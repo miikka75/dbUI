@@ -150,8 +150,25 @@ service cloud.firestore {
             <v-btn icon="mdi-printer" size="small" variant="text" @click="printView()"></v-btn>
           </div>
           <div v-if="currentConfig.header && t(currentConfig.header) !== currentConfig.header" class="pa-3 pb-0" style="font-size:0.85rem; opacity:0.7">{{ t(currentConfig.header) }}</div>
+          <!-- List layout: compact single-line items -->
+          <div v-if="useListLayout">
+            <v-list density="compact">
+              <v-list-item v-for="item in sortedData" :key="item.id" class="px-2">
+                <template v-slot:default>
+                  <span v-for="(col, i) in visibleCols" :key="col" style="font-size:0.85rem">{{ item[col] || '' }}<span v-if="i < visibleCols.length - 1" style="opacity:0.3; margin:0 6px">·</span></span>
+                </template>
+                <template v-slot:append>
+                  <v-btn icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>
+                  <template v-if="!hasMaster && !isReadonlyView">
+                  <v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archiveRow(item)"></v-btn>
+                  <v-btn :icon="isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="isArmed('row:'+item.id) ? 'error' : ''" @click="deleteRow(item)"></v-btn>
+                  </template>
+                </template>
+              </v-list-item>
+            </v-list>
+          </div>
           <!-- Mobile: card layout -->
-          <div v-if="useCardLayout">
+          <div v-else-if="useCardLayout">
             <v-card v-for="(item, idx) in sortedData" :key="item.id" variant="flat" class="ma-2 pa-2" style="border-bottom: 1px solid rgb(var(--v-theme-outline), 0.2)">
               <!-- First visible field always shown + expand toggle -->
               <div class="d-flex align-center" @click="currentConfig.collapsed ? (expandedCard = expandedCard === item.id ? null : item.id) : null" :style="currentConfig.collapsed ? 'cursor:pointer' : ''">
@@ -181,10 +198,13 @@ service cloud.firestore {
               <template v-for="(ei, eidx) in embedItems" :key="'emb'+eidx">
               <div v-if="ei.config.afterColumn && ei.rows.length" class="my-1 ml-2 pa-2" style="background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px">
                 <div v-if="ei.config.header && t(ei.config.header) !== ei.config.header" style="font-size:0.75rem; opacity:0.6; margin-bottom:4px">{{ t(ei.config.header) }}</div>
-                <table v-if="ei.config.mode === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
                   <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
                   <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ er[ec] || '' }}</td></tr></tbody>
                 </table>
+                <div v-else-if="embedLayout(ei) === 'card'" style="display:grid; gap:6px">
+                  <div v-for="er in ei.rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in ei.columns" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t('field.' + ec) || ec }}: </span>{{ er[ec] || '' }}</span></div>
+                </div>
                 <div v-else class="d-flex align-center flex-wrap ga-1">
                   <v-chip v-for="er in ei.rows" :key="er.id" size="small" variant="tonal" label>
                     <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
@@ -246,10 +266,13 @@ service cloud.firestore {
               <tr v-if="ei.config.afterColumn && ei.rows.length">
                 <td :colspan="visibleCols.length + 2" style="padding:6px 12px; background: rgb(var(--v-theme-surface-variant), 0.1)">
                   <div v-if="ei.config.header && t(ei.config.header) !== ei.config.header" style="font-size:0.75rem; opacity:0.6; margin-bottom:4px">{{ t(ei.config.header) }}</div>
-                  <table v-if="ei.config.mode === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                  <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
                     <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
                     <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ er[ec] || '' }}</td></tr></tbody>
                   </table>
+                  <div v-else-if="embedLayout(ei) === 'card'" style="display:grid; gap:6px">
+                    <div v-for="er in ei.rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in ei.columns" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t('field.' + ec) || ec }}: </span>{{ er[ec] || '' }}</span></div>
+                  </div>
                   <div v-else class="d-flex align-center flex-wrap ga-1">
                     <v-chip v-for="er in ei.rows" :key="er.id" size="small" variant="tonal" label>
                       <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
@@ -268,10 +291,13 @@ service cloud.firestore {
           <template v-for="(ei, eidx) in embedItems" :key="'bemb'+eidx">
           <div v-if="!ei.config.afterColumn && ei.rows.length" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
             <div style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ (ei.config.header && t(ei.config.header) !== ei.config.header ? t(ei.config.header) : '') || t('tab.' + ei.config.table) || ei.config.table }} ({{ ei.rows.length }})</div>
-            <table v-if="ei.config.mode === 'table'" style="width:100%; font-size:0.8rem; border-collapse:collapse">
+            <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.8rem; border-collapse:collapse">
               <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:3px 8px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
               <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:3px 8px">{{ er[ec] || '' }}</td></tr></tbody>
             </table>
+            <div v-else-if="embedLayout(ei) === 'card'" style="display:grid; gap:6px">
+              <div v-for="er in ei.rows" :key="er.id" style="font-size:0.8rem; padding:4px 8px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in ei.columns" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t('field.' + ec) || ec }}: </span>{{ er[ec] || '' }}</span></div>
+            </div>
             <div v-else class="d-flex align-center flex-wrap ga-1">
               <v-chip v-for="er in ei.rows" :key="er.id" size="small" variant="tonal" label>
                 <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
