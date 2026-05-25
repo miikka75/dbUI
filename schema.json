@@ -89,7 +89,7 @@
       "defaultSort": "date",
       "embed": [
         { "header": "embed.open", "table": "tasks", "filter": {"status": "Open"}, "columns": ["date", "title", "assigned_to"], "afterColumn": "title", "defaultSort": "date" },
-        { "header": "embed.in_progress", "view": "in_progress", "afterColumn": "title", "footer": "embed.in_progress.footer", "mode": "table", "hideEmpty": true }
+        { "header": "embed.in_progress", "view": "in_progress", "afterColumn": "title", "footer": "embed.in_progress.footer", "layout": "table", "hideEmpty": true }
       ]
     },
     "in_progress": {
@@ -105,11 +105,12 @@
       "mode": "join",
       "filter": { "status": "In Progress" },
       "readonly": true,
-      "cardOnly": true,
+      "layout": "card",
       "collapsed": true,
       "icon": "mdi-progress-clock",
       "defaultSort": "date",
-      "hideEmpty": true
+      "hideEmpty": true,
+      "embed": { "header": "embed.related_notes", "table": "notes", "columns": ["date", "content", "author"], "afterColumn": "title", "layout": "table" }
     }
   }
 }
