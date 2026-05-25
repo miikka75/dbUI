@@ -1,0 +1,115 @@
+{
+  "defaultLanguage": "en",
+  "tables": {
+    "tasks": {
+      "columns": {
+        "id": "text",
+        "date": {
+          "type": "date",
+          "mirror": "notes"
+        },
+        "title": {
+          "type": "text",
+          "mirror": "notes"
+        },
+        "status": {
+          "type": "select",
+          "list": "status"
+        },
+        "assigned_to": {
+          "type": "select",
+          "list": "assigned_to",
+          "allowNew": true
+        },
+        "city": {
+          "type": "ref",
+          "table": "cities",
+          "valueCol": "city",
+          "filterBy": {
+            "state": "state"
+          }
+        },
+        "created_at": { "type": "text", "hidden": true },
+        "updated_at": { "type": "text", "hidden": true }
+      },
+      "primaryKey": "id",
+      "hidden": false,
+      "tab": "active",
+      "archiveTab": "archive",
+      "defaultSort": "date",
+      "header": "table.tasks.header",
+      "footer": "table.tasks.footer"
+    },
+    "notes": {
+      "columns": {
+        "id": "text",
+        "date": "date",
+        "title": "text",
+        "content": "text",
+        "author": {
+          "type": "select",
+          "list": "assigned_to",
+          "allowNew": true
+        },
+        "created_at": { "type": "text", "hidden": true },
+        "updated_at": { "type": "text", "hidden": true }
+      },
+      "primaryKey": "id",
+      "hidden": true,
+      "tab": "active",
+      "archiveTab": "archive"
+    },
+    "cities": {
+      "columns": {
+        "id": "text",
+        "state": "text",
+        "city": "text",
+        "created_at": { "type": "text", "hidden": true },
+        "updated_at": { "type": "text", "hidden": true }
+      },
+      "primaryKey": "id",
+      "hidden": true,
+      "ref": true
+    }
+  },
+  "views": {
+    "all_items": {
+      "sources": ["tasks", "notes"],
+      "columns": ["date", "title", "status", "assigned_to", "city", "content", "author"],
+      "mode": "union",
+      "defaultSort": "date"
+    },
+    "combined": {
+      "sources": ["tasks", "notes"],
+      "matchKey": "id",
+      "columns": ["date", "title", "status", "assigned_to", "city", "content", "author"],
+      "mode": "join",
+      "header": "view.combined.header",
+      "footer": "view.combined.footer",
+      "defaultSort": "date",
+      "embed": [
+        { "header": "embed.open", "table": "tasks", "filter": {"status": "Open"}, "columns": ["date", "title", "assigned_to"], "afterColumn": "title", "defaultSort": "date" },
+        { "header": "embed.in_progress", "view": "in_progress", "afterColumn": "title", "footer": "embed.in_progress.footer", "mode": "table", "hideEmpty": true }
+      ]
+    },
+    "in_progress": {
+      "sources": ["tasks", "notes"],
+      "columns": [
+        "date",
+        "title",
+        "status",
+        "assigned_to",
+        {"content": {"status": "In Progress"}},
+        {"author": {"status": "In Progress"}}
+      ],
+      "mode": "join",
+      "filter": { "status": "In Progress" },
+      "readonly": true,
+      "cardOnly": true,
+      "collapsed": true,
+      "icon": "mdi-progress-clock",
+      "defaultSort": "date",
+      "hideEmpty": true
+    }
+  }
+}
