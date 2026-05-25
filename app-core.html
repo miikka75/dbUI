@@ -175,11 +175,14 @@ function createVueApp() {
       currentConfig: function() { return VIEWS[this.currentTable] || SCHEMA[this.currentTable] || {}; },
       isUnionView: function() { return this.currentConfig.mode === 'union'; },
       useCardLayout: function() {
-        if (this.currentConfig.cardOnly) return true;
+        var layout = this.currentConfig.layout;
+        if (layout === 'card' || layout === 'list') return true;
+        if (layout === 'table') return false;
         if (this.windowWidth < 600) return true;
         var needed = this.visibleCols.length * 130 + 100;
         return needed > (this.windowWidth - 72);
       },
+      useListLayout: function() { return this.currentConfig.layout === 'list'; },
       cardLabelWidth: function() {
         var self = this;
         var max = 0;
@@ -1400,6 +1403,10 @@ function createVueApp() {
         w.print();
       },
 
+      embedLayout: function(ei) {
+        return ei.config.layout || 'table';
+      },
+
       _printEmbed: function(ei) {
         var self = this;
         var html = '<div class="embed">';
@@ -1424,10 +1431,11 @@ function createVueApp() {
         html += '<dl>';
         cols.forEach(function(c) {
           if (item[c]) { html += '<dt>' + (self.t('field.' + c) || c) + '</dt><dd>' + item[c] + '</dd>'; }
+          self.embedItems.forEach(function(ei) { if (ei.config.afterColumn === c && ei.rows.length) html += '</dl>' + self._printEmbed(ei) + '<dl>'; });
         });
         html += '</dl>';
         var pself = this;
-        this.embedItems.forEach(function(ei) { if (ei.rows.length) html += pself._printEmbed(ei); });
+        this.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && ei.rows.length) html += pself._printEmbed(ei); });
         html += '</body></html>';
         var w = window.open('', '_blank');
         w.document.write(html);
