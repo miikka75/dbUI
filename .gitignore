@@ -1,0 +1,4 @@
+node_modules/
+dev/local.db*
+test-results/
+playwright-report/
