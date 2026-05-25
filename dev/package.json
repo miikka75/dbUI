@@ -1,0 +1,15 @@
+{
+  "name": "dbui",
+  "version": "1.0.0",
+  "description": "Schema-driven web app with 5 backends: Apps Script, OAuth Sheets, CRDT Drive sync, Firebase Firestore, local SQLite",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/",
+    "test:ui": "npx playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "better-sqlite3": "^11.0.0"
+  }
+}
