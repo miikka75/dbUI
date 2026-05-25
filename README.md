@@ -1,4 +1,4 @@
-# dbUI
+# Drive Sync App
 
 A schema-driven web app with multiple backend options. No build step — Vue 3 + Vuetify 3 via CDN.
 
@@ -7,7 +7,7 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 - **Schema-driven**: JSON config defines tables, columns, views, and behavior
 - **Five backends**: Google Sheets (Apps Script), OAuth REST API, CRDT (IndexedDB + Drive sync), Firebase (Firestore), local SQLite
 - **i18n**: multi-language with auto-generated translation keys from schema
-- **Views**: union, join, embedded views (chips or compact table mode)
+- **Views**: union, join, embedded views with configurable layout
 - **Header/footer**: translatable static text on tables, views, and embed entries
 - **Print**: layout-aware printing (table or card mode), per-card print, embeds included
 - **Responsive**: auto-switches between table and card layout based on column count
@@ -29,7 +29,7 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 cd dev
 npm install
 npm start        # http://127.0.0.1:3000
-npm test         # run backend tests
+npm test         # run backend tests (84 tests)
 ```
 
 Browser: click "Create Local Database" → app loads with schema from `schema.json`.
@@ -69,6 +69,7 @@ firestore.rules                ← Firestore Security Rules
 apps-script/                   ← Apps Script deployment files
   index.html, Code.gs, DEPLOY.md
 dev/                           ← Local development
+  package.json                 ← dependencies + scripts (npm start/test)
   server.js                    ← HTTP server (port 3000)
   backend-local.js             ← SQLite backend (better-sqlite3)
   backend-local-client.html    ← client adapter for local server
@@ -102,7 +103,7 @@ The schema defines the entire app structure. It's a JSON file stored in the Driv
 
 ### Common Properties (Tables & Views)
 
-These properties work identically on both table and view definitions via shared `currentConfig`:
+These properties work identically on tables, views, and embed entries:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -110,11 +111,22 @@ These properties work identically on both table and view definitions via shared 
 | `filter` | object | Filter displayed rows (`{field: value}`) |
 | `hideEmpty` | boolean | Hide empty fields per-row in card, hide column if ALL rows empty in table |
 | `readonly` | boolean | Disable editing (cells render as text, no add/delete buttons) |
-| `cardOnly` | boolean | Always render in card layout (never table) |
+| `layout` | string | Render layout (see below) |
 | `defaultSort` | string | Column to sort by on load |
 | `header` | string | Static text displayed above the data area |
 | `footer` | string | Static text displayed below the data area |
 | `embed` | object\|array | Embed filtered data from another table/view (see Embed section) |
+
+#### Layout
+
+The `layout` property controls how rows are rendered. Works on tables, views, and embeds.
+
+| Value | Renders as |
+|-------|-----------|
+| `"auto"` (default) | Responsive: table when enough screen width, list when narrow. Embeds: table if ≥3 columns, list otherwise |
+| `"table"` | Horizontal table with column headers |
+| `"card"` | Vertical label:value cards (one card per row) |
+| `"list"` | Compact single-line items (values separated by `·`) |
 
 ---
 
@@ -222,7 +234,7 @@ Views combine data from multiple tables without duplicating storage.
   "columns": ["title", "status", {"resolution": {"status": "closed"}}],
   "mode": "join",
   "readonly": true,
-  "cardOnly": true,
+  "layout": "card",
   "filter": { "status": "active" },
   "defaultSort": "due_date",
   "embed": { ... }
@@ -238,43 +250,34 @@ Views combine data from multiple tables without duplicating storage.
 | `union` | `UNION ALL` | Stacks all rows from all sources. Shows `_source` badge. |
 | `join` | `FULL OUTER JOIN ON id` | Merges rows with same id/matchKey. One row shows fields from all tables. |
 
-#### Inline showIf (per column)
+#### Conditional Columns
 
-Conditionally show a column based on field values in the same row. Use object syntax in the `columns` array:
+Columns in a view's `columns` array support two formats:
 
 ```json
 "columns": [
-  "title",
-  "status",
-  {"resolution": {"status": "closed"}},
-  {"notes": {"type": "bug"}},
-  "due_date"
+  "title",                                  // string: always visible
+  {"content": {"status": "In Progress"}}    // object: visible only when condition matches
 ]
 ```
 
-- String entry → always visible
-- Object entry → key is column name, value is condition (show only when condition matches)
+Object format: `{ columnName: { field: value } }` — the column is shown only for rows where `field === value`.
 
-Columns with conditions are hidden per-row in card layout when the condition doesn't match. In table layout, the column is always visible (condition is per-row, can't hide table columns per row).
+In card layout, conditional columns are hidden per-row when the condition doesn't match. In table layout, columns are always visible (conditions cannot hide table columns per-row).
 
 ---
 
 ### Embed
 
-Embeds show filtered data from another table or view as a read-only section within a view. Renders as compact chips. Can be a single object or an array for multiple embeds.
+Embeds show filtered data from another table or view as a read-only section. Can be a single object or an array for multiple embeds. Supports all common properties (`filter`, `columns`, `header`, `footer`, `defaultSort`, `hideEmpty`, `layout`).
+
+**Embed-specific properties:**
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `table` | string | Source table name (use `table` OR `view`, not both) |
 | `view` | string | Source view name (inherits its columns/filter/sources) |
-| `filter` | object | Row filter (`{field: value}`) — only with `table` |
-| `columns` | string[] | Columns to show in chips/table |
 | `afterColumn` | string | Position embed after this column in card layout |
-| `header` | string | Text displayed above (translation key or literal) |
-| `footer` | string | Text displayed below (translation key or literal) |
-| `defaultSort` | string | Column to sort embed rows by |
-| `hideEmpty` | boolean | Remove columns where all rows are empty |
-| `mode` | string | Render mode: `"table"` for compact table, omit for chips (default) |
 
 #### Table-based embed
 ```json
@@ -305,18 +308,6 @@ Embeds show filtered data from another table or view as a read-only section with
 **Positioning:**
 - With `afterColumn`: in card mode, renders between fields. In table mode, renders as full-width row after data.
 - Without `afterColumn`: renders at the bottom of the view.
-
-**Render modes:**
-- **Chips** (default): compact inline tags joined by `·` separators. Best for few items with few columns (quick glance).
-- **Compact table** (`"mode": "table"`): read-only table with translated column headers and rows. Best for many items or many columns where you need to compare values side-by-side.
-
-```json
-// Chips (default - mode omitted)
-{ "table": "tasks", "filter": {"status": "Open"}, "columns": ["title"] }
-
-// Compact table
-{ "table": "tasks", "filter": {"status": "In Progress"}, "columns": ["date", "title", "assigned_to"], "mode": "table" }
-```
 
 **Validation:** Circular embed references (A → B → A) are detected at boot time.
 
