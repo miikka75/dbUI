@@ -1,0 +1,1527 @@
+<script>
+// Default schema bundled in app — used when Drive has no schema.json yet
+var defaultSchema = {"defaultLanguage":"en","tables":{},"views":{}};
+
+// Active schema — initially from defaultSchema, overwritten from Drive on boot
+var SCHEMA = defaultSchema.tables;
+var VIEWS = defaultSchema.views;
+var DEFAULT_LANGUAGE = defaultSchema.defaultLanguage || 'en';
+
+// Schema helpers
+function getColumns(table) { if (!SCHEMA[table]) return []; if (window._columnOrders && window._columnOrders[table]) return window._columnOrders[table]; return Object.keys(SCHEMA[table].columns); }
+function colName(c) { return typeof c === 'object' ? Object.keys(c)[0] : c; }
+function colCondition(c) { return typeof c === 'object' ? c[Object.keys(c)[0]] : null; }
+function toDateStr(v) { if (!v) return ''; var s = String(v); if (s.length === 10) return s; var d = new Date(s); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function parseTableResult(r) { if (!r) return { headers: [], rows: [] }; if (typeof r === 'string') return JSON.parse(r); return r; }
+function validateSchema() {
+  var errors = [];
+  var allCols = {};
+  for (var t in SCHEMA) { for (var c in SCHEMA[t].columns) allCols[c] = t; }
+  for (var v in VIEWS) {
+    var view = VIEWS[v];
+    // Check sources exist
+    (view.sources || []).forEach(function(s) { if (!SCHEMA[s]) errors.push('View "' + v + '" references non-existent table "' + s + '"'); });
+    // Check columns exist in at least one source
+    (view.columns || []).forEach(function(c) {
+      var col = colName(c);
+      var found = (view.sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].columns && SCHEMA[s].columns[col]; });
+      if (!found) errors.push('View "' + v + '": column "' + col + '" not found in sources [' + (view.sources || []).join(', ') + ']');
+    });
+  }
+  // Check list references
+  for (var t2 in SCHEMA) { for (var c2 in SCHEMA[t2].columns) {
+    var def = SCHEMA[t2].columns[c2];
+    if (def && typeof def === 'object' && def.mirror && !SCHEMA[def.mirror]) errors.push('Table "' + t2 + '": mirror source "' + def.mirror + '" not found');
+    if (def && typeof def === 'object' && def.type === 'ref' && def.table && !SCHEMA[def.table]) errors.push('Table "' + t2 + '": ref table "' + def.table + '" not found');
+  }}
+  // Check embed view references and circular embeds
+  function hasCircular(vn, visited) {
+    if (visited.indexOf(vn) >= 0) return true;
+    var vv = VIEWS[vn];
+    if (!vv || !vv.embed) return false;
+    var embeds = Array.isArray(vv.embed) ? vv.embed : [vv.embed];
+    return embeds.some(function(e) { return e.view && hasCircular(e.view, visited.concat(vn)); });
+  }
+  for (var v3 in VIEWS) {
+    var rawEmb = VIEWS[v3].embed;
+    var embeds = rawEmb ? (Array.isArray(rawEmb) ? rawEmb : [rawEmb]) : [];
+    embeds.forEach(function(emb) {
+      if (emb.view && !VIEWS[emb.view]) errors.push('View "' + v3 + '": embed references non-existent view "' + emb.view + '"');
+    });
+    if (hasCircular(v3, [])) errors.push('View "' + v3 + '": circular embed reference');
+  }
+  return errors;
+}
+function getColumnType(table, col) {
+  var def = SCHEMA[table].columns[col];
+  if (!def) return 'text';
+  if (typeof def === 'string') return def;
+  return def.type || 'text';
+}
+function getColumnList(table, col) {
+  var def = SCHEMA[table].columns[col];
+  return (def && typeof def === 'object') ? def.list : null;
+}
+function getColumnRef(table, col) {
+  var def = SCHEMA[table].columns[col];
+  return (def && typeof def === 'object' && def.type === 'ref') ? def : null;
+}
+
+function colIsMirror(tables, col, tableName) {
+  var def = tables[tableName] && tables[tableName].columns[col];
+  return def && typeof def === 'object' && !!def.mirror;
+}
+function getTableMirrorSource(tables, tableName) {
+  var cols = tables[tableName] && tables[tableName].columns;
+  if (!cols) return null;
+  for (var c in cols) {
+    var def = cols[c];
+    if (def && typeof def === 'object' && def.mirror) return def.mirror;
+  }
+  return null;
+}
+
+var app; // Vue app instance
+var appInstance; // Mounted root component proxy
+var backend; // Set by backend adapter loaded after this file
+
+function getSetting(key, def) {
+  try { var s = JSON.parse(localStorage.getItem('app_settings') || '{}'); return s[key] !== undefined ? s[key] : def; } catch(e) { return def; }
+}
+
+function createVueApp() {
+  var vuetify = Vuetify.createVuetify({
+    theme: {
+      defaultTheme: localStorage.getItem('app_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+      themes: {
+        light: { colors: { primary: '#4285f4', secondary: '#5cbbf6', surface: '#ffffff', background: '#f5f5f5' } },
+        dark: { colors: { primary: '#8ab4f8', secondary: '#5cbbf6', surface: '#2a2a2a', background: '#1a1a1a' } }
+      }
+    }
+  });
+
+  app = Vue.createApp({
+    data: function() { return {
+      loading: true,
+      showSetup: false,
+      setupFolderId: '',
+      setupMode: 'sheets',
+      folderValid: false,
+      oauthReady: false,
+      firebaseUid: null,
+      firebaseConfigInput: localStorage.getItem('firebase_config') || '',
+      needsReauth: false,
+      setupStep: (function() { var m = localStorage.getItem('app_mode'); return (m === 'sheets' || m === 'crdt' || m === 'firebase') ? m : null; })(),
+      mode: 'sheets',
+      folderId: '',
+      tableMap: {},
+      currentTable: '',
+      currentData: [],
+      dataCache: {},
+      sortCol: null,
+      sortAsc: true,
+      strings: {},
+      languages: [],
+      currentLang: '',
+      editingLang: null,
+      currentTranslations: {},
+      listsCache: {},
+      viewingArchive: false,
+      drawer: true,
+      rail: false,
+      mobile: window.innerWidth < 768,
+      windowWidth: window.innerWidth,
+      theme: localStorage.getItem('app_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+      syncing: false,
+      snackbar: false,
+      snackText: '',
+      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true) },
+      appMode: localStorage.getItem('app_mode') || 'oauth',
+      saveTimers: {},
+      pendingDelete: null,
+      pendingDeleteTimer: null,
+      currentRefTable: null,
+      schemaData: null,
+      expandedCard: null
+    }; },
+
+    computed: {
+      appTitle: function() { return this.t('app.title'); },
+      langItems: function() { return this.languages.map(function(l) { return { title: l.name, value: l.code }; }); },
+      sidebarTabs: function() {
+        var self = this;
+        var tabs = [];
+        // Views first
+        if (typeof VIEWS !== 'undefined') {
+          Object.keys(VIEWS).forEach(function(v) {
+            tabs.push({ id: v, title: self.t('view.' + v) || v, icon: (VIEWS[v] && VIEWS[v].icon) || 'mdi-view-list' });
+          });
+        }
+        // Non-hidden tables (preserve schema order)
+        var tableKeys = self._tableOrder || Object.keys(SCHEMA);
+        tableKeys.forEach(function(name) {
+          if (!SCHEMA[name].hidden) tabs.push({ id: name, title: self.t('tab.' + name) || name, icon: SCHEMA[name].icon || 'mdi-table' });
+        });
+        tabs.push({ divider: true });
+        tabs.push({ id: '__languages', title: self.t('tab.languages'), icon: 'mdi-translate' });
+        tabs.push({ id: '__lookup', title: self.t('tab.lookup'), icon: 'mdi-database-outline' });
+        tabs.push({ id: '__settings', title: self.t('tab.settings'), icon: 'mdi-cog-outline' });
+        return tabs;
+      },
+      isDataView: function() {
+        return this.currentTable && this.currentTable[0] !== '_' && (VIEWS[this.currentTable] || SCHEMA[this.currentTable]);
+      },
+      hasFirebaseConfig: function() { return !!(window.FIREBASE_CONFIG || localStorage.getItem('firebase_config')); },
+      currentConfig: function() { return VIEWS[this.currentTable] || SCHEMA[this.currentTable] || {}; },
+      isUnionView: function() { return this.currentConfig.mode === 'union'; },
+      useCardLayout: function() {
+        if (this.currentConfig.cardOnly) return true;
+        if (this.windowWidth < 600) return true;
+        var needed = this.visibleCols.length * 130 + 100;
+        return needed > (this.windowWidth - 72);
+      },
+      cardLabelWidth: function() {
+        var self = this;
+        var max = 0;
+        this.visibleCols.forEach(function(c) { var l = (self.t('field.' + c) || c).length; if (l > max) max = l; });
+        return Math.max(80, max * 7.5 + 16) + 'px';
+      },
+      isReadonlyView: function() { return !!this.currentConfig.readonly; },
+      embedConfig: function() { var e = this.currentConfig.embed; return e ? (Array.isArray(e) ? e[0] : e) : null; },
+      embedConfigs: function() { var e = this.currentConfig.embed; if (!e) return []; return Array.isArray(e) ? e : [e]; },
+      embedColumns: function() {
+        if (!this.embedConfig) return [];
+        var raw = this.embedConfig.columns || (this.embedConfig.view && VIEWS[this.embedConfig.view] ? VIEWS[this.embedConfig.view].columns : []);
+        return raw.map(function(c) { return colName(c); });
+      },
+      colsBeforeEmbed: function() {
+        if (!this.embedConfig || !this.embedConfig.afterColumn) return this.visibleCols;
+        var idx = this.visibleCols.indexOf(this.embedConfig.afterColumn);
+        return idx >= 0 ? this.visibleCols.slice(0, idx + 1) : this.visibleCols;
+      },
+      colsAfterEmbed: function() {
+        if (!this.embedConfig || !this.embedConfig.afterColumn) return [];
+        var idx = this.visibleCols.indexOf(this.embedConfig.afterColumn);
+        return idx >= 0 ? this.visibleCols.slice(idx + 1) : [];
+      },
+      embedRows: function() {
+        if (!this.embedConfig) return [];
+        var cfg = this.embedConfig;
+        var self = this;
+        var rows;
+        if (cfg.view) {
+          // Embed a view: compute its rows using same logic as loadTableData
+          var v = VIEWS[cfg.view];
+          if (!v) return [];
+          rows = [];
+          v.sources.forEach(function(src) {
+            var srcRows = self.dataCache[src] || [];
+            if (v.mode === 'union') {
+              srcRows.forEach(function(r) { rows.push(Object.assign({}, r, { _source: src })); });
+            } else {
+              srcRows.forEach(function(r) {
+                var existing = rows.find(function(e) { return e.id === r.id; });
+                if (existing) Object.assign(existing, r);
+                else rows.push(Object.assign({ _source: src }, r));
+              });
+            }
+          });
+          if (v.filter) {
+            rows = rows.filter(function(r) {
+              for (var k in v.filter) { if (r[k] !== v.filter[k]) return false; }
+              return true;
+            });
+          }
+        } else {
+          rows = this.dataCache[cfg.table] || [];
+          if (cfg.filter) {
+            rows = rows.filter(function(r) {
+              for (var k in cfg.filter) { if (r[k] !== cfg.filter[k]) return false; }
+              return true;
+            });
+          }
+        }
+        return rows;
+      },
+      embedItems: function() {
+        var self = this;
+        return this.embedConfigs.map(function(cfg) {
+          var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
+          var columns = raw.map(function(c) { return colName(c); });
+          var rows;
+          if (cfg.view) {
+            var v = VIEWS[cfg.view]; rows = [];
+            if (v) { v.sources.forEach(function(src) { (self.dataCache[src] || []).forEach(function(r) { rows.push(Object.assign({}, r)); }); }); if (v.filter) { rows = rows.filter(function(r) { for (var k in v.filter) { if (r[k] !== v.filter[k]) return false; } return true; }); } }
+          } else {
+            rows = self.dataCache[cfg.table] || [];
+            if (cfg.filter) { rows = rows.filter(function(r) { for (var k in cfg.filter) { if (r[k] !== cfg.filter[k]) return false; } return true; }); }
+          }
+          if (cfg.defaultSort) { var sc = cfg.defaultSort; rows = rows.slice().sort(function(a, b) { return (a[sc] || '').localeCompare(b[sc] || ''); }); }
+          if (cfg.hideEmpty) { columns = columns.filter(function(col) { return rows.some(function(r) { return r[col]; }); }); }
+          return { config: cfg, columns: columns, rows: rows };
+        });
+      },
+      hasMaster: function() {
+        var table = this.currentTable;
+        if (VIEWS[table]) return false;
+        return !!getTableMirrorSource(SCHEMA, table);
+      },
+      hasArchive: function() {
+        if (VIEWS[this.currentTable]) return VIEWS[this.currentTable].sources.some(function(s) { return SCHEMA[s] && SCHEMA[s].archiveTab; });
+        return SCHEMA[this.currentTable] && SCHEMA[this.currentTable].archiveTab;
+      },
+      visibleCols: function() {
+        var self = this;
+        if (!this.currentTable) return [];
+        var view = VIEWS[this.currentTable];
+        var cols;
+        if (view) { cols = view.columns.map(function(c) { return colName(c); }); }
+        else {
+          cols = getColumns(this.currentTable).filter(function(c) {
+            if (c === 'id') return false;
+            var def = SCHEMA[self.currentTable].columns[c];
+            return !(def && typeof def === 'object' && def.hidden);
+          });
+        }
+        // Table-mode hideEmpty: remove columns where ALL rows are empty
+        if (this.currentConfig.hideEmpty && !this.useCardLayout && this.sortedData.length) {
+          var data = this.sortedData;
+          cols = cols.filter(function(c) { return data.some(function(r) { return r[c]; }); });
+        }
+        return cols;
+      },
+      tableHeaders: function() {
+        var self = this;
+        var hdrs = this.visibleCols.map(function(c) { return { title: self.t('field.' + c) || c, key: c, sortable: true }; });
+        if (this.isUnionView) hdrs.push({ title: self.t('field.source') || 'Source', key: '_source', sortable: true });
+        hdrs.push({ title: '', key: '_actions', sortable: false, width: '100px' });
+        return hdrs;
+      },
+      sortedData: function() {
+        var data = this.currentData.slice();
+        if (this.sortCol) {
+          var col = this.sortCol, asc = this.sortAsc;
+          data.sort(function(a, b) {
+            var va = (a[col] || ''), vb = (b[col] || '');
+            return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+          });
+        }
+        return data;
+      },
+      translationKeys: function() {
+        var keys = [];
+        ['app.title', 'btn.add',
+         'btn.show_active', 'btn.show_archived',
+         'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
+         'field.source', 'field.key', 'field.translation'].forEach(function(k) { keys.push(k); });
+        var schema = this.schemaData || {};
+        var tables = schema.tables || {};
+        for (var tbl in tables) {
+          keys.push('tab.' + tbl);
+          if (tables[tbl].header) keys.push(tables[tbl].header);
+          if (tables[tbl].footer) keys.push(tables[tbl].footer);
+          var cols = tables[tbl].columns || {};
+          for (var c in cols) {
+            if (c !== 'id' && c !== 'created_at' && c !== 'updated_at') keys.push('field.' + c);
+          }
+        }
+        var views = schema.views || {};
+        for (var v in views) {
+          keys.push('view.' + v);
+          if (views[v].header) keys.push(views[v].header);
+          if (views[v].footer) keys.push(views[v].footer);
+          var embeds = views[v].embed ? (Array.isArray(views[v].embed) ? views[v].embed : [views[v].embed]) : [];
+          embeds.forEach(function(e) { if (e.header) keys.push(e.header); if (e.footer) keys.push(e.footer); });
+        }
+        var seen = {};
+        return keys.filter(function(k) { if (seen[k]) return false; seen[k] = true; return true; }).sort();
+      },
+      EN: function() { return this.strings; },
+      defaultLanguage: function() { return (this.schemaData && this.schemaData.defaultLanguage) || DEFAULT_LANGUAGE; },
+      refTables: function() {
+        return Object.keys(SCHEMA).filter(function(k) { return SCHEMA[k].ref; });
+      },
+      refTableCols: function() {
+        if (!this.currentRefTable) return [];
+        return getColumns(this.currentRefTable).filter(function(c) { return c !== 'id' && c !== 'created_at' && c !== 'updated_at'; });
+      },
+      refTableData: function() {
+        if (!this.currentRefTable) return [];
+        return this.dataCache[this.currentRefTable] || [];
+      },
+      isHierarchicalRef: function() {
+        return this.refTableCols.length === 2;
+      },
+      refParentCol: function() { return this.refTableCols[0]; },
+      refChildCol: function() { return this.refTableCols[1]; },
+      refGroupedData: function() {
+        if (!this.isHierarchicalRef) return {};
+        var parentCol = this.refParentCol;
+        var data = this.refTableData;
+        var groups = {};
+        data.forEach(function(row) {
+          var key = row[parentCol] || '';
+          if (!groups[key]) groups[key] = [];
+          groups[key].push(row);
+        });
+        return groups;
+      }
+    },
+
+    methods: {
+      t: function(key) { return this.strings[key] || key; },
+
+      toggleTheme: function() {
+        this.theme = this.theme === 'dark' ? 'light' : 'dark';
+        this.$vuetify.theme.global.name = this.theme;
+        localStorage.setItem('app_theme', this.theme);
+      },
+
+      notify: function(text) { this.snackText = text; this.snackbar = true; },
+
+      // Setup
+      validateFolder: function() {
+        var self = this;
+        if (this.setupFolderId.length > 10) {
+          backend.validateFolder(this.setupFolderId).then(function() { self.folderValid = true; }).catch(function() { self.folderValid = false; });
+        }
+      },
+      completeLocalSetup: function() {
+        localStorage.setItem('app_folder', 'local');
+        localStorage.setItem('app_mode', 'local');
+        this.folderId = 'local'; this.mode = 'local';
+        this.showSetup = false;
+        this.startApp();
+      },
+      completeSetup: function() {
+        var self = this;
+        localStorage.setItem('app_folder', this.setupFolderId);
+        localStorage.setItem('app_mode', this.setupMode);
+        this.folderId = this.setupFolderId; this.mode = this.setupMode;
+        backend.setFolderConfig(this.folderId, { mode: this.mode }).then(function() {
+          self.showSetup = false; self.startApp();
+        });
+      },
+
+      // Boot
+      startApp: function() {
+        var self = this;
+        self.loading = true;
+
+        // Load schema from backend, fall back to default
+        var schemaPromise;
+        if (backend.getSchema) {
+          schemaPromise = backend.getSchema(self.folderId).then(function(s) {
+            if (s) {
+              var parsed = typeof s === 'string' ? JSON.parse(s) : s;
+              SCHEMA = parsed.tables || SCHEMA;
+              VIEWS = parsed.views || VIEWS;
+              self.schemaData = parsed;
+              // Set column orders from parsed schema (local has correct order)
+              window._columnOrders = {};
+              Object.keys(parsed.tables || {}).forEach(function(t) { window._columnOrders[t] = Object.keys(parsed.tables[t].columns); });
+              self._tableOrder = Object.keys(parsed.tables || {});
+              var schemaErrors = validateSchema();
+              if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify('Schema: ' + schemaErrors[0]); }
+            } else {
+              // First time: save default schema to Drive
+              if (backend.saveSchema) backend.saveSchema(self.folderId, defaultSchema);
+              self.schemaData = defaultSchema;
+            }
+          });
+        } else {
+          schemaPromise = Promise.resolve().then(function() { self.schemaData = defaultSchema; });
+        }
+
+        schemaPromise.then(function() {
+        // Fast path: single batch call (Apps Script)
+        if (backend.bootData) {
+          backend.bootData(self.folderId).then(function(result) {
+            if (!result) { self.notify('Server error: bootData returned null'); self.loading = false; return; }
+            if (result.error) { self.notify('Server error: ' + result.error); self.loading = false; return; }
+            // bootData may return schema too
+            if (result.schema) {
+              var parsedSchema = typeof result.schema === 'string' ? JSON.parse(result.schema) : result.schema;
+              SCHEMA = parsedSchema.tables || SCHEMA;
+              VIEWS = parsedSchema.views || VIEWS;
+              // Restore key order from server-provided arrays (google.script.run scrambles object keys)
+              if (result.tableOrder) self._tableOrder = result.tableOrder;
+              if (result.columnOrders) { self._columnOrders = result.columnOrders; window._columnOrders = result.columnOrders; }
+              self.schemaData = parsedSchema;
+              var schemaErrors = validateSchema();
+              if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify('Schema: ' + schemaErrors[0]); }
+            } else {
+              // First boot: save bundled default schema to Drive
+              self.schemaData = defaultSchema;
+              backend.saveSchema(self.folderId, defaultSchema);
+            }
+            self.tableMap = result.tableMap || {};
+            self.languages = result.languages || [];
+            self.listsCache = result.lists || {};
+            // Auto-create missing lists
+            Object.keys(SCHEMA).forEach(function(t) {
+              Object.keys(SCHEMA[t].columns).forEach(function(c) {
+                var def = SCHEMA[t].columns[c];
+                if (def && typeof def === 'object' && def.list && !self.listsCache[def.list]) self.listsCache[def.list] = [];
+              });
+            });
+            // Populate data cache
+            for (var key in result.data) {
+              var d = result.data[key];
+              self.dataCache[key] = parseTableResult(d).rows;
+            }
+            // Load active language
+            if (self.languages.length === 0) {
+              var defLang = self.defaultLanguage;
+              backend.createLanguage(self.folderId, defLang, defLang, self.translationKeys);
+              self.languages = [{ code: defLang, name: defLang }];
+            }
+            // Load default language translations as base
+            var defCode = self.defaultLanguage;
+            return backend.getTranslations(self.folderId, defCode).then(function(baseTrans) {
+              self.strings = baseTrans || {};
+              var saved = localStorage.getItem('app_lang') || self.languages[0].code;
+              self.currentLang = saved;
+              if (saved !== defCode && self.languages.length > 1) {
+                return backend.getTranslations(self.folderId, saved).then(function(trans) {
+                  if (trans) self.strings = Object.assign({}, self.strings, trans);
+                });
+              }
+            });
+          }).then(function() {
+            self.loading = false;
+            var firstTab = self.sidebarTabs.find(function(t) { return !t.divider; });
+            if (firstTab) self.selectTab(firstTab.id);
+          }).catch(function(err) {
+            self.loading = false;
+            self.notify(err && err.message ? err.message : 'Failed to load app');
+          });
+          return;
+        }
+
+        // Sequential path (local server / OAuth)
+        backend.initSchema(self.folderId, SCHEMA).then(function(schemaResult) {
+          self.tableMap = {};
+          if (schemaResult) { Object.keys(schemaResult).forEach(function(n) { self.tableMap[n] = schemaResult[n]; }); }
+          else { Object.keys(SCHEMA).forEach(function(n) { self.tableMap[n] = n; }); }
+
+          return backend.getAvailableLanguages(self.folderId);
+        }).then(function(langs) {
+          self.languages = langs || [];
+          if (self.languages.length === 0) {
+            var defLang = self.defaultLanguage;
+            backend.createLanguage(self.folderId, defLang, defLang, self.translationKeys);
+            self.languages = [{ code: defLang, name: defLang }];
+          }
+          // Load default language as base strings
+          var defCode = self.defaultLanguage;
+          return backend.getTranslations(self.folderId, defCode).then(function(baseTrans) {
+            self.strings = baseTrans || {};
+            var saved = localStorage.getItem('app_lang') || self.languages[0].code;
+            self.currentLang = saved;
+            if (saved !== defCode && self.languages.length > 1) {
+              return backend.getTranslations(self.folderId, saved).then(function(trans) {
+                if (trans) self.strings = Object.assign({}, self.strings, trans);
+              });
+            }
+          });
+        }).then(function() {
+          // Preload lists
+          return backend.getLists(self.folderId).then(function(lists) {
+            self.listsCache = lists || {};
+            // Auto-create lists referenced in schema but missing from backend
+            var missing = false;
+            Object.keys(SCHEMA).forEach(function(t) {
+              Object.keys(SCHEMA[t].columns).forEach(function(c) {
+                var def = SCHEMA[t].columns[c];
+                if (def && typeof def === 'object' && def.list && !self.listsCache[def.list]) {
+                  self.listsCache[def.list] = [];
+                  missing = true;
+                }
+              });
+            });
+            if (missing) backend.saveLists(self.folderId, self.listsCache);
+          });
+        }).then(function() {
+          // Preload data
+          var tables = Object.keys(self.tableMap);
+          var chain = Promise.resolve();
+          tables.forEach(function(name) {
+            chain = chain.then(function() {
+              return backend.getTableData(self.tableMap[name], SCHEMA[name].tab).then(function(result) {
+                self.dataCache[name] = parseTableResult(result).rows;
+              }).catch(function() { self.dataCache[name] = []; });
+            });
+            if (self.settings.preload_archive && SCHEMA[name] && SCHEMA[name].archiveTab) {
+              chain = chain.then(function() {
+                return backend.getTableData(self.tableMap[name], SCHEMA[name].archiveTab).then(function(result) {
+                  self.dataCache[name + '__archive'] = parseTableResult(result).rows;
+                }).catch(function() { self.dataCache[name + '__archive'] = []; });
+              });
+            }
+          });
+          return chain;
+        }).then(function() {
+          self.loading = false;
+          // Select first tab
+          var firstTab = self.sidebarTabs.find(function(t) { return !t.divider; });
+          if (firstTab) self.selectTab(firstTab.id);
+        }).catch(function(err) {
+          self.loading = false;
+          self.notify(err && err.message ? err.message : 'Failed to load app');
+        });
+        }); // end schemaPromise.then
+      },
+
+      // Navigation
+      selectTab: function(id) {
+        this.currentTable = id;
+        this.editingLang = null;
+        this.currentRefTable = null;
+        this.viewingArchive = false;
+        var cfg = VIEWS[id] || SCHEMA[id] || {};
+        this.sortCol = cfg.defaultSort || null;
+        this.sortAsc = true;
+        if (this.isDataView) this.loadTableData();
+      },
+
+      loadTableData: function() {
+        var self = this;
+        var view = VIEWS[this.currentTable];
+        if (view) {
+          // Union or join view
+          var rows = [];
+          view.sources.forEach(function(src) {
+            var key = self.viewingArchive ? src + '__archive' : src;
+            var srcRows = self.dataCache[key] || [];
+            if (view.mode === 'union') {
+              srcRows.forEach(function(r) { rows.push(Object.assign({}, r, { _source: src })); });
+            } else {
+              srcRows.forEach(function(r) {
+                var existing = rows.find(function(e) { return e.id === r.id; });
+                if (existing) Object.assign(existing, r);
+                else rows.push(Object.assign({ _source: src }, r));
+              });
+            }
+          });
+          if (view.filter) {
+            rows = rows.filter(function(r) {
+              for (var k in view.filter) { if (r[k] !== view.filter[k]) return false; }
+              return true;
+            });
+          }
+          self.currentData = rows;
+          // Load embed table data if not cached
+          if (view.embed && !self.dataCache[view.embed.table]) {
+            var embedTab = SCHEMA[view.embed.table] && SCHEMA[view.embed.table].tab;
+            backend.getTableData(self.tableMap[view.embed.table], embedTab).then(function(result) {
+              self.dataCache[view.embed.table] = parseTableResult(result).rows;
+            });
+          }
+        } else {
+          var key = self.viewingArchive ? self.currentTable + '__archive' : self.currentTable;
+          var tableDef = SCHEMA[self.currentTable];
+          if (!tableDef) return;
+          if (!self.dataCache[key]) {
+            var tab = self.viewingArchive ? tableDef.archiveTab : tableDef.tab;
+            backend.getTableData(self.tableMap[self.currentTable], tab).then(function(result) {
+              self.dataCache[key] = parseTableResult(result).rows;
+              var rows = self.dataCache[key];
+              if (tableDef.filter) rows = rows.filter(function(r) { for (var k in tableDef.filter) { if (r[k] !== tableDef.filter[k]) return false; } return true; });
+              self.currentData = rows;
+            });
+          } else {
+            var rows = self.dataCache[key];
+            if (tableDef.filter) rows = rows.filter(function(r) { for (var k in tableDef.filter) { if (r[k] !== tableDef.filter[k]) return false; } return true; });
+            self.currentData = rows;
+          }
+        }
+      },
+
+      isColumnHidden: function(col, item) {
+        var cfg = this.currentConfig;
+        if (cfg.hideEmpty && !item[col]) return true;
+        // Inline condition: {"colName": {"field": "value"}}
+        var cols = cfg.columns;
+        if (!cols || !Array.isArray(cols)) return false;
+        var colDef = cols.find(function(c) { return colName(c) === col && colCondition(c); });
+        if (colDef) {
+          var cond = colCondition(colDef);
+          for (var k in cond) { if (item[k] !== cond[k]) return true; }
+        }
+        return false;
+      },
+
+      toggleSort: function(col) {
+        if (this.sortCol === col) this.sortAsc = !this.sortAsc;
+        else { this.sortCol = col; this.sortAsc = true; }
+      },
+
+      // Cell editing
+      saveField: function(item, col, value) {
+        if (item[col] === value) return;
+        item[col] = value;
+        item.updated_at = new Date().toISOString();
+        var self = this;
+        var source = this.getSource(item);
+        // For join views, find which source table owns this column
+        var view = VIEWS && VIEWS[this.currentTable];
+        if (view && view.mode === 'join') {
+          for (var i = 0; i < view.sources.length; i++) {
+            var s = view.sources[i];
+            if (SCHEMA[s] && SCHEMA[s].columns && SCHEMA[s].columns[col]) { source = s; break; }
+          }
+        }
+        var tab = this.getTab(source);
+        // Update cache
+        var cacheKey = this.viewingArchive ? source + '__archive' : source;
+        var cached = this.dataCache[cacheKey];
+        if (cached) {
+          var cr = cached.find(function(r) { return r.id === item.id; });
+          if (cr) { cr[col] = value; cr.updated_at = item.updated_at; }
+          else {
+            // Row doesn't exist in this table's cache — create it
+            var newRow = { id: item.id, created_at: item.created_at || new Date().toISOString(), updated_at: item.updated_at };
+            getColumns(source).forEach(function(c) { newRow[c] = (c === col) ? value : (item[c] || ''); });
+            cached.push(newRow);
+          }
+        }
+        // Save — only send columns owned by the target table
+        var timerKey = source + ':' + item.id + ':' + col;
+        clearTimeout((self.saveTimers || {})[timerKey]);
+        if (!self.saveTimers) self.saveTimers = {};
+        self.saveTimers[timerKey] = setTimeout(function() {
+          var row = {};
+          getColumns(source).forEach(function(c) { row[c] = item[c] || ''; });
+          row.id = item.id;
+          row[col] = value;
+          row.updated_at = new Date().toISOString();
+          if (!row.created_at) row.created_at = new Date().toISOString();
+          backend.putRow(self.tableMap[source], row, tab);
+          // Propagate to mirror tables if this column is mirrored
+          self.propagateMirror(item.id, source, row, 'update');
+          self.notify('Saved');
+        }, 300);
+      },
+
+      // Add row
+      addRow: function() {
+        var self = this;
+        var view = VIEWS[this.currentTable];
+        var target = view ? view.sources[0] : this.currentTable;
+        var row = { id: self.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+        getColumns(target).forEach(function(c) { if (!row[c]) row[c] = ''; });
+        // Add to cache and view
+        var cacheKey = self.viewingArchive ? target + '__archive' : target;
+        if (!self.dataCache[cacheKey]) self.dataCache[cacheKey] = [];
+        self.dataCache[cacheKey].push(row);
+        if (view) {
+          var viewRow = Object.assign({}, row);
+          if (view.mode === 'union') viewRow._source = target;
+          self.currentData.push(viewRow);
+        }
+        var tab = self.viewingArchive ? (SCHEMA[target] && SCHEMA[target].archiveTab) : (SCHEMA[target] && SCHEMA[target].tab);
+        backend.putRow(self.tableMap[target], row, tab);
+        // Propagate to mirror tables
+        self.propagateMirror(row.id, target, row, 'create');
+        self.notify('Row added');
+        self.focusLastEditable('.v-table tbody tr:last-child .editable-cell');
+      },
+
+      deleteRow: function(item) {
+        var key = 'row:' + item.id;
+        if (this.pendingDelete !== key) { this.armDelete(key); return; }
+        var source = this.getSource(item);
+        var tab = this.getTab(source);
+        var cacheKey = this.viewingArchive ? source + '__archive' : source;
+        this.removeFromView(item.id, cacheKey);
+        backend.deleteRow(this.tableMap[source], item.id, tab);
+        // Delete from mirror tables
+        this.propagateMirror(item.id, source, item, 'delete');
+        this.notify('Deleted');
+      },
+
+      // Archive / Restore
+      archiveRow: function(item) {
+        var self = this;
+        var view = VIEWS[this.currentTable];
+        var sources;
+        if (view) {
+          sources = view.sources;
+        } else {
+          // Include mirror tables that reference this table
+          sources = [this.getSource(item)];
+          var primary = sources[0];
+          for (var mt in SCHEMA) {
+            if (mt === primary) continue;
+            for (var mc in SCHEMA[mt].columns) {
+              var mdef = SCHEMA[mt].columns[mc];
+              if (mdef && typeof mdef === 'object' && mdef.mirror === primary) { sources.push(mt); break; }
+            }
+          }
+        }
+        sources.forEach(function(source) {
+          var schema = SCHEMA[source];
+          if (!schema || !schema.archiveTab) return;
+          var cached = self.dataCache[source] || [];
+          var srcRow = cached.find(function(r) { return r.id === item.id; });
+          if (!srcRow) return;
+          self.dataCache[source] = cached.filter(function(r) { return r.id !== item.id; });
+          if (!self.dataCache[source + '__archive']) self.dataCache[source + '__archive'] = [];
+          self.dataCache[source + '__archive'].push(srcRow);
+          backend.moveRow(self.tableMap[source], srcRow, schema.tab, schema.archiveTab);
+        });
+        self.currentData = self.currentData.filter(function(r) { return r.id !== item.id; });
+        self.notify('Archived');
+      },
+
+      restoreRow: function(item) {
+        var self = this;
+        var view = VIEWS[this.currentTable];
+        var sources;
+        if (view) {
+          sources = view.sources;
+        } else {
+          sources = [this.getSource(item)];
+          var primary = sources[0];
+          for (var mt in SCHEMA) {
+            if (mt === primary) continue;
+            for (var mc in SCHEMA[mt].columns) {
+              var mdef = SCHEMA[mt].columns[mc];
+              if (mdef && typeof mdef === 'object' && mdef.mirror === primary) { sources.push(mt); break; }
+            }
+          }
+        }
+        sources.forEach(function(source) {
+          var schema = SCHEMA[source];
+          if (!schema) return;
+          var cached = self.dataCache[source + '__archive'] || [];
+          var srcRow = cached.find(function(r) { return r.id === item.id; });
+          if (!srcRow) return;
+          self.dataCache[source + '__archive'] = cached.filter(function(r) { return r.id !== item.id; });
+          if (!self.dataCache[source]) self.dataCache[source] = [];
+          self.dataCache[source].push(srcRow);
+          backend.moveRow(self.tableMap[source], srcRow, schema.archiveTab, schema.tab || 'active');
+        });
+        self.currentData = self.currentData.filter(function(r) { return r.id !== item.id; });
+        self.notify('Restored');
+      },
+
+      // Column helpers
+      colIsDate: function(col) {
+        for (var t in SCHEMA) { if (getColumnType(t, col) === 'date') return true; }
+        return false;
+      },
+      toDateStr: function(v) { return toDateStr(v); },
+      colIsList: function(col) {
+        for (var t in SCHEMA) { var l = getColumnList(t, col); if (l) return l; }
+        return null;
+      },
+      getListOptions: function(col) {
+        var listName = this.colIsList(col);
+        return listName && this.listsCache[listName] ? this.listsCache[listName] : [];
+      },
+      colAllowNew: function(col) {
+        for (var t in SCHEMA) {
+          var def = SCHEMA[t].columns[col];
+          if (def && typeof def === 'object' && def.allowNew) return true;
+        }
+        return false;
+      },
+      addToListOnBlur: function(item, col) {
+        var value = item[col];
+        if (!value) return;
+        var listName = this.colIsList(col);
+        if (listName && this.listsCache[listName] && this.listsCache[listName].indexOf(value) === -1) {
+          this.listsCache[listName].push(value);
+          backend.putListItem(this.folderId, listName, value);
+        }
+      },
+
+      colIsRef: function(col) {
+        for (var t in SCHEMA) { var r = getColumnRef(t, col); if (r) return true; }
+        return false;
+      },
+      colIsMirrorForTable: function(col) {
+        var table = this.currentTable;
+        if (VIEWS[table]) return false;
+        return colIsMirror(SCHEMA, col, table);
+      },
+      isReadonlyCell: function(item, col) {
+        // In union views, grey out columns that don't belong to the row's source table
+        var view = VIEWS && VIEWS[this.currentTable];
+        if (!view || view.mode !== 'union' || !item._source) return false;
+        return !(SCHEMA[item._source] && SCHEMA[item._source].columns && SCHEMA[item._source].columns[col]);
+      },
+      getRefOptions: function(col, item) {
+        var ref = null;
+        for (var t in SCHEMA) { ref = getColumnRef(t, col); if (ref) break; }
+        if (!ref) return [];
+        var rows = this.dataCache[ref.table] || [];
+        if (ref.filterBy) {
+          var filterBy = ref.filterBy;
+          var hasFilter = false;
+          for (var k in filterBy) { if (item[filterBy[k]]) { hasFilter = true; break; } }
+          if (hasFilter) {
+            rows = rows.filter(function(r) {
+              for (var refCol in filterBy) {
+                var val = item[filterBy[refCol]];
+                if (val && r[refCol] !== val) return false;
+              }
+              return true;
+            });
+          }
+        }
+        var valueCol = ref.valueCol;
+        // When filterBy exists but no filter applied, show all with disambiguation for duplicates
+        if (ref.filterBy && !hasFilter) {
+          var parentCol = Object.keys(ref.filterBy)[0];
+          // Count occurrences of each value
+          var counts = {};
+          rows.forEach(function(r) { var v = r[valueCol]; if (v) counts[v] = (counts[v] || 0) + 1; });
+          var seen = {};
+          var items = [];
+          rows.forEach(function(r) {
+            var v = r[valueCol];
+            if (!v || seen[v + '|' + r[parentCol]]) return;
+            seen[v + '|' + r[parentCol]] = true;
+            var title = counts[v] > 1 ? v + ' (' + r[parentCol] + ')' : v;
+            items.push({ title: title, value: v });
+          });
+          return items;
+        }
+        var seen = {};
+        var opts = [];
+        rows.forEach(function(r) {
+          var v = r[valueCol];
+          if (v && !seen[v]) { seen[v] = true; opts.push({ title: v, value: v }); }
+        });
+        return opts;
+      },
+
+      // Reference table editing (hierarchical)
+      renameRefParent: function(oldParent, newParent) {
+        newParent = (newParent || '').trim();
+        if (newParent === oldParent) return;
+        var self = this;
+        var table = self.currentRefTable;
+        var parentCol = self.refParentCol;
+        (self.dataCache[table] || []).forEach(function(row) {
+          if (row[parentCol] === oldParent) {
+            row[parentCol] = newParent;
+            row.updated_at = new Date().toISOString();
+            backend.putRow(self.tableMap[table], row, SCHEMA[table].tab);
+          }
+        });
+        self.notify('Renamed');
+      },
+      deleteRefParent: function(parent) {
+        var key = 'refp:' + parent;
+        if (this.pendingDelete !== key) { this.armDelete(key); return; }
+        var self = this;
+        var table = self.currentRefTable;
+        var parentCol = self.refParentCol;
+        var toDelete = (self.dataCache[table] || []).filter(function(r) { return r[parentCol] === parent; });
+        self.dataCache[table] = (self.dataCache[table] || []).filter(function(r) { return r[parentCol] !== parent; });
+        toDelete.forEach(function(row) { backend.deleteRow(self.tableMap[table], row.id, SCHEMA[table].tab); });
+        self.pendingDelete = null;
+        self.notify('Deleted');
+      },
+      addRefParent: function() {
+        var self = this;
+        var table = self.currentRefTable;
+        var row = { id: self.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+        getColumns(table).forEach(function(c) { if (!row[c]) row[c] = ''; });
+        if (!self.dataCache[table]) self.dataCache[table] = [];
+        self.dataCache[table].push(row);
+        backend.putRow(self.tableMap[table], row, SCHEMA[table].tab);
+        self.notify('Group added');
+        self.$nextTick(function() {
+          var els = document.querySelectorAll('.ref-hierarchy .v-list-group');
+          if (els.length) {
+            var last = els[els.length - 1];
+            var cell = last.querySelector('.editable-cell');
+            if (cell) cell.focus();
+          }
+        });
+      },
+      addRefChild: function(parentValue) {
+        var self = this;
+        var table = self.currentRefTable;
+        var row = { id: self.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+        getColumns(table).forEach(function(c) { if (!row[c]) row[c] = ''; });
+        row[self.refParentCol] = parentValue;
+        if (!self.dataCache[table]) self.dataCache[table] = [];
+        self.dataCache[table].push(row);
+        backend.putRow(self.tableMap[table], row, SCHEMA[table].tab);
+        self.notify('Item added');
+        self.$nextTick(function() {
+          var cells = document.querySelectorAll('.ref-hierarchy .editable-cell.ref-child');
+          if (cells.length) cells[cells.length - 1].focus();
+        });
+      },
+      saveRefField: function(item, col, value) {
+        if (item[col] === value) return;
+        item[col] = value;
+        item.updated_at = new Date().toISOString();
+        var self = this;
+        var refTable = self.currentRefTable;
+        var timerKey = refTable + ':' + item.id;
+        clearTimeout(self.saveTimers[timerKey]);
+        self.saveTimers[timerKey] = setTimeout(function() {
+          backend.putRow(self.tableMap[refTable], item, (SCHEMA[refTable] && SCHEMA[refTable].tab) || undefined);
+          self.notify('Saved');
+        }, 500);
+      },
+      addRefRow: function() {
+        var self = this;
+        var table = self.currentRefTable;
+        var row = { id: self.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+        getColumns(table).forEach(function(c) { if (!row[c]) row[c] = ''; });
+        if (!self.dataCache[table]) self.dataCache[table] = [];
+        self.dataCache[table].push(row);
+        backend.putRow(self.tableMap[table], row, SCHEMA[table].tab);
+        self.notify('Row added');
+        self.focusLastEditable('.v-main .v-card .v-table tbody tr:last-child .editable-cell');
+      },
+      deleteRefRow: function(item) {
+        var key = 'ref:' + item.id;
+        if (this.pendingDelete !== key) { this.armDelete(key); return; }
+        var table = this.currentRefTable;
+        this.dataCache[table] = (this.dataCache[table] || []).filter(function(r) { return r.id !== item.id; });
+        backend.deleteRow(this.tableMap[table], item.id, SCHEMA[table].tab);
+        this.notify('Deleted');
+      },
+
+      // Languages
+      switchLanguage: function(code) {
+        var self = this;
+        localStorage.setItem('app_lang', code);
+        var defCode = self.defaultLanguage;
+        backend.getTranslations(self.folderId, defCode).then(function(baseTrans) {
+          self.strings = baseTrans || {};
+          if (code !== defCode) {
+            return backend.getTranslations(self.folderId, code).then(function(trans) {
+              if (trans) self.strings = Object.assign({}, self.strings, trans);
+            });
+          }
+        });
+      },
+      openLangEditor: function(lang) {
+        var self = this;
+        this.editingLang = lang;
+        backend.getTranslations(self.folderId, lang.code).then(function(trans) {
+          self.currentTranslations = trans || {};
+        });
+      },
+      saveTranslation: function(key, value) {
+        var self = this;
+        this.currentTranslations[key] = value;
+        clearTimeout(this._langTimer);
+        this._langTimer = setTimeout(function() {
+          if (!self.editingLang) return;
+          backend.updateTranslations(self.folderId, self.editingLang.code, self.currentTranslations);
+          self.notify('Translation saved');
+        }, 500);
+      },
+      addLanguage: function() {
+        var self = this;
+        var name = 'lang-' + Date.now().toString(36);
+        backend.createLanguage(this.folderId, name, name, this.translationKeys).then(function() {
+          var newLang = { code: name, name: name };
+          self.languages.push(newLang);
+          self.openLangEditor(newLang);
+          self.notify('Language added');
+          self.focusLastEditable('.v-main .v-card .v-list .editable-cell');
+        });
+      },
+      renameLang: function(lang, newName) {
+        newName = (newName || '').trim();
+        if (newName === lang.name) return;
+        var self = this;
+        var oldCode = lang.code;
+        // Persist: delete old, create new with same translations
+        backend.getTranslations(self.folderId, oldCode).then(function(trans) {
+          return backend.deleteLanguage(self.folderId, oldCode).then(function() {
+            return backend.createLanguage(self.folderId, newName, newName, self.translationKeys).then(function() {
+              if (trans && Object.keys(trans).length) backend.updateTranslations(self.folderId, newName, trans);
+            });
+          });
+        });
+        lang.name = newName;
+        lang.code = newName;
+        if (self.currentLang === oldCode) self.currentLang = newName;
+        if (self.editingLang && self.editingLang.code === oldCode) self.editingLang = lang;
+      },
+      deleteLang: function(lang) {
+        var key = 'lang:' + lang.code;
+        if (this.pendingDelete !== key) { this.armDelete(key); return; }
+        var self = this;
+        backend.deleteLanguage(self.folderId, lang.code).then(function() {
+          self.languages = self.languages.filter(function(l) { return l.code !== lang.code; });
+          if (self.editingLang && self.editingLang.code === lang.code) self.editingLang = null;
+          self.notify('Deleted');
+        });
+      },
+
+      // Lists
+      addListItem2: function(name) {
+        this.listsCache[name].push('');
+        this.saveLists();
+        this.$nextTick(function() {
+          var groups = document.querySelectorAll('.v-list-group__items');
+          for (var i = 0; i < groups.length; i++) {
+            var cells = groups[i].querySelectorAll('.editable-cell');
+            if (cells.length && cells[cells.length - 1]) {
+              var lastCell = cells[cells.length - 1];
+              if (!lastCell.textContent.trim()) { lastCell.focus(); return; }
+            }
+          }
+        });
+      },
+      updateListItem2: function(name, i, value) {
+        this.listsCache[name][i] = value;
+        this.saveLists();
+      },
+      focusNextListItem: function(e) {
+        var el = e.target;
+        el.blur();
+        var li = el.closest('.v-list-item');
+        var next = li && li.nextElementSibling;
+        if (next) { var s = next.querySelector('[contenteditable]'); if (s) s.focus(); }
+      },
+      removeListItem2: function(name, i) {
+        var key = 'list_' + name + '_' + i;
+        if (this.pendingDelete !== key) { this.armDelete(key); return; }
+        this.pendingDelete = null;
+        this.listsCache[name].splice(i, 1);
+        this.saveLists();
+      },
+      saveLists: function() { backend.saveLists(this.folderId, this.listsCache); },
+
+      // Mirror propagation helper
+      propagateMirror: function(id, sourceTable, rowData, action) {
+        var self = this;
+        for (var mt in SCHEMA) {
+          var mirrorCols = SCHEMA[mt].columns;
+          var hasMirror = false;
+          for (var mc in mirrorCols) {
+            var mdef = mirrorCols[mc];
+            if (mdef && typeof mdef === 'object' && mdef.mirror === sourceTable) { hasMirror = true; break; }
+          }
+          if (!hasMirror) continue;
+          var mKey = self.viewingArchive ? mt + '__archive' : mt;
+          var mTab = self.viewingArchive ? (SCHEMA[mt].archiveTab) : (SCHEMA[mt].tab);
+          if (action === 'delete') {
+            self.dataCache[mKey] = (self.dataCache[mKey] || []).filter(function(r) { return r.id !== id; });
+            backend.deleteRow(self.tableMap[mt], id, mTab);
+          } else if (action === 'create') {
+            var mirrorRow = { id: id, created_at: rowData.created_at || new Date().toISOString(), updated_at: new Date().toISOString() };
+            getColumns(mt).forEach(function(c) { if (!mirrorRow[c]) mirrorRow[c] = ''; });
+            for (var mc2 in mirrorCols) {
+              var md = mirrorCols[mc2];
+              if (md && typeof md === 'object' && md.mirror) mirrorRow[mc2] = rowData[mc2] || '';
+            }
+            if (!self.dataCache[mKey]) self.dataCache[mKey] = [];
+            self.dataCache[mKey].push(mirrorRow);
+            backend.putRow(self.tableMap[mt], mirrorRow, mTab);
+          } else if (action === 'update') {
+            var mCached = self.dataCache[mKey] || [];
+            for (var mc3 in mirrorCols) {
+              var md2 = mirrorCols[mc3];
+              if (md2 && typeof md2 === 'object' && md2.mirror === sourceTable) {
+                var mr = mCached.find(function(r) { return r.id === id; });
+                if (mr) {
+                  mr[mc3] = rowData[mc3] || '';
+                  mr.updated_at = new Date().toISOString();
+                  backend.putRow(self.tableMap[mt], mr, mTab);
+                }
+              }
+            }
+          }
+        }
+      },
+
+      // Settings
+      saveSetting: function(key, val) {
+        var s = JSON.parse(localStorage.getItem('app_settings') || '{}');
+        s[key] = val; localStorage.setItem('app_settings', JSON.stringify(s));
+      },
+      resetApp: function() {
+        localStorage.clear();
+        location.reload();
+      },
+      copyUid: function() {
+        navigator.clipboard.writeText(this.firebaseUid);
+        this.snackbar = 'UID copied to clipboard';
+      },
+      saveFirebaseConfig: function() {
+        var input = this.firebaseConfigInput.trim();
+        if (!input && this.hasFirebaseConfig) {
+          localStorage.setItem('app_mode', 'firebase');
+          location.reload();
+          return;
+        }
+        try {
+          var config = JSON.parse(input);
+          if (!config.apiKey || !config.projectId) { this.snackbar = 'Invalid config: needs apiKey and projectId'; return; }
+          localStorage.setItem('firebase_config', JSON.stringify(config));
+          localStorage.setItem('app_mode', 'firebase');
+          // Try saving server-side for other users
+          fetch('/api/saveConfig', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({filename:'firebase-config.json', data:config}) }).catch(function(){});
+          location.reload();
+        } catch(e) { this.snackbar = 'Invalid JSON'; }
+      },
+      exportData: function() {
+        var self = this;
+        var data = {};
+        Object.keys(SCHEMA).forEach(function(table) {
+          data[table] = self.dataCache[table] || [];
+          var archiveKey = table + '__archive';
+          if (self.dataCache[archiveKey]) data[archiveKey] = self.dataCache[archiveKey];
+        });
+        // Gather translations
+        var translations = {};
+        var chain = Promise.resolve();
+        self.languages.forEach(function(lang) {
+          chain = chain.then(function() {
+            return backend.getTranslations(self.folderId, lang.code).then(function(t) { translations[lang.code] = t; });
+          });
+        });
+        chain.then(function() {
+          var json = JSON.stringify({ tables: data, lists: self.listsCache, languages: self.languages, translations: translations, exportedAt: new Date().toISOString() }, null, 2);
+          var blob = new Blob([json], { type: 'application/json' });
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json';
+          a.click();
+          self.notify('Exported');
+        });
+      },
+      backupToDrive: function() {
+        var self = this;
+        var data = {};
+        Object.keys(SCHEMA).forEach(function(table) {
+          data[table] = self.dataCache[table] || [];
+          var archiveKey = table + '__archive';
+          if (self.dataCache[archiveKey]) data[archiveKey] = self.dataCache[archiveKey];
+        });
+        var translations = {};
+        var chain = Promise.resolve();
+        self.languages.forEach(function(lang) {
+          chain = chain.then(function() {
+            return backend.getTranslations(self.folderId, lang.code).then(function(t) { translations[lang.code] = t; });
+          });
+        });
+        chain.then(function() {
+          var backup = { tables: data, lists: self.listsCache, languages: self.languages, translations: translations, exportedAt: new Date().toISOString() };
+        // Use backend-agnostic approach: saveChangesets repurposed, or direct _uploadFile if available
+          if (typeof _uploadFile === 'function') {
+            _uploadFile(self.folderId, 'backup.json', JSON.stringify(backup)).then(function() { self.notify('Backup saved'); });
+          } else if (backend.saveChangesets) {
+            backend.saveChangesets(self.folderId, 'backup', JSON.stringify(backup)).then(function() { self.notify('Backup saved'); });
+          } else {
+            self.notify('Backup not supported in this mode');
+          }
+        });
+      },
+      importData: function(event) {
+        var self = this;
+        var file = event.target.files[0];
+        if (!file) return;
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          try {
+            var imported = JSON.parse(e.target.result);
+            var tables = imported.tables || {};
+            var chain = Promise.resolve();
+            Object.keys(tables).forEach(function(key) {
+              var rows = tables[key];
+              var parts = key.split('__');
+              var table = parts[0];
+              var tab;
+              if (parts[1] === 'archive') {
+                tab = (SCHEMA[table] && SCHEMA[table].archiveTab) || parts[1];
+              } else {
+                tab = (SCHEMA[table] && SCHEMA[table].tab) || 'active';
+              }
+              rows.forEach(function(row) {
+                chain = chain.then(function() {
+                  // Delete first to force CRDT change detection on re-import
+                  return backend.deleteRow(self.tableMap[table] || table, row.id, tab).catch(function() {});
+                }).then(function() {
+                  return backend.putRow(self.tableMap[table] || table, row, tab);
+                });
+              });
+            });
+            if (imported.lists) {
+              chain = chain.then(function() {
+                self.listsCache = imported.lists;
+                return backend.saveLists(self.folderId, imported.lists);
+              });
+            }
+            if (imported.translations) {
+              Object.keys(imported.translations).forEach(function(code) {
+                chain = chain.then(function() {
+                  // Ensure language exists before writing translations
+                  var langName = (imported.languages || []).find(function(l) { return l.code === code; });
+                  return backend.createLanguage(self.folderId, code, langName ? langName.name : code, Object.keys(imported.translations[code])).catch(function() {});
+                }).then(function() {
+                  return backend.updateTranslations(self.folderId, code, imported.translations[code]);
+                });
+              });
+            }
+            chain.then(function() {
+              self.notify('Imported ' + Object.keys(tables).length + ' tables');
+              // Push CRDT changes before reloading
+              if (typeof _pushChanges === 'function') { _pushChanges().then(function() { location.reload(); }); }
+              else { location.reload(); }
+            });
+          } catch(err) { self.notify('Import error: ' + err.message); }
+        };
+        reader.readAsText(file);
+        event.target.value = '';
+      },
+      triggerOAuth: function() { if (typeof triggerOAuth === 'function') triggerOAuth(); },
+      selectSetupMode: function(mode) {
+        this.setupStep = mode || null;
+        if (mode) { localStorage.setItem('app_mode', mode); }
+        else { localStorage.removeItem('app_mode'); location.reload(); return; }
+        if (mode === 'sheets' || mode === 'crdt' || mode === 'firebase') {
+          if (typeof google !== 'undefined' && google.script) { return; }
+          if (typeof _oauthClient === 'undefined' || !_oauthClient) { location.reload(); return; }
+        }
+      },
+
+      switchMode: function(mode) {
+        localStorage.setItem('app_mode', mode);
+        location.reload();
+      },
+
+      // Sync
+      syncAndReload: function() {
+        var self = this;
+        self.syncing = true;
+        // Reload current table data from backend
+        var view = VIEWS[self.currentTable];
+        var sources = view ? view.sources : [self.currentTable];
+        var chain = Promise.resolve();
+        sources.forEach(function(src) {
+          chain = chain.then(function() {
+            return backend.getTableData(self.tableMap[src], SCHEMA[src].tab).then(function(r) {
+              self.dataCache[src] = (r && r.rows) ? r.rows : [];
+            });
+          });
+        });
+        chain.then(function() { self.loadTableData(); self.syncing = false; self.notify('Synced'); }).catch(function(err) {
+          self.syncing = false;
+          self.notify(err && err.message ? err.message : 'Sync failed');
+        });
+      },
+
+      generateId: function() { return Date.now().toString(36) + Math.random().toString(36).substr(2, 5); },
+
+      focusLastEditable: function(selector) {
+        this.$nextTick(function() {
+          var cells = document.querySelectorAll(selector);
+          if (cells.length) cells[0].focus();
+        });
+      },
+
+      getSource: function(item) { return item._source || this.currentTable; },
+
+      getTab: function(source) {
+        return this.viewingArchive ? (SCHEMA[source] && SCHEMA[source].archiveTab) : (SCHEMA[source] && SCHEMA[source].tab);
+      },
+
+      removeFromView: function(id, cacheKey) {
+        this.dataCache[cacheKey] = (this.dataCache[cacheKey] || []).filter(function(r) { return r.id !== id; });
+        this.currentData = this.currentData.filter(function(r) { return r.id !== id; });
+      },
+
+      armDelete: function(key) {
+        var self = this;
+        self.pendingDelete = key;
+        clearTimeout(self.pendingDeleteTimer);
+        self.pendingDeleteTimer = setTimeout(function() { self.pendingDelete = null; }, 3000);
+      },
+
+      isArmed: function(key) { return this.pendingDelete === key; },
+
+      printView: function() {
+        var self = this;
+        var cols = this.visibleCols;
+        var title = this.t('tab.' + this.currentTable) || this.currentTable;
+        var html = '<html><head><title>' + title + '</title><style>body{font-family:system-ui;margin:20px}.card{border:1px solid #ddd;padding:12px;margin-bottom:12px;border-radius:6px;page-break-inside:avoid}dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0}dt{font-weight:bold;font-size:12px;opacity:0.7}dd{margin:0;font-size:13px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:4px 8px;text-align:left;font-size:12px}th{background:#f5f5f5}.embed{margin:8px 0;padding:8px;background:#f9f9f9;border-radius:4px}.embed h4{margin:0 0 4px;font-size:12px;opacity:0.7}@media print{button{display:none}}</style></head><body>';
+        html += '<h2>' + title + '</h2>';
+        if (this.useCardLayout) {
+          this.sortedData.forEach(function(row) {
+            html += '<div class="card"><dl>';
+            cols.forEach(function(c) {
+              if (row[c]) html += '<dt>' + (self.t('field.' + c) || c) + '</dt><dd>' + row[c] + '</dd>';
+              self.embedItems.forEach(function(ei) { if (ei.config.afterColumn === c && ei.rows.length) html += '</dl>' + self._printEmbed(ei) + '<dl>'; });
+            });
+            html += '</dl>';
+            self.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && ei.rows.length) html += self._printEmbed(ei); });
+            html += '</div>';
+          });
+        } else {
+          var afterCol = null;
+          self.embedItems.forEach(function(ei) { if (ei.config.afterColumn) afterCol = ei.config.afterColumn; });
+          var colIdx = afterCol ? cols.indexOf(afterCol) : -1;
+          var colsBefore = colIdx >= 0 ? cols.slice(0, colIdx + 1) : cols;
+          var colsAfter = colIdx >= 0 ? cols.slice(colIdx + 1) : [];
+
+          html += '<table><thead><tr>';
+          colsBefore.forEach(function(c) { html += '<th>' + (self.t('field.' + c) || c) + '</th>'; });
+          html += '</tr></thead><tbody>';
+          this.sortedData.forEach(function(row) {
+            html += '<tr>'; colsBefore.forEach(function(c) { html += '<td>' + (row[c] || '') + '</td>'; }); html += '</tr>';
+          });
+          html += '</tbody></table>';
+
+          self.embedItems.forEach(function(ei) { if (ei.config.afterColumn && ei.rows.length) html += self._printEmbed(ei); });
+
+          if (colsAfter.length) {
+            html += '<table><thead><tr>';
+            colsAfter.forEach(function(c) { html += '<th>' + (self.t('field.' + c) || c) + '</th>'; });
+            html += '</tr></thead><tbody>';
+            self.sortedData.forEach(function(row) {
+              html += '<tr>'; colsAfter.forEach(function(c) { html += '<td>' + (row[c] || '') + '</td>'; }); html += '</tr>';
+            });
+            html += '</tbody></table>';
+          }
+          self.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && ei.rows.length) html += self._printEmbed(ei); });
+        }
+        html += '</body></html>';
+        var w = window.open('', '_blank');
+        w.document.write(html);
+        w.document.close();
+        w.print();
+      },
+
+      _printEmbed: function(ei) {
+        var self = this;
+        var html = '<div class="embed">';
+        var hdr = ei.config.header && self.t(ei.config.header) !== ei.config.header ? self.t(ei.config.header) : '';
+        if (hdr) html += '<h4>' + hdr + '</h4>';
+        html += '<table><thead><tr>';
+        ei.columns.forEach(function(c) { html += '<th>' + (self.t('field.' + c) || c) + '</th>'; });
+        html += '</tr></thead><tbody>';
+        ei.rows.forEach(function(r) { html += '<tr>'; ei.columns.forEach(function(c) { html += '<td>' + (r[c] || '') + '</td>'; }); html += '</tr>'; });
+        html += '</tbody></table>';
+        var ftr = ei.config.footer && self.t(ei.config.footer) !== ei.config.footer ? self.t(ei.config.footer) : '';
+        if (ftr) html += '<p style="font-size:11px;opacity:0.6;margin:4px 0 0">' + ftr + '</p>';
+        html += '</div>';
+        return html;
+      },
+
+      printCard: function(item) {
+        var self = this;
+        var cols = this.visibleCols;
+        var title = item[cols[0]] || item.id;
+        var html = '<html><head><title>' + title + '</title><style>body{font-family:system-ui;margin:20px}dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px}dt{font-weight:bold;font-size:12px;opacity:0.7}dd{margin:0;font-size:13px}.embed{margin:12px 0;padding:8px;background:#f9f9f9;border-radius:4px}.embed h4{margin:0 0 4px;font-size:12px;opacity:0.7}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:3px 6px;text-align:left;font-size:11px}th{background:#f5f5f5}@media print{button{display:none}}</style></head><body>';
+        html += '<dl>';
+        cols.forEach(function(c) {
+          if (item[c]) { html += '<dt>' + (self.t('field.' + c) || c) + '</dt><dd>' + item[c] + '</dd>'; }
+        });
+        html += '</dl>';
+        var pself = this;
+        this.embedItems.forEach(function(ei) { if (ei.rows.length) html += pself._printEmbed(ei); });
+        html += '</body></html>';
+        var w = window.open('', '_blank');
+        w.document.write(html);
+        w.document.close();
+        w.print();
+      }
+    },
+
+    watch: {
+      viewingArchive: function() { this.loadTableData(); },
+      sortedData: function(val) { if (this.currentConfig.collapsed && val.length) this.expandedCard = val[0].id; }
+    },
+
+    mounted: function() {
+      var self = this;
+      window.addEventListener('resize', function() { self.mobile = window.innerWidth < 768; self.windowWidth = window.innerWidth; });
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          var el = e.target;
+          if (el.hasAttribute('contenteditable') || el.tagName === 'SELECT' || el.tagName === 'INPUT') {
+            e.preventDefault();
+            el.blur();
+            // Table cells: move to next cell
+            var td = el.closest('td');
+            if (td) {
+              var next = td.nextElementSibling;
+              while (next && !next.querySelector('[contenteditable], select, input, .v-autocomplete input')) next = next.nextElementSibling;
+              if (!next) {
+                var tr = td.closest('tr');
+                var nextRow = tr && tr.nextElementSibling;
+                if (nextRow) next = nextRow.querySelector('td');
+                while (next && !next.querySelector('[contenteditable], select, input, .v-autocomplete input')) next = next.nextElementSibling;
+              }
+              if (next) { var t = next.querySelector('[contenteditable], select, input, .v-autocomplete input'); if (t) t.focus(); }
+              return;
+            }
+            // List items: move to next sibling or add new
+            var li = el.closest('.v-list-item');
+            if (li) {
+              var nextLi = li.nextElementSibling;
+              if (nextLi) {
+                var c = nextLi.querySelector('[contenteditable]');
+                if (c) { c.focus(); return; }
+              }
+              // At last item: find the "Add item" button in the parent group
+              var group = li.closest('.v-list-group__items') || li.closest('.v-list');
+              if (group) {
+                var addBtn = group.querySelector('.v-btn .mdi-plus') || group.parentElement.querySelector(':scope > .v-list-item:last-child .v-btn');
+                if (addBtn) { addBtn.closest('button, .v-btn').click(); return; }
+              }
+            }
+          }
+        }
+      });
+    }
+  });
+
+  app.use(vuetify);
+  appInstance = app.mount('#vue-app');
+}
+
+function init() {
+  var folder = localStorage.getItem('app_folder');
+  var savedMode = localStorage.getItem('app_mode');
+  var instance = appInstance;
+  if (savedMode === 'sheets' || savedMode === 'crdt' || savedMode === 'oauth') instance.oauthReady = true;
+
+  if (savedMode === 'firebase') {
+    instance.mode = 'firebase';
+    instance.loading = true;
+    instance.startApp();
+    return;
+  }
+
+  if (!folder) {
+    // On Apps Script, skip local server probe
+    if (typeof google !== 'undefined' && google.script) {
+      instance.showSetup = true; instance.loading = false;
+    } else if (savedMode === 'sheets' || savedMode === 'oauth' || savedMode === 'crdt') {
+      instance.mode = savedMode; instance.showSetup = true; instance.loading = false;
+    } else {
+      fetch('/api/validateFolder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"id":"local"}' })
+        .then(function(r) {
+          if (r.ok) { instance.mode = 'local'; instance.showSetup = true; instance.loading = false; }
+          else { instance.showSetup = true; instance.loading = false; }
+        })
+        .catch(function() { instance.showSetup = true; instance.loading = false; });
+    }
+  } else {
+    instance.folderId = folder;
+    instance.mode = savedMode || 'sheets';
+    instance.startApp();
+  }
+}
+
+// createVueApp() and init() called by index.html after all scripts loaded
+</script>
