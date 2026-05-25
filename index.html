@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+  <div id="app-root"></div>
+  <script>
+    async function loadApp() {
+      // Detect backend
+      var backendFile;
+      var mode = localStorage.getItem('app_mode');
+      if (mode === 'sheets') { backendFile = '/backend-oauth.html'; }
+      else if (mode === 'crdt') { backendFile = '/backend-crdt.html'; }
+      else if (mode === 'firebase') { backendFile = '/backend-firebase.html'; }
+      else {
+        try {
+          var probe = await fetch('/api/validateFolder', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' });
+          if (probe.ok) backendFile = '/backend-local-client.html';
+        } catch(e) {}
+        if (!backendFile) {
+          if (!mode) mode = await showModeSelector();
+          backendFile = (mode === 'crdt') ? '/backend-crdt.html' : '/backend-oauth.html';
+        }
+      }
+
+      var [styleResp, uiResp, coreResp, backendResp] = await Promise.all([
+        fetch('/style.html'),
+        fetch('/ui.html'),
+        fetch('/app-core.html'),
+        fetch(backendFile)
+      ]);
+
+      document.head.insertAdjacentHTML('beforeend', await styleResp.text());
+      document.getElementById('app-root').innerHTML = await uiResp.text();
+
+      await loadScript('/vendor/vue.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vue@3.4.38/dist/vue.global.prod.js'); });
+      await loadScript('/vendor/vuetify.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vuetify@3.7.6/dist/vuetify.min.js'); });
+
+      if (backendFile === '/backend-oauth.html' || backendFile === '/backend-crdt.html') {
+        await loadScript('https://accounts.google.com/gsi/client');
+      }
+      if (backendFile === '/backend-firebase.html') {
+        await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
+        await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js');
+        await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js');
+      }
+
+      execScript(await coreResp.text());
+      createVueApp();
+      // Load shared auth before backend for OAuth/CRDT
+      if (backendFile === '/backend-oauth.html' || backendFile === '/backend-crdt.html') {
+        var authResp = await fetch('/auth-oauth.html');
+        execScript(await authResp.text());
+      }
+      execScript(await backendResp.text());
+      // For OAuth/CRDT: handle auth
+      if (backendFile === '/backend-oauth.html' || backendFile === '/backend-crdt.html') {
+        if (!localStorage.getItem('app_folder')) {
+          appInstance.showSetup = true; appInstance.loading = false;
+        } else if (sessionStorage.getItem('oauth_token')) {
+          // Token cached: init directly (backend is now loaded)
+          init();
+        } else {
+          appInstance.needsReauth = true; appInstance.loading = false;
+        }
+      }
+      // Firebase: auth handled by onAuthStateChanged in backend-firebase.html
+      if (backendFile === '/backend-firebase.html') {
+        // onAuthStateChanged in backend-firebase.html handles auth state and calls init()
+      }
+    }
+
+    function showModeSelector() {
+      return new Promise(function(resolve) {
+        var root = document.getElementById('app-root');
+        root.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui">' +
+          '<div style="text-align:center;max-width:400px">' +
+          '<h2 style="margin-bottom:24px">Select Mode</h2>' +
+          '<button id="btn-oauth" style="display:block;width:100%;padding:16px;margin:8px 0;border:1px solid #ccc;border-radius:8px;cursor:pointer;font-size:16px;background:#fff">' +
+          '☁️ Google Sheets<br><small style="color:#666">Sync via Google Sheets REST API (requires OAuth)</small></button>' +
+          '<button id="btn-crdt" style="display:block;width:100%;padding:16px;margin:8px 0;border:1px solid #ccc;border-radius:8px;cursor:pointer;font-size:16px;background:#fff">' +
+          '💾 Local + Drive Sync<br><small style="color:#666">IndexedDB with optional Drive sync (CRDT)</small></button>' +
+          '</div></div>';
+        document.getElementById('btn-oauth').onclick = function() { localStorage.setItem('app_mode', 'oauth'); resolve('oauth'); };
+        document.getElementById('btn-crdt').onclick = function() { localStorage.setItem('app_mode', 'crdt'); resolve('crdt'); };
+      });
+    }
+
+    function loadScript(src) {
+      return new Promise(function(resolve, reject) {
+        var s = document.createElement('script');
+        s.src = src; s.onload = resolve; s.onerror = reject;
+        document.body.appendChild(s);
+      });
+    }
+
+    function execScript(html) {
+      var match = html.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
+      if (match) {
+        var s = document.createElement('script');
+        s.textContent = match[1];
+        document.body.appendChild(s);
+      }
+    }
+
+    loadApp();
+  </script>
+</body>
+</html>
