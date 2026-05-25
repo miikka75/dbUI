@@ -1,0 +1,444 @@
+<div id="vue-app" v-cloak>
+  <v-app :theme="theme">
+    <!-- Loading -->
+    <v-overlay :model-value="loading" class="align-center justify-center" persistent>
+      <v-progress-circular indeterminate size="64"></v-progress-circular>
+    </v-overlay>
+
+    <!-- Reauth Dialog -->
+    <v-dialog v-model="needsReauth" persistent max-width="340">
+      <v-card>
+        <v-card-text class="text-center pa-6">
+          <v-btn color="primary" prepend-icon="mdi-google" @click="triggerOAuth(); needsReauth = false; loading = true">Sign in to continue</v-btn>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
+
+    <!-- Setup Dialog -->
+    <v-dialog v-model="showSetup" persistent max-width="480">
+      <v-card>
+        <v-card-title>Setup</v-card-title>
+        <v-card-text>
+          <!-- Step 1: Choose mode -->
+          <div v-if="!setupStep">
+            <v-btn block variant="outlined" class="mb-3 text-left" @click="setupStep = 'local'">
+              <v-icon start>mdi-database</v-icon>
+              <div><strong>Local Database</strong><br><small style="opacity:0.6">SQLite on dev server — fastest for development</small></div>
+            </v-btn>
+            <v-btn block variant="outlined" class="mb-3 text-left" @click="selectSetupMode('sheets')">
+              <v-icon start>mdi-google-spreadsheet</v-icon>
+              <div><strong>Google Sheets</strong><br><small style="opacity:0.6">Data stored in Google Sheets via OAuth REST API</small></div>
+            </v-btn>
+            <v-btn block variant="outlined" class="mb-3 text-left" @click="selectSetupMode('crdt')">
+              <v-icon start>mdi-sync</v-icon>
+              <div><strong>Local + Drive Sync (CRDT)</strong><br><small style="opacity:0.6">Instant local IndexedDB with background Drive sync</small></div>
+            </v-btn>
+            <v-btn block variant="outlined" class="mb-3 text-left" @click="selectSetupMode('firebase')">
+              <v-icon start>mdi-firebase</v-icon>
+              <div><strong>Firebase</strong><br><small style="opacity:0.6">Real-time sync via Firestore with offline support</small></div>
+            </v-btn>
+          </div>
+          <!-- Step 2: Local -->
+          <div v-if="setupStep === 'local'">
+            <p class="mb-4">Local mode — data stored in server SQLite database.</p>
+            <v-btn color="primary" @click="completeLocalSetup">Create Local Database</v-btn>
+            <v-btn variant="text" @click="setupStep = null; localStorage.removeItem('app_mode')" class="ml-2">Back</v-btn>
+          </div>
+          <!-- Step 2: Sheets / CRDT / Firebase (need sign-in) -->
+          <div v-if="setupStep === 'sheets' || setupStep === 'crdt' || setupStep === 'firebase'">
+            <div v-if="setupStep === 'sheets'" class="mb-3 pa-2" style="background:rgb(var(--v-theme-surface-variant),0.3);border-radius:8px;font-size:0.8rem">
+              <strong>Google Sheets Setup:</strong><br>
+              1) Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank">console.cloud.google.com/apis/credentials</a><br>
+              2) Create project → Enable <em>Drive API</em> + <em>Sheets API</em><br>
+              3) OAuth consent screen → Add your email as test user<br>
+              4) Create OAuth Client ID (Web) → Add <code>http://127.0.0.1:3000</code> as authorized origin<br>
+              5) Create a Drive folder → paste its ID below<br><br>
+              <strong>User permissions:</strong><br>
+              • Share the Drive folder with other users (Editor = read+write, Viewer = read-only)<br>
+              • Per-table access: create separate spreadsheets and share individually<br>
+              • Add each user's email to OAuth consent screen → Test users
+            </div>
+            <div v-if="setupStep === 'crdt'" class="mb-3 pa-2" style="background:rgb(var(--v-theme-surface-variant),0.3);border-radius:8px;font-size:0.8rem">
+              <strong>CRDT + Drive Sync Setup:</strong><br>
+              1) Same Google Cloud setup as Sheets (OAuth + Drive API)<br>
+              2) Create a Drive folder → paste its ID below<br>
+              3) Data stays in browser IndexedDB (instant), syncs to Drive every 30s<br><br>
+              <strong>User permissions:</strong><br>
+              • Share the root Drive folder for full access to all tables<br>
+              • Per-table access: share individual <code>sync/{tableName}/</code> subfolders<br>
+              • Users only see/edit tables whose sync subfolder is shared with them<br>
+              • Add each user's email to OAuth consent screen → Test users
+            </div>
+            <div v-if="setupStep === 'firebase'" class="mb-3 pa-2" style="background:rgb(var(--v-theme-surface-variant),0.3);border-radius:8px;font-size:0.8rem">
+              <strong>Firebase Setup:</strong><br>
+              1) Go to <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a> → Create project<br>
+              2) Firestore Database → Create database (production mode)<br>
+              3) Authentication → Sign-in method → Enable <strong>Google</strong> provider (set support email)<br>
+              4) Authentication → Settings → Authorized domains → Add your hosting domain<br>
+              <span style="opacity:0.6">&nbsp;&nbsp;&nbsp;(e.g. <code>127.0.0.1</code> for local dev, <code>yourusername.github.io</code> for GitHub Pages)</span><br>
+              5) Project Settings → Your apps → Add Web app → Copy config JSON<br>
+              6) Paste config JSON below and click Start<br>
+              <span style="opacity:0.6">(For production: place <code>firebase-config.json</code> in the hosting root — users won't need to paste)</span><br>
+              <template v-if="!hasFirebaseConfig">
+              <v-textarea v-model="firebaseConfigInput" label="Firebase config JSON" variant="outlined" density="compact" rows="4" class="my-2" placeholder='{"apiKey":"...","authDomain":"...","projectId":"..."}'></v-textarea>
+              </template>
+              <template v-else><v-chip size="small" color="success" class="my-2">✓ Config saved</v-chip><br></template>
+              <strong>After first sign-in:</strong><br>
+              7) Firestore → Rules → Publish (start with open rules, then restrict per-user):<br>
+              <pre style="font-size:0.7rem;margin:4px 0;padding:4px;background:rgb(var(--v-theme-surface),0.5);border-radius:4px;overflow-x:auto">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}</pre>
+              8) To restrict per-user: go to Settings tab → copy your <strong>Firebase UID</strong> → update rules:<br>
+              <pre style="font-size:0.7rem;margin:4px 0;padding:4px;background:rgb(var(--v-theme-surface),0.5);border-radius:4px;overflow-x:auto">match /{document=**} {
+  allow read, write: if request.auth.uid in ['YOUR_UID_HERE'];
+}</pre>
+              9) Use Settings → Import from JSON to load schema + data.
+            </div>
+            <template v-if="setupStep === 'firebase'">
+            <v-btn color="primary" prepend-icon="mdi-google" :disabled="!hasFirebaseConfig && !firebaseConfigInput" @click="saveFirebaseConfig()">Sign in with Google</v-btn>
+            </template>
+            <template v-else>
+            <v-btn v-if="!oauthReady" color="primary" prepend-icon="mdi-google" @click="triggerOAuth()" class="mb-4">Sign in with Google</v-btn>
+            <template v-if="oauthReady">
+            <v-text-field v-model="setupFolderId" label="Drive folder ID" variant="outlined" density="compact" class="mb-2" @input="validateFolder"></v-text-field>
+            <v-btn color="primary" :disabled="!folderValid" @click="setupMode = setupStep; completeSetup()">Start</v-btn>
+            </template>
+            </template>
+            <v-btn variant="text" @click="selectSetupMode(''); setupStep = null" class="ml-2">Back</v-btn>
+          </div>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
+
+    <!-- App Bar -->
+    <v-app-bar density="compact" elevation="1">
+      <v-app-bar-nav-icon @click="rail = !rail"></v-app-bar-nav-icon>
+      <v-app-bar-title>{{ appTitle }}</v-app-bar-title>
+      <v-select v-if="languages.length > 1" v-model="currentLang" :items="langItems" density="compact" variant="plain" hide-details style="max-width:120px" class="mr-2" @update:model-value="switchLanguage"></v-select>
+      <v-btn icon="mdi-refresh" @click="syncAndReload" :loading="syncing"></v-btn>
+      <v-btn :icon="theme === 'dark' ? 'mdi-weather-sunny' : 'mdi-weather-night'" @click="toggleTheme"></v-btn>
+    </v-app-bar>
+
+    <!-- Sidebar -->
+    <v-navigation-drawer permanent :rail="rail" :expand-on-hover="rail">
+      <v-list density="compact" nav>
+        <template v-for="tab in sidebarTabs" :key="tab.id">
+          <v-divider v-if="tab.divider" class="my-1"></v-divider>
+          <v-list-item v-else :value="tab.id" :active="currentTable === tab.id" @click="selectTab(tab.id)" :prepend-icon="tab.icon" :title="tab.title"></v-list-item>
+        </template>
+      </v-list>
+    </v-navigation-drawer>
+
+    <!-- Main Content -->
+    <v-main>
+      <v-container fluid class="pa-4">
+        <!-- Archive Toggle -->
+        <v-tabs v-if="hasArchive" v-model="viewingArchive" density="compact" class="mb-3">
+          <v-tab :value="false">{{ t('btn.show_active') }}</v-tab>
+          <v-tab :value="true">{{ t('btn.show_archived') }}</v-tab>
+        </v-tabs>
+
+        <!-- Data Table -->
+        <v-card v-if="isDataView" variant="outlined">
+          <div class="d-flex align-center pa-2" style="min-height:0">
+            <v-spacer></v-spacer>
+            <v-btn icon="mdi-printer" size="small" variant="text" @click="printView()"></v-btn>
+          </div>
+          <div v-if="currentConfig.header && t(currentConfig.header) !== currentConfig.header" class="pa-3 pb-0" style="font-size:0.85rem; opacity:0.7">{{ t(currentConfig.header) }}</div>
+          <!-- Mobile: card layout -->
+          <div v-if="useCardLayout">
+            <v-card v-for="(item, idx) in sortedData" :key="item.id" variant="flat" class="ma-2 pa-2" style="border-bottom: 1px solid rgb(var(--v-theme-outline), 0.2)">
+              <!-- First visible field always shown + expand toggle -->
+              <div class="d-flex align-center" @click="currentConfig.collapsed ? (expandedCard = expandedCard === item.id ? null : item.id) : null" :style="currentConfig.collapsed ? 'cursor:pointer' : ''">
+                <div style="flex:1">
+                  <div v-if="colsBeforeEmbed.length" class="d-flex align-center mb-1">
+                    <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + colsBeforeEmbed[0]) || colsBeforeEmbed[0] }}</span>
+                    <span style="opacity:0.8">{{ item[colsBeforeEmbed[0]] || '' }}</span>
+                  </div>
+                </div>
+                <v-icon v-if="currentConfig.collapsed" size="small">{{ expandedCard === item.id || (!currentConfig.collapsed) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+              </div>
+              <!-- Remaining fields (collapsed unless expanded or not collapsed mode) -->
+              <div v-show="!currentConfig.collapsed || expandedCard === item.id">
+              <template v-for="col in colsBeforeEmbed.slice(1)" :key="col">
+              <div v-if="!isColumnHidden(col, item)" class="d-flex align-center mb-1">
+                <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + col) || col }}</span>
+                <span v-if="isReadonlyView || isReadonlyCell(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : (item[col] || '') }}</span>
+                <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : (item[col] || '') }}</span>
+                <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :model-value="item[col] || ''" :items="getListOptions(col)" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
+                <v-autocomplete v-else-if="colIsList(col)" :model-value="item[col] || ''" :items="getListOptions(col)" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
+                <v-autocomplete v-else-if="colIsRef(col)" :model-value="item[col] || ''" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
+                <input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="saveField(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">
+                <span v-else class="editable-cell" contenteditable @blur="saveField(item, col, $event.target.textContent)" style="min-width:auto">{{ item[col] || '' }}</span>
+              </div>
+              </template>
+              <!-- Inline embed between columns -->
+              <template v-for="(ei, eidx) in embedItems" :key="'emb'+eidx">
+              <div v-if="ei.config.afterColumn && ei.rows.length" class="my-1 ml-2 pa-2" style="background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px">
+                <div v-if="ei.config.header && t(ei.config.header) !== ei.config.header" style="font-size:0.75rem; opacity:0.6; margin-bottom:4px">{{ t(ei.config.header) }}</div>
+                <table v-if="ei.config.mode === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                  <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
+                  <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ er[ec] || '' }}</td></tr></tbody>
+                </table>
+                <div v-else class="d-flex align-center flex-wrap ga-1">
+                  <v-chip v-for="er in ei.rows" :key="er.id" size="small" variant="tonal" label>
+                    <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
+                  </v-chip>
+                </div>
+                <div v-if="ei.config.footer && t(ei.config.footer) !== ei.config.footer" style="font-size:0.75rem; opacity:0.6; margin-top:4px">{{ t(ei.config.footer) }}</div>
+              </div>
+              </template>
+              <template v-for="col in colsAfterEmbed" :key="col">
+              <div v-if="!isColumnHidden(col, item)" class="d-flex align-center mb-1">
+                <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + col) || col }}</span>
+                <span v-if="isReadonlyView || isReadonlyCell(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : (item[col] || '') }}</span>
+                <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : (item[col] || '') }}</span>
+                <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :model-value="item[col] || ''" :items="getListOptions(col)" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
+                <v-autocomplete v-else-if="colIsList(col)" :model-value="item[col] || ''" :items="getListOptions(col)" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
+                <v-autocomplete v-else-if="colIsRef(col)" :model-value="item[col] || ''" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
+                <input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="saveField(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">
+                <span v-else class="editable-cell" contenteditable @blur="saveField(item, col, $event.target.textContent)" style="min-width:auto">{{ item[col] || '' }}</span>
+              </div>
+              </template>
+              <div class="mt-2">
+                <v-btn icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>
+                <template v-if="!hasMaster && !isReadonlyView">
+                <v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archiveRow(item)"></v-btn>
+                <v-btn :icon="isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="isArmed('row:'+item.id) ? 'error' : ''" @click="deleteRow(item)"></v-btn>
+                </template>
+              </div>
+              </div>
+            </v-card>
+          </div>
+          <!-- Desktop: table layout -->
+          <v-table v-if="!useCardLayout" density="compact" hover>
+            <template v-slot:default>
+            <thead><tr>
+              <th v-for="col in visibleCols" :key="col" @click="toggleSort(col)" style="cursor:pointer">{{ t('field.' + col) || col }}</th>
+              <th v-if="isUnionView">{{ t('field.source') }}</th>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              <template v-for="item in sortedData" :key="item.id">
+              <tr>
+                <td v-for="col in visibleCols" :key="col">
+                  <span v-if="isReadonlyView || isReadonlyCell(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : (item[col] || '') }}</span>
+                  <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : (item[col] || '') }}</span>
+                  <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :model-value="item[col] || ''" :items="getListOptions(col)" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
+                  <v-autocomplete v-else-if="colIsList(col)" :model-value="item[col] || ''" :items="getListOptions(col)" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
+                  <v-autocomplete v-else-if="colIsRef(col)" :model-value="item[col] || ''" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
+                  <input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="saveField(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">
+                  <span v-else class="editable-cell" contenteditable @blur="saveField(item, col, $event.target.textContent)">{{ item[col] || '' }}</span>
+                </td>
+                <td v-if="isUnionView"><v-chip size="x-small" variant="tonal">{{ item._source }}</v-chip></td>
+                <td style="white-space:nowrap">
+                  <v-btn v-if="!viewingArchive && hasArchive && !hasMaster && !isReadonlyView" icon="mdi-archive-outline" size="small" variant="text" class="mr-2" @click="archiveRow(item)"></v-btn>
+                  <v-btn v-if="viewingArchive && !hasMaster && !isReadonlyView" icon="mdi-archive-arrow-up-outline" size="small" variant="text" class="mr-2" @click="restoreRow(item)"></v-btn>
+                  <v-btn v-if="!hasMaster && !isReadonlyView" :icon="isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('row:'+item.id) ? 'error' : ''" @click="deleteRow(item)"></v-btn>
+                </td>
+              </tr>
+              <template v-if="sortedData.indexOf(item) === sortedData.length - 1" v-for="(ei, eidx) in embedItems" :key="'temb'+eidx">
+              <tr v-if="ei.config.afterColumn && ei.rows.length">
+                <td :colspan="visibleCols.length + 2" style="padding:6px 12px; background: rgb(var(--v-theme-surface-variant), 0.1)">
+                  <div v-if="ei.config.header && t(ei.config.header) !== ei.config.header" style="font-size:0.75rem; opacity:0.6; margin-bottom:4px">{{ t(ei.config.header) }}</div>
+                  <table v-if="ei.config.mode === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
+                    <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ er[ec] || '' }}</td></tr></tbody>
+                  </table>
+                  <div v-else class="d-flex align-center flex-wrap ga-1">
+                    <v-chip v-for="er in ei.rows" :key="er.id" size="small" variant="tonal" label>
+                      <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
+                    </v-chip>
+                  </div>
+                  <div v-if="ei.config.footer && t(ei.config.footer) !== ei.config.footer" style="font-size:0.75rem; opacity:0.6; margin-top:4px">{{ t(ei.config.footer) }}</div>
+                </td>
+              </tr>
+              </template>
+              </template>
+            </tbody>
+            </template>
+          </v-table>
+          <v-btn v-if="!hasMaster && !isReadonlyView" variant="text" prepend-icon="mdi-plus" @click="addRow" class="ma-2">{{ t('btn.add') }} {{ t('tab.' + currentTable) }}</v-btn>
+          <!-- Embedded rows from another table (bottom position when no afterColumn) -->
+          <template v-for="(ei, eidx) in embedItems" :key="'bemb'+eidx">
+          <div v-if="!ei.config.afterColumn && ei.rows.length" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
+            <div style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ (ei.config.header && t(ei.config.header) !== ei.config.header ? t(ei.config.header) : '') || t('tab.' + ei.config.table) || ei.config.table }} ({{ ei.rows.length }})</div>
+            <table v-if="ei.config.mode === 'table'" style="width:100%; font-size:0.8rem; border-collapse:collapse">
+              <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:3px 8px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
+              <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:3px 8px">{{ er[ec] || '' }}</td></tr></tbody>
+            </table>
+            <div v-else class="d-flex align-center flex-wrap ga-1">
+              <v-chip v-for="er in ei.rows" :key="er.id" size="small" variant="tonal" label>
+                <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
+              </v-chip>
+            </div>
+            <div v-if="ei.config.footer && t(ei.config.footer) !== ei.config.footer" style="font-size:0.8rem; opacity:0.6; margin-top:8px">{{ t(ei.config.footer) }}</div>
+          </div>
+          </template>
+          <div v-if="currentConfig.footer && t(currentConfig.footer) !== currentConfig.footer" class="pa-3 pt-0" style="font-size:0.85rem; opacity:0.7">{{ t(currentConfig.footer) }}</div>
+        </v-card>
+
+        <!-- Detail card view -->
+
+        <!-- Languages Tab -->
+        <v-card v-if="currentTable === '__languages'" variant="outlined">
+          <v-card-title class="d-flex align-center">{{ t('tab.languages') }}</v-card-title>
+          <v-list>
+            <v-list-group v-for="lang in languages" :key="lang.code" :value="lang.code">
+              <template v-slot:activator="{ props }">
+                <v-list-item v-bind="props" @click="openLangEditor(lang)">
+                  <span v-if="lang.code !== defaultLanguage" class="editable-cell" contenteditable @click.stop @blur="renameLang(lang, $event.target.textContent)">{{ lang.name }}</span>
+                  <span v-else>{{ lang.name }}</span>
+                  <template v-slot:append>
+                    <v-btn v-if="lang.code !== defaultLanguage" :icon="isArmed('lang:'+lang.code) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="isArmed('lang:'+lang.code) ? 'error' : ''" @click.stop="deleteLang(lang)" class="mr-2"></v-btn>
+                    <v-icon>mdi-chevron-down</v-icon>
+                  </template>
+                </v-list-item>
+              </template>
+              <v-table v-if="editingLang && editingLang.code === lang.code" density="compact">
+                <template v-slot:default>
+                <thead><tr><th>{{ t('field.key') }}</th><th>{{ t('field.translation') }}</th></tr></thead>
+                <tbody>
+                  <tr v-for="key in translationKeys" :key="key">
+                    <td>{{ key }}</td>
+                    <td><span class="editable-cell" contenteditable @blur="saveTranslation(key, $event.target.textContent)">{{ currentTranslations[key] || '' }}</span></td>
+                  </tr>
+                </tbody>
+                </template>
+              </v-table>
+            </v-list-group>
+          </v-list>
+          <v-btn variant="text" prepend-icon="mdi-plus" @click="addLanguage" class="ma-2">{{ t('btn.add') }} {{ t('tab.languages') }}</v-btn>
+        </v-card>
+
+        <!-- Lists Tab -->
+        <v-card v-if="currentTable === '__lookup'" variant="outlined">
+          <v-card-title>{{ t('tab.lists') }}</v-card-title>
+          <v-list>
+            <v-list-group v-for="(items, name) in listsCache" :key="name" :value="name">
+              <template v-slot:activator="{ props }">
+                <v-list-item v-bind="props" prepend-icon="mdi-format-list-bulleted">
+                  <span>{{ name }}</span>
+                </v-list-item>
+              </template>
+              <v-list-item v-for="(val, i) in items" :key="i">
+                <span class="editable-cell" contenteditable @blur="updateListItem2(name, i, $event.target.textContent)" @keydown.enter.prevent="focusNextListItem($event)" @keydown.home.stop @keydown.end.stop>{{ val }}</span>
+                <template v-slot:append>
+                  <v-btn :icon="isArmed('list_' + name + '_' + i) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('list_' + name + '_' + i) ? 'error' : ''" @click="removeListItem2(name, i)"></v-btn>
+                </template>
+              </v-list-item>
+              <v-list-item>
+                <v-btn variant="text" size="small" prepend-icon="mdi-plus" @click="addListItem2(name)">{{ t('btn.add') }} {{ name }}</v-btn>
+              </v-list-item>
+            </v-list-group>
+          </v-list>
+          <v-divider class="my-4"></v-divider>
+          <v-card-title>{{ t('tab.ref_data') }}</v-card-title>
+          <v-list>
+            <v-list-group v-for="rt in refTables" :key="rt" :value="rt">
+              <template v-slot:activator="{ props }">
+                <v-list-item v-bind="props" :prepend-icon="'mdi-database-outline'" @click="currentRefTable = rt">
+                  <span>{{ rt }}</span>
+                </v-list-item>
+              </template>
+            <!-- Hierarchical mode (2 data columns) -->
+            <template v-if="currentRefTable === rt && isHierarchicalRef">
+            <div class="ref-hierarchy">
+              <v-list>
+                <v-list-group v-for="(children, parent) in refGroupedData" :key="parent" :value="parent">
+                  <template v-slot:activator="{ props }">
+                    <v-list-item v-bind="props">
+                      <span class="editable-cell" contenteditable @click.stop @blur="renameRefParent(parent, $event.target.textContent)">{{ parent }}</span>
+                      <template v-slot:append>
+                        <v-btn :icon="isArmed('refp:'+parent) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="isArmed('refp:'+parent) ? 'error' : ''" @click.stop="deleteRefParent(parent)" class="mr-2"></v-btn>
+                        <v-icon>mdi-chevron-down</v-icon>
+                      </template>
+                    </v-list-item>
+                  </template>
+                  <v-list-item v-for="item in children" :key="item.id">
+                    <span class="editable-cell ref-child" contenteditable @blur="saveRefField(item, refChildCol, $event.target.textContent)">{{ item[refChildCol] || '' }}</span>
+                    <template v-slot:append>
+                      <v-btn :icon="isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('ref:'+item.id) ? 'error' : ''" @click="deleteRefRow(item)"></v-btn>
+                    </template>
+                  </v-list-item>
+                  <v-list-item>
+                    <v-btn variant="text" size="small" prepend-icon="mdi-plus" @click="addRefChild(parent)">{{ t('btn.add') }} {{ refChildCol }}</v-btn>
+                  </v-list-item>
+                </v-list-group>
+              </v-list>
+              <v-btn variant="text" prepend-icon="mdi-plus" @click="addRefParent()" class="ma-2">{{ t('btn.add') }} {{ refParentCol }}</v-btn>
+            </div>
+            </template>
+            <!-- Flat mode when not this table -->
+            <template v-if="currentRefTable === rt && !isHierarchicalRef">
+            <div>
+              <v-table density="compact" hover>
+                <template v-slot:default>
+                <thead><tr>
+                  <th v-for="col in refTableCols" :key="col">{{ t('field.' + col) || col }}</th>
+                  <th></th>
+                </tr></thead>
+                <tbody>
+                  <tr v-for="item in refTableData" :key="item.id">
+                    <td v-for="col in refTableCols" :key="col">
+                      <span class="editable-cell" contenteditable @blur="saveRefField(item, col, $event.target.textContent)">{{ item[col] || '' }}</span>
+                    </td>
+                    <td><v-btn :icon="isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('ref:'+item.id) ? 'error' : ''" @click="deleteRefRow(item)"></v-btn></td>
+                  </tr>
+                </tbody>
+                </template>
+              </v-table>
+              <v-btn variant="text" prepend-icon="mdi-plus" @click="addRefRow" class="ma-2">{{ t('btn.add') }} {{ t('tab.' + currentTable) }}</v-btn>
+            </div>
+            </template>
+            </v-list-group>
+          </v-list>
+        </v-card>
+
+        <!-- Settings Tab -->
+        <v-card v-if="currentTable === '__settings'" variant="outlined">
+          <v-card-title>{{ t('tab.settings') }}</v-card-title>
+          <v-card-text>
+            <p style="color: rgb(var(--v-theme-on-surface-variant))">All data loads automatically at startup. No configuration needed.</p>
+            <v-divider class="my-4"></v-divider>
+            <div class="mb-4">
+              <p class="text-subtitle-2 mb-2">Backend Mode</p>
+              <v-chip-group v-model="appMode" mandatory @update:model-value="switchMode">
+                <v-chip value="oauth" variant="outlined">☁️ Google Sheets</v-chip>
+                <v-chip value="crdt" variant="outlined">💾 Local + Drive Sync</v-chip>
+              </v-chip-group>
+            </div>
+            <v-divider class="my-4"></v-divider>
+            <p class="text-subtitle-2 mb-2">Data Import / Export</p>
+            <v-btn variant="outlined" prepend-icon="mdi-download" @click="exportData" class="mr-2 mb-2">Export as JSON</v-btn>
+            <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()" class="mb-2">Import from JSON</v-btn>
+            <input ref="importFile" type="file" accept=".json" hidden @change="importData($event)">
+            <p class="text-caption mt-1" style="opacity:0.6">Export all table data as JSON file. Import overwrites current data.</p>
+            <v-divider class="my-4"></v-divider>
+            <p class="text-subtitle-2 mb-2">Backend</p>
+            <v-chip variant="outlined" class="mr-2">{{ mode || 'local' }}</v-chip>
+            <v-btn variant="text" size="small" prepend-icon="mdi-swap-horizontal" @click="selectSetupMode('')">Change Backend</v-btn>
+            <p class="text-caption mt-1" style="opacity:0.6">Export data first, then switch backend and import to migrate.</p>
+            <v-divider class="my-4"></v-divider>
+            <v-btn variant="outlined" color="warning" prepend-icon="mdi-refresh" @click="resetApp">Reset &amp; Reload</v-btn>
+            <p class="text-caption mt-2" style="opacity:0.6">Clears browser cache and reloads from server.</p>
+            <template v-if="mode === 'firebase' && firebaseUid">
+            <v-divider class="my-4"></v-divider>
+            <p class="text-subtitle-2 mb-2">Firebase User</p>
+            <v-text-field :model-value="firebaseUid" label="Your UID" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="copyUid"></v-text-field>
+            <p class="text-caption mt-1" style="opacity:0.6">Use this UID in Firestore Security Rules for per-table access control.</p>
+            </template>
+          </v-card-text>
+        </v-card>
+      </v-container>
+    </v-main>
+
+    <!-- Snackbar -->
+    <v-snackbar v-model="snackbar" :timeout="2000" location="bottom">{{ snackText }}</v-snackbar>
+  </v-app>
+</div>
