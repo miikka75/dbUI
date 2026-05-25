@@ -1,0 +1,35 @@
+<!-- backend-appscript.html — Apps Script backend adapter -->
+<script>
+backend = {
+  getSchema: (folderId) => _run('getSchema', folderId),
+  saveSchema: (folderId, schema) => _run('saveSchema', folderId, JSON.stringify(schema)),
+  bootData: (folderId, schema) => _run('bootData', folderId, schema),
+  validateFolder: (id) => _run('validateFolderId', id),
+  getFolderConfig: (folderId) => _run('getFolderConfig', folderId),
+  setFolderConfig: (folderId, config) => _run('setFolderConfig', folderId, config),
+  initSchema: (folderId, schema) => _run('initSchema', folderId, JSON.stringify(schema)),
+  getAvailableTables: (folderId) => _run('getAvailableTables', folderId),
+  getAvailableLanguages: (folderId) => _run('getAvailableLanguages', folderId),
+  getTableData: (spreadsheetId, tab) => tab ? _run('getTableData', spreadsheetId, tab) : _run('getTableData', spreadsheetId),
+  putRow: (spreadsheetId, data, tab) => tab ? _run('putRow', spreadsheetId, data, tab) : _run('putRow', spreadsheetId, data),
+  deleteRow: (spreadsheetId, id, tab) => tab ? _run('deleteRow', spreadsheetId, id, tab) : _run('deleteRow', spreadsheetId, id),
+  moveRow: (spreadsheetId, rowData, fromTab, toTab) => _run('moveRow', spreadsheetId, rowData, fromTab, toTab),
+  getTranslations: (folderId, langCode) => _run('getTranslations', folderId, langCode),
+  updateTranslations: (folderId, langCode, updates) => _run('updateTranslations', folderId, langCode, updates),
+  createLanguage: (folderId, code, name, keys) => _run('createLanguage', folderId, code, name, keys),
+  deleteLanguage: (folderId, code) => _run('deleteLanguage', folderId, code),
+  getLists: (folderId) => _run('getLists', folderId),
+  saveLists: (folderId, lists) => _run('saveLists', folderId, lists),
+  putListItem: (folderId, listName, value) => _run('putListItem', folderId, listName, value),
+  saveChangesets: (folderId, siteId, json) => _run('saveChangesets', folderId, siteId, json),
+  loadChangesets: (folderId, excludeSiteId) => _run('loadChangesets', folderId, excludeSiteId)
+};
+
+function _run(fn, ...args) {
+  return new Promise((resolve, reject) => {
+    google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn](...args);
+  });
+}
+
+init();
+</script>
