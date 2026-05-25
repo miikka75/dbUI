@@ -1,0 +1,320 @@
+<!-- backend-oauth.html — Google OAuth + REST API backend adapter -->
+<script>
+var API_KEY = 'AIzaSyDXGZdTBk8L7CCq-BJJghEH8XwC-QDz9AM';
+
+backend = {
+  async getSchema(folderId) {
+    try {
+      const res = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and name='schema.json' and trashed=false&fields=files(id)`);
+      const { files } = await res.json();
+      if (!files?.length) return null;
+      const content = await _fetch(`https://www.googleapis.com/drive/v3/files/${files[0].id}?alt=media`);
+      return content.json();
+    } catch(e) { return null; }
+  },
+
+  async saveSchema(folderId, schema) {
+    try { await _uploadFile(folderId, 'schema.json', JSON.stringify(schema, null, 2)); } catch(e) {}
+  },
+
+  async validateFolder(id) {
+    try {
+      const res = await _fetch(`https://www.googleapis.com/drive/v3/files/${id}?fields=name`);
+      if (res.ok) { const d = await res.json(); return { valid: true, name: d.name }; }
+      return { valid: false, name: null };
+    } catch(e) { return { valid: false, name: null }; }
+  },
+
+  async getFolderConfig(folderId) {
+    try {
+      const res = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and name='.app-config.json' and trashed=false&fields=files(id)`);
+      const { files } = await res.json();
+      if (!files?.length) return null;
+      const content = await _fetch(`https://www.googleapis.com/drive/v3/files/${files[0].id}?alt=media`);
+      return content.json();
+    } catch(e) { return null; }
+  },
+
+  async setFolderConfig(folderId, config) {
+    try { await _uploadFile(folderId, '.app-config.json', JSON.stringify(config)); } catch(e) {}
+  },
+
+  async initSchema(folderId, schema) {
+    try {
+      const result = {};
+      for (const [table, def] of Object.entries(schema)) {
+        result[table] = await _ensureSheet(folderId, table, def.columns);
+      }
+      return result;
+    } catch(e) { return {}; }
+  },
+
+  async getAvailableTables(folderId) {
+    try {
+      const res = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and not name contains 'lang-' and trashed=false&fields=files(id,name)`);
+      return (await res.json()).files || [];
+    } catch(e) { return []; }
+  },
+
+  async getAvailableLanguages(folderId) {
+    try {
+      // Try 'languages' spreadsheet first (Apps Script pattern - tabs per language)
+      var res = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and name='languages' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&fields=files(id)`);
+      var data = await res.json();
+      if (data.files && data.files.length) {
+        var ssId = data.files[0].id;
+        var meta = await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}?fields=sheets.properties.title`);
+        var ss = await meta.json();
+        return (ss.sheets || []).map(function(s) { return { code: s.properties.title, name: s.properties.title, fileId: ssId }; });
+      }
+      return [];
+    } catch(e) { return []; }
+  },
+
+  async getTableData(spreadsheetId, tab) {
+    if (!tab) return { headers: [], rows: [] };
+    try {
+      const res = await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(tab)}`);
+      if (!res.ok) return { headers: [], rows: [] };
+      const data = await res.json();
+      const values = data.values;
+      if (!values || values.length < 2) return { headers: (values && values[0]) || [], rows: [] };
+      const headers = values[0];
+      return { headers, rows: values.slice(1).map(row => { var obj = {}; headers.forEach(function(h, i) { obj[h] = (row[i] !== undefined ? String(row[i]) : ''); }); return obj; }) };
+    } catch(e) { return { headers: [], rows: [] }; }
+  },
+
+  async putRow(spreadsheetId, data, tab) {
+    if (!tab) return;
+    try {
+      // Ensure tab exists
+      const meta = await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`);
+      const ss = await meta.json();
+      const tabExists = (ss.sheets || []).some(s => s.properties.title === tab);
+      if (!tabExists) {
+        await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, 'POST', {
+          requests: [{ addSheet: { properties: { title: tab } } }]
+        });
+        // Write headers from data keys
+        const headers = Object.keys(data);
+        await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(tab)}!A1?valueInputOption=RAW`, 'PUT', { values: [headers] });
+      }
+      const { headers } = await this.getTableData(spreadsheetId, tab);
+      const row = headers.map(h => data[h] ?? '');
+      const all = await this.getTableData(spreadsheetId, tab);
+      const idx = all.rows.findIndex(r => r.id === data.id);
+      if (idx === -1) {
+        await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(tab)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, 'POST', { values: [row] });
+      } else {
+        await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(tab)}!A${idx + 2}?valueInputOption=RAW`, 'PUT', { values: [row] });
+      }
+    } catch(e) { console.error('putRow error:', e); }
+  },
+
+  async deleteRow(spreadsheetId, id, tab) {
+    if (!tab) return;
+    try {
+      const { rows } = await this.getTableData(spreadsheetId, tab);
+      const idx = rows.findIndex(r => r.id === id);
+      if (idx === -1) return;
+      const meta = await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`);
+      const { sheets } = await meta.json();
+      const sheet = sheets.find(s => s.properties.title === tab) || sheets[0];
+      const sheetId = sheet?.properties?.sheetId || 0;
+      await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, 'POST', {
+        requests: [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: idx + 1, endIndex: idx + 2 } } }]
+      });
+    } catch(e) { console.error('deleteRow error:', e); }
+  },
+
+  async moveRow(spreadsheetId, rowData, fromTab, toTab) {
+    try {
+      await this.deleteRow(spreadsheetId, rowData.id, fromTab);
+      await this.putRow(spreadsheetId, rowData, toTab);
+    } catch(e) { console.error('moveRow error:', e); }
+  },
+
+  async getTranslations(folderId, langCode) {
+    try {
+      var search = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and name='languages' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&fields=files(id)`);
+      var data = await search.json();
+      if (!data.files || !data.files.length) return {};
+      var res = await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${data.files[0].id}/values/${encodeURIComponent(langCode)}`);
+      var sheet = await res.json();
+      var t = {};
+      if (sheet.values) sheet.values.slice(1).forEach(function(r) { if (r[0] && r[1]) t[r[0]] = r[1]; });
+      return t;
+    } catch(e) { return {}; }
+  },
+
+  async updateTranslations(folderId, langCode, updates) {
+    try {
+      const search = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and name='languages' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&fields=files(id)`);
+      const { files } = await search.json();
+      if (!files || !files.length) return;
+      const ssId = files[0].id;
+      const res = await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(langCode)}`);
+      const sheet = await res.json();
+      const data = (sheet.values && sheet.values.length) ? sheet.values : [['key', 'text']];
+      for (const [key, value] of Object.entries(updates)) {
+        const idx = data.findIndex((r, i) => i > 0 && r[0] === key);
+        if (idx >= 0) data[idx][1] = value;
+        else data.push([key, value]);
+      }
+      await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(langCode)}?valueInputOption=RAW`, 'PUT', { values: data });
+    } catch(e) { console.error('updateTranslations error:', e); }
+  },
+
+  async createLanguage(folderId, code, name, keys) {
+    try {
+      // Find or create 'languages' spreadsheet
+      let ssId;
+      const search = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and name='languages' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&fields=files(id)`);
+      const { files } = await search.json();
+      if (files && files.length) {
+        ssId = files[0].id;
+      } else {
+        const create = await _fetch('https://sheets.googleapis.com/v4/spreadsheets', 'POST', { properties: { title: 'languages' } });
+        const ss = await create.json();
+        ssId = ss.spreadsheetId;
+        await _fetch(`https://www.googleapis.com/drive/v3/files/${ssId}?addParents=${folderId}&removeParents=root`, 'PATCH');
+      }
+      // Add tab with language code name
+      await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}:batchUpdate`, 'POST', {
+        requests: [{ addSheet: { properties: { title: code } } }]
+      });
+      // Write header + keys
+      const rows = [['key', 'text'], ...(keys || []).map(k => [k, ''])];
+      await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(code)}?valueInputOption=RAW`, 'PUT', { values: rows });
+      return ssId;
+    } catch(e) { console.error('createLanguage error:', e); return null; }
+  },
+
+  async deleteLanguage(folderId, code) {
+    try {
+      const search = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and name='languages' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&fields=files(id)`);
+      const { files } = await search.json();
+      if (!files || !files.length) return;
+      const ssId = files[0].id;
+      const meta = await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}?fields=sheets.properties`);
+      const ss = await meta.json();
+      const sheet = (ss.sheets || []).find(s => s.properties.title === code);
+      if (!sheet) return;
+      await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}:batchUpdate`, 'POST', {
+        requests: [{ deleteSheet: { sheetId: sheet.properties.sheetId } }]
+      });
+    } catch(e) { console.error('deleteLanguage error:', e); }
+  },
+
+  async getLists(folderId) {
+    try {
+      const res = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and name='lists' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&fields=files(id)`);
+      const { files } = await res.json();
+      if (!files || !files.length) return {};
+      const ssId = files[0].id;
+      const meta = await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}?fields=sheets.properties.title`);
+      const { sheets } = await meta.json();
+      const result = {};
+      for (const s of sheets) {
+        const name = s.properties.title;
+        if (name === 'Sheet1') continue;
+        const data = await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(name)}!A:A`);
+        const { values } = await data.json();
+        result[name] = values ? values.map(r => r[0]).filter(v => v) : [];
+      }
+      return result;
+    } catch(e) { return {}; }
+  },
+
+  async saveLists(folderId, lists) {
+    try {
+      let ssId;
+      const search = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and name='lists' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&fields=files(id)`);
+      const { files } = await search.json();
+      if (files && files.length) {
+        ssId = files[0].id;
+      } else {
+        const create = await _fetch('https://sheets.googleapis.com/v4/spreadsheets', 'POST', { properties: { title: 'lists' } });
+        const ss = await create.json();
+        ssId = ss.spreadsheetId;
+        await _fetch(`https://www.googleapis.com/drive/v3/files/${ssId}?addParents=${folderId}&removeParents=root`, 'PATCH');
+      }
+      for (const [name, values] of Object.entries(lists)) {
+        await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(name)}!A:A?valueInputOption=RAW`, 'PUT', { values: values.map(v => [v]) });
+      }
+    } catch(e) { console.error('saveLists error:', e); }
+  },
+
+  async putListItem(folderId, listName, value) {
+    try {
+      const search = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and name='lists' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&fields=files(id)`);
+      const { files } = await search.json();
+      if (!files || !files.length) return;
+      const ssId = files[0].id;
+      await _fetch(`https://sheets.googleapis.com/v4/spreadsheets/${ssId}/values/${encodeURIComponent(listName)}!A:A:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, 'POST', { values: [[value]] });
+    } catch(e) { console.error('putListItem error:', e); }
+  },
+
+  async saveChangesets(folderId, siteId, json) {
+    try {
+      const syncFolderId = await _getOrCreateFolder(folderId, 'changesets');
+      await _uploadFile(syncFolderId, siteId + '.json', json);
+    } catch(e) { console.error('saveChangesets error:', e); }
+  },
+
+  async loadChangesets(folderId, excludeSiteId) {
+    try {
+      const syncFolderId = await _getOrCreateFolder(folderId, 'changesets');
+      const res = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${syncFolderId}' in parents and trashed=false&fields=files(id,name)`);
+      const files = (await res.json()).files || [];
+      const result = [];
+      for (const f of files) {
+        const sid = f.name.replace('.json', '');
+        if (sid === excludeSiteId) continue;
+        const content = await _fetch(`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`);
+        result.push({ siteId: sid, data: await content.text() });
+      }
+      return result;
+    } catch(e) { return []; }
+  }
+};
+
+// --- Helpers ---
+
+
+async function _ensureSheet(folderId, name, columns) {
+  const search = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and name='${name}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&fields=files(id)`);
+  const { files } = await search.json();
+  if (files?.length) return files[0].id;
+  const res = await _fetch('https://sheets.googleapis.com/v4/spreadsheets', 'POST', {
+    properties: { title: name },
+    sheets: [{ properties: { title: 'data' }, data: [{ rowData: [{ values: columns.map(c => ({ userEnteredValue: { stringValue: c } })) }] }] }]
+  });
+  const sheet = await res.json();
+  await _fetch(`https://www.googleapis.com/drive/v3/files/${sheet.spreadsheetId}?addParents=${folderId}&removeParents=root`, 'PATCH');
+  return sheet.spreadsheetId;
+}
+
+async function _getOrCreateFolder(parentId, name) {
+  const res = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${parentId}' in parents and name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id)`);
+  const { files } = await res.json();
+  if (files?.length) return files[0].id;
+  const create = await _fetch('https://www.googleapis.com/drive/v3/files', 'POST', { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] });
+  return (await create.json()).id;
+}
+
+async function _uploadFile(folderId, name, content) {
+  const search = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and name='${name}' and trashed=false&fields=files(id)`);
+  const { files } = await search.json();
+  const fileId = files?.[0]?.id;
+  const metadata = { name, parents: fileId ? undefined : [folderId] };
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('file', new Blob([content], { type: 'application/json' }));
+  const url = fileId
+    ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`
+    : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+  await fetch(url, { method: fileId ? 'PATCH' : 'POST', headers: { Authorization: `Bearer ${_token}` }, body: form });
+}
+
+</script>
