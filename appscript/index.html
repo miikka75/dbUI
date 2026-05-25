@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <?!= HtmlService.createHtmlOutputFromFile('style').getContent(); ?>
+</head>
+<body>
+  <?!= HtmlService.createHtmlOutputFromFile('ui').getContent(); ?>
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.4.38/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vuetify@3.7.6/dist/vuetify.min.js"></script>
+  <?!= HtmlService.createHtmlOutputFromFile('app-core').getContent(); ?>
+  <script>createVueApp();</script>
+  <?!= HtmlService.createHtmlOutputFromFile('backend-appscript').getContent(); ?>
+</body>
+</html>
