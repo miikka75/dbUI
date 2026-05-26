@@ -8,6 +8,16 @@
   <div id="app-root"></div>
   <script>
     async function loadApp() {
+      // URL params override: ?mode=firebase&config=BASE64&folder=ID&clientId=OAUTH_CLIENT_ID
+      var params = new URLSearchParams(location.search);
+      if (params.get('mode')) { localStorage.setItem('app_mode', params.get('mode')); }
+      if (params.get('folder')) { localStorage.setItem('app_folder', params.get('folder')); }
+      if (params.get('clientId')) { localStorage.setItem('oauth_client_id', params.get('clientId')); }
+      if (params.get('config')) {
+        try { var c = JSON.parse(atob(params.get('config'))); localStorage.setItem('firebase_config', JSON.stringify(c)); } catch(e) {}
+      }
+      if (params.toString()) { history.replaceState(null, '', location.pathname); } // clean URL after storing
+
       // Detect backend
       var backendFile;
       var mode = localStorage.getItem('app_mode');
@@ -17,11 +27,10 @@
       else {
         try {
           var probe = await fetch('/api/validateFolder', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' });
-          if (probe.ok) backendFile = '/backend-local-client.html';
+          if (probe.ok) { var pj = await probe.json(); if (pj && pj.valid) backendFile = '/backend-local-client.html'; }
         } catch(e) {}
         if (!backendFile) {
-          if (!mode) mode = await showModeSelector();
-          backendFile = (mode === 'crdt') ? '/backend-crdt.html' : '/backend-oauth.html';
+          backendFile = '/backend-oauth.html';
         }
       }
 
@@ -35,8 +44,8 @@
       document.head.insertAdjacentHTML('beforeend', await styleResp.text());
       document.getElementById('app-root').innerHTML = await uiResp.text();
 
-      await loadScript('/vendor/vue.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vue@3.4.38/dist/vue.global.prod.js'); });
-      await loadScript('/vendor/vuetify.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vuetify@3.7.6/dist/vuetify.min.js'); });
+      await loadScript('/vendor/vue.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vue@3.5.34/dist/vue.global.prod.js'); });
+      await loadScript('/vendor/vuetify.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vuetify@4.0.7/dist/vuetify.min.js'); });
 
       if (backendFile === '/backend-oauth.html' || backendFile === '/backend-crdt.html') {
         await loadScript('https://accounts.google.com/gsi/client');
@@ -70,22 +79,6 @@
       if (backendFile === '/backend-firebase.html') {
         // onAuthStateChanged in backend-firebase.html handles auth state and calls init()
       }
-    }
-
-    function showModeSelector() {
-      return new Promise(function(resolve) {
-        var root = document.getElementById('app-root');
-        root.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui">' +
-          '<div style="text-align:center;max-width:400px">' +
-          '<h2 style="margin-bottom:24px">Select Mode</h2>' +
-          '<button id="btn-oauth" style="display:block;width:100%;padding:16px;margin:8px 0;border:1px solid #ccc;border-radius:8px;cursor:pointer;font-size:16px;background:#fff">' +
-          '☁️ Google Sheets<br><small style="color:#666">Sync via Google Sheets REST API (requires OAuth)</small></button>' +
-          '<button id="btn-crdt" style="display:block;width:100%;padding:16px;margin:8px 0;border:1px solid #ccc;border-radius:8px;cursor:pointer;font-size:16px;background:#fff">' +
-          '💾 Local + Drive Sync<br><small style="color:#666">IndexedDB with optional Drive sync (CRDT)</small></button>' +
-          '</div></div>';
-        document.getElementById('btn-oauth').onclick = function() { localStorage.setItem('app_mode', 'oauth'); resolve('oauth'); };
-        document.getElementById('btn-crdt').onclick = function() { localStorage.setItem('app_mode', 'crdt'); resolve('crdt'); };
-      });
     }
 
     function loadScript(src) {
