@@ -21,7 +21,7 @@ function createLocalBackend(dbPath) {
       const row = db.prepare('SELECT value FROM _schema WHERE key = ?').get('schema');
       if (row) return JSON.parse(row.value);
       // Fall back to schema.json file on disk
-      try { return JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'schema.json'), 'utf8')); } catch(e) { return null; }
+      try { return JSON.parse(require('fs').readFileSync(require('path').join(__dirname, 'schema.json'), 'utf8')); } catch(e) { return null; }
     },
 
     saveSchema(folderId, schema) {
