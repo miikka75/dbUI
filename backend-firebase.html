@@ -7,7 +7,10 @@ var _auth = null;
 backend = {
   getSchema: function(folderId) {
     return _db.collection('_meta').doc('schema').get().then(function(doc) {
-      return doc.exists ? doc.data() : null;
+      if (!doc.exists) return null;
+      var d = doc.data();
+      if (d._json) return typeof d._json === 'string' ? JSON.parse(d._json) : d._json;
+      return d;
     });
   },
   saveSchema: function(folderId, schema) {
@@ -131,6 +134,24 @@ function triggerOAuth() {
   var provider = new firebase.auth.GoogleAuthProvider();
   _auth.signInWithPopup(provider).catch(function(e) { console.error('Firebase auth error:', e); });
 }
+
+// User registry
+var backend_users = {
+  getUsers: function() { return _db.collection('_meta').doc('users').get().then(function(d) { return d.exists ? d.data() : {}; }); },
+  setUserRole: function(uid, role, user, tables) {
+    return _db.collection('_meta').doc('users').set(
+      Object.fromEntries([[uid, { role: role, user: user || '', tables: tables || 'all' }]]),
+      { merge: true }
+    );
+  },
+  removeUser: function(uid) {
+    return _db.collection('_meta').doc('users').get().then(function(doc) {
+      var data = doc.data() || {};
+      delete data[uid];
+      return _db.collection('_meta').doc('users').set(data);
+    });
+  }
+};
 
 initFirebase();
 </script>
