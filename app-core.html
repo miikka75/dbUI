@@ -1,4 +1,7 @@
 <script>
+// localStorage shim for Apps Script sandbox (where localStorage is undefined)
+if (typeof localStorage === 'undefined') { window.localStorage = { _d:{}, getItem:function(k){return this._d[k]||null;}, setItem:function(k,v){this._d[k]=String(v);}, removeItem:function(k){delete this._d[k];}, clear:function(){this._d={};} }; }
+
 // Default schema bundled in app — used when Drive has no schema.json yet
 var defaultSchema = {"defaultLanguage":"en","tables":{},"views":{}};
 
@@ -109,7 +112,13 @@ function createVueApp() {
       folderValid: false,
       oauthReady: false,
       firebaseUid: null,
+      firebaseUserList: [],
+      firestoreRules: '',
+      newUserAddr: '',
+      newUserRole: 'editor',
+      newUserTables: ['all'],
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
+      oauthClientId: localStorage.getItem('oauth_client_id') || '',
       needsReauth: false,
       setupStep: (function() { var m = localStorage.getItem('app_mode'); return (m === 'sheets' || m === 'crdt' || m === 'firebase') ? m : null; })(),
       mode: 'sheets',
@@ -171,7 +180,26 @@ function createVueApp() {
       isDataView: function() {
         return this.currentTable && this.currentTable[0] !== '_' && (VIEWS[this.currentTable] || SCHEMA[this.currentTable]);
       },
-      hasFirebaseConfig: function() { return !!(window.FIREBASE_CONFIG || localStorage.getItem('firebase_config')); },
+      hasFirebaseConfig: function() {
+        if (window.FIREBASE_CONFIG) return true;
+        var s = localStorage.getItem('firebase_config');
+        if (!s) return false;
+        try { var c = JSON.parse(s); return !!(c && c.apiKey); } catch(e) { return false; }
+      },
+      shareLink: function() {
+        var base = location.origin + location.pathname;
+        var mode = localStorage.getItem('app_mode');
+        if (mode === 'firebase') {
+          var cfg = localStorage.getItem('firebase_config');
+          return cfg ? base + '?mode=firebase&config=' + btoa(cfg) : base;
+        }
+        var folder = localStorage.getItem('app_folder');
+        var clientId = localStorage.getItem('oauth_client_id');
+        var params = '?mode=' + (mode || 'sheets');
+        if (folder) params += '&folder=' + folder;
+        if (clientId) params += '&clientId=' + clientId;
+        return base + params;
+      },
       currentConfig: function() { return VIEWS[this.currentTable] || SCHEMA[this.currentTable] || {}; },
       isUnionView: function() { return this.currentConfig.mode === 'union'; },
       useCardLayout: function() {
@@ -419,7 +447,7 @@ function createVueApp() {
               var parsed = typeof s === 'string' ? JSON.parse(s) : s;
               SCHEMA = parsed.tables || SCHEMA;
               VIEWS = parsed.views || VIEWS;
-              self.schemaData = parsed;
+              self.schemaData = Object.freeze(parsed);
               // Set column orders from parsed schema (local has correct order)
               window._columnOrders = {};
               Object.keys(parsed.tables || {}).forEach(function(t) { window._columnOrders[t] = Object.keys(parsed.tables[t].columns); });
@@ -429,11 +457,11 @@ function createVueApp() {
             } else {
               // First time: save default schema to Drive
               if (backend.saveSchema) backend.saveSchema(self.folderId, defaultSchema);
-              self.schemaData = defaultSchema;
+              self.schemaData = Object.freeze(defaultSchema);
             }
           });
         } else {
-          schemaPromise = Promise.resolve().then(function() { self.schemaData = defaultSchema; });
+          schemaPromise = Promise.resolve().then(function() { self.schemaData = Object.freeze(defaultSchema); });
         }
 
         schemaPromise.then(function() {
@@ -450,12 +478,12 @@ function createVueApp() {
               // Restore key order from server-provided arrays (google.script.run scrambles object keys)
               if (result.tableOrder) self._tableOrder = result.tableOrder;
               if (result.columnOrders) { self._columnOrders = result.columnOrders; window._columnOrders = result.columnOrders; }
-              self.schemaData = parsedSchema;
+              self.schemaData = Object.freeze(parsedSchema);
               var schemaErrors = validateSchema();
               if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify('Schema: ' + schemaErrors[0]); }
             } else {
               // First boot: save bundled default schema to Drive
-              self.schemaData = defaultSchema;
+              self.schemaData = Object.freeze(defaultSchema);
               backend.saveSchema(self.folderId, defaultSchema);
             }
             self.tableMap = result.tableMap || {};
@@ -495,6 +523,7 @@ function createVueApp() {
             self.loading = false;
             var firstTab = self.sidebarTabs.find(function(t) { return !t.divider; });
             if (firstTab) self.selectTab(firstTab.id);
+            self.loadFirebaseUsers();
           }).catch(function(err) {
             self.loading = false;
             self.notify(err && err.message ? err.message : 'Failed to load app');
@@ -569,6 +598,7 @@ function createVueApp() {
           // Select first tab
           var firstTab = self.sidebarTabs.find(function(t) { return !t.divider; });
           if (firstTab) self.selectTab(firstTab.id);
+          self.loadFirebaseUsers();
         }).catch(function(err) {
           self.loading = false;
           self.notify(err && err.message ? err.message : 'Failed to load app');
@@ -1154,9 +1184,41 @@ function createVueApp() {
         localStorage.clear();
         location.reload();
       },
-      copyUid: function() {
-        navigator.clipboard.writeText(this.firebaseUid);
-        this.snackbar = 'UID copied to clipboard';
+      copyUid: function() { this.copyText(this.firebaseUid); },
+      copyText: function(text) {
+        if (navigator.clipboard) { navigator.clipboard.writeText(text); }
+        else { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); }
+        this.notify('Copied');
+      },
+      loadFirebaseUsers: function() {
+        var self = this;
+        if (typeof backend_users !== 'undefined') {
+          backend_users.getUsers().then(function(u) {
+            var list = [];
+            Object.keys(u || {}).forEach(function(k) { var v = u[k]; if (v && typeof v === 'object' && v.role) list.push({key: k, addr: v.user || k, role: v.role, tables: v.tables || 'all'}); });
+            self.firebaseUserList = list;
+          });
+        }
+      },
+      setUserRole: function(uid, role, user) {
+        var self = this;
+        backend_users.setUserRole(uid, role, user).then(function() { self.loadFirebaseUsers(); });
+      },
+      removeFirebaseUser: function(uid) {
+        var self = this;
+        backend_users.removeUser(uid).then(function() { self.loadFirebaseUsers(); });
+      },
+      addFirebaseUser: function() {
+        if (!this.newUserAddr) return;
+        var self = this;
+        var user = this.newUserAddr.trim();
+        var tables = this.newUserTables.indexOf('all') >= 0 ? 'all' : this.newUserTables;
+        backend_users.setUserRole(user, this.newUserRole, user, tables).then(function() {
+          self.newUserAddr = '';
+          self.newUserTables = ['all'];
+          self.loadFirebaseUsers();
+          self.notify('User added');
+        });
       },
       saveFirebaseConfig: function() {
         var input = this.firebaseConfigInput.trim();
@@ -1166,14 +1228,35 @@ function createVueApp() {
           return;
         }
         try {
-          var config = JSON.parse(input);
-          if (!config.apiKey || !config.projectId) { this.snackbar = 'Invalid config: needs apiKey and projectId'; return; }
+          // Accept both JSON and Firebase console JS snippet format
+          var jsonStr = input;
+          if (jsonStr.indexOf('{') > 0) jsonStr = jsonStr.substring(jsonStr.indexOf('{'));
+          if (jsonStr.lastIndexOf('}') < jsonStr.length - 1) jsonStr = jsonStr.substring(0, jsonStr.lastIndexOf('}') + 1);
+          jsonStr = jsonStr.replace(/,\s*}/g, '}').replace(/^\s*(\w+)\s*:/gm, '"$1":');
+          var config = JSON.parse(jsonStr);
+          if (!config.apiKey || !config.projectId) { this.notify('Invalid config: needs apiKey and projectId'); return; }
           localStorage.setItem('firebase_config', JSON.stringify(config));
           localStorage.setItem('app_mode', 'firebase');
           // Try saving server-side for other users
           fetch('/api/saveConfig', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({filename:'firebase-config.json', data:config}) }).catch(function(){});
-          location.reload();
-        } catch(e) { this.snackbar = 'Invalid JSON'; }
+          // Initialize Firebase and sign in directly (no reload)
+          if (typeof firebase !== 'undefined' && firebase.apps && !firebase.apps.length) {
+            firebase.initializeApp(config);
+          }
+          var auth = firebase.auth();
+          var provider = new firebase.auth.GoogleAuthProvider();
+          this.showSetup = false;
+          this.loading = true;
+          var self = this;
+          auth.signInWithPopup(provider).then(function(result) {
+            self.firebaseUid = result.user.uid;
+            self.mode = 'firebase';
+            init();
+          }).catch(function(e) { self.notify('Sign-in failed: ' + e.message); self.loading = false; self.showSetup = true; });
+        } catch(e) { this.notify('Invalid JSON'); }
+      },
+      saveClientId: function() {
+        if (this.oauthClientId) localStorage.setItem('oauth_client_id', this.oauthClientId);
       },
       exportData: function() {
         var self = this;
@@ -1192,7 +1275,7 @@ function createVueApp() {
           });
         });
         chain.then(function() {
-          var json = JSON.stringify({ tables: data, lists: self.listsCache, languages: self.languages, translations: translations, exportedAt: new Date().toISOString() }, null, 2);
+          var json = JSON.stringify({ schema: self.schemaData, tables: data, lists: self.listsCache, languages: self.languages, translations: translations, exportedAt: new Date().toISOString() }, null, 2);
           var blob = new Blob([json], { type: 'application/json' });
           var a = document.createElement('a');
           a.href = URL.createObjectURL(blob);
@@ -1236,10 +1319,17 @@ function createVueApp() {
         reader.onload = function(e) {
           try {
             var imported = JSON.parse(e.target.result);
-            var tables = imported.tables || {};
             var chain = Promise.resolve();
+            // Detect if file is a raw schema.json (has tables with column definitions, not row arrays)
+            var isRawSchema = imported.tables && !imported.schema && Object.values(imported.tables).some(function(t) { return t && t.columns; });
+            if (isRawSchema) { imported = { schema: imported, tables: {} }; }
+            // Import schema if present (initializes empty databases)
+            if (imported.schema && backend.saveSchema) {
+              chain = chain.then(function() { return backend.saveSchema(self.folderId, imported.schema); });
+            }
+            var tables = imported.tables || {};
             Object.keys(tables).forEach(function(key) {
-              var rows = tables[key];
+              var rows = Array.isArray(tables[key]) ? tables[key] : (tables[key].rows || []);
               var parts = key.split('__');
               var table = parts[0];
               var tab;
@@ -1290,7 +1380,11 @@ function createVueApp() {
         this.setupStep = mode || null;
         if (mode) { localStorage.setItem('app_mode', mode); }
         else { localStorage.removeItem('app_mode'); location.reload(); return; }
-        if (mode === 'sheets' || mode === 'crdt' || mode === 'firebase') {
+        if (mode === 'firebase' && !this.firestoreRules) {
+          var self = this;
+          fetch('/firestore.rules').then(function(r) { return r.ok ? r.text() : ''; }).then(function(t) { self.firestoreRules = t; }).catch(function(){});
+        }
+        if (mode === 'sheets' || mode === 'crdt') {
           if (typeof google !== 'undefined' && google.script) { return; }
           if (typeof _oauthClient === 'undefined' || !_oauthClient) { location.reload(); return; }
         }
