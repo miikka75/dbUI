@@ -2,7 +2,7 @@
 <script>
 var _token = sessionStorage.getItem('oauth_token');
 var _oauthClient = null;
-var CLIENT_ID = '753722880306-l6rbgnfq12adoq0feao9hktold5ukii3.apps.googleusercontent.com';
+var CLIENT_ID = localStorage.getItem('oauth_client_id');
 var SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets';
 
 function _fetch(url, method, body) {
