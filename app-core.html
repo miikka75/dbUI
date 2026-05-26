@@ -344,7 +344,10 @@ function createVueApp() {
         ['app.title', 'btn.add',
          'btn.show_active', 'btn.show_archived',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
-         'field.source', 'field.key', 'field.translation'].forEach(function(k) { keys.push(k); });
+         'field.source', 'field.key', 'field.translation',
+         'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
+         'settings.reset', 'settings.confirm_reset', 'settings.firebase_user', 'settings.user_access',
+         'settings.user_id', 'settings.user_email', 'settings.add_user', 'settings.all'].forEach(function(k) { keys.push(k); });
         var schema = this.schemaData || {};
         var tables = schema.tables || {};
         for (var tbl in tables) {
@@ -1200,9 +1203,23 @@ function createVueApp() {
           });
         }
       },
-      setUserRole: function(uid, role, user) {
+      setUserRole: function(uid, role, user, tables) {
         var self = this;
-        backend_users.setUserRole(uid, role, user).then(function() { self.loadFirebaseUsers(); });
+        backend_users.setUserRole(uid, role, user, tables).then(function() { self.loadFirebaseUsers(); });
+      },
+      updateUserTables: function(u, selected) {
+        var prev = u.tables === 'all' ? ['all'] : (u.tables || []);
+        var tables;
+        if (selected.indexOf('all') >= 0 && prev.indexOf('all') < 0) {
+          tables = 'all'; // All just selected → clear others
+        } else if (selected.indexOf('all') >= 0 && selected.length > 1) {
+          tables = selected.filter(function(s) { return s !== 'all'; }); // Other selected → remove All
+        } else if (selected.indexOf('all') >= 0) {
+          tables = 'all';
+        } else {
+          tables = selected.length ? selected : 'all';
+        }
+        backend_users.setUserRole(u.key, u.role, u.addr, tables).then(this.loadFirebaseUsers.bind(this));
       },
       removeFirebaseUser: function(uid) {
         var self = this;
@@ -1239,20 +1256,7 @@ function createVueApp() {
           localStorage.setItem('app_mode', 'firebase');
           // Try saving server-side for other users
           fetch('/api/saveConfig', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({filename:'firebase-config.json', data:config}) }).catch(function(){});
-          // Initialize Firebase and sign in directly (no reload)
-          if (typeof firebase !== 'undefined' && firebase.apps && !firebase.apps.length) {
-            firebase.initializeApp(config);
-          }
-          var auth = firebase.auth();
-          var provider = new firebase.auth.GoogleAuthProvider();
-          this.showSetup = false;
-          this.loading = true;
-          var self = this;
-          auth.signInWithPopup(provider).then(function(result) {
-            self.firebaseUid = result.user.uid;
-            self.mode = 'firebase';
-            init();
-          }).catch(function(e) { self.notify('Sign-in failed: ' + e.message); self.loading = false; self.showSetup = true; });
+          location.reload();
         } catch(e) { this.notify('Invalid JSON'); }
       },
       saveClientId: function() {
