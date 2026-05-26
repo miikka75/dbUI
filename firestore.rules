@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function getUserData() {
+      return get(/databases/$(database)/documents/_meta/users).data[request.auth.token.email];
+    }
+    function isAdmin() {
+      return exists(/databases/$(database)/documents/_meta/users) &&
+        getUserData().role == 'admin';
+    }
+    function isRegistered() {
+      return !exists(/databases/$(database)/documents/_meta/users) ||
+        getUserData() != null;
+    }
+    function hasTableAccess(collection) {
+      let userData = getUserData();
+      let table = collection.split('__')[0];
+      return userData.tables == 'all' || table in userData.tables;
+    }
+
+    // Meta documents: read by all registered, write by admin (or bootstrap)
+    match /_meta/{doc} {
+      allow read: if request.auth != null && isRegistered();
+      allow write: if request.auth != null && (
+        !exists(/databases/$(database)/documents/_meta/users) || isAdmin()
+      );
+    }
+
+    // Data tables: per-table access based on user's tables field
+    match /{collection}/{doc} {
+      allow read, write: if request.auth != null && isRegistered() && (
+        !exists(/databases/$(database)/documents/_meta/users) ||
+        getUserData().role == 'admin' ||
+        hasTableAccess(collection)
+      );
+    }
+  }
+}
