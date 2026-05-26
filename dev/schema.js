@@ -1,7 +1,7 @@
 // schema.js — Derives SCHEMA/VIEWS from schema.json for Node tests and legacy loading
 var _defaultSchema;
 if (typeof require !== 'undefined') {
-  _defaultSchema = require('../schema.json');
+  _defaultSchema = require('./schema.json');
 } else if (typeof window !== 'undefined' && window._loadedSchema) {
   _defaultSchema = window._loadedSchema;
 }
