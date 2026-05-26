@@ -95,7 +95,7 @@
               9) Settings → User Access → add yourself as admin.
             </div>
             <template v-if="setupStep === 'firebase'">
-            <v-btn color="primary" prepend-icon="mdi-google" :disabled="!hasFirebaseConfig && !firebaseConfigInput" @click="saveFirebaseConfig()">Sign in with Google</v-btn>
+            <v-btn color="primary" prepend-icon="mdi-content-save" :disabled="!hasFirebaseConfig && !firebaseConfigInput" @click="saveFirebaseConfig()">Save &amp; Continue</v-btn>
             </template>
             <template v-else>
             <v-text-field v-model="oauthClientId" label="OAuth Client ID" variant="outlined" density="compact" class="mb-2" placeholder="xxxxx.apps.googleusercontent.com"></v-text-field>
@@ -428,44 +428,44 @@
           <v-card-text>
             <div class="mb-4">
             <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2">Data Import / Export</p>
-            <v-btn variant="outlined" prepend-icon="mdi-download" @click="exportData" class="mr-2 mb-2">Export as JSON</v-btn>
-            <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()" class="mb-2">Import from JSON</v-btn>
+            <p class="text-subtitle-2 mb-2">{{ t('settings.import_export') }}</p>
+            <v-btn variant="outlined" prepend-icon="mdi-download" @click="exportData" class="mr-2 mb-2">{{ t('settings.export') }}</v-btn>
+            <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()" class="mb-2">{{ t('settings.import') }}</v-btn>
             <input ref="importFile" type="file" accept=".json" hidden @change="importData($event)">
             <p class="text-caption mt-1" style="opacity:0.6">Export all table data as JSON file. Import overwrites current data.</p>
             <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2">Share</p>
+            <p class="text-subtitle-2 mb-2">{{ t('settings.share') }}</p>
             <v-text-field :model-value="shareLink" label="Shareable link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="copyText(shareLink)"></v-text-field>
             <p class="text-caption mt-1" style="opacity:0.6">New users opening this link get pre-configured connection settings.</p>
             <v-divider class="my-4"></v-divider>
-            <v-btn variant="outlined" :color="isArmed('reset') ? 'error' : 'warning'" :prepend-icon="isArmed('reset') ? 'mdi-check-circle' : 'mdi-refresh'" @click="isArmed('reset') ? resetApp() : armDelete('reset')">{{ isArmed('reset') ? 'Confirm Reset' : 'Reset &amp; Reload' }}</v-btn>
+            <v-btn variant="outlined" :color="isArmed('reset') ? 'error' : 'warning'" :prepend-icon="isArmed('reset') ? 'mdi-check-circle' : 'mdi-refresh'" @click="isArmed('reset') ? resetApp() : armDelete('reset')">{{ isArmed('reset') ? t('settings.confirm_reset') : t('settings.reset') }}</v-btn>
             <p class="text-caption mt-2" style="opacity:0.6">Clears browser cache and reloads from server.</p>
             <template v-if="mode === 'firebase' && firebaseUid">
             <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2">Firebase User</p>
+            <p class="text-subtitle-2 mb-2">{{ t('settings.firebase_user') }}</p>
             <v-text-field :model-value="firebaseUid" label="Your UID" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="copyUid"></v-text-field>
-            <p class="text-subtitle-2 mb-2 mt-4">User Access</p>
+            <p class="text-subtitle-2 mb-2 mt-4">{{ t('settings.user_access') }}</p>
             <table v-if="firebaseUserList.length" class="v-table__wrapper" style="width:100%; border-collapse:collapse; font-size:0.85rem; margin-bottom:8px">
-              <thead><tr style="border-bottom:1px solid rgb(var(--v-theme-outline),0.3)"><th style="text-align:left; padding:8px">Email / UID</th><th style="text-align:left; padding:8px">Role</th><th style="text-align:left; padding:8px">Tables</th><th></th></tr></thead>
+              <thead><tr style="border-bottom:1px solid rgb(var(--v-theme-outline),0.3)"><th style="text-align:left; padding:8px">{{ t('settings.user_id') }}</th><th style="text-align:left; padding:8px">Role</th><th style="text-align:left; padding:8px">Tables</th><th></th></tr></thead>
               <tbody>
                 <tr v-for="u in firebaseUserList" :key="u.key" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.1)">
                   <td style="padding:8px">{{ u.addr }}</td>
-                  <td style="padding:8px"><v-select :model-value="u.role" :items="['admin','editor','viewer']" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="setUserRole(u.key, $event, u.addr)"></v-select></td>
-                  <td style="padding:8px; font-size:0.75rem">{{ u.tables === 'all' ? 'all' : (u.tables || []).join(', ') }}</td>
+                  <td style="padding:8px"><v-select :model-value="u.role" :items="['admin','editor','viewer']" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>
+                  <td style="padding:8px"><v-chip-group :model-value="u.tables === 'all' ? ['all'] : u.tables" multiple @update:model-value="updateUserTables(u, $event)">
+                    <v-chip v-for="tn in ['all'].concat(Object.keys(schemaData && schemaData.tables || {}))" :key="tn" :value="tn" size="x-small" filter variant="outlined">{{ tn === 'all' ? t('settings.all') : (t('tab.' + tn) || tn) }}</v-chip>
+                  </v-chip-group></td>
                   <td><v-btn :icon="isArmed('user:'+u.key) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('user:'+u.key) ? 'error' : ''" @click="isArmed('user:'+u.key) ? removeFirebaseUser(u.key) : armDelete('user:'+u.key)"></v-btn></td>
                 </tr>
               </tbody>
             </table>
-            <div class="d-flex align-center ga-2 mt-2">
-              <v-text-field v-model="newUserAddr" label="Email or UID" density="compact" variant="outlined" hide-details style="max-width:200px"></v-text-field>
+            <div class="d-flex align-center flex-wrap ga-2 mt-2">
+              <v-text-field v-model="newUserAddr" :label="t('settings.user_email')" density="compact" variant="outlined" hide-details style="max-width:200px"></v-text-field>
               <v-select v-model="newUserRole" :items="['admin','editor','viewer']" density="compact" variant="outlined" hide-details style="max-width:120px"></v-select>
-              <v-btn size="small" variant="outlined" @click="addFirebaseUser()">Add User</v-btn>
-            </div>
-            <div class="mt-2">
               <v-chip-group v-model="newUserTables" multiple>
-                <v-chip v-for="t in Object.keys(schemaData && schemaData.tables || {})" :key="t" :value="t" size="small" filter variant="outlined">{{ t }}</v-chip>
-                <v-chip value="all" size="small" filter variant="outlined">All</v-chip>
+                <v-chip value="all" size="small" filter variant="outlined">{{ t('settings.all') }}</v-chip>
+                <v-chip v-for="t2 in Object.keys(schemaData && schemaData.tables || {})" :key="t2" :value="t2" size="small" filter variant="outlined">{{ t('tab.' + t2) || t2 }}</v-chip>
               </v-chip-group>
+              <v-btn size="small" variant="outlined" @click="addFirebaseUser()">{{ t('settings.add_user') }}</v-btn>
             </div>
             </template>
           </v-card-text>
