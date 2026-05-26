@@ -3,7 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { createLocalBackend } = require('./backend-local');
-const defaultSchema = require('../schema.json');
+const defaultSchema = require('./schema.json');
 const SCHEMA = defaultSchema.tables;
 
 const PORT = 3000;
