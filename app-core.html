@@ -112,11 +112,10 @@ function createVueApp() {
       folderValid: false,
       oauthReady: false,
       firebaseUid: null,
-      firebaseUserList: [],
+      currentUserEmail: null,
+      userList: [],
+      usersLoaded: false,
       firestoreRules: '',
-      newUserAddr: '',
-      newUserRole: 'editor',
-      newUserTables: ['all'],
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
       oauthClientId: localStorage.getItem('oauth_client_id') || '',
       needsReauth: false,
@@ -144,7 +143,7 @@ function createVueApp() {
       syncing: false,
       snackbar: false,
       snackText: '',
-      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true) },
+      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false },
       appMode: localStorage.getItem('app_mode') || 'oauth',
       saveTimers: {},
       pendingDelete: null,
@@ -160,25 +159,74 @@ function createVueApp() {
       sidebarTabs: function() {
         var self = this;
         var tabs = [];
-        // Views first
+        // Determine allowed tables for current user
+        var allowedTables = null;
+        if (self.usersLoaded && self.currentUserRole && self.currentUserRole !== 'admin') {
+          var email = self.currentUserEmail;
+          var u = self.userList.find(function(x) { return x.addr === email; });
+          if (u && u.tables !== 'all') allowedTables = u.tables;
+        }
+        // Views first (only if all their sources are accessible)
         if (typeof VIEWS !== 'undefined') {
           Object.keys(VIEWS).forEach(function(v) {
+            if (allowedTables) {
+              var sources = VIEWS[v].sources || [];
+              if (!sources.every(function(s) { return allowedTables.indexOf(s) >= 0; })) return;
+            }
             tabs.push({ id: v, title: self.t('view.' + v) || v, icon: (VIEWS[v] && VIEWS[v].icon) || 'mdi-view-list' });
           });
         }
         // Non-hidden tables (preserve schema order)
         var tableKeys = self._tableOrder || Object.keys(SCHEMA);
         tableKeys.forEach(function(name) {
-          if (!SCHEMA[name].hidden) tabs.push({ id: name, title: self.t('tab.' + name) || name, icon: SCHEMA[name].icon || 'mdi-table' });
+          if (!SCHEMA[name].hidden && (!allowedTables || allowedTables.indexOf(name) >= 0))
+            tabs.push({ id: name, title: self.t('tab.' + name) || name, icon: SCHEMA[name].icon || 'mdi-table' });
         });
         tabs.push({ divider: true });
-        tabs.push({ id: '__languages', title: self.t('tab.languages'), icon: 'mdi-translate' });
+        if (self.isAdmin) {
+          tabs.push({ id: '__languages', title: self.t('tab.languages'), icon: 'mdi-translate' });
+        }
         tabs.push({ id: '__lookup', title: self.t('tab.lookup'), icon: 'mdi-database-outline' });
         tabs.push({ id: '__settings', title: self.t('tab.settings'), icon: 'mdi-cog-outline' });
         return tabs;
       },
       isDataView: function() {
         return this.currentTable && this.currentTable[0] !== '_' && (VIEWS[this.currentTable] || SCHEMA[this.currentTable]);
+      },
+      currentUserRole: function() {
+        if (!this.usersLoaded) return null;
+        if (!this.userList.length) return 'admin'; // bootstrap
+        var email = this.currentUserEmail;
+        var u = this.userList.find(function(x) { return x.addr === email; });
+        return u ? u.role : null;
+      },
+      isAdmin: function() {
+        if (!this.usersLoaded) return true; // default until loaded
+        if (!this.userList.length) return true; // no users = bootstrap
+        return this.currentUserRole === 'admin';
+      },
+      visibleLists: function() {
+        if (this.isAdmin) return this.listsCache;
+        // Find tables this user can access
+        var email = this.currentUserEmail;
+        var u = this.userList.find(function(x) { return x.addr === email; });
+        if (!u) return {};
+        var userTables = u.tables === 'all' ? Object.keys(SCHEMA) : (u.tables || []);
+        // Find which lists are used by accessible tables
+        var allowedLists = {};
+        userTables.forEach(function(t) {
+          if (!SCHEMA[t]) return;
+          var cols = SCHEMA[t].columns || {};
+          Object.keys(cols).forEach(function(c) {
+            var def = cols[c];
+            var listName = (typeof def === 'object' && def.list) ? def.list : null;
+            if (listName) allowedLists[listName] = true;
+          });
+        });
+        var result = {};
+        var cache = this.listsCache;
+        Object.keys(cache).forEach(function(name) { if (allowedLists[name]) result[name] = cache[name]; });
+        return result;
       },
       hasFirebaseConfig: function() {
         if (window.FIREBASE_CONFIG) return true;
@@ -217,7 +265,7 @@ function createVueApp() {
         this.visibleCols.forEach(function(c) { var l = (self.t('field.' + c) || c).length; if (l > max) max = l; });
         return Math.max(80, max * 7.5 + 16) + 'px';
       },
-      isReadonlyView: function() { return !!this.currentConfig.readonly; },
+      isReadonlyView: function() { return !!this.currentConfig.readonly || this.currentUserRole === 'viewer'; },
       embedConfig: function() { var e = this.currentConfig.embed; return e ? (Array.isArray(e) ? e[0] : e) : null; },
       embedConfigs: function() { var e = this.currentConfig.embed; if (!e) return []; return Array.isArray(e) ? e : [e]; },
       embedColumns: function() {
@@ -339,15 +387,16 @@ function createVueApp() {
         }
         return data;
       },
-      translationKeys: function() {
-        var keys = [];
-        ['app.title', 'btn.add',
-         'btn.show_active', 'btn.show_archived',
+      staticTranslationKeys: function() {
+        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
-         'settings.reset', 'settings.confirm_reset', 'settings.firebase_user', 'settings.user_access',
-         'settings.user_id', 'settings.user_email', 'settings.add_user', 'settings.all'].forEach(function(k) { keys.push(k); });
+         'settings.reset', 'settings.confirm_reset', 'settings.user_access',
+         'settings.user_id', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all'].sort();
+      },
+      schemaTranslationKeys: function() {
+        var keys = [];
         var schema = this.schemaData || {};
         var tables = schema.tables || {};
         for (var tbl in tables) {
@@ -369,6 +418,10 @@ function createVueApp() {
         }
         var seen = {};
         return keys.filter(function(k) { if (seen[k]) return false; seen[k] = true; return true; }).sort();
+      },
+      translationKeys: function() {
+        var seen = {};
+        return this.staticTranslationKeys.concat(this.schemaTranslationKeys).filter(function(k) { if (seen[k]) return false; seen[k] = true; return true; });
       },
       EN: function() { return this.strings; },
       defaultLanguage: function() { return (this.schemaData && this.schemaData.defaultLanguage) || DEFAULT_LANGUAGE; },
@@ -523,10 +576,7 @@ function createVueApp() {
               }
             });
           }).then(function() {
-            self.loading = false;
-            var firstTab = self.sidebarTabs.find(function(t) { return !t.divider; });
-            if (firstTab) self.selectTab(firstTab.id);
-            self.loadFirebaseUsers();
+            self.loadUsers();
           }).catch(function(err) {
             self.loading = false;
             self.notify(err && err.message ? err.message : 'Failed to load app');
@@ -597,11 +647,7 @@ function createVueApp() {
           });
           return chain;
         }).then(function() {
-          self.loading = false;
-          // Select first tab
-          var firstTab = self.sidebarTabs.find(function(t) { return !t.divider; });
-          if (firstTab) self.selectTab(firstTab.id);
-          self.loadFirebaseUsers();
+          self.loadUsers();
         }).catch(function(err) {
           self.loading = false;
           self.notify(err && err.message ? err.message : 'Failed to load app');
@@ -1193,49 +1239,74 @@ function createVueApp() {
         else { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); }
         this.notify('Copied');
       },
-      loadFirebaseUsers: function() {
+      loadUsers: function() {
         var self = this;
         if (typeof backend_users !== 'undefined') {
+          if (!self.currentUserEmail) {
+            var p = new URLSearchParams(location.search);
+            self.currentUserEmail = p.get('user') || localStorage.getItem('test_user') || 'local@dev';
+          }
           backend_users.getUsers().then(function(u) {
             var list = [];
-            Object.keys(u || {}).forEach(function(k) { var v = u[k]; if (v && typeof v === 'object' && v.role) list.push({key: k, addr: v.user || k, role: v.role, tables: v.tables || 'all'}); });
-            self.firebaseUserList = list;
+            Object.keys(u || {}).forEach(function(k) { var v = u[k]; if (v && typeof v === 'object' && v.role) list.push({key: k, addr: v.user || '', role: v.role, tables: v.tables || 'all'}); });
+            // Auto-admin: first sign-in with no users -> register as admin
+            if (!list.length && self.currentUserEmail) {
+              backend_users.setUserRole(self.currentUserEmail, 'admin', self.currentUserEmail, 'all').then(function() {
+                self.userList = [{key: self.currentUserEmail, addr: self.currentUserEmail, role: 'admin', tables: 'all'}];
+                self.usersLoaded = true;
+                self.loading = false;
+                if (!self.currentTable) { var ft = self.sidebarTabs.find(function(t) { return !t.divider; }); if (ft) self.selectTab(ft.id); }
+                self.notify('You are registered as admin');
+              });
+              return;
+            }
+            self.userList = list;
+            self.usersLoaded = true;
+            self.loading = false;
+            if (!self.currentTable) { var ft = self.sidebarTabs.find(function(t) { return !t.divider; }); if (ft) self.selectTab(ft.id); }
+          }).catch(function() {
+            self.usersLoaded = true;
+            self.loading = false;
+            if (!self.currentTable) { var ft = self.sidebarTabs.find(function(t) { return !t.divider; }); if (ft) self.selectTab(ft.id); }
           });
+        } else {
+          self.usersLoaded = true;
+          self.loading = false;
+          if (!self.currentTable) { var ft = self.sidebarTabs.find(function(t) { return !t.divider; }); if (ft) self.selectTab(ft.id); }
         }
       },
       setUserRole: function(uid, role, user, tables) {
         var self = this;
-        backend_users.setUserRole(uid, role, user, tables).then(function() { self.loadFirebaseUsers(); });
+        backend_users.setUserRole(uid, role, user, tables).then(function() { self.loadUsers(); });
       },
       updateUserTables: function(u, selected) {
         var prev = u.tables === 'all' ? ['all'] : (u.tables || []);
-        var tables;
-        if (selected.indexOf('all') >= 0 && prev.indexOf('all') < 0) {
-          tables = 'all'; // All just selected → clear others
-        } else if (selected.indexOf('all') >= 0 && selected.length > 1) {
-          tables = selected.filter(function(s) { return s !== 'all'; }); // Other selected → remove All
-        } else if (selected.indexOf('all') >= 0) {
-          tables = 'all';
-        } else {
-          tables = selected.length ? selected : 'all';
-        }
-        backend_users.setUserRole(u.key, u.role, u.addr, tables).then(this.loadFirebaseUsers.bind(this));
+        var tables = this._resolveTableSelection(selected, prev);
+        backend_users.setUserRole(u.key, u.role, u.addr, tables).then(this.loadUsers.bind(this));
       },
-      removeFirebaseUser: function(uid) {
-        var self = this;
-        backend_users.removeUser(uid).then(function() { self.loadFirebaseUsers(); });
+      _resolveTableSelection: function(selected, prev) {
+        if (selected.indexOf('all') >= 0 && prev.indexOf('all') < 0) return 'all';
+        if (selected.indexOf('all') >= 0 && selected.length > 1) return selected.filter(function(s) { return s !== 'all'; });
+        if (selected.indexOf('all') >= 0) return 'all';
+        return selected.length ? selected : 'all';
       },
-      addFirebaseUser: function() {
-        if (!this.newUserAddr) return;
+      removeUser: function(uid) {
         var self = this;
-        var user = this.newUserAddr.trim();
-        var tables = this.newUserTables.indexOf('all') >= 0 ? 'all' : this.newUserTables;
-        backend_users.setUserRole(user, this.newUserRole, user, tables).then(function() {
-          self.newUserAddr = '';
-          self.newUserTables = ['all'];
-          self.loadFirebaseUsers();
-          self.notify('User added');
+        backend_users.removeUser(uid).then(function() { self.loadUsers(); });
+      },
+      addUser: function() {
+        var self = this;
+        var key = '_new_' + Date.now();
+        backend_users.setUserRole(key, 'editor', '', 'all').then(function() {
+          self.loadUsers();
         });
+      },
+      renameUser: function(u, newAddr) {
+        if (!newAddr || newAddr === u.addr) return;
+        var self = this;
+        backend_users.removeUser(u.key).then(function() {
+          return backend_users.setUserRole(newAddr, u.role, newAddr, u.tables);
+        }).then(function() { self.loadUsers(); });
       },
       saveFirebaseConfig: function() {
         var input = this.firebaseConfigInput.trim();
