@@ -25,8 +25,8 @@ function validateSchema() {
     var view = VIEWS[v];
     // Check sources exist
     (view.sources || []).forEach(function(s) { if (!SCHEMA[s]) errors.push('View "' + v + '" references non-existent table "' + s + '"'); });
-    // Check columns exist in at least one source
-    (view.columns || []).forEach(function(c) {
+    // Check columns exist in at least one source (skip aggregate views)
+    if (!view.keys) (view.columns || []).forEach(function(c) {
       var col = colName(c);
       var found = (view.sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].columns && SCHEMA[s].columns[col]; });
       if (!found) errors.push('View "' + v + '": column "' + col + '" not found in sources [' + (view.sources || []).join(', ') + ']');
@@ -169,12 +169,20 @@ function createVueApp() {
         }
         // Views first (only if all their sources are accessible)
         if (typeof VIEWS !== 'undefined') {
+          var childSet = {};
+          Object.keys(VIEWS).forEach(function(v) { (VIEWS[v].children || []).forEach(function(c) { childSet[c] = true; }); });
           Object.keys(VIEWS).forEach(function(v) {
+            if (childSet[v]) return; // skip children, they appear under parent
             if (allowedTables) {
               var sources = VIEWS[v].sources || [];
               if (!sources.every(function(s) { return allowedTables.indexOf(s) >= 0; })) return;
             }
-            tabs.push({ id: v, title: self.t('view.' + v) || v, icon: (VIEWS[v] && VIEWS[v].icon) || 'mdi-view-list' });
+            var children = (VIEWS[v].children || []).filter(function(c) {
+              if (!VIEWS[c]) return false;
+              if (!allowedTables) return true;
+              return (VIEWS[c].sources || []).every(function(s) { return allowedTables.indexOf(s) >= 0; });
+            }).map(function(c) { return { id: c, title: self.t('view.' + c) || c, icon: (VIEWS[c] && VIEWS[c].icon) || 'mdi-view-list' }; });
+            tabs.push({ id: v, title: self.t('view.' + v) || v, icon: (VIEWS[v] && VIEWS[v].icon) || 'mdi-view-list', children: children.length ? children : undefined });
           });
         }
         // Non-hidden tables (preserve schema order)
@@ -266,7 +274,7 @@ function createVueApp() {
         this.visibleCols.forEach(function(c) { var l = (self.t('field.' + c) || c).length; if (l > max) max = l; });
         return Math.max(80, max * 7.5 + 16) + 'px';
       },
-      isReadonlyView: function() { return !!this.currentConfig.readonly || this.currentUserRole === 'viewer'; },
+      isReadonlyView: function() { var v = VIEWS[this.currentTable]; return !!this.currentConfig.readonly || this.currentUserRole === 'viewer' || (v && v.keys && v.value); },
       embedConfigs: function() { var e = this.currentConfig.embed; if (!e) return []; return Array.isArray(e) ? e : [e]; },
       embedItems: function() {
         var self = this;
@@ -632,10 +640,25 @@ function createVueApp() {
               });
             }
           });
-          if (view.filter) {
-            rows = rows.filter(function(r) {
-              for (var k in view.filter) { if (r[k] !== view.filter[k]) return false; }
-              return true;
+          rows = filterRows(rows, view.filter);
+          // Aggregate: group by keys, collect value into Nth columns
+          if (view.keys && view.value) {
+            var keyCol = (typeof view.keys === 'object' && !Array.isArray(view.keys)) ? view.keys.column : view.columns[0];
+            var keysFrom = (typeof view.keys === 'object' && !Array.isArray(view.keys)) ? view.keys.from : view.keys;
+            var groups = {};
+            rows.forEach(function(r) {
+              keysFrom.forEach(function(k) {
+                var person = r[k];
+                if (person) { if (!groups[person]) groups[person] = []; if (r[view.value]) groups[person].push(r[view.value]); }
+              });
+            });
+            var valCols = (view.columns || []).filter(function(c) { return c !== keyCol; });
+            rows = Object.keys(groups).map(function(person) {
+              var vals = groups[person].sort().reverse();
+              var row = { id: person };
+              row[keyCol] = person;
+              for (var i = 0; i < valCols.length; i++) row[valCols[i]] = vals[i] || '';
+              return row;
             });
           }
           self.currentData = rows;
