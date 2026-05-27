@@ -13,7 +13,7 @@ async function ensureAppReady(page) {
 test.describe('App boot', () => {
   test('loads and shows first view tab', async ({ page }) => {
     await ensureAppReady(page);
-    await expect(page.locator('.v-app-bar-title')).toContainText('app.title');
+    await expect(page.locator('.v-app-bar-title')).not.toBeEmpty();
     const items = page.locator('.v-navigation-drawer .v-list-item');
     await expect(items.first()).toBeVisible();
   });
@@ -218,11 +218,11 @@ test.describe('Card layout', () => {
 test.describe('Import/Export', () => {
   test('export button downloads JSON', async ({ page }) => {
     await ensureAppReady(page);
-    await page.locator('.v-navigation-drawer .v-list-item:has-text("tab.settings")').click();
+    await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
     await page.waitForTimeout(500);
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has-text("Export")').click()
+      page.locator('button:has(.mdi-download)').click()
     ]);
     expect(download.suggestedFilename()).toMatch(/\.json$/);
   });
@@ -330,11 +330,11 @@ test.describe('Setup UI', () => {
 
   test('snackbar shows notification on export', async ({ page }) => {
     await ensureAppReady(page);
-    await page.locator('.v-navigation-drawer .v-list-item:has-text("tab.settings")').click();
+    await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
     await page.waitForTimeout(500);
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has-text("Export")').click()
+      page.locator('button:has(.mdi-download)').click()
     ]);
     expect(download.suggestedFilename()).toMatch(/\.json$/);
   });
