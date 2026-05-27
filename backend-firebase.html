@@ -9,12 +9,14 @@ backend = {
     return _db.collection('_meta').doc('schema').get().then(function(doc) {
       if (!doc.exists) return null;
       var d = doc.data();
-      if (d._json) return typeof d._json === 'string' ? JSON.parse(d._json) : d._json;
-      return d;
+      if (d._json) return JSON.parse(d._json);
+      // Legacy: direct fields (loses key order)
+      if (d.tables) return d;
+      return null;
     });
   },
   saveSchema: function(folderId, schema) {
-    return _db.collection('_meta').doc('schema').set(schema);
+    return _db.collection('_meta').doc('schema').set({ _json: JSON.stringify(schema) });
   },
   validateFolder: function(id) {
     return Promise.resolve({ valid: true, name: 'Firebase' });
@@ -125,7 +127,7 @@ function _startFirebase(config) {
   _auth = firebase.auth();
   _db.enablePersistence().catch(function() {});
   _auth.onAuthStateChanged(function(user) {
-    if (user) { appInstance.firebaseUid = user.uid; init(); }
+    if (user) { appInstance.firebaseUid = user.uid; appInstance.currentUserEmail = user.email; init(); }
     else { appInstance.needsReauth = true; appInstance.loading = false; }
   });
 }
