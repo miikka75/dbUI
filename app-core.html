@@ -13,6 +13,7 @@ var DEFAULT_LANGUAGE = defaultSchema.defaultLanguage || 'en';
 // Schema helpers
 function getColumns(table) { if (!SCHEMA[table]) return []; if (window._columnOrders && window._columnOrders[table]) return window._columnOrders[table]; return Object.keys(SCHEMA[table].columns); }
 function colName(c) { return typeof c === 'object' ? Object.keys(c)[0] : c; }
+function filterRows(rows, filter) { if (!filter) return rows; return rows.filter(function(r) { for (var k in filter) { if (r[k] !== filter[k]) return false; } return true; }); }
 function colCondition(c) { return typeof c === 'object' ? c[Object.keys(c)[0]] : null; }
 function toDateStr(v) { if (!v) return ''; var s = String(v); if (s.length === 10) return s; var d = new Date(s); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 function parseTableResult(r) { if (!r) return { headers: [], rows: [] }; if (typeof r === 'string') return JSON.parse(r); return r; }
@@ -266,62 +267,7 @@ function createVueApp() {
         return Math.max(80, max * 7.5 + 16) + 'px';
       },
       isReadonlyView: function() { return !!this.currentConfig.readonly || this.currentUserRole === 'viewer'; },
-      embedConfig: function() { var e = this.currentConfig.embed; return e ? (Array.isArray(e) ? e[0] : e) : null; },
       embedConfigs: function() { var e = this.currentConfig.embed; if (!e) return []; return Array.isArray(e) ? e : [e]; },
-      embedColumns: function() {
-        if (!this.embedConfig) return [];
-        var raw = this.embedConfig.columns || (this.embedConfig.view && VIEWS[this.embedConfig.view] ? VIEWS[this.embedConfig.view].columns : []);
-        return raw.map(function(c) { return colName(c); });
-      },
-      colsBeforeEmbed: function() {
-        if (!this.embedConfig || !this.embedConfig.afterColumn) return this.visibleCols;
-        var idx = this.visibleCols.indexOf(this.embedConfig.afterColumn);
-        return idx >= 0 ? this.visibleCols.slice(0, idx + 1) : this.visibleCols;
-      },
-      colsAfterEmbed: function() {
-        if (!this.embedConfig || !this.embedConfig.afterColumn) return [];
-        var idx = this.visibleCols.indexOf(this.embedConfig.afterColumn);
-        return idx >= 0 ? this.visibleCols.slice(idx + 1) : [];
-      },
-      embedRows: function() {
-        if (!this.embedConfig) return [];
-        var cfg = this.embedConfig;
-        var self = this;
-        var rows;
-        if (cfg.view) {
-          // Embed a view: compute its rows using same logic as loadTableData
-          var v = VIEWS[cfg.view];
-          if (!v) return [];
-          rows = [];
-          v.sources.forEach(function(src) {
-            var srcRows = self.dataCache[src] || [];
-            if (v.mode === 'union') {
-              srcRows.forEach(function(r) { rows.push(Object.assign({}, r, { _source: src })); });
-            } else {
-              srcRows.forEach(function(r) {
-                var existing = rows.find(function(e) { return e.id === r.id; });
-                if (existing) Object.assign(existing, r);
-                else rows.push(Object.assign({ _source: src }, r));
-              });
-            }
-          });
-          if (v.filter) {
-            rows = rows.filter(function(r) {
-              for (var k in v.filter) { if (r[k] !== v.filter[k]) return false; }
-              return true;
-            });
-          }
-        } else {
-          rows = this.dataCache[cfg.table] || [];
-          if (cfg.filter) {
-            rows = rows.filter(function(r) {
-              for (var k in cfg.filter) { if (r[k] !== cfg.filter[k]) return false; }
-              return true;
-            });
-          }
-        }
-        return rows;
-      },
       embedItems: function() {
         var self = this;
         return this.embedConfigs.map(function(cfg) {
@@ -330,10 +276,10 @@ function createVueApp() {
           var rows;
           if (cfg.view) {
             var v = VIEWS[cfg.view]; rows = [];
-            if (v) { v.sources.forEach(function(src) { (self.dataCache[src] || []).forEach(function(r) { rows.push(Object.assign({}, r)); }); }); if (v.filter) { rows = rows.filter(function(r) { for (var k in v.filter) { if (r[k] !== v.filter[k]) return false; } return true; }); } }
+            if (v) { v.sources.forEach(function(src) { (self.dataCache[src] || []).forEach(function(r) { rows.push(Object.assign({}, r)); }); }); rows = filterRows(rows, v.filter); }
           } else {
             rows = self.dataCache[cfg.table] || [];
-            if (cfg.filter) { rows = rows.filter(function(r) { for (var k in cfg.filter) { if (r[k] !== cfg.filter[k]) return false; } return true; }); }
+            if (cfg.filter) { rows = filterRows(rows, cfg.filter); }
           }
           if (cfg.defaultSort) { var sc = cfg.defaultSort; rows = rows.slice().sort(function(a, b) { return (a[sc] || '').localeCompare(b[sc] || ''); }); }
           if (cfg.hideEmpty) { columns = columns.filter(function(col) { return rows.some(function(r) { return r[col]; }); }); }
@@ -533,7 +479,7 @@ function createVueApp() {
               VIEWS = parsedSchema.views || VIEWS;
               // Restore key order from server-provided arrays (google.script.run scrambles object keys)
               if (result.tableOrder) self._tableOrder = result.tableOrder;
-              if (result.columnOrders) { self._columnOrders = result.columnOrders; window._columnOrders = result.columnOrders; }
+              if (result.columnOrders) { window._columnOrders = result.columnOrders; }
               self.schemaData = Object.freeze(parsedSchema);
               var schemaErrors = validateSchema();
               if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify('Schema: ' + schemaErrors[0]); }
@@ -709,12 +655,12 @@ function createVueApp() {
             backend.getTableData(self.tableMap[self.currentTable], tab).then(function(result) {
               self.dataCache[key] = parseTableResult(result).rows;
               var rows = self.dataCache[key];
-              if (tableDef.filter) rows = rows.filter(function(r) { for (var k in tableDef.filter) { if (r[k] !== tableDef.filter[k]) return false; } return true; });
+              if (tableDef.filter) rows = filterRows(rows, tableDef.filter);
               self.currentData = rows;
             });
           } else {
             var rows = self.dataCache[key];
-            if (tableDef.filter) rows = rows.filter(function(r) { for (var k in tableDef.filter) { if (r[k] !== tableDef.filter[k]) return false; } return true; });
+            if (tableDef.filter) rows = filterRows(rows, tableDef.filter);
             self.currentData = rows;
           }
         }
@@ -1239,6 +1185,9 @@ function createVueApp() {
         else { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); }
         this.notify('Copied');
       },
+      _autoSelectTab: function() {
+        if (!this.currentTable) { var ft = this.sidebarTabs.find(function(t) { return !t.divider; }); if (ft) this.selectTab(ft.id); }
+      },
       loadUsers: function() {
         var self = this;
         if (typeof backend_users !== 'undefined') {
@@ -1255,7 +1204,7 @@ function createVueApp() {
                 self.userList = [{key: self.currentUserEmail, addr: self.currentUserEmail, role: 'admin', tables: 'all'}];
                 self.usersLoaded = true;
                 self.loading = false;
-                if (!self.currentTable) { var ft = self.sidebarTabs.find(function(t) { return !t.divider; }); if (ft) self.selectTab(ft.id); }
+            self._autoSelectTab();
                 self.notify('You are registered as admin');
               });
               return;
@@ -1263,11 +1212,11 @@ function createVueApp() {
             self.userList = list;
             self.usersLoaded = true;
             self.loading = false;
-            if (!self.currentTable) { var ft = self.sidebarTabs.find(function(t) { return !t.divider; }); if (ft) self.selectTab(ft.id); }
+            self._autoSelectTab();
           }).catch(function() {
             self.usersLoaded = true;
             self.loading = false;
-            if (!self.currentTable) { var ft = self.sidebarTabs.find(function(t) { return !t.divider; }); if (ft) self.selectTab(ft.id); }
+            self._autoSelectTab();
           });
         } else {
           self.usersLoaded = true;
