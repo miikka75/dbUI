@@ -73,11 +73,8 @@ backend = {
     return _db.collection('_meta').doc('lists').set(lists);
   },
   putListItem: function(folderId, listName, value) {
-    return this.getLists(folderId).then(function(lists) {
-      lists[listName] = lists[listName] || [];
-      if (lists[listName].indexOf(value) === -1) lists[listName].push(value);
-      return _db.collection('_meta').doc('lists').set(lists);
-    });
+    var update = {}; update[listName] = firebase.firestore.FieldValue.arrayUnion(value);
+    return _db.collection('_meta').doc('lists').set(update, { merge: true });
   },
   getTranslations: function(folderId, langCode) {
     return _db.collection('_meta').doc('lang_' + langCode).get().then(function(doc) {
@@ -112,7 +109,8 @@ backend = {
 
 function initFirebase() {
   var stored = localStorage.getItem('firebase_config');
-  var config = (stored && JSON.parse(stored)) || window.FIREBASE_CONFIG || {};
+  var config;
+  try { config = (stored && JSON.parse(stored)) || window.FIREBASE_CONFIG || {}; } catch(e) { config = window.FIREBASE_CONFIG || {}; }
   if (config.apiKey) { _startFirebase(config); return; }
   // Try loading from server-side file
   fetch('/firebase-config.json').then(function(r) { return r.ok ? r.json() : null; }).then(function(c) {
@@ -147,11 +145,8 @@ var backend_users = {
     );
   },
   removeUser: function(uid) {
-    return _db.collection('_meta').doc('users').get().then(function(doc) {
-      var data = doc.data() || {};
-      delete data[uid];
-      return _db.collection('_meta').doc('users').set(data);
-    });
+    var update = {}; update[uid] = firebase.firestore.FieldValue.delete();
+    return _db.collection('_meta').doc('users').update(update);
   }
 };
 
