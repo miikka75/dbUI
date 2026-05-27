@@ -25,6 +25,12 @@ backend = {
   loadChangesets: (folderId, excludeSiteId) => _post('loadChangesets', { folderId, excludeSiteId })
 };
 
+var backend_users = {
+  getUsers: () => _post('getUsers', {}),
+  setUserRole: (uid, role, user, tables) => _post('setUserRole', { uid, role, user, tables }),
+  removeUser: (uid) => _post('removeUser', { uid })
+};
+
 function _post(route, body) {
   return fetch('/api/' + route, {
     method: 'POST',
