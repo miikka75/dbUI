@@ -49,7 +49,7 @@ const server = http.createServer(async (req, res) => {
       case 'getFolderConfig': return json(res, backend.getFolderConfig('local'));
       case 'setFolderConfig': backend.setFolderConfig('local', body.config); return json(res, { ok: true });
       case 'initSchema': return json(res, backend.initSchema('local', body.schema || SCHEMA));
-      case 'resetData': backend.resetData(); return json(res, { ok: true });
+      case 'resetData': backend.resetData(); backend._users = undefined; return json(res, { ok: true });
       case 'getAvailableTables': return json(res, backend.getAvailableTables('local'));
       case 'getAvailableLanguages': return json(res, backend.getAvailableLanguages('local'));
       case 'getTableData': return json(res, backend.getTableData(body.tableId, body.tab));
@@ -65,6 +65,9 @@ const server = http.createServer(async (req, res) => {
       case 'putListItem': backend.putListItem('local', body.listName, body.value); return json(res, { ok: true });
       case 'moveRow': backend.moveRow(body.tableId, body.rowData, body.fromTab, body.toTab); return json(res, { ok: true });
       case 'saveConfig': fs.writeFileSync(path.join(STATIC_DIR, body.filename), JSON.stringify(body.data, null, 2)); return json(res, { ok: true });
+      case 'getUsers': return json(res, backend._users || {});
+      case 'setUserRole': { if (!backend._users) backend._users = {}; backend._users[body.uid] = { role: body.role, user: body.user || '', tables: body.tables || 'all' }; return json(res, { ok: true }); }
+      case 'removeUser': { if (backend._users) delete backend._users[body.uid]; return json(res, { ok: true }); }
       default: res.writeHead(404); return res.end('Not found');
     }
     } catch (err) {
