@@ -125,6 +125,12 @@
       <v-list density="compact" nav>
         <template v-for="tab in sidebarTabs" :key="tab.id">
           <v-divider v-if="tab.divider" class="my-1"></v-divider>
+          <v-list-group v-else-if="tab.children" :value="tab.id">
+            <template v-slot:activator="{ props }">
+              <v-list-item v-bind="props" :prepend-icon="tab.icon" :title="tab.title" @click.stop="selectTab(tab.id)"></v-list-item>
+            </template>
+            <v-list-item v-for="child in tab.children" :key="child.id" :value="child.id" :active="currentTable === child.id" @click="selectTab(child.id)" :prepend-icon="child.icon" :title="child.title" class="pl-8"></v-list-item>
+          </v-list-group>
           <v-list-item v-else :value="tab.id" :active="currentTable === tab.id" @click="selectTab(tab.id)" :prepend-icon="tab.icon" :title="tab.title"></v-list-item>
         </template>
       </v-list>
