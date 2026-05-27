@@ -7,7 +7,7 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 - **Schema-driven**: JSON config defines tables, columns, views, and behavior
 - **Five backends**: Google Sheets (Apps Script), OAuth REST API, CRDT (IndexedDB + Drive sync), Firebase (Firestore), local SQLite
 - **i18n**: multi-language with auto-generated translation keys from schema
-- **Views**: union, join, embedded views with configurable layout
+- **Views**: union, join, aggregate, embedded views with configurable layout
 - **Header/footer**: translatable static text on tables, views, and embed entries
 - **Print**: layout-aware printing (table or card mode), per-card print, embeds included
 - **Responsive**: auto-switches between table and card layout based on column count
@@ -288,6 +288,47 @@ Views combine data from multiple tables without duplicating storage.
 | `columns` | string[] | ✅ | Columns to display (strings or conditional objects) |
 | `mode` | string | ✅ | `"union"` or `"join"` |
 | `matchKey` | string | | Column to match rows in join mode (default: `"id"`) |
+| `keys` | object/array | | Aggregate: group rows by these source columns |
+| `value` | string | | Aggregate: collect this column's values per group (sorted descending — works with ISO dates `YYYY-MM-DD`) |
+| `children` | string[] | | Child view names shown as indented sub-items in sidebar |
+
+#### Aggregate Views
+
+Add `keys` + `value` to any view to group rows and collect values into fixed columns. Works as a post-processing step after union/join/filter.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `keys` | `{ column, from }` or `string[]` | `column`: output column name for group key. `from`: source columns to extract key from. Array shorthand: key goes in `columns[0]`. |
+| `value` | string | Source column to collect per group (sorted descending) |
+| `columns` | string[] | First N-1 non-key columns become Nth value slots |
+
+```json
+"attendance": {
+  "sources": ["tasks", "notes"],
+  "mode": "union",
+  "keys": { "column": "person", "from": ["assigned_to", "author"] },
+  "value": "date",
+  "columns": ["person", "latest", "previous", "3rd"],
+  "icon": "mdi-account-group"
+}
+```
+
+Output: one row per unique person, with their 3 most recent dates from either table. Read-only, sortable by any column.
+
+#### Sidebar Grouping (children)
+
+Views with `children` render as expandable groups in the sidebar. Click the parent to show its view; child views appear indented below.
+
+```json
+"combined": {
+  "sources": ["tasks", "notes"],
+  "mode": "join",
+  "children": ["attendance", "in_progress"],
+  ...
+}
+```
+
+Child views are independent — they work standalone if accessed directly. The `children` property only controls sidebar presentation.
 
 ```json
 "dashboard": {
