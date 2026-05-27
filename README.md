@@ -49,9 +49,8 @@ See `apps-script/DEPLOY.md` for deployment guide.
 5. Firestore → Rules → paste contents of `firestore.rules` → Publish
 6. Run the app, select Firebase mode, paste config → Sign in with Google
 7. Settings → Import from JSON to load schema + data
-8. Settings → User Access → add yourself as admin
 
-First user has full access (bootstrap mode). After adding yourself as admin, only registered users can access. Per-table permissions configurable per user.
+First user is auto-registered as admin (bootstrap mode). After that, only registered users can access. Per-table permissions configurable per user.
 
 Firebase config is stored in browser localStorage. Share a pre-configured URL to onboard users without manual setup.
 
@@ -78,20 +77,24 @@ Generate the link from Settings tab (shown under "Share link" for Firebase mode)
 | Backend | How to add users | Admin UI? |
 |---------|-----------------|:---:|
 | **Firebase** | Settings → User Access panel | ✅ Yes |
+| **Local** | Settings → User Access panel (test with `?user=`) | ✅ Yes |
 | **Sheets** | Share Drive folder via Google Drive | ❌ |
 | **CRDT** | Share Drive subfolder per table | ❌ |
 | **Apps Script** | Share folder + add to OAuth test users | ❌ |
 
-### Firebase User Registry
+### User Registry
 
-Firebase mode includes a built-in user admin panel (Settings → User Access):
+Any backend defining `backend_users` gets built-in user access control (Settings → User Access):
 
-1. **Bootstrap mode**: first authenticated user has full access (no `_meta/users` document yet)
-2. **Add yourself as admin** via Settings → User Access
-3. **Add users** by email or UID with role + per-table access
-4. **Roles**: admin (manage schema/users + all tables), editor (read+write allowed tables), viewer (read-only)
-5. **Per-table access**: select which tables each user can access (or "All")
-6. **Security Rules** (`firestore.rules`): enforces roles + per-table access server-side. Deploy once — no updates needed when adding users.
+1. **Bootstrap mode**: first user auto-registered as admin
+2. **Add users** inline (click +, edit email/role/tables in-place)
+3. **Roles**: admin (manage schema/users/translations + all tables), editor (read+write allowed tables + edit allowed lists), viewer (read-only)
+4. **Per-table access**: select which tables each user can access (or "All")
+5. **View filtering**: views are only visible if user has access to ALL source tables
+6. **List filtering**: editors see only lists used by their allowed tables
+7. **Security Rules** (`firestore.rules`): enforces roles + per-table access server-side. Deploy once.
+
+Local dev: test access control with `http://localhost:3000/?user=editor1` (user must exist in registry).
 
 Firestore document structure (`_meta/users`):
 ```json
