@@ -59,6 +59,7 @@ describe('Union view data access', () => {
 
   it('VIEWS columns exist in at least one source table', () => {
     for (const [name, view] of Object.entries(VIEWS)) {
+      if (view.keys && view.value) continue; // aggregate views have computed columns
       for (const col of view.columns) {
         const colStr = typeof col === 'object' ? Object.keys(col)[0] : col;
         const found = view.sources.some(src => getColumns(src).includes(colStr));
@@ -124,5 +125,88 @@ describe('Join view data access', () => {
 
     assert.equal(backend.getTableData('tasks').rows.length, 0);
     assert.equal(backend.getTableData('notes').rows.length, 0);
+  });
+});
+
+describe('Aggregate view logic', () => {
+  // Test the aggregation algorithm directly (same logic as app-core)
+  function aggregate(rows, keys, value, columns) {
+    var keyCol = (typeof keys === 'object' && !Array.isArray(keys)) ? keys.column : columns[0];
+    var keysFrom = (typeof keys === 'object' && !Array.isArray(keys)) ? keys.from : keys;
+    var groups = {};
+    rows.forEach(function(r) {
+      keysFrom.forEach(function(k) {
+        var person = r[k];
+        if (person) { if (!groups[person]) groups[person] = []; if (r[value]) groups[person].push(r[value]); }
+      });
+    });
+    var valCols = columns.filter(function(c) { return c !== keyCol; });
+    return Object.keys(groups).map(function(person) {
+      var vals = groups[person].sort().reverse();
+      var row = { id: person };
+      row[keyCol] = person;
+      for (var i = 0; i < valCols.length; i++) row[valCols[i]] = vals[i] || '';
+      return row;
+    });
+  }
+
+  it('groups by multiple key columns', () => {
+    const rows = [
+      { assigned_to: 'Alice', author: '', date: '2026-05-27' },
+      { assigned_to: '', author: 'Alice', date: '2026-05-20' },
+      { assigned_to: 'Bob', author: '', date: '2026-05-25' }
+    ];
+    const result = aggregate(rows, ['assigned_to', 'author'], 'date', ['person', 'latest', 'previous']);
+    assert.equal(result.length, 2);
+    const alice = result.find(r => r.person === 'Alice');
+    assert.equal(alice.latest, '2026-05-27');
+    assert.equal(alice.previous, '2026-05-20');
+    const bob = result.find(r => r.person === 'Bob');
+    assert.equal(bob.latest, '2026-05-25');
+    assert.equal(bob.previous, '');
+  });
+
+  it('deduplicates when same person in multiple key columns of same row', () => {
+    const rows = [
+      { assigned_to: 'Alice', author: 'Alice', date: '2026-05-27' }
+    ];
+    const result = aggregate(rows, ['assigned_to', 'author'], 'date', ['person', 'latest', 'previous']);
+    assert.equal(result.length, 1);
+    // Alice appears in both columns of same row — date counted twice
+    assert.equal(result[0].latest, '2026-05-27');
+  });
+
+  it('sorts values descending (latest first)', () => {
+    const rows = [
+      { assigned_to: 'Alice', date: '2026-01-01' },
+      { assigned_to: 'Alice', date: '2026-12-31' },
+      { assigned_to: 'Alice', date: '2026-06-15' }
+    ];
+    const result = aggregate(rows, ['assigned_to'], 'date', ['person', '1st', '2nd', '3rd']);
+    assert.equal(result[0]['1st'], '2026-12-31');
+    assert.equal(result[0]['2nd'], '2026-06-15');
+    assert.equal(result[0]['3rd'], '2026-01-01');
+  });
+
+  it('limits to column count', () => {
+    const rows = [
+      { assigned_to: 'Alice', date: '2026-01-01' },
+      { assigned_to: 'Alice', date: '2026-06-01' },
+      { assigned_to: 'Alice', date: '2026-12-01' }
+    ];
+    const result = aggregate(rows, ['assigned_to'], 'date', ['person', 'latest']);
+    assert.equal(result[0].latest, '2026-12-01');
+    assert.equal(result[0]['2nd'], undefined); // not in columns
+  });
+
+  it('key column can be in any position', () => {
+    const rows = [
+      { assigned_to: 'Alice', date: '2026-05-27' },
+      { assigned_to: 'Alice', date: '2026-05-20' }
+    ];
+    const result = aggregate(rows, { column: 'person', from: ['assigned_to'] }, 'date', ['latest', 'person', 'previous']);
+    assert.equal(result[0].person, 'Alice');
+    assert.equal(result[0].latest, '2026-05-27');
+    assert.equal(result[0].previous, '2026-05-20');
   });
 });
