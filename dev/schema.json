@@ -29,8 +29,14 @@
             "state": "state"
           }
         },
-        "created_at": { "type": "text", "hidden": true },
-        "updated_at": { "type": "text", "hidden": true }
+        "created_at": {
+          "type": "text",
+          "hidden": true
+        },
+        "updated_at": {
+          "type": "text",
+          "hidden": true
+        }
       },
       "primaryKey": "id",
       "hidden": false,
@@ -51,8 +57,14 @@
           "list": "assigned_to",
           "allowNew": true
         },
-        "created_at": { "type": "text", "hidden": true },
-        "updated_at": { "type": "text", "hidden": true }
+        "created_at": {
+          "type": "text",
+          "hidden": true
+        },
+        "updated_at": {
+          "type": "text",
+          "hidden": true
+        }
       },
       "primaryKey": "id",
       "hidden": true,
@@ -64,8 +76,14 @@
         "id": "text",
         "state": "text",
         "city": "text",
-        "created_at": { "type": "text", "hidden": true },
-        "updated_at": { "type": "text", "hidden": true }
+        "created_at": {
+          "type": "text",
+          "hidden": true
+        },
+        "updated_at": {
+          "type": "text",
+          "hidden": true
+        }
       },
       "primaryKey": "id",
       "hidden": true,
@@ -74,43 +92,133 @@
   },
   "views": {
     "all_items": {
-      "sources": ["tasks", "notes"],
-      "columns": ["date", "title", "status", "assigned_to", "city", "content", "author"],
-      "mode": "union",
-      "defaultSort": "date"
-    },
-    "combined": {
-      "sources": ["tasks", "notes"],
-      "matchKey": "id",
-      "columns": ["date", "title", "status", "assigned_to", "city", "content", "author"],
-      "mode": "join",
-      "header": "view.combined.header",
-      "footer": "view.combined.footer",
-      "defaultSort": "date",
-      "embed": [
-        { "header": "embed.open", "table": "tasks", "filter": {"status": "Open"}, "columns": ["date", "title", "assigned_to"], "afterColumn": "title", "defaultSort": "date" },
-        { "header": "embed.in_progress", "view": "in_progress", "afterColumn": "title", "footer": "embed.in_progress.footer", "layout": "table", "hideEmpty": true }
-      ]
-    },
-    "in_progress": {
-      "sources": ["tasks", "notes"],
+      "sources": [
+        "tasks",
+        "notes"
+      ],
       "columns": [
         "date",
         "title",
         "status",
         "assigned_to",
-        {"content": {"status": "In Progress"}},
-        {"author": {"status": "In Progress"}}
+        "city",
+        "content",
+        "author"
+      ],
+      "mode": "union",
+      "defaultSort": "date"
+    },
+    "combined": {
+      "sources": [
+        "tasks",
+        "notes"
+      ],
+      "matchKey": "id",
+      "columns": [
+        "date",
+        "title",
+        "status",
+        "assigned_to",
+        "city",
+        "content",
+        "author"
       ],
       "mode": "join",
-      "filter": { "status": "In Progress" },
+      "header": "view.combined.header",
+      "footer": "view.combined.footer",
+      "defaultSort": "date",
+      "embed": [
+        {
+          "header": "embed.open",
+          "table": "tasks",
+          "filter": {
+            "status": "Open"
+          },
+          "columns": [
+            "date",
+            "title",
+            "assigned_to"
+          ],
+          "afterColumn": "title",
+          "defaultSort": "date"
+        },
+        {
+          "header": "embed.in_progress",
+          "view": "in_progress",
+          "afterColumn": "title",
+          "footer": "embed.in_progress.footer",
+          "layout": "table",
+          "hideEmpty": true
+        }
+      ],
+      "children": [
+        "attendance"
+      ]
+    },
+    "in_progress": {
+      "sources": [
+        "tasks",
+        "notes"
+      ],
+      "columns": [
+        "date",
+        "title",
+        "status",
+        "assigned_to",
+        {
+          "content": {
+            "status": "In Progress"
+          }
+        },
+        {
+          "author": {
+            "status": "In Progress"
+          }
+        }
+      ],
+      "mode": "join",
+      "filter": {
+        "status": "In Progress"
+      },
       "readonly": true,
       "layout": "card",
       "collapsed": true,
       "icon": "mdi-progress-clock",
       "defaultSort": "date",
       "hideEmpty": true,
-      "embed": { "header": "embed.related_notes", "table": "notes", "columns": ["date", "content", "author"], "afterColumn": "title", "layout": "table" }
+      "embed": {
+        "header": "embed.related_notes",
+        "table": "notes",
+        "columns": [
+          "date",
+          "content",
+          "author"
+        ],
+        "afterColumn": "title",
+        "layout": "table"
+      }
+    },
+    "attendance": {
+      "sources": [
+        "tasks",
+        "notes"
+      ],
+      "mode": "join",
+      "keys": {
+        "column": "person",
+        "from": [
+          "assigned_to",
+          "author"
+        ]
+      },
+      "value": "date",
+      "columns": [
+        "person",
+        "latest",
+        "previous",
+        "3rd"
+      ],
+      "icon": "mdi-account-group"
     }
   }
 }
