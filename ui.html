@@ -1,10 +1,5 @@
 <div id="vue-app" v-cloak>
   <v-app :theme="theme">
-    <!-- Loading -->
-    <v-overlay :model-value="loading" class="align-center justify-center" persistent>
-      <v-progress-circular indeterminate size="64"></v-progress-circular>
-    </v-overlay>
-
     <!-- Reauth Dialog -->
     <v-dialog v-model="needsReauth" persistent max-width="340">
       <v-card>
@@ -112,7 +107,12 @@
     </v-dialog>
 
     <!-- App Bar -->
-    <v-app-bar density="compact" elevation="1">
+    <!-- Loading -->
+    <div v-if="loading && !showSetup" style="display:flex; align-items:center; justify-content:center; height:100vh">
+      <v-progress-circular indeterminate color="primary" size="48"></v-progress-circular>
+    </div>
+
+    <v-app-bar v-if="!loading" density="compact" elevation="1">
       <v-app-bar-nav-icon @click="rail = !rail"></v-app-bar-nav-icon>
       <v-app-bar-title>{{ appTitle }}</v-app-bar-title>
       <v-select v-if="languages.length > 1" v-model="currentLang" :items="langItems" density="compact" variant="plain" hide-details style="max-width:120px" class="mr-2" @update:model-value="switchLanguage"></v-select>
@@ -121,8 +121,8 @@
     </v-app-bar>
 
     <!-- Sidebar -->
-    <v-navigation-drawer permanent :rail="rail" :expand-on-hover="rail">
-      <v-list v-if="!loading" density="compact" nav>
+    <v-navigation-drawer v-if="!loading" permanent :rail="rail" :expand-on-hover="rail">
+      <v-list density="compact" nav>
         <template v-for="tab in sidebarTabs" :key="tab.id">
           <v-divider v-if="tab.divider" class="my-1"></v-divider>
           <v-list-item v-else :value="tab.id" :active="currentTable === tab.id" @click="selectTab(tab.id)" :prepend-icon="tab.icon" :title="tab.title"></v-list-item>
@@ -169,16 +169,16 @@
               <!-- First visible field always shown + expand toggle -->
               <div class="d-flex align-center" @click="currentConfig.collapsed ? (expandedCard = expandedCard === item.id ? null : item.id) : null" :style="currentConfig.collapsed ? 'cursor:pointer' : ''">
                 <div style="flex:1">
-                  <div v-if="colsBeforeEmbed.length" class="d-flex align-center mb-1">
-                    <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + colsBeforeEmbed[0]) || colsBeforeEmbed[0] }}</span>
-                    <span style="opacity:0.8">{{ item[colsBeforeEmbed[0]] || '' }}</span>
+                  <div v-if="visibleCols.length" class="d-flex align-center mb-1">
+                    <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + visibleCols[0]) || visibleCols[0] }}</span>
+                    <span style="opacity:0.8">{{ item[visibleCols[0]] || '' }}</span>
                   </div>
                 </div>
                 <v-icon v-if="currentConfig.collapsed" size="small">{{ expandedCard === item.id || (!currentConfig.collapsed) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
               </div>
               <!-- Remaining fields (collapsed unless expanded or not collapsed mode) -->
               <div v-show="!currentConfig.collapsed || expandedCard === item.id">
-              <template v-for="col in colsBeforeEmbed.slice(1)" :key="col">
+              <template v-for="col in visibleCols.slice(1)" :key="col">
               <div v-if="!isColumnHidden(col, item)" class="d-flex align-center mb-1">
                 <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + col) || col }}</span>
                 <span v-if="isReadonlyView || isReadonlyCell(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : (item[col] || '') }}</span>
@@ -189,10 +189,9 @@
                 <input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="saveField(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">
                 <span v-else class="editable-cell" contenteditable @blur="saveField(item, col, $event.target.textContent)" style="min-width:auto">{{ item[col] || '' }}</span>
               </div>
-              </template>
-              <!-- Inline embed between columns -->
-              <template v-for="(ei, eidx) in embedItems" :key="'emb'+eidx">
-              <div v-if="ei.config.afterColumn && ei.rows.length" class="my-1 ml-2 pa-2" style="background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px">
+              <!-- Inline embed after this column -->
+              <template v-for="(ei, eidx) in embedItems" :key="'emb'+col+eidx">
+              <div v-if="ei.config.afterColumn === col && ei.rows.length" class="my-1 ml-2 pa-2" style="background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px">
                 <div v-if="ei.config.header && t(ei.config.header) !== ei.config.header" style="font-size:0.75rem; opacity:0.6; margin-bottom:4px">{{ t(ei.config.header) }}</div>
                 <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
                   <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
@@ -209,17 +208,6 @@
                 <div v-if="ei.config.footer && t(ei.config.footer) !== ei.config.footer" style="font-size:0.75rem; opacity:0.6; margin-top:4px">{{ t(ei.config.footer) }}</div>
               </div>
               </template>
-              <template v-for="col in colsAfterEmbed" :key="col">
-              <div v-if="!isColumnHidden(col, item)" class="d-flex align-center mb-1">
-                <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + col) || col }}</span>
-                <span v-if="isReadonlyView || isReadonlyCell(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : (item[col] || '') }}</span>
-                <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : (item[col] || '') }}</span>
-                <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :model-value="item[col] || ''" :items="getListOptions(col)" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
-                <v-autocomplete v-else-if="colIsList(col)" :model-value="item[col] || ''" :items="getListOptions(col)" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
-                <v-autocomplete v-else-if="colIsRef(col)" :model-value="item[col] || ''" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
-                <input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="saveField(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">
-                <span v-else class="editable-cell" contenteditable @blur="saveField(item, col, $event.target.textContent)" style="min-width:auto">{{ item[col] || '' }}</span>
-              </div>
               </template>
               <div class="mt-2">
                 <v-btn icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>
@@ -232,7 +220,7 @@
             </v-card>
           </div>
           <!-- Desktop: table layout -->
-          <v-table v-if="!useCardLayout" density="compact" hover>
+          <v-table v-else density="compact" hover>
             <template v-slot:default>
             <thead><tr>
               <th v-for="col in visibleCols" :key="col" @click="toggleSort(col)" style="cursor:pointer">{{ t('field.' + col) || col }}</th>
@@ -324,14 +312,15 @@
               </template>
               <v-table v-if="editingLang && editingLang.code === lang.code" density="compact">
                 <template v-slot:default>
-                <thead><tr><th>{{ t('field.key') }}</th><th>{{ t('field.translation') }}</th></tr></thead>
                 <tbody>
                   <tr @click="settings._collapseApp = !settings._collapseApp" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseApp ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> App</td></tr>
+                  <tr v-show="!settings._collapseApp"><th style="opacity:0.6">{{ t('field.key') }}</th><th style="opacity:0.6">{{ t('field.translation') }}</th></tr>
                   <tr v-for="key in staticTranslationKeys" :key="key" v-show="!settings._collapseApp">
                     <td>{{ key }}</td>
                     <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="saveTranslation(key, $event.target.textContent)">{{ currentTranslations[key] || '' }}</span></td>
                   </tr>
                   <tr @click="settings._collapseSchema = !settings._collapseSchema" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseSchema ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> Schema</td></tr>
+                  <tr v-show="!settings._collapseSchema"><th style="opacity:0.6">{{ t('field.key') }}</th><th style="opacity:0.6">{{ t('field.translation') }}</th></tr>
                   <tr v-for="key in schemaTranslationKeys" :key="key" v-show="!settings._collapseSchema">
                     <td>{{ key }}</td>
                     <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="saveTranslation(key, $event.target.textContent)">{{ currentTranslations[key] || '' }}</span></td>
