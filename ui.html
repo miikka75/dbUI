@@ -122,7 +122,7 @@
 
     <!-- Sidebar -->
     <v-navigation-drawer permanent :rail="rail" :expand-on-hover="rail">
-      <v-list density="compact" nav>
+      <v-list v-if="!loading" density="compact" nav>
         <template v-for="tab in sidebarTabs" :key="tab.id">
           <v-divider v-if="tab.divider" class="my-1"></v-divider>
           <v-list-item v-else :value="tab.id" :active="currentTable === tab.id" @click="selectTab(tab.id)" :prepend-icon="tab.icon" :title="tab.title"></v-list-item>
@@ -326,9 +326,15 @@
                 <template v-slot:default>
                 <thead><tr><th>{{ t('field.key') }}</th><th>{{ t('field.translation') }}</th></tr></thead>
                 <tbody>
-                  <tr v-for="key in translationKeys" :key="key">
+                  <tr @click="settings._collapseApp = !settings._collapseApp" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseApp ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> App</td></tr>
+                  <tr v-for="key in staticTranslationKeys" :key="key" v-show="!settings._collapseApp">
                     <td>{{ key }}</td>
-                    <td><span class="editable-cell" contenteditable @blur="saveTranslation(key, $event.target.textContent)">{{ currentTranslations[key] || '' }}</span></td>
+                    <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="saveTranslation(key, $event.target.textContent)">{{ currentTranslations[key] || '' }}</span></td>
+                  </tr>
+                  <tr @click="settings._collapseSchema = !settings._collapseSchema" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseSchema ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> Schema</td></tr>
+                  <tr v-for="key in schemaTranslationKeys" :key="key" v-show="!settings._collapseSchema">
+                    <td>{{ key }}</td>
+                    <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="saveTranslation(key, $event.target.textContent)">{{ currentTranslations[key] || '' }}</span></td>
                   </tr>
                 </tbody>
                 </template>
@@ -342,19 +348,20 @@
         <v-card v-if="currentTable === '__lookup'" variant="outlined">
           <v-card-title>{{ t('tab.lists') }}</v-card-title>
           <v-list>
-            <v-list-group v-for="(items, name) in listsCache" :key="name" :value="name">
+            <v-list-group v-for="(items, name) in visibleLists" :key="name" :value="name">
               <template v-slot:activator="{ props }">
                 <v-list-item v-bind="props" prepend-icon="mdi-format-list-bulleted">
                   <span>{{ name }}</span>
                 </v-list-item>
               </template>
               <v-list-item v-for="(val, i) in items" :key="i">
-                <span class="editable-cell" contenteditable @blur="updateListItem2(name, i, $event.target.textContent)" @keydown.enter.prevent="focusNextListItem($event)" @keydown.home.stop @keydown.end.stop>{{ val }}</span>
-                <template v-slot:append>
+                <span v-if="currentUserRole === 'viewer'">{{ val }}</span>
+                <span v-else class="editable-cell" contenteditable @blur="updateListItem2(name, i, $event.target.textContent)" @keydown.enter.prevent="focusNextListItem($event)" @keydown.home.stop @keydown.end.stop>{{ val }}</span>
+                <template v-if="currentUserRole !== 'viewer'" v-slot:append>
                   <v-btn :icon="isArmed('list_' + name + '_' + i) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('list_' + name + '_' + i) ? 'error' : ''" @click="removeListItem2(name, i)"></v-btn>
                 </template>
               </v-list-item>
-              <v-list-item>
+              <v-list-item v-if="currentUserRole !== 'viewer'">
                 <v-btn variant="text" size="small" prepend-icon="mdi-plus" @click="addListItem2(name)">{{ t('btn.add') }} {{ name }}</v-btn>
               </v-list-item>
             </v-list-group>
@@ -427,46 +434,38 @@
           <v-card-title>{{ t('tab.settings') }}</v-card-title>
           <v-card-text>
             <div class="mb-4">
+            <template v-if="isAdmin">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ t('settings.import_export') }}</p>
             <v-btn variant="outlined" prepend-icon="mdi-download" @click="exportData" class="mr-2 mb-2">{{ t('settings.export') }}</v-btn>
             <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()" class="mb-2">{{ t('settings.import') }}</v-btn>
             <input ref="importFile" type="file" accept=".json" hidden @change="importData($event)">
-            <p class="text-caption mt-1" style="opacity:0.6">Export all table data as JSON file. Import overwrites current data.</p>
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ t('settings.share') }}</p>
-            <v-text-field :model-value="shareLink" label="Shareable link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="copyText(shareLink)"></v-text-field>
-            <p class="text-caption mt-1" style="opacity:0.6">New users opening this link get pre-configured connection settings.</p>
+            <v-text-field :model-value="shareLink" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="copyText(shareLink)"></v-text-field>
+            </template>
             <v-divider class="my-4"></v-divider>
             <v-btn variant="outlined" :color="isArmed('reset') ? 'error' : 'warning'" :prepend-icon="isArmed('reset') ? 'mdi-check-circle' : 'mdi-refresh'" @click="isArmed('reset') ? resetApp() : armDelete('reset')">{{ isArmed('reset') ? t('settings.confirm_reset') : t('settings.reset') }}</v-btn>
-            <p class="text-caption mt-2" style="opacity:0.6">Clears browser cache and reloads from server.</p>
-            <template v-if="mode === 'firebase' && firebaseUid">
+            <template v-if="usersLoaded && userList.length && isAdmin">
             <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2">{{ t('settings.firebase_user') }}</p>
-            <v-text-field :model-value="firebaseUid" label="Your UID" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="copyUid"></v-text-field>
-            <p class="text-subtitle-2 mb-2 mt-4">{{ t('settings.user_access') }}</p>
-            <table v-if="firebaseUserList.length" class="v-table__wrapper" style="width:100%; border-collapse:collapse; font-size:0.85rem; margin-bottom:8px">
-              <thead><tr style="border-bottom:1px solid rgb(var(--v-theme-outline),0.3)"><th style="text-align:left; padding:8px">{{ t('settings.user_id') }}</th><th style="text-align:left; padding:8px">Role</th><th style="text-align:left; padding:8px">Tables</th><th></th></tr></thead>
+            <p class="text-subtitle-1 font-weight-bold mb-2">Firebase</p>
+            <p class="text-subtitle-2 mb-2">{{ t('settings.user_access') }}</p>
+            <v-table v-if="userList.length" density="compact">
+              <template v-slot:default>
+              <thead><tr><th>{{ t('settings.user_id') }}</th><th>{{ t('settings.role') }}</th><th>{{ t('settings.tables') }}</th><th></th></tr></thead>
               <tbody>
-                <tr v-for="u in firebaseUserList" :key="u.key" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.1)">
-                  <td style="padding:8px">{{ u.addr }}</td>
-                  <td style="padding:8px"><v-select :model-value="u.role" :items="['admin','editor','viewer']" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>
-                  <td style="padding:8px"><v-chip-group :model-value="u.tables === 'all' ? ['all'] : u.tables" multiple @update:model-value="updateUserTables(u, $event)">
+                <tr v-for="u in userList" :key="u.key">
+                  <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="renameUser(u, $event.target.textContent.trim())">{{ u.addr }}</span></td>
+                  <td><v-select :model-value="u.role" :items="['admin','editor','viewer']" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>
+                  <td><v-chip-group :model-value="u.tables === 'all' ? ['all'] : u.tables" multiple @update:model-value="updateUserTables(u, $event)">
                     <v-chip v-for="tn in ['all'].concat(Object.keys(schemaData && schemaData.tables || {}))" :key="tn" :value="tn" size="x-small" filter variant="outlined">{{ tn === 'all' ? t('settings.all') : (t('tab.' + tn) || tn) }}</v-chip>
                   </v-chip-group></td>
-                  <td><v-btn :icon="isArmed('user:'+u.key) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('user:'+u.key) ? 'error' : ''" @click="isArmed('user:'+u.key) ? removeFirebaseUser(u.key) : armDelete('user:'+u.key)"></v-btn></td>
+                  <td><v-btn :icon="isArmed('user:'+u.key) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('user:'+u.key) ? 'error' : ''" @click="isArmed('user:'+u.key) ? removeUser(u.key) : armDelete('user:'+u.key)"></v-btn></td>
                 </tr>
               </tbody>
-            </table>
-            <div class="d-flex align-center flex-wrap ga-2 mt-2">
-              <v-text-field v-model="newUserAddr" :label="t('settings.user_email')" density="compact" variant="outlined" hide-details style="max-width:200px"></v-text-field>
-              <v-select v-model="newUserRole" :items="['admin','editor','viewer']" density="compact" variant="outlined" hide-details style="max-width:120px"></v-select>
-              <v-chip-group v-model="newUserTables" multiple>
-                <v-chip value="all" size="small" filter variant="outlined">{{ t('settings.all') }}</v-chip>
-                <v-chip v-for="t2 in Object.keys(schemaData && schemaData.tables || {})" :key="t2" :value="t2" size="small" filter variant="outlined">{{ t('tab.' + t2) || t2 }}</v-chip>
-              </v-chip-group>
-              <v-btn size="small" variant="outlined" @click="addFirebaseUser()">{{ t('settings.add_user') }}</v-btn>
-            </div>
+              </template>
+            </v-table>
+            <v-btn variant="text" prepend-icon="mdi-plus" @click="addUser()" class="ma-2">{{ t('settings.add_user') }}</v-btn>
             </template>
           </v-card-text>
         </v-card>
