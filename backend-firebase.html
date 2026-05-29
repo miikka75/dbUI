@@ -9,14 +9,13 @@ backend = {
     return _db.collection('_meta').doc('schema').get().then(function(doc) {
       if (!doc.exists) return null;
       var d = doc.data();
-      if (d._json) return JSON.parse(d._json);
-      // Legacy: direct fields (loses key order)
+      if (d._json) return JSON.parse(d._json); // legacy
       if (d.tables) return d;
       return null;
     });
   },
   saveSchema: function(folderId, schema) {
-    return _db.collection('_meta').doc('schema').set({ _json: JSON.stringify(schema) });
+    return _db.collection('_meta').doc('schema').set(schema);
   },
   validateFolder: function(id) {
     return Promise.resolve({ valid: true, name: 'Firebase' });
