@@ -90,11 +90,11 @@ function bootData(folderId, schema) {
   var data = {};
   for (var name in tableMap) {
     var def = tables[name];
-    data[name] = getTableData(tableMap[name], def.tab || 'active');
-    if (def.archiveTab) { try { data[name + '__archive'] = getTableData(tableMap[name], def.archiveTab); } catch(e2) {} }
+    data[name] = getTableData(tableMap[name], def.partition || 'active');
+    if (def.archivePartition) { try { data[name + '__archive'] = getTableData(tableMap[name], def.archivePartition); } catch(e2) {} }
   }
   // Return schema as object + explicit key order arrays (google.script.run scrambles object keys)
-  return { schema: parsed, tableOrder: Object.keys(tables), columnOrders: Object.keys(tables).reduce(function(acc, t) { acc[t] = Object.keys(tables[t].columns); return acc; }, {}), tableMap: tableMap, languages: languages, lists: lists, data: data };
+  return { schema: parsed, tableOrder: Object.keys(tables), columnOrders: Object.keys(tables).reduce(function(acc, t) { var c = tables[t].columns; acc[t] = Array.isArray(c) ? c.map(function(x) { return typeof x === 'object' ? x.name : x; }).filter(Boolean) : Object.keys(c); return acc; }, {}), tableMap: tableMap, languages: languages, lists: lists, data: data };
   } catch(e) { return { error: e.message }; }
 }
 
@@ -105,14 +105,14 @@ function initSchema(folderId, schema) {
   const folder = DriveApp.getFolderById(folderId);
   const result = {};
   for (const [table, def] of Object.entries(schema)) {
-    result[table] = ensureTable(folder, table, def.columns, def.tab);
+    result[table] = ensureTable(folder, table, def.columns, def.partition);
   }
   return result;
 }
 
 function ensureTable(folder, tableName, columns, tabName) {
-  // Normalize: columns can be object {name: type} or array [name]
-  const cols = Array.isArray(columns) ? columns : Object.keys(columns);
+  // Normalize: columns can be object {name: type}, array of strings, or array of objects
+  const cols = Array.isArray(columns) ? columns.map(function(c) { return typeof c === 'object' ? c.name : c; }).filter(Boolean) : Object.keys(columns);
   const files = folder.getFilesByName(tableName);
   if (files.hasNext()) {
     const ss = SpreadsheetApp.openById(files.next().getId());
