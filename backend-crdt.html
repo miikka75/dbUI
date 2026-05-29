@@ -296,9 +296,9 @@ backend = {
     var needed = [];
     tables.forEach(function(table) {
       var def = schema[table];
-      var tab = (def && def.tab) || 'active';
+      var tab = (def && def.partition) || 'active';
       needed.push(_storeName(table, tab));
-      if (def && def.archiveTab) needed.push(_storeName(table, def.archiveTab));
+      if (def && def.archivePartition) needed.push(_storeName(table, def.archivePartition));
       result[table] = table;
     });
     // Find which stores are missing
@@ -332,9 +332,9 @@ backend = {
             Object.keys(tableMap).forEach(function(name) {
               var def = tables[name];
               chain = chain.then(function() {
-                return self.getTableData(name, (def && def.tab) || 'active').then(function(r) { data[name] = r; });
+                return self.getTableData(name, (def && def.partition) || 'active').then(function(r) { data[name] = r; });
               }).then(function() {
-                if (def && def.archiveTab) return self.getTableData(name, def.archiveTab).then(function(r) { data[name + '__archive'] = r; });
+                if (def && def.archivePartition) return self.getTableData(name, def.archivePartition).then(function(r) { data[name + '__archive'] = r; });
               });
             });
             return chain.then(function() {
