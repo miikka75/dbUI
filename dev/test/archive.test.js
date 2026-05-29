@@ -72,8 +72,8 @@ describe('moveRow', () => {
     const table = Object.keys(SCHEMA)[0];
     const row = { id: 'mv1', created_at: '2026-01-01', updated_at: '2026-01-01' };
     Object.keys(SCHEMA[table].columns).forEach(c => { if (!row[c]) row[c] = ''; });
-    const srcTab = SCHEMA[table].tab || 'active';
-    const arcTab = SCHEMA[table].archiveTab;
+    const srcTab = SCHEMA[table].partition || 'active';
+    const arcTab = SCHEMA[table].archivePartition;
     if (!arcTab) return;
     backend.putRow(table, row, srcTab);
     backend.moveRow(table, row, srcTab, arcTab);
@@ -85,8 +85,8 @@ describe('moveRow', () => {
     const table = Object.keys(SCHEMA)[0];
     const row = { id: 'mv2', created_at: '2026-01-01', updated_at: '2026-01-01' };
     Object.keys(SCHEMA[table].columns).forEach(c => { if (!row[c]) row[c] = ''; });
-    backend.putRow(table, row, SCHEMA[table].tab || 'active');
-    backend.moveRow(table, row, SCHEMA[table].tab || 'active', 'newtab');
+    backend.putRow(table, row, SCHEMA[table].partition || 'active');
+    backend.moveRow(table, row, SCHEMA[table].partition || 'active', 'newtab');
     assert.ok(backend.getTableData(table, 'newtab').rows.find(r => r.id === 'mv2'));
   });
 });
