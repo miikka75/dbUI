@@ -8,7 +8,7 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 - **Five backends**: Google Sheets (Apps Script), OAuth REST API, CRDT (IndexedDB + Drive sync), Firebase (Firestore), local SQLite
 - **i18n**: multi-language with auto-generated translation keys from schema
 - **Views**: union, join, aggregate, embedded views with configurable layout
-- **Header/footer**: translatable static text on tables, views, and embed entries
+- **Text entries**: translatable static text positioned anywhere in views and embeds
 - **Print**: layout-aware printing (table or card mode), per-card print, embeds included
 - **Responsive**: auto-switches between table and card layout based on column count
 - **Validation**: schema validated at boot time with error reporting
@@ -115,7 +115,6 @@ One hosted instance serves multiple independent databases:
 ## Project Structure
 
 ```
-schema.json                    ← schema definition (tables, views, settings)
 index.html                     ← unified entry point (auto-detects backend)
 app-core.html                  ← Vue app logic + computeds + helpers
 ui.html                        ← Vue template (data views, forms, setup)
@@ -130,330 +129,215 @@ firestore.rules                ← Firestore Security Rules
 apps-script/                   ← Apps Script deployment files
   index.html, Code.gs, DEPLOY.md
 dev/                           ← Local development
+  schema.json                  ← schema definition (tables, views, settings)
+  schema.js                    ← test helper (parses schema.json)
+  migrate-schema.js            ← schema v1 → v2 converter
   package.json                 ← dependencies + scripts (npm start/test)
   server.js                    ← HTTP server (port 3000)
   backend-local.js             ← SQLite backend (better-sqlite3)
   backend-local-client.html    ← client adapter for local server
-  schema.js                    ← test helper (parses schema.json)
-  test/                        ← node:test backend tests (84 tests)
+  test/                        ← node:test backend tests
+  test-ui/                     ← Playwright E2E tests
 ```
 
 ---
 
 ## Schema Reference (`schema.json`)
 
-The schema defines the entire app structure. It's a JSON file stored in the Drive folder (or read from disk in local dev).
-
-### Top-Level Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `defaultLanguage` | string | Language code for fallback (e.g. `"en"`) |
-| `tables` | object | Table definitions (key = table name) |
-| `views` | object | View definitions (key = view name) |
+The schema has two top-level sections:
 
 ```json
 {
   "defaultLanguage": "en",
   "tables": { ... },
-  "views": { ... }
+  "views": [ ... ]
 }
 ```
 
----
+### Tables
 
-### Common Properties (Tables & Views)
-
-These properties work identically on tables, views, and embed entries:
+Tables define data structure. Each table has columns and storage configuration.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `icon` | string | MDI icon for sidebar (e.g. `"mdi-table"`) |
-| `filter` | object | Filter displayed rows (`{field: value}`) |
-| `hideEmpty` | boolean | Hide empty fields per-row in card, hide column if ALL rows empty in table |
-| `readonly` | boolean | Disable editing (cells render as text, no add/delete buttons) |
-| `layout` | string | Render layout (see below) |
-| `defaultSort` | string | Column to sort by on load |
-| `header` | string | Static text displayed above the data area |
-| `footer` | string | Static text displayed below the data area |
-| `embed` | object\|array | Embed filtered data from another table/view (see Embed section) |
-
-#### Layout
-
-The `layout` property controls how rows are rendered. Works on tables, views, and embeds.
-
-| Value | Renders as |
-|-------|-----------|
-| `"auto"` (default) | Responsive: table when enough screen width, list when narrow. Embeds: table if ≥3 columns, list otherwise |
-| `"table"` | Horizontal table with column headers |
-| `"card"` | Vertical label:value cards (one card per row) |
-| `"list"` | Compact single-line items (values separated by `·`) |
-
----
-
-### Tables (unique properties)
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `columns` | object | ✅ | Column definitions (key = column name) |
-| `primaryKey` | string | ✅ | Primary key column (usually `"id"`) |
-| `tab` | string | | Sheet tab name for active data |
-| `archiveTab` | string | | Sheet tab name for archived rows |
-| `hidden` | boolean | | Hide from sidebar (reference tables) |
-| `ref` | boolean | | Marks as a reference/lookup table |
+| `columns` | array | Column definitions (array of objects) |
+| `partition` | string | Storage tab/collection name (default: `"active"`) |
+| `archivePartition` | string | Archive storage tab name |
+| `isLookup` | boolean | Reference/lookup table (managed in Lookup tab, not sidebar) |
 
 ```json
 "tasks": {
-  "columns": { ... },
-  "primaryKey": "id",
-  "tab": "active",
-  "archiveTab": "archive",
-  "defaultSort": "due_date",
-  "filter": { "status": "open" },
-  "icon": "mdi-checkbox-marked-outline"
+  "columns": [
+    { "name": "id", "type": "text", "hidden": true },
+    { "name": "date", "type": "date", "syncFrom": "notes" },
+    { "name": "title", "type": "text", "syncFrom": "notes" },
+    { "name": "status", "type": "select", "list": "status" },
+    { "name": "assigned_to", "type": "select", "list": "assigned_to", "allowNew": true, "sorted": true },
+    { "name": "city", "type": "ref", "table": "cities", "valueCol": "city", "filterBy": {"state": "state"} }
+  ],
+  "partition": "active",
+  "archivePartition": "archive"
 }
 ```
 
----
+#### Column types
 
-### Column Definitions
+| Type | Description |
+|------|-------------|
+| `text` | Plain text (default) |
+| `date` | Date picker, stored as `YYYY-MM-DD` |
+| `select` | Dropdown from a named list |
+| `ref` | Reference to a lookup table column |
 
-Each column is either a **type string** or a **column object**:
+#### Column properties
 
-#### Simple (type string)
+| Property | Description |
+|----------|-------------|
+| `name` | Column identifier (required) |
+| `type` | Column type (default: `"text"`) |
+| `hidden` | Don't display in UI (e.g., `id`, `created_at`) |
+| `list` | List name for `select` type |
+| `allowNew` | Allow adding new values to the list (combobox) |
+| `sorted` | Sort dropdown items alphabetically (for `select`/`list` columns) |
+| `syncFrom` | Mirror this column's value from another table |
+| `table` | Reference table name (for `ref` type) |
+| `valueCol` | Column to use as value (for `ref` type) |
+| `filterBy` | Filter reference options by another column (for `ref` type) |
+
+### Views
+
+Views define navigation, presentation, and data transformations. The `views` array is the sidebar — its order and nesting determine what users see.
+
+Each entry is either a **view definition** (has `name` + `sources`) or a **table reference** (has `table`):
+
 ```json
-"title": "text",
-"due_date": "date"
+"views": [
+  { "name": "dashboard", "sources": ["tasks", "notes"], "mode": "union", ... },
+  { "name": "report", "sources": ["tasks"], "mode": "union", "views": [
+    { "name": "sub_report", ... }
+  ]},
+  { "table": "tasks" }
+]
 ```
 
-#### Object (with options)
+#### View properties
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | string | `"text"`, `"date"`, `"select"`, `"ref"` |
-| `hidden` | boolean | Hide from table/card view (still stored in data) |
-| `list` | string | List name for `select` type (dropdown options from Lookup Data) |
-| `allowNew` | boolean | Allow typing new values that auto-add to the list (`select` type only) |
-| `mirror` | string | Source table name — value copied from master table (read-only) |
-| `table` | string | Reference table name for `ref` type |
-| `filterBy` | string | Parent column for hierarchical ref filtering |
+| `name` | string | View identifier |
+| `sources` | string[] | Table names to pull data from |
+| `mode` | string | `"union"` (stack rows) or `"join"` (merge by id) |
+| `columns` | array | Mix of column names, text entries, embeds, and conditional columns |
+| `filter` | object | Static row filter (e.g., `{"status": "in_progress"}`) |
+| `matchKey` | string | Column to match rows in join mode (default: `"id"`) |
+| `readonly` | boolean | Disable editing (report views) |
+| `layout` | string | `"table"`, `"card"`, or `"list"` |
+| `collapsed` | boolean | Cards start collapsed (accordion) |
+| `defaultSort` | string | Default sort column |
+| `hideEmpty` | boolean | Hide columns where all rows are empty |
+| `icon` | string | MDI icon for sidebar |
+| `views` | array | Child views (nested sidebar items, recursive) |
 
-```json
-"priority": {
-  "type": "select",
-  "list": "priorities"
-},
-"due_date": {
-  "type": "date",
-  "mirror": "projects"
-},
-"city": {
-  "type": "ref",
-  "table": "cities",
-  "filterBy": "country"
-},
-"created_at": {
-  "type": "text",
-  "hidden": true
-}
-```
+#### Aggregate views
 
-#### Column Types
-
-| Type | Renders as | Notes |
-|------|-----------|-------|
-| `text` | Contenteditable span | Default type |
-| `date` | `<input type="date">` | Native date picker |
-| `select` | `v-autocomplete` | Dropdown from `list` name |
-| `ref` | `v-autocomplete` | Dropdown from reference table with hierarchical filtering |
-
-#### Mirror Columns
-
-Mirror columns copy their value from a master table row with the same `id`. The master table owns the row lifecycle (create/delete/archive). Tables with mirror columns cannot add or delete rows independently.
-
-```json
-// tasks.columns.due_date mirrors projects.columns.due_date
-"due_date": { "type": "date", "mirror": "projects" }
-```
-
----
-
-### Views (unique properties)
-
-Views combine data from multiple tables without duplicating storage.
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `sources` | string[] | ✅ | Table names to pull data from |
-| `columns` | string[] | ✅ | Columns to display (strings or conditional objects) |
-| `mode` | string | ✅ | `"union"` or `"join"` |
-| `matchKey` | string | | Column to match rows in join mode (default: `"id"`) |
-| `keys` | object/array | | Aggregate: group rows by these source columns |
-| `value` | string | | Aggregate: collect this column's values per group (sorted descending — works with ISO dates `YYYY-MM-DD`) |
-| `children` | string[] | | Child view names shown as indented sub-items in sidebar |
-
-#### Aggregate Views
-
-Add `keys` + `value` to any view to group rows and collect values into fixed columns. Works as a post-processing step after union/join/filter.
+Add `groupBy` + `collect` to group rows and collect values into fixed columns:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `keys` | `{ column, from }` or `string[]` | `column`: output column name for group key. `from`: source columns to extract key from. Array shorthand: key goes in `columns[0]`. |
-| `value` | string | Source column to collect per group (sorted descending) |
-| `columns` | string[] | First N-1 non-key columns become Nth value slots |
+| `groupBy` | `{ column, from }` or `string[]` | Group key: `column` = output name, `from` = source columns |
+| `collect` | string | Source column to collect per group (sorted descending) |
 
 ```json
-"attendance": {
+{
+  "name": "attendance",
   "sources": ["tasks", "notes"],
   "mode": "union",
-  "keys": { "column": "person", "from": ["assigned_to", "author"] },
-  "value": "date",
-  "columns": ["person", "latest", "previous", "3rd"],
-  "icon": "mdi-account-group"
+  "groupBy": { "column": "person", "from": ["assigned_to", "author"] },
+  "collect": "date",
+  "columns": ["person", "latest", "previous", "3rd"]
 }
 ```
 
-Output: one row per unique person, with their 3 most recent dates from either table. Read-only, sortable by any column.
+Output: one row per person with their N most recent dates. Read-only, sortable.
 
-#### Sidebar Grouping (children)
+### Columns array
 
-Views with `children` render as expandable groups in the sidebar. Click the parent to show its view; child views appear indented below.
+The `columns` array in views can contain:
 
+#### 1. Column names (strings)
 ```json
-"combined": {
-  "sources": ["tasks", "notes"],
-  "mode": "join",
-  "children": ["attendance", "in_progress"],
-  ...
-}
+"date", "title", "status"
 ```
 
-Child views are independent — they work standalone if accessed directly. The `children` property only controls sidebar presentation.
+#### 2. Conditional columns (show field only when condition met)
+```json
+{ "content": { "status": "in_progress" } }
+```
+Shows `content` column only for rows where `status === "in_progress"`.
+
+#### 3. Text entries (translatable static text)
+```json
+{ "text": "view.report.header" }
+```
+Renders translated text at that position. Hidden if no translation exists. In views: hidden when no data. Position determines placement (first = header, last = footer, middle = between columns).
+
+#### 4. Inline embeds (filtered table data)
+```json
+{ "sources": ["tasks"], "filter": {"status": "open"}, "columns": ["date", "title"], "layout": "table" }
+```
+Renders a filtered subset of another table. Hidden when filter produces 0 rows.
+
+Embed properties:
+
+| Property | Description |
+|----------|-------------|
+| `sources` | Source table(s) (array) |
+| `mode` | `"union"` or `"join"` (for multi-source embeds) |
+| `filter` | Row filter |
+| `columns` | Columns to display (can include `{ "text": "..." }` entries) |
+| `layout` | `"table"`, `"card"`, or `"chip"` (default) |
+| `text` | Label shown above embed (only when embed has rows) |
+| `defaultSort` | Sort column for embed rows |
+| `hideEmpty` | Hide columns where all embed rows are empty |
+
+#### Full example
 
 ```json
-"dashboard": {
-  "sources": ["tasks", "notes"],
-  "columns": ["title", "status", {"resolution": {"status": "closed"}}],
-  "mode": "join",
+{
+  "name": "progress_report",
+  "sources": ["tasks"],
+  "mode": "union",
   "readonly": true,
-  "layout": "card",
-  "filter": { "status": "active" },
-  "defaultSort": "due_date",
-  "embed": { ... }
+  "icon": "mdi-progress-clock",
+  "columns": [
+    { "text": "view.report.header" },
+    { "sources": ["tasks"], "filter": {"status": "open"}, "columns": [
+      { "text": "embed.open.title" }, "date", "title", "assigned_to"
+    ]},
+    { "sources": ["tasks"], "filter": {"status": "in_progress"}, "columns": [
+      { "text": "embed.ip.title" }, "date", "title", "assigned_to",
+      { "text": "embed.ip.attention" }
+    ]},
+    { "text": "view.report.footer" }
+  ]
 }
 ```
 
----
+### Lists and translations
 
-### View Modes
+- **List values** are stored as stable keys (e.g., `"in_progress"`, not "In Progress")
+- **Display** uses translations: `list.status.in_progress` → "Käynnissä" / "In Progress"
+- **Locked values**: list values referenced in schema filters are auto-seeded and non-deletable
+- **Translation keys** auto-generated: `tab.*`, `view.*`, `field.*`, `list.*.*`, text entries
 
-| Mode | SQL Analogy | Behavior |
-|------|-------------|----------|
-| `union` | `UNION ALL` | Stacks all rows from all sources. Shows `_source` badge. |
-| `join` | `FULL OUTER JOIN ON id` | Merges rows with same id/matchKey. One row shows fields from all tables. |
+### Schema migration
 
-#### Conditional Columns
-
-Columns in a view's `columns` array support two formats:
-
-```json
-"columns": [
-  "title",                                  // string: always visible
-  {"content": {"status": "In Progress"}}    // object: visible only when condition matches
-]
+Convert old-format schemas to v2:
+```bash
+node dev/migrate-schema.js old-schema.json > schema.json
 ```
 
-Object format: `{ columnName: { field: value } }` — the column is shown only for rows where `field === value`.
-
-In card layout, conditional columns are hidden per-row when the condition doesn't match. In table layout, columns are always visible (conditions cannot hide table columns per-row).
-
----
-
-### Embed
-
-Embeds show filtered data from another table or view as a read-only section. Can be a single object or an array for multiple embeds. Supports all common properties (`filter`, `columns`, `header`, `footer`, `defaultSort`, `hideEmpty`, `layout`).
-
-**Embed-specific properties:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `table` | string | Source table name (use `table` OR `view`, not both) |
-| `view` | string | Source view name (inherits its columns/filter/sources) |
-| `afterColumn` | string | Position embed after this column in card layout |
-
-#### Table-based embed
-```json
-"embed": {
-  "table": "subtasks",
-  "filter": { "status": "in_progress" },
-  "columns": ["title", "assigned_to", "priority"],
-  "afterColumn": "description"
-}
-```
-
-#### View-based embed
-```json
-"embed": {
-  "view": "active_items",
-  "afterColumn": "title"
-}
-```
-
-#### Multiple embeds with headers
-```json
-"embed": [
-  { "header": "Open items", "table": "tasks", "filter": {"status": "Open"}, "columns": ["title"] },
-  { "header": "In Progress", "table": "tasks", "filter": {"status": "In Progress"}, "columns": ["title", "assigned_to"], "footer": "Check daily" }
-]
-```
-
-**Positioning:**
-- With `afterColumn`: in card mode, renders between fields. In table mode, renders as full-width row after data.
-- Without `afterColumn`: renders at the bottom of the view.
-
-**Validation:** Circular embed references (A → B → A) are detected at boot time.
-
----
-
-### Lists (Dropdown Options)
-
-Lists provide dropdown options for `select` columns. Defined in schema, items managed in the Lookup Data tab.
-
-```json
-"priority": { "type": "select", "list": "priorities" }
-```
-
-List names are fixed by schema (not user-creatable). Items within lists are editable in the app's Lookup Data tab.
-
-Storage: Google Sheets mode stores lists in a `lists` spreadsheet with one tab per list name, values in column A.
-
----
-
-### i18n (Translations)
-
-Translation keys are auto-generated from schema:
-
-| Pattern | Source |
-|---------|--------|
-| `tab.{tableName}` | Table names |
-| `view.{viewName}` | View names |
-| `field.{columnName}` | Column names |
-| `btn.add`, `btn.show_active`, etc. | Fixed UI keys |
-
-No translations needed in schema — add them in the Languages tab. Untranslated keys show as raw key text (e.g. `field.assigned_to`).
-
----
-
-### Schema Validation
-
-`validateSchema()` runs at boot and reports errors via snackbar notification + console:
-
-- View columns not found in any source table
-- Mirror references to non-existent tables
-- Ref table references to non-existent tables
-- View sources referencing non-existent tables
-- Embed view references to non-existent views
-- Circular embed references
+Handles: object→array columns, property renames (`tab`→`partition`, `mirror`→`syncFrom`, `ref`→`isLookup`, `keys`→`groupBy`, `value`→`collect`), embed inlining, header/footer→text entries, children→views.
 
 ---
 
