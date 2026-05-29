@@ -9,7 +9,7 @@ function getTableMirrorSource(tables, tableName) {
   if (!cols) return null;
   for (var c in cols) {
     var def = cols[c];
-    if (def && typeof def === 'object' && def.mirror) return def.mirror;
+    if (def && typeof def === 'object' && def.syncFrom) return def.syncFrom;
   }
   return null;
 }
@@ -35,9 +35,9 @@ describe('Mirror columns', () => {
         const mirrorCols = SCHEMA[mt].columns;
         for (const mc in mirrorCols) {
           const mdef = mirrorCols[mc];
-          if (mdef && typeof mdef === 'object' && mdef.mirror) mirrorRow[mc] = noteRow[mc] || '';
+          if (mdef && typeof mdef === 'object' && mdef.syncFrom) mirrorRow[mc] = noteRow[mc] || '';
         }
-        backend.putRow(mt, mirrorRow, SCHEMA[mt].tab);
+        backend.putRow(mt, mirrorRow, SCHEMA[mt].partition);
       }
     }
 
@@ -61,13 +61,13 @@ describe('Mirror columns', () => {
       const mirrorCols = SCHEMA[mt].columns;
       for (const mc in mirrorCols) {
         const mdef = mirrorCols[mc];
-        if (mdef && typeof mdef === 'object' && mdef.mirror === source && mc === col) {
-          const tasks = backend.getTableData(mt, SCHEMA[mt].tab);
+        if (mdef && typeof mdef === 'object' && mdef.syncFrom === source && mc === col) {
+          const tasks = backend.getTableData(mt, SCHEMA[mt].partition);
           const mr = tasks.rows.find(r => r.id === 'n1');
           if (mr) {
             mr[mc] = value;
             mr.updated_at = new Date().toISOString();
-            backend.putRow(mt, mr, SCHEMA[mt].tab);
+            backend.putRow(mt, mr, SCHEMA[mt].partition);
           }
         }
       }
@@ -86,7 +86,7 @@ describe('Mirror columns', () => {
     const source = 'notes';
     for (const mt in SCHEMA) {
       if (getTableMirrorSource(SCHEMA, mt) === source) {
-        backend.deleteRow(mt, 'n1', SCHEMA[mt].tab);
+        backend.deleteRow(mt, 'n1', SCHEMA[mt].partition);
       }
     }
 
@@ -106,9 +106,9 @@ describe('archive propagation to mirror tables', () => {
     for (const t of Object.keys(SCHEMA)) {
       for (const col of Object.keys(SCHEMA[t].columns)) {
         const def = SCHEMA[t].columns[col];
-        if (def && typeof def === 'object' && def.mirror) {
+        if (def && typeof def === 'object' && def.syncFrom) {
           mirrorTable = t;
-          masterTable = def.mirror;
+          masterTable = def.syncFrom;
           break;
         }
       }
@@ -117,8 +117,8 @@ describe('archive propagation to mirror tables', () => {
     if (!masterTable || !mirrorTable) return;
     const masterTab = SCHEMA[masterTable].tab || 'active';
     const mirrorTab = SCHEMA[mirrorTable].tab || 'active';
-    const masterArchive = SCHEMA[masterTable].archiveTab;
-    const mirrorArchive = SCHEMA[mirrorTable].archiveTab;
+    const masterArchive = SCHEMA[masterTable].archivePartition;
+    const mirrorArchive = SCHEMA[mirrorTable].archivePartition;
     if (!masterArchive || !mirrorArchive) return;
 
     const row = { id: 'arch1', created_at: '2026-01-01', updated_at: '2026-01-01' };
