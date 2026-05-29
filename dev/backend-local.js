@@ -46,12 +46,12 @@ function createLocalBackend(dbPath) {
     initSchema(folderId, schema) {
       const result = {};
       for (const [table, def] of Object.entries(schema)) {
-        const columns = Array.isArray(def.columns) ? def.columns : Object.keys(def.columns);
-        const cols = columns.map(c => c === def.primaryKey ? c + ' TEXT PRIMARY KEY' : c + ' TEXT').join(', ');
+        const columns = Array.isArray(def.columns) ? def.columns.map(c => typeof c === 'object' ? c.name : c).filter(Boolean) : Object.keys(def.columns);
+        const cols = columns.map(c => c === 'id' ? c + ' TEXT PRIMARY KEY' : c + ' TEXT').join(', ');
         // Create base + tab-suffixed tables
         const tabs = [table];
-        if (def.tab) tabs.push(table + '__' + def.tab);
-        if (def.archiveTab) tabs.push(table + '__' + def.archiveTab);
+        if (def.partition) tabs.push(table + '__' + def.partition);
+        if (def.archivePartition) tabs.push(table + '__' + def.archivePartition);
         for (const t of tabs) {
           db.exec('CREATE TABLE IF NOT EXISTS "' + t + '" (' + cols + ')');
           const info = db.pragma('table_info("' + t + '")');
@@ -104,17 +104,32 @@ function createLocalBackend(dbPath) {
 
     putRow(tableId, rowData, tab) {
       const actualTable = tab ? tableId + '__' + tab : tableId;
-      const meta = db.prepare('SELECT columns FROM _tables WHERE name = ?').get(tableId);
-      if (!meta) throw new Error('Table not found: ' + tableId);
+      let meta = db.prepare('SELECT columns FROM _tables WHERE name = ?').get(tableId);
+      if (!meta) {
+        // Auto-register table from row data
+        const cols = Object.keys(rowData).filter(k => k !== undefined);
+        db.prepare('INSERT OR REPLACE INTO _tables (name, columns) VALUES (?, ?)').run(tableId, JSON.stringify(cols));
+        const colDefs = cols.map(c => c === 'id' ? c + ' TEXT PRIMARY KEY' : c + ' TEXT').join(', ');
+        db.exec('CREATE TABLE IF NOT EXISTS "' + actualTable + '" (' + colDefs + ')');
+        meta = { columns: JSON.stringify(cols) };
+      }
       const columns = JSON.parse(meta.columns);
       if (tab) {
         const cols = columns.map(c => c === 'id' ? c + ' TEXT PRIMARY KEY' : c + ' TEXT').join(', ');
         db.exec('CREATE TABLE IF NOT EXISTS "' + actualTable + '" (' + cols + ')');
       }
       const values = columns.map(c => rowData[c] !== undefined ? rowData[c] : '');
+      if (values.length !== columns.length) console.error('putRow mismatch:', tableId, 'cols:', columns.length, 'vals:', values.length);
+      const badVals = values.filter(v => typeof v === 'object' && v !== null);
+      if (badVals.length) console.error('putRow has object values:', badVals, 'for cols:', columns.filter((c,i) => typeof values[i] === 'object'));
       const colList = columns.map(c => '"' + c + '"').join(',');
       const placeholders = columns.map(() => '?').join(',');
-      db.prepare('INSERT OR REPLACE INTO "' + actualTable + '" (' + colList + ') VALUES (' + placeholders + ')').run(...values);
+      try {
+        db.prepare('INSERT OR REPLACE INTO "' + actualTable + '" (' + colList + ') VALUES (' + placeholders + ')').run(...values);
+      } catch(e) {
+        console.error('putRow SQL error:', e.message, 'table:', actualTable, 'cols:', columns, 'rowData keys:', Object.keys(rowData));
+        throw e;
+      }
     },
 
     deleteRow(tableId, id, tab) {
