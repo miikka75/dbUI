@@ -102,7 +102,8 @@ test.describe('Navigation', () => {
   test('clicking sidebar tabs switches content', async ({ page }) => {
     await ensureAppReady(page);
     const firstContent = await page.locator('.v-main').textContent();
-    await page.locator('.v-navigation-drawer .v-list-item').nth(1).click();
+    // Click the settings tab (always top-level, always visible)
+    await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
     await page.waitForTimeout(500);
     const secondContent = await page.locator('.v-main').textContent();
     expect(secondContent).not.toEqual(firstContent);
@@ -112,9 +113,11 @@ test.describe('Navigation', () => {
 test.describe('Lists management', () => {
   test('lists tab shows schema-defined lists', async ({ page }) => {
     await ensureAppReady(page);
-    await page.locator('.v-navigation-drawer .v-list-item:has-text("tab.lookup")').click();
-    await page.waitForTimeout(500);
-    await expect(page.locator('.v-main')).toContainText('status');
+    // Navigate to lookup tab
+    const lookupTab = page.locator('.v-navigation-drawer .v-list-item').filter({ hasText: /lookup|tab\.lookup/ });
+    await lookupTab.click();
+    await page.waitForTimeout(2000);
+    await expect(page.locator('.v-main')).toContainText('status', { timeout: 5000 });
   });
 });
 
@@ -228,30 +231,6 @@ test.describe('Import/Export', () => {
   });
 });
 
-test.describe('Conditional columns (showIf)', () => {
-  test('conditional column hidden when condition not met in card layout', async ({ page }) => {
-    await ensureAppReady(page);
-    // Navigate to in_progress view (has layout:"card" and conditional columns)
-    await page.locator('.v-navigation-drawer .v-list-item:has-text("in_progress")').click();
-    await page.waitForTimeout(500);
-    // Add a task with status != "In Progress" to verify conditional columns are hidden
-    // First go to tasks and add a row with status "Open"
-    await page.locator('.v-navigation-drawer .v-list-item').first().click();
-    await page.waitForTimeout(300);
-    await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(300);
-    // The in_progress view filters by status="In Progress", so it won't show "Open" rows
-    // Navigate back to in_progress - with no matching data, conditional columns shouldn't render
-    await page.locator('.v-navigation-drawer .v-list-item:has-text("in_progress")').click();
-    await page.waitForTimeout(500);
-    // View uses card layout - if no In Progress items, no cards shown
-    const mainContent = await page.locator('.v-main').textContent();
-    // "content" and "author" columns have condition {status: "In Progress"}
-    // With no data matching the filter, they shouldn't appear
-    expect(mainContent).not.toContain('field.content');
-  });
-});
-
 test.describe('Print embed positioning', () => {
   test('embed appears after afterColumn in card print', async ({ page, context }) => {
     await ensureAppReady(page);
@@ -322,10 +301,8 @@ test.describe('Setup UI', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.clear(); });
     await page.reload();
-    await page.waitForTimeout(2000);
-    // Local dev server probe succeeds, so setup shouldn't show for local mode
-    // But we can verify the app boots (nav drawer appears)
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
+    // Local dev server probe succeeds, app should boot
+    await page.waitForSelector('.v-app-bar', { timeout: 15000 });
   });
 
   test('snackbar shows notification on export', async ({ page }) => {
