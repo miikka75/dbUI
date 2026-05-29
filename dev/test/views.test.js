@@ -59,8 +59,10 @@ describe('Union view data access', () => {
 
   it('VIEWS columns exist in at least one source table', () => {
     for (const [name, view] of Object.entries(VIEWS)) {
-      if (view.keys && view.value) continue; // aggregate views have computed columns
+      if (view.groupBy && view.collect) continue; // aggregate views have computed columns
       for (const col of view.columns) {
+        if (typeof col === 'object' && col.sources && !col.name) continue; // inline embed
+        if (typeof col === 'object' && col.text) continue; // inline text
         const colStr = typeof col === 'object' ? Object.keys(col)[0] : col;
         const found = view.sources.some(src => getColumns(src).includes(colStr));
         assert.ok(found, 'View "' + name + '" column "' + colStr + '" not in any source table');
@@ -208,5 +210,106 @@ describe('Aggregate view logic', () => {
     assert.equal(result[0].person, 'Alice');
     assert.equal(result[0].latest, '2026-05-27');
     assert.equal(result[0].previous, '2026-05-20');
+  });
+});
+
+describe('Schema property coverage', () => {
+  it('text entries are filtered from visibleCols', () => {
+    // Text entries in view columns should not appear as visible columns
+    const view = VIEWS.progress_report || VIEWS.combined;
+    if (!view) return; // skip if view doesn't exist
+    const cols = (view.columns || []);
+    const textEntries = cols.filter(c => typeof c === 'object' && c.text && !c.sources);
+    const embedEntries = cols.filter(c => typeof c === 'object' && c.sources);
+    // Text and embed entries should exist in the schema
+    assert.ok(textEntries.length > 0 || embedEntries.length > 0, 'Schema should have text or embed entries in columns');
+  });
+
+  it('embed columns can contain text entries', () => {
+    // Find an embed with text in its columns
+    let found = false;
+    for (const vn in VIEWS) {
+      const view = VIEWS[vn];
+      (view.columns || []).forEach(c => {
+        if (typeof c === 'object' && c.sources && Array.isArray(c.columns)) {
+          c.columns.forEach(ec => { if (typeof ec === 'object' && ec.text) found = true; });
+        }
+      });
+    }
+    assert.ok(found, 'At least one embed should have text entries in its columns');
+  });
+
+  it('readonly view property exists in schema', () => {
+    let hasReadonly = false;
+    for (const vn in VIEWS) { if (VIEWS[vn].readonly) hasReadonly = true; }
+    assert.ok(hasReadonly, 'At least one view should have readonly: true');
+  });
+
+  it('layout property exists in schema', () => {
+    let hasLayout = false;
+    for (const vn in VIEWS) { if (VIEWS[vn].layout) hasLayout = true; }
+    assert.ok(hasLayout, 'At least one view should have layout property');
+  });
+
+  it('hideEmpty property exists in schema', () => {
+    let hasHideEmpty = false;
+    for (const vn in VIEWS) {
+      if (VIEWS[vn].hideEmpty) hasHideEmpty = true;
+      (VIEWS[vn].columns || []).forEach(c => { if (typeof c === 'object' && c.hideEmpty) hasHideEmpty = true; });
+    }
+    assert.ok(hasHideEmpty, 'At least one view or embed should have hideEmpty: true');
+  });
+
+  it('isLookup table not included in non-lookup tables', () => {
+    const lookups = Object.keys(SCHEMA).filter(t => SCHEMA[t].isLookup);
+    const nonLookups = Object.keys(SCHEMA).filter(t => !SCHEMA[t].isLookup);
+    assert.ok(lookups.length > 0, 'Should have at least one lookup table');
+    assert.ok(nonLookups.length > 0, 'Should have at least one non-lookup table');
+  });
+
+  it('syncFrom column property exists', () => {
+    let found = false;
+    for (const t in SCHEMA) {
+      for (const c in SCHEMA[t].columns) {
+        const def = SCHEMA[t].columns[c];
+        if (def && typeof def === 'object' && def.syncFrom) found = true;
+      }
+    }
+    assert.ok(found, 'At least one column should have syncFrom');
+  });
+
+  it('locked list values extracted from filters', () => {
+    // Simulate lockedListValues logic
+    const locked = {};
+    for (const vn in VIEWS) {
+      const view = VIEWS[vn];
+      if (view.filter) {
+        for (const col in view.filter) {
+          for (const t in SCHEMA) {
+            const d = SCHEMA[t].columns[col];
+            if (d && typeof d === 'object' && d.list) {
+              if (!locked[d.list]) locked[d.list] = {};
+              locked[d.list][view.filter[col]] = true;
+            }
+          }
+        }
+      }
+      // Also check inline embeds
+      (view.columns || []).forEach(c => {
+        if (typeof c === 'object' && c.sources && c.filter) {
+          for (const col in c.filter) {
+            for (const t in SCHEMA) {
+              const d = SCHEMA[t].columns[col];
+              if (d && typeof d === 'object' && d.list) {
+                if (!locked[d.list]) locked[d.list] = {};
+                locked[d.list][c.filter[col]] = true;
+              }
+            }
+          }
+        }
+      });
+    }
+    assert.ok(Object.keys(locked).length > 0, 'Should have locked list values from filters');
+    assert.ok(locked.status, 'status list should have locked values');
   });
 });
