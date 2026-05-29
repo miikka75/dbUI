@@ -119,3 +119,82 @@ describe('Firebase role resolution', () => {
     assert.equal(getFirebaseRole(list, 'v@b.com'), 'viewer');
   });
 });
+
+describe('Embed access filtering', () => {
+  function filterEmbeds(embeds, allowedTables) {
+    if (!allowedTables) return embeds;
+    return embeds.filter(function(e) {
+      if (e._text) return true;
+      var sources = e.sources || [];
+      return sources.every(function(s) { return allowedTables.indexOf(s) >= 0; });
+    });
+  }
+
+  const embeds = [
+    { sources: ['tasks'], columns: ['date', 'title'] },
+    { sources: ['notes'], columns: ['content'] },
+    { sources: ['tasks', 'notes'], columns: ['date', 'content'] },
+    { _text: 'section.header' }
+  ];
+
+  it('null allowedTables shows all embeds', () => {
+    assert.equal(filterEmbeds(embeds, null).length, 4);
+  });
+  it('user with all sources sees all embeds', () => {
+    assert.equal(filterEmbeds(embeds, ['tasks', 'notes']).length, 4);
+  });
+  it('user missing notes hides notes-only and multi-source embeds', () => {
+    var result = filterEmbeds(embeds, ['tasks']);
+    assert.equal(result.length, 2); // tasks embed + text
+    assert.deepEqual(result[0].sources, ['tasks']);
+    assert.equal(result[1]._text, 'section.header');
+  });
+  it('text entries always visible regardless of access', () => {
+    var result = filterEmbeds(embeds, []);
+    assert.equal(result.length, 1);
+    assert.equal(result[0]._text, 'section.header');
+  });
+});
+
+describe('Server-side table access check', () => {
+  function checkTableAccess(tableId, users, userEmail) {
+    if (!users) return true;
+    const u = Object.values(users).find(v => v.user === userEmail);
+    if (!u) return false;
+    if (u.role === 'admin' || u.tables === 'all') return true;
+    const base = tableId ? tableId.split('__')[0] : '';
+    return (u.tables || []).indexOf(base) >= 0;
+  }
+
+  const users = {
+    'admin@dev': { role: 'admin', user: 'admin@dev', tables: 'all' },
+    'editor@dev': { role: 'editor', user: 'editor@dev', tables: ['tasks', 'notes'] },
+    'viewer@dev': { role: 'viewer', user: 'viewer@dev', tables: ['tasks'] }
+  };
+
+  it('admin can access any table', () => {
+    assert.equal(checkTableAccess('cities__active', users, 'admin@dev'), true);
+  });
+  it('editor can access allowed table', () => {
+    assert.equal(checkTableAccess('tasks__active', users, 'editor@dev'), true);
+  });
+  it('editor cannot access disallowed table', () => {
+    assert.equal(checkTableAccess('cities__active', users, 'editor@dev'), false);
+  });
+  it('viewer can access allowed table', () => {
+    assert.equal(checkTableAccess('tasks__active', users, 'viewer@dev'), true);
+  });
+  it('viewer cannot access disallowed table', () => {
+    assert.equal(checkTableAccess('notes__active', users, 'viewer@dev'), false);
+  });
+  it('unknown user has no access', () => {
+    assert.equal(checkTableAccess('tasks__active', users, 'unknown@dev'), false);
+  });
+  it('no users config = unrestricted', () => {
+    assert.equal(checkTableAccess('tasks__active', null, 'anyone@dev'), true);
+  });
+  it('handles partition suffix correctly', () => {
+    assert.equal(checkTableAccess('tasks__archive', users, 'editor@dev'), true);
+    assert.equal(checkTableAccess('cities__archive', users, 'editor@dev'), false);
+  });
+});
