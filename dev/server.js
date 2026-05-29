@@ -14,6 +14,11 @@ const STATIC_DIR = path.join(__dirname, '..');
 // Auto-init schema on start
 backend.initSchema('local', SCHEMA);
 
+// Persist users to file
+const USERS_PATH = path.join(__dirname, 'users.json');
+if (fs.existsSync(USERS_PATH)) backend._users = JSON.parse(fs.readFileSync(USERS_PATH, 'utf8'));
+function saveUsers() { fs.writeFileSync(USERS_PATH, JSON.stringify(backend._users || {}, null, 2)); }
+
 function parseBody(req) {
   return new Promise((resolve) => {
     let body = '';
@@ -41,6 +46,23 @@ const server = http.createServer(async (req, res) => {
     const body = req.method === 'POST' ? await parseBody(req) : {};
     const route = url.pathname.slice(5);
 
+    // Access control: resolve user's allowed tables
+    const userEmail = req.headers['x-user'] || 'local@dev';
+    function getAllowedTables() {
+      if (!backend._users) return null; // no users = no restrictions
+      const u = Object.values(backend._users).find(v => v.user === userEmail);
+      if (!u) return []; // unknown user = no access
+      if (u.role === 'admin' || u.tables === 'all') return null; // null = unrestricted
+      return u.tables || [];
+    }
+    function checkTableAccess(tableId) {
+      const allowed = getAllowedTables();
+      if (!allowed) return true;
+      // tableId may be "tasks__active" -> extract base name
+      const base = tableId ? tableId.split('__')[0] : '';
+      return allowed.indexOf(base) >= 0;
+    }
+
     try {
     switch (route) {
       case 'getSchema': return json(res, backend.getSchema('local'));
@@ -49,12 +71,12 @@ const server = http.createServer(async (req, res) => {
       case 'getFolderConfig': return json(res, backend.getFolderConfig('local'));
       case 'setFolderConfig': backend.setFolderConfig('local', body.config); return json(res, { ok: true });
       case 'initSchema': return json(res, backend.initSchema('local', body.schema || SCHEMA));
-      case 'resetData': backend.resetData(); backend._users = undefined; return json(res, { ok: true });
+      case 'resetData': backend.resetData(); backend._users = undefined; saveUsers(); return json(res, { ok: true });
       case 'getAvailableTables': return json(res, backend.getAvailableTables('local'));
       case 'getAvailableLanguages': return json(res, backend.getAvailableLanguages('local'));
-      case 'getTableData': return json(res, backend.getTableData(body.tableId, body.tab));
-      case 'putRow': backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
-      case 'deleteRow': return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
+      case 'getTableData': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } return json(res, backend.getTableData(body.tableId, body.tab));
+      case 'putRow': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
+      case 'deleteRow': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
       case 'getTranslations': return json(res, backend.getTranslations(body.folderId || 'local', body.langCode));
       case 'updateTranslations': backend.updateTranslations(body.folderId || 'local', body.langCode, body.updates); return json(res, { ok: true });
       case 'createLanguage': return json(res, { id: backend.createLanguage(body.folderId || 'local', body.code, body.name, body.keys) });
@@ -62,12 +84,12 @@ const server = http.createServer(async (req, res) => {
       case 'getFileModifiedTime': return json(res, { time: backend.getFileModifiedTime(body.fileId) });
       case 'getLists': return json(res, backend.getLists('local'));
       case 'saveLists': backend.saveLists('local', body.lists); return json(res, { ok: true });
-      case 'putListItem': backend.putListItem('local', body.listName, body.value); return json(res, { ok: true });
-      case 'moveRow': backend.moveRow(body.tableId, body.rowData, body.fromTab, body.toTab); return json(res, { ok: true });
+      case 'putListItem': if (!checkTableAccess(body.listName)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.putListItem('local', body.listName, body.value); return json(res, { ok: true });
+      case 'moveRow': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.moveRow(body.tableId, body.rowData, body.fromTab, body.toTab); return json(res, { ok: true });
       case 'saveConfig': fs.writeFileSync(path.join(STATIC_DIR, body.filename), JSON.stringify(body.data, null, 2)); return json(res, { ok: true });
       case 'getUsers': return json(res, backend._users || {});
-      case 'setUserRole': { if (!backend._users) backend._users = {}; backend._users[body.uid] = { role: body.role, user: body.user || '', tables: body.tables || 'all' }; return json(res, { ok: true }); }
-      case 'removeUser': { if (backend._users) delete backend._users[body.uid]; return json(res, { ok: true }); }
+      case 'setUserRole': { if (!backend._users) backend._users = {}; backend._users[body.uid] = { role: body.role, user: body.user || '', tables: body.tables || 'all' }; saveUsers(); return json(res, { ok: true }); }
+      case 'removeUser': { if (backend._users) delete backend._users[body.uid]; saveUsers(); return json(res, { ok: true }); }
       default: res.writeHead(404); return res.end('Not found');
     }
     } catch (err) {
