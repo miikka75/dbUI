@@ -32,11 +32,12 @@ var backend_users = {
 };
 
 function _post(route, body) {
+  var user = (new URLSearchParams(location.search)).get('user') || localStorage.getItem('test_user') || 'local@dev';
   return fetch('/api/' + route, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-User': user },
     body: JSON.stringify(body)
-  }).then(r => r.json());
+  }).then(function(r) { if (!r.ok) return r.json().then(function(e) { return Promise.reject(e); }); return r.json(); });
 }
 
 init();
