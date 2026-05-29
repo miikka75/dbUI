@@ -107,11 +107,6 @@
     </v-dialog>
 
     <!-- App Bar -->
-    <!-- Loading -->
-    <div v-if="loading && !showSetup" style="display:flex; align-items:center; justify-content:center; height:100vh">
-      <v-progress-circular indeterminate color="primary" size="48"></v-progress-circular>
-    </div>
-
     <v-app-bar v-if="!loading" density="compact" elevation="1">
       <v-app-bar-nav-icon @click="rail = !rail"></v-app-bar-nav-icon>
       <v-app-bar-title>{{ appTitle }}</v-app-bar-title>
@@ -123,8 +118,8 @@
     <!-- Sidebar -->
     <v-navigation-drawer v-if="!loading" permanent :rail="rail" :expand-on-hover="rail">
       <v-list density="compact" nav>
-        <template v-for="tab in sidebarTabs" :key="tab.id">
-          <v-divider v-if="tab.divider" class="my-1"></v-divider>
+        <template v-for="(tab, tidx) in sidebarTabs" :key="tab.id || ('d'+tidx)">
+          <div v-if="tab.divider" style="border-top:1px solid currentColor; opacity:0.2; margin:8px 0"></div>
           <v-list-group v-else-if="tab.children" :value="tab.id">
             <template v-slot:activator="{ props }">
               <v-list-item v-bind="props" :prepend-icon="tab.icon" :title="tab.title" @click.stop="selectTab(tab.id)"></v-list-item>
@@ -151,7 +146,10 @@
             <v-spacer></v-spacer>
             <v-btn icon="mdi-printer" size="small" variant="text" @click="printView()"></v-btn>
           </div>
-          <div v-if="currentConfig.header && t(currentConfig.header) !== currentConfig.header" class="pa-3 pb-0" style="font-size:0.85rem; opacity:0.7">{{ t(currentConfig.header) }}</div>
+          <!-- Header text entries (before columns) -->
+          <template v-for="(ei, eidx) in embedItems" :key="'htxt'+eidx">
+            <div v-if="ei.config._text && !ei.config.afterColumn && eidx === 0 && t(ei.config._text) !== ei.config._text" class="pa-3 pb-0" style="font-size:0.85rem; opacity:0.7">{{ t(ei.config._text) }}</div>
+          </template>
           <!-- List layout: compact single-line items -->
           <div v-if="useListLayout">
             <v-list density="compact">
@@ -184,21 +182,24 @@
               </div>
               <!-- Remaining fields (collapsed unless expanded or not collapsed mode) -->
               <div v-show="!currentConfig.collapsed || expandedCard === item.id">
+              <template v-for="(ei, eidx) in embedItems" :key="'pre'+eidx"><div v-if="ei.config._text && !ei.config.afterColumn && t(ei.config._text) !== ei.config._text" class="mb-1" style="font-size:0.8rem; opacity:0.6">{{ t(ei.config._text) }}</div></template>
               <template v-for="col in visibleCols.slice(1)" :key="col">
               <div v-if="!isColumnHidden(col, item)" class="d-flex align-center mb-1">
                 <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + col) || col }}</span>
-                <span v-if="isReadonlyView || isReadonlyCell(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : (item[col] || '') }}</span>
-                <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : (item[col] || '') }}</span>
-                <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :model-value="item[col] || ''" :items="getListOptions(col)" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
-                <v-autocomplete v-else-if="colIsList(col)" :model-value="item[col] || ''" :items="getListOptions(col)" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
+                <span v-if="isReadonlyView || isReadonlyCell(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
+                <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
+                <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
+                <v-autocomplete v-else-if="colIsList(col)" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
                 <v-autocomplete v-else-if="colIsRef(col)" :model-value="item[col] || ''" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
                 <input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="saveField(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">
                 <span v-else class="editable-cell" contenteditable @blur="saveField(item, col, $event.target.textContent)" style="min-width:auto">{{ item[col] || '' }}</span>
               </div>
-              <!-- Inline embed after this column -->
+              <!-- Inline text/embed after this column -->
               <template v-for="(ei, eidx) in embedItems" :key="'emb'+col+eidx">
-              <div v-if="ei.config.afterColumn === col && ei.rows.length" class="my-1 ml-2 pa-2" style="background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px">
-                <div v-if="ei.config.header && t(ei.config.header) !== ei.config.header" style="font-size:0.75rem; opacity:0.6; margin-bottom:4px">{{ t(ei.config.header) }}</div>
+              <div v-if="ei.config._text && ei.config.afterColumn === col && t(ei.config._text) !== ei.config._text" class="my-1" style="font-size:0.8rem; opacity:0.6">{{ t(ei.config._text) }}</div>
+              <div v-else-if="ei.config.afterColumn === col && ei.rows.length" class="my-1 ml-2 pa-2" style="background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px">
+                <template v-for="(tb, tbi) in ei.textsBefore" :key="'tb'+tbi"><div v-if="t(tb) !== tb" style="font-size:0.75rem; opacity:0.6; margin-bottom:4px">{{ t(tb) }}</div></template>
+                <div v-if="ei.config.text && t(ei.config.text) !== ei.config.text" style="font-size:0.75rem; opacity:0.6; margin-bottom:4px">{{ t(ei.config.text) }}</div>
                 <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
                   <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
                   <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ er[ec] || '' }}</td></tr></tbody>
@@ -211,7 +212,7 @@
                     <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
                   </v-chip>
                 </div>
-                <div v-if="ei.config.footer && t(ei.config.footer) !== ei.config.footer" style="font-size:0.75rem; opacity:0.6; margin-top:4px">{{ t(ei.config.footer) }}</div>
+                <template v-for="(ta, tai) in ei.textsAfter" :key="'ta'+tai"><div v-if="t(ta) !== ta" style="font-size:0.75rem; opacity:0.6; margin-top:4px">{{ t(ta) }}</div></template>
               </div>
               </template>
               </template>
@@ -226,7 +227,7 @@
             </v-card>
           </div>
           <!-- Desktop: table layout -->
-          <v-table v-else density="compact" hover>
+          <v-table v-else-if="visibleCols.length" density="compact" hover>
             <template v-slot:default>
             <thead><tr>
               <th v-for="col in visibleCols" :key="col" @click="toggleSort(col)" style="cursor:pointer">{{ t('field.' + col) || col }}</th>
@@ -237,10 +238,10 @@
               <template v-for="item in sortedData" :key="item.id">
               <tr>
                 <td v-for="col in visibleCols" :key="col">
-                  <span v-if="isReadonlyView || isReadonlyCell(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : (item[col] || '') }}</span>
-                  <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : (item[col] || '') }}</span>
-                  <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :model-value="item[col] || ''" :items="getListOptions(col)" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
-                  <v-autocomplete v-else-if="colIsList(col)" :model-value="item[col] || ''" :items="getListOptions(col)" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
+                  <span v-if="isReadonlyView || isReadonlyCell(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
+                  <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
+                  <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
+                  <v-autocomplete v-else-if="colIsList(col)" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
                   <v-autocomplete v-else-if="colIsRef(col)" :model-value="item[col] || ''" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
                   <input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="saveField(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">
                   <span v-else class="editable-cell" contenteditable @blur="saveField(item, col, $event.target.textContent)">{{ item[col] || '' }}</span>
@@ -255,7 +256,7 @@
               <template v-if="sortedData.indexOf(item) === sortedData.length - 1" v-for="(ei, eidx) in embedItems" :key="'temb'+eidx">
               <tr v-if="ei.config.afterColumn && ei.rows.length">
                 <td :colspan="visibleCols.length + 2" style="padding:6px 12px; background: rgb(var(--v-theme-surface-variant), 0.1)">
-                  <div v-if="ei.config.header && t(ei.config.header) !== ei.config.header" style="font-size:0.75rem; opacity:0.6; margin-bottom:4px">{{ t(ei.config.header) }}</div>
+                  <div v-if="ei.config.text && t(ei.config.text) !== ei.config.text" style="font-size:0.75rem; opacity:0.6; margin-bottom:4px">{{ t(ei.config.text) }}</div>
                   <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
                     <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
                     <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ er[ec] || '' }}</td></tr></tbody>
@@ -268,7 +269,6 @@
                       <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
                     </v-chip>
                   </div>
-                  <div v-if="ei.config.footer && t(ei.config.footer) !== ei.config.footer" style="font-size:0.75rem; opacity:0.6; margin-top:4px">{{ t(ei.config.footer) }}</div>
                 </td>
               </tr>
               </template>
@@ -277,10 +277,12 @@
             </template>
           </v-table>
           <v-btn v-if="!hasMaster && !isReadonlyView" variant="text" prepend-icon="mdi-plus" @click="addRow" class="ma-2">{{ t('btn.add') }} {{ t('tab.' + currentTable) }}</v-btn>
-          <!-- Embedded rows from another table (bottom position when no afterColumn) -->
+          <!-- Text entries and embedded rows -->
           <template v-for="(ei, eidx) in embedItems" :key="'bemb'+eidx">
-          <div v-if="!ei.config.afterColumn && ei.rows.length" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
-            <div style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ (ei.config.header && t(ei.config.header) !== ei.config.header ? t(ei.config.header) : '') || t('tab.' + ei.config.table) || ei.config.table }} ({{ ei.rows.length }})</div>
+          <div v-if="ei.config._text && !useCardLayout && (ei.config.afterColumn || eidx > 0) && t(ei.config._text) !== ei.config._text" class="pa-3" style="font-size:0.85rem; opacity:0.6">{{ t(ei.config._text) }}</div>
+          <div v-else-if="!ei.config._text && !ei.config.afterColumn && ei.rows.length" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
+            <template v-for="(tb, tbi) in ei.textsBefore" :key="'btb'+tbi"><div v-if="t(tb) !== tb" style="font-size:0.8rem; opacity:0.6; margin-bottom:4px">{{ t(tb) }}</div></template>
+            <div v-if="!ei.textsBefore.length" style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ (ei.config.text && t(ei.config.text) !== ei.config.text ? t(ei.config.text) : '') || t('tab.' + ei.config.table) || ei.config.table }} ({{ ei.rows.length }})</div>
             <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.8rem; border-collapse:collapse">
               <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:3px 8px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
               <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:3px 8px">{{ er[ec] || '' }}</td></tr></tbody>
@@ -293,10 +295,9 @@
                 <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
               </v-chip>
             </div>
-            <div v-if="ei.config.footer && t(ei.config.footer) !== ei.config.footer" style="font-size:0.8rem; opacity:0.6; margin-top:8px">{{ t(ei.config.footer) }}</div>
+            <template v-for="(ta, tai) in ei.textsAfter" :key="'bta'+tai"><div v-if="t(ta) !== ta" style="font-size:0.8rem; opacity:0.6; margin-top:8px">{{ t(ta) }}</div></template>
           </div>
           </template>
-          <div v-if="currentConfig.footer && t(currentConfig.footer) !== currentConfig.footer" class="pa-3 pt-0" style="font-size:0.85rem; opacity:0.7">{{ t(currentConfig.footer) }}</div>
         </v-card>
 
         <!-- Detail card view -->
@@ -350,10 +351,13 @@
                 </v-list-item>
               </template>
               <v-list-item v-for="(val, i) in items" :key="i">
-                <span v-if="currentUserRole === 'viewer'">{{ val }}</span>
+                <span v-if="currentUserRole === 'viewer' || isLockedValue(name, val)" style="opacity:0.7">{{ t('list.' + name + '.' + val) !== ('list.' + name + '.' + val) ? t('list.' + name + '.' + val) : val }} <v-icon v-if="isLockedValue(name, val)" size="x-small" style="opacity:0.4">mdi-lock-outline</v-icon></span>
                 <span v-else class="editable-cell" contenteditable @blur="updateListItem2(name, i, $event.target.textContent)" @keydown.enter.prevent="focusNextListItem($event)" @keydown.home.stop @keydown.end.stop>{{ val }}</span>
                 <template v-if="currentUserRole !== 'viewer'" v-slot:append>
-                  <v-btn :icon="isArmed('list_' + name + '_' + i) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('list_' + name + '_' + i) ? 'error' : ''" @click="removeListItem2(name, i)"></v-btn>
+                  <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="i === 0" @click="moveListItem(name, i, -1)"></v-btn>
+                  <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="i === items.length - 1" @click="moveListItem(name, i, 1)"></v-btn>
+                  <v-btn v-if="!isLockedValue(name, val)" :icon="isArmed('list_' + name + '_' + i) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('list_' + name + '_' + i) ? 'error' : ''" @click="removeListItem2(name, i)"></v-btn>
+                  <div v-else style="width:36px"></div>
                 </template>
               </v-list-item>
               <v-list-item v-if="currentUserRole !== 'viewer'">
