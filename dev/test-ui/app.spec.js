@@ -1,13 +1,20 @@
 const { test, expect } = require('@playwright/test');
+const SCHEMA = require('../schema.json');
 
-// Helper: reset DB and wait for app to be fully ready (local mode auto-detects)
-async function ensureAppReady(page) {
+// Reset DB, seed the schema (server no longer auto-loads schema.json), and wait for the app.
+// By default opens the 'tasks' table tab (first sidebar tab is a read-only join view).
+async function ensureAppReady(page, openTableKey = 'tab.tasks') {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.request.post('/api/resetData');
+  await page.request.post('/api/saveSchema', { data: { schema: SCHEMA } });
   await page.goto('/');
   await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
   await page.reload();
-  await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 20000 });
+  await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+  if (openTableKey) {
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: openTableKey }).first().click();
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+  }
 }
 
 test.describe('App boot', () => {
@@ -205,10 +212,16 @@ test.describe('Card layout', () => {
   test('narrow viewport shows card layout', async ({ page }) => {
     await page.setViewportSize({ width: 400, height: 800 });
     await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCHEMA } });
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 20000 });
+    await page.waitForSelector('.v-app-bar', { timeout: 6000 });
+    // Narrow mode: open the drawer, then navigate to the tasks table
+    await page.locator('.v-app-bar button:has(.mdi-menu)').click();
+    await page.waitForTimeout(300);
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.tasks' }).first().click();
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
     await page.waitForTimeout(500);
     // Cards render as nested v-card inside main content
