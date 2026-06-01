@@ -15,11 +15,12 @@ In the Apps Script editor, create these files:
 | Script editor file | Source |
 |-------------------|--------|
 | `Code.gs` (default) | `apps-script/Code.gs` |
+| `sheets-helpers.gs` | `apps-script/sheets-helpers.js` (add as **+ → Script**) |
 | HTML: `index` | `apps-script/index.html` |
 | HTML: `app-core` | `app-core.html` |
 | HTML: `ui` | `ui.html` |
 | HTML: `style` | `style.html` |
-| HTML: `backend-appscript` | `backend-appscript.html` |
+| HTML: `backend-appscript` | `apps-script/backend-appscript.html` |
 
 To add HTML files: click **+** → **HTML file** → enter name (without `.html`)
 
