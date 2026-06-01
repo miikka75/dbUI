@@ -94,7 +94,7 @@ function bootData(folderId, schema) {
     if (def.archivePartition) { try { data[name + '__archive'] = getTableData(tableMap[name], def.archivePartition); } catch(e2) {} }
   }
   // Return schema as object + explicit key order arrays (google.script.run scrambles object keys)
-  return { schema: parsed, tableOrder: Object.keys(tables), columnOrders: Object.keys(tables).reduce(function(acc, t) { var c = tables[t].columns; acc[t] = Array.isArray(c) ? c.map(function(x) { return typeof x === 'object' ? x.name : x; }).filter(Boolean) : Object.keys(c); return acc; }, {}), tableMap: tableMap, languages: languages, lists: lists, data: data };
+  return { schema: parsed, tableOrder: Object.keys(tables), columnOrders: buildColumnOrders(tables), tableMap: tableMap, languages: languages, lists: lists, data: data };
   } catch(e) { return { error: e.message }; }
 }
 
@@ -112,7 +112,7 @@ function initSchema(folderId, schema) {
 
 function ensureTable(folder, tableName, columns, tabName) {
   // Normalize: columns can be object {name: type}, array of strings, or array of objects
-  const cols = Array.isArray(columns) ? columns.map(function(c) { return typeof c === 'object' ? c.name : c; }).filter(Boolean) : Object.keys(columns);
+  const cols = normalizeColumns(columns);
   const files = folder.getFilesByName(tableName);
   if (files.hasNext()) {
     const ss = SpreadsheetApp.openById(files.next().getId());
@@ -140,22 +140,7 @@ function getTableData(spreadsheetId, tabName) {
   try {
     const sheet = getSheet(spreadsheetId, tabName);
     if (!sheet || sheet.getLastRow() < 1) return { headers: [], rows: [] };
-    var values = sheet.getDataRange().getValues();
-    if (!values || values.length < 2) return { headers: (values && values[0]) || [], rows: [] };
-    var headers = values[0].map(function(h) { return String(h || ''); }).filter(function(h) { return h; });
-    var rows = values.slice(1).map(function(row) {
-      var obj = {};
-      headers.forEach(function(h, i) {
-        var val = row[i];
-        // Force all values to strings for safe serialization
-        if (val instanceof Date) val = val.getFullYear() + '-' + String(val.getMonth()+1).padStart(2,'0') + '-' + String(val.getDate()).padStart(2,'0');
-        else if (val === null || val === undefined) val = '';
-        else val = String(val);
-        obj[h] = val;
-      });
-      return obj;
-    });
-    return { headers: headers, rows: rows };
+    return valuesToObjects(sheet.getDataRange().getValues());
   } catch (e) {
     return { headers: [], rows: [] };
   }
@@ -171,7 +156,7 @@ function moveRow(spreadsheetId, rowData, fromTab, toTab) {
   var tgtSheet = ss.getSheetByName(toTab);
   if (!tgtSheet) { tgtSheet = ss.insertSheet(toTab); tgtSheet.getRange(1, 1, 1, headers.length).setValues([headers]); }
   else if (tgtSheet.getLastColumn() < 1) { tgtSheet.getRange(1, 1, 1, headers.length).setValues([headers]); }
-  var values = headers.map(function(h) { return rowData[h] !== undefined ? rowData[h] : ''; });
+  var values = objectToValues(rowData, headers);
   tgtSheet.appendRow(values);
 }
 
@@ -190,14 +175,11 @@ function putRow(spreadsheetId, rowData, tabName) {
   if (lastCol < 1) return;
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   if (!headers || !headers.length || !headers[0]) return;
-  const values = headers.map(h => rowData[h] !== undefined ? rowData[h] : '');
+  const values = objectToValues(rowData, headers);
   const data = sheet.getDataRange().getValues();
   const idCol = headers.indexOf('id');
-  let rowIdx = -1;
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][idCol]) === String(rowData.id)) { rowIdx = i + 1; break; }
-  }
-  if (rowIdx > 0) sheet.getRange(rowIdx, 1, 1, values.length).setValues([values]);
+  const fi = findRowIndex(data, idCol, rowData.id);
+  if (fi >= 0) sheet.getRange(fi + 1, 1, 1, values.length).setValues([values]);
   else sheet.appendRow(values);
 }
 
@@ -206,9 +188,8 @@ function deleteRow(spreadsheetId, id, tabName) {
   if (!sheet || sheet.getLastRow() < 2) return false;
   const data = sheet.getDataRange().getValues();
   const idCol = data[0].indexOf('id');
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][idCol]) === String(id)) { sheet.deleteRow(i + 1); return true; }
-  }
+  const fi = findRowIndex(data, idCol, id);
+  if (fi >= 0) { sheet.deleteRow(fi + 1); return true; }
   return false;
 }
 
@@ -281,12 +262,7 @@ function getTranslations(folderId, langCode) {
   if (!ss) return {};
   const sheet = ss.getSheetByName(langCode);
   if (!sheet || sheet.getLastRow() < 2) return {};
-  const values = sheet.getDataRange().getValues();
-  const translations = {};
-  for (let i = 1; i < values.length; i++) {
-    if (values[i][0] && values[i][1]) translations[values[i][0]] = values[i][1];
-  }
-  return translations;
+  return parseTranslations(sheet.getDataRange().getValues());
 }
 
 function updateTranslations(folderId, langCode, updates) {
