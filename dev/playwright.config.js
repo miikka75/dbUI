@@ -2,7 +2,8 @@ const { defineConfig } = require('@playwright/test');
 
 module.exports = defineConfig({
   testDir: './test-ui',
-  timeout: 60000,
+  timeout: 8000,
+  expect: { timeout: 4000 },
   use: {
     baseURL: 'http://localhost:3000',
     headless: true,
