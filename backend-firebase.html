@@ -1,32 +1,28 @@
-<!-- backend-firebase.html — Firebase Firestore backend with Google Auth -->
+<!-- backend-firebase.html — Firebase Firestore backend with Google Auth
+     Requires: storage-firestore.html loaded before this -->
 <script>
-var _fb = null;
 var _db = null;
 var _auth = null;
 
+function _storeName(table, tab) { return BackendHelpers.storeName(table, tab); }
+
 backend = {
   getSchema: function(folderId) {
-    return _db.collection('_meta').doc('schema').get().then(function(doc) {
-      if (!doc.exists) return null;
-      var d = doc.data();
-      if (d._json) return JSON.parse(d._json); // legacy
-      if (d.tables) return d;
-      return null;
+    return StorageFirestore.getMeta('schema').then(function(d) {
+      return BackendHelpers.unwrapSchemaDoc(d);
     });
   },
   saveSchema: function(folderId, schema) {
-    return _db.collection('_meta').doc('schema').set(schema);
+    return StorageFirestore.setMeta('schema', schema);
   },
   validateFolder: function(id) {
     return Promise.resolve({ valid: true, name: 'Firebase' });
   },
   getFolderConfig: function(folderId) {
-    return _db.collection('_meta').doc('config').get().then(function(doc) {
-      return doc.exists ? doc.data() : null;
-    });
+    return StorageFirestore.getMeta('config').then(function(d) { return d || null; });
   },
   setFolderConfig: function(folderId, config) {
-    return _db.collection('_meta').doc('config').set(config);
+    return StorageFirestore.setMeta('config', config);
   },
   initSchema: function(folderId, schema) {
     var result = {};
@@ -35,27 +31,22 @@ backend = {
   },
   getAvailableTables: function() { return Promise.resolve([]); },
   getAvailableLanguages: function(folderId) {
-    return _db.collection('_meta').doc('languages').get().then(function(doc) {
-      return doc.exists ? (doc.data().list || []) : [];
+    return StorageFirestore.getMeta('languages').then(function(d) {
+      return d ? (d.list || []) : [];
     });
   },
   getTableData: function(tableId, tab) {
-    var col = tableId + '__' + (tab || 'active');
-    return _db.collection(col).get().then(function(snap) {
-      var rows = [];
-      snap.forEach(function(doc) { rows.push(doc.data()); });
-      var headers = rows.length ? Object.keys(rows[0]) : [];
-      return { headers: headers, rows: rows };
+    var store = _storeName(tableId, tab);
+    return StorageFirestore.getAll(store).then(function(rows) {
+      return { headers: BackendHelpers.deriveHeaders(rows), rows: rows };
     });
   },
   putRow: function(tableId, data, tab) {
-    var col = tableId + '__' + (tab || 'active');
     if (!data.id) return Promise.resolve();
-    return _db.collection(col).doc(data.id).set(data, { merge: true });
+    return StorageFirestore.put(_storeName(tableId, tab), data.id, data);
   },
   deleteRow: function(tableId, id, tab) {
-    var col = tableId + '__' + (tab || 'active');
-    return _db.collection(col).doc(id).delete();
+    return StorageFirestore.delete(_storeName(tableId, tab), id);
   },
   moveRow: function(tableId, rowData, fromTab, toTab) {
     var self = this;
@@ -64,40 +55,33 @@ backend = {
     });
   },
   getLists: function(folderId) {
-    return _db.collection('_meta').doc('lists').get().then(function(doc) {
-      return doc.exists ? doc.data() : {};
-    });
+    return StorageFirestore.getMeta('lists').then(function(d) { return d || {}; });
   },
   saveLists: function(folderId, lists) {
-    return _db.collection('_meta').doc('lists').set(lists);
+    return StorageFirestore.setMeta('lists', lists);
   },
   putListItem: function(folderId, listName, value) {
     var update = {}; update[listName] = firebase.firestore.FieldValue.arrayUnion(value);
     return _db.collection('_meta').doc('lists').set(update, { merge: true });
   },
   getTranslations: function(folderId, langCode) {
-    return _db.collection('_meta').doc('lang_' + langCode).get().then(function(doc) {
-      return doc.exists ? doc.data() : {};
-    });
+    return StorageFirestore.getMeta('lang_' + langCode).then(function(d) { return d || {}; });
   },
   updateTranslations: function(folderId, langCode, updates) {
     return _db.collection('_meta').doc('lang_' + langCode).set(updates, { merge: true });
   },
   createLanguage: function(folderId, code, name, keys) {
-    return _db.collection('_meta').doc('languages').get().then(function(doc) {
-      var langs = doc.exists ? (doc.data().list || []) : [];
-      langs.push({ code: code, name: name });
-      return _db.collection('_meta').doc('languages').set({ list: langs });
+    return StorageFirestore.getMeta('languages').then(function(d) {
+      var langs = BackendHelpers.addLanguage(d ? (d.list || []) : [], code, name);
+      return StorageFirestore.setMeta('languages', { list: langs });
     }).then(function() {
-      var t = {}; if (keys) keys.forEach(function(k) { t[k] = ''; });
-      return _db.collection('_meta').doc('lang_' + code).set(t);
+      return StorageFirestore.setMeta('lang_' + code, BackendHelpers.emptyTranslations(keys));
     });
   },
   deleteLanguage: function(folderId, code) {
-    return _db.collection('_meta').doc('languages').get().then(function(doc) {
-      var langs = doc.exists ? (doc.data().list || []) : [];
-      langs = langs.filter(function(l) { return l.code !== code; });
-      return _db.collection('_meta').doc('languages').set({ list: langs });
+    return StorageFirestore.getMeta('languages').then(function(d) {
+      var langs = BackendHelpers.removeLanguage(d ? (d.list || []) : [], code);
+      return StorageFirestore.setMeta('languages', { list: langs });
     }).then(function() {
       return _db.collection('_meta').doc('lang_' + code).delete();
     });
@@ -111,7 +95,6 @@ function initFirebase() {
   var config;
   try { config = (stored && JSON.parse(stored)) || window.FIREBASE_CONFIG || {}; } catch(e) { config = window.FIREBASE_CONFIG || {}; }
   if (config.apiKey) { _startFirebase(config); return; }
-  // Try loading from server-side file
   fetch('/firebase-config.json').then(function(r) { return r.ok ? r.json() : null; }).then(function(c) {
     if (c && c.apiKey) { localStorage.setItem('firebase_config', JSON.stringify(c)); _startFirebase(c); }
     else { appInstance.showSetup = true; appInstance.setupStep = 'firebase'; appInstance.loading = false; }
@@ -134,7 +117,6 @@ function triggerOAuth() {
   _auth.signInWithPopup(provider).catch(function(e) { console.error('Firebase auth error:', e); });
 }
 
-// User registry
 var backend_users = {
   getUsers: function() { return _db.collection('_meta').doc('users').get().then(function(d) { return d.exists ? d.data() : {}; }); },
   setUserRole: function(uid, role, user, tables) {
