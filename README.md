@@ -5,7 +5,8 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 ## Features
 
 - **Schema-driven**: JSON config defines tables, columns, views, and behavior
-- **Five backends**: Google Sheets (Apps Script), OAuth REST API, CRDT (IndexedDB + Drive sync), Firebase (Firestore), local SQLite
+- **Six backends**: Google Sheets (Apps Script), OAuth REST API, CRDT over Drive, CRDT over local server, Firebase (Firestore), local SQLite
+- **Unified CRDT**: one offline-first engine; Drive and local server differ only in the transport
 - **i18n**: multi-language with auto-generated translation keys from schema
 - **Views**: union, join, aggregate, embedded views with configurable layout
 - **Text entries**: translatable static text positioned anywhere in views and embeds
@@ -19,7 +20,8 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 |---------|---------|------|---------|-----------|-------|
 | **Apps Script** | Google Sheets | Built-in | ❌ | ❌ | Web editor |
 | **OAuth** | Google Sheets | OAuth consent | ❌ | ❌ | Cloud Console |
-| **CRDT** | IndexedDB + Drive | OAuth consent | ✅ | 30s sync | Cloud Console |
+| **CRDT (Drive)** | IndexedDB + Drive | OAuth consent | ✅ | 30s sync | Cloud Console |
+| **CRDT (Local)** | IndexedDB + dev server | None | ✅ | 30s sync | `npm start` |
 | **Firebase** | Firestore | Firebase Auth | ✅ | ✅ Instant | Firebase Console |
 | **Local** | SQLite | None | N/A | N/A | `npm start` |
 
@@ -119,23 +121,34 @@ index.html                     ← unified entry point (auto-detects backend)
 app-core.html                  ← Vue app logic + computeds + helpers
 ui.html                        ← Vue template (data views, forms, setup)
 style.html                     ← CSS styles
-auth-oauth.html                ← shared OAuth (GSI) for Sheets + CRDT
-backend-appscript.html         ← adapter: google.script.run
+auth-oauth.html                ← shared OAuth (GSI) for Sheets + CRDT(Drive)
 backend-oauth.html             ← adapter: REST API + OAuth
-backend-crdt.html              ← adapter: IndexedDB + Drive sync (LWW)
 backend-firebase.html          ← adapter: Firestore + Firebase Auth
+storage-firestore.html         ← Firestore storage adapter
+── Unified CRDT (shared by Drive + local) ──
+crdt-backend.html              ← shared CRDT backend (data via engine, files via transport)
+crdt-engine.html               ← storage-agnostic LWW CRDT engine
+storage-idb.html               ← IndexedDB storage adapter
+transport-drive.html           ← Drive transport (files + changesets via Drive API)
+backend-crdt.html              ← Drive CRDT initializer (Transport = TransportDrive)
+────────────────────────────────────────────
 firebase.json                  ← Firebase Hosting config
 firestore.rules                ← Firestore Security Rules
-apps-script/                   ← Apps Script deployment files
+apps-script/                   ← Apps Script deployment files (GAS-only)
   index.html, Code.gs, DEPLOY.md
-dev/                           ← Local development
+  sheets-helpers.js            ← pure transforms shared with unit tests
+  backend-appscript.html       ← adapter: google.script.run (GAS-only)
+dev/                           ← Local development (dev-server-only files live here)
   schema.json                  ← schema definition (tables, views, settings)
   schema.js                    ← test helper (parses schema.json)
   migrate-schema.js            ← schema v1 → v2 converter
   package.json                 ← dependencies + scripts (npm start/test)
-  server.js                    ← HTTP server (port 3000)
+  server.js                    ← HTTP server (port 3000; --fs for JSON-file storage)
   backend-local.js             ← SQLite backend (better-sqlite3)
-  backend-local-client.html    ← client adapter for local server
+  storage-fs.js                ← JSON-file backend (node server.js --fs)
+  backend-local-client.html    ← client adapter for local server (direct SQLite)
+  backend-crdt-local.html      ← local CRDT initializer (Transport = TransportLocal)
+  transport-local.html         ← local transport (files + changesets via dev server)
   test/                        ← node:test backend tests
   test-ui/                     ← Playwright E2E tests
 ```
@@ -351,7 +364,7 @@ Handles: object→array columns, property renames (`tab`→`partition`, `mirror`
 ├────────────────┼─────────────────────────────────┤
 │ backend-*.html │   schema.json / firebase-config │  ← adapter + config
 ├────────────────┴─────────────────────────────────┤
-│ Sheets │ OAuth │ CRDT (IDB+Drive) │ Firestore │ SQLite │
+│ Sheets │ OAuth │ CRDT (Drive / Local) │ Firestore │ SQLite │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -367,3 +380,25 @@ Handles: object→array columns, property renames (`tab`→`partition`, `mirror`
 - `defaultSchema` in app-core.html is minimal empty fallback only
 - Column order in Google Sheets preserved via JSON string serialization (avoids RPC key reordering)
 - All backends implement the same 16-function interface
+
+### Unified CRDT (Drive + Local)
+
+Both CRDT modes share **one backend** (`crdt-backend.html`) built on a storage-agnostic engine. They differ **only in the transport**:
+
+```
+            crdt-backend.html  (one shared backend)
+        data ─► CrdtEngine + StorageIDB  (IndexedDB, LWW per field)
+       files ─► Transport.readJson / writeJson / deleteFile
+                        │
+            ┌───────────┴────────────┐
+      TransportDrive            TransportLocal
+      (Google Drive API)        (HTTP → dev server)
+```
+
+- **Data** (table rows) lives in IndexedDB and syncs as compacted LWW changesets (`pushChangesets`/`pullChangesets`, 30s interval). The server/Drive is *not* the read path — it only stores changesets for cross-device sync.
+- **Metadata** (schema, lists, languages, translations, config) are plain JSON files read/written through the transport: `schema.json`, `lists.json`, `languages.json`, `lang_{code}.json`, `.app-config.json`.
+- Both transports produce an **identical file layout**, so a local `--fs` data folder is a drop-in Google Drive folder — copy it across and switch modes.
+- A **new user/device** bootstraps by reading the metadata files + pulling every device's `_sync/` changesets into a fresh IndexedDB.
+- The local dev server (`server.js`, optionally `--fs`) acts as a dumb file store via generic `readFile`/`writeFile`/`deleteFile` routes plus `saveChangesets`/`loadChangesets`.
+
+Firebase is intentionally **not** on the CRDT engine — Firestore provides its own real-time sync, offline cache, and conflict resolution.
