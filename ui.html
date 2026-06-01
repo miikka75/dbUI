@@ -16,27 +16,37 @@
         <v-card-text>
           <!-- Step 1: Choose mode -->
           <div v-if="!setupStep">
-            <v-btn block variant="outlined" class="mb-3 text-left" @click="setupStep = 'local'">
+            <v-btn v-if="hasLocalServer" block variant="outlined" class="mb-3 text-left" @click="setupStep = 'local'">
               <v-icon start>mdi-database</v-icon>
               <div><strong>Local Database</strong><br><small style="opacity:0.6">SQLite on dev server — fastest for development</small></div>
             </v-btn>
-            <v-btn block variant="outlined" class="mb-3 text-left" @click="selectSetupMode('sheets')">
-              <v-icon start>mdi-google-spreadsheet</v-icon>
-              <div><strong>Google Sheets</strong><br><small style="opacity:0.6">Data stored in Google Sheets via OAuth REST API</small></div>
+            <v-btn v-if="hasLocalServer" block variant="outlined" class="mb-3 text-left" @click="setupStep = 'crdt-local'">
+              <v-icon start>mdi-sync-circle</v-icon>
+              <div><strong>Local + CRDT Sync</strong><br><small style="opacity:0.6">IndexedDB with CRDT sync via local server (no Google)</small></div>
+            </v-btn>
+            <v-btn block variant="outlined" class="mb-3 text-left" @click="selectSetupMode('firebase')">
+              <v-icon start>mdi-firebase</v-icon>
+              <div><strong>Firebase</strong><br><small style="opacity:0.6">Real-time sync via Firestore with offline support</small></div>
             </v-btn>
             <v-btn block variant="outlined" class="mb-3 text-left" @click="selectSetupMode('crdt')">
               <v-icon start>mdi-sync</v-icon>
               <div><strong>Local + Drive Sync (CRDT)</strong><br><small style="opacity:0.6">Instant local IndexedDB with background Drive sync</small></div>
             </v-btn>
-            <v-btn block variant="outlined" class="mb-3 text-left" @click="selectSetupMode('firebase')">
-              <v-icon start>mdi-firebase</v-icon>
-              <div><strong>Firebase</strong><br><small style="opacity:0.6">Real-time sync via Firestore with offline support</small></div>
+            <v-btn block variant="outlined" class="mb-3 text-left" @click="selectSetupMode('sheets')">
+              <v-icon start>mdi-google-spreadsheet</v-icon>
+              <div><strong>Google Sheets</strong><br><small style="opacity:0.6">Data stored in Google Sheets via OAuth REST API</small></div>
             </v-btn>
           </div>
           <!-- Step 2: Local -->
           <div v-if="setupStep === 'local'">
             <p class="mb-4">Local mode — data stored in server SQLite database.</p>
             <v-btn color="primary" @click="completeLocalSetup">Create Local Database</v-btn>
+            <v-btn variant="text" @click="setupStep = null; localStorage.removeItem('app_mode')" class="ml-2">Back</v-btn>
+          </div>
+          <!-- Step 2: CRDT-Local -->
+          <div v-if="setupStep === 'crdt-local'">
+            <p class="mb-4">CRDT mode — data in browser IndexedDB with CRDT sync via local server. No Google account needed.</p>
+            <v-btn color="primary" @click="completeCrdtLocalSetup">Start CRDT-Local</v-btn>
             <v-btn variant="text" @click="setupStep = null; localStorage.removeItem('app_mode')" class="ml-2">Back</v-btn>
           </div>
           <!-- Step 2: Sheets / CRDT / Firebase (need sign-in) -->
@@ -76,7 +86,7 @@
               5) Project Settings → Your apps → Add Web app → Copy config JSON<br>
               6) Paste config below → Sign in with Google<br>
               <template v-if="!hasFirebaseConfig">
-              <v-textarea v-model="firebaseConfigInput" label="Firebase config JSON" variant="outlined" density="compact" rows="4" class="my-2" placeholder='{"apiKey":"...","authDomain":"...","projectId":"..."}'></v-textarea>
+              <v-textarea v-model="firebaseConfigInput" name="firebase-config" label="Firebase config JSON" variant="outlined" density="compact" rows="4" class="my-2" placeholder='{"apiKey":"...","authDomain":"...","projectId":"..."}'></v-textarea>
               </template>
               <template v-else><v-chip size="small" color="success" class="my-2">✓ Config saved</v-chip><br></template>
               <strong>After first sign-in:</strong><br>
@@ -93,10 +103,10 @@
             <v-btn color="primary" prepend-icon="mdi-content-save" :disabled="!hasFirebaseConfig && !firebaseConfigInput" @click="saveFirebaseConfig()">Save &amp; Continue</v-btn>
             </template>
             <template v-else>
-            <v-text-field v-model="oauthClientId" label="OAuth Client ID" variant="outlined" density="compact" class="mb-2" placeholder="xxxxx.apps.googleusercontent.com"></v-text-field>
+            <v-text-field v-model="oauthClientId" name="oauth-client-id" label="OAuth Client ID" variant="outlined" density="compact" class="mb-2" placeholder="xxxxx.apps.googleusercontent.com"></v-text-field>
             <v-btn v-if="!oauthReady" color="primary" prepend-icon="mdi-google" :disabled="!oauthClientId" @click="saveClientId(); triggerOAuth()" class="mb-4">Sign in with Google</v-btn>
             <template v-if="oauthReady">
-            <v-text-field v-model="setupFolderId" label="Drive folder ID" variant="outlined" density="compact" class="mb-2" @input="validateFolder"></v-text-field>
+            <v-text-field v-model="setupFolderId" name="drive-folder-id" label="Drive folder ID" variant="outlined" density="compact" class="mb-2" @input="validateFolder"></v-text-field>
             <v-btn color="primary" :disabled="!folderValid" @click="setupMode = setupStep; completeSetup()">Start</v-btn>
             </template>
             </template>
@@ -110,7 +120,7 @@
     <v-app-bar v-if="!loading" density="compact" elevation="1">
       <v-app-bar-nav-icon @click="rail = !rail"></v-app-bar-nav-icon>
       <v-app-bar-title>{{ appTitle }}</v-app-bar-title>
-      <v-select v-if="languages.length > 1" v-model="currentLang" :items="langItems" density="compact" variant="plain" hide-details style="max-width:120px" class="mr-2" @update:model-value="switchLanguage"></v-select>
+      <v-select v-if="languages.length > 1" v-model="currentLang" name="current-lang" :items="langItems" density="compact" variant="plain" hide-details style="max-width:120px" class="mr-2" @update:model-value="switchLanguage"></v-select>
       <v-btn icon="mdi-refresh" @click="syncAndReload" :loading="syncing"></v-btn>
       <v-btn :icon="theme === 'dark' ? 'mdi-weather-sunny' : 'mdi-weather-night'" @click="toggleTheme"></v-btn>
     </v-app-bar>
@@ -188,9 +198,9 @@
                 <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + col) || col }}</span>
                 <span v-if="isReadonlyView || isReadonlyCell(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
                 <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
-                <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
-                <v-autocomplete v-else-if="colIsList(col)" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
-                <v-autocomplete v-else-if="colIsRef(col)" :model-value="item[col] || ''" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
+                <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
+                <v-autocomplete v-else-if="colIsList(col)" :name="col" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
+                <v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || ''" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
                 <input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="saveField(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">
                 <span v-else class="editable-cell" contenteditable @blur="saveField(item, col, $event.target.textContent)" style="min-width:auto">{{ item[col] || '' }}</span>
               </div>
@@ -240,9 +250,9 @@
                 <td v-for="col in visibleCols" :key="col">
                   <span v-if="isReadonlyView || isReadonlyCell(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
                   <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
-                  <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
-                  <v-autocomplete v-else-if="colIsList(col)" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
-                  <v-autocomplete v-else-if="colIsRef(col)" :model-value="item[col] || ''" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
+                  <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
+                  <v-autocomplete v-else-if="colIsList(col)" :name="col" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
+                  <v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || ''" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
                   <input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="saveField(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">
                   <span v-else class="editable-cell" contenteditable @blur="saveField(item, col, $event.target.textContent)">{{ item[col] || '' }}</span>
                 </td>
@@ -441,7 +451,7 @@
             <input ref="importFile" type="file" accept=".json" hidden @change="importData($event)">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ t('settings.share') }}</p>
-            <v-text-field :model-value="shareLink" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="copyText(shareLink)"></v-text-field>
+            <v-text-field :model-value="shareLink" name="share-link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="copyText(shareLink)"></v-text-field>
             </template>
             <v-divider class="my-4"></v-divider>
             <v-btn variant="outlined" :color="isArmed('reset') ? 'error' : 'warning'" :prepend-icon="isArmed('reset') ? 'mdi-check-circle' : 'mdi-refresh'" @click="isArmed('reset') ? resetApp() : armDelete('reset')">{{ isArmed('reset') ? t('settings.confirm_reset') : t('settings.reset') }}</v-btn>
@@ -455,7 +465,7 @@
               <tbody>
                 <tr v-for="u in userList" :key="u.key">
                   <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="renameUser(u, $event.target.textContent.trim())">{{ u.addr }}</span></td>
-                  <td><v-select :model-value="u.role" :items="['admin','editor','viewer']" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>
+                  <td><v-select :model-value="u.role" :name="'role-' + u.key" :items="['admin','editor','viewer']" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>
                   <td><v-chip-group :model-value="u.tables === 'all' ? ['all'] : u.tables" multiple @update:model-value="updateUserTables(u, $event)">
                     <v-chip v-for="tn in ['all'].concat(Object.keys(schemaData && schemaData.tables || {}))" :key="tn" :value="tn" size="x-small" filter variant="outlined">{{ tn === 'all' ? t('settings.all') : (t('tab.' + tn) || tn) }}</v-chip>
                   </v-chip-group></td>
