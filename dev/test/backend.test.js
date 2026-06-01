@@ -220,9 +220,8 @@ describe('getFileModifiedTime', () => {
 
 describe('schema storage', () => {
   it('getSchema returns null when no schema saved', () => {
-    // getSchema falls back to schema.json from disk when no DB schema
     const result = backend.getSchema('f1');
-    assert.ok(result !== null);
+    assert.equal(result, null);
   });
   it('saveSchema stores and retrieves schema', () => {
     const schema = { tables: { t1: { columns: { id: 'text' } } }, views: {}, i18n: {} };
