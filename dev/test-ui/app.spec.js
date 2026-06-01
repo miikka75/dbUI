@@ -2,8 +2,9 @@ const { test, expect } = require('@playwright/test');
 const SCHEMA = require('../schema.json');
 
 // Reset DB, seed the schema (server no longer auto-loads schema.json), and wait for the app.
-// By default opens the 'tasks' table tab (first sidebar tab is a read-only join view).
-async function ensureAppReady(page, openTableKey = 'tab.tasks') {
+// Opens the 'notes' table tab by default — it's the addable master table (first sidebar
+// tab is a read-only join view; 'tasks' is a detail synced from 'notes' so has no add button).
+async function ensureAppReady(page, openTableKey = 'tab.notes') {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.request.post('/api/resetData');
   await page.request.post('/api/saveSchema', { data: { schema: SCHEMA } });
@@ -220,7 +221,7 @@ test.describe('Card layout', () => {
     // Narrow mode: open the drawer, then navigate to the tasks table
     await page.locator('.v-app-bar button:has(.mdi-menu)').click();
     await page.waitForTimeout(300);
-    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.tasks' }).first().click();
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.notes' }).first().click();
     await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
     await page.waitForTimeout(500);
@@ -311,11 +312,12 @@ test.describe('Print card embed positioning', () => {
 test.describe('Setup UI', () => {
   test('shows setup dialog when no mode configured', async ({ page }) => {
     await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCHEMA } });
     await page.goto('/');
     await page.evaluate(() => { localStorage.clear(); });
     await page.reload();
     // Local dev server probe succeeds, app should boot
-    await page.waitForSelector('.v-app-bar', { timeout: 15000 });
+    await page.waitForSelector('.v-app-bar', { timeout: 6000 });
   });
 
   test('snackbar shows notification on export', async ({ page }) => {
