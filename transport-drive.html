@@ -1,0 +1,128 @@
+<!-- transport-drive.html -- Google Drive transport for CrdtEngine sync -->
+<script>
+var TransportDrive = (function() {
+  var _folderId = null;
+
+  function setFolder(folderId) { _folderId = folderId; }
+
+  function _getOrCreateFolder(parentId, name) {
+    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + parentId + '\' in parents and name=\'' + name + '\' and mimeType=\'application/vnd.google-apps.folder\' and trashed=false&fields=files(id)')
+      .then(function(r) { return r.json(); }).then(function(d) {
+        if (d.files && d.files.length) return d.files[0].id;
+        return _fetch('https://www.googleapis.com/drive/v3/files', 'POST', { name: name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
+          .then(function(r) { return r.json(); }).then(function(f) { return f.id; });
+      });
+  }
+
+  function _uploadFile(folderId, name, content) {
+    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + folderId + '\' in parents and name=\'' + name + '\' and trashed=false&fields=files(id)')
+      .then(function(r) { return r.json(); }).then(function(d) {
+        var fileId = d.files && d.files[0] ? d.files[0].id : null;
+        var metadata = { name: name }; if (!fileId) metadata.parents = [folderId];
+        var form = new FormData();
+        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+        form.append('file', new Blob([content], { type: 'application/json' }));
+        var url = fileId
+          ? 'https://www.googleapis.com/upload/drive/v3/files/' + fileId + '?uploadType=multipart'
+          : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+        return fetch(url, { method: fileId ? 'PATCH' : 'POST', headers: { Authorization: 'Bearer ' + _token }, body: form });
+      });
+  }
+
+  function _downloadFile(fileId) {
+    return _fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media').then(function(r) { return r.text(); });
+  }
+
+  function pushChangesets(siteId, changes) {
+    return _getOrCreateFolder(_folderId, 'sync').then(function(syncId) {
+      // Group by table
+      var byTable = {};
+      changes.forEach(function(c) { if (!byTable[c.t]) byTable[c.t] = []; byTable[c.t].push(c); });
+      return Object.keys(byTable).reduce(function(chain, table) {
+        return chain.then(function() {
+          return _getOrCreateFolder(syncId, table).then(function(tableFolderId) {
+            return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + tableFolderId + '\' in parents and name=\'' + siteId + '.json\' and trashed=false&fields=files(id)')
+              .then(function(r) { return r.json(); }).then(function(d) {
+                var existing = { siteId: siteId, changes: [] };
+                if (d.files && d.files.length) {
+                  return _downloadFile(d.files[0].id).then(function(t) { try { existing = JSON.parse(t); } catch(e) {} return existing; });
+                }
+                return existing;
+              }).then(function(existing) {
+                existing.changes = existing.changes.concat(byTable[table]);
+                // Dedup: keep latest per (b, id, col) via d keys
+                var seen = {};
+                for (var i = existing.changes.length - 1; i >= 0; i--) {
+                  var c = existing.changes[i];
+                  var cols = c.d ? Object.keys(c.d) : [];
+                  cols.forEach(function(col) {
+                    var key = c.b + '|' + c.id + '|' + col;
+                    if (seen[key]) { delete c.d[col]; } else { seen[key] = true; }
+                  });
+                  if (c.d && !Object.keys(c.d).length) existing.changes.splice(i, 1);
+                }
+                return _uploadFile(tableFolderId, siteId + '.json', JSON.stringify(existing));
+              });
+          });
+        });
+      }, Promise.resolve());
+    });
+  }
+
+  function pullChangesets(excludeSiteId) {
+    return _getOrCreateFolder(_folderId, 'sync').then(function(syncId) {
+      return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + syncId + '\' in parents and mimeType=\'application/vnd.google-apps.folder\' and trashed=false&fields=files(id,name)')
+        .then(function(r) { return r.json(); });
+    }).then(function(d) {
+      var folders = d.files || [];
+      var results = [];
+      return folders.reduce(function(chain, folder) {
+        return chain.then(function() {
+          return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + folder.id + '\' in parents and trashed=false&fields=files(id,name)')
+            .then(function(r) { return r.json(); }).then(function(fd) {
+              var files = (fd.files || []).filter(function(f) { return f.name !== excludeSiteId + '.json'; });
+              return files.reduce(function(fChain, f) {
+                return fChain.then(function() {
+                  return _downloadFile(f.id).then(function(text) {
+                    try { results.push(JSON.parse(text)); } catch(e) {}
+                  });
+                });
+              }, Promise.resolve());
+            });
+        });
+      }, Promise.resolve()).then(function() { return results; });
+    });
+  }
+
+  function _readJson(name) {
+    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + _folderId + '\' in parents and name=\'' + name + '\' and trashed=false&fields=files(id)')
+      .then(function(r) { return r.json(); }).then(function(d) {
+        if (!d.files || !d.files.length) return null;
+        return _downloadFile(d.files[0].id).then(function(t) { try { return JSON.parse(t); } catch(e) { return null; } });
+      });
+  }
+
+  function _deleteFile(name) {
+    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + _folderId + '\' in parents and name=\'' + name + '\' and trashed=false&fields=files(id)')
+      .then(function(r) { return r.json(); }).then(function(d) {
+        if (!d.files || !d.files.length) return;
+        return _fetch('https://www.googleapis.com/drive/v3/files/' + d.files[0].id, 'DELETE');
+      });
+  }
+
+  return {
+    setFolder: setFolder,
+    validateFolder: function(id) {
+      return _fetch('https://www.googleapis.com/drive/v3/files/' + id + '?fields=name').then(function(res) {
+        if (res.ok) return res.json().then(function(d) { return { valid: true, name: d.name }; });
+        return { valid: false, name: null };
+      });
+    },
+    readJson: function(name) { return _readJson(name); },
+    writeJson: function(name, data) { return _uploadFile(_folderId, name, JSON.stringify(data)); },
+    deleteFile: function(name) { return _deleteFile(name); },
+    pushChangesets: pushChangesets,
+    pullChangesets: pullChangesets
+  };
+})();
+</script>
