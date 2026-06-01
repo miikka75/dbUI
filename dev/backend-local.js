@@ -1,9 +1,13 @@
 // backend-local.js — Local SQLite backend implementing same interface as Code.gs
 const Database = require('better-sqlite3');
+const H = require('../backend-helpers');
 
 function createLocalBackend(dbPath) {
   const db = new Database(dbPath || ':memory:');
   db.pragma('journal_mode = WAL');
+
+  // Quote a SQL identifier safely: wrap in "" and escape embedded quotes (blocks identifier injection).
+  function qid(n) { return '"' + String(n).replace(/"/g, '""') + '"'; }
 
   // Internal: folder config storage
   db.exec('CREATE TABLE IF NOT EXISTS _config (key TEXT PRIMARY KEY, value TEXT)');
@@ -20,8 +24,7 @@ function createLocalBackend(dbPath) {
     getSchema(folderId) {
       const row = db.prepare('SELECT value FROM _schema WHERE key = ?').get('schema');
       if (row) return JSON.parse(row.value);
-      // Fall back to schema.json file on disk
-      try { return JSON.parse(require('fs').readFileSync(require('path').join(__dirname, 'schema.json'), 'utf8')); } catch(e) { return null; }
+      return null;
     },
 
     saveSchema(folderId, schema) {
@@ -47,18 +50,18 @@ function createLocalBackend(dbPath) {
       const result = {};
       for (const [table, def] of Object.entries(schema)) {
         const columns = Array.isArray(def.columns) ? def.columns.map(c => typeof c === 'object' ? c.name : c).filter(Boolean) : Object.keys(def.columns);
-        const cols = columns.map(c => c === 'id' ? c + ' TEXT PRIMARY KEY' : c + ' TEXT').join(', ');
+        const cols = columns.map(c => c === 'id' ? qid(c) + ' TEXT PRIMARY KEY' : qid(c) + ' TEXT').join(', ');
         // Create base + tab-suffixed tables
         const tabs = [table];
         if (def.partition) tabs.push(table + '__' + def.partition);
         if (def.archivePartition) tabs.push(table + '__' + def.archivePartition);
         for (const t of tabs) {
-          db.exec('CREATE TABLE IF NOT EXISTS "' + t + '" (' + cols + ')');
-          const info = db.pragma('table_info("' + t + '")');
+          db.exec('CREATE TABLE IF NOT EXISTS ' + qid(t) + ' (' + cols + ')');
+          const info = db.pragma('table_info(' + qid(t) + ')');
           const existing = info.map(r => r.name);
           for (const col of columns) {
             if (!existing.includes(col)) {
-              db.exec('ALTER TABLE "' + t + '" ADD COLUMN "' + col + '" TEXT');
+              db.exec('ALTER TABLE ' + qid(t) + ' ADD COLUMN ' + qid(col) + ' TEXT');
             }
           }
         }
@@ -76,11 +79,17 @@ function createLocalBackend(dbPath) {
     resetData() {
       const tables = db.prepare('SELECT name FROM _tables').all();
       for (const t of tables) {
-        // Clear all tab variants (active, archive, and plain)
         const stmts = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?").all(t.name + '%');
-        for (const s of stmts) db.exec('DELETE FROM "' + s.name + '"');
+        for (const s of stmts) db.exec('DROP TABLE IF EXISTS ' + qid(s.name));
       }
       try { db.exec('DELETE FROM _lists'); } catch(e) {}
+      try { db.exec('DELETE FROM _schema'); } catch(e) {}
+      try { db.exec('DELETE FROM _tables'); } catch(e) {}
+      try { db.exec('DELETE FROM _config'); } catch(e) {}
+      try { db.exec('DELETE FROM _languages'); } catch(e) {}
+      try { db.exec('DELETE FROM _translations'); } catch(e) {}
+      try { db.exec('DELETE FROM _changesets'); } catch(e) {}
+      try { db.exec('DELETE FROM _files'); } catch(e) {}
     },
 
     getAvailableLanguages(folderId) {
@@ -93,9 +102,9 @@ function createLocalBackend(dbPath) {
     getTableData(tableId, tab) {
       const actualTable = tab ? tableId + '__' + tab : tableId;
       try {
-        const rows = db.prepare('SELECT * FROM "' + actualTable + '"').all();
+        const rows = db.prepare('SELECT * FROM ' + qid(actualTable)).all();
         const meta = db.prepare('SELECT columns FROM _tables WHERE name = ?').get(tableId);
-        const headers = meta ? JSON.parse(meta.columns) : (rows.length > 0 ? Object.keys(rows[0]) : []);
+        const headers = meta ? JSON.parse(meta.columns) : H.deriveHeaders(rows);
         return { headers, rows };
       } catch (e) {
         return { headers: [], rows: [] };
@@ -109,23 +118,23 @@ function createLocalBackend(dbPath) {
         // Auto-register table from row data
         const cols = Object.keys(rowData).filter(k => k !== undefined);
         db.prepare('INSERT OR REPLACE INTO _tables (name, columns) VALUES (?, ?)').run(tableId, JSON.stringify(cols));
-        const colDefs = cols.map(c => c === 'id' ? c + ' TEXT PRIMARY KEY' : c + ' TEXT').join(', ');
-        db.exec('CREATE TABLE IF NOT EXISTS "' + actualTable + '" (' + colDefs + ')');
+        const colDefs = cols.map(c => c === 'id' ? qid(c) + ' TEXT PRIMARY KEY' : qid(c) + ' TEXT').join(', ');
+        db.exec('CREATE TABLE IF NOT EXISTS ' + qid(actualTable) + ' (' + colDefs + ')');
         meta = { columns: JSON.stringify(cols) };
       }
       const columns = JSON.parse(meta.columns);
       if (tab) {
-        const cols = columns.map(c => c === 'id' ? c + ' TEXT PRIMARY KEY' : c + ' TEXT').join(', ');
-        db.exec('CREATE TABLE IF NOT EXISTS "' + actualTable + '" (' + cols + ')');
+        const cols = columns.map(c => c === 'id' ? qid(c) + ' TEXT PRIMARY KEY' : qid(c) + ' TEXT').join(', ');
+        db.exec('CREATE TABLE IF NOT EXISTS ' + qid(actualTable) + ' (' + cols + ')');
       }
       const values = columns.map(c => rowData[c] !== undefined ? rowData[c] : '');
       if (values.length !== columns.length) console.error('putRow mismatch:', tableId, 'cols:', columns.length, 'vals:', values.length);
       const badVals = values.filter(v => typeof v === 'object' && v !== null);
       if (badVals.length) console.error('putRow has object values:', badVals, 'for cols:', columns.filter((c,i) => typeof values[i] === 'object'));
-      const colList = columns.map(c => '"' + c + '"').join(',');
+      const colList = columns.map(c => qid(c)).join(',');
       const placeholders = columns.map(() => '?').join(',');
       try {
-        db.prepare('INSERT OR REPLACE INTO "' + actualTable + '" (' + colList + ') VALUES (' + placeholders + ')').run(...values);
+        db.prepare('INSERT OR REPLACE INTO ' + qid(actualTable) + ' (' + colList + ') VALUES (' + placeholders + ')').run(...values);
       } catch(e) {
         console.error('putRow SQL error:', e.message, 'table:', actualTable, 'cols:', columns, 'rowData keys:', Object.keys(rowData));
         throw e;
@@ -134,7 +143,7 @@ function createLocalBackend(dbPath) {
 
     deleteRow(tableId, id, tab) {
       const actualTable = tab ? tableId + '__' + tab : tableId;
-      const result = db.prepare('DELETE FROM "' + actualTable + '" WHERE id = ?').run(id);
+      const result = db.prepare('DELETE FROM ' + qid(actualTable) + ' WHERE id = ?').run(id);
       return result.changes > 0;
     },
 
@@ -206,6 +215,20 @@ function createLocalBackend(dbPath) {
     loadChangesets(folderId, excludeSiteId) {
       db.exec('CREATE TABLE IF NOT EXISTS _changesets (site_id TEXT PRIMARY KEY, data TEXT)');
       return db.prepare('SELECT site_id as siteId, data FROM _changesets WHERE site_id != ?').all(excludeSiteId || '');
+    },
+
+    // Generic named-file store (for unified CRDT transport). name = full filename e.g. 'schema.json'
+    readFile(folderId, name) {
+      db.exec('CREATE TABLE IF NOT EXISTS _files (name TEXT PRIMARY KEY, data TEXT)');
+      const row = db.prepare('SELECT data FROM _files WHERE name = ?').get(name);
+      return row ? JSON.parse(row.data) : null;
+    },
+    writeFile(folderId, name, data) {
+      db.exec('CREATE TABLE IF NOT EXISTS _files (name TEXT PRIMARY KEY, data TEXT)');
+      db.prepare('INSERT OR REPLACE INTO _files (name, data) VALUES (?, ?)').run(name, JSON.stringify(data));
+    },
+    deleteFile(folderId, name) {
+      try { db.prepare('DELETE FROM _files WHERE name = ?').run(name); } catch(e) {}
     },
 
     // Test helper: close DB
