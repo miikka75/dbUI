@@ -23,6 +23,7 @@
       var mode = localStorage.getItem('app_mode');
       if (mode === 'sheets') { backendFile = '/backend-oauth.html'; }
       else if (mode === 'crdt') { backendFile = '/backend-crdt.html'; }
+      else if (mode === 'crdt-local') { backendFile = '/backend-crdt-local.html'; }
       else if (mode === 'firebase') { backendFile = '/backend-firebase.html'; }
       else {
         try {
@@ -47,6 +48,11 @@
       await loadScript('/vendor/vue.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vue@3.5.34/dist/vue.global.prod.js'); });
       await loadScript('/vendor/vuetify.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vuetify@4.0.7/dist/vuetify.min.js'); });
 
+      // Shared pure backend helpers (used by Firebase + CRDT backends)
+      if (backendFile === '/backend-firebase.html' || backendFile === '/backend-crdt.html' || backendFile === '/backend-crdt-local.html') {
+        await loadScript('/backend-helpers.js');
+      }
+
       if (backendFile === '/backend-oauth.html' || backendFile === '/backend-crdt.html') {
         await loadScript('https://accounts.google.com/gsi/client');
       }
@@ -58,13 +64,34 @@
 
       execScript(await coreResp.text());
       createVueApp();
-      // Load shared auth before backend for OAuth/CRDT
+      // Load shared auth before backend for OAuth/CRDT(Drive)
       if (backendFile === '/backend-oauth.html' || backendFile === '/backend-crdt.html') {
         var authResp = await fetch('/auth-oauth.html');
         execScript(await authResp.text());
       }
+      // Dev-server client helpers (_post + backend_users) shared by local + crdt-local
+      if (backendFile === '/backend-local-client.html' || backendFile === '/backend-crdt-local.html') {
+        execScript(await (await fetch('/dev-client.html')).text());
+      }
+      // Load shared CRDT modules (engine + IDB storage + transport + unified backend)
+      // for both Drive CRDT and local CRDT — they differ only in the transport.
+      if (backendFile === '/backend-crdt.html' || backendFile === '/backend-crdt-local.html') {
+        var transportFile = backendFile === '/backend-crdt.html' ? '/transport-drive.html' : '/transport-local.html';
+        var [engineResp, storageResp, transportResp, crdtBackendResp] = await Promise.all([
+          fetch('/crdt-engine.html'), fetch('/storage-idb.html'), fetch(transportFile), fetch('/crdt-backend.html')
+        ]);
+        execScript(await engineResp.text());
+        execScript(await storageResp.text());
+        execScript(await transportResp.text());
+        execScript(await crdtBackendResp.text());
+      }
+      // Load Firestore storage adapter for Firebase mode
+      if (backendFile === '/backend-firebase.html') {
+        var fsResp = await fetch('/storage-firestore.html');
+        execScript(await fsResp.text());
+      }
       execScript(await backendResp.text());
-      // For OAuth/CRDT: handle auth
+      // For OAuth/CRDT(Drive): handle auth
       if (backendFile === '/backend-oauth.html' || backendFile === '/backend-crdt.html') {
         if (!localStorage.getItem('app_folder')) {
           appInstance.showSetup = true; appInstance.loading = false;
