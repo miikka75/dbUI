@@ -1,0 +1,18 @@
+<!-- dev-client.html -- Shared dev-server client helpers (_post + backend_users).
+     Loaded before backend-local-client.html and backend-crdt-local.html. Dev-server only. -->
+<script>
+function _post(route, body) {
+  var user = (new URLSearchParams(location.search)).get('user') || localStorage.getItem('test_user') || 'local@dev';
+  return fetch('/api/' + route, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User': user },
+    body: JSON.stringify(body)
+  }).then(function(r) { if (!r.ok) return r.json().then(function(e) { return Promise.reject(e); }); return r.json(); });
+}
+
+var backend_users = {
+  getUsers: function() { return _post('getUsers', {}); },
+  setUserRole: function(uid, role, user, tables) { return _post('setUserRole', { uid: uid, role: role, user: user, tables: tables }); },
+  removeUser: function(uid) { return _post('removeUser', { uid: uid }); }
+};
+</script>
