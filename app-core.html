@@ -3,7 +3,7 @@
 if (typeof localStorage === 'undefined') { window.localStorage = { _d:{}, getItem:function(k){return this._d[k]||null;}, setItem:function(k,v){this._d[k]=String(v);}, removeItem:function(k){delete this._d[k];}, clear:function(){this._d={};} }; }
 
 // Default schema bundled in app — used when Drive has no schema.json yet
-var defaultSchema = {"defaultLanguage":"en","tables":{},"views":{}};
+var defaultSchema = {"tables":{},"views":{}};
 
 // Active schema — initially from defaultSchema, overwritten from Drive on boot
 var SCHEMA = defaultSchema.tables;
@@ -14,7 +14,7 @@ function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && v.
 if (defaultSchema.views && !Array.isArray(defaultSchema.views)) {
   for (var _k in defaultSchema.views) { VIEWS[_k] = defaultSchema.views[_k]; }
 } else { _flattenViews(_viewsNav); }
-var DEFAULT_LANGUAGE = defaultSchema.defaultLanguage || 'en';
+var DEFAULT_LANGUAGE = defaultSchema.defaultLanguage || null;
 
 // Schema helpers
 function getColumns(table) { if (!SCHEMA[table]) return []; return window._columnOrders && window._columnOrders[table] ? window._columnOrders[table] : Object.keys(SCHEMA[table].columns); }
@@ -120,6 +120,7 @@ function createVueApp() {
     data: function() { return {
       loading: true,
       showSetup: false,
+      hasLocalServer: false,
       setupFolderId: '',
       setupMode: 'sheets',
       folderValid: false,
@@ -452,7 +453,7 @@ function createVueApp() {
         return this.staticTranslationKeys.concat(this.schemaTranslationKeys).filter(function(k) { if (seen[k]) return false; seen[k] = true; return true; });
       },
       EN: function() { return this.strings; },
-      defaultLanguage: function() { return (this.schemaData && this.schemaData.defaultLanguage) || DEFAULT_LANGUAGE; },
+      defaultLanguage: function() { return (this.schemaData && this.schemaData.defaultLanguage) || (this.languages.length ? this.languages[0].code : null); },
       refTables: function() {
         return Object.keys(SCHEMA).filter(function(k) { return SCHEMA[k].isLookup; });
       },
@@ -505,6 +506,13 @@ function createVueApp() {
         localStorage.setItem('app_folder', 'local');
         localStorage.setItem('app_mode', 'local');
         this.folderId = 'local'; this.mode = 'local';
+        this.showSetup = false;
+        this.startApp();
+      },
+      completeCrdtLocalSetup: function() {
+        localStorage.setItem('app_folder', 'local');
+        localStorage.setItem('app_mode', 'crdt-local');
+        this.folderId = 'local'; this.mode = 'crdt-local';
         this.showSetup = false;
         this.startApp();
       },
@@ -624,9 +632,8 @@ function createVueApp() {
             }
             // Load active language
             if (self.languages.length === 0) {
-              var defLang = self.defaultLanguage;
-              backend.createLanguage(self.folderId, defLang, defLang, self.translationKeys);
-              self.languages = [{ code: defLang, name: defLang }];
+              // No languages configured -- skip translation loading
+              return Promise.resolve();
             }
             // Load default language translations as base
             var defCode = self.defaultLanguage;
@@ -659,9 +666,7 @@ function createVueApp() {
         }).then(function(langs) {
           self.languages = langs || [];
           if (self.languages.length === 0) {
-            var defLang = self.defaultLanguage;
-            backend.createLanguage(self.folderId, defLang, defLang, self.translationKeys);
-            self.languages = [{ code: defLang, name: defLang }];
+            return Promise.resolve();
           }
           // Load default language as base strings
           var defCode = self.defaultLanguage;
@@ -1447,7 +1452,13 @@ function createVueApp() {
       },
       resetApp: function() {
         localStorage.clear();
-        location.reload();
+        function done() {
+          // Clear server-side data if a local server is available, then reload
+          fetch('/api/resetData', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' })
+            .catch(function() {}).finally(function() { location.reload(); });
+        }
+        var req = indexedDB.deleteDatabase('dbui');
+        req.onsuccess = req.onerror = req.onblocked = done;
       },
       copyUid: function() { this.copyText(this.firebaseUid); },
       copyText: function(text) {
@@ -1626,6 +1637,12 @@ function createVueApp() {
                   VIEWS = {}; _flattenViews(_viewsNav);
                 }
                 return backend.saveSchema(self.folderId, imported.schema);
+              }).then(function() {
+                var s = imported.schema.tables || imported.schema;
+                SCHEMA = s;
+                return backend.initSchema(self.folderId, s);
+              }).then(function(tableMap) {
+                if (tableMap) self.tableMap = tableMap;
               });
             }
             var tables = imported.tables || {};
@@ -1633,17 +1650,23 @@ function createVueApp() {
               var rows = Array.isArray(tables[key]) ? tables[key] : (tables[key].rows || []);
               var parts = key.split('__');
               var table = parts[0];
-              var tab;
-              if (parts[1] === 'archive') {
-                tab = (SCHEMA[table] && SCHEMA[table].archivePartition) || parts[1];
-              } else {
-                tab = (SCHEMA[table] && SCHEMA[table].partition) || 'active';
-              }
               rows.forEach(function(row) {
                 chain = chain.then(function() {
+                  var tab;
+                  if (parts[1] === 'archive') {
+                    tab = (SCHEMA[table] && SCHEMA[table].archivePartition) || parts[1];
+                  } else {
+                    tab = (SCHEMA[table] && SCHEMA[table].partition) || 'active';
+                  }
                   // Delete first to force CRDT change detection on re-import
                   return backend.deleteRow(self.tableMap[table] || table, row.id, tab).catch(function() {});
                 }).then(function() {
+                  var tab;
+                  if (parts[1] === 'archive') {
+                    tab = (SCHEMA[table] && SCHEMA[table].archivePartition) || parts[1];
+                  } else {
+                    tab = (SCHEMA[table] && SCHEMA[table].partition) || 'active';
+                  }
                   return backend.putRow(self.tableMap[table] || table, row, tab);
                 });
               });
@@ -1679,6 +1702,7 @@ function createVueApp() {
               savePromise.then(function() {
                 self.notify('Imported ' + Object.keys(tables).length + ' tables');
                 if (typeof _pushChanges === 'function') { _pushChanges().then(function() { location.reload(); }); }
+                else if (typeof CrdtEngine !== 'undefined') { CrdtEngine.pushChanges().then(function() { setTimeout(function() { location.reload(); }, 100); }); }
                 else { location.reload(); }
               });
             });
@@ -1896,6 +1920,10 @@ function createVueApp() {
           }
         }
       });
+      // Probe local server availability for setup UI
+      fetch('/api/validateFolder', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' })
+        .then(function(r) { if (r.ok) self.hasLocalServer = true; })
+        .catch(function() {});
     }
   });
 
