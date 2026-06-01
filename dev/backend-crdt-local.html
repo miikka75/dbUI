@@ -1,0 +1,13 @@
+<!-- backend-crdt-local.html -- Local CRDT initializer.
+     Wires the shared crdt-backend.html to TransportLocal (local dev server).
+     Requires (loaded before): dev-client.html (_post, backend_users), crdt-engine.html,
+     storage-idb.html, transport-local.html, crdt-backend.html. -->
+<script>
+Transport = TransportLocal;
+
+// Open IDB + init engine, then boot the app. initSchema also awaits _crdtReady.
+window._crdtReady = StorageIDB.open().then(function() {
+  return CrdtEngine.init(StorageIDB, TransportLocal);
+});
+window._crdtReady.then(function() { init(); });
+</script>
