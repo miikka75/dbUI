@@ -79,6 +79,7 @@ const server = http.createServer(async (req, res) => {
       case 'initSchema': if (!body.schema) return json(res, {}); return json(res, backend.initSchema('local', body.schema));
       case 'resetData': backend.resetData(); backend._users = undefined; saveUsers(); return json(res, { ok: true });
       case 'getAvailableTables': return json(res, backend.getAvailableTables('local'));
+      case 'serverInfo': return json(res, { storage: USE_FS ? 'fs' : 'sqlite' });
       case 'getAvailableLanguages': return json(res, backend.getAvailableLanguages('local'));
       case 'getTableData': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } return json(res, backend.getTableData(body.tableId, body.tab));
       case 'putRow': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
