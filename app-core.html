@@ -151,6 +151,7 @@ function createVueApp() {
       oauthReady: false,
       firebaseUid: null,
       currentUserEmail: null,
+      serverStorage: '',
       userList: [],
       usersLoaded: false,
       firestoreRules: '',
@@ -553,6 +554,15 @@ function createVueApp() {
         this.folderId = 'local'; this.mode = 'local';
         this.showSetup = false;
         this.startApp();
+      },
+      openCrdtLocalSetup: function() {
+        var self = this;
+        this.setupStep = 'crdt-local';
+        fetch('/api/serverInfo').then(function(r) { return r.json(); }).then(function(d) { self.serverStorage = d.storage; }).catch(function() {});
+      },
+      backToSetup: function() {
+        this.setupStep = null;
+        try { localStorage.removeItem('app_mode'); } catch (e) {}
       },
       completeCrdtLocalSetup: function() {
         localStorage.setItem('app_folder', 'local');
