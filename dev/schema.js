@@ -38,6 +38,10 @@ for (var t in SCHEMA) {
     _columnOrders[t] = Object.keys(SCHEMA[t].columns || {});
   }
 }
+// id is implicit: auto-inject so schemas needn't declare it (stays storage PK + join/archive key)
+for (var _t in SCHEMA) {
+  if (SCHEMA[_t].columns && !SCHEMA[_t].columns.id) { SCHEMA[_t].columns.id = 'text'; if (_columnOrders[_t] && _columnOrders[_t].indexOf('id') === -1) _columnOrders[_t].unshift('id'); }
+}
 
 function getColumns(table) { return _columnOrders[table] || Object.keys((SCHEMA[table] && SCHEMA[table].columns) || {}); }
 function getColumnType(table, col) {
