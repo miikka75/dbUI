@@ -134,7 +134,7 @@
             <template v-slot:activator="{ props }">
               <v-list-item v-bind="props" :prepend-icon="tab.icon" :title="tab.title" @click.stop="selectTab(tab.id)"></v-list-item>
             </template>
-            <v-list-item v-for="child in tab.children" :key="child.id" :value="child.id" :active="currentTable === child.id" @click="selectTab(child.id)" :prepend-icon="child.icon" :title="child.title" class="pl-8"></v-list-item>
+            <v-list-item v-for="child in tab.children" :key="child.id" :value="child.id" :active="currentTable === child.id" @click="selectTab(child.id)" :prepend-icon="child.icon" :title="child.title" class="subview-item"></v-list-item>
           </v-list-group>
           <v-list-item v-else :value="tab.id" :active="currentTable === tab.id" @click="selectTab(tab.id)" :prepend-icon="tab.icon" :title="tab.title"></v-list-item>
         </template>
@@ -169,7 +169,7 @@
                 </template>
                 <template v-slot:append>
                   <v-btn icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>
-                  <template v-if="!hasMaster && !isReadonlyView">
+                  <template v-if="canMutateRows">
                   <v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archiveRow(item)"></v-btn>
                   <v-btn :icon="isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="isArmed('row:'+item.id) ? 'error' : ''" @click="deleteRow(item)"></v-btn>
                   </template>
@@ -196,7 +196,7 @@
               <template v-for="col in visibleCols.slice(1)" :key="col">
               <div v-if="!isColumnHidden(col, item)" class="d-flex align-center mb-1">
                 <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + col) || col }}</span>
-                <span v-if="isReadonlyView || isReadonlyCell(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
+                <span v-if="cellReadonly(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
                 <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
                 <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
                 <v-autocomplete v-else-if="colIsList(col)" :name="col" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" style="flex:1" @keydown.home.stop @keydown.end.stop></v-autocomplete>
@@ -228,7 +228,7 @@
               </template>
               <div class="mt-2">
                 <v-btn icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>
-                <template v-if="!hasMaster && !isReadonlyView">
+                <template v-if="canMutateRows">
                 <v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archiveRow(item)"></v-btn>
                 <v-btn :icon="isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="isArmed('row:'+item.id) ? 'error' : ''" @click="deleteRow(item)"></v-btn>
                 </template>
@@ -248,7 +248,7 @@
               <template v-for="item in sortedData" :key="item.id">
               <tr>
                 <td v-for="col in visibleCols" :key="col">
-                  <span v-if="isReadonlyView || isReadonlyCell(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
+                  <span v-if="cellReadonly(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
                   <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
                   <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
                   <v-autocomplete v-else-if="colIsList(col)" :name="col" :model-value="item[col] || ''" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
@@ -258,9 +258,9 @@
                 </td>
                 <td v-if="isUnionView"><v-chip size="x-small" variant="tonal">{{ item._source }}</v-chip></td>
                 <td style="white-space:nowrap">
-                  <v-btn v-if="!viewingArchive && hasArchive && !hasMaster && !isReadonlyView" icon="mdi-archive-outline" size="small" variant="text" class="mr-2" @click="archiveRow(item)"></v-btn>
-                  <v-btn v-if="viewingArchive && !hasMaster && !isReadonlyView" icon="mdi-archive-arrow-up-outline" size="small" variant="text" class="mr-2" @click="restoreRow(item)"></v-btn>
-                  <v-btn v-if="!hasMaster && !isReadonlyView" :icon="isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('row:'+item.id) ? 'error' : ''" @click="deleteRow(item)"></v-btn>
+                  <v-btn v-if="!viewingArchive && hasArchive && canMutateRows" icon="mdi-archive-outline" size="small" variant="text" class="mr-2" @click="archiveRow(item)"></v-btn>
+                  <v-btn v-if="viewingArchive && canMutateRows" icon="mdi-archive-arrow-up-outline" size="small" variant="text" class="mr-2" @click="restoreRow(item)"></v-btn>
+                  <v-btn v-if="canMutateRows" :icon="isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('row:'+item.id) ? 'error' : ''" @click="deleteRow(item)"></v-btn>
                 </td>
               </tr>
               <template v-if="sortedData.indexOf(item) === sortedData.length - 1" v-for="(ei, eidx) in embedItems" :key="'temb'+eidx">
@@ -286,7 +286,7 @@
             </tbody>
             </template>
           </v-table>
-          <v-btn v-if="!hasMaster && !isReadonlyView" variant="text" prepend-icon="mdi-plus" @click="addRow" class="ma-2">{{ t('btn.add') }} {{ t('tab.' + currentTable) }}</v-btn>
+          <v-btn v-if="canMutateRows" variant="text" prepend-icon="mdi-plus" @click="addRow" class="ma-2">{{ t('btn.add') }} {{ t('tab.' + currentTable) }}</v-btn>
           <!-- Text entries and embedded rows -->
           <template v-for="(ei, eidx) in embedItems" :key="'bemb'+eidx">
           <div v-if="ei.config._text && !useCardLayout && (ei.config.afterColumn || eidx > 0) && t(ei.config._text) !== ei.config._text" class="pa-3" style="font-size:0.85rem; opacity:0.6">{{ t(ei.config._text) }}</div>
@@ -361,16 +361,16 @@
                 </v-list-item>
               </template>
               <v-list-item v-for="(val, i) in items" :key="i">
-                <span v-if="currentUserRole === 'viewer' || isLockedValue(name, val)" style="opacity:0.7">{{ t('list.' + name + '.' + val) !== ('list.' + name + '.' + val) ? t('list.' + name + '.' + val) : val }} <v-icon v-if="isLockedValue(name, val)" size="x-small" style="opacity:0.4">mdi-lock-outline</v-icon></span>
+                <span v-if="!canEditLists || isLockedValue(name, val)" style="opacity:0.7">{{ t('list.' + name + '.' + val) !== ('list.' + name + '.' + val) ? t('list.' + name + '.' + val) : val }} <v-icon v-if="isLockedValue(name, val)" size="x-small" style="opacity:0.4">mdi-lock-outline</v-icon></span>
                 <span v-else class="editable-cell" contenteditable @blur="updateListItem2(name, i, $event.target.textContent)" @keydown.enter.prevent="focusNextListItem($event)" @keydown.home.stop @keydown.end.stop>{{ val }}</span>
-                <template v-if="currentUserRole !== 'viewer'" v-slot:append>
+                <template v-if="canEditLists" v-slot:append>
                   <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="i === 0" @click="moveListItem(name, i, -1)"></v-btn>
                   <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="i === items.length - 1" @click="moveListItem(name, i, 1)"></v-btn>
                   <v-btn v-if="!isLockedValue(name, val)" :icon="isArmed('list_' + name + '_' + i) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('list_' + name + '_' + i) ? 'error' : ''" @click="removeListItem2(name, i)"></v-btn>
                   <div v-else style="width:36px"></div>
                 </template>
               </v-list-item>
-              <v-list-item v-if="currentUserRole !== 'viewer'">
+              <v-list-item v-if="canEditLists">
                 <v-btn variant="text" size="small" prepend-icon="mdi-plus" @click="addListItem2(name)">{{ t('btn.add') }} {{ name }}</v-btn>
               </v-list-item>
             </v-list-group>
