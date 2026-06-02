@@ -5,7 +5,7 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 ## Features
 
 - **Schema-driven**: JSON config defines tables, columns, views, and behavior
-- **Six backends**: Google Sheets (Apps Script), OAuth REST API, CRDT over Drive, CRDT over local server, Firebase (Firestore), local SQLite
+- **Six backends**: Google Sheets (Apps Script), OAuth REST API, Browser + CRDT Sync (Google Drive), Browser + CRDT Sync (Local Server), Firebase (Firestore), Dev Server (SQLite)
 - **Unified CRDT**: one offline-first engine; Drive and local server differ only in the transport
 - **i18n**: multi-language with auto-generated translation keys from schema
 - **Views**: union, join, aggregate, embedded views with configurable layout
@@ -20,10 +20,10 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 |---------|---------|------|---------|-----------|-------|
 | **Apps Script** | Google Sheets | Built-in | ❌ | ❌ | Web editor |
 | **OAuth** | Google Sheets | OAuth consent | ❌ | ❌ | Cloud Console |
-| **CRDT (Drive)** | IndexedDB + Drive | OAuth consent | ✅ | 30s sync | Cloud Console |
-| **CRDT (Local)** | IndexedDB + dev server | None | ✅ | 30s sync | `npm start` |
+| **Browser + CRDT Sync (Google Drive)** | IndexedDB + Drive | OAuth consent | ✅ | 30s sync | Cloud Console |
+| **Browser + CRDT Sync (Local Server)** | IndexedDB + dev server (SQLite or `--fs` JSON) | None | ✅ | 30s sync | `npm start` |
 | **Firebase** | Firestore | Firebase Auth | ✅ | ✅ Instant | Firebase Console |
-| **Local** | SQLite | None | N/A | N/A | `npm start` |
+| **Dev Server (SQLite)** | SQLite | None | N/A | N/A | `npm start` |
 
 ## Quick Start (Local Development)
 
@@ -80,9 +80,9 @@ Generate the link from Settings tab (shown under "Share link" for Firebase mode)
 | Backend | How to add users | Admin UI? |
 |---------|-----------------|:---:|
 | **Firebase** | Settings → User Access panel | ✅ Yes |
-| **Local** | Settings → User Access panel (test with `?user=`) | ✅ Yes |
+| **Dev Server (SQLite)** | Settings → User Access panel (test with `?user=`) | ✅ Yes |
 | **Sheets** | Share Drive folder via Google Drive | ❌ |
-| **CRDT** | Share Drive subfolder per table | ❌ |
+| **Browser (CRDT)** | Share Drive subfolder per table | ❌ |
 | **Apps Script** | Share folder + add to OAuth test users | ❌ |
 
 ### User Registry
