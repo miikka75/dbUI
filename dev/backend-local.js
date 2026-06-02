@@ -49,7 +49,8 @@ function createLocalBackend(dbPath) {
     initSchema(folderId, schema) {
       const result = {};
       for (const [table, def] of Object.entries(schema)) {
-        const columns = Array.isArray(def.columns) ? def.columns.map(c => typeof c === 'object' ? c.name : c).filter(Boolean) : Object.keys(def.columns);
+        const declared = Array.isArray(def.columns) ? def.columns.map(c => typeof c === 'object' ? c.name : c).filter(Boolean) : Object.keys(def.columns);
+        const columns = ['id'].concat(declared.filter(c => c !== 'id')); // id is implicit -> always present, first, PK
         const cols = columns.map(c => c === 'id' ? qid(c) + ' TEXT PRIMARY KEY' : qid(c) + ' TEXT').join(', ');
         // Create base + tab-suffixed tables
         const tabs = [table];
