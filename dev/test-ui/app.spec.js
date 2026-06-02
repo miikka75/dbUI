@@ -331,3 +331,304 @@ test.describe('Setup UI', () => {
     expect(download.suggestedFilename()).toMatch(/\.json$/);
   });
 });
+
+
+test.describe('syncFrom read-only', () => {
+  test('syncFrom columns are read-only in the detail table', async ({ page }) => {
+    await ensureAppReady(page); // opens notes (master)
+    // Navigate to tasks: a detail table whose date/title columns sync from notes
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.tasks' }).first().click();
+    await page.waitForTimeout(400);
+    const r = await page.evaluate(() => ({
+      current: appInstance.currentTable,
+      title: appInstance.isReadonlyCell({}, 'title'),   // syncFrom -> read-only
+      date: appInstance.isReadonlyCell({}, 'date'),     // syncFrom -> read-only
+      status: appInstance.isReadonlyCell({}, 'status')  // own column -> editable
+    }));
+    expect(r.current).toBe('tasks');
+    expect(r.title).toBe(true);
+    expect(r.date).toBe(true);
+    expect(r.status).toBe(false);
+  });
+});
+
+test.describe('Multi-table lifecycle (join view UI)', () => {
+  const has = async (page, tableId, tab, id) => {
+    const d = await (await page.request.post('/api/getTableData', { data: { tableId, tab } })).json();
+    return (d.rows || []).some(r => r.id === id);
+  };
+  test('add/archive/restore/delete in join view stays in sync across tasks+notes', async ({ page }) => {
+    test.setTimeout(20000);
+    await ensureAppReady(page, null); // boot only
+    // combined (join view over [tasks, notes]) is the first sidebar tab
+    await page.locator('.v-navigation-drawer .v-list-item').first().click();
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+
+    // ADD via the join view -> must create a row with the same id in BOTH source tables
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(700);
+    const tasks = await (await page.request.post('/api/getTableData', { data: { tableId: 'tasks', tab: 'active' } })).json();
+    const notes = await (await page.request.post('/api/getTableData', { data: { tableId: 'notes', tab: 'active' } })).json();
+    expect(tasks.rows.length).toBe(1);
+    expect(notes.rows.length).toBe(1);
+    const id = tasks.rows[0].id;
+    expect(notes.rows[0].id).toBe(id);
+
+    // ARCHIVE -> both sources move to archive
+    await page.locator('button:has(.mdi-archive-outline)').first().click();
+    await page.waitForTimeout(700);
+    expect(await has(page, 'tasks', 'active', id)).toBe(false);
+    expect(await has(page, 'notes', 'active', id)).toBe(false);
+    expect(await has(page, 'tasks', 'archive', id)).toBe(true);
+    expect(await has(page, 'notes', 'archive', id)).toBe(true);
+
+    // RESTORE from archived view -> both sources back to active
+    await page.locator('.v-tab:nth-child(2)').click();
+    await page.waitForTimeout(900);
+    await page.locator('button:has(.mdi-archive-arrow-up-outline)').first().click();
+    await page.waitForTimeout(700);
+    expect(await has(page, 'tasks', 'active', id)).toBe(true);
+    expect(await has(page, 'notes', 'active', id)).toBe(true);
+    expect(await has(page, 'tasks', 'archive', id)).toBe(false);
+    expect(await has(page, 'notes', 'archive', id)).toBe(false);
+
+    // DELETE (two-press) -> removed from both sources
+    await page.locator('.v-tab:nth-child(1)').click();
+    await page.waitForTimeout(600);
+    await page.locator('.v-table button:has(.mdi-close)').first().click();
+    await page.waitForTimeout(200);
+    await page.locator('.v-table button:has(.mdi-check-circle)').first().click();
+    await page.waitForTimeout(700);
+    expect(await has(page, 'tasks', 'active', id)).toBe(false);
+    expect(await has(page, 'notes', 'active', id)).toBe(false);
+  });
+});
+
+test.describe('Custom archivePartition', () => {
+  const CUSTOM = {
+    defaultLanguage: 'en',
+    tables: { items: { columns: [{ name: 'title', type: 'text' }], partition: 'active', archivePartition: 'trash' } },
+    views: [{ table: 'items' }]
+  };
+  const get = (page, tab) => page.request.post('/api/getTableData', { data: { tableId: 'items', tab } }).then(r => r.json());
+
+  test('archive/restore use the configured archivePartition (trash), not hardcoded archive', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: CUSTOM } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.items' }).first().click();
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+
+    // ADD + ARCHIVE
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(500);
+    await page.locator('button:has(.mdi-archive-outline)').first().click();
+    await page.waitForTimeout(600);
+
+    // Stored under 'trash', NOT the hardcoded 'archive'
+    const trash = await get(page, 'trash');
+    expect(trash.rows.length).toBe(1);
+    expect((await get(page, 'archive')).rows.length).toBe(0);
+    expect((await get(page, 'active')).rows.length).toBe(0);
+    const id = trash.rows[0].id;
+
+    // Archived view reads dataCache[items__trash] -> row is visible
+    await page.locator('.v-tab:nth-child(2)').click();
+    await page.waitForTimeout(700);
+    await expect(page.locator('.v-table tbody tr')).toHaveCount(1);
+
+    // RESTORE -> back to active partition, trash emptied
+    await page.locator('button:has(.mdi-archive-arrow-up-outline)').first().click();
+    await page.waitForTimeout(600);
+    expect((await get(page, 'active')).rows.some(r => r.id === id)).toBe(true);
+    expect((await get(page, 'trash')).rows.length).toBe(0);
+  });
+});
+
+test.describe('Archive from a view whose source has a mirror table not in sources', () => {
+  // Mirrors the kokous/musiikki case: view 'mtg' sources=[meetings] only; 'music' mirrors meetings.
+  const SCH = {
+    defaultLanguage: 'en',
+    tables: {
+      meetings: { columns: [{ name: 'title', type: 'text' }], partition: 'active', archivePartition: 'archive' },
+      music: { columns: [{ name: 'title', type: 'text', syncFrom: 'meetings' }, { name: 'song', type: 'text' }], partition: 'active', archivePartition: 'archive' }
+    },
+    views: [{ name: 'mtg', sources: ['meetings'], mode: 'union', columns: ['title'] }, { name: 'mus', sources: ['music'], mode: 'union', columns: ['song'] }, { table: 'meetings' }, { table: 'music' }]
+  };
+  const get = (page, t, tab) => page.request.post('/api/getTableData', { data: { tableId: t, tab } }).then(r => r.json());
+
+  test('archiving in the view also archives the mirror table row', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'mtg' }).first().click(); // the view
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+
+    // ADD in the view -> meetings row + propagated music mirror row (same id)
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(600);
+    expect((await get(page, 'meetings', 'active')).rows.length).toBe(1);
+    expect((await get(page, 'music', 'active')).rows.length).toBe(1);
+    const id = (await get(page, 'meetings', 'active')).rows[0].id;
+
+    // ARCHIVE from the view -> BOTH meetings AND the mirror 'music' move to archive
+    await page.locator('button:has(.mdi-archive-outline)').first().click();
+    await page.waitForTimeout(600);
+    expect((await get(page, 'meetings', 'active')).rows.length).toBe(0);
+    expect((await get(page, 'music', 'active')).rows.length).toBe(0);
+    expect((await get(page, 'meetings', 'archive')).rows.some(r => r.id === id)).toBe(true);
+    expect((await get(page, 'music', 'archive')).rows.some(r => r.id === id)).toBe(true);
+  });
+
+  test('archiving from the DETAIL view also archives the upstream master row', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'mus' }).first().click(); // detail view (music)
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+
+    // ADD in the detail view -> music row + propagated upstream master 'meetings' row (same id)
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(600);
+    expect((await get(page, 'music', 'active')).rows.length).toBe(1);
+    expect((await get(page, 'meetings', 'active')).rows.length).toBe(1);
+    const id = (await get(page, 'music', 'active')).rows[0].id;
+
+    // ARCHIVE from the detail view -> upstream master 'meetings' moves to archive too
+    await page.locator('button:has(.mdi-archive-outline)').first().click();
+    await page.waitForTimeout(600);
+    expect((await get(page, 'music', 'active')).rows.length).toBe(0);
+    expect((await get(page, 'meetings', 'active')).rows.length).toBe(0);
+    expect((await get(page, 'meetings', 'archive')).rows.some(r => r.id === id)).toBe(true);
+    expect((await get(page, 'music', 'archive')).rows.some(r => r.id === id)).toBe(true);
+  });
+});
+
+test.describe('Permissions — restricted user UI gating', () => {
+  // meetings (master) has a list + a ref to venues; music (detail) has neither.
+  const SCH = {
+    defaultLanguage: 'en',
+    tables: {
+      meetings: { columns: [{ name: 'title', type: 'text' }, { name: 'place', type: 'ref', table: 'venues', valueCol: 'venue' }, { name: 'kind', type: 'select', list: 'mkind' }], partition: 'active', archivePartition: 'archive' },
+      music: { columns: [{ name: 'title', type: 'text', syncFrom: 'meetings' }, { name: 'song', type: 'text' }], partition: 'active', archivePartition: 'archive' },
+      venues: { columns: [{ name: 'venue', type: 'text' }], isLookup: true }
+    },
+    views: [{ name: 'mus', sources: ['music'], mode: 'union', columns: ['song'] }, { name: 'mtg', sources: ['meetings'], mode: 'union', columns: ['title', 'place', 'kind'] }, { table: 'meetings' }, { table: 'music' }]
+  };
+  async function setup(page) {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.request.post('/api/saveLists', { data: { lists: { mkind: ['weekly'] } } });
+    await page.request.post('/api/setUserRole', { data: { uid: 'admin@x', role: 'admin', user: 'admin@x', tables: 'all' } });
+    await page.request.post('/api/setUserRole', { data: { uid: 'ed@x', role: 'editor', user: 'ed@x', tables: ['music'] } });
+  }
+  async function bootAs(page, user) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    await page.evaluate((u) => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('test_user', u); }, user);
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+  }
+
+  test('admin sees every tab, the lookup tab, all ref tables, and can archive', async ({ page }) => {
+    test.setTimeout(20000);
+    await setup(page);
+    await bootAs(page, 'admin@x');
+    const info = await page.evaluate(() => ({ ids: appInstance.sidebarTabs.map(t => t.id), ref: appInstance.refTables, lists: Object.keys(appInstance.visibleLists) }));
+    expect(info.ids).toEqual(expect.arrayContaining(['mus', 'mtg', '__lookup']));
+    expect(info.ref).toContain('venues');
+    expect(info.lists).toContain('mkind');
+    // add a row in the mus view -> archive button visible (admin has full access)
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.mus' }).first().click();
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(500);
+    expect(await page.evaluate(() => appInstance.canMutateCurrent)).toBe(true);
+    expect(await page.locator('button:has(.mdi-archive-outline)').count()).toBeGreaterThanOrEqual(1);
+  });
+
+  test('editor restricted to music: filtered sidebar, no lookup tab, no archive button', async ({ page }) => {
+    test.setTimeout(20000);
+    await setup(page);
+    // seed a music row as admin so the editor's view has data
+    await bootAs(page, 'admin@x');
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.mus' }).first().click();
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(500);
+
+    await bootAs(page, 'ed@x');
+    const info = await page.evaluate(() => ({ ids: appInstance.sidebarTabs.map(t => t.id), ref: appInstance.refTables, lists: Object.keys(appInstance.visibleLists) }));
+    expect(info.ids).toEqual(expect.arrayContaining(['mus', 'music']));
+    expect(info.ids).not.toContain('mtg');         // view needs meetings (no access)
+    expect(info.ids).not.toContain('meetings');    // table not allowed
+    expect(info.ids).not.toContain('__lookup');    // no lists + no refs -> tab hidden
+    expect(info.ref).toEqual([]);                  // venues filtered out
+    expect(info.lists).toEqual([]);                // mkind (used by meetings) filtered out
+
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.mus' }).first().click();
+    await page.waitForTimeout(500);
+    expect(await page.evaluate(() => appInstance.canMutateCurrent)).toBe(false);
+    expect(await page.locator('button:has(.mdi-archive-outline)').count()).toBe(0); // archive hidden
+    expect(await page.locator('.v-table tbody tr').count()).toBeGreaterThanOrEqual(1); // row still visible
+    expect(await page.locator('.v-table button:has(.mdi-close)').count()).toBe(0); // delete hidden too
+  });
+});
+
+test.describe('Mirror cluster is transitive (master + 2 details)', () => {
+  // meet (master) <- mus, task (both syncFrom meet). Adding/deleting one detail must affect ALL three.
+  const SCH = {
+    defaultLanguage: 'en',
+    tables: {
+      meet: { columns: [{ name: 'title', type: 'text' }], partition: 'active', archivePartition: 'archive' },
+      mus: { columns: [{ name: 'title', type: 'text', syncFrom: 'meet' }, { name: 'song', type: 'text' }], partition: 'active', archivePartition: 'archive' },
+      task: { columns: [{ name: 'title', type: 'text', syncFrom: 'meet' }, { name: 'todo', type: 'text' }], partition: 'active', archivePartition: 'archive' }
+    },
+    views: [{ name: 'musv', sources: ['mus'], mode: 'union', columns: ['song'] }, { table: 'meet' }, { table: 'mus' }, { table: 'task' }]
+  };
+  const get = (page, t) => page.request.post('/api/getTableData', { data: { tableId: t, tab: 'active' } }).then(r => r.json());
+
+  test('add + delete from a detail view propagate transitively to master and sibling detail', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'musv' }).first().click();
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+
+    // ADD in the mus detail view -> meet (master) + task (sibling detail) created too
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(600);
+    expect((await get(page, 'mus')).rows.length).toBe(1);
+    expect((await get(page, 'meet')).rows.length).toBe(1);
+    expect((await get(page, 'task')).rows.length).toBe(1);
+
+    // DELETE (two-press) -> all three removed
+    await page.locator('.v-table button:has(.mdi-close)').first().click();
+    await page.waitForTimeout(200);
+    await page.locator('.v-table button:has(.mdi-check-circle)').first().click();
+    await page.waitForTimeout(600);
+    expect((await get(page, 'mus')).rows.length).toBe(0);
+    expect((await get(page, 'meet')).rows.length).toBe(0);
+    expect((await get(page, 'task')).rows.length).toBe(0);
+  });
+});
