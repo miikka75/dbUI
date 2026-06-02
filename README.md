@@ -31,7 +31,8 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 cd dev
 npm install
 npm start        # http://127.0.0.1:3000
-npm test         # run backend tests (84 tests)
+npm test         # run backend tests (206 unit tests)
+npx playwright test  # run E2E tests (25 tests)
 ```
 
 Browser: click "Create Local Database" → app loads with schema from `schema.json`.
@@ -181,7 +182,6 @@ Tables define data structure. Each table has columns and storage configuration.
 ```json
 "tasks": {
   "columns": [
-    { "name": "id", "type": "text", "hidden": true },
     { "name": "date", "type": "date", "syncFrom": "notes" },
     { "name": "title", "type": "text", "syncFrom": "notes" },
     { "name": "status", "type": "select", "list": "status" },
@@ -192,6 +192,8 @@ Tables define data structure. Each table has columns and storage configuration.
   "archivePartition": "archive"
 }
 ```
+
+> **`id` is implicit** — every table gets an `id` column auto-injected (storage primary key + join/archive match key). Do not declare it in `columns`.
 
 #### Column types
 
@@ -208,7 +210,7 @@ Tables define data structure. Each table has columns and storage configuration.
 |----------|-------------|
 | `name` | Column identifier (required) |
 | `type` | Column type (default: `"text"`) |
-| `hidden` | Don't display in UI (e.g., `id`, `created_at`) |
+| `hidden` | Don't display in UI (e.g., `created_at`, `updated_at`) |
 | `list` | List name for `select` type |
 | `allowNew` | Allow adding new values to the list (combobox) |
 | `sorted` | Sort dropdown items alphabetically (for `select`/`list` columns) |
@@ -239,10 +241,9 @@ Each entry is either a **view definition** (has `name` + `sources`) or a **table
 |-------|------|-------------|
 | `name` | string | View identifier |
 | `sources` | string[] | Table names to pull data from |
-| `mode` | string | `"union"` (stack rows) or `"join"` (merge by id) |
+| `mode` | string | `"union"` (stack rows) or `"join"` (merge rows by `id`) |
 | `columns` | array | Mix of column names, text entries, embeds, and conditional columns |
 | `filter` | object | Static row filter (e.g., `{"status": "in_progress"}`) |
-| `matchKey` | string | Column to match rows in join mode (default: `"id"`) |
 | `readonly` | boolean | Disable editing (report views) |
 | `layout` | string | `"table"`, `"card"`, or `"list"` |
 | `collapsed` | boolean | Cards start collapsed (accordion) |
