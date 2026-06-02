@@ -4,10 +4,6 @@
     "tasks": {
       "columns": [
         {
-          "name": "id",
-          "type": "text"
-        },
-        {
           "name": "date",
           "type": "date",
           "syncFrom": "notes"
@@ -54,10 +50,6 @@
     "notes": {
       "columns": [
         {
-          "name": "id",
-          "type": "text"
-        },
-        {
           "name": "date",
           "type": "date"
         },
@@ -92,10 +84,6 @@
     "cities": {
       "columns": [
         {
-          "name": "id",
-          "type": "text"
-        },
-        {
           "name": "state",
           "type": "text"
         },
@@ -125,7 +113,6 @@
         "notes"
       ],
       "mode": "join",
-      "matchKey": "id",
       "columns": [
         {
           "text": "view.combined.header"
