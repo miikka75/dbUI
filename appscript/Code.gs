@@ -91,7 +91,7 @@ function bootData(folderId, schema) {
   for (var name in tableMap) {
     var def = tables[name];
     data[name] = getTableData(tableMap[name], def.partition || 'active');
-    if (def.archivePartition) { try { data[name + '__archive'] = getTableData(tableMap[name], def.archivePartition); } catch(e2) {} }
+    if (def.archivePartition) { try { data[name + '__' + def.archivePartition] = getTableData(tableMap[name], def.archivePartition); } catch(e2) {} }
   }
   // Return schema as object + explicit key order arrays (google.script.run scrambles object keys)
   return { schema: parsed, tableOrder: Object.keys(tables), columnOrders: buildColumnOrders(tables), tableMap: tableMap, languages: languages, lists: lists, data: data };
