@@ -632,3 +632,30 @@ test.describe('Mirror cluster is transitive (master + 2 details)', () => {
     expect((await get(page, 'task')).rows.length).toBe(0);
   });
 });
+
+test.describe('Import round-trip', () => {
+  test('importing a JSON bundle restores data into correct partitions (active vs archive) with implicit id', async ({ page }) => {
+    test.setTimeout(20000);
+    const SCH = { defaultLanguage: 'en', tables: { docs: { columns: [{ name: 'title', type: 'text' }], partition: 'active', archivePartition: 'archive' } }, views: [{ table: 'docs' }] };
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    // Open Settings so the hidden import file input is in the DOM
+    await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
+    await page.waitForTimeout(300);
+
+    const bundle = { schema: SCH, tables: { docs: [{ id: 'a1', title: 'Active1' }], docs__archive: [{ id: 'z1', title: 'Arch1' }] } };
+    await page.setInputFiles('input[type=file][accept=".json"]', { name: 'import.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bundle)) });
+    await page.waitForTimeout(2000); // FileReader + chained per-row writes
+
+    const active = await (await page.request.post('/api/getTableData', { data: { tableId: 'docs', tab: 'active' } })).json();
+    const archive = await (await page.request.post('/api/getTableData', { data: { tableId: 'docs', tab: 'archive' } })).json();
+    expect(active.rows.some(r => r.id === 'a1' && r.title === 'Active1')).toBe(true);  // bare key -> active partition
+    expect(archive.rows.some(r => r.id === 'z1' && r.title === 'Arch1')).toBe(true);   // __archive key -> archive partition
+    expect(active.headers).toContain('id'); // implicit id present after import
+  });
+});
