@@ -16,38 +16,45 @@
         <v-card-text>
           <!-- Step 1: Choose mode -->
           <div v-if="!setupStep">
-            <v-btn v-if="hasLocalServer" block variant="outlined" class="mb-3 text-left" @click="setupStep = 'local'">
+            <v-btn v-if="hasLocalServer" block variant="outlined" class="mb-3 text-left mode-btn" @click="setupStep = 'local'">
               <v-icon start>mdi-database</v-icon>
-              <div><strong>Local Database</strong><br><small style="opacity:0.6">SQLite on dev server — fastest for development</small></div>
+              <div><strong>Dev Server (SQLite)</strong><br><small style="opacity:0.6">SQLite on the local dev server — fastest for development</small></div>
             </v-btn>
-            <v-btn v-if="hasLocalServer" block variant="outlined" class="mb-3 text-left" @click="setupStep = 'crdt-local'">
+            <v-btn v-if="hasLocalServer" block variant="outlined" class="mb-3 text-left mode-btn" @click="openCrdtLocalSetup">
               <v-icon start>mdi-sync-circle</v-icon>
-              <div><strong>Local + CRDT Sync</strong><br><small style="opacity:0.6">IndexedDB with CRDT sync via local server (no Google)</small></div>
+              <div><strong>Browser + CRDT Sync (Local Server)</strong><br><small style="opacity:0.6">Browser IndexedDB synced to the local dev server (no Google)</small></div>
             </v-btn>
-            <v-btn block variant="outlined" class="mb-3 text-left" @click="selectSetupMode('firebase')">
+            <v-btn block variant="outlined" class="mb-3 text-left mode-btn" @click="selectSetupMode('firebase')">
               <v-icon start>mdi-firebase</v-icon>
               <div><strong>Firebase</strong><br><small style="opacity:0.6">Real-time sync via Firestore with offline support</small></div>
             </v-btn>
-            <v-btn block variant="outlined" class="mb-3 text-left" @click="selectSetupMode('crdt')">
-              <v-icon start>mdi-sync</v-icon>
-              <div><strong>Local + Drive Sync (CRDT)</strong><br><small style="opacity:0.6">Instant local IndexedDB with background Drive sync</small></div>
+            <v-btn block variant="outlined" class="mb-3 text-left mode-btn" @click="selectSetupMode('crdt')">
+              <v-icon start>mdi-google-drive</v-icon>
+              <div><strong>Browser + CRDT Sync (Google Drive)</strong><br><small style="opacity:0.6">Browser IndexedDB synced to Google Drive in the background</small></div>
             </v-btn>
-            <v-btn block variant="outlined" class="mb-3 text-left" @click="selectSetupMode('sheets')">
+            <v-btn block variant="outlined" class="mb-3 text-left mode-btn" @click="selectSetupMode('sheets')">
               <v-icon start>mdi-google-spreadsheet</v-icon>
               <div><strong>Google Sheets</strong><br><small style="opacity:0.6">Data stored in Google Sheets via OAuth REST API</small></div>
             </v-btn>
           </div>
           <!-- Step 2: Local -->
           <div v-if="setupStep === 'local'">
-            <p class="mb-4">Local mode — data stored in server SQLite database.</p>
-            <v-btn color="primary" @click="completeLocalSetup">Create Local Database</v-btn>
-            <v-btn variant="text" @click="setupStep = null; localStorage.removeItem('app_mode')" class="ml-2">Back</v-btn>
+            <p class="mb-4">Dev Server mode — data stored in the local server's SQLite database.</p>
+            <v-btn color="primary" @click="completeLocalSetup">Create Database</v-btn>
+            <v-btn variant="text" @click="backToSetup" class="ml-2">Back</v-btn>
           </div>
           <!-- Step 2: CRDT-Local -->
           <div v-if="setupStep === 'crdt-local'">
-            <p class="mb-4">CRDT mode — data in browser IndexedDB with CRDT sync via local server. No Google account needed.</p>
-            <v-btn color="primary" @click="completeCrdtLocalSetup">Start CRDT-Local</v-btn>
-            <v-btn variant="text" @click="setupStep = null; localStorage.removeItem('app_mode')" class="ml-2">Back</v-btn>
+            <p class="mb-4">Browser mode — data in browser IndexedDB with CRDT sync via the local dev server. No Google account needed.</p>
+            <p class="mb-4 pa-2" style="background:rgb(var(--v-theme-surface-variant),0.3);border-radius:8px;font-size:0.8rem">
+              <strong>Server storage:</strong>&nbsp;
+              <span v-if="serverStorage === 'fs'">JSON files on disk (<code>dev/data/</code>)</span>
+              <span v-else-if="serverStorage === 'sqlite'">SQLite (<code>dev/local.db</code>)</span>
+              <span v-else style="opacity:0.6">checking…</span><br>
+              To change it, restart the server with <code>node server.js --fs</code> (JSON files) or without it (SQLite).
+            </p>
+            <v-btn color="primary" @click="completeCrdtLocalSetup">Start Browser + CRDT</v-btn>
+            <v-btn variant="text" @click="backToSetup" class="ml-2">Back</v-btn>
           </div>
           <!-- Step 2: Sheets / CRDT / Firebase (need sign-in) -->
           <div v-if="setupStep === 'sheets' || setupStep === 'crdt' || setupStep === 'firebase'">
