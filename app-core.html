@@ -963,7 +963,7 @@ function createVueApp() {
           if (!row.created_at) row.created_at = new Date().toISOString();
           backend.putRow(self.tableMap[source], row, tab);
           // Propagate to mirror tables if this column is mirrored
-          self.propagateMirror(item.id, source, row, 'update');
+          self.propagateMirror(item.id, source, row);
           self.notify('Saved');
         }, 300);
       },
@@ -1415,78 +1415,37 @@ function createVueApp() {
       },
       saveLists: function() { backend.saveLists(this.folderId, this.listsCache); },
 
-      // Mirror propagation helper
-      propagateMirror: function(id, sourceTable, rowData, action) {
+      // Propagate edited syncFrom column values to mirror-linked tables (downstream details + upstream masters)
+      propagateMirror: function(id, sourceTable, rowData) {
         var self = this;
+        // Downstream: detail tables whose columns syncFrom sourceTable
         for (var mt in SCHEMA) {
-          var mirrorCols = SCHEMA[mt].columns;
-          var hasMirror = false;
-          for (var mc in mirrorCols) {
-            var mdef = mirrorCols[mc];
-            if (mdef && typeof mdef === 'object' && mdef.syncFrom === sourceTable) { hasMirror = true; break; }
-          }
-          if (!hasMirror) continue;
+          var synced = [];
+          for (var mc in SCHEMA[mt].columns) { var md = SCHEMA[mt].columns[mc]; if (md && typeof md === 'object' && md.syncFrom === sourceTable) synced.push(mc); }
+          if (!synced.length) continue;
           var mKey = self.viewingArchive ? aKey(mt) : mt;
-          var mTab = self.viewingArchive ? (SCHEMA[mt].archivePartition) : (SCHEMA[mt].partition);
-          if (action === 'delete') {
-            self.dataCache[mKey] = (self.dataCache[mKey] || []).filter(function(r) { return r.id !== id; });
-            backend.deleteRow(self.tableMap[mt], id, mTab);
-          } else if (action === 'create') {
-            var mirrorRow = { id: id, created_at: rowData.created_at || new Date().toISOString(), updated_at: new Date().toISOString() };
-            getColumns(mt).forEach(function(c) { if (!mirrorRow[c]) mirrorRow[c] = ''; });
-            for (var mc2 in mirrorCols) {
-              var md = mirrorCols[mc2];
-              if (md && typeof md === 'object' && md.syncFrom) mirrorRow[mc2] = rowData[mc2] || '';
-            }
-            if (!self.dataCache[mKey]) self.dataCache[mKey] = [];
-            self.dataCache[mKey].push(mirrorRow);
-            backend.putRow(self.tableMap[mt], mirrorRow, mTab);
-          } else if (action === 'update') {
-            var mCached = self.dataCache[mKey] || [];
-            for (var mc3 in mirrorCols) {
-              var md2 = mirrorCols[mc3];
-              if (md2 && typeof md2 === 'object' && md2.syncFrom === sourceTable) {
-                var mr = mCached.find(function(r) { return r.id === id; });
-                if (mr) {
-                  mr[mc3] = rowData[mc3] || '';
-                  mr.updated_at = new Date().toISOString();
-                  backend.putRow(self.tableMap[mt], mr, mTab);
-                }
-              }
-            }
+          var mTab = self.viewingArchive ? SCHEMA[mt].archivePartition : SCHEMA[mt].partition;
+          var mr = (self.dataCache[mKey] || []).find(function(r) { return r.id === id; });
+          if (mr) {
+            var mch = false;
+            synced.forEach(function(c) { if (mr[c] !== rowData[c]) { mr[c] = rowData[c] || ''; mch = true; } });
+            if (mch) { mr.updated_at = new Date().toISOString(); backend.putRow(self.tableMap[mt], mr, mTab); }
           }
         }
-        // Reverse (upstream): keep the master table(s) this sourceTable mirrors from in sync for all actions
+        // Upstream: master table(s) this sourceTable mirrors from
         var srcCols = SCHEMA[sourceTable] && SCHEMA[sourceTable].columns;
-        if (srcCols) {
-          var upTargets = {};
-          for (var rc in srcCols) {
-            var rdef = srcCols[rc];
-            if (rdef && typeof rdef === 'object' && rdef.syncFrom) { (upTargets[rdef.syncFrom] = upTargets[rdef.syncFrom] || []).push(rc); }
+        var upTargets = {};
+        for (var rc in (srcCols || {})) { var rdef = srcCols[rc]; if (rdef && typeof rdef === 'object' && rdef.syncFrom) { (upTargets[rdef.syncFrom] = upTargets[rdef.syncFrom] || []).push(rc); } }
+        Object.keys(upTargets).forEach(function(st) {
+          var stKey = self.viewingArchive ? aKey(st) : st;
+          var stTab = self.viewingArchive ? (SCHEMA[st] && SCHEMA[st].archivePartition) : (SCHEMA[st] && SCHEMA[st].partition);
+          var stRow = (self.dataCache[stKey] || []).find(function(r) { return r.id === id; });
+          if (stRow) {
+            var ch = false;
+            upTargets[st].forEach(function(c) { if (stRow[c] !== rowData[c]) { stRow[c] = rowData[c] || ''; ch = true; } });
+            if (ch) { stRow.updated_at = new Date().toISOString(); backend.putRow(self.tableMap[st], stRow, stTab); }
           }
-          Object.keys(upTargets).forEach(function(st) {
-            var stKey = self.viewingArchive ? aKey(st) : st;
-            var stTab = self.viewingArchive ? (SCHEMA[st] && SCHEMA[st].archivePartition) : (SCHEMA[st] && SCHEMA[st].partition);
-            var stCached = self.dataCache[stKey] || (self.dataCache[stKey] = []);
-            var stRow = stCached.find(function(r) { return r.id === id; });
-            if (action === 'delete') {
-              self.dataCache[stKey] = stCached.filter(function(r) { return r.id !== id; });
-              backend.deleteRow(self.tableMap[st], id, stTab);
-            } else if (action === 'create') {
-              if (!stRow) {
-                stRow = { id: id, created_at: rowData.created_at || new Date().toISOString(), updated_at: new Date().toISOString() };
-                getColumns(st).forEach(function(c) { if (!stRow[c]) stRow[c] = ''; });
-                upTargets[st].forEach(function(c) { stRow[c] = rowData[c] || ''; });
-                stCached.push(stRow);
-                backend.putRow(self.tableMap[st], stRow, stTab);
-              }
-            } else if (action === 'update' && stRow) {
-              var ch = false;
-              upTargets[st].forEach(function(c) { if (stRow[c] !== rowData[c]) { stRow[c] = rowData[c] || ''; ch = true; } });
-              if (ch) { stRow.updated_at = new Date().toISOString(); backend.putRow(self.tableMap[st], stRow, stTab); }
-            }
-          });
-        }
+        });
       },
 
       // Settings
@@ -1684,6 +1643,16 @@ function createVueApp() {
               }).then(function() {
                 var s = imported.schema.tables || imported.schema;
                 SCHEMA = s;
+                // Normalize array columns -> colMap + inject implicit id (same as the boot load paths)
+                window._columnOrders = {};
+                Object.keys(SCHEMA).forEach(function(t) {
+                  if (Array.isArray(SCHEMA[t].columns)) {
+                    var colMap = {}; window._columnOrders[t] = [];
+                    SCHEMA[t].columns.forEach(function(c) { if (!c.name) return; window._columnOrders[t].push(c.name); var def = Object.assign({}, c); delete def.name; colMap[c.name] = Object.keys(def).length ? def : 'text'; });
+                    SCHEMA[t].columns = colMap;
+                  } else { window._columnOrders[t] = Object.keys(SCHEMA[t].columns || {}); }
+                });
+                ensureImplicitId(SCHEMA, window._columnOrders);
                 return backend.initSchema(self.folderId, s);
               }).then(function(tableMap) {
                 if (tableMap) self.tableMap = tableMap;
