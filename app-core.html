@@ -473,10 +473,14 @@ function createVueApp() {
             if (v.name) {
               keys.push('view.' + v.name);
               (v.columns || []).forEach(function(c) {
-                if (typeof c === 'object' && c.text) keys.push(c.text);
-                if (typeof c === 'object' && c.sources && c.columns) {
-                  c.columns.forEach(function(ec) { if (typeof ec === 'object' && ec.text) keys.push(ec.text); });
+                if (typeof c !== 'object') { keys.push('field.' + c); return; }          // plain column name
+                if (c.text && !c.sources) { keys.push(c.text); return; }                 // text entry
+                if (c.sources && c.columns) {                                            // inline embed
+                  if (c.text) keys.push(c.text);                                         // embed label
+                  c.columns.forEach(function(ec) { (typeof ec === 'object' && ec.text) ? keys.push(ec.text) : keys.push('field.' + colName(ec)); });
+                  return;
                 }
+                keys.push('field.' + colName(c));                                        // conditional column {col:{filter}}
               });
               if (v.views) addViewKeys(v.views);
             }
