@@ -22,6 +22,7 @@ function _fetch(url, method, body) {
 
 function initOAuth() {
   if (typeof google === 'undefined' || !google.accounts) return;
+  if (!CLIENT_ID) return; // no client id entered yet -> defer until the user signs in
   _oauthClient = google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID, scope: SCOPES,
     callback: function(response) { if (response.access_token) { _token = response.access_token; sessionStorage.setItem('oauth_token', _token); init(); } }
@@ -29,7 +30,10 @@ function initOAuth() {
   // If token exists from session, init() will be called by index.html after backend loads
 }
 
-function triggerOAuth() { if (_oauthClient) _oauthClient.requestAccessToken(); }
+function triggerOAuth() {
+  if (!_oauthClient) { CLIENT_ID = localStorage.getItem('oauth_client_id'); initOAuth(); } // lazy init once the id is saved
+  if (_oauthClient) _oauthClient.requestAccessToken();
+}
 
 initOAuth();
 </script>
