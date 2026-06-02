@@ -659,3 +659,14 @@ test.describe('Import round-trip', () => {
     expect(active.headers).toContain('id'); // implicit id present after import
   });
 });
+
+test.describe('Translation keys for view columns', () => {
+  test('aggregate/computed view columns get field.* keys (plus normal columns + text entries)', async ({ page }) => {
+    await ensureAppReady(page); // default schema includes the aggregate "attendance" subview
+    const keys = await page.evaluate(() => appInstance.schemaTranslationKeys);
+    // aggregate subview 'attendance' computed columns -> previously had NO key
+    for (const k of ['field.person', 'field.latest', 'field.previous', 'field.3rd']) expect(keys).toContain(k);
+    expect(keys).toContain('field.title');            // normal table column still covered
+    expect(keys).toContain('view.combined.header');   // text entry still covered
+  });
+});
