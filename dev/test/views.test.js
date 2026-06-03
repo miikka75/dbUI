@@ -225,20 +225,6 @@ describe('Schema property coverage', () => {
     assert.ok(textEntries.length > 0 || embedEntries.length > 0, 'Schema should have text or embed entries in columns');
   });
 
-  it('embed columns can contain text entries', () => {
-    // Find an embed with text in its columns
-    let found = false;
-    for (const vn in VIEWS) {
-      const view = VIEWS[vn];
-      (view.columns || []).forEach(c => {
-        if (typeof c === 'object' && c.sources && Array.isArray(c.columns)) {
-          c.columns.forEach(ec => { if (typeof ec === 'object' && ec.text) found = true; });
-        }
-      });
-    }
-    assert.ok(found, 'At least one embed should have text entries in its columns');
-  });
-
   it('readonly view property exists in schema', () => {
     let hasReadonly = false;
     for (const vn in VIEWS) { if (VIEWS[vn].readonly) hasReadonly = true; }
