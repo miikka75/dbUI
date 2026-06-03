@@ -28,8 +28,11 @@ function ensureImplicitId(schema, orders) {
 function colName(c) { return typeof c === 'object' ? Object.keys(c)[0] : c; }
 function isEmbed(c) { return typeof c === 'object' && c.sources && !c.name; }
 function isText(c) { return typeof c === 'object' && c.text && !c.name && !c.sources; }
-// dataCache/export key for a table's archive partition (uses the configured archivePartition, default 'archive')
-function aKey(table) { return table + '__' + ((SCHEMA[table] && SCHEMA[table].archivePartition) || 'archive'); }
+// dataCache/export key for a table's archive partition (fixed 'archive')
+function aKey(table) { return table + '__archive'; }
+// Derive fixed internal partitions from the `archivable` flag (active is always 'active';
+// archive is 'archive' when archivable). Legacy archivePartition values also enable archive.
+function normArchive(t) { if (!t) return; t.partition = 'active'; t.archivePartition = (t.archivable || t.archivePartition) ? 'archive' : null; }
 // Full mirror cluster: all tables sharing a logical row via syncFrom, both directions, transitively
 // (a detail's master, a master's details, and their other details).
 function withMirrors(base) {
@@ -46,6 +49,20 @@ function withMirrors(base) {
   return set;
 }
 function filterRows(rows, filter) { if (!filter) return rows; return rows.filter(function(r) { for (var k in filter) { if (r[k] !== filter[k]) return false; } return true; }); }
+// Tiny markdown -> HTML for pages (headings, bold/italic, lists, links, paragraphs). Embed tokens are split out before this runs.
+function mdToHtml(md) {
+  var esc = function(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+  var inline = function(t) { return esc(t).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\*([^*]+)\*/g, '<em>$1</em>').replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>'); };
+  var lines = String(md || '').split('\n'), out = [], i = 0;
+  while (i < lines.length) {
+    var l = lines[i], h = /^(#{1,4})\s+(.*)/.exec(l);
+    if (h) { out.push('<h' + h[1].length + '>' + inline(h[2]) + '</h' + h[1].length + '>'); i++; continue; }
+    if (/^\s*[-*]\s+/.test(l)) { var items = []; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push('<li>' + inline(lines[i].replace(/^\s*[-*]\s+/, '')) + '</li>'); i++; } out.push('<ul>' + items.join('') + '</ul>'); continue; }
+    if (l.trim() === '') { i++; continue; }
+    out.push('<p>' + inline(l) + '</p>'); i++;
+  }
+  return out.join('');
+}
 function buildRows(cfg, dataCache) {
   var rows = [];
   var sources = cfg.sources || [];
@@ -58,6 +75,27 @@ function buildRows(cfg, dataCache) {
     }
   });
   return filterRows(rows, cfg.filter);
+}
+// Aggregate a groupBy/collect view's rows into one row per key (collected values -> Nth columns).
+function aggregateRows(view, rows) {
+  if (!(view.groupBy && view.collect)) return rows;
+  var byObj = typeof view.groupBy === 'object' && !Array.isArray(view.groupBy);
+  var keyCol = byObj ? view.groupBy.column : view.columns[0];
+  var keysFrom = byObj ? view.groupBy.from : view.groupBy;
+  var groups = {};
+  rows.forEach(function(r) {
+    keysFrom.forEach(function(k) {
+      var key = r[k];
+      if (key) { if (!groups[key]) groups[key] = []; if (r[view.collect]) groups[key].push(r[view.collect]); }
+    });
+  });
+  var valCols = (view.columns || []).filter(function(c) { return c !== keyCol; });
+  return Object.keys(groups).map(function(key) {
+    var vals = groups[key].sort().reverse(), row = { id: key };
+    row[keyCol] = key;
+    for (var i = 0; i < valCols.length; i++) row[valCols[i]] = vals[i] || '';
+    return row;
+  });
 }
 function colCondition(c) { return typeof c === 'object' ? c[Object.keys(c)[0]] : null; }
 function toDateStr(v) { if (!v) return ''; var s = String(v); if (s.length === 10) return s; var d = new Date(s); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
@@ -189,6 +227,9 @@ function createVueApp() {
       pendingDeleteTimer: null,
       currentRefTable: null,
       schemaData: null,
+      pageEditing: false,
+      pageEditText: '',
+      pageCache: {},
       expandedCard: null
     }; },
 
@@ -206,53 +247,56 @@ function createVueApp() {
           if (SCHEMA[id]) return allowedTables.indexOf(id) >= 0;
           return true;
         }
-        function makeTab(item) {
-          var id = item.name || item.table;
-          if (!id) return null;
-          if (!canAccess(id)) return null;
-          var isView = !!item.name;
-          var def = isView ? VIEWS[id] : SCHEMA[id];
-          if (!def) return null;
-          var tab = { id: id, title: self.t((isView ? 'view.' : 'tab.') + id) || id, icon: (item.icon || (def && def.icon)) || (isView ? 'mdi-view-list' : 'mdi-table') };
-          if (item.views) {
-            var children = item.views.map(makeTab).filter(Boolean);
-            if (children.length) tab.children = children;
-          }
-          return tab;
+        var pages = (self.schemaData && self.schemaData.pages) || {};
+        // Single nav model (v3): the schema's nav.items defines the sidebar
+        var navCfg = self.navConfig;
+        var navItems = (navCfg && Array.isArray(navCfg.items)) ? navCfg.items : [];
+        function navTab(it) {
+          if (it.page) { if (!pages[it.page]) return null; var pt = { id: '@page:' + it.page, title: self.t('page.' + it.page) || it.page, icon: it.icon || 'mdi-file-document-outline' }; if (it.items) { var pk = it.items.map(navTab).filter(Boolean); if (pk.length) pt.children = pk; } return pt; }
+          if (it.group) { var ch = (it.items || []).map(navTab).filter(Boolean); return ch.length ? { id: 'grp:' + it.group, title: self.t('nav.' + it.group) || it.group, icon: it.icon || 'mdi-folder', children: ch } : null; }
+          var gid = it.view || it.table;
+          if (!gid || !canAccess(gid)) return null;
+          if (it.view && !VIEWS[gid]) return null;
+          if (it.table && !SCHEMA[gid]) return null;
+          var isV = !!it.view;
+          var tb = { id: gid, title: self.t((isV ? 'view.' : 'tab.') + gid) || gid, icon: it.icon || (isV ? 'mdi-view-list' : 'mdi-table') };
+          if (it.items) { var kids = it.items.map(navTab).filter(Boolean); if (kids.length) tb.children = kids; }
+          return tb;
         }
-        // Build from views nav array
-        if (_viewsNav.length) {
-          var hasViews = false, hasTable = false;
-          _viewsNav.forEach(function(item) {
-            if (!hasTable && item.table && hasViews) { tabs.push({ divider: true }); hasTable = true; }
-            if (item.name) hasViews = true;
-            var tab = makeTab(item); if (tab) tabs.push(tab);
-          });
-          // Show unreferenced non-lookup tables for admins
-          if (self.isAdmin) {
-            var referenced = {};
-            function collectRefs(arr) { (arr || []).forEach(function(item) { if (item.table) referenced[item.table] = true; if (item.views) collectRefs(item.views); }); }
-            collectRefs(_viewsNav);
-            var extra = Object.keys(SCHEMA).filter(function(t) { return !referenced[t] && !SCHEMA[t].isLookup; });
-            if (extra.length) tabs.push({ divider: true });
-            extra.forEach(function(name) { var tab = makeTab({ table: name }); if (tab) tabs.push(tab); });
-          }
-        } else {
-          // Legacy: VIEWS is object, auto-generate flat list
-          Object.keys(VIEWS).forEach(function(v) { var tab = makeTab({ name: v, sources: VIEWS[v].sources }); if (tab) tabs.push(tab); });
-          var tableKeys = self._tableOrder || Object.keys(SCHEMA);
-          tableKeys.forEach(function(name) { var tab = makeTab({ table: name }); if (tab) tabs.push(tab); });
-        }
+        navItems.forEach(function(it) { var tb = navTab(it); if (tb) tabs.push(tb); });
         tabs.push({ divider: true });
-        if (self.isAdmin) {
-          tabs.push({ id: '__languages', title: self.t('tab.languages'), icon: 'mdi-translate' });
-        }
+        if (self.isAdmin) tabs.push({ id: '__languages', title: self.t('tab.languages'), icon: 'mdi-translate' });
         if (self.refTables.length || Object.keys(self.visibleLists).length) tabs.push({ id: '__lookup', title: self.t('tab.lookup'), icon: 'mdi-database-outline' });
         tabs.push({ id: '__settings', title: self.t('tab.settings'), icon: 'mdi-cog-outline' });
         return tabs;
       },
       isDataView: function() {
-        return this.currentTable && this.currentTable[0] !== '_' && (VIEWS[this.currentTable] || SCHEMA[this.currentTable]);
+        return this.currentTable && this.currentTable[0] !== '_' && this.currentTable.indexOf('@page:') !== 0 && (VIEWS[this.currentTable] || SCHEMA[this.currentTable]);
+      },
+      navConfig: function() { return (this.schemaData && this.schemaData.nav) || null; },
+      navLayout: function() { return (this.navConfig && this.navConfig.layout) || 'drawer'; },
+      flatNavTabs: function() { var out = []; this.sidebarTabs.forEach(function(t) { if (t.divider) return; if (t.children) t.children.forEach(function(c) { out.push(c); }); else out.push(t); }); return out; },
+      currentPage: function() {
+        if (!this.currentTable || this.currentTable.indexOf('@page:') !== 0) return null;
+        return { markdown: this.pageCache[this.currentTable.slice(6)] || '' };
+      },
+      pageBlocks: function() {
+        var self = this, p = this.currentPage;
+        if (!p) return [];
+        var md = String(p.markdown || '').replace(/\{\{\s*t\s*:\s*([\w.\-]+)\s*\}\}/g, function(_, k) { return self.t(k) || ''; }); // translatable text tokens
+        var parts = md.split(/\{\{\s*(view|table)\s*:\s*([\w-]+(?:@[\w-]+)?\??)\s*\}\}/);
+        var blocks = [], i = 0;
+        while (i < parts.length) {
+          if (parts[i]) blocks.push({ html: mdToHtml(parts[i]) });
+          if (i + 2 < parts.length) {
+            var type = parts[i + 1], raw = parts[i + 2];
+            var optional = raw.charAt(raw.length - 1) === '?'; if (optional) raw = raw.slice(0, -1);
+            var at = raw.indexOf('@'), part = at >= 0 ? raw.slice(at + 1) : null, name = at >= 0 ? raw.slice(0, at) : raw;
+            if (!(optional && self.embedRows(type, name, part).length === 0)) blocks.push(self.buildEmbedBlock(type, name, part)); // hide-when-empty
+            i += 3;
+          } else break;
+        }
+        return blocks;
       },
       currentUserRole: function() {
         if (!this.usersLoaded) return null;
@@ -333,18 +377,17 @@ function createVueApp() {
         this.visibleCols.forEach(function(c) { var l = (self.t('field.' + c) || c).length; if (l > max) max = l; });
         return Math.max(80, max * 7.5 + 16) + 'px';
       },
-      isReadonlyView: function() { var v = VIEWS[this.currentTable]; return !!this.currentConfig.readonly || this.currentUserRole === 'viewer' || (v && v.groupBy && v.collect); },
+      isReadonlyView: function() { return this.viewReadonly(this.currentTable); },
       embedConfigs: function() {
         var cfg = this.currentConfig;
-        // Extract embeds and text entries from columns array
+        // Extract inline embeds from columns array (text entries are deprecated -> use pages)
         var embeds = [];
         var lastCol = null;
         var cols = cfg.columns;
         if (Array.isArray(cols)) {
           cols.forEach(function(c) {
             if (isEmbed(c)) { embeds.push(Object.assign({ afterColumn: lastCol }, c)); }
-            else if (isText(c)) { embeds.push({ _text: c.text, afterColumn: lastCol }); }
-            else { lastCol = colName(c); }
+            else if (!isText(c)) { lastCol = colName(c); }
           });
         }
         // Legacy: separate embed array
@@ -353,7 +396,6 @@ function createVueApp() {
         var allowed = self.userAllowedTables;
         if (allowed) {
           embeds = embeds.filter(function(e) {
-            if (e._text) return true; // text entries always visible
             var sources = e.sources || [];
             return sources.every(function(s) { return allowed.indexOf(s) >= 0; });
           });
@@ -364,17 +406,11 @@ function createVueApp() {
         var self = this;
         return this.embedConfigs.map(function(cfg) {
           var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
-          var textsBefore = [], textsAfter = [], seenCol = false;
-          var colsOnly = [];
-          raw.forEach(function(c) {
-            if (typeof c === 'object' && c.text) { (seenCol ? textsAfter : textsBefore).push(c.text); }
-            else { colsOnly.push(c); seenCol = true; }
-          });
-          var columns = colsOnly.map(function(c) { return colName(c); });
+          var columns = raw.filter(function(c) { return !(typeof c === 'object' && c.text && !c.sources); }).map(function(c) { return colName(c); });
           var rows = buildRows(cfg, self.dataCache);
           if (cfg.defaultSort) { var sc = cfg.defaultSort; rows = rows.slice().sort(function(a, b) { return (a[sc] || '').localeCompare(b[sc] || ''); }); }
           if (cfg.hideEmpty) { columns = columns.filter(function(col) { return rows.some(function(r) { return r[col]; }); }); }
-          return { config: cfg, columns: columns, rows: rows, textsBefore: textsBefore, textsAfter: textsAfter };
+          return { config: cfg, columns: columns, rows: rows };
         });
       },
       hasMaster: function() {
@@ -474,10 +510,9 @@ function createVueApp() {
               keys.push('view.' + v.name);
               (v.columns || []).forEach(function(c) {
                 if (typeof c !== 'object') { keys.push('field.' + c); return; }          // plain column name
-                if (c.text && !c.sources) { keys.push(c.text); return; }                 // text entry
+                if (c.text && !c.sources) return;                                        // deprecated text entry -> no key
                 if (c.sources && c.columns) {                                            // inline embed
-                  if (c.text) keys.push(c.text);                                         // embed label
-                  c.columns.forEach(function(ec) { (typeof ec === 'object' && ec.text) ? keys.push(ec.text) : keys.push('field.' + colName(ec)); });
+                  c.columns.forEach(function(ec) { if (!(typeof ec === 'object' && ec.text)) keys.push('field.' + colName(ec)); });
                   return;
                 }
                 keys.push('field.' + colName(c));                                        // conditional column {col:{filter}}
@@ -487,6 +522,12 @@ function createVueApp() {
           });
         }
         addViewKeys(Array.isArray(views) ? views : Object.values(views));
+        // Page markdown {{t:key}} tokens are translatable too
+        var pages = schema.pages || {};
+        for (var pn in pages) {
+          var md = String(pages[pn].markdown || ''), m, re = /\{\{\s*t\s*:\s*([\w.\-]+)\s*\}\}/g;
+          while ((m = re.exec(md))) keys.push(m[1]);
+        }
         var seen = {};
         return keys.filter(function(k) { if (seen[k]) return false; seen[k] = true; return true; }).sort();
       },
@@ -604,6 +645,7 @@ function createVueApp() {
               // Build colMap from array columns + preserve order
               window._columnOrders = {};
               Object.keys(SCHEMA).forEach(function(t) {
+                normArchive(SCHEMA[t]);
                 if (Array.isArray(SCHEMA[t].columns)) {
                   var colMap = {}; window._columnOrders[t] = []; 
                   SCHEMA[t].columns.forEach(function(c) { if (!c.name) return; window._columnOrders[t].push(c.name); var def = Object.assign({}, c); delete def.name; colMap[c.name] = Object.keys(def).length ? def : 'text'; });
@@ -642,6 +684,7 @@ function createVueApp() {
               // Build colMap from array columns or use columnOrders fallback (Apps Script)
               window._columnOrders = {};
               Object.keys(SCHEMA).forEach(function(t) {
+                normArchive(SCHEMA[t]);
                 if (Array.isArray(SCHEMA[t].columns)) {
                   var colMap = {}; window._columnOrders[t] = []; 
                   SCHEMA[t].columns.forEach(function(c) { if (!c.name) return; window._columnOrders[t].push(c.name); var def = Object.assign({}, c); delete def.name; colMap[c.name] = Object.keys(def).length ? def : 'text'; });
@@ -843,10 +886,92 @@ function createVueApp() {
         this.editingLang = null;
         this.currentRefTable = null;
         this.viewingArchive = false;
+        this.pageEditing = false;
         var cfg = VIEWS[id] || SCHEMA[id] || {};
         this.sortCol = cfg.defaultSort || null;
         this.sortAsc = true;
         if (this.isDataView) this.loadTableData();
+        else if (id.indexOf('@page:') === 0) this.loadPage(id.slice(6));
+      },
+      // Page bodies live in a server-side "_pages" collection (not in schema.json).
+      // Falls back to a schema-defined body for legacy/seed pages, then caches it.
+      loadPage: function(name) {
+        var self = this;
+        Promise.resolve(backend.getTableData('_pages', 'active')).then(function(d) {
+          var row = (d && d.rows || []).find(function(r) { return r.id === name; });
+          var seed = ((self.schemaData && self.schemaData.pages) || {})[name];
+          self.pageCache[name] = row ? row.markdown : ((seed && seed.markdown) || '');
+        }).catch(function() {});
+      },
+      // v3 pages: a {{view:x}}/{{table:x}} embed block — self-computing component resolves cols/rows
+      buildEmbedBlock: function(type, name, part) {
+        if ((type === 'view' && VIEWS[name]) || (type === 'table' && SCHEMA[name])) return { embedType: type, embedName: name, embedPart: part || null };
+        return { html: '<em>Unknown embed: ' + type + ':' + name + '</em>' };
+      },
+      embedCols: function(type, name) {
+        if (type === 'view' && VIEWS[name]) return (VIEWS[name].columns || []).filter(function(c) { return !isEmbed(c) && !isText(c); }).map(colName);
+        if (type === 'table' && SCHEMA[name]) return getColumns(name).filter(function(c) { var d = SCHEMA[name].columns[c]; return c !== 'id' && !(d && typeof d === 'object' && d.hidden); });
+        return [];
+      },
+      embedRows: function(type, name, part) {
+        if (type === 'view' && VIEWS[name]) {
+          var v = VIEWS[name], cache = this.dataCache;
+          if (part) { cache = {}; var dc = this.dataCache; (v.sources || []).forEach(function(s) { cache[s] = dc[s + '__' + part] || []; }); }
+          return aggregateRows(v, buildRows(v, cache));
+        }
+        if (type === 'table' && SCHEMA[name]) return this.dataCache[part ? name + '__' + part : name] || [];
+        return [];
+      },
+      // Embed row controls — operate on the active partition across the mirror cluster (dataCache is reactive)
+      embedSources: function(type, name) { return type === 'view' && VIEWS[name] ? (VIEWS[name].sources || []) : [name]; },
+      canMutateEmbed: function(type, name) {
+        if (this.viewReadonly(name)) return false;
+        var allowed = this.userAllowedTables;
+        if (!allowed) return true;
+        return withMirrors(this.embedSources(type, name)).every(function(t) { return allowed.indexOf(t) >= 0; });
+      },
+      embedHasArchive: function(type, name) { return this.embedSources(type, name).some(function(s) { return SCHEMA[s] && SCHEMA[s].archivePartition; }); },
+      embedAddRow: function(type, name) {
+        var self = this, id = this.generateId();
+        withMirrors([this.embedSources(type, name)[0]]).forEach(function(src) {
+          var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+          getColumns(src).forEach(function(c) { if (!row[c]) row[c] = ''; });
+          if (!self.dataCache[src]) self.dataCache[src] = [];
+          self.dataCache[src].push(row);
+          backend.putRow(self.tableMap[src], row, SCHEMA[src] && SCHEMA[src].partition);
+        });
+        this.notify('Row added');
+      },
+      embedDeleteRow: function(type, name, item) {
+        var self = this, key = 'erow:' + item.id;
+        if (this.pendingDelete !== key) { this.armDelete(key); return; }
+        withMirrors(this.embedSources(type, name)).forEach(function(src) {
+          self.dataCache[src] = (self.dataCache[src] || []).filter(function(r) { return r.id !== item.id; });
+          backend.deleteRow(self.tableMap[src], item.id, SCHEMA[src] && SCHEMA[src].partition);
+        });
+        this.notify('Deleted');
+      },
+      embedArchiveRow: function(type, name, item) {
+        var self = this;
+        withMirrors(this.embedSources(type, name)).forEach(function(source) {
+          var schema = SCHEMA[source];
+          if (!schema || !schema.archivePartition) return;
+          var srcRow = (self.dataCache[source] || []).find(function(r) { return r.id === item.id; });
+          if (!srcRow) return;
+          self.dataCache[source] = self.dataCache[source].filter(function(r) { return r.id !== item.id; });
+          if (!self.dataCache[aKey(source)]) self.dataCache[aKey(source)] = [];
+          self.dataCache[aKey(source)].push(srcRow);
+          backend.moveRow(self.tableMap[source], srcRow, schema.partition, schema.archivePartition);
+        });
+        this.notify('Archived');
+      },
+      togglePageEdit: function() { this.pageEditing = !this.pageEditing; if (this.pageEditing) this.pageEditText = (this.currentPage && this.currentPage.markdown) || ''; },
+      savePage: function() {
+        var name = this.currentTable.slice(6);
+        this.pageCache[name] = this.pageEditText;
+        if (backend.putRow) backend.putRow('_pages', { id: name, markdown: this.pageEditText }, 'active');
+        this.pageEditing = false;
+        this.notify('Saved');
       },
 
       loadTableData: function() {
@@ -860,26 +985,7 @@ function createVueApp() {
             view.sources.forEach(function(src) { cache[src] = self.dataCache[aKey(src)] || []; });
           }
           var rows = buildRows(view, cache);
-          // Aggregate: group by keys, collect value into Nth columns
-          if (view.groupBy && view.collect) {
-            var keyCol = (typeof view.groupBy === 'object' && !Array.isArray(view.groupBy)) ? view.groupBy.column : view.columns[0];
-            var keysFrom = (typeof view.groupBy === 'object' && !Array.isArray(view.groupBy)) ? view.groupBy.from : view.groupBy;
-            var groups = {};
-            rows.forEach(function(r) {
-              keysFrom.forEach(function(k) {
-                var person = r[k];
-                if (person) { if (!groups[person]) groups[person] = []; if (r[view.collect]) groups[person].push(r[view.collect]); }
-              });
-            });
-            var valCols = (view.columns || []).filter(function(c) { return c !== keyCol; });
-            rows = Object.keys(groups).map(function(person) {
-              var vals = groups[person].sort().reverse();
-              var row = { id: person };
-              row[keyCol] = person;
-              for (var i = 0; i < valCols.length; i++) row[valCols[i]] = vals[i] || '';
-              return row;
-            });
-          }
+          rows = aggregateRows(view, rows);
           self.currentData = rows;
           // Load embed table data if not cached
           var allowed = self.userAllowedTables;
@@ -935,15 +1041,16 @@ function createVueApp() {
       },
 
       // Cell editing
-      saveField: function(item, col, value) {
+      saveField: function(item, col, value, ownerId) {
         if (typeof value === "object" && value !== null) value = value.value || value.title || String(value);
         if (item[col] === value) return;
         item[col] = value;
         item.updated_at = new Date().toISOString();
         var self = this;
-        var source = this.getSource(item);
+        ownerId = ownerId || this.currentTable;
+        var source = this.getSource(item, ownerId);
         // For join views, find which source table owns this column
-        var view = VIEWS && VIEWS[this.currentTable];
+        var view = VIEWS && VIEWS[ownerId];
         if (view && view.mode === 'join') {
           for (var i = 0; i < view.sources.length; i++) {
             var s = view.sources[i];
@@ -1165,18 +1272,21 @@ function createVueApp() {
         if (VIEWS[table]) return false;
         return colIsMirror(SCHEMA, col, table);
       },
-      isReadonlyCell: function(item, col) {
-        var view = VIEWS && VIEWS[this.currentTable];
+      isReadonlyCell: function(item, col, ownerId) {
+        ownerId = ownerId || this.currentTable;
+        var view = VIEWS && VIEWS[ownerId];
         // Resolve the underlying table for this row/column (union rows carry _source)
-        var table = (view && view.mode === 'union' && item._source) ? item._source : this.currentTable;
+        var table = (view && view.mode === 'union' && item._source) ? item._source : ownerId;
         // syncFrom (mirror) columns are synced from a master -> read-only in the detail table
         if (table && SCHEMA[table] && colIsMirror(SCHEMA, col, table)) return true;
         // In union views, grey out columns that don't belong to the row's source table
         if (!view || view.mode !== 'union' || !item._source) return false;
         return !(SCHEMA[item._source] && SCHEMA[item._source].columns && SCHEMA[item._source].columns[col]);
       },
-      // Shared gate for whether a data cell renders read-only
-      cellReadonly: function(item, col) { return this.isReadonlyView || this.isReadonlyCell(item, col); },
+      // Is a view/table read-only as a whole (config flag, viewer role, or aggregate)
+      viewReadonly: function(id) { var v = VIEWS[id], cfg = VIEWS[id] || SCHEMA[id] || {}; return !!cfg.readonly || this.currentUserRole === 'viewer' || !!(v && v.groupBy && v.collect); },
+      // Shared gate for whether a data cell renders read-only (ownerId defaults to currentTable)
+      cellReadonly: function(item, col, ownerId) { return this.viewReadonly(ownerId || this.currentTable) || this.isReadonlyCell(item, col, ownerId); },
       getRefOptions: function(col, item) {
         var ref = null;
         for (var t in SCHEMA) { ref = getColumnRef(t, col); if (ref) break; }
@@ -1780,7 +1890,7 @@ function createVueApp() {
         });
       },
 
-      getSource: function(item) { if (item._source) return item._source; var v = VIEWS[this.currentTable]; return v ? v.sources[0] : this.currentTable; },
+      getSource: function(item, ownerId) { ownerId = ownerId || this.currentTable; if (item._source) return item._source; var v = VIEWS[ownerId]; return v ? v.sources[0] : ownerId; },
 
       getTab: function(source) {
         return this.viewingArchive ? (SCHEMA[source] && SCHEMA[source].archivePartition) : (SCHEMA[source] && SCHEMA[source].partition);
@@ -1947,6 +2057,51 @@ function createVueApp() {
   });
 
   app.use(vuetify);
+  // Self-computing, interactive embed-view: resolves its own cols/rows from the root and
+  // delegates editing to the root's ownerId-parameterized methods (saveField/cellReadonly).
+  app.component('embed-view', {
+    props: { type: { type: String, default: 'view' }, name: { type: String, required: true }, part: { type: String, default: null } },
+    computed: {
+      cols: function() { return appInstance ? appInstance.embedCols(this.type, this.name) : []; },
+      rows: function() { return appInstance ? appInstance.embedRows(this.type, this.name, this.part) : []; },
+      canMutate: function() { return !this.part && appInstance && appInstance.canMutateEmbed(this.type, this.name); },
+      hasArchive: function() { return !this.part && appInstance && appInstance.embedHasArchive(this.type, this.name); }
+    },
+    methods: {
+      t: function(k) { return appInstance ? appInstance.t(k) : k; },
+      colIsDate: function(c) { return appInstance && appInstance.colIsDate(c); },
+      colIsList: function(c) { return appInstance && appInstance.colIsList(c); },
+      colAllowNew: function(c) { return appInstance && appInstance.colAllowNew(c); },
+      colIsRef: function(c) { return appInstance && appInstance.colIsRef(c); },
+      getListOptions: function(c) { return appInstance ? appInstance.getListOptions(c) : []; },
+      getRefOptions: function(c, item) { return appInstance ? appInstance.getRefOptions(c, item) : []; },
+      displayValue: function(c, v) { return appInstance ? appInstance.displayValue(c, v) : v; },
+      toDateStr: toDateStr,
+      cellRO: function(item, col) { return !!this.part || appInstance.cellReadonly(item, col, this.name); },
+      save: function(item, col, val) { return appInstance.saveField(item, col, val, this.name); },
+      addToListOnBlur: function(item, col) { return appInstance.addToListOnBlur(item, col); },
+      isArmed: function(item) { return appInstance.isArmed('erow:' + item.id); },
+      addRow: function() { return appInstance.embedAddRow(this.type, this.name); },
+      delRow: function(item) { return appInstance.embedDeleteRow(this.type, this.name, item); },
+      archRow: function(item) { return appInstance.embedArchiveRow(this.type, this.name, item); }
+    },
+    template: '<div><v-table density="compact" class="my-2"><template v-slot:default>'
+      + '<thead><tr><th v-for="c in cols" :key="c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
+      + '<tbody><tr v-for="(item, ri) in rows" :key="item.id || ri"><td v-for="col in cols" :key="col">'
+      + '<span v-if="cellRO(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
+      + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :model-value="item[col] || \'\'" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)"></v-combobox>'
+      + '<v-autocomplete v-else-if="colIsList(col)" :model-value="item[col] || \'\'" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="save(item, col, $event)"></v-autocomplete>'
+      + '<v-autocomplete v-else-if="colIsRef(col)" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="save(item, col, $event)"></v-autocomplete>'
+      + '<input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="save(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">'
+      + '<span v-else class="editable-cell" contenteditable @blur="save(item, col, $event.target.textContent)">{{ item[col] || \'\' }}</span>'
+      + '</td><td v-if="canMutate" style="white-space:nowrap">'
+      + '<v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn>'
+      + '<v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn>'
+      + '</td></tr></tbody>'
+      + '</template></v-table>'
+      + '<v-btn v-if="canMutate" variant="text" size="small" prepend-icon="mdi-plus" @click="addRow">{{ t(\'btn.add\') || \'Add\' }}</v-btn>'
+      + '</div>'
+  });
   appInstance = app.mount('#vue-app');
 }
 
