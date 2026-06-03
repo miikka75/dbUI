@@ -944,4 +944,34 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(ids.some(s => s.startsWith('grp:Data['))).toBe(true);                 // nav group
     expect(ids.some(s => s.startsWith('all_items[summary_cards,quick_list]'))).toBe(true); // nested clickable parent
   });
+
+  test('demo pages render embeds (combined + aggregate + archive) and all layouts', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 't1', title: 'Demo task', date: '2026-06-01', status: 'open', assigned_to: 'Alice' }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 'z1', title: 'Archived task', date: '2026-05-01', status: 'open', assigned_to: 'Bob' }, tab: 'archive' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.waitForTimeout(500);
+    // combined_page (auto-selected): all embeds present, incl. the archive embed (archived rows seeded)
+    const embeds = await page.evaluate(() => appInstance.pageBlocks.filter(b => b.embedName).map(b => b.embedName));
+    expect(embeds).toEqual(['combined', 'attendance', 'tasks', 'notes']);        // {{table:tasks@archive?}} -> 'tasks' (visible: has archived rows)
+    // aggregate embed computes rows (regression: not blank)
+    const agg = await page.evaluate(() => appInstance.embedRows('view', 'attendance'));
+    expect(agg.some(r => r.person === 'Alice')).toBe(true);
+    await expect(page.locator('.v-main')).toContainText('Demo task');            // combined embed (active)
+    await expect(page.locator('.v-main')).toContainText('Alice');                // attendance embed
+    await expect(page.locator('.v-main')).toContainText('Archived task');        // {{table:tasks@archive}} embed
+    // layouts resolve per view
+    const layouts = await page.evaluate(() => {
+      var r = {};
+      ['all_items', 'summary_cards', 'quick_list'].forEach(function(v) { appInstance.selectTab(v); r[v] = appInstance.currentConfig.layout; });
+      return r;
+    });
+    expect(layouts).toEqual({ all_items: 'table', summary_cards: 'card', quick_list: 'list' });
+  });
 });
