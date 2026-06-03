@@ -22,6 +22,8 @@ var DEFAULT_LANGUAGE = _defaultSchema ? (_defaultSchema.defaultLanguage || 'en')
 // Build colMap (object keyed by name) from array columns, preserving order
 var _columnOrders = {};
 for (var t in SCHEMA) {
+  SCHEMA[t].partition = 'active';
+  SCHEMA[t].archivePartition = (SCHEMA[t].archivable || SCHEMA[t].archivePartition) ? 'archive' : null;
   if (Array.isArray(SCHEMA[t].columns)) {
     var colMap = {};
     _columnOrders[t] = [];
