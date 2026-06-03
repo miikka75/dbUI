@@ -144,8 +144,9 @@ function createLocalBackend(dbPath) {
 
     deleteRow(tableId, id, tab) {
       const actualTable = tab ? tableId + '__' + tab : tableId;
-      const result = db.prepare('DELETE FROM ' + qid(actualTable) + ' WHERE id = ?').run(id);
-      return result.changes > 0;
+      try {
+        return db.prepare('DELETE FROM ' + qid(actualTable) + ' WHERE id = ?').run(id).changes > 0;
+      } catch (e) { return false; } // table not created yet (e.g. delete-before-put on import) -> nothing to delete
     },
 
     moveRow(tableId, rowData, fromTab, toTab) {
