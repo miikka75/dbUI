@@ -5,8 +5,9 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
+    "seed": "node seed-translations.js",
     "test": "node --test test/",
-    "test:ui": "npx playwright test"
+    "test:ui": "npx playwright test --config=playwright.config.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
