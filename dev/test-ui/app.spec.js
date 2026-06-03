@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test');
-const SCHEMA = require('../schema.json');
+const SCHEMA = require('./fixture-schema.json');
 
 // Reset DB, seed the schema (server no longer auto-loads schema.json), and wait for the app.
 // Opens the 'notes' table tab by default — it's the addable master table (first sidebar
@@ -404,15 +404,16 @@ test.describe('Multi-table lifecycle (join view UI)', () => {
   });
 });
 
-test.describe('Custom archivePartition', () => {
+test.describe('Archivable flag', () => {
   const CUSTOM = {
     defaultLanguage: 'en',
-    tables: { items: { columns: [{ name: 'title', type: 'text' }], partition: 'active', archivePartition: 'trash' } },
-    views: [{ table: 'items' }]
+    tables: { items: { columns: [{ name: 'title', type: 'text' }], archivable: true } },
+    views: [{ table: 'items' }],
+    nav: { items: [{ table: 'items' }] }
   };
   const get = (page, tab) => page.request.post('/api/getTableData', { data: { tableId: 'items', tab } }).then(r => r.json());
 
-  test('archive/restore use the configured archivePartition (trash), not hardcoded archive', async ({ page }) => {
+  test('archivable flag enables archive/restore using the fixed "archive" partition', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');
@@ -430,23 +431,22 @@ test.describe('Custom archivePartition', () => {
     await page.locator('button:has(.mdi-archive-outline)').first().click();
     await page.waitForTimeout(600);
 
-    // Stored under 'trash', NOT the hardcoded 'archive'
-    const trash = await get(page, 'trash');
-    expect(trash.rows.length).toBe(1);
-    expect((await get(page, 'archive')).rows.length).toBe(0);
+    // Stored under the fixed 'archive' partition
+    const archive = await get(page, 'archive');
+    expect(archive.rows.length).toBe(1);
     expect((await get(page, 'active')).rows.length).toBe(0);
-    const id = trash.rows[0].id;
+    const id = archive.rows[0].id;
 
-    // Archived view reads dataCache[items__trash] -> row is visible
+    // Archived view shows the row
     await page.locator('.v-tab:nth-child(2)').click();
     await page.waitForTimeout(700);
     await expect(page.locator('.v-table tbody tr')).toHaveCount(1);
 
-    // RESTORE -> back to active partition, trash emptied
+    // RESTORE -> back to active, archive emptied
     await page.locator('button:has(.mdi-archive-arrow-up-outline)').first().click();
     await page.waitForTimeout(600);
     expect((await get(page, 'active')).rows.some(r => r.id === id)).toBe(true);
-    expect((await get(page, 'trash')).rows.length).toBe(0);
+    expect((await get(page, 'archive')).rows.length).toBe(0);
   });
 });
 
@@ -455,10 +455,11 @@ test.describe('Archive from a view whose source has a mirror table not in source
   const SCH = {
     defaultLanguage: 'en',
     tables: {
-      meetings: { columns: [{ name: 'title', type: 'text' }], partition: 'active', archivePartition: 'archive' },
-      music: { columns: [{ name: 'title', type: 'text', syncFrom: 'meetings' }, { name: 'song', type: 'text' }], partition: 'active', archivePartition: 'archive' }
+      meetings: { columns: [{ name: 'title', type: 'text' }], archivable: true },
+      music: { columns: [{ name: 'title', type: 'text', syncFrom: 'meetings' }, { name: 'song', type: 'text' }], archivable: true }
     },
-    views: [{ name: 'mtg', sources: ['meetings'], mode: 'union', columns: ['title'] }, { name: 'mus', sources: ['music'], mode: 'union', columns: ['song'] }, { table: 'meetings' }, { table: 'music' }]
+    views: [{ name: 'mtg', sources: ['meetings'], mode: 'union', columns: ['title'] }, { name: 'mus', sources: ['music'], mode: 'union', columns: ['song'] }, { table: 'meetings' }, { table: 'music' }],
+    nav: { items: [{ view: 'mtg' }, { view: 'mus' }, { table: 'meetings' }, { table: 'music' }] }
   };
   const get = (page, t, tab) => page.request.post('/api/getTableData', { data: { tableId: t, tab } }).then(r => r.json());
 
@@ -524,11 +525,12 @@ test.describe('Permissions — restricted user UI gating', () => {
   const SCH = {
     defaultLanguage: 'en',
     tables: {
-      meetings: { columns: [{ name: 'title', type: 'text' }, { name: 'place', type: 'ref', table: 'venues', valueCol: 'venue' }, { name: 'kind', type: 'select', list: 'mkind' }], partition: 'active', archivePartition: 'archive' },
-      music: { columns: [{ name: 'title', type: 'text', syncFrom: 'meetings' }, { name: 'song', type: 'text' }], partition: 'active', archivePartition: 'archive' },
+      meetings: { columns: [{ name: 'title', type: 'text' }, { name: 'place', type: 'ref', table: 'venues', valueCol: 'venue' }, { name: 'kind', type: 'select', list: 'mkind' }], archivable: true },
+      music: { columns: [{ name: 'title', type: 'text', syncFrom: 'meetings' }, { name: 'song', type: 'text' }], archivable: true },
       venues: { columns: [{ name: 'venue', type: 'text' }], isLookup: true }
     },
-    views: [{ name: 'mus', sources: ['music'], mode: 'union', columns: ['song'] }, { name: 'mtg', sources: ['meetings'], mode: 'union', columns: ['title', 'place', 'kind'] }, { table: 'meetings' }, { table: 'music' }]
+    views: [{ name: 'mus', sources: ['music'], mode: 'union', columns: ['song'] }, { name: 'mtg', sources: ['meetings'], mode: 'union', columns: ['title', 'place', 'kind'] }, { table: 'meetings' }, { table: 'music' }],
+    nav: { items: [{ view: 'mus' }, { view: 'mtg' }, { table: 'meetings' }, { table: 'music' }] }
   };
   async function setup(page) {
     await page.request.post('/api/resetData');
@@ -595,11 +597,12 @@ test.describe('Mirror cluster is transitive (master + 2 details)', () => {
   const SCH = {
     defaultLanguage: 'en',
     tables: {
-      meet: { columns: [{ name: 'title', type: 'text' }], partition: 'active', archivePartition: 'archive' },
-      mus: { columns: [{ name: 'title', type: 'text', syncFrom: 'meet' }, { name: 'song', type: 'text' }], partition: 'active', archivePartition: 'archive' },
-      task: { columns: [{ name: 'title', type: 'text', syncFrom: 'meet' }, { name: 'todo', type: 'text' }], partition: 'active', archivePartition: 'archive' }
+      meet: { columns: [{ name: 'title', type: 'text' }], archivable: true },
+      mus: { columns: [{ name: 'title', type: 'text', syncFrom: 'meet' }, { name: 'song', type: 'text' }], archivable: true },
+      task: { columns: [{ name: 'title', type: 'text', syncFrom: 'meet' }, { name: 'todo', type: 'text' }], archivable: true }
     },
-    views: [{ name: 'musv', sources: ['mus'], mode: 'union', columns: ['song'] }, { table: 'meet' }, { table: 'mus' }, { table: 'task' }]
+    views: [{ name: 'musv', sources: ['mus'], mode: 'union', columns: ['song'] }, { table: 'meet' }, { table: 'mus' }, { table: 'task' }],
+    nav: { items: [{ view: 'musv' }, { table: 'meet' }, { table: 'mus' }, { table: 'task' }] }
   };
   const get = (page, t) => page.request.post('/api/getTableData', { data: { tableId: t, tab: 'active' } }).then(r => r.json());
 
@@ -636,7 +639,7 @@ test.describe('Mirror cluster is transitive (master + 2 details)', () => {
 test.describe('Import round-trip', () => {
   test('importing a JSON bundle restores data into correct partitions (active vs archive) with implicit id', async ({ page }) => {
     test.setTimeout(20000);
-    const SCH = { defaultLanguage: 'en', tables: { docs: { columns: [{ name: 'title', type: 'text' }], partition: 'active', archivePartition: 'archive' } }, views: [{ table: 'docs' }] };
+    const SCH = { defaultLanguage: 'en', tables: { docs: { columns: [{ name: 'title', type: 'text' }], archivable: true } }, views: [{ table: 'docs' }], nav: { items: [{ table: 'docs' }] } };
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: SCH } });
@@ -661,12 +664,284 @@ test.describe('Import round-trip', () => {
 });
 
 test.describe('Translation keys for view columns', () => {
-  test('aggregate/computed view columns get field.* keys (plus normal columns + text entries)', async ({ page }) => {
+  test('aggregate/computed view columns get field.* keys (plus normal columns)', async ({ page }) => {
     await ensureAppReady(page); // default schema includes the aggregate "attendance" subview
     const keys = await page.evaluate(() => appInstance.schemaTranslationKeys);
     // aggregate subview 'attendance' computed columns -> previously had NO key
     for (const k of ['field.person', 'field.latest', 'field.previous', 'field.3rd']) expect(keys).toContain(k);
     expect(keys).toContain('field.title');            // normal table column still covered
-    expect(keys).toContain('view.combined.header');   // text entry still covered
+  });
+});
+
+test.describe('v3 nav + pages + tabs layout', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }], archivable: true } },
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }],
+    pages: { home: { markdown: '# Hello Page\n\nTasks below:\n\n{{table:tasks}}\n\nVia view:\n\n{{view:all}}' } },
+    nav: { layout: 'tabs', items: [{ page: 'home', icon: 'mdi-home' }, { view: 'all' }, { table: 'tasks' }] }
+  };
+  test('top tabs render, drawer hidden, markdown page shows prose + embedded data', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 't1', title: 'Buy milk' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
+
+    // tabs layout: top tab bar present, drawer hidden
+    expect(await page.locator('.v-tabs .v-tab', { hasText: 'home' }).count()).toBeGreaterThanOrEqual(1);
+    expect(await page.locator('.v-navigation-drawer').count()).toBe(0);
+
+    // page auto-selected -> markdown heading + embedded data rendered
+    await page.waitForTimeout(400);
+    await expect(page.locator('.v-main')).toContainText('Hello Page');   // markdown <h1>
+    await expect(page.locator('.v-main')).toContainText('Buy milk');     // {{table:tasks}} + {{view:all}} embed
+  });
+});
+
+test.describe('v3 interactive page embed', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }], archivable: true } },
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }],
+    pages: { home: { markdown: 'Edit below:\n\n{{view:all}}' } },
+    nav: { layout: 'tabs', items: [{ page: 'home' }, { view: 'all' }] }
+  };
+  test('editing a cell in an embedded view persists', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 't1', title: 'Buy milk' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
+    await page.waitForTimeout(400);
+    const cell = page.locator('.v-main .editable-cell', { hasText: 'Buy milk' }).first();
+    await cell.click();
+    await cell.evaluate(el => { el.textContent = 'Edited milk'; el.dispatchEvent(new Event('blur')); });
+    await page.waitForTimeout(800);
+    // persisted to the underlying table
+    const row = await page.request.post('/api/getTableData', { data: { tableId: 'tasks', tab: 'active' } });
+    expect(JSON.stringify(await row.json())).toContain('Edited milk');
+  });
+});
+
+test.describe('v3 embed row controls', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }], archivable: true } },
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }],
+    pages: { home: { markdown: '{{view:all}}' } },
+    nav: { layout: 'tabs', items: [{ page: 'home' }, { view: 'all' }] }
+  };
+  const count = (page, tab) => page.request.post('/api/getTableData', { data: { tableId: 'tasks', tab } }).then(r => r.json()).then(d => d.rows.length);
+  test('add/archive/delete from an embedded view operate on the underlying table', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
+    await page.waitForTimeout(400);
+    // ADD via embed
+    await page.locator('.v-main button:has(.mdi-plus)').first().click();
+    await page.waitForTimeout(600);
+    expect(await count(page, 'active')).toBe(1);
+    // ARCHIVE via embed
+    await page.locator('.v-main button:has(.mdi-archive-outline)').first().click();
+    await page.waitForTimeout(600);
+    expect(await count(page, 'active')).toBe(0);
+    expect(await count(page, 'archive')).toBe(1);
+  });
+});
+
+test.describe('v3 hide-empty embed', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }, { name: 'status', type: 'text' }] } },
+    views: [
+      { name: 'open', sources: ['tasks'], mode: 'union', filter: { status: 'open' }, columns: ['title'] },
+      { name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }
+    ],
+    pages: { home: { markdown: '{{view:open?}}\n\n{{view:all}}' } },
+    nav: { layout: 'tabs', items: [{ page: 'home' }, { view: 'all' }] }
+  };
+  test('{{view:x?}} block is skipped when the view yields 0 rows', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 't1', title: 'Buy milk', status: 'done' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
+    await page.waitForTimeout(400);
+    // only the non-empty 'all' embed should render (open? has 0 rows -> hidden)
+    const embeds = await page.evaluate(() => appInstance.pageBlocks.filter(b => b.embedName).map(b => b.embedName));
+    expect(embeds).toEqual(['all']);
+  });
+});
+
+test.describe('v3 aggregate view embed', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'date', type: 'date' }, { name: 'who', type: 'text' }] } },
+    views: [{ name: 'byperson', sources: ['tasks'], mode: 'union', groupBy: { column: 'person', from: ['who'] }, collect: 'date', columns: ['person', 'latest'] }],
+    pages: { home: { markdown: '{{view:byperson}}' } },
+    nav: { layout: 'tabs', items: [{ page: 'home' }, { view: 'byperson' }] }
+  };
+  test('embedded groupBy/collect view shows aggregated rows (not blank)', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 't1', date: '2026-06-01', who: 'Alice' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
+    await page.waitForTimeout(400);
+    const rows = await page.evaluate(() => appInstance.embedRows('view', 'byperson'));
+    expect(rows.length).toBe(1);
+    expect(rows[0].person).toBe('Alice');
+    expect(rows[0].latest).toBe('2026-06-01');
+    await expect(page.locator('.v-main')).toContainText('Alice');
+  });
+});
+
+test.describe('v3 archived table embed', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }], archivable: true } },
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }],
+    pages: { home: { markdown: '## Active\n\n{{table:tasks}}\n\n## Archived\n\n{{table:tasks@archive}}' } },
+    nav: { layout: 'tabs', items: [{ page: 'home' }, { view: 'all' }] }
+  };
+  test('{{table:x@archive}} shows archived rows (read-only)', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 'a1', title: 'Active item' }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 'z1', title: 'Archived item' }, tab: 'archive' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
+    await page.waitForTimeout(400);
+    const active = await page.evaluate(() => appInstance.embedRows('table', 'tasks', null).map(r => r.title));
+    const archived = await page.evaluate(() => appInstance.embedRows('table', 'tasks', 'archive').map(r => r.title));
+    expect(active).toEqual(['Active item']);
+    expect(archived).toEqual(['Archived item']);
+    await expect(page.locator('.v-main')).toContainText('Archived item');
+  });
+});
+
+test.describe('v3 page body stored on server', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }] } },
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }],
+    pages: { home: { markdown: '# Seed' } },
+    nav: { layout: 'tabs', items: [{ page: 'home' }, { view: 'all' }] }
+  };
+  test('editing a page saves to the _pages collection (not schema) and survives reload', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
+    await page.waitForTimeout(400);
+    // edit + save
+    await page.locator('.v-card button:has-text("Edit")').click();
+    await page.locator('.v-card textarea').first().fill('# Edited on server');
+    await page.locator('.v-card button:has-text("Save")').click();
+    await page.waitForTimeout(500);
+    // persisted to _pages collection, NOT to schema
+    const pages = await (await page.request.post('/api/getTableData', { data: { tableId: '_pages', tab: 'active' } })).json();
+    const row = pages.rows.find(r => r.id === 'home');
+    expect(row && row.markdown).toBe('# Edited on server');
+    const schema = await (await page.request.post('/api/getSchema', { data: { folderId: 'local' } })).json();
+    expect(JSON.stringify(schema.pages || {})).not.toContain('Edited on server');
+    // survives reload (rendered from server, not schema seed)
+    await page.reload();
+    await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
+    await page.waitForTimeout(500);
+    await expect(page.locator('.v-main')).toContainText('Edited on server');
+  });
+});
+
+test.describe('v3 nav nesting (migrated hierarchy)', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }], archivable: true }, notes: { columns: [{ name: 'note', type: 'text' }], archivable: true } },
+    views: [{ name: 'combined', sources: ['tasks', 'notes'], mode: 'join', columns: ['title'] }, { name: 'attendance', sources: ['tasks'], mode: 'union', columns: ['title'] }],
+    nav: { layout: 'drawer', items: [{ view: 'combined', items: [{ view: 'attendance' }] }, { table: 'tasks' }] }
+  };
+  test('a nav view item with child items renders as a clickable group', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const ids = await page.evaluate(() => appInstance.sidebarTabs.map(t => t.children ? t.id + '[' + t.children.map(c => c.id).join(',') + ']' : t.id));
+    expect(ids).toContain('combined[attendance]'); // clickable parent + nested child
+    expect(ids).toContain('tasks');
+  });
+});
+
+test.describe('Page {{t:key}} translatable token', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }], archivable: true } },
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }],
+    pages: { home: { markdown: '{{t:page.home.intro}}\n\n{{view:all}}' } },
+    nav: { items: [{ page: 'home' }, { view: 'all' }] }
+  };
+  test('{{t:key}} resolves via translations in a page', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'en', name: 'English', keys: ['page.home.intro'] } });
+    await page.request.post('/api/updateTranslations', { data: { folderId: 'local', langCode: 'en', updates: { 'page.home.intro': 'Welcome translated intro' } } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.waitForTimeout(400);
+    await expect(page.locator('.v-main')).toContainText('Welcome translated intro'); // {{t:page.home.intro}} resolved
+  });
+});
+
+test.describe('demo schema (dev/schema.json) is valid v3', () => {
+  const DEMO = require('../schema.json');
+  test('boots and nav exposes a group + nested items', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const ids = await page.evaluate(() => appInstance.sidebarTabs.map(t => t.id + (t.children ? '[' + t.children.map(c => c.id).join(',') + ']' : '')));
+    expect(ids.some(s => s.startsWith('grp:Data['))).toBe(true);                 // nav group
+    expect(ids.some(s => s.startsWith('all_items[summary_cards,quick_list]'))).toBe(true); // nested clickable parent
   });
 });
