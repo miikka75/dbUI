@@ -8,8 +8,9 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 - **Six backends**: Google Sheets (Apps Script), OAuth REST API, Browser + CRDT Sync (Google Drive), Browser + CRDT Sync (Local Server), Firebase (Firestore), Dev Server (SQLite)
 - **Unified CRDT**: one offline-first engine; Drive and local server differ only in the transport
 - **i18n**: multi-language with auto-generated translation keys from schema
-- **Views**: union, join, aggregate, embedded views with configurable layout
-- **Text entries**: translatable static text positioned anywhere in views and embeds
+- **Views**: flat union, join, and aggregate views with configurable layout
+- **Pages**: editable markdown documents with interactive embedded views (`{{view:x}}`, `{{view:x?}}` hides when empty) — bodies stored on the server, not in the schema
+- **Nav**: explicit sidebar tree with drawer/tabs layout and nested groups
 - **Print**: layout-aware printing (table or card mode), per-card print, embeds included
 - **Responsive**: auto-switches between table and card layout based on column count
 - **Validation**: schema validated at boot time with error reporting
@@ -31,11 +32,12 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 cd dev
 npm install
 npm start        # http://127.0.0.1:3000
-npm test         # run backend tests (206 unit tests)
-npx playwright test  # run E2E tests (25 tests)
+npm test         # run backend unit tests
+npx playwright test  # run E2E tests
 ```
 
 Browser: click "Create Local Database" → app loads with schema from `schema.json`.
+Optionally run `npm run seed` (with the server running) to populate the demo's page prose translations.
 
 **Reset**: delete `dev/local.db` + browser `localStorage.clear(); location.reload()`
 
@@ -142,7 +144,7 @@ apps-script/                   ← Apps Script deployment files (GAS-only)
 dev/                           ← Local development (dev-server-only files live here)
   schema.json                  ← schema definition (tables, views, settings)
   schema.js                    ← test helper (parses schema.json)
-  migrate-schema.js            ← schema v1 → v2 converter
+  migrate-schema.js            ← schema migration/normalization tool (handles export bundles)
   package.json                 ← dependencies + scripts (npm start/test)
   server.js                    ← HTTP server (port 3000; --fs for JSON-file storage)
   backend-local.js             ← SQLite backend (better-sqlite3)
@@ -158,15 +160,21 @@ dev/                           ← Local development (dev-server-only files live
 
 ## Schema Reference (`schema.json`)
 
-The schema has two top-level sections:
+The schema has these top-level sections:
 
 ```json
 {
   "defaultLanguage": "en",
   "tables": { ... },
-  "views": [ ... ]
+  "views": [ ... ],
+  "pages": { ... },
+  "nav": { "layout": "drawer", "items": [ ... ] }
 }
 ```
+
+> `nav` defines the sidebar and is **required**. `views` are flat — grouping and nesting live
+> in `nav`, not in the views. `pages` are optional markdown documents that embed views.
+> `defaultLanguage` is optional (defaults to the first defined language).
 
 ### Tables
 
@@ -175,8 +183,7 @@ Tables define data structure. Each table has columns and storage configuration.
 | Field | Type | Description |
 |-------|------|-------------|
 | `columns` | array | Column definitions (array of objects) |
-| `partition` | string | Storage tab/collection name (default: `"active"`) |
-| `archivePartition` | string | Archive storage tab name |
+| `archivable` | boolean | Enable archive/restore (rows move between the fixed `active` and `archive` partitions) |
 | `isLookup` | boolean | Reference/lookup table (managed in Lookup tab, not sidebar) |
 
 ```json
@@ -188,8 +195,7 @@ Tables define data structure. Each table has columns and storage configuration.
     { "name": "assigned_to", "type": "select", "list": "assigned_to", "allowNew": true, "sorted": true },
     { "name": "city", "type": "ref", "table": "cities", "valueCol": "city", "filterBy": {"state": "state"} }
   ],
-  "partition": "active",
-  "archivePartition": "archive"
+  "archivable": true
 }
 ```
 
@@ -221,16 +227,15 @@ Tables define data structure. Each table has columns and storage configuration.
 
 ### Views
 
-Views define navigation, presentation, and data transformations. The `views` array is the sidebar — its order and nesting determine what users see.
+Views define presentation and data transformations. They are **flat, reusable data
+components** — the sidebar structure (order, grouping, nesting) lives in `nav`, not here.
 
 Each entry is either a **view definition** (has `name` + `sources`) or a **table reference** (has `table`):
 
 ```json
 "views": [
   { "name": "dashboard", "sources": ["tasks", "notes"], "mode": "union", ... },
-  { "name": "report", "sources": ["tasks"], "mode": "union", "views": [
-    { "name": "sub_report", ... }
-  ]},
+  { "name": "report", "sources": ["tasks"], "mode": "union", ... },
   { "table": "tasks" }
 ]
 ```
@@ -242,7 +247,7 @@ Each entry is either a **view definition** (has `name` + `sources`) or a **table
 | `name` | string | View identifier |
 | `sources` | string[] | Table names to pull data from |
 | `mode` | string | `"union"` (stack rows) or `"join"` (merge rows by `id`) |
-| `columns` | array | Mix of column names, text entries, embeds, and conditional columns |
+| `columns` | array | Mix of column names, inline embeds, and conditional columns |
 | `filter` | object | Static row filter (e.g., `{"status": "in_progress"}`) |
 | `readonly` | boolean | Disable editing (report views) |
 | `layout` | string | `"table"`, `"card"`, or `"list"` |
@@ -250,7 +255,6 @@ Each entry is either a **view definition** (has `name` + `sources`) or a **table
 | `defaultSort` | string | Default sort column |
 | `hideEmpty` | boolean | Hide columns where all rows are empty |
 | `icon` | string | MDI icon for sidebar |
-| `views` | array | Child views (nested sidebar items, recursive) |
 
 #### Aggregate views
 
@@ -274,6 +278,51 @@ Add `groupBy` + `collect` to group rows and collect values into fixed columns:
 
 Output: one row per person with their N most recent dates. Read-only, sortable.
 
+### Pages (markdown + embedded views)
+
+A page is a markdown document that embeds live views/tables. Pages are the **content layer**
+on top of views and are editable in-app (Edit toggle → Save).
+
+```json
+"pages": {
+  "home": { "markdown": "# Welcome\n\nOpen items:\n\n{{view:report}}\n\n{{t:page.home.note}}" }
+}
+```
+
+- `{{view:<name>}}` / `{{table:<name>}}` — render live data inline. Embeds are **interactive**:
+  inline cell editing plus add/delete/archive row controls (gated by the same permission/
+  read-only rules as the main grid). A view with a `filter` embeds only its matching rows, so
+  composing several filtered views in a page replaces in-view sectioning.
+- `{{view:<name>?}}` / `{{table:<name>?}}` — append `?` to hide the embed when it has 0 rows.
+- `{{t:<key>}}` — translatable text token (collected into the Languages tab).
+- Markdown supports headings, bold/italic, lists, links, paragraphs.
+- Page bodies are stored on the server in a `_pages` collection (one `{id, markdown}` row per
+  page), not in `schema.json`. Edit via the toggle in the page corner → textarea → Save.
+
+### Nav (sidebar structure + layout)
+
+`nav` defines the sidebar (required). It references pages/views/tables by name and sets layout.
+
+```json
+"nav": {
+  "layout": "drawer",
+  "items": [
+    { "page": "home", "icon": "mdi-home" },
+    { "view": "report", "items": [ { "view": "sub_report" } ] },
+    { "group": "Data", "icon": "mdi-database", "items": [ { "table": "tasks" } ] }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `layout` | string | `"drawer"` (default, side) or `"tabs"` (top, desktop) |
+| `items` | array | Nav entries: `{page}`, `{view}`, `{table}`, or `{group, items}` |
+| item `items` | array | Child entries (one level) — a clickable parent with nested children |
+| item `icon` / `title` | string | Optional per-item icon / label override |
+
+System tabs (Lookup / Languages / Settings) are appended automatically. Access filtering is unchanged: a view/page is visible only if the user can access all its source tables.
+
 ### Columns array
 
 The `columns` array in views can contain:
@@ -289,13 +338,7 @@ The `columns` array in views can contain:
 ```
 Shows `content` column only for rows where `status === "in_progress"`.
 
-#### 3. Text entries (translatable static text)
-```json
-{ "text": "view.report.header" }
-```
-Renders translated text at that position. Hidden if no translation exists. In views: hidden when no data. Position determines placement (first = header, last = footer, middle = between columns).
-
-#### 4. Inline embeds (filtered table data)
+#### 3. Inline embeds (filtered table data)
 ```json
 { "sources": ["tasks"], "filter": {"status": "open"}, "columns": ["date", "title"], "layout": "table" }
 ```
@@ -308,9 +351,8 @@ Embed properties:
 | `sources` | Source table(s) (array) |
 | `mode` | `"union"` or `"join"` (for multi-source embeds) |
 | `filter` | Row filter |
-| `columns` | Columns to display (can include `{ "text": "..." }` entries) |
+| `columns` | Columns to display |
 | `layout` | `"table"`, `"card"`, or `"chip"` (default) |
-| `text` | Label shown above embed (only when embed has rows) |
 | `defaultSort` | Sort column for embed rows |
 | `hideEmpty` | Hide columns where all embed rows are empty |
 
@@ -318,21 +360,15 @@ Embed properties:
 
 ```json
 {
-  "name": "progress_report",
-  "sources": ["tasks"],
-  "mode": "union",
-  "readonly": true,
-  "icon": "mdi-progress-clock",
+  "name": "combined",
+  "sources": ["tasks", "notes"],
+  "mode": "join",
+  "defaultSort": "date",
   "columns": [
-    { "text": "view.report.header" },
-    { "sources": ["tasks"], "filter": {"status": "open"}, "columns": [
-      { "text": "embed.open.title" }, "date", "title", "assigned_to"
-    ]},
-    { "sources": ["tasks"], "filter": {"status": "in_progress"}, "columns": [
-      { "text": "embed.ip.title" }, "date", "title", "assigned_to",
-      { "text": "embed.ip.attention" }
-    ]},
-    { "text": "view.report.footer" }
+    "date", "title",
+    { "sources": ["tasks"], "filter": {"status": "open"}, "columns": ["date", "title", "assigned_to"], "defaultSort": "date" },
+    { "sources": ["tasks"], "filter": {"status": "in_progress"}, "columns": ["date", "title", "assigned_to"], "layout": "table", "hideEmpty": true },
+    "status", "assigned_to", "city", "content", "author"
   ]
 }
 ```
@@ -342,16 +378,12 @@ Embed properties:
 - **List values** are stored as stable keys (e.g., `"in_progress"`, not "In Progress")
 - **Display** uses translations: `list.status.in_progress` → "Käynnissä" / "In Progress"
 - **Locked values**: list values referenced in schema filters are auto-seeded and non-deletable
-- **Translation keys** auto-generated: `tab.*`, `view.*`, `field.*`, `list.*.*`, text entries
+- **Translation keys** auto-generated: `tab.*`, `view.*`, `field.*`, `list.*.*`, `page.*`, and page `{{t:}}` tokens
 
 ### Schema migration
 
-Convert old-format schemas to v2:
-```bash
-node dev/migrate-schema.js old-schema.json > schema.json
-```
-
-Handles: object→array columns, property renames (`tab`→`partition`, `mirror`→`syncFrom`, `ref`→`isLookup`, `keys`→`groupBy`, `value`→`collect`), embed inlining, header/footer→text entries, children→views.
+`migrate-schema.js` normalizes/converts a schema (or an exported bundle) to the current
+format. Run it against a schema file or export JSON to upgrade older layouts.
 
 ---
 
