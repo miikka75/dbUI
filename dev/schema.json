@@ -22,7 +22,8 @@
           "name": "assigned_to",
           "type": "select",
           "list": "assigned_to",
-          "allowNew": true
+          "allowNew": true,
+          "sorted": true
         },
         {
           "name": "city",
@@ -44,8 +45,7 @@
           "hidden": true
         }
       ],
-      "partition": "active",
-      "archivePartition": "archive"
+      "archivable": true
     },
     "notes": {
       "columns": [
@@ -78,8 +78,7 @@
           "hidden": true
         }
       ],
-      "partition": "active",
-      "archivePartition": "archive"
+      "archivable": true
     },
     "cities": {
       "columns": [
@@ -114,9 +113,6 @@
       ],
       "mode": "join",
       "columns": [
-        {
-          "text": "view.combined.header"
-        },
         "date",
         "title",
         {
@@ -152,94 +148,70 @@
         "assigned_to",
         "city",
         "content",
-        "author",
-        {
-          "text": "view.combined.footer"
-        }
+        "author"
       ],
-      "defaultSort": "date",
-      "views": [
-        {
-          "name": "attendance",
-          "sources": [
-            "tasks",
-            "notes"
-          ],
-          "mode": "union",
-          "groupBy": {
-            "column": "person",
-            "from": [
-              "assigned_to",
-              "author"
-            ]
-          },
-          "collect": "date",
-          "columns": [
-            "person",
-            "latest",
-            "previous",
-            "3rd"
-          ],
-          "icon": "mdi-account-group"
-        },
-        {
-          "name": "progress_report",
-          "icon": "mdi-progress-clock",
-          "columns": [
-            {
-              "text": "view.progress_report.header"
-            },
-            {
-              "filter": {
-                "status": "open"
-              },
-              "columns": [
-                {
-                  "text": "embed.open.title"
-                },
-                "date",
-                "title",
-                "status",
-                "assigned_to",
-                "content",
-                "author"
-              ],
-              "text": "embed.open.label",
-              "sources": [
-                "tasks",
-                "notes"
-              ],
-              "mode": "join"
-            },
-            {
-              "filter": {
-                "status": "in_progress"
-              },
-              "columns": [
-                {
-                  "text": "embed.ip.title"
-                },
-                "date",
-                "title",
-                "assigned_to",
-                {
-                  "text": "embed.ip.attention"
-                }
-              ],
-              "sources": [
-                "tasks"
-              ]
-            },
-            {
-              "text": "view.progress_report.footer"
-            }
-          ],
-          "readonly": true,
-          "sources": [
-            "tasks"
-          ],
-          "mode": "union"
-        }
+      "defaultSort": "date"
+    },
+    {
+      "name": "attendance",
+      "sources": [
+        "tasks",
+        "notes"
+      ],
+      "mode": "union",
+      "groupBy": {
+        "column": "person",
+        "from": [
+          "assigned_to",
+          "author"
+        ]
+      },
+      "collect": "date",
+      "columns": [
+        "person",
+        "latest",
+        "previous",
+        "3rd"
+      ],
+      "icon": "mdi-account-group"
+    },
+    {
+      "name": "report_open",
+      "icon": "mdi-progress-clock",
+      "sources": [
+        "tasks",
+        "notes"
+      ],
+      "mode": "join",
+      "filter": {
+        "status": "open"
+      },
+      "readonly": true,
+      "columns": [
+        "date",
+        "title",
+        "status",
+        "assigned_to",
+        "content",
+        "author"
+      ]
+    },
+    {
+      "name": "report_in_progress",
+      "sources": [
+        "tasks"
+      ],
+      "mode": "union",
+      "filter": {
+        "status": "in_progress"
+      },
+      "readonly": true,
+      "layout": "table",
+      "hideEmpty": true,
+      "columns": [
+        "date",
+        "title",
+        "assigned_to"
       ]
     },
     {
@@ -254,7 +226,11 @@
         "status",
         "assigned_to",
         "city",
-        "content",
+        {
+          "content": {
+            "status": "in_progress"
+          }
+        },
         "author"
       ],
       "mode": "union",
@@ -262,7 +238,78 @@
       "layout": "table"
     },
     {
-      "table": "tasks"
+      "name": "summary_cards",
+      "sources": [
+        "tasks",
+        "notes"
+      ],
+      "mode": "union",
+      "layout": "card",
+      "collapsed": true,
+      "columns": [
+        "title",
+        "status",
+        "assigned_to"
+      ]
+    },
+    {
+      "name": "quick_list",
+      "sources": [
+        "tasks"
+      ],
+      "mode": "union",
+      "layout": "list",
+      "columns": [
+        "title",
+        "status"
+      ]
     }
-  ]
+  ],
+  "nav": {
+    "layout": "drawer",
+    "items": [
+      {
+        "page": "combined_page"
+      },
+      {
+        "view": "attendance",
+        "icon": "mdi-account-group"
+      },
+      {
+        "page": "progress_report_page",
+        "icon": "mdi-progress-clock"
+      },
+      {
+        "view": "all_items",
+        "items": [
+          {
+            "view": "summary_cards"
+          },
+          {
+            "view": "quick_list"
+          }
+        ]
+      },
+      {
+        "group": "Data",
+        "icon": "mdi-database",
+        "items": [
+          {
+            "table": "tasks"
+          },
+          {
+            "table": "notes"
+          }
+        ]
+      }
+    ]
+  },
+  "pages": {
+    "combined_page": {
+      "markdown": "{{t:view.combined.header}}\n\n{{view:combined}}\n\n## Attendance\n\n{{view:attendance}}\n\n## Archived tasks\n\n{{table:tasks@archive?}}\n\n## Notes\n\n{{table:notes}}\n\n{{t:view.combined.footer}}"
+    },
+    "progress_report_page": {
+      "markdown": "{{t:view.progress_report.header}}\n\n## {{t:embed.open.title}}\n\n{{view:report_open}}\n\n## {{t:embed.ip.title}}\n\n{{view:report_in_progress?}}\n\n{{t:embed.ip.attention}}\n\n{{t:view.progress_report.footer}}"
+    }
+  }
 }
