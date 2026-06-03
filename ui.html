@@ -132,8 +132,13 @@
       <v-btn :icon="theme === 'dark' ? 'mdi-weather-sunny' : 'mdi-weather-night'" @click="toggleTheme"></v-btn>
     </v-app-bar>
 
+    <!-- Top tabs nav (desktop) when nav.layout === 'tabs' -->
+    <v-tabs v-if="!loading && navLayout === 'tabs'" :model-value="currentTable" density="compact" show-arrows class="border-b">
+      <v-tab v-for="t in flatNavTabs" :key="t.id" :value="t.id" :prepend-icon="t.icon" @click="selectTab(t.id)">{{ t.title }}</v-tab>
+    </v-tabs>
+
     <!-- Sidebar -->
-    <v-navigation-drawer v-if="!loading" permanent :rail="rail" :expand-on-hover="rail">
+    <v-navigation-drawer v-if="!loading && navLayout !== 'tabs'" permanent :rail="rail" :expand-on-hover="rail">
       <v-list density="compact" nav>
         <template v-for="(tab, tidx) in sidebarTabs" :key="tab.id || ('d'+tidx)">
           <div v-if="tab.divider" style="border-top:1px solid currentColor; opacity:0.2; margin:8px 0"></div>
@@ -157,6 +162,20 @@
           <v-tab :value="true">{{ t('btn.show_archived') }}</v-tab>
         </v-tabs>
 
+        <!-- Markdown page (v3): prose + embedded views/tables -->
+        <v-card v-if="currentPage" variant="outlined" class="pa-4">
+          <div class="d-flex align-center mb-2">
+            <v-spacer></v-spacer>
+            <v-btn size="small" variant="text" :prepend-icon="pageEditing ? 'mdi-eye' : 'mdi-pencil'" @click="togglePageEdit">{{ pageEditing ? 'Preview' : 'Edit' }}</v-btn>
+            <v-btn v-if="pageEditing" size="small" color="primary" prepend-icon="mdi-content-save" @click="savePage" class="ml-2">Save</v-btn>
+          </div>
+          <v-textarea v-if="pageEditing" v-model="pageEditText" auto-grow variant="outlined" density="compact" placeholder="# Markdown — embed views with {{view:name}} or {{table:name}}"></v-textarea>
+          <template v-else v-for="(blk, bi) in pageBlocks" :key="bi">
+            <div v-if="blk.html" v-html="blk.html"></div>
+            <embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>
+          </template>
+        </v-card>
+
         <!-- Data Table -->
         <v-card v-if="isDataView" variant="outlined">
           <div class="d-flex align-center pa-2" style="min-height:0">
@@ -165,7 +184,6 @@
           </div>
           <!-- Header text entries (before columns) -->
           <template v-for="(ei, eidx) in embedItems" :key="'htxt'+eidx">
-            <div v-if="ei.config._text && !ei.config.afterColumn && eidx === 0 && t(ei.config._text) !== ei.config._text" class="pa-3 pb-0" style="font-size:0.85rem; opacity:0.7">{{ t(ei.config._text) }}</div>
           </template>
           <!-- List layout: compact single-line items -->
           <div v-if="useListLayout">
@@ -199,7 +217,6 @@
               </div>
               <!-- Remaining fields (collapsed unless expanded or not collapsed mode) -->
               <div v-show="!currentConfig.collapsed || expandedCard === item.id">
-              <template v-for="(ei, eidx) in embedItems" :key="'pre'+eidx"><div v-if="ei.config._text && !ei.config.afterColumn && t(ei.config._text) !== ei.config._text" class="mb-1" style="font-size:0.8rem; opacity:0.6">{{ t(ei.config._text) }}</div></template>
               <template v-for="col in visibleCols.slice(1)" :key="col">
               <div v-if="!isColumnHidden(col, item)" class="d-flex align-center mb-1">
                 <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + col) || col }}</span>
@@ -213,10 +230,7 @@
               </div>
               <!-- Inline text/embed after this column -->
               <template v-for="(ei, eidx) in embedItems" :key="'emb'+col+eidx">
-              <div v-if="ei.config._text && ei.config.afterColumn === col && t(ei.config._text) !== ei.config._text" class="my-1" style="font-size:0.8rem; opacity:0.6">{{ t(ei.config._text) }}</div>
-              <div v-else-if="ei.config.afterColumn === col && ei.rows.length" class="my-1 ml-2 pa-2" style="background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px">
-                <template v-for="(tb, tbi) in ei.textsBefore" :key="'tb'+tbi"><div v-if="t(tb) !== tb" style="font-size:0.75rem; opacity:0.6; margin-bottom:4px">{{ t(tb) }}</div></template>
-                <div v-if="ei.config.text && t(ei.config.text) !== ei.config.text" style="font-size:0.75rem; opacity:0.6; margin-bottom:4px">{{ t(ei.config.text) }}</div>
+              <div v-if="ei.config.afterColumn === col && ei.rows.length" class="my-1 ml-2 pa-2" style="background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px">
                 <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
                   <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
                   <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ er[ec] || '' }}</td></tr></tbody>
@@ -229,7 +243,6 @@
                     <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
                   </v-chip>
                 </div>
-                <template v-for="(ta, tai) in ei.textsAfter" :key="'ta'+tai"><div v-if="t(ta) !== ta" style="font-size:0.75rem; opacity:0.6; margin-top:4px">{{ t(ta) }}</div></template>
               </div>
               </template>
               </template>
@@ -273,7 +286,6 @@
               <template v-if="sortedData.indexOf(item) === sortedData.length - 1" v-for="(ei, eidx) in embedItems" :key="'temb'+eidx">
               <tr v-if="ei.config.afterColumn && ei.rows.length">
                 <td :colspan="visibleCols.length + 2" style="padding:6px 12px; background: rgb(var(--v-theme-surface-variant), 0.1)">
-                  <div v-if="ei.config.text && t(ei.config.text) !== ei.config.text" style="font-size:0.75rem; opacity:0.6; margin-bottom:4px">{{ t(ei.config.text) }}</div>
                   <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
                     <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
                     <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ er[ec] || '' }}</td></tr></tbody>
@@ -296,10 +308,8 @@
           <v-btn v-if="canMutateRows" variant="text" prepend-icon="mdi-plus" @click="addRow" class="ma-2">{{ t('btn.add') }} {{ t('tab.' + currentTable) }}</v-btn>
           <!-- Text entries and embedded rows -->
           <template v-for="(ei, eidx) in embedItems" :key="'bemb'+eidx">
-          <div v-if="ei.config._text && !useCardLayout && (ei.config.afterColumn || eidx > 0) && t(ei.config._text) !== ei.config._text" class="pa-3" style="font-size:0.85rem; opacity:0.6">{{ t(ei.config._text) }}</div>
-          <div v-else-if="!ei.config._text && !ei.config.afterColumn && ei.rows.length" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
-            <template v-for="(tb, tbi) in ei.textsBefore" :key="'btb'+tbi"><div v-if="t(tb) !== tb" style="font-size:0.8rem; opacity:0.6; margin-bottom:4px">{{ t(tb) }}</div></template>
-            <div v-if="!ei.textsBefore.length" style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ (ei.config.text && t(ei.config.text) !== ei.config.text ? t(ei.config.text) : '') || t('tab.' + ei.config.table) || ei.config.table }} ({{ ei.rows.length }})</div>
+          <div v-if="!ei.config.afterColumn && ei.rows.length" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
+            <div style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t('tab.' + ei.config.table) || ei.config.table }} ({{ ei.rows.length }})</div>
             <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.8rem; border-collapse:collapse">
               <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:3px 8px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
               <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:3px 8px">{{ er[ec] || '' }}</td></tr></tbody>
@@ -312,7 +322,6 @@
                 <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
               </v-chip>
             </div>
-            <template v-for="(ta, tai) in ei.textsAfter" :key="'bta'+tai"><div v-if="t(ta) !== ta" style="font-size:0.8rem; opacity:0.6; margin-top:8px">{{ t(ta) }}</div></template>
           </div>
           </template>
         </v-card>
