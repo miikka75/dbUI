@@ -90,3 +90,12 @@ describe('moveRow', () => {
     assert.ok(backend.getTableData(table, 'newtab').rows.find(r => r.id === 'mv2'));
   });
 });
+
+describe('deleteRow on missing partition table', () => {
+  it('returns false and does not throw (import delete-before-put on fresh DB)', () => {
+    const b = createLocalBackend();
+    // No initSchema/putRow for this partition -> table does not exist yet
+    assert.equal(b.deleteRow('notes', 'nope', 'active'), false);
+    b.close();
+  });
+});
