@@ -49,6 +49,7 @@ function withMirrors(base) {
   return set;
 }
 function filterRows(rows, filter) { if (!filter) return rows; return rows.filter(function(r) { for (var k in filter) { if (r[k] !== filter[k]) return false; } return true; }); }
+function sortByCol(rows, col) { return col ? rows.slice().sort(function(a, b) { return String(a[col] || '').localeCompare(String(b[col] || '')); }) : rows; }
 // Tiny markdown -> HTML for pages (headings, bold/italic, lists, links, paragraphs). Embed tokens are split out before this runs.
 function mdToHtml(md) {
   var esc = function(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
@@ -917,11 +918,13 @@ function createVueApp() {
         if (type === 'view' && VIEWS[name]) {
           var v = VIEWS[name], cache = this.dataCache;
           if (part) { cache = {}; var dc = this.dataCache; (v.sources || []).forEach(function(s) { cache[s] = dc[s + '__' + part] || []; }); }
-          return aggregateRows(v, buildRows(v, cache));
+          return sortByCol(aggregateRows(v, buildRows(v, cache)), v.defaultSort);
         }
-        if (type === 'table' && SCHEMA[name]) return this.dataCache[part ? name + '__' + part : name] || [];
+        if (type === 'table' && SCHEMA[name]) return sortByCol(this.dataCache[part ? name + '__' + part : name] || [], SCHEMA[name].defaultSort);
         return [];
       },
+      embedHideEmpty: function(type, name) { var c = type === 'view' ? VIEWS[name] : SCHEMA[name]; return !!(c && c.hideEmpty); },
+      embedViewLayout: function(type, name) { var c = type === 'view' ? VIEWS[name] : SCHEMA[name]; return (c && c.layout) || 'table'; },
       // Embed row controls — operate on the active partition across the mirror cluster (dataCache is reactive)
       embedSources: function(type, name) { return type === 'view' && VIEWS[name] ? (VIEWS[name].sources || []) : [name]; },
       canMutateEmbed: function(type, name) {
@@ -2062,10 +2065,11 @@ function createVueApp() {
   app.component('embed-view', {
     props: { type: { type: String, default: 'view' }, name: { type: String, required: true }, part: { type: String, default: null } },
     computed: {
-      cols: function() { return appInstance ? appInstance.embedCols(this.type, this.name) : []; },
+      cols: function() { if (!appInstance) return []; var cols = appInstance.embedCols(this.type, this.name); if (appInstance.embedHideEmpty(this.type, this.name)) { var rows = this.rows; cols = cols.filter(function(c) { return rows.some(function(r) { return r[c]; }); }); } return cols; },
       rows: function() { return appInstance ? appInstance.embedRows(this.type, this.name, this.part) : []; },
       canMutate: function() { return !this.part && appInstance && appInstance.canMutateEmbed(this.type, this.name); },
-      hasArchive: function() { return !this.part && appInstance && appInstance.embedHasArchive(this.type, this.name); }
+      hasArchive: function() { return !this.part && appInstance && appInstance.embedHasArchive(this.type, this.name); },
+      layout: function() { return appInstance ? appInstance.embedViewLayout(this.type, this.name) : 'table'; }
     },
     methods: {
       t: function(k) { return appInstance ? appInstance.t(k) : k; },
@@ -2085,7 +2089,18 @@ function createVueApp() {
       delRow: function(item) { return appInstance.embedDeleteRow(this.type, this.name, item); },
       archRow: function(item) { return appInstance.embedArchiveRow(this.type, this.name, item); }
     },
-    template: '<div><v-table density="compact" class="my-2"><template v-slot:default>'
+    template: '<div>'
+      + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
+      + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
+      + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" style="font-size:0.85rem">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}<span v-if="i < cols.length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
+      + '<template v-slot:append><template v-if="canMutate"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></template></template>'
+      + '</v-list-item></v-list>'
+      + '<div v-else-if="layout===\'card\'" class="my-2">'
+      + '<v-card v-for="(item, ri) in rows" :key="item.id || ri" variant="flat" class="ma-2 pa-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">'
+      + '<div v-for="col in cols" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span></div>'
+      + '<div v-if="canMutate" style="text-align:right"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></div>'
+      + '</v-card></div>'
+      + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
       + '<thead><tr><th v-for="c in cols" :key="c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
       + '<tbody><tr v-for="(item, ri) in rows" :key="item.id || ri"><td v-for="col in cols" :key="col">'
       + '<span v-if="cellRO(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
