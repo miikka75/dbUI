@@ -5,8 +5,35 @@
 html, body { margin: 0; padding: 0; height: 100%; background: #1a1a1a; }
 .v-table__wrapper { max-height: calc(100vh - 200px); overflow-y: auto !important; }
 .v-navigation-drawer .v-list-item--active { background: rgb(var(--v-theme-primary), 0.08); }
+/* Normalize nav icons: top-level 24px (drawer + tabs), sub-views 18px (rule below wins by source order) */
+.v-navigation-drawer .v-list-item__prepend .v-icon { font-size: 24px; }
+.v-tabs .v-tab .v-icon { font-size: 24px; }
 .subview-item .v-list-item__prepend .v-icon { font-size: 18px; }
+/* Nav tabs: drop the active-tab underline slider; use a background tint as the active indicator instead */
+.nav-tabs .v-tab__slider { display: none; }
+.nav-tabs .v-tab .v-btn__overlay { opacity: 0 !important; }  /* drive the tab bg ourselves so the icon and the hover-overlay label always match */
+.nav-tabs .v-tab { transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+.nav-tabs .v-tab[aria-selected="true"], .nav-tabs .v-tab.nav-tab-active { background: rgba(var(--v-theme-primary), 0.18); }
+.nav-tabs .v-tab:hover { background: rgba(var(--v-theme-on-surface), var(--v-hover-opacity)); }
+.nav-tabs .v-tab[aria-selected="true"]:hover, .nav-tabs .v-tab.nav-tab-active:hover { background: linear-gradient(rgba(var(--v-theme-on-surface), var(--v-hover-opacity)), rgba(var(--v-theme-on-surface), var(--v-hover-opacity))), rgba(var(--v-theme-primary), 0.18); }
 .subview-item { padding-inline-start: 16px !important; }
+/* Icon-only tabs (hamburger toggles rail): label hidden; on hover it overlays in place
+   (right after the icon, like a full-size tab) -- inherits the tab's font/color, no width change */
+.nav-icons-only .v-tab { position: relative; }
+.nav-icons-only .v-tab .tab-label {
+  display: flex; align-items: center;
+  position: absolute; left: 100%; top: 0; height: 100%;
+  padding: 0 12px; white-space: nowrap; z-index: 5;
+  pointer-events: none;            /* overlay blocks the view but never the pointer -> hover follows the icon under the cursor */
+  opacity: 0; transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);  /* fade in like the icon's hover tint */
+  /* match the hovered icon area: tab surface + Vuetify's hover tint (theme-aware) */
+  background: linear-gradient(rgba(var(--v-theme-on-surface), var(--v-hover-opacity)), rgba(var(--v-theme-on-surface), var(--v-hover-opacity))), rgb(var(--v-theme-surface));
+}
+.nav-icons-only .v-tab:hover .tab-label { opacity: 1; }
+.nav-icons-only .v-tab[aria-selected="true"] .tab-label, .nav-icons-only .v-tab.nav-tab-active .tab-label {
+  /* active tab also carries the primary active tint, beneath the hover tint (match icon layer order) */
+  background: linear-gradient(rgba(var(--v-theme-on-surface), var(--v-hover-opacity)), rgba(var(--v-theme-on-surface), var(--v-hover-opacity))), linear-gradient(rgba(var(--v-theme-primary), 0.18), rgba(var(--v-theme-primary), 0.18)), rgb(var(--v-theme-surface));
+}
 /* Setup mode buttons: left-align icon+text so all icons/titles line up, allow 2-line content */
 .mode-btn .v-btn__content { justify-content: flex-start; width: 100%; }
 .mode-btn { height: auto !important; padding-top: 10px; padding-bottom: 10px; }
