@@ -1,6 +1,16 @@
 const { test, expect } = require('@playwright/test');
 const SCHEMA = require('./fixture-schema.json');
 
+// Global gate: fail any test that produces an uncaught page error or console error
+// (benign resource/network noise like favicon 404s is ignored).
+let _consoleErrors = [];
+test.beforeEach(({ page }) => {
+  _consoleErrors = [];
+  page.on('pageerror', e => _consoleErrors.push('pageerror: ' + e.message));
+  page.on('console', m => { if (m.type() === 'error' && !/favicon|Failed to load resource|\b404\b|net::ERR|ERR_/.test(m.text())) _consoleErrors.push('console: ' + m.text()); });
+});
+test.afterEach(() => { expect(_consoleErrors, 'console/page errors during test').toEqual([]); });
+
 // Reset DB, seed the schema (server no longer auto-loads schema.json), and wait for the app.
 // Opens the 'notes' table tab by default — it's the addable master table (first sidebar
 // tab is a read-only join view; 'tasks' is a detail synced from 'notes' so has no add button).
@@ -788,6 +798,529 @@ test.describe('v3 hide-empty embed', () => {
     // only the non-empty 'all' embed should render (open? has 0 rows -> hidden)
     const embeds = await page.evaluate(() => appInstance.pageBlocks.filter(b => b.embedName).map(b => b.embedName));
     expect(embeds).toEqual(['all']);
+  });
+});
+
+test.describe('v3 named-view column embed', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }, { name: 'status', type: 'text' }], partition: 'active' } },
+    views: [
+      { name: 'sub', sources: ['tasks'], mode: 'union', filter: { status: 'open' }, columns: ['title'] },
+      { name: 'main', sources: ['tasks'], mode: 'union', columns: ['title', { view: 'sub', filter: { status: 'done' } }] }
+    ],
+    nav: { items: [{ view: 'main' }, { view: 'sub' }] }
+  };
+  test('{view,filter} column embed reuses the named view with an overridden filter', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 'o1', title: 'OpenItem', status: 'open' }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 'd1', title: 'DoneItem', status: 'done' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
+    await page.waitForTimeout(400);
+    // the embed reuses 'sub' (columns from sub) but with filter overridden to status:done
+    const emb = await page.evaluate(() => appInstance.embedItems.map(e => ({ cols: e.columns, rows: e.rows.map(r => r.title) })));
+    expect(emb.length).toBe(1);
+    expect(emb[0].cols).toEqual(['title']);
+    expect(emb[0].rows).toEqual(['DoneItem']);
+  });
+});
+
+test.describe('v3 embeddable doc-view (markdown header/footer/table inline)', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { meet: { columns: [{ name: 'topic', type: 'text' }, { name: 'place', type: 'text' }], partition: 'active' }, people: { columns: [{ name: 'name', type: 'text' }, { name: 'state', type: 'text' }], partition: 'active' } },
+    views: [
+      { name: 'people_open', sources: ['people'], mode: 'union', filter: { state: 'in_progress' }, columns: ['name'] },
+      { name: 'people_block', markdown: '**People in progress**\n\n{{view:people_open?}}\n\n_end of people_' },
+      { name: 'main', sources: ['meet'], mode: 'union', layout: 'card', columns: ['topic', 'place', { view: 'people_block' }] }
+    ],
+    nav: { items: [{ view: 'main' }, { table: 'people' }] }
+  };
+  async function boot(page) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'meet', data: { id: 'm1', topic: 'Meeting', place: 'Hall' }, tab: 'active' } });
+  }
+  test('renders header + table + footer inline when the table has rows', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    await page.request.post('/api/putRow', { data: { tableId: 'people', data: { id: 'p1', name: 'Alice', state: 'in_progress' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
+    await page.waitForTimeout(500);
+    await expect(page.locator('.v-main')).toContainText('People in progress'); // doc header
+    await expect(page.locator('.v-main')).toContainText('Alice');              // embedded table
+    await expect(page.locator('.v-main')).toContainText('end of people');      // doc footer
+  });
+  test('whole doc-view is hidden when its table is empty', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    await page.request.post('/api/putRow', { data: { tableId: 'people', data: { id: 'p2', name: 'Bob', state: 'done' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
+    await page.waitForTimeout(500);
+    // no in_progress people -> the doc embed (header + footer included) is not rendered
+    await expect(page.locator('.v-main')).not.toContainText('People in progress');
+    await expect(page.locator('.v-main')).not.toContainText('end of people');
+  });
+});
+
+test.describe('v3 self-embed (view renders prose + its own grid, zero code)', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }], partition: 'active' } },
+    views: [
+      { name: 'selfdemo', sources: ['tasks'], mode: 'union', columns: ['title'],
+        markdown: '**Above grid**\n\n{{self}}\n\n_Below grid_' }
+    ],
+    nav: { items: [{ view: 'selfdemo' }] }
+  };
+  test('a view with sources + markdown self-embeds its own grid between prose', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 't1', title: 'SelfRow' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.selfdemo' }).first().click();
+    await page.waitForTimeout(400);
+    // renders as a doc (markdown wins) yet shows its own grid inline via {{view:self}}
+    expect(await page.evaluate(() => appInstance.isDataView)).toBeFalsy();
+    await expect(page.locator('.v-main')).toContainText('Above grid'); // header prose
+    await expect(page.locator('.v-main')).toContainText('SelfRow');    // its own grid row
+    await expect(page.locator('.v-main')).toContainText('Below grid'); // footer prose
+  });
+});
+
+test.describe('v3 hybrid self-view hide-empty ({{self}} participates)', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { meet: { columns: [{ name: 'topic', type: 'text' }, { name: 'place', type: 'text' }], partition: 'active' }, task: { columns: [{ name: 'title', type: 'text' }, { name: 'state', type: 'text' }], partition: 'active' } },
+    views: [
+      { name: 'task_block', sources: ['task'], mode: 'union', filter: { state: 'open' }, readonly: true, columns: ['title'],
+        markdown: '**Open tasks**\n\n{{self}}\n\n_end tasks_' },
+      { name: 'main', sources: ['meet'], mode: 'union', layout: 'card', columns: ['topic', 'place', { view: 'task_block' }] }
+    ],
+    nav: { items: [{ view: 'main' }, { table: 'task' }] }
+  };
+  async function boot(page, taskState) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'meet', data: { id: 'm1', topic: 'Meeting', place: 'Hall' }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'task', data: { id: 'k1', title: 'TheTask', state: taskState }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
+    await page.waitForTimeout(500);
+  }
+  test('shows header + own grid + footer when the {{self}} grid has rows', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page, 'open');
+    await expect(page.locator('.v-main')).toContainText('Open tasks'); // header
+    await expect(page.locator('.v-main')).toContainText('TheTask');    // {{self}} grid row
+    await expect(page.locator('.v-main')).toContainText('end tasks');  // footer
+  });
+  test('hides the whole block (header + footer) when the {{self}} grid is empty', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page, 'done'); // no state:open rows -> {{self}} empty
+    await expect(page.locator('.v-main')).not.toContainText('Open tasks');
+    await expect(page.locator('.v-main')).not.toContainText('end tasks');
+  });
+});
+
+test.describe('v3 non-ASCII names in embed tokens', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { 'tehtävät': { columns: [{ name: 'otsikko', type: 'text' }], partition: 'active' } },
+    views: [
+      { name: 'tehtävä_block', sources: ['tehtävät'], mode: 'union', columns: ['otsikko'],
+        markdown: '**Lista**\n\n{{self}}\n\n{{table:tehtävät}}' }
+    ],
+    nav: { items: [{ view: 'tehtävä_block' }, { table: 'tehtävät' }] }
+  };
+  test('{{self}} and {{table:X}} resolve non-ASCII (ä) names', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tehtävät', data: { id: 'r1', otsikko: 'FinRivi' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.tehtävä_block' }).first().click();
+    await page.waitForTimeout(400);
+    await expect(page.locator('.v-main')).toContainText('Lista');   // header prose
+    await expect(page.locator('.v-main')).toContainText('FinRivi'); // {{self}} + {{table:tehtävät}} both rendered the row
+  });
+});
+
+test.describe('v3 dangling reference validation', () => {
+  test('validateRefs flags missing view/table/nav refs and passes a clean schema', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.goto('/');
+    await page.waitForFunction(() => typeof validateRefs === 'function');
+    const bad = await page.evaluate(() => validateRefs({
+      tables: { t: { columns: [] } },
+      views: [{ name: 'a', sources: ['nope'], columns: [{ view: 'ghost' }], markdown: '{{table:missing}}' }],
+      nav: { items: [{ view: 'absent' }, { table: 't' }] }
+    }));
+    const good = await page.evaluate(() => validateRefs({
+      tables: { t: { columns: [] } },
+      views: [{ name: 'a', sources: ['t'], columns: [], markdown: '{{view:a}}\n\n{{table:t}}' }],
+      nav: { items: [{ view: 'a' }, { table: 't' }] }
+    }));
+    expect(bad.length).toBeGreaterThanOrEqual(4); // missing source table, embed view, markdown table, nav view
+    expect(good).toEqual([]);
+  });
+});
+
+test.describe('v3 unicode {{t:}} key', () => {
+  test('a non-ASCII (ä) {{t:}} key both resolves and is extracted', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.goto('/');
+    await page.waitForFunction(() => typeof appInstance !== 'undefined' && !!appInstance && typeof appInstance.mdBlocks === 'function');
+    const result = await page.evaluate(() => {
+      appInstance.strings = Object.assign({}, appInstance.strings, { 'tehtävä.otsikko': 'Otsikko-ÄÖ' });
+      var resolved = appInstance.mdBlocks('{{t:tehtävä.otsikko}}', null).map(function (b) { return b.html || ''; }).join('');
+      // extractor uses the same broadened class -> confirm it captures the ä key
+      var extracted = /\{\{\s*t\s*:\s*([^\s{}:]+)\s*\}\}/.exec('{{t:tehtävä.otsikko}}');
+      return { resolved: resolved, extracted: extracted && extracted[1] };
+    });
+    expect(result.resolved).toContain('Otsikko-ÄÖ');     // resolver regex matched + substituted the ä key
+    expect(result.extracted).toBe('tehtävä.otsikko');    // extractor regex captures the ä key
+  });
+});
+
+test.describe('v3 tabs nav layout', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }], partition: 'active' } },
+    views: [
+      { name: 'home', sources: ['tasks'], mode: 'union', columns: ['title'] },
+      { name: 'report', sources: ['tasks'], mode: 'union', columns: ['title'] }
+    ],
+    nav: { layout: 'tabs', items: [
+      { view: 'home' },
+      { group: 'Group', items: [{ view: 'report' }] },
+      { table: 'tasks' }
+    ] }
+  };
+  test('renders top tabs (no drawer), keeps group hierarchy via dropdown, and child click navigates', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 't1', title: 'TabRow' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
+    // tabs layout -> top tabs render and the navigation drawer is not present
+    await expect(page.locator('.v-navigation-drawer')).toHaveCount(0);
+    // hierarchy preserved (not flattened): 'home' is a top-level tab; the group is a parent tab; 'report' lives under it
+    await expect(page.locator('.v-tab', { hasText: 'view.home' })).toBeVisible();
+    const groupTab = page.locator('.v-tab', { hasText: 'Group' });
+    await expect(groupTab).toBeVisible();
+    await expect(page.locator('.v-list-item', { hasText: 'view.report' })).toHaveCount(0); // not a top-level tab; hidden until the group opens
+    // hovering the parent opens its dropdown (no click) -> child revealed -> selecting it navigates
+    await groupTab.dispatchEvent('mouseenter');
+    const child = page.locator('.v-list-item', { hasText: 'view.report' });
+    await expect(child).toBeVisible();
+    await child.dispatchEvent('click');
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => appInstance.currentTable)).toBe('report');
+    await expect(page.locator('.v-main')).toContainText('TabRow');
+    await expect(groupTab).toHaveClass(/nav-tab-active/); // parent tab shows active styling when a child view is selected
+    // active indication is background, not the underline slider (slider hidden)
+    expect(await page.evaluate(() => { const s = document.querySelector('.nav-tabs .v-tab__slider'); return s ? getComputedStyle(s).display : 'none'; })).toBe('none');
+  });
+});
+
+test.describe('v3 drawer nav layout', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }], partition: 'active' } },
+    views: [
+      { name: 'home', sources: ['tasks'], mode: 'union', columns: ['title'] },
+      { name: 'report', sources: ['tasks'], mode: 'union', columns: ['title'] }
+    ],
+    nav: { layout: 'drawer', items: [
+      { view: 'home' },
+      { group: 'Group', items: [{ view: 'report' }] },
+      { table: 'tasks' }
+    ] }
+  };
+  test('renders the navigation drawer (no top tabs) and item click navigates', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 't1', title: 'DrawerRow' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    // drawer layout -> side drawer present, no top tabs
+    await expect(page.locator('.v-tabs')).toHaveCount(0);
+    await expect(page.locator('.v-navigation-drawer')).not.toHaveCount(0);
+    // a group keeps its hierarchy in the drawer (rendered as a parent, not flattened)
+    await expect(page.locator('.v-navigation-drawer .v-list-item', { hasText: 'Group' })).toHaveCount(1);
+    // clicking a top-level item navigates and shows its data
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.home' }).first().click();
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => appInstance.currentTable)).toBe('home');
+    await expect(page.locator('.v-main')).toContainText('DrawerRow');
+  });
+});
+
+test.describe('v3 live nav layout switch', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }], partition: 'active' } },
+    views: [{ name: 'home', sources: ['tasks'], mode: 'union', columns: ['title'] }],
+    nav: { layout: 'drawer', items: [{ view: 'home' }] }
+  };
+  async function boot(page) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.removeItem('app_nav_layout'); localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+  }
+  test('Settings toggle flips drawer -> tabs live (navLayoutOverride)', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    await expect(page.locator('.v-tabs')).toHaveCount(0);
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
+    await page.waitForTimeout(200);
+    await page.locator('[data-testid="nav-layout-toggle"] input').dispatchEvent('click');
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => appInstance.navLayout)).toBe('tabs');
+    await expect(page.locator('.v-tabs')).not.toHaveCount(0);
+    await expect(page.locator('.v-navigation-drawer')).toHaveCount(0);
+    await expect(page.locator('.v-toolbar__extension')).toHaveCount(0); // inline tabs -> no extension row, bar stays thin
+    await expect(page.locator('.v-app-bar-nav-icon')).toHaveCount(1);   // hamburger stays in tabs mode
+    // hamburger toggles icon-only tabs (rail), like the drawer rail
+    expect(await page.evaluate(() => appInstance.rail)).toBe(false);
+    await page.locator('.v-app-bar-nav-icon').first().click();
+    await page.waitForTimeout(150);
+    expect(await page.evaluate(() => appInstance.rail)).toBe(true);
+    await expect(page.locator('.v-tabs.nav-icons-only')).toHaveCount(1);
+    // icon-only: label faded out (opacity 0) until hover, then fades in (overlay in place)
+    const homeTab = page.locator('.v-tab', { hasText: 'view.home' });
+    await expect(homeTab.locator('.tab-label')).toHaveCSS('opacity', '0');
+    await homeTab.hover();
+    await expect(homeTab.locator('.tab-label')).toHaveCSS('opacity', '1');
+    // toggle back to drawer; never any extension row
+    await page.locator('[data-testid="nav-layout-toggle"] input').dispatchEvent('click');
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => appInstance.navLayout)).toBe('drawer');
+    await expect(page.locator('.v-toolbar__extension')).toHaveCount(0);
+    await expect(page.locator('.v-app-bar-nav-icon')).toHaveCount(1);
+  });
+  test('reassigning schemaData live-swaps the layout (no reload)', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    expect(await page.evaluate(() => appInstance.navLayout)).toBe('drawer');
+    await page.evaluate(() => {
+      appInstance.navLayoutOverride = null; // ensure schema drives the layout
+      appInstance.schemaData = Object.freeze(Object.assign({}, appInstance.schemaData, { nav: { layout: 'tabs', items: [{ view: 'home' }] } }));
+    });
+    await page.waitForSelector('.v-tabs .v-tab', { timeout: 4000 });
+    expect(await page.evaluate(() => appInstance.navLayout)).toBe('tabs');
+    await expect(page.locator('.v-navigation-drawer')).toHaveCount(0);
+  });
+});
+
+test.describe('Print with doc-view embed', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { t: { columns: [{ name: 'title', type: 'text' }], partition: 'active' } },
+    views: [
+      { name: 'doc', markdown: '**Doc**\n\n{{table:t}}' },
+      { name: 'main', sources: ['t'], mode: 'union', layout: 'card', columns: ['title', { view: 'doc', bare: true }] }
+    ],
+    nav: { items: [{ view: 'main' }, { table: 't' }] }
+  };
+  test('printing a card whose view embeds a doc-view renders the doc inline (markdown + nested table)', async ({ page, context }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 't', data: { id: 'r1', title: 'Row1' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
+    await page.waitForTimeout(400);
+    const [popup] = await Promise.all([
+      context.waitForEvent('page'),
+      page.locator('.v-main .v-card button:has(.mdi-printer)').first().click()
+    ]);
+    await popup.waitForLoadState();
+    await expect(popup.locator('body')).toContainText('Doc');   // doc-view markdown header rendered in print
+    await expect(popup.locator('body')).toContainText('Row1');  // its embedded {{table:t}} row rendered in print
+    expect(await popup.locator('.embed').count()).toBe(0);      // bare:true -> no boxed .embed wrapper in print
+    await popup.close(); // global afterEach console-error gate asserts no TypeError from printCard
+  });
+});
+
+test.describe('filterRows operators', () => {
+  test('supports flat AND, array-IN, $or, and $and', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.goto('/');
+    await page.waitForFunction(() => typeof filterRows === 'function');
+    const r = await page.evaluate(() => {
+      const rows = [
+        { id: 1, state: 'open', city: 'X' },
+        { id: 2, state: 'in_progress', city: 'X' },
+        { id: 3, state: 'done', city: 'X' },
+        { id: 4, state: 'open', city: 'Y' }
+      ];
+      const ids = (f) => filterRows(rows, f).map((x) => x.id);
+      return {
+        flatAnd: ids({ state: 'open', city: 'X' }),
+        arrayIn: ids({ state: ['open', 'in_progress'] }),
+        or: ids({ $or: [{ state: 'open' }, { state: 'in_progress' }] }),
+        and: ids({ $and: [{ city: 'X' }, { $or: [{ state: 'open' }, { state: 'in_progress' }] }] }),
+        noFilter: ids(null).length
+      };
+    });
+    expect(r.flatAnd).toEqual([1]);          // AND of equality (backward compatible)
+    expect(r.arrayIn).toEqual([1, 2, 4]);    // array value = IN
+    expect(r.or).toEqual([1, 2, 4]);         // $or
+    expect(r.and).toEqual([1, 2]);           // city X AND (open OR in_progress)
+    expect(r.noFilter).toBe(4);              // no filter = all rows
+  });
+});
+
+test.describe('v3 bare doc-view embed', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { meet: { columns: [{ name: 'topic', type: 'text' }, { name: 'place', type: 'text' }], partition: 'active' }, task: { columns: [{ name: 'title', type: 'text' }], partition: 'active' } },
+    views: [
+      { name: 'doc', markdown: '**DocHeader**\n\n{{table:task}}' },
+      { name: 'main', sources: ['meet'], mode: 'union', layout: 'card', columns: ['topic', 'place', { view: 'doc', bare: true }] }
+    ],
+    nav: { items: [{ view: 'main' }, { table: 'task' }] }
+  };
+  test('bare:true renders the embed without the box wrapper (no surface-variant background)', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'meet', data: { id: 'm1', topic: 'Meeting', place: 'Hall' }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'task', data: { id: 't1', title: 'TaskRow' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
+    await page.waitForTimeout(400);
+    await expect(page.locator('.v-main')).toContainText('DocHeader'); // doc still renders inline
+    await expect(page.locator('.v-main')).toContainText('TaskRow');
+    expect(await page.locator('.v-main [style*="surface-variant"]').count()).toBe(0); // no boxed wrapper
+  });
+});
+
+test.describe('v3 per-column hideEmpty override', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { t: { columns: [{ name: 'a', type: 'text' }, { name: 'b', type: 'text' }, { name: 'c', type: 'text' }], partition: 'active' } },
+    views: [
+      { name: 'tbl', sources: ['t'], mode: 'union', layout: 'table', hideEmpty: true, columns: ['a', { name: 'b', hideEmpty: false }, 'c'] }
+    ],
+    nav: { items: [{ view: 'tbl' }, { table: 't' }] }
+  };
+  test('per-column hideEmpty:false force-shows an empty column; view default still hides others', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 't', data: { id: 'r1', a: 'A1', b: '', c: '' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.tbl' }).first().click();
+    await page.waitForTimeout(400);
+    const cols = await page.evaluate(() => appInstance.visibleCols);
+    expect(cols).toEqual(['a', 'b']); // a has data; b forced-shown (hideEmpty:false); c (empty, view default hide) dropped
+  });
+});
+
+test.describe('Print honors per-column hideEmpty (card)', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { t: { columns: [{ name: 'title', type: 'text' }, { name: 'note', type: 'text' }, { name: 'extra', type: 'text' }], partition: 'active' } },
+    views: [{ name: 'main', sources: ['t'], mode: 'union', layout: 'card', hideEmpty: true, columns: ['title', { name: 'note', hideEmpty: false }, 'extra'] }],
+    nav: { items: [{ view: 'main' }, { table: 't' }] }
+  };
+  test('force-shown empty column prints; default-hidden empty column does not', async ({ page, context }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 't', data: { id: 'r1', title: 'T1', note: '', extra: '' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
+    await page.waitForTimeout(400);
+    const [popup] = await Promise.all([
+      context.waitForEvent('page'),
+      page.locator('.v-main .v-card button:has(.mdi-printer)').first().click()
+    ]);
+    await popup.waitForLoadState();
+    await expect(popup.locator('body')).toContainText('field.note');      // hideEmpty:false -> printed even though empty
+    await expect(popup.locator('body')).not.toContainText('field.extra'); // empty + view default hide -> not printed
+    await popup.close();
+  });
+});
+
+test.describe('v3 markdown doc-view', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }], partition: 'active' } },
+    views: [
+      { name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] },
+      { name: 'home', markdown: '# Home Doc\n\n{{view:all}}' }
+    ],
+    nav: { layout: 'tabs', items: [{ view: 'home' }, { view: 'all' }] }
+  };
+  test('a view with markdown renders as a document with embeds (pages removed)', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 't1', title: 'Buy milk' }, tab: 'active' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
+    await page.waitForTimeout(400);
+    // 'home' is a doc-view: not a data view, renders markdown + embedded 'all'
+    expect(await page.evaluate(() => appInstance.isDataView)).toBeFalsy();
+    expect(await page.evaluate(() => !!appInstance.currentPage)).toBe(true);
+    await expect(page.locator('.v-main')).toContainText('Home Doc');
+    await expect(page.locator('.v-main')).toContainText('Buy milk');
   });
 });
 
