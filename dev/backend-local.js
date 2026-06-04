@@ -200,11 +200,12 @@ function createLocalBackend(dbPath) {
       db.exec('DELETE FROM _lists');
       const stmt = db.prepare('INSERT INTO _lists (name, value) VALUES (?, ?)');
       for (const [name, values] of Object.entries(lists)) {
-        values.forEach(v => stmt.run(name, v));
+        (values || []).forEach(v => { if (typeof v === 'string') stmt.run(name, v); });
       }
     },
 
     putListItem(folderId, listName, value) {
+      if (typeof value !== 'string') return;
       db.exec('CREATE TABLE IF NOT EXISTS _lists (name TEXT, value TEXT)');
       db.prepare('INSERT INTO _lists (name, value) VALUES (?, ?)').run(listName, value);
     },
