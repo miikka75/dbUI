@@ -8,8 +8,8 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 - **Six backends**: Google Sheets (Apps Script), OAuth REST API, Browser + CRDT Sync (Google Drive), Browser + CRDT Sync (Local Server), Firebase (Firestore), Dev Server (SQLite)
 - **Unified CRDT**: one offline-first engine; Drive and local server differ only in the transport
 - **i18n**: multi-language with auto-generated translation keys from schema
-- **Views**: flat union, join, and aggregate views with configurable layout
-- **Pages**: editable markdown documents with interactive embedded views (`{{view:x}}`, `{{view:x?}}` hides when empty) — bodies stored on the server, not in the schema
+- **Views**: flat union, join, and aggregate views; columns can embed named views/inline tables
+- **Documents**: a view with `markdown` is an editable document with interactive embeds (`{{view:x}}`, `{{self}}` for its own grid, `{{view:x?}}` hides when empty) — bodies stored on the server, not in the schema
 - **Nav**: explicit sidebar tree with drawer/tabs layout and nested groups
 - **Print**: layout-aware printing (table or card mode), per-card print, embeds included
 - **Responsive**: auto-switches between table and card layout based on column count
@@ -37,7 +37,7 @@ npx playwright test  # run E2E tests
 ```
 
 Browser: click "Create Local Database" → app loads with schema from `schema.json`.
-Optionally run `npm run seed` (with the server running) to populate the demo's page prose translations.
+Optionally run `npm run seed` (with the server running) to populate the demo's markdown prose translations.
 
 **Reset**: delete `dev/local.db` + browser `localStorage.clear(); location.reload()`
 
@@ -167,14 +167,14 @@ The schema has these top-level sections:
   "defaultLanguage": "en",
   "tables": { ... },
   "views": [ ... ],
-  "pages": { ... },
   "nav": { "layout": "drawer", "items": [ ... ] }
 }
 ```
 
 > `nav` defines the sidebar and is **required**. `views` are flat — grouping and nesting live
-> in `nav`, not in the views. `pages` are optional markdown documents that embed views.
-> `defaultLanguage` is optional (defaults to the first defined language).
+> in `nav`, not in the views. A view is either a **data view** (sources/columns) or a
+> **document** (a view with a `markdown` field that embeds other views/tables). `defaultLanguage`
+> is optional (defaults to the first defined language).
 
 ### Tables
 
@@ -278,36 +278,40 @@ Add `groupBy` + `collect` to group rows and collect values into fixed columns:
 
 Output: one row per person with their N most recent dates. Read-only, sortable.
 
-### Pages (markdown + embedded views)
+### Markdown (documents)
 
-A page is a markdown document that embeds live views/tables. Pages are the **content layer**
-on top of views and are editable in-app (Edit toggle → Save).
+A view with a `markdown` field is a **document** (rather than a data grid) that embeds live
+views/tables. It is the content layer, editable in-app (Edit toggle → Save).
 
 ```json
-"pages": {
-  "home": { "markdown": "# Welcome\n\nOpen items:\n\n{{view:report}}\n\n{{t:page.home.note}}" }
-}
+{ "name": "home", "markdown": "# Welcome\n\nOpen items:\n\n{{view:report}}\n\n{{t:home.note}}" }
 ```
 
 - `{{view:<name>}}` / `{{table:<name>}}` — render live data inline. Embeds are **interactive**:
   inline cell editing plus add/delete/archive row controls (gated by the same permission/
   read-only rules as the main grid). A view with a `filter` embeds only its matching rows, so
-  composing several filtered views in a page replaces in-view sectioning.
+  composing several filtered views in a markdown view replaces in-view sectioning.
+- `{{self}}` — render *this* view's own data grid inline. Use it when a view has both
+  `sources`/`columns` and `markdown` (one view = prose **plus** its own data), avoiding having
+  to reference the view by name.
 - `{{view:<name>?}}` / `{{table:<name>?}}` — append `?` to hide the embed when it has 0 rows.
+- `{{view:<name>@archive}}` / `{{table:<name>@archive}}` — embed a non-active partition (read-only).
 - `{{t:<key>}}` — translatable text token (collected into the Languages tab).
 - Markdown supports headings, bold/italic, lists, links, paragraphs.
-- Page bodies are stored on the server in a `_pages` collection (one `{id, markdown}` row per
-  page), not in `schema.json`. Edit via the toggle in the page corner → textarea → Save.
+- Bodies are stored on the server in a `_pages` collection (one `{id, markdown}` row per
+  view), not in `schema.json`. Edit via the toggle in the corner → textarea → Save. The view's
+  schema `markdown` is a seed/fallback until first saved. (Legacy `pages` schemas still load —
+  they're folded into `markdown` views automatically.)
 
 ### Nav (sidebar structure + layout)
 
-`nav` defines the sidebar (required). It references pages/views/tables by name and sets layout.
+`nav` defines the sidebar (required). It references views/tables by name and sets layout.
 
 ```json
 "nav": {
   "layout": "drawer",
   "items": [
-    { "page": "home", "icon": "mdi-home" },
+    { "view": "home", "icon": "mdi-home" },
     { "view": "report", "items": [ { "view": "sub_report" } ] },
     { "group": "Data", "icon": "mdi-database", "items": [ { "table": "tasks" } ] }
   ]
@@ -317,11 +321,11 @@ on top of views and are editable in-app (Edit toggle → Save).
 | Field | Type | Description |
 |-------|------|-------------|
 | `layout` | string | `"drawer"` (default, side) or `"tabs"` (top, desktop) |
-| `items` | array | Nav entries: `{page}`, `{view}`, `{table}`, or `{group, items}` |
+| `items` | array | Nav entries: `{view}`, `{table}`, or `{group, items}` (a `{view}` may be a data view or a view with `markdown`) |
 | item `items` | array | Child entries (one level) — a clickable parent with nested children |
 | item `icon` / `title` | string | Optional per-item icon / label override |
 
-System tabs (Lookup / Languages / Settings) are appended automatically. Access filtering is unchanged: a view/page is visible only if the user can access all its source tables.
+System tabs (Lookup / Languages / Settings) are appended automatically. Access filtering is unchanged: a view is visible only if the user can access all its source tables.
 
 ### Columns array
 
@@ -356,6 +360,16 @@ Embed properties:
 | `defaultSort` | Sort column for embed rows |
 | `hideEmpty` | Hide columns where all embed rows are empty |
 
+#### 4. Named-view embeds
+```json
+{ "view": "report_open", "filter": {"status": "in_progress"}, "hideEmpty": true }
+```
+Embeds a defined view at that position, reusing its `sources`/`columns`/`mode`. The entry's
+`filter`/`hideEmpty`/`layout` override the embedded view's — so one view can be reused as a
+template with different filters. If the named view has `markdown`, its document renders inline
+(header + nested embeds + footer), and the whole block is hidden when all its embedded tables
+are empty — useful for a per-card header/table/footer section.
+
 #### Full example
 
 ```json
@@ -378,7 +392,7 @@ Embed properties:
 - **List values** are stored as stable keys (e.g., `"in_progress"`, not "In Progress")
 - **Display** uses translations: `list.status.in_progress` → "Käynnissä" / "In Progress"
 - **Locked values**: list values referenced in schema filters are auto-seeded and non-deletable
-- **Translation keys** auto-generated: `tab.*`, `view.*`, `field.*`, `list.*.*`, `page.*`, and page `{{t:}}` tokens
+- **Translation keys** auto-generated: `tab.*`, `view.*`, `field.*`, `list.*.*`, and `{{t:}}` tokens in markdown views
 
 ### Schema migration
 
