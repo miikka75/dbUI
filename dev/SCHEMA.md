@@ -1,17 +1,16 @@
-# Schema Reference — pages + flat views + nav/layout
+# Schema Reference — views + nav/layout
 
-The schema splits the two concerns a flat `views` array would conflate — *what a view is* vs
-*how the sidebar is structured* — into three layers, and adds a markdown **content** layer on top.
+A schema has three layers. Views are the unit of presentation: a view is either a **data view**
+(sources/columns) or a **document** (a view with a `markdown` field).
 
 ```
-pages   ← markdown documents that embed views/tables  (content layer)
-views   ← flat, named, reusable data components        (no nesting)
+views   ← flat, named components: data views, or views with markdown (documents)
 tables  ← raw data + partitions
-nav     ← navigation tree + layout, references the above by name
+nav     ← navigation tree + layout, references views/tables by name
 ```
 
-`nav` is **required** and defines the sidebar (there is no auto-derived nav). `pages` is
-optional; `views` and `tables` are flat (no nesting).
+`nav` is **required** and defines the sidebar (there is no auto-derived nav). `views` and
+`tables` are flat (no nesting; hierarchy lives in `nav`).
 
 ## tables
 ```json
@@ -29,15 +28,32 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 ]
 ```
 
-## pages (markdown + embedded views)
+A view's `columns` may contain, besides plain column names:
+- **Conditional column** `{ "<col>": { <filter> } }` — show the column only for rows matching the filter.
+- **Inline embed** `{ "sources": [...], "filter": {...}, "columns": [...] }` — a filtered sub-table at that position.
+- **Named-view embed** `{ "view": "<name>", "filter": {...}, "hideEmpty": true }` — embed a defined
+  view (reuses its sources/columns/mode), with the entry's `filter`/`hideEmpty` overriding.
+  If the named view has `markdown`, its document (header + nested embeds + footer) renders
+  inline at that position; the whole block is hidden when all its embedded tables are empty.
+
+### filters
+A `filter` (on a view, an inline/named-view embed, or a conditional column) matches rows:
+- **Flat object** = AND of equality: `{ "status": "open", "city": "X" }` -> `status==open AND city==X`.
+- **Array value** = IN (OR on one column): `{ "status": ["open", "in_progress"] }`.
+- **`$or` / `$and`** = explicit logical groups, nestable:
+  `{ "$and": [ { "city": "X" }, { "$or": [ {"status":"open"}, {"status":"in_progress"} ] } ] }`.
+
+## markdown (documents)
+A view with a `markdown` field renders as a **document** instead of a data grid:
 ```json
-"pages": {
-  "home": { "markdown": "# Welcome\n\nOpen items:\n\n{{view:combined}}\n\nAll meetings:\n\n{{table:tasks}}" }
-}
+{ "name": "home", "markdown": "# Welcome\n\nOpen items:\n\n{{view:combined}}\n\nAll tasks:\n\n{{table:tasks}}" }
 ```
 - Embed tokens: `{{view:<name>}}` and `{{table:<name>}}` render the live data inline.
   Embeds are **interactive**: inline cell editing plus add/delete/archive row controls
   (gated by the same read-only/permission rules as the main grid).
+- **Own grid** `{{self}}` — render *this* view's own data grid at that position. Use it when a
+  view has both `sources`/`columns` and `markdown`, so one view is prose **plus** its own data
+  (no need to name itself in an embed token).
 - **Conditional views**: a view with a `filter` (e.g. `{"status":"open"}`) embeds only its
   matching rows — embed several filtered views to compose a report.
 - **Hide when empty**: append `?` to a token (`{{view:open?}}`) to skip the embed entirely
@@ -48,44 +64,47 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 - Translatable text: `{{t:<key>}}` resolves via the translations store and is collected
   into the Languages tab as a translation key.
 - Markdown supports headings, bold/italic, lists, links, paragraphs.
-- **Page bodies are stored on the server** in a `_pages` collection (one row per page,
-  `{id, markdown}`) — NOT in `schema.json`. Edit in-app via the Edit toggle in the page
-  corner → textarea → Save (persists via `putRow`). A schema-defined `pages.<name>.markdown`
-  acts only as a seed/fallback until the page is first saved.
+- **Bodies are stored on the server** in a `_pages` collection (one row per view,
+  `{id, markdown}`) — NOT in `schema.json`. Edit in-app via the Edit toggle in the corner →
+  textarea → Save (persists via `putRow`). The view's schema `markdown` acts only as a
+  seed/fallback until first saved.
 
 ## nav (structure + layout)
 ```json
 "nav": {
   "layout": "drawer",            // "drawer" (default) | "tabs" (top, desktop)
   "items": [
-    { "page": "home", "icon": "mdi-home" },
+    { "view": "home", "icon": "mdi-home" },
     { "group": "Data", "icon": "mdi-database", "items": [ { "view": "combined" }, { "table": "tasks" } ] },
     { "view": "attendance" }
   ]
 }
 ```
-- Item kinds: `{page}`, `{view}`, `{table}`, or `{group, items:[...]}` (one level).
+- Item kinds: `{view}`, `{table}`, or `{group, items:[...]}` (one level). A `{view}` may point
+  at a data view or a view with `markdown`.
 - Each item: optional `icon`, `title`. Access-filtered (a view needs all its sources).
 - System tabs (Lookup / Languages / Settings) are appended automatically.
 
 ## `text` entries (removed)
 The `{ "text": "<key>" }` column entry (free-form text interleaved in a view's columns)
 is **removed**: it is no longer rendered — any leftover `text` entries are silently ignored.
-Author prose in a `pages` markdown document instead (a filtered view + markdown + another
-view replaces text-between-columns). `migrate-schema.js` converts existing `text` to
-pages automatically. Do not author new `text` entries.
+Author prose with a `markdown` view instead (a filtered view + markdown + another view
+replaces text-between-columns). `migrate-schema.js` converts existing `text` automatically.
+Do not author new `text` entries.
 
 ## Migration
-`migrate-schema.js <schema-or-export>.json` normalizes a schema to the current format:
+`migrate-schema.js <schema-or-export>.json` normalizes a schema:
 - Flattens nested `views` → top-level entries; rebuilds the hierarchy in `nav.items`.
 - Adds the formerly-implicit admin tables; excludes lookups.
-- Converts `text` entries to a `pages` entry: splits the view at **every** text boundary
+- Converts `text` entries to a `markdown` view: splits the view at **every** text boundary
   into sub-views (`name`, `name_2`, …) and interleaves `{{t:key}}` tokens with one
-  `{{view:subview}}` embed per run of real columns; repoints nav to the page.
+  `{{view:subview}}` embed per run of real columns; points nav at the markdown view.
+- Converts a legacy `pages` map into `markdown` views (also folded in automatically at load,
+  so older schemas keep working without re-migration).
 - **Export bundles**: if the input has a `.schema` key (an exported JSON with `tables` data,
   `lists`, `translations`), only `schema` is migrated in place; data/lists/translations are
   preserved, so the result re-imports cleanly.
 
 ## Translation keys
-- `page.<name>` (page title), `nav.<group>` (group label), page `{{t:<key>}}` tokens,
-  plus existing `view.*` / `field.*` / `list.*`.
+- `nav.<group>` (group label), `{{t:<key>}}` tokens in markdown, plus existing
+  `view.*` / `field.*` / `list.*`.
