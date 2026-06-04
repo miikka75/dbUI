@@ -9,7 +9,16 @@ var defaultSchema = {"tables":{},"views":{}};
 var SCHEMA = defaultSchema.tables;
 var _viewsNav = Array.isArray(defaultSchema.views) ? defaultSchema.views : [];
 var VIEWS = {};
-function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && v.sources) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
+function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string')) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
+// Back-compat: fold a legacy `pages` map into doc-views (views with `markdown`) and rewrite {page:x} nav -> {view:x}.
+function foldPages(s) {
+  if (!s || !s.pages) return s;
+  if (!Array.isArray(s.views)) s.views = [];
+  Object.keys(s.pages).forEach(function(p) { if (!s.views.some(function(v) { return v.name === p; })) s.views.push({ name: p, markdown: (s.pages[p] && s.pages[p].markdown) || '' }); });
+  if (s.nav && s.nav.items) (function fix(items) { items.forEach(function(it) { if (it.page) { it.view = it.page; delete it.page; } if (it.items) fix(it.items); }); })(s.nav.items);
+  delete s.pages;
+  return s;
+}
 // Support legacy object format: { viewName: viewDef }
 if (defaultSchema.views && !Array.isArray(defaultSchema.views)) {
   for (var _k in defaultSchema.views) { VIEWS[_k] = defaultSchema.views[_k]; }
@@ -25,8 +34,9 @@ function ensureImplicitId(schema, orders) {
     if (!cols.id) { cols.id = 'text'; if (orders && orders[t] && orders[t].indexOf('id') === -1) orders[t].unshift('id'); }
   });
 }
-function colName(c) { return typeof c === 'object' ? Object.keys(c)[0] : c; }
+function colName(c) { return c && typeof c === 'object' ? (c.name || Object.keys(c)[0]) : c; }
 function isEmbed(c) { return typeof c === 'object' && c.sources && !c.name; }
+function isViewEmbed(c) { return typeof c === 'object' && typeof c.view === 'string'; } // {view:name,filter?,hideEmpty?} -> embed a named view
 function isText(c) { return typeof c === 'object' && c.text && !c.name && !c.sources; }
 // dataCache/export key for a table's archive partition (fixed 'archive')
 function aKey(table) { return table + '__archive'; }
@@ -48,7 +58,13 @@ function withMirrors(base) {
   }
   return set;
 }
-function filterRows(rows, filter) { if (!filter) return rows; return rows.filter(function(r) { for (var k in filter) { if (r[k] !== filter[k]) return false; } return true; }); }
+function matchFilter(r, f) {
+  if (f.$or) return f.$or.some(function(s) { return matchFilter(r, s); });
+  if (f.$and) return f.$and.every(function(s) { return matchFilter(r, s); });
+  for (var k in f) { var v = f[k]; if (Array.isArray(v) ? v.indexOf(r[k]) < 0 : r[k] !== v) return false; }
+  return true;
+}
+function filterRows(rows, filter) { if (!filter) return rows; return rows.filter(function(r) { return matchFilter(r, filter); }); }
 function sortByCol(rows, col) { return col ? rows.slice().sort(function(a, b) { return String(a[col] || '').localeCompare(String(b[col] || '')); }) : rows; }
 // Tiny markdown -> HTML for pages (headings, bold/italic, lists, links, paragraphs). Embed tokens are split out before this runs.
 function mdToHtml(md) {
@@ -98,7 +114,7 @@ function aggregateRows(view, rows) {
     return row;
   });
 }
-function colCondition(c) { return typeof c === 'object' ? c[Object.keys(c)[0]] : null; }
+function colCondition(c) { if (!c || typeof c !== 'object' || c.name || c.sources || c.view || c.text) return null; var v = c[Object.keys(c)[0]]; return (v && typeof v === 'object') ? v : null; }
 function toDateStr(v) { if (!v) return ''; var s = String(v); if (s.length === 10) return s; var d = new Date(s); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 function parseTableResult(r) { if (!r) return { headers: [], rows: [] }; if (typeof r === 'string') return JSON.parse(r); return r; }
 function validateSchema() {
@@ -111,7 +127,7 @@ function validateSchema() {
     (view.sources || []).forEach(function(s) { if (!SCHEMA[s]) errors.push('View "' + v + '" references non-existent table "' + s + '"'); });
     // Check columns exist in at least one source (skip aggregate views)
     if (!view.groupBy) (view.columns || []).forEach(function(c) {
-      if (isEmbed(c) || isText(c)) return;
+      if (isEmbed(c) || isViewEmbed(c) || isText(c)) return;
       var col = colName(c);
       var found = (view.sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].columns && SCHEMA[s].columns[col]; });
       if (!found) errors.push('View "' + v + '": column "' + col + '" not found in sources [' + (view.sources || []).join(', ') + ']');
@@ -130,6 +146,33 @@ function validateSchema() {
     });
   }
   return errors;
+}
+// Structural dangling-reference check on a raw schema (names only; safe to run pre-normalization, e.g. on import).
+function validateRefs(schema) {
+  var errs = [], tables = schema.tables || {}, views = {};
+  (Array.isArray(schema.views) ? schema.views : []).forEach(function(v) { if (v && v.name) views[v.name] = v; });
+  var hasView = function(n) { return !!views[n]; }, hasTable = function(n) { return !!tables[n]; };
+  Object.keys(views).forEach(function(n) {
+    var v = views[n];
+    (v.sources || []).forEach(function(s) { if (!hasTable(s)) errs.push('View "' + n + '" -> missing table "' + s + '"'); });
+    (v.columns || []).forEach(function(c) {
+      if (c && typeof c === 'object' && typeof c.view === 'string' && !hasView(c.view)) errs.push('View "' + n + '" embed -> missing view "' + c.view + '"');
+      if (c && typeof c === 'object' && Array.isArray(c.sources)) c.sources.forEach(function(s) { if (!hasTable(s)) errs.push('View "' + n + '" embed -> missing table "' + s + '"'); });
+    });
+    if (typeof v.markdown === 'string') {
+      var re = /\{\{\s*(view|table)\s*:\s*([^\s@?{}:]+)/g, m;
+      while ((m = re.exec(v.markdown))) {
+        if (m[1] === 'view' && !hasView(m[2])) errs.push('View "' + n + '" markdown -> missing view "' + m[2] + '"');
+        if (m[1] === 'table' && !hasTable(m[2])) errs.push('View "' + n + '" markdown -> missing table "' + m[2] + '"');
+      }
+    }
+  });
+  (function walk(items) { (items || []).forEach(function(it) {
+    if (it.view && !hasView(it.view) && !hasTable(it.view)) errs.push('Nav -> missing view "' + it.view + '"');
+    if (it.table && !hasTable(it.table)) errs.push('Nav -> missing table "' + it.table + '"');
+    if (it.items) walk(it.items);
+  }); })(schema.nav && schema.nav.items);
+  return errs;
 }
 function getColumnType(table, col) {
   var def = SCHEMA[table].columns[col];
@@ -215,6 +258,7 @@ function createVueApp() {
       viewingArchive: false,
       drawer: true,
       rail: false,
+      navLayoutOverride: localStorage.getItem('app_nav_layout') || null,
       mobile: window.innerWidth < 768,
       windowWidth: window.innerWidth,
       theme: localStorage.getItem('app_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
@@ -248,19 +292,17 @@ function createVueApp() {
           if (SCHEMA[id]) return allowedTables.indexOf(id) >= 0;
           return true;
         }
-        var pages = (self.schemaData && self.schemaData.pages) || {};
         // Single nav model (v3): the schema's nav.items defines the sidebar
         var navCfg = self.navConfig;
         var navItems = (navCfg && Array.isArray(navCfg.items)) ? navCfg.items : [];
         function navTab(it) {
-          if (it.page) { if (!pages[it.page]) return null; var pt = { id: '@page:' + it.page, title: self.t('page.' + it.page) || it.page, icon: it.icon || 'mdi-file-document-outline' }; if (it.items) { var pk = it.items.map(navTab).filter(Boolean); if (pk.length) pt.children = pk; } return pt; }
           if (it.group) { var ch = (it.items || []).map(navTab).filter(Boolean); return ch.length ? { id: 'grp:' + it.group, title: self.t('nav.' + it.group) || it.group, icon: it.icon || 'mdi-folder', children: ch } : null; }
           var gid = it.view || it.table;
           if (!gid || !canAccess(gid)) return null;
           if (it.view && !VIEWS[gid]) return null;
           if (it.table && !SCHEMA[gid]) return null;
-          var isV = !!it.view;
-          var tb = { id: gid, title: self.t((isV ? 'view.' : 'tab.') + gid) || gid, icon: it.icon || (isV ? 'mdi-view-list' : 'mdi-table') };
+          var isV = !!it.view, isDoc = isV && typeof VIEWS[gid].markdown === 'string';
+          var tb = { id: gid, title: self.t((isV ? 'view.' : 'tab.') + gid) || gid, icon: it.icon || (isDoc ? 'mdi-file-document-outline' : (isV ? 'mdi-view-list' : 'mdi-table')) };
           if (it.items) { var kids = it.items.map(navTab).filter(Boolean); if (kids.length) tb.children = kids; }
           return tb;
         }
@@ -272,32 +314,21 @@ function createVueApp() {
         return tabs;
       },
       isDataView: function() {
-        return this.currentTable && this.currentTable[0] !== '_' && this.currentTable.indexOf('@page:') !== 0 && (VIEWS[this.currentTable] || SCHEMA[this.currentTable]);
+        var v = VIEWS[this.currentTable];
+        return this.currentTable && this.currentTable[0] !== '_' && !(v && typeof v.markdown === 'string') && (v || SCHEMA[this.currentTable]);
       },
       navConfig: function() { return (this.schemaData && this.schemaData.nav) || null; },
-      navLayout: function() { return (this.navConfig && this.navConfig.layout) || 'drawer'; },
+      navLayout: function() { return this.navLayoutOverride || (this.navConfig && this.navConfig.layout) || 'drawer'; },
       flatNavTabs: function() { var out = []; this.sidebarTabs.forEach(function(t) { if (t.divider) return; if (t.children) t.children.forEach(function(c) { out.push(c); }); else out.push(t); }); return out; },
       currentPage: function() {
-        if (!this.currentTable || this.currentTable.indexOf('@page:') !== 0) return null;
-        return { markdown: this.pageCache[this.currentTable.slice(6)] || '' };
+        var v = VIEWS[this.currentTable];
+        if (!v || typeof v.markdown !== 'string') return null;
+        var body = this.pageCache[this.currentTable];
+        return { markdown: body != null ? body : v.markdown };
       },
       pageBlocks: function() {
-        var self = this, p = this.currentPage;
-        if (!p) return [];
-        var md = String(p.markdown || '').replace(/\{\{\s*t\s*:\s*([\w.\-]+)\s*\}\}/g, function(_, k) { return self.t(k) || ''; }); // translatable text tokens
-        var parts = md.split(/\{\{\s*(view|table)\s*:\s*([\w-]+(?:@[\w-]+)?\??)\s*\}\}/);
-        var blocks = [], i = 0;
-        while (i < parts.length) {
-          if (parts[i]) blocks.push({ html: mdToHtml(parts[i]) });
-          if (i + 2 < parts.length) {
-            var type = parts[i + 1], raw = parts[i + 2];
-            var optional = raw.charAt(raw.length - 1) === '?'; if (optional) raw = raw.slice(0, -1);
-            var at = raw.indexOf('@'), part = at >= 0 ? raw.slice(at + 1) : null, name = at >= 0 ? raw.slice(0, at) : raw;
-            if (!(optional && self.embedRows(type, name, part).length === 0)) blocks.push(self.buildEmbedBlock(type, name, part)); // hide-when-empty
-            i += 3;
-          } else break;
-        }
-        return blocks;
+        var p = this.currentPage;
+        return p ? this.mdBlocks(p.markdown, this.currentTable) : [];
       },
       currentUserRole: function() {
         if (!this.usersLoaded) return null;
@@ -387,7 +418,8 @@ function createVueApp() {
         var cols = cfg.columns;
         if (Array.isArray(cols)) {
           cols.forEach(function(c) {
-            if (isEmbed(c)) { embeds.push(Object.assign({ afterColumn: lastCol }, c)); }
+            if (isViewEmbed(c)) { embeds.push(Object.assign({ afterColumn: lastCol }, VIEWS[c.view] || {}, c)); } // named-view embed (its sources/columns + entry overrides)
+            else if (isEmbed(c)) { embeds.push(Object.assign({ afterColumn: lastCol }, c)); }
             else if (!isText(c)) { lastCol = colName(c); }
           });
         }
@@ -406,6 +438,9 @@ function createVueApp() {
       embedItems: function() {
         var self = this;
         return this.embedConfigs.map(function(cfg) {
+          if (typeof cfg.markdown === 'string') { // doc-view embed: render its markdown inline; hide whole block if its tables are all empty
+            return { config: cfg, isDoc: true, blocks: self.mdBlocks(cfg.markdown, cfg.name), show: self.docHasData(cfg.markdown, cfg.name) };
+          }
           var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
           var columns = raw.filter(function(c) { return !(typeof c === 'object' && c.text && !c.sources); }).map(function(c) { return colName(c); });
           var rows = buildRows(cfg, self.dataCache);
@@ -420,7 +455,7 @@ function createVueApp() {
         return !!getTableMirrorSource(SCHEMA, table);
       },
       hasArchive: function() {
-        if (VIEWS[this.currentTable]) return VIEWS[this.currentTable].sources.some(function(s) { return SCHEMA[s] && SCHEMA[s].archivePartition; });
+        if (VIEWS[this.currentTable]) return (VIEWS[this.currentTable].sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].archivePartition; });
         return SCHEMA[this.currentTable] && SCHEMA[this.currentTable].archivePartition;
       },
       // Add/delete/archive/restore fan out across the whole mirror cluster; only allow if the user can access every table in it
@@ -441,7 +476,7 @@ function createVueApp() {
         if (!this.currentTable) return [];
         var view = VIEWS[this.currentTable];
         var cols;
-        if (view) { cols = view.columns.filter(function(c) { return !isEmbed(c) && !isText(c); }).map(function(c) { return colName(c); }); }
+        if (view) { cols = (view.columns || []).filter(function(c) { return !isEmbed(c) && !isViewEmbed(c) && !isText(c); }).map(function(c) { return colName(c); }); }
         else {
           cols = getColumns(this.currentTable).filter(function(c) {
             if (c === 'id') return false;
@@ -449,10 +484,10 @@ function createVueApp() {
             return !(def && typeof def === 'object' && def.hidden);
           });
         }
-        // Table-mode hideEmpty: remove columns where ALL rows are empty
-        if (this.currentConfig.hideEmpty && !this.useCardLayout && this.sortedData.length) {
+        // hideEmpty (table mode): drop a column when empty across all rows -- view default, overridable per-column via {name, hideEmpty}
+        if (!this.useCardLayout && this.sortedData.length) {
           var data = this.sortedData;
-          cols = cols.filter(function(c) { return data.some(function(r) { return r[c]; }); });
+          cols = cols.filter(function(c) { return !self.colHideEmpty(c) || data.some(function(r) { return r[c]; }); });
         }
         return cols;
       },
@@ -523,12 +558,11 @@ function createVueApp() {
           });
         }
         addViewKeys(Array.isArray(views) ? views : Object.values(views));
-        // Page markdown {{t:key}} tokens are translatable too
-        var pages = schema.pages || {};
-        for (var pn in pages) {
-          var md = String(pages[pn].markdown || ''), m, re = /\{\{\s*t\s*:\s*([\w.\-]+)\s*\}\}/g;
-          while ((m = re.exec(md))) keys.push(m[1]);
-        }
+        // Doc-view markdown {{t:key}} tokens are translatable too
+        var docs = [];
+        for (var vn in VIEWS) { if (typeof VIEWS[vn].markdown === 'string') docs.push(VIEWS[vn].markdown); }
+        for (var dn in this.pageCache) { docs.push(this.pageCache[dn] || ''); }
+        docs.forEach(function(md) { var m, re = /\{\{\s*t\s*:\s*([^\s{}:]+)\s*\}\}/g; while ((m = re.exec(String(md || '')))) keys.push(m[1]); });
         var seen = {};
         return keys.filter(function(k) { if (seen[k]) return false; seen[k] = true; return true; }).sort();
       },
@@ -586,6 +620,7 @@ function createVueApp() {
       },
 
       notify: function(text) { this.snackText = text; this.snackbar = true; },
+      setNavLayout: function(v) { this.navLayoutOverride = v; localStorage.setItem('app_nav_layout', v); },
 
       // Setup
       validateFolder: function() {
@@ -638,6 +673,7 @@ function createVueApp() {
           schemaPromise = backend.getSchema(self.folderId).then(function(s) {
             if (s) {
               var parsed = typeof s === 'string' ? JSON.parse(s) : s;
+              foldPages(parsed);
               SCHEMA = parsed.tables || SCHEMA;
               _viewsNav = Array.isArray(parsed.views) ? parsed.views : _viewsNav;
               VIEWS = {};
@@ -677,6 +713,7 @@ function createVueApp() {
             // bootData may return schema too
             if (result.schema) {
               var parsedSchema = typeof result.schema === 'string' ? JSON.parse(result.schema) : result.schema;
+              foldPages(parsedSchema);
               SCHEMA = parsedSchema.tables || SCHEMA;
               _viewsNav = Array.isArray(parsedSchema.views) ? parsedSchema.views : _viewsNav;
               VIEWS = {};
@@ -716,10 +753,13 @@ function createVueApp() {
             });
             function seedFilter(filter) {
               if (!filter) return;
+              if (filter.$or || filter.$and) { (filter.$or || filter.$and).forEach(seedFilter); return; }
               for (var col in filter) {
                 var ln = null;
                 for (var t in SCHEMA) { var d = SCHEMA[t].columns[col]; if (d && typeof d === 'object' && d.list) { ln = d.list; break; } }
-                if (ln && self.listsCache[ln] && self.listsCache[ln].indexOf(filter[col]) < 0) { self.listsCache[ln].push(filter[col]); seedMissing = true; }
+                if (!ln || !self.listsCache[ln]) continue;
+                var vals = Array.isArray(filter[col]) ? filter[col] : [filter[col]];
+                vals.forEach(function(val) { if (typeof val === 'string' && self.listsCache[ln].indexOf(val) < 0) { self.listsCache[ln].push(val); seedMissing = true; } });
               }
             }
             for (var vn in VIEWS) {
@@ -804,13 +844,13 @@ function createVueApp() {
             // 2. Extract mandatory values from filters and conditionals in views
             function seedFromFilter(filter) {
               if (!filter) return;
+              if (filter.$or || filter.$and) { (filter.$or || filter.$and).forEach(seedFromFilter); return; }
               for (var col in filter) {
                 var listName = null;
                 for (var t in SCHEMA) { var d = SCHEMA[t].columns[col]; if (d && typeof d === 'object' && d.list) { listName = d.list; break; } }
-                if (listName && self.listsCache[listName] && self.listsCache[listName].indexOf(filter[col]) < 0) {
-                  self.listsCache[listName].push(filter[col]);
-                  missing = true;
-                }
+                if (!listName || !self.listsCache[listName]) continue;
+                var vals = Array.isArray(filter[col]) ? filter[col] : [filter[col]];
+                vals.forEach(function(val) { if (typeof val === 'string' && self.listsCache[listName].indexOf(val) < 0) { self.listsCache[listName].push(val); missing = true; } });
               }
             }
             for (var vn in VIEWS) {
@@ -892,16 +932,15 @@ function createVueApp() {
         this.sortCol = cfg.defaultSort || null;
         this.sortAsc = true;
         if (this.isDataView) this.loadTableData();
-        else if (id.indexOf('@page:') === 0) this.loadPage(id.slice(6));
+        else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
-      // Page bodies live in a server-side "_pages" collection (not in schema.json).
-      // Falls back to a schema-defined body for legacy/seed pages, then caches it.
+      // Doc-view bodies live in a server-side "_pages" collection (not in schema.json).
+      // Falls back to the view's schema-defined `markdown` (seed), then caches it.
       loadPage: function(name) {
         var self = this;
         Promise.resolve(backend.getTableData('_pages', 'active')).then(function(d) {
           var row = (d && d.rows || []).find(function(r) { return r.id === name; });
-          var seed = ((self.schemaData && self.schemaData.pages) || {})[name];
-          self.pageCache[name] = row ? row.markdown : ((seed && seed.markdown) || '');
+          self.pageCache[name] = row ? row.markdown : ((VIEWS[name] && VIEWS[name].markdown) || '');
         }).catch(function() {});
       },
       // v3 pages: a {{view:x}}/{{table:x}} embed block — self-computing component resolves cols/rows
@@ -909,8 +948,33 @@ function createVueApp() {
         if ((type === 'view' && VIEWS[name]) || (type === 'table' && SCHEMA[name])) return { embedType: type, embedName: name, embedPart: part || null };
         return { html: '<em>Unknown embed: ' + type + ':' + name + '</em>' };
       },
+      // Parse markdown into render blocks: {html} or {embedType,embedName,embedPart}. `?` hides empty embeds.
+      mdBlocks: function(markdown, selfName) {
+        var self = this;
+        var md = String(markdown || '').replace(/\{\{\s*self\s*\}\}/g, selfName ? '{{view:' + selfName + '}}' : '').replace(/\{\{\s*t\s*:\s*([^\s{}:]+)\s*\}\}/g, function(_, k) { return self.t(k) || ''; });
+        var parts = md.split(/\{\{\s*(view|table)\s*:\s*([^\s@?{}:]+(?:@[^\s?{}:]+)?\??)\s*\}\}/);
+        var blocks = [], i = 0;
+        while (i < parts.length) {
+          if (parts[i]) blocks.push({ html: mdToHtml(parts[i]) });
+          if (i + 2 < parts.length) {
+            var type = parts[i + 1], raw = parts[i + 2];
+            var optional = raw.charAt(raw.length - 1) === '?'; if (optional) raw = raw.slice(0, -1);
+            var at = raw.indexOf('@'), part = at >= 0 ? raw.slice(at + 1) : null, name = at >= 0 ? raw.slice(0, at) : raw;
+            if (!(optional && self.embedRows(type, name, part).length === 0)) blocks.push(self.buildEmbedBlock(type, name, part)); // hide-when-empty
+            i += 3;
+          } else break;
+        }
+        return blocks;
+      },
+      // For an embedded doc-view: false only if it has data embeds and ALL of them are empty (hide whole doc-view).
+      docHasData: function(markdown, selfName) {
+        var md = String(markdown || '').replace(/\{\{\s*self\s*\}\}/g, selfName ? '{{view:' + selfName + '}}' : '');
+        var re = /\{\{\s*(view|table)\s*:\s*([^\s@?{}:]+)(@[^\s?{}:]+)?\??\s*\}\}/g, m, any = false;
+        while ((m = re.exec(md))) { any = true; if (this.embedRows(m[1], m[2], m[3] ? m[3].slice(1) : null).length) return true; }
+        return !any;
+      },
       embedCols: function(type, name) {
-        if (type === 'view' && VIEWS[name]) return (VIEWS[name].columns || []).filter(function(c) { return !isEmbed(c) && !isText(c); }).map(colName);
+        if (type === 'view' && VIEWS[name]) return (VIEWS[name].columns || []).filter(function(c) { return !isEmbed(c) && !isViewEmbed(c) && !isText(c); }).map(colName);
         if (type === 'table' && SCHEMA[name]) return getColumns(name).filter(function(c) { var d = SCHEMA[name].columns[c]; return c !== 'id' && !(d && typeof d === 'object' && d.hidden); });
         return [];
       },
@@ -970,7 +1034,7 @@ function createVueApp() {
       },
       togglePageEdit: function() { this.pageEditing = !this.pageEditing; if (this.pageEditing) this.pageEditText = (this.currentPage && this.currentPage.markdown) || ''; },
       savePage: function() {
-        var name = this.currentTable.slice(6);
+        var name = this.currentTable;
         this.pageCache[name] = this.pageEditText;
         if (backend.putRow) backend.putRow('_pages', { id: name, markdown: this.pageEditText }, 'active');
         this.pageEditing = false;
@@ -1024,9 +1088,16 @@ function createVueApp() {
         }
       },
 
+      colHideEmpty: function(col) {
+        var cfg = this.currentConfig;
+        var arr = Array.isArray(cfg.columns) ? cfg.columns : [];
+        var entry = arr.find(function(c) { return colName(c) === col; });
+        if (entry && typeof entry === 'object' && typeof entry.hideEmpty === 'boolean') return entry.hideEmpty;
+        return !!cfg.hideEmpty;
+      },
       isColumnHidden: function(col, item) {
         var cfg = this.currentConfig;
-        if (cfg.hideEmpty && !item[col]) return true;
+        if (this.colHideEmpty(col) && !item[col]) return true;
         // Inline condition: {"colName": {"field": "value"}}
         var cols = cfg.columns;
         if (!cols || !Array.isArray(cols)) return false;
@@ -1215,7 +1286,7 @@ function createVueApp() {
             for (var col in view.filter) {
               var ln = null;
               for (var t in SCHEMA) { var d = SCHEMA[t].columns[col]; if (d && typeof d === 'object' && d.list) { ln = d.list; break; } }
-              if (ln) { if (!locked[ln]) locked[ln] = {}; locked[ln][view.filter[col]] = true; }
+              if (ln) { if (!locked[ln]) locked[ln] = {}; (Array.isArray(view.filter[col]) ? view.filter[col] : [view.filter[col]]).forEach(function(v) { locked[ln][v] = true; }); }
             }
           }
           (view.columns || []).forEach(function(c) {
@@ -1758,9 +1829,16 @@ function createVueApp() {
             // Detect if file is a raw schema.json (has tables with column definitions, not row arrays)
             var isRawSchema = imported.tables && !imported.schema && Object.values(imported.tables).some(function(t) { return t && t.columns; });
             if (isRawSchema) { imported = { schema: imported, tables: {} }; }
+            // Structural check: block import if the schema has dangling view/table references
+            if (imported.schema) {
+              foldPages(imported.schema);
+              var refErrs = validateRefs(imported.schema);
+              if (refErrs.length) { self.notify('Import blocked: ' + refErrs[0] + (refErrs.length > 1 ? ' (+' + (refErrs.length - 1) + ' more)' : '')); return; }
+            }
             // Import schema if present (initializes empty databases)
             if (imported.schema && backend.saveSchema) {
               chain = chain.then(function() {
+                foldPages(imported.schema);
                 // Rebuild VIEWS from new schema so lockedListValues works
                 if (Array.isArray(imported.schema.views)) {
                   _viewsNav = imported.schema.views;
@@ -1917,17 +1995,17 @@ function createVueApp() {
         var self = this;
         var cols = this.visibleCols;
         var title = this.t('tab.' + this.currentTable) || this.currentTable;
-        var html = '<html><head><title>' + title + '</title><style>body{font-family:system-ui;margin:20px}.card{border:1px solid #ddd;padding:12px;margin-bottom:12px;border-radius:6px;page-break-inside:avoid}dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0}dt{font-weight:bold;font-size:12px;opacity:0.7}dd{margin:0;font-size:13px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:4px 8px;text-align:left;font-size:12px}th{background:#f5f5f5}.embed{margin:8px 0;padding:8px;background:#f9f9f9;border-radius:4px}.embed h4{margin:0 0 4px;font-size:12px;opacity:0.7}@media print{button{display:none}}</style></head><body>';
+        var html = '<html><head><title>' + title + '</title><style>body{font-family:system-ui;margin:20px;font-size:13px}.card{border:1px solid #ddd;padding:12px;margin-bottom:12px;border-radius:6px;page-break-inside:avoid}dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0}dt{font-weight:bold;font-size:13px;opacity:0.7}dd{margin:0;font-size:13px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:4px 8px;text-align:left;font-size:13px}th{background:#f5f5f5}.embed{margin:8px 0;padding:8px;background:#f9f9f9;border-radius:4px}.embed h4{margin:0 0 4px;font-size:13px;opacity:0.7}h1,h2,h3,h4,h5,h6{font-size:13px;margin:6px 0}@media print{button{display:none}}</style></head><body>';
         html += '<h2>' + title + '</h2>';
         if (this.useCardLayout) {
           this.sortedData.forEach(function(row) {
             html += '<div class="card"><dl>';
             cols.forEach(function(c) {
-              if (row[c]) html += '<dt>' + (self.t('field.' + c) || c) + '</dt><dd>' + row[c] + '</dd>';
-              self.embedItems.forEach(function(ei) { if (ei.config.afterColumn === c && ei.rows.length) html += '</dl>' + self._printEmbed(ei) + '<dl>'; });
+              if (!self.isColumnHidden(c, row)) html += '<dt>' + (self.t('field.' + c) || c) + '</dt><dd>' + (row[c] || '') + '</dd>';
+              self.embedItems.forEach(function(ei) { if (ei.config.afterColumn === c && self._printable(ei)) html += '</dl>' + self._printEmbed(ei) + '<dl>'; });
             });
             html += '</dl>';
-            self.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && ei.rows.length) html += self._printEmbed(ei); });
+            self.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && self._printable(ei)) html += self._printEmbed(ei); });
             html += '</div>';
           });
         } else {
@@ -1969,9 +2047,24 @@ function createVueApp() {
         return ei.config.layout || 'table';
       },
 
+      _printable: function(ei) { return ei.isDoc ? !!ei.show : !!(ei.rows && ei.rows.length); },
       _printEmbed: function(ei) {
         var self = this;
-        var html = '<div class="embed">';
+        if (ei.isDoc) {
+          var dh = ei.config.bare ? '<div>' : '<div class="embed">';
+          (ei.blocks || []).forEach(function(b) {
+            if (b.html) { dh += b.html; return; }
+            var cols = self.embedCols(b.embedType, b.embedName), rows = self.embedRows(b.embedType, b.embedName, b.embedPart);
+            if (!rows.length) return;
+            dh += '<table><thead><tr>';
+            cols.forEach(function(c) { dh += '<th>' + (self.t('field.' + c) || c) + '</th>'; });
+            dh += '</tr></thead><tbody>';
+            rows.forEach(function(r) { dh += '<tr>'; cols.forEach(function(c) { dh += '<td>' + (r[c] || '') + '</td>'; }); dh += '</tr>'; });
+            dh += '</tbody></table>';
+          });
+          return dh + '</div>';
+        }
+        var html = ei.config.bare ? '<div>' : '<div class="embed">';
         var hdr = ei.config.header && self.t(ei.config.header) !== ei.config.header ? self.t(ei.config.header) : '';
         if (hdr) html += '<h4>' + hdr + '</h4>';
         html += '<table><thead><tr>';
@@ -1980,7 +2073,7 @@ function createVueApp() {
         ei.rows.forEach(function(r) { html += '<tr>'; ei.columns.forEach(function(c) { html += '<td>' + (r[c] || '') + '</td>'; }); html += '</tr>'; });
         html += '</tbody></table>';
         var ftr = ei.config.footer && self.t(ei.config.footer) !== ei.config.footer ? self.t(ei.config.footer) : '';
-        if (ftr) html += '<p style="font-size:11px;opacity:0.6;margin:4px 0 0">' + ftr + '</p>';
+        if (ftr) html += '<p style="font-size:13px;opacity:0.6;margin:4px 0 0">' + ftr + '</p>';
         html += '</div>';
         return html;
       },
@@ -1989,15 +2082,15 @@ function createVueApp() {
         var self = this;
         var cols = this.visibleCols;
         var title = item[cols[0]] || item.id;
-        var html = '<html><head><title>' + title + '</title><style>body{font-family:system-ui;margin:20px}dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px}dt{font-weight:bold;font-size:12px;opacity:0.7}dd{margin:0;font-size:13px}.embed{margin:12px 0;padding:8px;background:#f9f9f9;border-radius:4px}.embed h4{margin:0 0 4px;font-size:12px;opacity:0.7}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:3px 6px;text-align:left;font-size:11px}th{background:#f5f5f5}@media print{button{display:none}}</style></head><body>';
+        var html = '<html><head><title>' + title + '</title><style>body{font-family:system-ui;margin:20px;font-size:13px}dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px}dt{font-weight:bold;font-size:13px;opacity:0.7}dd{margin:0;font-size:13px}.embed{margin:12px 0;padding:8px;background:#f9f9f9;border-radius:4px}.embed h4{margin:0 0 4px;font-size:13px;opacity:0.7}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:3px 6px;text-align:left;font-size:13px}th{background:#f5f5f5}h1,h2,h3,h4,h5,h6{font-size:13px;margin:6px 0}@media print{button{display:none}}</style></head><body>';
         html += '<dl>';
         cols.forEach(function(c) {
-          if (item[c]) { html += '<dt>' + (self.t('field.' + c) || c) + '</dt><dd>' + item[c] + '</dd>'; }
-          self.embedItems.forEach(function(ei) { if (ei.config.afterColumn === c && ei.rows.length) html += '</dl>' + self._printEmbed(ei) + '<dl>'; });
+          if (!self.isColumnHidden(c, item)) { html += '<dt>' + (self.t('field.' + c) || c) + '</dt><dd>' + (item[c] || '') + '</dd>'; }
+          self.embedItems.forEach(function(ei) { if (ei.config.afterColumn === c && self._printable(ei)) html += '</dl>' + self._printEmbed(ei) + '<dl>'; });
         });
         html += '</dl>';
         var pself = this;
-        this.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && ei.rows.length) html += pself._printEmbed(ei); });
+        this.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && self._printable(ei)) html += pself._printEmbed(ei); });
         html += '</body></html>';
         var w = window.open('', '_blank');
         w.document.write(html);
