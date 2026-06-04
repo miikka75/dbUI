@@ -177,6 +177,7 @@
     },
     {
       "name": "report_open",
+      "layout": "card",
       "icon": "mdi-progress-clock",
       "sources": [
         "tasks",
@@ -191,6 +192,9 @@
         "date",
         "title",
         "status",
+        {
+          "view": "in_progress_block"
+        },
         "assigned_to",
         "content",
         "author"
@@ -263,21 +267,78 @@
         "title",
         "status"
       ]
+    },
+    {
+      "name": "combined_page",
+      "markdown": "{{t:view.combined.header}}\n\n{{view:combined}}\n\n## Attendance\n\n{{view:attendance}}\n\n## Archived tasks\n\n{{table:tasks@archive?}}\n\n## Notes\n\n{{table:notes}}\n\n{{t:view.combined.footer}}"
+    },
+    {
+      "name": "progress_report_page",
+      "markdown": "{{t:view.progress_report.header}}\n\n## {{t:embed.open.title}}\n\n{{view:report_open}}\n\n## {{t:embed.ip.title}}\n\n{{view:report_in_progress?}}\n\n{{t:embed.ip.attention}}\n\n{{t:view.progress_report.footer}}"
+    },
+    {
+      "name": "in_progress_block",
+      "markdown": "**{{t:embed.ip.title}}**\n\n{{view:report_in_progress}}\n\n_{{t:embed.ip.attention}}_"
+    },
+    {
+      "name": "task_doc",
+      "sources": [
+        "tasks"
+      ],
+      "mode": "union",
+      "defaultSort": "date",
+      "columns": [
+        "date",
+        "title",
+        "status",
+        "assigned_to"
+      ],
+      "markdown": "## Tasks\n\nProse above the view's **own** editable grid (placed with the self token):\n\n{{self}}\n\n_One view = prose + its own data._"
+    },
+    {
+      "name": "active_work",
+      "sources": [
+        "tasks"
+      ],
+      "mode": "union",
+      "filter": {
+        "status": [
+          "open",
+          "in_progress"
+        ]
+      },
+      "readonly": true,
+      "defaultSort": "date",
+      "icon": "mdi-clipboard-list-outline",
+      "columns": [
+        "date",
+        "title",
+        "status",
+        "assigned_to"
+      ]
     }
   ],
   "nav": {
     "layout": "drawer",
     "items": [
       {
-        "page": "combined_page"
+        "view": "combined_page"
       },
       {
         "view": "attendance",
         "icon": "mdi-account-group"
       },
       {
-        "page": "progress_report_page",
-        "icon": "mdi-progress-clock"
+        "icon": "mdi-progress-clock",
+        "view": "progress_report_page"
+      },
+      {
+        "icon": "mdi-text-box",
+        "view": "task_doc"
+      },
+      {
+        "icon": "mdi-clipboard-list-outline",
+        "view": "active_work"
       },
       {
         "view": "all_items",
@@ -303,13 +364,5 @@
         ]
       }
     ]
-  },
-  "pages": {
-    "combined_page": {
-      "markdown": "{{t:view.combined.header}}\n\n{{view:combined}}\n\n## Attendance\n\n{{view:attendance}}\n\n## Archived tasks\n\n{{table:tasks@archive?}}\n\n## Notes\n\n{{table:notes}}\n\n{{t:view.combined.footer}}"
-    },
-    "progress_report_page": {
-      "markdown": "{{t:view.progress_report.header}}\n\n## {{t:embed.open.title}}\n\n{{view:report_open}}\n\n## {{t:embed.ip.title}}\n\n{{view:report_in_progress?}}\n\n{{t:embed.ip.attention}}\n\n{{t:view.progress_report.footer}}"
-    }
   }
 }
