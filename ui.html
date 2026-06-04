@@ -126,16 +126,26 @@
     <!-- App Bar -->
     <v-app-bar v-if="!loading" density="compact" elevation="1">
       <v-app-bar-nav-icon @click="rail = !rail"></v-app-bar-nav-icon>
-      <v-app-bar-title>{{ appTitle }}</v-app-bar-title>
+      <v-app-bar-title style="flex:0 1 auto" class="mr-2">{{ appTitle }}</v-app-bar-title>
+      <!-- Inline tabs after the title when nav.layout === 'tabs' (single-row bar, no extension). rail => icon-only (hover expands text). -->
+      <v-tabs v-if="navLayout === 'tabs'" :model-value="currentTable" density="compact" show-arrows class="nav-tabs" :class="{ 'nav-icons-only': rail }" style="flex:1 1 auto; min-width:0">
+        <template v-for="t in sidebarTabs" :key="t.id || 'd'">
+          <v-menu v-if="t.children" open-on-hover location="bottom">
+            <template v-slot:activator="{ props }">
+              <v-tab v-bind="props" :value="t.id" :active="currentTable === t.id" :class="{ 'nav-tab-active': t.children && t.children.some(c => c.id === currentTable) }" :prepend-icon="t.icon" append-icon="mdi-menu-down" @click="String(t.id).slice(0,4) !== 'grp:' && selectTab(t.id)"><span class="tab-label">{{ t.title }}</span></v-tab>
+            </template>
+            <v-list density="compact">
+              <v-list-item v-for="child in t.children" :key="child.id" :value="child.id" :active="currentTable === child.id" :prepend-icon="child.icon" :title="child.title" class="subview-item" @click="selectTab(child.id)"></v-list-item>
+            </v-list>
+          </v-menu>
+          <v-tab v-else-if="!t.divider" :value="t.id" :active="currentTable === t.id" :prepend-icon="t.icon" @click="selectTab(t.id)"><span class="tab-label">{{ t.title }}</span></v-tab>
+        </template>
+      </v-tabs>
+      <v-spacer v-else></v-spacer>
       <v-select v-if="languages.length > 1" v-model="currentLang" name="current-lang" :items="langItems" density="compact" variant="plain" hide-details style="max-width:120px" class="mr-2" @update:model-value="switchLanguage"></v-select>
       <v-btn icon="mdi-refresh" @click="syncAndReload" :loading="syncing"></v-btn>
       <v-btn :icon="theme === 'dark' ? 'mdi-weather-sunny' : 'mdi-weather-night'" @click="toggleTheme"></v-btn>
     </v-app-bar>
-
-    <!-- Top tabs nav (desktop) when nav.layout === 'tabs' -->
-    <v-tabs v-if="!loading && navLayout === 'tabs'" :model-value="currentTable" density="compact" show-arrows class="border-b">
-      <v-tab v-for="t in flatNavTabs" :key="t.id" :value="t.id" :prepend-icon="t.icon" @click="selectTab(t.id)">{{ t.title }}</v-tab>
-    </v-tabs>
 
     <!-- Sidebar -->
     <v-navigation-drawer v-if="!loading && navLayout !== 'tabs'" permanent :rail="rail" :expand-on-hover="rail">
@@ -230,8 +240,12 @@
               </div>
               <!-- Inline text/embed after this column -->
               <template v-for="(ei, eidx) in embedItems" :key="'emb'+col+eidx">
-              <div v-if="ei.config.afterColumn === col && ei.rows.length" class="my-1 ml-2 pa-2" style="background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px">
-                <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
+              <div v-if="ei.config.afterColumn === col && (ei.isDoc ? ei.show : ei.rows.length)" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
+                <template v-if="ei.isDoc" v-for="(blk, bi) in ei.blocks" :key="bi">
+                  <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
+                  <embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>
+                </template>
+                <table v-else-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
                   <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
                   <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ er[ec] || '' }}</td></tr></tbody>
                 </table>
@@ -284,9 +298,13 @@
                 </td>
               </tr>
               <template v-if="sortedData.indexOf(item) === sortedData.length - 1" v-for="(ei, eidx) in embedItems" :key="'temb'+eidx">
-              <tr v-if="ei.config.afterColumn && ei.rows.length">
+              <tr v-if="ei.config.afterColumn && (ei.isDoc ? ei.show : ei.rows.length)">
                 <td :colspan="visibleCols.length + 2" style="padding:6px 12px; background: rgb(var(--v-theme-surface-variant), 0.1)">
-                  <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                  <template v-if="ei.isDoc" v-for="(blk, bi) in ei.blocks" :key="bi">
+                    <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
+                    <embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>
+                  </template>
+                  <table v-else-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
                     <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
                     <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ er[ec] || '' }}</td></tr></tbody>
                   </table>
@@ -308,16 +326,20 @@
           <v-btn v-if="canMutateRows" variant="text" prepend-icon="mdi-plus" @click="addRow" class="ma-2">{{ t('btn.add') }} {{ t('tab.' + currentTable) }}</v-btn>
           <!-- Text entries and embedded rows -->
           <template v-for="(ei, eidx) in embedItems" :key="'bemb'+eidx">
-          <div v-if="!ei.config.afterColumn && ei.rows.length" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
-            <div style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t('tab.' + ei.config.table) || ei.config.table }} ({{ ei.rows.length }})</div>
-            <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.8rem; border-collapse:collapse">
+          <div v-if="!ei.config.afterColumn && (ei.isDoc ? ei.show : ei.rows.length)" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
+            <template v-if="ei.isDoc" v-for="(blk, bi) in ei.blocks" :key="bi">
+              <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
+              <embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>
+            </template>
+            <div v-else style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t('tab.' + ei.config.table) || ei.config.table }} ({{ ei.rows.length }})</div>
+            <table v-if="!ei.isDoc && embedLayout(ei) === 'table'" style="width:100%; font-size:0.8rem; border-collapse:collapse">
               <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:3px 8px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
               <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:3px 8px">{{ er[ec] || '' }}</td></tr></tbody>
             </table>
-            <div v-else-if="embedLayout(ei) === 'card'" style="display:grid; gap:6px">
+            <div v-else-if="!ei.isDoc && embedLayout(ei) === 'card'" style="display:grid; gap:6px">
               <div v-for="er in ei.rows" :key="er.id" style="font-size:0.8rem; padding:4px 8px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in ei.columns" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t('field.' + ec) || ec }}: </span>{{ er[ec] || '' }}</span></div>
             </div>
-            <div v-else class="d-flex align-center flex-wrap ga-1">
+            <div v-else-if="!ei.isDoc" class="d-flex align-center flex-wrap ga-1">
               <v-chip v-for="er in ei.rows" :key="er.id" size="small" variant="tonal" label>
                 <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
               </v-chip>
@@ -459,6 +481,7 @@
           <v-card-title>{{ t('tab.settings') }}</v-card-title>
           <v-card-text>
             <div class="mb-4">
+            <v-switch :model-value="navLayout === 'tabs'" @update:model-value="v => setNavLayout(v ? 'tabs' : 'drawer')" color="primary" density="compact" hide-details label="Top tabs navigation" data-testid="nav-layout-toggle"></v-switch>
             <template v-if="isAdmin">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ t('settings.import_export') }}</p>
