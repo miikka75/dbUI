@@ -62,3 +62,18 @@ describe('putListItem', () => {
     assert.ok(lists.colors.includes('red'));
   });
 });
+
+describe('saveLists robustness (malformed filter seeding)', () => {
+  it('skips non-string list values instead of throwing', () => {
+    assert.doesNotThrow(() => backend.saveLists('local', {
+      tilat: ['open', { $or: ['a', 'b'] }, undefined, 'done', 123]
+    }));
+    assert.deepEqual(backend.getLists('local').tilat, ['open', 'done']); // only strings persisted
+  });
+
+  it('putListItem ignores non-string values', () => {
+    assert.doesNotThrow(() => backend.putListItem('local', 'tilat', { bad: 1 }));
+    backend.putListItem('local', 'tilat', 'ok');
+    assert.deepEqual(backend.getLists('local').tilat, ['ok']);
+  });
+});
