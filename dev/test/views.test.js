@@ -51,6 +51,7 @@ describe('Union view data access', () => {
 
   it('VIEWS config references valid SCHEMA tables', () => {
     for (const [name, view] of Object.entries(VIEWS)) {
+      if (typeof view.markdown === 'string') continue; // doc-view (no sources)
       for (const src of view.sources) {
         assert.ok(SCHEMA[src], 'View "' + name + '" references non-existent table: ' + src);
       }
@@ -59,8 +60,10 @@ describe('Union view data access', () => {
 
   it('VIEWS columns exist in at least one source table', () => {
     for (const [name, view] of Object.entries(VIEWS)) {
+      if (typeof view.markdown === 'string') continue; // doc-view (no columns)
       if (view.groupBy && view.collect) continue; // aggregate views have computed columns
       for (const col of view.columns) {
+        if (typeof col === 'object' && col.view) continue; // named-view embed
         if (typeof col === 'object' && col.sources && !col.name) continue; // inline embed
         if (typeof col === 'object' && col.text) continue; // inline text
         const colStr = typeof col === 'object' ? Object.keys(col)[0] : col;
