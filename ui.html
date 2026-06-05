@@ -481,7 +481,7 @@
           <v-card-title>{{ t('tab.settings') }}</v-card-title>
           <v-card-text>
             <div class="mb-4">
-            <v-switch :model-value="navLayout === 'tabs'" @update:model-value="v => setNavLayout(v ? 'tabs' : 'drawer')" color="primary" density="compact" hide-details label="Top tabs navigation" data-testid="nav-layout-toggle"></v-switch>
+            <v-switch :model-value="navLayout === 'tabs'" @update:model-value="v => setNavLayout(v ? 'tabs' : 'drawer')" color="primary" density="compact" hide-details :label="t('settings.tabs_nav')" data-testid="nav-layout-toggle"></v-switch>
             <template v-if="isAdmin">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ t('settings.import_export') }}</p>
