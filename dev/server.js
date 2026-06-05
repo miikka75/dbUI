@@ -22,9 +22,9 @@ if (fs.existsSync(USERS_PATH)) backend._users = JSON.parse(fs.readFileSync(USERS
 function saveUsers() { fs.writeFileSync(USERS_PATH, JSON.stringify(backend._users || {}, null, 2)); }
 
 function parseBody(req) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', c => body += c);
+    req.on('data', c => { body += c; if (body.length > 10e6) { req.destroy(); reject(new Error('body too large')); } });
     req.on('end', () => { try { resolve(JSON.parse(body)); } catch(e) { resolve({}); } });
   });
 }
@@ -98,7 +98,7 @@ const server = http.createServer(async (req, res) => {
       case 'readFile': return json(res, { data: backend.readFile('local', body.name) });
       case 'writeFile': backend.writeFile('local', body.name, body.data); return json(res, { ok: true });
       case 'deleteFile': backend.deleteFile('local', body.name); return json(res, { ok: true });
-      case 'saveConfig': fs.writeFileSync(path.join(STATIC_DIR, path.basename(body.filename || 'config.json')), JSON.stringify(body.data, null, 2)); return json(res, { ok: true });
+      case 'saveConfig': { var allowed = ['firebase-config.json', 'config.json']; var fn = path.basename(body.filename || 'config.json'); if (!allowed.includes(fn)) return json(res, { error: 'filename not allowed' }, 403); fs.writeFileSync(path.join(STATIC_DIR, fn), JSON.stringify(body.data, null, 2)); return json(res, { ok: true }); }
       case 'getUsers': return json(res, backend._users || {});
       case 'setUserRole': { if (!backend._users) backend._users = {}; backend._users[body.uid] = { role: body.role, user: body.user || '', tables: body.tables || 'all' }; saveUsers(); return json(res, { ok: true }); }
       case 'removeUser': { if (backend._users) delete backend._users[body.uid]; saveUsers(); return json(res, { ok: true }); }
