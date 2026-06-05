@@ -43,10 +43,15 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 A view's `columns` may contain, besides plain column names:
 - **Conditional column** `{ "<col>": { <filter> } }` — show the column only for rows matching the filter.
 - **Inline embed** `{ "sources": [...], "filter": {...}, "columns": [...] }` — a filtered sub-table at that position.
-- **Named-view embed** `{ "view": "<name>", "filter": {...}, "hideEmpty": true }` — embed a defined
-  view (reuses its sources/columns/mode), with the entry's `filter`/`hideEmpty` overriding.
+- **Named-view embed** `{ "view": "<name>", "filter": {...}, "hideEmpty": true, "bare": true }` — embed a defined
+  view (reuses its sources/columns/mode), with the entry's `filter`/`hideEmpty`/`bare` overriding.
   If the named view has `markdown`, its document (header + nested embeds + footer) renders
   inline at that position; the whole block is hidden when all its embedded tables are empty.
+  `"bare": true` suppresses the box wrapper (background + padding + border-radius) — the embed
+  renders flush with the card content. Applies to both screen and print.
+- **Per-column hideEmpty** `{ "name": "<col>", "hideEmpty": true|false }` — override the view-level
+  `hideEmpty` for a specific column. `false` forces the column to always show (even when empty);
+  `true` hides it when empty even if the view shows empties. Works in both table and card layout.
 
 ### filters
 A `filter` (on a view, an inline/named-view embed, or a conditional column) matches rows:
@@ -54,6 +59,30 @@ A `filter` (on a view, an inline/named-view embed, or a conditional column) matc
 - **Array value** = IN (OR on one column): `{ "status": ["open", "in_progress"] }`.
 - **`$or` / `$and`** = explicit logical groups, nestable:
   `{ "$and": [ { "city": "X" }, { "$or": [ {"status":"open"}, {"status":"in_progress"} ] } ] }`.
+
+### aggregate views (groupBy + collect)
+A view with `groupBy` + `collect` groups rows by person/key and collects a column's values:
+```json
+{ "name": "puheet", "sources": ["kokoukset"], "mode": "union",
+  "groupBy": { "column": "person", "from": ["puhe1","puhe2","puhe3"] },
+  "collect": "pvm", "columns": ["person", "edellinen", "toinen", "kolmas"] }
+```
+- `groupBy.column`: output key column; `groupBy.from`: source columns to scan for keys.
+- `collect`: source column whose values are gathered per group (sorted descending).
+- Output columns after `groupBy.column` receive the Nth collected value (most recent first).
+- **`collectWith`** (optional): when set, collected values include the source column name:
+  `"collectWith": "role"` → values render as `"2026-06-01 (puhe1)"` instead of just `"2026-06-01"`.
+  Useful for cross-table aggregates where you need to see *which role* produced each entry.
+
+### filterBy (per-card master-detail)
+A `{view}` column embed with `filterBy` dynamically filters embed rows per card:
+```json
+{ "view": "tasks_view", "filterBy": { "owner": "name" } }
+```
+- Maps embed column (`owner`) to the current card's column (`name`).
+- Each card shows only rows where `task.owner === card_row.name`.
+- Only works in `card`/`list` layout (one card per row hosts the per-row embed).
+- Combine with `hideEmpty: true` to hide the embed when a card has no matching rows.
 
 ## markdown (documents)
 A view with a `markdown` field renders as a **document** instead of a data grid:
