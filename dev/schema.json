@@ -168,6 +168,7 @@
         ]
       },
       "collect": "date",
+      "collectWith": "role",
       "columns": [
         "person",
         "latest",
@@ -194,7 +195,8 @@
         "title",
         "status",
         {
-          "view": "in_progress_block"
+          "view": "in_progress_block",
+          "bare": true
         },
         "assigned_to",
         "content",
@@ -225,12 +227,13 @@
         "tasks",
         "notes"
       ],
+      "hideEmpty": true,
       "columns": [
         "date",
         "title",
         "status",
         "assigned_to",
-        "city",
+        { "name": "city", "hideEmpty": false },
         {
           "content": {
             "status": "in_progress"
@@ -241,6 +244,14 @@
       "mode": "union",
       "defaultSort": "date",
       "layout": "table"
+    },
+    {
+      "name": "open_tasks",
+      "sources": ["tasks"],
+      "mode": "union",
+      "filter": { "status": "open" },
+      "readonly": true,
+      "columns": ["date", "title"]
     },
     {
       "name": "summary_cards",
@@ -254,7 +265,8 @@
       "columns": [
         "title",
         "status",
-        "assigned_to"
+        "assigned_to",
+        { "view": "open_tasks", "filterBy": { "assigned_to": "assigned_to" }, "hideEmpty": true, "bare": true }
       ]
     },
     {
