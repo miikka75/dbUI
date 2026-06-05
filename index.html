@@ -15,6 +15,9 @@
       if (params.get('clientId')) { localStorage.setItem('oauth_client_id', params.get('clientId')); }
       if (params.get('config')) {
         try { var c = JSON.parse(atob(params.get('config'))); localStorage.setItem('firebase_config', JSON.stringify(c)); } catch(e) {}
+      } else if (params.get('k') && params.get('d') && params.get('p')) {
+        // Short Firebase share link: ?mode=firebase&k=apiKey&d=authDomain&p=projectId
+        localStorage.setItem('firebase_config', JSON.stringify({ apiKey: params.get('k'), authDomain: params.get('d'), projectId: params.get('p') }));
       }
       if (params.toString()) { history.replaceState(null, '', location.pathname); } // clean URL after storing
 
