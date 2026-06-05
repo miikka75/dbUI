@@ -142,18 +142,26 @@ function aggregateRows(view, rows) {
   var byObj = typeof view.groupBy === 'object' && !Array.isArray(view.groupBy);
   var keyCol = byObj ? view.groupBy.column : view.columns[0];
   var keysFrom = byObj ? view.groupBy.from : view.groupBy;
+  var withRole = view.collectWith; // e.g. "role" — if set, collected values include the source column name
   var groups = {};
   rows.forEach(function(r) {
     keysFrom.forEach(function(k) {
       var key = r[k];
-      if (key) { if (!groups[key]) groups[key] = []; if (r[view.collect]) groups[key].push(r[view.collect]); }
+      if (key && r[view.collect]) {
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(withRole ? { date: r[view.collect], role: k } : r[view.collect]);
+      }
     });
   });
   var valCols = (view.columns || []).filter(function(c) { return c !== keyCol; });
   return Object.keys(groups).map(function(key) {
-    var vals = groups[key].sort().reverse(), row = { id: key };
+    var vals = groups[key].sort(function(a, b) { var da = withRole ? a.date : a, db = withRole ? b.date : b; return da > db ? -1 : da < db ? 1 : 0; });
+    var row = { id: key };
     row[keyCol] = key;
-    for (var i = 0; i < valCols.length; i++) row[valCols[i]] = vals[i] || '';
+    for (var i = 0; i < valCols.length; i++) {
+      var v = vals[i];
+      row[valCols[i]] = !v ? '' : withRole ? v.date + ' (' + v.role + ')' : v;
+    }
     return row;
   });
 }
