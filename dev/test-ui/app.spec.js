@@ -18,9 +18,8 @@ async function ensureAppReady(page, openTableKey = 'tab.notes') {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.request.post('/api/resetData');
   await page.request.post('/api/saveSchema', { data: { schema: SCHEMA } });
+  await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
   await page.goto('/');
-  await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
-  await page.reload();
   await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
   if (openTableKey) {
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: openTableKey }).first().click();
@@ -48,7 +47,7 @@ test.describe('Data table', () => {
   test('add row creates a new row', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     const rows = page.locator('.v-table tbody tr');
     await expect(rows).toHaveCount(1);
   });
@@ -56,7 +55,7 @@ test.describe('Data table', () => {
   test('edit cell saves value', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     const cell = page.locator('.v-table .editable-cell').first();
     await cell.click();
     await page.keyboard.type('TestValue');
@@ -70,11 +69,11 @@ test.describe('Data table', () => {
   test('delete row removes it', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     await page.locator('.v-table button:has(.mdi-close)').first().click();
     await page.waitForTimeout(200);
     await page.locator('.v-table button:has(.mdi-check-circle)').first().click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     const rows = page.locator('.v-table tbody tr');
     await expect(rows).toHaveCount(0);
   });
@@ -85,7 +84,7 @@ test.describe('Archive / Restore', () => {
     await ensureAppReady(page);
     const rowsBefore = await page.locator('.v-table tbody tr').count();
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     await expect(page.locator('.v-table tbody tr')).toHaveCount(rowsBefore + 1);
     await page.locator('button:has(.mdi-archive-outline)').first().click();
     await page.waitForTimeout(1000);
@@ -101,17 +100,17 @@ test.describe('Archive / Restore', () => {
     await ensureAppReady(page);
     // Add and archive a row
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     const activeBefore = await page.locator('.v-table tbody tr').count();
     await page.locator('button:has(.mdi-archive-outline)').first().click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     await expect(page.locator('.v-table tbody tr')).toHaveCount(activeBefore - 1);
     // Go to archived, restore
     await page.locator('.v-tab:nth-child(2)').click();
     await page.waitForTimeout(1000);
     const archivedBefore = await page.locator('.v-table tbody tr').count();
     await page.locator('button:has(.mdi-archive-arrow-up-outline)').first().click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     await expect(page.locator('.v-table tbody tr')).toHaveCount(archivedBefore - 1);
   });
 });
@@ -122,7 +121,7 @@ test.describe('Navigation', () => {
     const firstContent = await page.locator('.v-main').textContent();
     // Click the settings tab (always top-level, always visible)
     await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     const secondContent = await page.locator('.v-main').textContent();
     expect(secondContent).not.toEqual(firstContent);
   });
@@ -145,7 +144,7 @@ test.describe('Theme toggle', () => {
     const app = page.locator('.v-theme--light, .v-theme--dark');
     const initialClass = await app.first().getAttribute('class');
     await page.locator('.v-app-bar button:has(.mdi-weather-night), .v-app-bar button:has(.mdi-weather-sunny)').click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     const newClass = await page.locator('.v-theme--light, .v-theme--dark').first().getAttribute('class');
     expect(newClass).not.toEqual(initialClass);
   });
@@ -155,7 +154,7 @@ test.describe('Select dropdowns', () => {
   test('select column renders as Vuetify autocomplete in table', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     const selects = page.locator('.v-table .v-autocomplete, .v-table .v-combobox');
     const count = await selects.count();
     expect(count).toBeGreaterThan(0);
@@ -166,13 +165,13 @@ test.describe('Two-press delete', () => {
   test('first click arms, second click deletes', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     const deleteBtn = page.locator('.v-table button:has(.mdi-close)').first();
     await deleteBtn.click(); // arm
     await page.waitForTimeout(200);
     await expect(page.locator('.v-table button:has(.mdi-check-circle)')).toBeVisible();
     await page.locator('.v-table button:has(.mdi-check-circle)').click(); // confirm
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     await expect(page.locator('.v-table tbody tr')).toHaveCount(0);
   });
 });
@@ -182,10 +181,10 @@ test.describe('Views', () => {
     await ensureAppReady(page);
     // Add a row to tasks first
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     // Navigate to all_items view
     await page.locator('.v-navigation-drawer .v-list-item:has-text("all_items")').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     const rows = await page.locator('.v-table tbody tr, .v-card.ma-2').count();
     expect(rows).toBeGreaterThanOrEqual(1);
   });
@@ -193,7 +192,7 @@ test.describe('Views', () => {
   test('join view renders', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('.v-navigation-drawer .v-list-item:has-text("combined")').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     // Combined view should render (may be empty but not error)
     await expect(page.locator('.v-main .v-card')).toBeVisible();
   });
@@ -208,7 +207,7 @@ test.describe('Print', () => {
   test('print opens new window', async ({ page, context }) => {
     await ensureAppReady(page);
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     const [popup] = await Promise.all([
       context.waitForEvent('page'),
       page.locator('.v-card button:has(.mdi-printer)').first().click()
@@ -230,11 +229,11 @@ test.describe('Card layout', () => {
     await page.waitForSelector('.v-app-bar', { timeout: 6000 });
     // Narrow mode: open the drawer, then navigate to the tasks table
     await page.locator('.v-app-bar button:has(.mdi-menu)').click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.notes' }).first().click();
     await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     // Cards render as nested v-card inside main content
     const cards = page.locator('.v-main .v-card .v-card');
     const count = await cards.count();
@@ -246,7 +245,7 @@ test.describe('Import/Export', () => {
   test('export button downloads JSON', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     const [download] = await Promise.all([
       page.waitForEvent('download'),
       page.locator('button:has(.mdi-download)').click()
@@ -260,15 +259,15 @@ test.describe('Print embed positioning', () => {
     await ensureAppReady(page);
     // Add a task with data so combined view has content
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     const cell = page.locator('.v-table .editable-cell').first();
     await cell.click();
     await page.keyboard.type('TestTask');
     await cell.blur();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     // Navigate to combined view
     await page.locator('.v-navigation-drawer .v-list-item:has-text("combined")').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     // Print the view
     const [popup] = await Promise.all([
       context.waitForEvent('page'),
@@ -292,15 +291,15 @@ test.describe('Print card embed positioning', () => {
     await ensureAppReady(page);
     // Add a task
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     const cell = page.locator('.v-table .editable-cell').first();
     await cell.click();
     await page.keyboard.type('CardTest');
     await cell.blur();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     // Navigate to combined view (has embeds with afterColumn:"title")
     await page.locator('.v-navigation-drawer .v-list-item:has-text("combined")').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     // Click per-card print button
     const printBtn = page.locator('button:has(.mdi-printer)').first();
     const [popup] = await Promise.all([
@@ -333,7 +332,7 @@ test.describe('Setup UI', () => {
   test('snackbar shows notification on export', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     const [download] = await Promise.all([
       page.waitForEvent('download'),
       page.locator('button:has(.mdi-download)').click()
@@ -348,7 +347,7 @@ test.describe('syncFrom read-only', () => {
     await ensureAppReady(page); // opens notes (master)
     // Navigate to tasks: a detail table whose date/title columns sync from notes
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.tasks' }).first().click();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     const r = await page.evaluate(() => ({
       current: appInstance.currentTable,
       title: appInstance.isReadonlyCell({}, 'title'),   // syncFrom -> read-only
@@ -437,7 +436,7 @@ test.describe('Archivable flag', () => {
 
     // ADD + ARCHIVE
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     await page.locator('button:has(.mdi-archive-outline)').first().click();
     await page.waitForTimeout(600);
 
@@ -569,7 +568,7 @@ test.describe('Permissions — restricted user UI gating', () => {
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.mus' }).first().click();
     await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     expect(await page.evaluate(() => appInstance.canMutateCurrent)).toBe(true);
     expect(await page.locator('button:has(.mdi-archive-outline)').count()).toBeGreaterThanOrEqual(1);
   });
@@ -582,7 +581,7 @@ test.describe('Permissions — restricted user UI gating', () => {
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.mus' }).first().click();
     await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
 
     await bootAs(page, 'ed@x');
     const info = await page.evaluate(() => ({ ids: appInstance.sidebarTabs.map(t => t.id), ref: appInstance.refTables, lists: Object.keys(appInstance.visibleLists) }));
@@ -594,7 +593,7 @@ test.describe('Permissions — restricted user UI gating', () => {
     expect(info.lists).toEqual([]);                // mkind (used by meetings) filtered out
 
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.mus' }).first().click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     expect(await page.evaluate(() => appInstance.canMutateCurrent)).toBe(false);
     expect(await page.locator('button:has(.mdi-archive-outline)').count()).toBe(0); // archive hidden
     expect(await page.locator('.v-table tbody tr').count()).toBeGreaterThanOrEqual(1); // row still visible
@@ -659,7 +658,7 @@ test.describe('Import round-trip', () => {
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
     // Open Settings so the hidden import file input is in the DOM
     await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
 
     const bundle = { schema: SCH, tables: { docs: [{ id: 'a1', title: 'Active1' }], docs__archive: [{ id: 'z1', title: 'Arch1' }] } };
     await page.setInputFiles('input[type=file][accept=".json"]', { name: 'import.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bundle)) });
@@ -707,7 +706,7 @@ test.describe('v3 nav + pages + tabs layout', () => {
     expect(await page.locator('.v-navigation-drawer').count()).toBe(0);
 
     // page auto-selected -> markdown heading + embedded data rendered
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     await expect(page.locator('.v-main')).toContainText('Hello Page');   // markdown <h1>
     await expect(page.locator('.v-main')).toContainText('Buy milk');     // {{table:tasks}} + {{view:all}} embed
   });
@@ -731,7 +730,7 @@ test.describe('v3 interactive page embed', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     const cell = page.locator('.v-main .editable-cell', { hasText: 'Buy milk' }).first();
     await cell.click();
     await cell.evaluate(el => { el.textContent = 'Edited milk'; el.dispatchEvent(new Event('blur')); });
@@ -760,7 +759,7 @@ test.describe('v3 embed row controls', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     // ADD via embed
     await page.locator('.v-main button:has(.mdi-plus)').first().click();
     await page.waitForTimeout(600);
@@ -794,7 +793,7 @@ test.describe('v3 hide-empty embed', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     // only the non-empty 'all' embed should render (open? has 0 rows -> hidden)
     const embeds = await page.evaluate(() => appInstance.pageBlocks.filter(b => b.embedName).map(b => b.embedName));
     expect(embeds).toEqual(['all']);
@@ -823,7 +822,7 @@ test.describe('v3 named-view column embed', () => {
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     // the embed reuses 'sub' (columns from sub) but with filter overridden to status:done
     const emb = await page.evaluate(() => appInstance.embedItems.map(e => ({ cols: e.columns, rows: e.rows.map(r => r.title) })));
     expect(emb.length).toBe(1);
@@ -857,7 +856,7 @@ test.describe('v3 embeddable doc-view (markdown header/footer/table inline)', ()
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     await expect(page.locator('.v-main')).toContainText('People in progress'); // doc header
     await expect(page.locator('.v-main')).toContainText('Alice');              // embedded table
     await expect(page.locator('.v-main')).toContainText('end of people');      // doc footer
@@ -870,7 +869,7 @@ test.describe('v3 embeddable doc-view (markdown header/footer/table inline)', ()
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     // no in_progress people -> the doc embed (header + footer included) is not rendered
     await expect(page.locator('.v-main')).not.toContainText('People in progress');
     await expect(page.locator('.v-main')).not.toContainText('end of people');
@@ -898,7 +897,7 @@ test.describe('v3 self-embed (view renders prose + its own grid, zero code)', ()
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.selfdemo' }).first().click();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     // renders as a doc (markdown wins) yet shows its own grid inline via {{view:self}}
     expect(await page.evaluate(() => appInstance.isDataView)).toBeFalsy();
     await expect(page.locator('.v-main')).toContainText('Above grid'); // header prose
@@ -928,7 +927,7 @@ test.describe('v3 hybrid self-view hide-empty ({{self}} participates)', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
   }
   test('shows header + own grid + footer when the {{self}} grid has rows', async ({ page }) => {
     test.setTimeout(20000);
@@ -965,7 +964,7 @@ test.describe('v3 non-ASCII names in embed tokens', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.tehtävä_block' }).first().click();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     await expect(page.locator('.v-main')).toContainText('Lista');   // header prose
     await expect(page.locator('.v-main')).toContainText('FinRivi'); // {{self}} + {{table:tehtävät}} both rendered the row
   });
@@ -1044,7 +1043,7 @@ test.describe('v3 tabs nav layout', () => {
     const child = page.locator('.v-list-item', { hasText: 'view.report' });
     await expect(child).toBeVisible();
     await child.dispatchEvent('click');
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     expect(await page.evaluate(() => appInstance.currentTable)).toBe('report');
     await expect(page.locator('.v-main')).toContainText('TabRow');
     await expect(groupTab).toHaveClass(/nav-tab-active/); // parent tab shows active styling when a child view is selected
@@ -1084,7 +1083,7 @@ test.describe('v3 drawer nav layout', () => {
     await expect(page.locator('.v-navigation-drawer .v-list-item', { hasText: 'Group' })).toHaveCount(1);
     // clicking a top-level item navigates and shows its data
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.home' }).first().click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     expect(await page.evaluate(() => appInstance.currentTable)).toBe('home');
     await expect(page.locator('.v-main')).toContainText('DrawerRow');
   });
@@ -1113,7 +1112,7 @@ test.describe('v3 live nav layout switch', () => {
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
     await page.waitForTimeout(200);
     await page.locator('[data-testid="nav-layout-toggle"] input').dispatchEvent('click');
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     expect(await page.evaluate(() => appInstance.navLayout)).toBe('tabs');
     await expect(page.locator('.v-tabs')).not.toHaveCount(0);
     await expect(page.locator('.v-navigation-drawer')).toHaveCount(0);
@@ -1132,7 +1131,7 @@ test.describe('v3 live nav layout switch', () => {
     await expect(homeTab.locator('.tab-label')).toHaveCSS('opacity', '1');
     // toggle back to drawer; never any extension row
     await page.locator('[data-testid="nav-layout-toggle"] input').dispatchEvent('click');
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
     expect(await page.evaluate(() => appInstance.navLayout)).toBe('drawer');
     await expect(page.locator('.v-toolbar__extension')).toHaveCount(0);
     await expect(page.locator('.v-app-bar-nav-icon')).toHaveCount(1);
@@ -1171,7 +1170,7 @@ test.describe('Print with doc-view embed', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     const [popup] = await Promise.all([
       context.waitForEvent('page'),
       page.locator('.v-main .v-card button:has(.mdi-printer)').first().click()
@@ -1234,7 +1233,7 @@ test.describe('v3 bare doc-view embed', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     await expect(page.locator('.v-main')).toContainText('DocHeader'); // doc still renders inline
     await expect(page.locator('.v-main')).toContainText('TaskRow');
     expect(await page.locator('.v-main [style*="surface-variant"]').count()).toBe(0); // no boxed wrapper
@@ -1260,7 +1259,7 @@ test.describe('v3 per-column hideEmpty override', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.tbl' }).first().click();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     const cols = await page.evaluate(() => appInstance.visibleCols);
     expect(cols).toEqual(['a', 'b']); // a has data; b forced-shown (hideEmpty:false); c (empty, view default hide) dropped
   });
@@ -1283,7 +1282,7 @@ test.describe('Print honors per-column hideEmpty (card)', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     const [popup] = await Promise.all([
       context.waitForEvent('page'),
       page.locator('.v-main .v-card button:has(.mdi-printer)').first().click()
@@ -1292,6 +1291,71 @@ test.describe('Print honors per-column hideEmpty (card)', () => {
     await expect(popup.locator('body')).toContainText('field.note');      // hideEmpty:false -> printed even though empty
     await expect(popup.locator('body')).not.toContainText('field.extra'); // empty + view default hide -> not printed
     await popup.close();
+  });
+});
+
+test.describe('saveField debounce (data integrity)', () => {
+  test('rapid edits to the same cell persist the last value (no data loss)', async ({ page }) => {
+    test.setTimeout(20000);
+    await ensureAppReady(page);
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(150);
+    // rapidly update the same field 5 times
+    for (let i = 1; i <= 5; i++) {
+      await page.evaluate((v) => { const row = appInstance.sortedData[0]; appInstance.saveField(row, 'title', 'val' + v); }, i);
+    }
+    await page.waitForTimeout(500); // debounce fires (300ms)
+    // reload from backend and verify last value persisted
+    const persisted = await page.evaluate(async () => {
+      const rows = await backend.getTableData(appInstance.tableMap[appInstance.currentTable] || appInstance.currentTable, 'active');
+      return rows && rows.rows ? rows.rows[0].title : (rows[0] && rows[0].title);
+    });
+    expect(persisted).toBe('val5');
+  });
+});
+
+test.describe('importData error recovery', () => {
+  test('import blocked by validateRefs does not corrupt existing data', async ({ page }) => {
+    test.setTimeout(20000);
+    await ensureAppReady(page);
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(150);
+    const before = await page.evaluate(() => appInstance.sortedData.length);
+    // simulate importing a schema with a dangling reference (calls importData's reader.onload path)
+    const blocked = await page.evaluate(() => {
+      return new Promise(resolve => {
+        var origNotify = appInstance.notify; var msg = '';
+        appInstance.notify = function(t) { msg = t; origNotify.call(appInstance, t); };
+        var bad = JSON.stringify({ schema: { tables: { t: { columns: [{ name: 'x', type: 'text' }] } }, views: [{ name: 'v', sources: ['missing_table'], columns: ['x'] }], nav: { items: [{ view: 'v' }] } } });
+        var file = new File([bad], 'bad.json', { type: 'application/json' });
+        var evt = { target: { files: [file] } };
+        appInstance.importData(evt);
+        setTimeout(function() { resolve(msg); }, 500);
+      });
+    });
+    expect(blocked).toContain('Import blocked');
+    expect(await page.evaluate(() => appInstance.sortedData.length)).toBe(before);
+  });
+});
+
+test.describe('XSS prevention (safeUrl + print escape)', () => {
+  test('javascript: URLs in markdown are neutralized; HTML in field values is escaped in print', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.goto('/');
+    await page.waitForFunction(() => typeof mdToHtml === 'function');
+    const results = await page.evaluate(() => {
+      // Test 1: safeUrl blocks javascript: protocol
+      var html = mdToHtml('[click](javascript:alert(1))');
+      var hasJsUrl = html.includes('javascript:');
+      // Test 2: _pe escapes HTML special chars
+      var pe = appInstance._pe;
+      var escaped = pe('<script>alert(1)</script>');
+      var hasRawTag = escaped.includes('<script>');
+      return { jsBlocked: !hasJsUrl, htmlEscaped: !hasRawTag, escapedOutput: escaped };
+    });
+    expect(results.jsBlocked).toBe(true);     // javascript: URL stripped
+    expect(results.htmlEscaped).toBe(true);   // <script> tags escaped
+    expect(results.escapedOutput).toContain('&lt;script&gt;');
   });
 });
 
@@ -1315,7 +1379,7 @@ test.describe('v3 markdown doc-view', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     // 'home' is a doc-view: not a data view, renders markdown + embedded 'all'
     expect(await page.evaluate(() => appInstance.isDataView)).toBeFalsy();
     expect(await page.evaluate(() => !!appInstance.currentPage)).toBe(true);
@@ -1342,7 +1406,7 @@ test.describe('v3 aggregate view embed', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     const rows = await page.evaluate(() => appInstance.embedRows('view', 'byperson'));
     expect(rows.length).toBe(1);
     expect(rows[0].person).toBe('Alice');
@@ -1370,7 +1434,7 @@ test.describe('v3 archived table embed', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     const active = await page.evaluate(() => appInstance.embedRows('table', 'tasks', null).map(r => r.title));
     const archived = await page.evaluate(() => appInstance.embedRows('table', 'tasks', 'archive').map(r => r.title));
     expect(active).toEqual(['Active item']);
@@ -1396,12 +1460,12 @@ test.describe('v3 page body stored on server', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     // edit + save
     await page.locator('.v-card button:has-text("Edit")').click();
     await page.locator('.v-card textarea').first().fill('# Edited on server');
     await page.locator('.v-card button:has-text("Save")').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     // persisted to _pages collection, NOT to schema
     const pages = await (await page.request.post('/api/getTableData', { data: { tableId: '_pages', tab: 'active' } })).json();
     const row = pages.rows.find(r => r.id === 'home');
@@ -1411,7 +1475,7 @@ test.describe('v3 page body stored on server', () => {
     // survives reload (rendered from server, not schema seed)
     await page.reload();
     await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     await expect(page.locator('.v-main')).toContainText('Edited on server');
   });
 });
@@ -1457,7 +1521,7 @@ test.describe('Page {{t:key}} translatable token', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     await expect(page.locator('.v-main')).toContainText('Welcome translated intro'); // {{t:page.home.intro}} resolved
   });
 });
@@ -1489,7 +1553,7 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     // combined_page (auto-selected): all embeds present, incl. the archive embed (archived rows seeded)
     const embeds = await page.evaluate(() => appInstance.pageBlocks.filter(b => b.embedName).map(b => b.embedName));
     expect(embeds).toEqual(['combined', 'attendance', 'tasks', 'notes']);        // {{table:tasks@archive?}} -> 'tasks' (visible: has archived rows)
