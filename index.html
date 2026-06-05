@@ -62,12 +62,14 @@
         await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js');
       }
 
+      execScript(await (await fetch('/schema-loader.html')).text());
       execScript(await coreResp.text());
       createVueApp();
       // Load shared auth before backend for OAuth/CRDT(Drive)
       if (backendFile === '/backend-oauth.html' || backendFile === '/backend-crdt.html') {
         var authResp = await fetch('/auth-oauth.html');
         execScript(await authResp.text());
+        execScript(await (await fetch('/drive-helpers.html')).text());
       }
       // Dev-server client helpers (_post + backend_users) shared by local + crdt-local
       if (backendFile === '/backend-local-client.html' || backendFile === '/backend-crdt-local.html') {
