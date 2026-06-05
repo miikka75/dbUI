@@ -36,6 +36,7 @@ function getSetting(key, def) {
   try { var s = JSON.parse(localStorage.getItem('app_settings') || '{}'); return s[key] !== undefined ? s[key] : def; } catch(e) { return def; }
 }
 
+var PRINT_CSS = 'body{font-family:system-ui;margin:20px;font-size:13px}.card{border:1px solid #ddd;padding:12px;margin-bottom:12px;border-radius:6px;page-break-inside:avoid}dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0}dt{font-weight:bold;font-size:13px;opacity:0.7}dd{margin:0;font-size:13px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:4px 8px;text-align:left;font-size:13px}th{background:#f5f5f5}.embed{margin:8px 0;padding:8px;background:#f9f9f9;border-radius:4px}.embed h4{margin:0 0 4px;font-size:13px;opacity:0.7}h1,h2,h3,h4,h5,h6{font-size:13px;margin:6px 0}@media print{button{display:none}}';
 function createVueApp() {
   var vuetify = Vuetify.createVuetify({
     theme: {
@@ -246,7 +247,7 @@ function createVueApp() {
       embedItems: function() {
         var self = this;
         return this.embedConfigs.map(function(cfg) {
-          if (typeof cfg.markdown === 'string') { // doc-view embed: render its markdown inline; hide whole block if its tables are all empty
+          if (typeof cfg.markdown === 'string' && !cfg.filterBy && cfg.name) { // named doc-view embed (no filterBy: global show/hide)
             return { config: cfg, isDoc: true, blocks: self.mdBlocks(cfg.markdown, cfg.name), show: self.docHasData(cfg.markdown, cfg.name) };
           }
           var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
@@ -254,7 +255,19 @@ function createVueApp() {
           var rows = buildRows(cfg, self.dataCache);
           if (cfg.defaultSort) { var sc = cfg.defaultSort; rows = rows.slice().sort(function(a, b) { return (a[sc] || '').localeCompare(b[sc] || ''); }); }
           if (cfg.hideEmpty) { columns = columns.filter(function(col) { return rows.some(function(r) { return r[col]; }); }); }
-          return { config: cfg, columns: columns, rows: rows };
+          // markdown on a filterBy/inline embed: store as header HTML (rendered per-card by the template)
+          // Inline embed markdown: build blocks (prose + {{self}} markers for own table)
+          var inlineBlocks = null;
+          if (typeof cfg.markdown === 'string') {
+            var md = String(cfg.markdown).replace(/\{\{\s*t\s*:\s*([^\s{}:]+)\s*\}\}/g, function(_, k) { return self.t(k) || ''; });
+            var blockParts = md.split(/\{\{\s*self\s*\}\}/);
+            inlineBlocks = [];
+            blockParts.forEach(function(part, i) {
+              if (part.trim()) inlineBlocks.push({ html: mdToHtml(part.trim()) });
+              if (i < blockParts.length - 1) inlineBlocks.push({ self: true }); // marker: render own table here
+            });
+          }
+          return { config: cfg, columns: columns, rows: rows, inlineBlocks: inlineBlocks };
         });
       },
       hasMaster: function() {
@@ -368,7 +381,11 @@ function createVueApp() {
         addViewKeys(Array.isArray(views) ? views : Object.values(views));
         // Doc-view markdown {{t:key}} tokens are translatable too
         var docs = [];
-        for (var vn in VIEWS) { if (typeof VIEWS[vn].markdown === 'string') docs.push(VIEWS[vn].markdown); }
+        for (var vn in VIEWS) {
+          if (typeof VIEWS[vn].markdown === 'string') docs.push(VIEWS[vn].markdown);
+          // Also scan inline embed markdowns in columns
+          (VIEWS[vn].columns || []).forEach(function(c) { if (c && typeof c === 'object' && typeof c.markdown === 'string') docs.push(c.markdown); });
+        }
         for (var dn in this.pageCache) { docs.push(this.pageCache[dn] || ''); }
         docs.forEach(function(md) { var m, re = /\{\{\s*t\s*:\s*([^\s{}:]+)\s*\}\}/g; while ((m = re.exec(String(md || '')))) keys.push(m[1]); });
         var seen = {};
@@ -724,6 +741,14 @@ function createVueApp() {
       },
       embedHideEmpty: function(type, name) { var c = type === 'view' ? VIEWS[name] : SCHEMA[name]; return !!(c && c.hideEmpty); },
       embedViewLayout: function(type, name) { var c = type === 'view' ? VIEWS[name] : SCHEMA[name]; return (c && c.layout) || 'table'; },
+      embedRowsForItem: function(ei, item) {
+        if (!ei.config.filterBy || !item) return ei.rows;
+        var fb = ei.config.filterBy; // { embedCol: cardCol } — filter embed rows where embedCol === item[cardCol]
+        return ei.rows.filter(function(r) {
+          for (var k in fb) { if (r[k] !== item[fb[k]]) return false; }
+          return true;
+        });
+      },
       // Embed row controls — operate on the active partition across the mirror cluster (dataCache is reactive)
       embedSources: function(type, name) { return type === 'view' && VIEWS[name] ? (VIEWS[name].sources || []) : [name]; },
       canMutateEmbed: function(type, name) {
@@ -777,9 +802,11 @@ function createVueApp() {
           // Load embed table data if not cached
           var allowed = self.userAllowedTables;
           (view.columns || []).forEach(function(c) {
-            if (!isEmbed(c)) return;
-            (c.sources || []).forEach(function(tbl) {
-              if (allowed && allowed.indexOf(tbl) < 0) return; // skip inaccessible
+            var embedSources = [];
+            if (isEmbed(c)) { embedSources = c.sources || []; }
+            else if (isViewEmbed(c) && VIEWS[c.view]) { embedSources = VIEWS[c.view].sources || []; }
+            embedSources.forEach(function(tbl) {
+              if (allowed && allowed.indexOf(tbl) < 0) return;
               if (tbl && !self.dataCache[tbl]) {
                 var embedTab = SCHEMA[tbl] && SCHEMA[tbl].partition;
                 backend.getTableData(self.tableMap[tbl], embedTab).then(function(result) {
@@ -995,7 +1022,7 @@ function createVueApp() {
               for (var ek in c.filter) {
                 var eln = null;
                 for (var et in SCHEMA) { var ed = SCHEMA[et].columns[ek]; if (ed && typeof ed === 'object' && ed.list) { eln = ed.list; break; } }
-                if (eln) { if (!locked[eln]) locked[eln] = {}; locked[eln][c.filter[ek]] = true; }
+                if (eln) { if (!locked[eln]) locked[eln] = {}; (Array.isArray(c.filter[ek]) ? c.filter[ek] : [c.filter[ek]]).forEach(function(v) { if (typeof v === 'string') locked[eln][v] = true; }); }
               }
             } else if (typeof c === 'object' && !c.sources && !c.name) {
               var cond = c[Object.keys(c)[0]];
@@ -1719,17 +1746,18 @@ function createVueApp() {
           reader.readAsDataURL(blob);
         }).catch(function() { self._setFaviconEl(icon); }); // fallback: use URL directly
       },
-      _printCss: 'body{font-family:system-ui;margin:20px;font-size:13px}.card{border:1px solid #ddd;padding:12px;margin-bottom:12px;border-radius:6px;page-break-inside:avoid}dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0}dt{font-weight:bold;font-size:13px;opacity:0.7}dd{margin:0;font-size:13px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:4px 8px;text-align:left;font-size:13px}th{background:#f5f5f5}.embed{margin:8px 0;padding:8px;background:#f9f9f9;border-radius:4px}.embed h4{margin:0 0 4px;font-size:13px;opacity:0.7}h1,h2,h3,h4,h5,h6{font-size:13px;margin:6px 0}@media print{button{display:none}}',
+      // (PRINT_CSS is a module-level var defined above createVueApp)
       _pe: function(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); },
-      _printOpen: function(title, bodyHtml) { var w = window.open('', '_blank'); w.document.write('<html><head><title>' + title + '</title><style>' + this._printCss + '</style></head><body>' + bodyHtml + '</body></html>'); w.document.close(); w.print(); },
+      _printOpen: function(title, bodyHtml) { var w = window.open('', '_blank'); w.document.write('<html><head><title>' + title + '</title><style>' + PRINT_CSS + '</style></head><body>' + bodyHtml + '</body></html>'); w.document.close(); w.print(); },
       _printCardHtml: function(cols, item) {
         var self = this, pe = this._pe, html = '<div class="card"><dl>';
         cols.forEach(function(c) {
-          if (!self.isColumnHidden(c, item)) html += '<dt>' + pe(self.t('field.' + c) || c) + '</dt><dd>' + pe(item[c]) + '</dd>';
-          self.embedItems.forEach(function(ei) { if (ei.config.afterColumn === c && self._printable(ei)) html += '</dl>' + self._printEmbed(ei) + '<dl>'; });
+          if (!self.isColumnHidden(c, item) && (item[c] || !self.colHideEmpty(c))) html += '<dt>' + pe(self.t('field.' + c) || c) + '</dt><dd>' + pe(item[c]) + '</dd>';
+          self.embedItems.forEach(function(ei) { if (ei.config.afterColumn === c && self._printable(ei, item)) html += '</dl>' + self._printEmbed(ei, item) + '<dl>'; });
         });
         html += '</dl>';
-        self.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && self._printable(ei)) html += self._printEmbed(ei); });
+        self.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && self._printable(ei, item)) html += self._printEmbed(ei, item); });
+        html = html.replace(/<dl><\/dl>/g, ''); // remove empty dl pairs left by embed splits
         return html + '</div>';
       },
 
@@ -1765,9 +1793,10 @@ function createVueApp() {
 
       embedLayout: function(ei) { return ei.config.layout || 'table'; },
 
-      _printable: function(ei) { return ei.isDoc ? !!ei.show : !!(ei.rows && ei.rows.length); },
-      _printEmbed: function(ei) {
+      _printable: function(ei, item) { if (ei.isDoc) return !!ei.show; var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows; return !!(rows && rows.length); },
+      _printEmbed: function(ei, item) {
         var self = this, pe = this._pe;
+        var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows;
         if (ei.isDoc) {
           var dh = ei.config.bare ? '<div>' : '<div class="embed">';
           (ei.blocks || []).forEach(function(b) {
@@ -1783,15 +1812,28 @@ function createVueApp() {
           return dh + '</div>';
         }
         var html = ei.config.bare ? '<div>' : '<div class="embed">';
-        var hdr = ei.config.header && self.t(ei.config.header) !== ei.config.header ? self.t(ei.config.header) : '';
-        if (hdr) html += '<h4>' + hdr + '</h4>';
-        html += '<table><thead><tr>';
-        ei.columns.forEach(function(c) { html += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
-        html += '</tr></thead><tbody>';
-        ei.rows.forEach(function(r) { html += '<tr>'; ei.columns.forEach(function(c) { html += '<td>' + pe(r[c]) + '</td>'; }); html += '</tr>'; });
-        html += '</tbody></table>';
-        var ftr = ei.config.footer && self.t(ei.config.footer) !== ei.config.footer ? self.t(ei.config.footer) : '';
-        if (ftr) html += '<p style="font-size:13px;opacity:0.6;margin:4px 0 0">' + ftr + '</p>';
+        if (ei.inlineBlocks) {
+          ei.inlineBlocks.forEach(function(blk) {
+            if (blk.html) { html += blk.html; return; }
+            if (blk.self) {
+              html += '<table><thead><tr>';
+              ei.columns.forEach(function(c) { html += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
+              html += '</tr></thead><tbody>';
+              rows.forEach(function(r) { html += '<tr>'; ei.columns.forEach(function(c) { html += '<td>' + pe(r[c]) + '</td>'; }); html += '</tr>'; });
+              html += '</tbody></table>';
+            }
+          });
+        } else {
+          var hdr = ei.config.header && self.t(ei.config.header) !== ei.config.header ? self.t(ei.config.header) : '';
+          if (hdr) html += '<h4>' + hdr + '</h4>';
+          html += '<table><thead><tr>';
+          ei.columns.forEach(function(c) { html += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
+          html += '</tr></thead><tbody>';
+          rows.forEach(function(r) { html += '<tr>'; ei.columns.forEach(function(c) { html += '<td>' + pe(r[c]) + '</td>'; }); html += '</tr>'; });
+          html += '</tbody></table>';
+          var ftr = ei.config.footer && self.t(ei.config.footer) !== ei.config.footer ? self.t(ei.config.footer) : '';
+          if (ftr) html += '<p style="font-size:13px;opacity:0.6;margin:4px 0 0">' + ftr + '</p>';
+        }
         html += '</div>';
         return html;
       },
