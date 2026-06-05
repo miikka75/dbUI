@@ -5,42 +5,19 @@ var TransportDrive = (function() {
 
   function setFolder(folderId) { _folderId = folderId; }
 
-  function _getOrCreateFolder(parentId, name) {
-    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + parentId + '\' in parents and name=\'' + name + '\' and mimeType=\'application/vnd.google-apps.folder\' and trashed=false&fields=files(id)')
-      .then(function(r) { return r.json(); }).then(function(d) {
-        if (d.files && d.files.length) return d.files[0].id;
-        return _fetch('https://www.googleapis.com/drive/v3/files', 'POST', { name: name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
-          .then(function(r) { return r.json(); }).then(function(f) { return f.id; });
-      });
-  }
-
-  function _uploadFile(folderId, name, content) {
-    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + folderId + '\' in parents and name=\'' + name + '\' and trashed=false&fields=files(id)')
-      .then(function(r) { return r.json(); }).then(function(d) {
-        var fileId = d.files && d.files[0] ? d.files[0].id : null;
-        var metadata = { name: name }; if (!fileId) metadata.parents = [folderId];
-        var form = new FormData();
-        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        form.append('file', new Blob([content], { type: 'application/json' }));
-        var url = fileId
-          ? 'https://www.googleapis.com/upload/drive/v3/files/' + fileId + '?uploadType=multipart'
-          : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
-        return fetch(url, { method: fileId ? 'PATCH' : 'POST', headers: { Authorization: 'Bearer ' + _token }, body: form });
-      });
-  }
 
   function _downloadFile(fileId) {
     return _fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media').then(function(r) { return r.text(); });
   }
 
   function pushChangesets(siteId, changes) {
-    return _getOrCreateFolder(_folderId, 'sync').then(function(syncId) {
+    return DriveHelpers.getOrCreateFolder(_folderId, 'sync').then(function(syncId) {
       // Group by table
       var byTable = {};
       changes.forEach(function(c) { if (!byTable[c.t]) byTable[c.t] = []; byTable[c.t].push(c); });
       return Object.keys(byTable).reduce(function(chain, table) {
         return chain.then(function() {
-          return _getOrCreateFolder(syncId, table).then(function(tableFolderId) {
+          return DriveHelpers.getOrCreateFolder(syncId, table).then(function(tableFolderId) {
             return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + tableFolderId + '\' in parents and name=\'' + siteId + '.json\' and trashed=false&fields=files(id)')
               .then(function(r) { return r.json(); }).then(function(d) {
                 var existing = { siteId: siteId, changes: [] };
@@ -61,7 +38,7 @@ var TransportDrive = (function() {
                   });
                   if (c.d && !Object.keys(c.d).length) existing.changes.splice(i, 1);
                 }
-                return _uploadFile(tableFolderId, siteId + '.json', JSON.stringify(existing));
+                return DriveHelpers.uploadFile(tableFolderId, siteId + '.json', JSON.stringify(existing));
               });
           });
         });
@@ -70,7 +47,7 @@ var TransportDrive = (function() {
   }
 
   function pullChangesets(excludeSiteId) {
-    return _getOrCreateFolder(_folderId, 'sync').then(function(syncId) {
+    return DriveHelpers.getOrCreateFolder(_folderId, 'sync').then(function(syncId) {
       return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + syncId + '\' in parents and mimeType=\'application/vnd.google-apps.folder\' and trashed=false&fields=files(id,name)')
         .then(function(r) { return r.json(); });
     }).then(function(d) {
@@ -119,7 +96,7 @@ var TransportDrive = (function() {
       });
     },
     readJson: function(name) { return _readJson(name); },
-    writeJson: function(name, data) { return _uploadFile(_folderId, name, JSON.stringify(data)); },
+    writeJson: function(name, data) { return DriveHelpers.uploadFile(_folderId, name, JSON.stringify(data)); },
     deleteFile: function(name) { return _deleteFile(name); },
     pushChangesets: pushChangesets,
     pullChangesets: pullChangesets
