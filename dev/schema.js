@@ -14,7 +14,7 @@ var DEFAULT_LANGUAGE = _defaultSchema ? (_defaultSchema.defaultLanguage || 'en')
 // Flatten views array into VIEWS object (keyed by name), recursing into items
 (function flattenViews(arr) {
   (arr || []).forEach(function(v) {
-    if (v.name && v.sources) { VIEWS[v.name] = v; }
+    if (v.name && (v.sources || typeof v.markdown === 'string')) { VIEWS[v.name] = v; }
     if (v.views) flattenViews(v.views);
   });
 })(_viewsNav);
