@@ -4,10 +4,22 @@ A schema has three layers. Views are the unit of presentation: a view is either 
 (sources/columns) or a **document** (a view with a `markdown` field).
 
 ```
+icon    ← optional favicon (data URI, relative path, or URL — cached as base64 on first load)
+title   ← optional document/tab title
 views   ← flat, named components: data views, or views with markdown (documents)
 tables  ← raw data + partitions
 nav     ← navigation tree + layout, references views/tables by name
 ```
+
+## icon + title
+```json
+{ "icon": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>📋</text></svg>" }
+```
+- **`icon`** — sets the browser favicon. Accepts:
+  - `data:` URI (inline SVG/PNG — recommended, no network)
+  - Relative path (`"./favicon.png"`)
+  - External URL (`"https://..."`) — fetched once, cached as base64 in localStorage; re-fetched when the URL changes
+- **Browser tab title** — derived from the `app.title` translation key (set in Languages tab), not a schema field. The tab title updates reactively when the translation changes.
 
 `nav` is **required** and defines the sidebar (there is no auto-derived nav). `views` and
 `tables` are flat (no nesting; hierarchy lives in `nav`).
