@@ -1,0 +1,242 @@
+<script>
+// localStorage shim for Apps Script sandbox (where localStorage is undefined)
+if (typeof localStorage === 'undefined') { window.localStorage = { _d:{}, getItem:function(k){return this._d[k]||null;}, setItem:function(k,v){this._d[k]=String(v);}, removeItem:function(k){delete this._d[k];}, clear:function(){this._d={};} }; }
+
+// Default schema bundled in app — used when Drive has no schema.json yet
+var defaultSchema = {"tables":{},"views":{}};
+
+// Active schema — initially from defaultSchema, overwritten from Drive on boot
+var SCHEMA = defaultSchema.tables;
+var _viewsNav = Array.isArray(defaultSchema.views) ? defaultSchema.views : [];
+var VIEWS = {};
+function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string')) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
+// Back-compat: fold a legacy `pages` map into doc-views (views with `markdown`) and rewrite {page:x} nav -> {view:x}.
+function foldPages(s) {
+  if (!s || !s.pages) return s;
+  if (!Array.isArray(s.views)) s.views = [];
+  Object.keys(s.pages).forEach(function(p) { if (!s.views.some(function(v) { return v.name === p; })) s.views.push({ name: p, markdown: (s.pages[p] && s.pages[p].markdown) || '' }); });
+  if (s.nav && s.nav.items) (function fix(items) { items.forEach(function(it) { if (it.page) { it.view = it.page; delete it.page; } if (it.items) fix(it.items); }); })(s.nav.items);
+  delete s.pages;
+  return s;
+}
+// Support legacy object format: { viewName: viewDef }
+if (defaultSchema.views && !Array.isArray(defaultSchema.views)) {
+  for (var _k in defaultSchema.views) { VIEWS[_k] = defaultSchema.views[_k]; }
+} else { _flattenViews(_viewsNav); }
+var DEFAULT_LANGUAGE = defaultSchema.defaultLanguage || null;
+
+// Schema helpers
+function getColumns(table) { if (!SCHEMA[table]) return []; return window._columnOrders && window._columnOrders[table] ? window._columnOrders[table] : Object.keys(SCHEMA[table].columns); }
+// id is implicit: auto-inject into every table so schemas needn't declare it. It stays the storage PK and join/archive key.
+function ensureImplicitId(schema, orders) {
+  Object.keys(schema).forEach(function(t) {
+    var cols = schema[t].columns; if (!cols) return;
+    if (!cols.id) { cols.id = 'text'; if (orders && orders[t] && orders[t].indexOf('id') === -1) orders[t].unshift('id'); }
+  });
+}
+// Shared schema normalization: foldPages + set globals + colMap + ensureImplicitId. Returns nothing; mutates globals.
+function _normalizeSchema(parsed) {
+  foldPages(parsed);
+  SCHEMA = parsed.tables || SCHEMA;
+  _viewsNav = Array.isArray(parsed.views) ? parsed.views : _viewsNav;
+  VIEWS = {};
+  if (parsed.views && !Array.isArray(parsed.views)) { for (var _vk in parsed.views) VIEWS[_vk] = parsed.views[_vk]; }
+  else _flattenViews(_viewsNav);
+  window._columnOrders = {};
+  Object.keys(SCHEMA).forEach(function(t) {
+    if (typeof normArchive === 'function') normArchive(SCHEMA[t]);
+    if (Array.isArray(SCHEMA[t].columns)) {
+      var colMap = {}; window._columnOrders[t] = [];
+      SCHEMA[t].columns.forEach(function(c) { if (!c.name) return; window._columnOrders[t].push(c.name); var def = Object.assign({}, c); delete def.name; colMap[c.name] = Object.keys(def).length ? def : 'text'; });
+      SCHEMA[t].columns = colMap;
+    } else { window._columnOrders[t] = Object.keys(SCHEMA[t].columns || {}); }
+  });
+  ensureImplicitId(SCHEMA, window._columnOrders);
+}
+function colName(c) { return c && typeof c === 'object' ? (c.name || Object.keys(c)[0]) : c; }
+// Shared list-value seeding: ensure filter-referenced values exist in listsCache. Returns true if anything was added.
+function _seedListValues(listsCache) {
+  var seeded = false;
+  function seed(filter) {
+    if (!filter) return;
+    if (filter.$or || filter.$and) { (filter.$or || filter.$and).forEach(seed); return; }
+    for (var col in filter) { if (col[0] === '$') continue;
+      var ln = null;
+      for (var t in SCHEMA) { var d = SCHEMA[t].columns[col]; if (d && typeof d === 'object' && d.list) { ln = d.list; break; } }
+      if (!ln || !listsCache[ln]) continue;
+      var vals = Array.isArray(filter[col]) ? filter[col] : [filter[col]];
+      vals.forEach(function(val) { if (typeof val === 'string' && listsCache[ln].indexOf(val) < 0) { listsCache[ln].push(val); seeded = true; } });
+    }
+  }
+  for (var vn in VIEWS) {
+    seed(VIEWS[vn].filter);
+    (VIEWS[vn].columns || []).forEach(function(c) {
+      if (typeof c === 'object' && c.sources && c.filter) seed(c.filter);
+      else if (typeof c === 'object' && !c.sources && !c.name && !c.view) { var cond = c[Object.keys(c)[0]]; if (cond && typeof cond === 'object') seed(cond); }
+    });
+  }
+  return seeded;
+}
+function isEmbed(c) { return typeof c === 'object' && c.sources && !c.name; }
+function isViewEmbed(c) { return typeof c === 'object' && typeof c.view === 'string'; } // {view:name,filter?,hideEmpty?} -> embed a named view
+function isText(c) { return typeof c === 'object' && c.text && !c.name && !c.sources; }
+// dataCache/export key for a table's archive partition (fixed 'archive')
+function aKey(table) { return table + '__archive'; }
+// Derive fixed internal partitions from the `archivable` flag (active is always 'active';
+// archive is 'archive' when archivable). Legacy archivePartition values also enable archive.
+function normArchive(t) { if (!t) return; t.partition = 'active'; t.archivePartition = (t.archivable || t.archivePartition) ? 'archive' : null; }
+// Full mirror cluster: all tables sharing a logical row via syncFrom, both directions, transitively
+// (a detail's master, a master's details, and their other details).
+function withMirrors(base) {
+  var set = base.slice();
+  for (var i = 0; i < set.length; i++) {           // grows as tables are discovered -> transitive closure
+    var t = set[i], cols = (SCHEMA[t] && SCHEMA[t].columns) || {};
+    for (var c in cols) { var d = cols[c]; if (d && typeof d === 'object' && d.syncFrom && set.indexOf(d.syncFrom) < 0) set.push(d.syncFrom); } // upstream masters
+    for (var mt in SCHEMA) {                        // downstream tables mirroring t
+      if (set.indexOf(mt) >= 0) continue;
+      var mc = SCHEMA[mt].columns || {};
+      for (var k in mc) { var md = mc[k]; if (md && typeof md === 'object' && md.syncFrom === t) { set.push(mt); break; } }
+    }
+  }
+  return set;
+}
+function matchFilter(r, f) {
+  if (f.$or) return f.$or.some(function(s) { return matchFilter(r, s); });
+  if (f.$and) return f.$and.every(function(s) { return matchFilter(r, s); });
+  for (var k in f) { if (k[0] === '$') continue; var v = f[k]; if (Array.isArray(v) ? v.indexOf(r[k]) < 0 : r[k] !== v) return false; }
+  return true;
+}
+function filterRows(rows, filter) { if (!filter) return rows; return rows.filter(function(r) { return matchFilter(r, filter); }); }
+function sortByCol(rows, col) { return col ? rows.slice().sort(function(a, b) { return String(a[col] || '').localeCompare(String(b[col] || '')); }) : rows; }
+// Tiny markdown -> HTML for pages (headings, bold/italic, lists, links, paragraphs). Embed tokens are split out before this runs.
+function mdToHtml(md) {
+  var esc = function(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
+  var safeUrl = function(u) { try { var p = new URL(u, location.href); return /^https?:$/.test(p.protocol) ? esc(u) : ''; } catch(e) { return esc(u); } };
+  var inline = function(t) { return esc(t).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\*([^*]+)\*/g, '<em>$1</em>').replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) { return '<a href="' + safeUrl(url) + '" target="_blank">' + text + '</a>'; }); };
+  var lines = String(md || '').split('\n'), out = [], i = 0;
+  while (i < lines.length) {
+    var l = lines[i], h = /^(#{1,4})\s+(.*)/.exec(l);
+    if (h) { out.push('<h' + h[1].length + '>' + inline(h[2]) + '</h' + h[1].length + '>'); i++; continue; }
+    if (/^\s*[-*]\s+/.test(l)) { var items = []; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push('<li>' + inline(lines[i].replace(/^\s*[-*]\s+/, '')) + '</li>'); i++; } out.push('<ul>' + items.join('') + '</ul>'); continue; }
+    if (l.trim() === '') { i++; continue; }
+    out.push('<p>' + inline(l) + '</p>'); i++;
+  }
+  return out.join('');
+}
+function buildRows(cfg, dataCache) {
+  var rows = [];
+  var sources = cfg.sources || [];
+  sources.forEach(function(src) {
+    var srcRows = dataCache[src] || [];
+    if (cfg.mode === 'join') {
+      srcRows.forEach(function(r) { var e = rows.find(function(x) { return x.id === r.id; }); if (e) Object.assign(e, r); else rows.push(Object.assign({ _source: src }, r)); });
+    } else {
+      srcRows.forEach(function(r) { rows.push(Object.assign({}, r, { _source: src })); });
+    }
+  });
+  return filterRows(rows, cfg.filter);
+}
+// Aggregate a groupBy/collect view's rows into one row per key (collected values -> Nth columns).
+function aggregateRows(view, rows) {
+  if (!(view.groupBy && view.collect)) return rows;
+  var byObj = typeof view.groupBy === 'object' && !Array.isArray(view.groupBy);
+  var keyCol = byObj ? view.groupBy.column : view.columns[0];
+  var keysFrom = byObj ? view.groupBy.from : view.groupBy;
+  var groups = {};
+  rows.forEach(function(r) {
+    keysFrom.forEach(function(k) {
+      var key = r[k];
+      if (key) { if (!groups[key]) groups[key] = []; if (r[view.collect]) groups[key].push(r[view.collect]); }
+    });
+  });
+  var valCols = (view.columns || []).filter(function(c) { return c !== keyCol; });
+  return Object.keys(groups).map(function(key) {
+    var vals = groups[key].sort().reverse(), row = { id: key };
+    row[keyCol] = key;
+    for (var i = 0; i < valCols.length; i++) row[valCols[i]] = vals[i] || '';
+    return row;
+  });
+}
+function colCondition(c) { if (!c || typeof c !== 'object' || c.name || c.sources || c.view || c.text) return null; var v = c[Object.keys(c)[0]]; return (v && typeof v === 'object') ? v : null; }
+function toDateStr(v) { if (!v) return ''; var s = String(v); if (s.length === 10) return s; var d = new Date(s); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function parseTableResult(r) { if (!r) return { headers: [], rows: [] }; if (typeof r === 'string') return JSON.parse(r); return r; }
+function validateSchema() {
+  var errors = [];
+  var allCols = {};
+  for (var t in SCHEMA) { for (var c in SCHEMA[t].columns) allCols[c] = t; }
+  for (var v in VIEWS) {
+    var view = VIEWS[v];
+    // Check sources exist
+    (view.sources || []).forEach(function(s) { if (!SCHEMA[s]) errors.push('View "' + v + '" references non-existent table "' + s + '"'); });
+    // Check columns exist in at least one source (skip aggregate views)
+    if (!view.groupBy) (view.columns || []).forEach(function(c) {
+      if (isEmbed(c) || isViewEmbed(c) || isText(c)) return;
+      var col = colName(c);
+      var found = (view.sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].columns && SCHEMA[s].columns[col]; });
+      if (!found) errors.push('View "' + v + '": column "' + col + '" not found in sources [' + (view.sources || []).join(', ') + ']');
+    });
+  }
+  // Check list references
+  for (var t2 in SCHEMA) { for (var c2 in SCHEMA[t2].columns) {
+    var def = SCHEMA[t2].columns[c2];
+    if (def && typeof def === 'object' && def.syncFrom && !SCHEMA[def.syncFrom]) errors.push('Table "' + t2 + '": mirror source "' + def.syncFrom + '" not found');
+    if (def && typeof def === 'object' && def.type === 'ref' && def.partitionle && !SCHEMA[def.partitionle]) errors.push('Table "' + t2 + '": ref table "' + def.partitionle + '" not found');
+  }}
+  // Check embed view references and circular embeds
+  for (var v3 in VIEWS) {
+    (VIEWS[v3].columns || []).forEach(function(c) {
+      if (isEmbed(c)) { (c.sources || []).forEach(function(s) { if (!SCHEMA[s]) errors.push('View "' + v3 + '": embed references non-existent table "' + s + '"'); }); }
+    });
+  }
+  return errors;
+}
+// Structural dangling-reference check on a raw schema (names only; safe to run pre-normalization, e.g. on import).
+function validateRefs(schema) {
+  var errs = [], tables = schema.tables || {}, views = {};
+  (Array.isArray(schema.views) ? schema.views : []).forEach(function(v) { if (v && v.name) views[v.name] = v; });
+  var hasView = function(n) { return !!views[n]; }, hasTable = function(n) { return !!tables[n]; };
+  Object.keys(views).forEach(function(n) {
+    var v = views[n];
+    (v.sources || []).forEach(function(s) { if (!hasTable(s)) errs.push('View "' + n + '" -> missing table "' + s + '"'); });
+    (v.columns || []).forEach(function(c) {
+      if (c && typeof c === 'object' && typeof c.view === 'string' && !hasView(c.view)) errs.push('View "' + n + '" embed -> missing view "' + c.view + '"');
+      if (c && typeof c === 'object' && Array.isArray(c.sources)) c.sources.forEach(function(s) { if (!hasTable(s)) errs.push('View "' + n + '" embed -> missing table "' + s + '"'); });
+    });
+    if (typeof v.markdown === 'string') {
+      var re = /\{\{\s*(view|table)\s*:\s*([^\s@?{}:]+)/g, m;
+      while ((m = re.exec(v.markdown))) {
+        if (m[1] === 'view' && !hasView(m[2])) errs.push('View "' + n + '" markdown -> missing view "' + m[2] + '"');
+        if (m[1] === 'table' && !hasTable(m[2])) errs.push('View "' + n + '" markdown -> missing table "' + m[2] + '"');
+      }
+    }
+  });
+  (function walk(items) { (items || []).forEach(function(it) {
+    if (it.view && !hasView(it.view) && !hasTable(it.view)) errs.push('Nav -> missing view "' + it.view + '"');
+    if (it.table && !hasTable(it.table)) errs.push('Nav -> missing table "' + it.table + '"');
+    if (it.items) walk(it.items);
+  }); })(schema.nav && schema.nav.items);
+  return errs;
+}
+// NavService: build sidebar/tab model from nav config. Pure function (no Vue dependency).
+// t(key): translator, canAccess(id): permission check, opts: {isAdmin, hasLookup}
+function buildNavTabs(navItems, t, canAccess, opts) {
+  var tabs = [];
+  function navTab(it) {
+    if (it.group) { var ch = (it.items || []).map(navTab).filter(Boolean); return ch.length ? { id: 'grp:' + it.group, title: t('nav.' + it.group) || it.group, icon: it.icon || 'mdi-folder', children: ch } : null; }
+    var gid = it.view || it.table;
+    if (!gid || !canAccess(gid)) return null;
+    if (it.view && !VIEWS[gid]) return null;
+    if (it.table && !SCHEMA[gid]) return null;
+    var isV = !!it.view, isDoc = isV && typeof VIEWS[gid].markdown === 'string';
+    var tb = { id: gid, title: t((isV ? 'view.' : 'tab.') + gid) || gid, icon: it.icon || (isDoc ? 'mdi-file-document-outline' : (isV ? 'mdi-view-list' : 'mdi-table')) };
+    if (it.items) { var kids = it.items.map(navTab).filter(Boolean); if (kids.length) tb.children = kids; }
+    return tb;
+  }
+  navItems.forEach(function(it) { var tb = navTab(it); if (tb) tabs.push(tb); });
+  tabs.push({ divider: true });
+  if (opts.isAdmin) tabs.push({ id: '__languages', title: t('tab.languages'), icon: 'mdi-translate' });
+  if (opts.hasLookup) tabs.push({ id: '__lookup', title: t('tab.lookup'), icon: 'mdi-database-outline' });
+  tabs.push({ id: '__settings', title: t('tab.settings'), icon: 'mdi-cog-outline' });
+  return tabs;
+}
+</script>
