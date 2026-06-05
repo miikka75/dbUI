@@ -188,7 +188,9 @@ function createVueApp() {
         var mode = localStorage.getItem('app_mode');
         if (mode === 'firebase') {
           var cfg = localStorage.getItem('firebase_config');
-          return cfg ? base + '?mode=firebase&config=' + btoa(cfg) : base;
+          if (!cfg) return base;
+          try { var c = JSON.parse(cfg); return base + '?mode=firebase&k=' + encodeURIComponent(c.apiKey) + '&d=' + encodeURIComponent(c.authDomain) + '&p=' + encodeURIComponent(c.projectId); }
+          catch(e) { return base + '?mode=firebase&config=' + btoa(cfg); } // fallback to full encoding
         }
         var folder = localStorage.getItem('app_folder');
         var clientId = localStorage.getItem('oauth_client_id');
@@ -320,7 +322,7 @@ function createVueApp() {
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
-         'settings.reset', 'settings.confirm_reset', 'settings.user_access',
+         'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access',
          'settings.user_id', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all'].sort();
       },
       schemaTranslationKeys: function() {
