@@ -24,7 +24,8 @@
           "type": "select",
           "list": "assigned_to",
           "allowNew": true,
-          "sorted": true
+          "sorted": true,
+          "listSwitch": { "label": "External", "list": "external_workers" }
         },
         {
           "name": "city",
