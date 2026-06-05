@@ -12,7 +12,7 @@ backend = {
   },
 
   async saveSchema(folderId, schema) {
-    try { await _uploadFile(folderId, 'schema.json', JSON.stringify(schema, null, 2)); } catch(e) {}
+    try { await DriveHelpers.uploadFile(folderId, 'schema.json', JSON.stringify(schema, null, 2)); } catch(e) { console.warn("backend-oauth:", e.message || e); }
   },
 
   async validateFolder(id) {
@@ -34,7 +34,7 @@ backend = {
   },
 
   async setFolderConfig(folderId, config) {
-    try { await _uploadFile(folderId, '.app-config.json', JSON.stringify(config)); } catch(e) {}
+    try { await DriveHelpers.uploadFile(folderId, '.app-config.json', JSON.stringify(config)); } catch(e) { console.warn("backend-oauth:", e.message || e); }
   },
 
   async initSchema(folderId, schema) {
@@ -255,14 +255,14 @@ backend = {
 
   async saveChangesets(folderId, siteId, json) {
     try {
-      const syncFolderId = await _getOrCreateFolder(folderId, 'changesets');
-      await _uploadFile(syncFolderId, siteId + '.json', json);
+      const syncFolderId = await DriveHelpers.getOrCreateFolder(folderId, 'changesets');
+      await DriveHelpers.uploadFile(syncFolderId, siteId + '.json', json);
     } catch(e) { console.error('saveChangesets error:', e); }
   },
 
   async loadChangesets(folderId, excludeSiteId) {
     try {
-      const syncFolderId = await _getOrCreateFolder(folderId, 'changesets');
+      const syncFolderId = await DriveHelpers.getOrCreateFolder(folderId, 'changesets');
       const res = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${syncFolderId}' in parents and trashed=false&fields=files(id,name)`);
       const files = (await res.json()).files || [];
       const result = [];
@@ -293,26 +293,5 @@ async function _ensureSheet(folderId, name, columns) {
   return sheet.spreadsheetId;
 }
 
-async function _getOrCreateFolder(parentId, name) {
-  const res = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${parentId}' in parents and name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id)`);
-  const { files } = await res.json();
-  if (files?.length) return files[0].id;
-  const create = await _fetch('https://www.googleapis.com/drive/v3/files', 'POST', { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] });
-  return (await create.json()).id;
-}
-
-async function _uploadFile(folderId, name, content) {
-  const search = await _fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and name='${name}' and trashed=false&fields=files(id)`);
-  const { files } = await search.json();
-  const fileId = files?.[0]?.id;
-  const metadata = { name, parents: fileId ? undefined : [folderId] };
-  const form = new FormData();
-  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-  form.append('file', new Blob([content], { type: 'application/json' }));
-  const url = fileId
-    ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`
-    : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
-  await fetch(url, { method: fileId ? 'PATCH' : 'POST', headers: { Authorization: `Bearer ${_token}` }, body: form });
-}
 
 </script>
