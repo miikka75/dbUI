@@ -1462,6 +1462,46 @@ test.describe('Print inline embed markdown', () => {
   });
 });
 
+test.describe('listSwitch (toggle between two dropdown lists)', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { t: { columns: [{ name: 'person', type: 'select', list: 'internal', allowNew: true, listSwitch: { label: 'External', list: 'external' } }], partition: 'active' } },
+    views: [{ name: 'main', sources: ['t'], mode: 'union', columns: ['person'] }],
+    nav: { items: [{ view: 'main' }, { table: 't' }] }
+  };
+  test('swap icon toggles which list populates the dropdown', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/saveLists', { data: { folderId: 'local', lists: { internal: ['Alice', 'Bob'], external: ['ExtJohn', 'ExtJane'] } } });
+    await page.request.post('/api/putRow', { data: { tableId: 't', data: { id: 'r1', person: 'Alice' }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.t' }).first().click();
+    await page.waitForTimeout(200);
+    // Verify swap icon exists and isAltList detects correctly
+    const result = await page.evaluate(() => {
+      var item = appInstance.sortedData[0];
+      return {
+        hasSwitch: !!appInstance.colListSwitch('person'),
+        isAlt: appInstance.isAltList('person', item),
+        primaryOptions: appInstance.getListOptions('person', null).map(o => o.value),
+        altOptions: appInstance.getListOptions('person', 'external').map(o => o.value)
+      };
+    });
+    expect(result.hasSwitch).toBe(true);
+    expect(result.isAlt).toBe(false); // Alice is in 'internal' list
+    expect(result.primaryOptions).toEqual(['Alice', 'Bob']);
+    expect(result.altOptions).toEqual(['ExtJohn', 'ExtJane']); // not sorted (no sorted:true on column)
+    // Toggle and verify alt list is used
+    await page.evaluate(() => { appInstance.toggleListSwitch('person', appInstance.sortedData[0]); });
+    const afterToggle = await page.evaluate(() => appInstance.isAltList('person', appInstance.sortedData[0]));
+    expect(afterToggle).toBe(true);
+  });
+});
+
 test.describe('collectWith (role alongside date)', () => {
   test('aggregateRows includes role when collectWith is set', async ({ page }) => {
     test.setTimeout(20000);
