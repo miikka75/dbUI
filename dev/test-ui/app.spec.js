@@ -1388,6 +1388,102 @@ test.describe('v3 markdown doc-view', () => {
   });
 });
 
+test.describe('filterBy (per-card dynamic embed filter)', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { people: { columns: [{ name: 'name', type: 'text' }], partition: 'active' }, tasks: { columns: [{ name: 'title', type: 'text' }, { name: 'owner', type: 'text' }], partition: 'active' } },
+    views: [
+      { name: 'all_tasks', sources: ['tasks'], mode: 'union', columns: ['title'] },
+      { name: 'main', sources: ['people'], mode: 'union', layout: 'card', columns: ['name', { view: 'all_tasks', filterBy: { owner: 'name' } }] }
+    ],
+    nav: { items: [{ view: 'main' }, { table: 'tasks' }, { table: 'people' }] }
+  };
+  test('each card shows only tasks where owner matches that card person', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'people', data: { id: 'p1', name: 'Alice' }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'people', data: { id: 'p2', name: 'Bob' }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 't1', title: 'AliceTask', owner: 'Alice' }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 't2', title: 'BobTask', owner: 'Bob' }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
+    await page.waitForTimeout(500); // wait for embed data preload (async)
+    // Alice's card should contain AliceTask but NOT BobTask
+    const cards = page.locator('.v-main .v-card.ma-2');
+    await expect(cards).toHaveCount(2);
+    const aliceCard = cards.filter({ hasText: 'Alice' }).first();
+    await expect(aliceCard).toContainText('AliceTask');
+    await expect(aliceCard).not.toContainText('BobTask');
+    // Bob's card should contain BobTask but NOT AliceTask
+    const bobCard = cards.filter({ hasText: 'Bob' }).first();
+    await expect(bobCard).toContainText('BobTask');
+    await expect(bobCard).not.toContainText('AliceTask');
+  });
+});
+
+test.describe('Print inline embed markdown', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { t: { columns: [{ name: 'title', type: 'text' }, { name: 'status', type: 'text' }], partition: 'active' } },
+    views: [{ name: 'main', sources: ['t'], mode: 'union', layout: 'card', columns: ['title',
+      { sources: ['t'], mode: 'union', filter: { status: 'open' }, columns: ['title'], hideEmpty: true, bare: true, markdown: '**Open Items**\n\n{{self}}\n\n_end of open_' }
+    ] }],
+    nav: { items: [{ view: 'main' }, { table: 't' }] }
+  };
+  test('print renders inline embed markdown (header + table + footer + CSS borders)', async ({ page, context }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 't', data: { id: 'r1', title: 'Task1', status: 'open' }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
+    await page.waitForTimeout(200);
+    await page.locator('.v-main .v-card.ma-2').first().click();
+    await page.waitForTimeout(200);
+    const [popup] = await Promise.all([
+      context.waitForEvent('page'),
+      page.locator('.v-main .v-card.ma-2 button:has(.mdi-printer)').first().click()
+    ]);
+    await popup.waitForLoadState();
+    const html = await popup.content();
+    await expect(popup.locator('body')).toContainText('Open Items');  // header from markdown
+    await expect(popup.locator('body')).toContainText('Task1');       // table row
+    await expect(popup.locator('body')).toContainText('end of open'); // footer from markdown
+    expect(html).toContain('<style>');                                 // CSS present
+    expect(html).toContain('border:1px solid #ddd');                   // table borders in CSS
+    expect(html).toContain('grid-template-columns');                   // dl grid layout
+    await popup.close();
+  });
+});
+
+test.describe('collectWith (role alongside date)', () => {
+  test('aggregateRows includes role when collectWith is set', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.goto('/');
+    await page.waitForFunction(() => typeof aggregateRows === 'function');
+    const result = await page.evaluate(() => {
+      var view = { groupBy: { column: 'person', from: ['speaker', 'singer'] }, collect: 'date', collectWith: 'role', columns: ['person', 'latest', 'previous'] };
+      var rows = [
+        { id: '1', date: '2026-06-01', speaker: 'Alice', singer: '' },
+        { id: '2', date: '2026-05-20', speaker: '', singer: 'Alice' },
+        { id: '3', date: '2026-06-03', speaker: 'Bob', singer: '' }
+      ];
+      return aggregateRows(view, rows);
+    });
+    const alice = result.find(r => r.person === 'Alice');
+    const bob = result.find(r => r.person === 'Bob');
+    expect(alice.latest).toBe('2026-06-01 (speaker)');
+    expect(alice.previous).toBe('2026-05-20 (singer)');
+    expect(bob.latest).toBe('2026-06-03 (speaker)');
+  });
+});
+
 test.describe('v3 aggregate view embed', () => {
   const V3 = {
     defaultLanguage: 'en',
