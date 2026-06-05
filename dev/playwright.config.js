@@ -4,6 +4,8 @@ module.exports = defineConfig({
   testDir: './test-ui',
   timeout: 8000,
   expect: { timeout: 4000 },
+  workers: 1,
+  fullyParallel: false,
   use: {
     baseURL: 'http://localhost:3000',
     headless: true,
