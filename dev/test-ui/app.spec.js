@@ -1524,6 +1524,55 @@ test.describe('collectWith (role alongside date)', () => {
   });
 });
 
+test.describe('matchList (filter + filterBy + computed)', () => {
+  const ML = {
+    defaultLanguage: 'en',
+    tables: { events: { columns: [{ name: 'speaker', type: 'select', list: 'members' }, { name: 'guest', type: 'select', list: 'guests' }, { name: 'topic' }] } },
+    lists: { members: ['Alice', 'Bob'], guests: ['Charlie', 'Dave'] },
+    views: [
+      { name: 'guest_events', sources: ['events'], mode: 'union', filter: { speaker: { matchList: 'guests' } }, columns: ['speaker', 'topic'] },
+      { name: 'all', sources: ['events'], mode: 'union', columns: ['speaker', 'guest', 'topic', { name: 'visitors', computed: { fromColumns: ['speaker', 'guest'], matchList: 'guests' } }] }
+    ],
+    nav: { layout: 'tabs', items: [{ view: 'guest_events' }, { view: 'all' }] }
+  };
+  test('filter with matchList filters rows by list membership', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: ML } });
+    await page.request.post('/api/initSchema', { data: { schema: ML.tables } });
+    await page.request.post('/api/saveLists', { data: { folderId: 'local', lists: ML.lists } });
+    await page.request.post('/api/putRow', { data: { tableId: 'events', data: { id: '1', speaker: 'Alice', guest: '', topic: 'a' }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'events', data: { id: '2', speaker: 'Charlie', guest: '', topic: 'b' }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'events', data: { id: '3', speaker: 'Bob', guest: 'Dave', topic: 'c' }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 10000 });
+    // guest_events view: only rows where speaker is in guests list (Charlie)
+    const guestRows = await page.evaluate(() => appInstance.sortedData.map(r => r.speaker));
+    expect(guestRows).toEqual(['Charlie']);
+  });
+  test('computed column with matchList collects values from named list', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: ML } });
+    await page.request.post('/api/initSchema', { data: { schema: ML.tables } });
+    await page.request.post('/api/saveLists', { data: { folderId: 'local', lists: ML.lists } });
+    await page.request.post('/api/putRow', { data: { tableId: 'events', data: { id: '1', speaker: 'Alice', guest: '', topic: 'a' }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'events', data: { id: '2', speaker: 'Charlie', guest: '', topic: 'b' }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'events', data: { id: '3', speaker: 'Bob', guest: 'Dave', topic: 'c' }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 10000 });
+    // Navigate to 'all' view
+    await page.evaluate(() => { appInstance.selectTab('all'); });
+    await page.waitForFunction(() => appInstance.sortedData.length === 3, { timeout: 5000 });
+    const rows = await page.evaluate(() => appInstance.sortedData.map(r => ({ speaker: r.speaker, visitors: r.visitors })));
+    expect(rows.find(r => r.speaker === 'Alice').visitors).toBe('');
+    expect(rows.find(r => r.speaker === 'Charlie').visitors).toBe('Charlie');
+    expect(rows.find(r => r.speaker === 'Bob').visitors).toBe('Dave');
+  });
+});
+
 test.describe('v3 aggregate view embed', () => {
   const V3 = {
     defaultLanguage: 'en',
@@ -1706,5 +1755,34 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
       return r;
     });
     expect(layouts).toEqual({ all_items: 'table', summary_cards: 'card', quick_list: 'list' });
+  });
+});
+
+test.describe('Export/import includes edited page bodies', () => {
+  test('pages are exported and re-imported via _pages collection', async ({ request }) => {
+    test.setTimeout(20000);
+    await request.post('/api/resetData');
+    const schema = { defaultLanguage: 'en', tables: { tasks: { columns: [{ name: 'title', type: 'text' }] } }, views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'], markdown: '# Seed\n\n{{self}}' }], nav: { items: [{ view: 'all' }] } };
+    await request.post('/api/saveSchema', { data: { schema } });
+    // Save an edited page body (overwrites the seed)
+    await request.post('/api/putRow', { data: { tableId: '_pages', data: { id: 'all', markdown: '# Edited content\n\n{{self}}' }, tab: 'active' } });
+    // Verify stored
+    const res1 = await request.post('/api/getTableData', { data: { tableId: '_pages', tab: 'active' } });
+    const rows1 = (await res1.json()).rows;
+    expect(rows1.find(r => r.id === 'all').markdown).toBe('# Edited content\n\n{{self}}');
+    // Simulate export: pages are fetched from _pages
+    const pages = rows1.filter(r => r.id && r.markdown);
+    expect(pages.length).toBeGreaterThan(0);
+    // Reset (simulates fresh import target)
+    await request.post('/api/resetData');
+    await request.post('/api/saveSchema', { data: { schema } });
+    // Re-import pages
+    for (const pg of pages) {
+      await request.post('/api/putRow', { data: { tableId: '_pages', data: pg, tab: 'active' } });
+    }
+    // Verify restored
+    const res2 = await request.post('/api/getTableData', { data: { tableId: '_pages', tab: 'active' } });
+    const rows2 = (await res2.json()).rows;
+    expect(rows2.find(r => r.id === 'all').markdown).toBe('# Edited content\n\n{{self}}');
   });
 });
