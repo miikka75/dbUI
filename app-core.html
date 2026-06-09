@@ -6,6 +6,7 @@ function getColumnType(table, col) {
   return def.type || 'text';
 }
 function getColumnList(table, col) {
+  if (!table) { for (var t in SCHEMA) { var l = getColumnList(t, col); if (l) return l; } return null; }
   var def = SCHEMA[table].columns[col];
   return (def && typeof def === 'object') ? def.list : null;
 }
@@ -254,7 +255,8 @@ function createVueApp() {
           var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
           var columns = raw.filter(function(c) { return !(typeof c === 'object' && c.text && !c.sources); }).map(function(c) { return colName(c); });
           var rows = buildRows(cfg, self.dataCache);
-          if (cfg.defaultSort) { var sc = cfg.defaultSort; rows = rows.slice().sort(function(a, b) { return (a[sc] || '').localeCompare(b[sc] || ''); }); }
+          resolveComputed(rows, cfg.columns || []);
+          if (cfg.defaultSort) { rows = sortByCol(rows, cfg.defaultSort); }
           if (cfg.hideEmpty) { columns = columns.filter(function(col) { return rows.some(function(r) { return r[col]; }); }); }
           // markdown on a filterBy/inline embed: store as header HTML (rendered per-card by the template)
           // Inline embed markdown: build blocks (prose + {{self}} markers for own table)
@@ -277,8 +279,9 @@ function createVueApp() {
         return !!getTableMirrorSource(SCHEMA, table);
       },
       hasArchive: function() {
-        if (VIEWS[this.currentTable]) return (VIEWS[this.currentTable].sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].archivePartition; });
-        return SCHEMA[this.currentTable] && SCHEMA[this.currentTable].archivePartition;
+        if (VIEWS[this.currentTable] && VIEWS[this.currentTable].hideArchive) return false;
+        if (VIEWS[this.currentTable]) return (VIEWS[this.currentTable].sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].archivable; });
+        return SCHEMA[this.currentTable] && SCHEMA[this.currentTable].archivable;
       },
       // Add/delete/archive/restore fan out across the whole mirror cluster; only allow if the user can access every table in it
       canMutateCurrent: function() {
@@ -323,9 +326,13 @@ function createVueApp() {
       sortedData: function() {
         var data = this.currentData.slice();
         if (this.sortCol) {
-          var col = this.sortCol, asc = this.sortAsc;
+          var col = this.sortCol, asc = this.sortAsc, lo = null, ln = this.colIsList(col);
+          if (!ln) { var v = VIEWS[this.currentTable]; if (v && v.groupBy && typeof v.groupBy === 'object' && v.groupBy.column === col && v.groupBy.from) { for (var i = 0; i < v.groupBy.from.length && !ln; i++) ln = this.colIsList(v.groupBy.from[i]); } }
+          if (ln && this.listsCache[ln]) { lo = {}; this.listsCache[ln].forEach(function(v, i) { lo[v] = i; }); }
           data.sort(function(a, b) {
-            var va = (a[col] || ''), vb = (b[col] || '');
+            if (lo) { var ia = lo[a[col]] !== undefined ? lo[a[col]] : 9999, ib = lo[b[col]] !== undefined ? lo[b[col]] : 9999; return asc ? ia - ib : ib - ia; }
+            var va = a[col] || '', vb = b[col] || '';
+            if (!va && vb) return 1; if (va && !vb) return -1;
             return asc ? va.localeCompare(vb) : vb.localeCompare(va);
           });
         }
@@ -537,7 +544,7 @@ function createVueApp() {
             }
             self.tableMap = result.tableMap || {};
             self.languages = result.languages || [];
-            self.listsCache = result.lists || {};
+            self.listsCache = result.lists || {}; window._listsCache = self.listsCache;
             // Auto-seed lists: create missing list names + seed mandatory values from filters
             Object.keys(SCHEMA).forEach(function(t) {
               Object.keys(SCHEMA[t].columns).forEach(function(c) {
@@ -605,7 +612,7 @@ function createVueApp() {
         }).then(function() {
           // Preload lists
           return backend.getLists(self.folderId).then(function(lists) {
-            self.listsCache = lists || {};
+            self.listsCache = lists || {}; window._listsCache = self.listsCache;
             // Auto-seed: ensure list values referenced in filters/conditionals exist
             // 1. Create empty lists for all referenced list names
             Object.keys(SCHEMA).forEach(function(t) {
@@ -656,13 +663,13 @@ function createVueApp() {
           var chain = Promise.resolve();
           tables.forEach(function(name) {
             chain = chain.then(function() {
-              return backend.getTableData(self.tableMap[name], SCHEMA[name].partition).then(function(result) {
+              return backend.getTableData(self.tableMap[name], 'active').then(function(result) {
                 self.dataCache[name] = parseTableResult(result).rows;
               }).catch(function() { self.dataCache[name] = []; });
             });
-            if (self.settings.preload_archive && SCHEMA[name] && SCHEMA[name].archivePartition) {
+            if (self.settings.preload_archive && SCHEMA[name] && SCHEMA[name].archivable) {
               chain = chain.then(function() {
-                return backend.getTableData(self.tableMap[name], SCHEMA[name].archivePartition).then(function(result) {
+                return backend.getTableData(self.tableMap[name], 'archive').then(function(result) {
                   self.dataCache[aKey(name)] = parseTableResult(result).rows;
                 }).catch(function() { self.dataCache[aKey(name)] = []; });
               });
@@ -740,7 +747,7 @@ function createVueApp() {
         if (type === 'view' && VIEWS[name]) {
           var v = VIEWS[name], cache = this.dataCache;
           if (part) { cache = {}; var dc = this.dataCache; (v.sources || []).forEach(function(s) { cache[s] = dc[s + '__' + part] || []; }); }
-          return sortByCol(aggregateRows(v, buildRows(v, cache)), v.defaultSort);
+          return sortByCol(resolveComputed(aggregateRows(v, buildRows(v, cache)), v.columns), v.defaultSort, v);
         }
         if (type === 'table' && SCHEMA[name]) return sortByCol(this.dataCache[part ? name + '__' + part : name] || [], SCHEMA[name].defaultSort);
         return [];
@@ -749,9 +756,9 @@ function createVueApp() {
       embedViewLayout: function(type, name) { var c = type === 'view' ? VIEWS[name] : SCHEMA[name]; return (c && c.layout) || 'table'; },
       embedRowsForItem: function(ei, item) {
         if (!ei.config.filterBy || !item) return ei.rows;
-        var fb = ei.config.filterBy; // { embedCol: cardCol } — filter embed rows where embedCol === item[cardCol]
+        var fb = ei.config.filterBy; // { embedCol: cardCol } or { embedCol: { matchList: "listName" } }
         return ei.rows.filter(function(r) {
-          for (var k in fb) { if (r[k] !== item[fb[k]]) return false; }
+          for (var k in fb) { var v = fb[k]; if (v && typeof v === 'object' && v.matchList) { if (!window._listsCache || !window._listsCache[v.matchList] || window._listsCache[v.matchList].indexOf(r[k]) < 0) return false; } else if (r[k] !== item[v]) return false; }
           return true;
         });
       },
@@ -763,7 +770,7 @@ function createVueApp() {
         if (!allowed) return true;
         return withMirrors(this.embedSources(type, name)).every(function(t) { return allowed.indexOf(t) >= 0; });
       },
-      embedHasArchive: function(type, name) { return this.embedSources(type, name).some(function(s) { return SCHEMA[s] && SCHEMA[s].archivePartition; }); },
+      embedHasArchive: function(type, name) { return this.embedSources(type, name).some(function(s) { return SCHEMA[s] && SCHEMA[s].archivable; }); },
       embedAddRow: function(type, name) {
         var self = this, id = this.generateId();
         withMirrors([this.embedSources(type, name)[0]]).forEach(function(src) {
@@ -771,7 +778,7 @@ function createVueApp() {
           getColumns(src).forEach(function(c) { if (!row[c]) row[c] = ''; });
           if (!self.dataCache[src]) self.dataCache[src] = [];
           self.dataCache[src].push(row);
-          backend.putRow(self.tableMap[src], row, SCHEMA[src] && SCHEMA[src].partition);
+          backend.putRow(self.tableMap[src], row, 'active');
         });
         this.notify('Row added');
       },
@@ -803,7 +810,7 @@ function createVueApp() {
             view.sources.forEach(function(src) { cache[src] = self.dataCache[aKey(src)] || []; });
           }
           var rows = buildRows(view, cache);
-          rows = aggregateRows(view, rows);
+          rows = resolveComputed(aggregateRows(view, rows), view.columns);
           self.currentData = rows;
           // Load embed table data if not cached
           var allowed = self.userAllowedTables;
@@ -814,7 +821,7 @@ function createVueApp() {
             embedSources.forEach(function(tbl) {
               if (allowed && allowed.indexOf(tbl) < 0) return;
               if (tbl && !self.dataCache[tbl]) {
-                var embedTab = SCHEMA[tbl] && SCHEMA[tbl].partition;
+                var embedTab = 'active';
                 backend.getTableData(self.tableMap[tbl], embedTab).then(function(result) {
                   self.dataCache[tbl] = parseTableResult(result).rows;
                 });
@@ -826,7 +833,7 @@ function createVueApp() {
           var tableDef = SCHEMA[self.currentTable];
           if (!tableDef) return;
           if (!self.dataCache[key]) {
-            var tab = self.viewingArchive ? tableDef.archivePartition : tableDef.partition;
+            var tab = self.viewingArchive ? 'archive' : 'active';
             backend.getTableData(self.tableMap[self.currentTable], tab).then(function(result) {
               self.dataCache[key] = parseTableResult(result).rows;
               var rows = self.dataCache[key];
@@ -930,7 +937,7 @@ function createVueApp() {
           var cacheKey = self.viewingArchive ? aKey(src) : src;
           if (!self.dataCache[cacheKey]) self.dataCache[cacheKey] = [];
           self.dataCache[cacheKey].push(row);
-          var tab = self.viewingArchive ? (SCHEMA[src] && SCHEMA[src].archivePartition) : (SCHEMA[src] && SCHEMA[src].partition);
+          var tab = self.viewingArchive ? 'archive' : 'active';
           backend.putRow(self.tableMap[src], row, tab);
           if (src === primary) primaryRow = row;
         });
@@ -972,7 +979,7 @@ function createVueApp() {
           self.dataCache[aKey(source)] = cached.filter(function(r) { return r.id !== item.id; });
           if (!self.dataCache[source]) self.dataCache[source] = [];
           self.dataCache[source].push(srcRow);
-          backend.moveRow(self.tableMap[source], srcRow, schema.archivePartition, schema.partition || 'active');
+          backend.moveRow(self.tableMap[source], srcRow, 'archive', 'active');
         });
         self.currentData = self.currentData.filter(function(r) { return r.id !== item.id; });
         self.notify('Restored');
@@ -1018,6 +1025,7 @@ function createVueApp() {
       displayValue: function(col, val) {
         if (!val) return '';
         var listName = this.colIsList(col);
+        if (!listName) { var v = VIEWS[this.currentTable]; if (v && v.groupBy && typeof v.groupBy === 'object' && v.groupBy.column === col && v.groupBy.from) { for (var i = 0; i < v.groupBy.from.length && !listName; i++) listName = this.colIsList(v.groupBy.from[i]); } }
         if (listName) {
           var key = 'list.' + listName + '.' + val;
           var translated = this.t(key);
@@ -1167,7 +1175,7 @@ function createVueApp() {
           if (row[parentCol] === oldParent) {
             row[parentCol] = newParent;
             row.updated_at = new Date().toISOString();
-            backend.putRow(self.tableMap[table], row, SCHEMA[table].partition);
+            backend.putRow(self.tableMap[table], row, 'active');
           }
         });
         self.notify('Renamed');
@@ -1180,7 +1188,7 @@ function createVueApp() {
         var parentCol = self.refParentCol;
         var toDelete = (self.dataCache[table] || []).filter(function(r) { return r[parentCol] === parent; });
         self.dataCache[table] = (self.dataCache[table] || []).filter(function(r) { return r[parentCol] !== parent; });
-        toDelete.forEach(function(row) { backend.deleteRow(self.tableMap[table], row.id, SCHEMA[table].partition); });
+        toDelete.forEach(function(row) { backend.deleteRow(self.tableMap[table], row.id, 'active'); });
         self.pendingDelete = null;
         self.notify('Deleted');
       },
@@ -1191,7 +1199,7 @@ function createVueApp() {
         getColumns(table).forEach(function(c) { if (!row[c]) row[c] = ''; });
         if (!self.dataCache[table]) self.dataCache[table] = [];
         self.dataCache[table].push(row);
-        backend.putRow(self.tableMap[table], row, SCHEMA[table].partition);
+        backend.putRow(self.tableMap[table], row, 'active');
         self.notify('Group added');
         self.$nextTick(function() {
           var els = document.querySelectorAll('.ref-hierarchy .v-list-group');
@@ -1210,7 +1218,7 @@ function createVueApp() {
         row[self.refParentCol] = parentValue;
         if (!self.dataCache[table]) self.dataCache[table] = [];
         self.dataCache[table].push(row);
-        backend.putRow(self.tableMap[table], row, SCHEMA[table].partition);
+        backend.putRow(self.tableMap[table], row, 'active');
         self.notify('Item added');
         self.$nextTick(function() {
           var cells = document.querySelectorAll('.ref-hierarchy .editable-cell.ref-child');
@@ -1226,7 +1234,7 @@ function createVueApp() {
         var timerKey = refTable + ':' + item.id;
         clearTimeout(self.saveTimers[timerKey]);
         self.saveTimers[timerKey] = setTimeout(function() {
-          backend.putRow(self.tableMap[refTable], item, (SCHEMA[refTable] && SCHEMA[refTable].partition) || undefined);
+          backend.putRow(self.tableMap[refTable], item, 'active');
           self.notify('Saved');
         }, 500);
       },
@@ -1237,7 +1245,7 @@ function createVueApp() {
         getColumns(table).forEach(function(c) { if (!row[c]) row[c] = ''; });
         if (!self.dataCache[table]) self.dataCache[table] = [];
         self.dataCache[table].push(row);
-        backend.putRow(self.tableMap[table], row, SCHEMA[table].partition);
+        backend.putRow(self.tableMap[table], row, 'active');
         self.notify('Row added');
         self.focusLastEditable('.v-main .v-card .v-table tbody tr:last-child .editable-cell');
       },
@@ -1246,7 +1254,7 @@ function createVueApp() {
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
         var table = this.currentRefTable;
         this.dataCache[table] = (this.dataCache[table] || []).filter(function(r) { return r.id !== item.id; });
-        backend.deleteRow(this.tableMap[table], item.id, SCHEMA[table].partition);
+        backend.deleteRow(this.tableMap[table], item.id, 'active');
         this.notify('Deleted');
       },
 
@@ -1371,7 +1379,7 @@ function createVueApp() {
           for (var mc in SCHEMA[mt].columns) { var md = SCHEMA[mt].columns[mc]; if (md && typeof md === 'object' && md.syncFrom === sourceTable) synced.push(mc); }
           if (!synced.length) continue;
           var mKey = self.viewingArchive ? aKey(mt) : mt;
-          var mTab = self.viewingArchive ? SCHEMA[mt].archivePartition : SCHEMA[mt].partition;
+          var mTab = self.viewingArchive ? 'archive' : 'active';
           var mr = (self.dataCache[mKey] || []).find(function(r) { return r.id === id; });
           if (mr) {
             var mch = false;
@@ -1385,7 +1393,7 @@ function createVueApp() {
         for (var rc in (srcCols || {})) { var rdef = srcCols[rc]; if (rdef && typeof rdef === 'object' && rdef.syncFrom) { (upTargets[rdef.syncFrom] = upTargets[rdef.syncFrom] || []).push(rc); } }
         Object.keys(upTargets).forEach(function(st) {
           var stKey = self.viewingArchive ? aKey(st) : st;
-          var stTab = self.viewingArchive ? (SCHEMA[st] && SCHEMA[st].archivePartition) : (SCHEMA[st] && SCHEMA[st].partition);
+          var stTab = self.viewingArchive ? 'archive' : 'active';
           var stRow = (self.dataCache[stKey] || []).find(function(r) { return r.id === id; });
           if (stRow) {
             var ch = false;
@@ -1530,13 +1538,29 @@ function createVueApp() {
           });
         });
         chain.then(function() {
-          var json = JSON.stringify({ schema: self.schemaData, tables: data, lists: self.listsCache, languages: self.languages, translations: translations, exportedAt: new Date().toISOString() }, null, 2);
-          var blob = new Blob([json], { type: 'application/json' });
-          var a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = 'drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json';
-          a.click();
-          self.notify('Exported');
+          return Promise.resolve(backend.getTableData('_pages', 'active')).then(function(d) {
+            var pages = (d && d.rows || []).filter(function(r) { return r.id && r.markdown; });
+            // Strip runtime-injected properties (implicit id, legacy partition fields)
+            var schema = JSON.parse(JSON.stringify(self.schemaData));
+            if (schema.tables) Object.keys(schema.tables).forEach(function(t) { var c = schema.tables[t].columns; if (c) { delete c.id; } delete schema.tables[t].partition; delete schema.tables[t].archivePartition; });
+            var json = JSON.stringify({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations, pages: pages.length ? pages : undefined, exportedAt: new Date().toISOString() }, null, 2);
+            var blob = new Blob([json], { type: 'application/json' });
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json';
+            a.click();
+            self.notify('Exported');
+          }).catch(function() {
+            var schema = JSON.parse(JSON.stringify(self.schemaData));
+            if (schema.tables) Object.keys(schema.tables).forEach(function(t) { var c = schema.tables[t].columns; if (c) { delete c.id; } delete schema.tables[t].partition; delete schema.tables[t].archivePartition; });
+            var json = JSON.stringify({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations, exportedAt: new Date().toISOString() }, null, 2);
+            var blob = new Blob([json], { type: 'application/json' });
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json';
+            a.click();
+            self.notify('Exported');
+          });
         });
       },
       backupToDrive: function() {
@@ -1607,9 +1631,7 @@ function createVueApp() {
               var parts = key.split('__');
               var table = parts[0];
               // bare key = active partition; any suffixed key = the (single) archive partition
-              var tab = parts.length > 1
-                ? ((SCHEMA[table] && SCHEMA[table].archivePartition) || parts[1])
-                : ((SCHEMA[table] && SCHEMA[table].partition) || 'active');
+              var tab = parts.length > 1 ? 'archive' : 'active';
               rows.forEach(function(row) {
                 chain = chain.then(function() {
                   // Delete first to force CRDT change detection on re-import
@@ -1636,8 +1658,16 @@ function createVueApp() {
                 });
               });
             }
+            if (imported.pages && Array.isArray(imported.pages)) {
+              imported.pages.forEach(function(page) {
+                if (page.id && page.markdown) {
+                  chain = chain.then(function() {
+                    return backend.putRow('_pages', { id: page.id, markdown: page.markdown }, 'active');
+                  });
+                }
+              });
+            }
             chain.then(function() {
-              // Re-seed locked list values from new schema before reload
               var locked = self.lockedListValues();
               var needSave = false;
               for (var ln in locked) {
@@ -1693,7 +1723,7 @@ function createVueApp() {
         var chain = Promise.resolve();
         sources.forEach(function(src) {
           chain = chain.then(function() {
-            return backend.getTableData(self.tableMap[src], SCHEMA[src].partition).then(function(r) {
+            return backend.getTableData(self.tableMap[src], 'active').then(function(r) {
               self.dataCache[src] = (r && r.rows) ? r.rows : [];
             });
           });
@@ -1716,13 +1746,13 @@ function createVueApp() {
       getSource: function(item, ownerId) { ownerId = ownerId || this.currentTable; if (item._source) return item._source; var v = VIEWS[ownerId]; return v ? v.sources[0] : ownerId; },
 
       getTab: function(source) {
-        return this.viewingArchive ? (SCHEMA[source] && SCHEMA[source].archivePartition) : (SCHEMA[source] && SCHEMA[source].partition);
+        return this.viewingArchive ? 'archive' : 'active';
       },
 
       _deleteFromSources: function(sources, itemId, fromArchive) {
         var self = this;
         sources.forEach(function(src) {
-          var tab = fromArchive ? (SCHEMA[src] && SCHEMA[src].archivePartition) : (SCHEMA[src] && SCHEMA[src].partition);
+          var tab = fromArchive ? 'archive' : 'active';
           var key = fromArchive ? aKey(src) : src;
           self.dataCache[key] = (self.dataCache[key] || []).filter(function(r) { return r.id !== itemId; });
           backend.deleteRow(self.tableMap[src], itemId, tab);
@@ -1734,14 +1764,14 @@ function createVueApp() {
         var self = this;
         sources.forEach(function(source) {
           var schema = SCHEMA[source];
-          if (!schema || !schema.archivePartition) return;
+          if (!schema || !schema.archivable) return;
           var cached = self.dataCache[source] || [];
           var srcRow = cached.find(function(r) { return r.id === itemId; });
           if (!srcRow) return;
           self.dataCache[source] = cached.filter(function(r) { return r.id !== itemId; });
           if (!self.dataCache[aKey(source)]) self.dataCache[aKey(source)] = [];
           self.dataCache[aKey(source)].push(srcRow);
-          backend.moveRow(self.tableMap[source], srcRow, schema.partition, schema.archivePartition);
+          backend.moveRow(self.tableMap[source], srcRow, 'active', 'archive');
         });
         this.notify('Archived');
       },
