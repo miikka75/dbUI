@@ -15,8 +15,8 @@ backend = {
     var needed = [];
     tables.forEach(function(t) {
       var def = schema[t];
-      needed.push(t + '__' + ((def && def.partition) || 'active'));
-      if (def && def.archivePartition) needed.push(t + '__' + def.archivePartition);
+      needed.push(t + '__active');
+      if (def && def.archivable) needed.push(t + '__archive');
     });
     return (window._crdtReady || Promise.resolve()).then(function() {
       return StorageIDB.ensureStores(needed);
