@@ -44,7 +44,8 @@ function _normalizeSchema(parsed) {
   else _flattenViews(_viewsNav);
   window._columnOrders = {};
   Object.keys(SCHEMA).forEach(function(t) {
-    if (typeof normArchive === 'function') normArchive(SCHEMA[t]);
+    // Legacy compat: convert archivePartition/partition to archivable flag
+    if (SCHEMA[t].archivePartition || SCHEMA[t].partition) { if (SCHEMA[t].archivePartition) SCHEMA[t].archivable = true; delete SCHEMA[t].partition; delete SCHEMA[t].archivePartition; }
     if (Array.isArray(SCHEMA[t].columns)) {
       var colMap = {}; window._columnOrders[t] = [];
       SCHEMA[t].columns.forEach(function(c) { if (!c.name) return; window._columnOrders[t].push(c.name); var def = Object.assign({}, c); delete def.name; colMap[c.name] = Object.keys(def).length ? def : 'text'; });
@@ -82,9 +83,6 @@ function isViewEmbed(c) { return typeof c === 'object' && typeof c.view === 'str
 function isText(c) { return typeof c === 'object' && c.text && !c.name && !c.sources; }
 // dataCache/export key for a table's archive partition (fixed 'archive')
 function aKey(table) { return table + '__archive'; }
-// Derive fixed internal partitions from the `archivable` flag (active is always 'active';
-// archive is 'archive' when archivable). Legacy archivePartition values also enable archive.
-function normArchive(t) { if (!t) return; t.partition = 'active'; t.archivePartition = (t.archivable || t.archivePartition) ? 'archive' : null; }
 // Full mirror cluster: all tables sharing a logical row via syncFrom, both directions, transitively
 // (a detail's master, a master's details, and their other details).
 function withMirrors(base) {
@@ -103,11 +101,11 @@ function withMirrors(base) {
 function matchFilter(r, f) {
   if (f.$or) return f.$or.some(function(s) { return matchFilter(r, s); });
   if (f.$and) return f.$and.every(function(s) { return matchFilter(r, s); });
-  for (var k in f) { if (k[0] === '$') continue; var v = f[k]; if (Array.isArray(v) ? v.indexOf(r[k]) < 0 : r[k] !== v) return false; }
+  for (var k in f) { if (k[0] === '$') continue; var v = f[k]; if (v && typeof v === 'object' && !Array.isArray(v) && v.matchList) { if (!window._listsCache || !window._listsCache[v.matchList] || window._listsCache[v.matchList].indexOf(r[k]) < 0) return false; } else if (v && typeof v === 'object' && !Array.isArray(v) && v.notMatchList) { if (window._listsCache && window._listsCache[v.notMatchList] && window._listsCache[v.notMatchList].indexOf(r[k]) >= 0) return false; } else if (Array.isArray(v) ? v.indexOf(r[k]) < 0 : r[k] !== v) return false; }
   return true;
 }
 function filterRows(rows, filter) { if (!filter) return rows; return rows.filter(function(r) { return matchFilter(r, filter); }); }
-function sortByCol(rows, col) { return col ? rows.slice().sort(function(a, b) { return String(a[col] || '').localeCompare(String(b[col] || '')); }) : rows; }
+function sortByCol(rows, col, view) { if (!col) return rows; var listOrder = null; var ln = getColumnList(null, col); if (!ln && view && view.groupBy && typeof view.groupBy === 'object' && view.groupBy.column === col && view.groupBy.from) { for (var i = 0; i < view.groupBy.from.length && !ln; i++) ln = getColumnList(null, view.groupBy.from[i]); } if (ln && window._listsCache && window._listsCache[ln]) { listOrder = {}; window._listsCache[ln].forEach(function(v, i) { listOrder[v] = i; }); } return rows.slice().sort(function(a, b) { if (listOrder) { var ia = listOrder[a[col]] !== undefined ? listOrder[a[col]] : 9999, ib = listOrder[b[col]] !== undefined ? listOrder[b[col]] : 9999; return ia - ib; } var va = String(a[col] || ''), vb = String(b[col] || ''); if (!va && vb) return 1; if (va && !vb) return -1; return va.localeCompare(vb); }); }
 // Tiny markdown -> HTML for pages (headings, bold/italic, lists, links, paragraphs). Embed tokens are split out before this runs.
 function mdToHtml(md) {
   var esc = function(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
@@ -144,13 +142,14 @@ function aggregateRows(view, rows) {
   var keysFrom = byObj ? view.groupBy.from : view.groupBy;
   var withRole = view.collectWith; // e.g. "role" — if set, collected values include the source column name
   var groups = {};
+  var groupFilter = byObj ? view.groupBy.filter : null;
   rows.forEach(function(r) {
     keysFrom.forEach(function(k) {
       var key = r[k];
-      if (key && r[view.collect]) {
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(withRole ? { date: r[view.collect], role: k } : r[view.collect]);
-      }
+      if (!key || !r[view.collect]) return;
+      if (groupFilter) { var tmp = {}; tmp[keyCol] = key; if (!matchFilter(tmp, groupFilter)) return; }
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(withRole ? { date: r[view.collect], role: k } : r[view.collect]);
     });
   });
   var valCols = (view.columns || []).filter(function(c) { return c !== keyCol; });
@@ -165,6 +164,32 @@ function aggregateRows(view, rows) {
     return row;
   });
 }
+function resolveComputed(rows, columns) {
+  if (!columns || !window._listsCache) return rows;
+  var defs = [];
+  (Array.isArray(columns) ? columns : []).forEach(function(c) {
+    if (c && typeof c === 'object' && c.name && c.computed) defs.push(c);
+  });
+  if (!defs.length) return rows;
+  rows.forEach(function(r) {
+    defs.forEach(function(d) {
+      var comp = d.computed, ml = comp.matchList;
+      if (!ml) return;
+      if (typeof ml === 'string') {
+        // String matchList: collect values from fromColumns that are in the named list
+        var list = window._listsCache[ml] || [];
+        var vals = (comp.fromColumns || []).map(function(c) { return r[c]; }).filter(function(v) { return v && list.indexOf(v) >= 0; });
+        r[d.name] = vals.join(', ');
+      } else if (typeof ml === 'object') {
+        // Object matchList: categorize fromColumn value by which list it belongs to
+        var src = r[comp.fromColumn];
+        r[d.name] = '';
+        for (var ln in ml) { if (window._listsCache[ln] && window._listsCache[ln].indexOf(src) >= 0) { r[d.name] = ml[ln]; break; } }
+      }
+    });
+  });
+  return rows;
+}
 function colCondition(c) { if (!c || typeof c !== 'object' || c.name || c.sources || c.view || c.text) return null; var v = c[Object.keys(c)[0]]; return (v && typeof v === 'object') ? v : null; }
 function toDateStr(v) { if (!v) return ''; var s = String(v); if (s.length === 10) return s; var d = new Date(s); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 function parseTableResult(r) { if (!r) return { headers: [], rows: [] }; if (typeof r === 'string') return JSON.parse(r); return r; }
@@ -178,7 +203,7 @@ function validateSchema() {
     (view.sources || []).forEach(function(s) { if (!SCHEMA[s]) errors.push('View "' + v + '" references non-existent table "' + s + '"'); });
     // Check columns exist in at least one source (skip aggregate views)
     if (!view.groupBy) (view.columns || []).forEach(function(c) {
-      if (isEmbed(c) || isViewEmbed(c) || isText(c)) return;
+      if (isEmbed(c) || isViewEmbed(c) || isText(c) || (c && typeof c === 'object' && c.computed)) return;
       var col = colName(c);
       var found = (view.sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].columns && SCHEMA[s].columns[col]; });
       if (!found) errors.push('View "' + v + '": column "' + col + '" not found in sources [' + (view.sources || []).join(', ') + ']');
