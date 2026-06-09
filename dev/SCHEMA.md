@@ -57,8 +57,19 @@ A view's `columns` may contain, besides plain column names:
 A `filter` (on a view, an inline/named-view embed, or a conditional column) matches rows:
 - **Flat object** = AND of equality: `{ "status": "open", "city": "X" }` -> `status==open AND city==X`.
 - **Array value** = IN (OR on one column): `{ "status": ["open", "in_progress"] }`.
+- **`matchList` (dynamic)** = value must be in a named list: `{ "speaker": { "matchList": "guests" } }`.
+  The list is resolved at runtime from the Lookup tab — adding/removing items in the list
+  immediately changes which rows pass the filter. Use for filters that should stay in sync
+  with user-editable lists.
 - **`$or` / `$and`** = explicit logical groups, nestable:
   `{ "$and": [ { "city": "X" }, { "$or": [ {"status":"open"}, {"status":"in_progress"} ] } ] }`.
+
+**Static vs Dynamic filtering:**
+| Syntax | When to use |
+|--------|-------------|
+| `"col": "value"` | Fixed filter value known at schema design time |
+| `"col": ["a","b","c"]` | Fixed set of values known at schema design time |
+| `"col": { "matchList": "listName" }` | Filter should track a user-editable list (Lookup tab) |
 
 ### aggregate views (groupBy + collect)
 A view with `groupBy` + `collect` groups rows by person/key and collects a column's values:
@@ -83,6 +94,23 @@ A `{view}` column embed with `filterBy` dynamically filters embed rows per card:
 - Each card shows only rows where `task.owner === card_row.name`.
 - Only works in `card`/`list` layout (one card per row hosts the per-row embed).
 - Combine with `hideEmpty: true` to hide the embed when a card has no matching rows.
+- **`matchList` in filterBy**: `{ "speaker": { "matchList": "guests" } }` — show embed rows
+  where `speaker` value is in the named list (same syntax as in `filter`).
+
+### computed columns
+A column with `computed` derives its value from other columns at render time (not stored):
+```json
+{ "name": "visitors", "computed": { "fromColumns": ["puhe1","puhe2","puhe3"], "matchList": "guests" } }
+```
+- **Collect from list** (`matchList` as string): gathers values from `fromColumns` that exist
+  in the named list, joins with ", ". Output is empty if no matches.
+- **Categorize by list** (`matchList` as object): checks which list contains the `fromColumn`
+  value, outputs the mapped label:
+  ```json
+  { "name": "type", "computed": { "fromColumn": "person", "matchList": { "members": "Internal", "guests": "External" } } }
+  ```
+- Computed columns are read-only (no cell editor renders for them).
+- They appear in the view's visible columns and in card/table layout.
 
 ## markdown (documents)
 A view with a `markdown` field renders as a **document** instead of a data grid:
