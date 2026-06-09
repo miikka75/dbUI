@@ -200,7 +200,7 @@
             <v-list density="compact">
               <v-list-item v-for="item in sortedData" :key="item.id" class="px-2">
                 <template v-slot:default>
-                  <span v-for="(col, i) in visibleCols" :key="col" style="font-size:0.85rem">{{ item[col] || '' }}<span v-if="i < visibleCols.length - 1" style="opacity:0.3; margin:0 6px">·</span></span>
+                  <span v-for="(col, i) in visibleCols" :key="col" style="font-size:0.85rem">{{ displayValue(col, item[col]) }}<span v-if="i < visibleCols.length - 1" style="opacity:0.3; margin:0 6px">·</span></span>
                 </template>
                 <template v-slot:append>
                   <v-btn icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>
@@ -220,7 +220,7 @@
                 <div style="flex:1">
                   <div v-if="visibleCols.length" class="d-flex align-center mb-1">
                     <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + visibleCols[0]) || visibleCols[0] }}</span>
-                    <span style="opacity:0.8">{{ item[visibleCols[0]] || '' }}</span>
+                    <span style="opacity:0.8">{{ displayValue(visibleCols[0], item[visibleCols[0]]) }}</span>
                   </div>
                 </div>
                 <v-icon v-if="currentConfig.collapsed" size="small">{{ expandedCard === item.id || (!currentConfig.collapsed) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
