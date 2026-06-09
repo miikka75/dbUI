@@ -8,21 +8,7 @@
   <div id="app-root"></div>
   <script>
     async function loadApp() {
-      // URL params override: ?mode=firebase&config=BASE64&folder=ID&clientId=OAUTH_CLIENT_ID
-      var params = new URLSearchParams(location.search);
-      if (params.get('mode')) { localStorage.setItem('app_mode', params.get('mode')); }
-      if (params.get('folder')) { localStorage.setItem('app_folder', params.get('folder')); }
-      if (params.get('clientId')) { localStorage.setItem('oauth_client_id', params.get('clientId')); }
-      if (params.get('config')) {
-        try { var c = JSON.parse(atob(params.get('config'))); localStorage.setItem('firebase_config', JSON.stringify(c)); } catch(e) {}
-      } else if (params.get('k') && params.get('d') && params.get('p')) {
-        // Short Firebase share link: ?mode=firebase&k=apiKey&d=authDomain&p=projectId
-        localStorage.setItem('firebase_config', JSON.stringify({ apiKey: params.get('k'), authDomain: params.get('d'), projectId: params.get('p') }));
-      }
-      if (params.toString()) { history.replaceState(null, '', location.pathname); } // clean URL after storing
-
-      // Detect backend
-      var backendFile;
+      // Backend mode from localStorage only (no URL params)
       var mode = localStorage.getItem('app_mode');
       if (mode === 'sheets') { backendFile = '/backend-oauth.html'; }
       else if (mode === 'crdt') { backendFile = '/backend-crdt.html'; }
