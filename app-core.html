@@ -85,6 +85,7 @@ function createVueApp() {
       viewingArchive: false,
       drawer: true,
       rail: false,
+      drawerOpen: false,
       navLayoutOverride: localStorage.getItem('app_nav_layout') || null,
       mobile: window.innerWidth < 768,
       windowWidth: window.innerWidth,
@@ -122,6 +123,18 @@ function createVueApp() {
         var navItems = (navCfg && Array.isArray(navCfg.items)) ? navCfg.items : [];
         return buildNavTabs(navItems, self.t.bind(self), canAccess, { isAdmin: self.isAdmin, hasLookup: self.refTables.length || Object.keys(self.visibleLists).length });
       },
+      bottomNavTabs: function() {
+        // Schema can define explicit bottom nav items: nav.bottomNav = ["view1", "view2", ...]
+        var navCfg = this.navConfig;
+        if (navCfg && Array.isArray(navCfg.bottomNav)) {
+          var all = this.sidebarTabs; var flat = []; all.forEach(function(t) { if (t.divider) return; if (t.children) t.children.forEach(function(c) { flat.push(c); }); else flat.push(t); });
+          return navCfg.bottomNav.map(function(id) { return flat.find(function(t) { return t.id === id; }); }).filter(Boolean);
+        }
+        // Fallback: first 5 flattened items
+        var tabs = []; this.sidebarTabs.forEach(function(t) { if (t.divider) return; if (t.children) t.children.forEach(function(c) { tabs.push(c); }); else tabs.push(t); });
+        return tabs.slice(0, 5);
+      },
+      bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
       isDataView: function() {
         var v = VIEWS[this.currentTable];
         return this.currentTable && this.currentTable[0] !== '_' && !(v && typeof v.markdown === 'string') && (v || SCHEMA[this.currentTable]);
@@ -689,6 +702,7 @@ function createVueApp() {
       // Navigation
       selectTab: function(id) {
         this.currentTable = id;
+        if (this.mobile) this.drawerOpen = false;
         this.editingLang = null;
         this.currentRefTable = null;
         this.viewingArchive = false;
@@ -1815,7 +1829,7 @@ function createVueApp() {
 
       printView: function() {
         var self = this, pe = this._pe, cols = this.visibleCols;
-        var title = this.t('tab.' + this.currentTable) || this.currentTable;
+        var title = this.t((this.currentConfig.sources ? 'view.' : 'tab.') + this.currentTable) || this.currentTable;
         var body = '<h2>' + title + '</h2>';
         if (this.useCardLayout) {
           this.sortedData.forEach(function(row) { body += self._printCardHtml(cols, row); });
