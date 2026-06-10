@@ -125,7 +125,7 @@
 
     <!-- App Bar -->
     <v-app-bar v-if="!loading" density="compact" elevation="1">
-      <v-app-bar-nav-icon @click="rail = !rail"></v-app-bar-nav-icon>
+      <v-app-bar-nav-icon @click="mobile ? (drawerOpen = !drawerOpen) : (rail = !rail)"></v-app-bar-nav-icon>
       <v-app-bar-title style="flex:0 1 auto" class="mr-2">{{ appTitle }}</v-app-bar-title>
       <!-- Inline tabs after the title when nav.layout === 'tabs' (single-row bar, no extension). rail => icon-only (hover expands text). -->
       <v-tabs v-if="navLayout === 'tabs'" :model-value="currentTable" density="compact" show-arrows class="nav-tabs" :class="{ 'nav-icons-only': rail }" style="flex:1 1 auto; min-width:0">
@@ -148,7 +148,7 @@
     </v-app-bar>
 
     <!-- Sidebar -->
-    <v-navigation-drawer v-if="!loading && navLayout !== 'tabs'" permanent :rail="rail" :expand-on-hover="rail">
+    <v-navigation-drawer v-if="!loading && navLayout !== 'tabs'" :permanent="!mobile" :temporary="mobile" :rail="rail && !mobile" :expand-on-hover="rail && !mobile" :model-value="mobile ? drawerOpen : true" @update:model-value="drawerOpen = $event">
       <v-list density="compact" nav>
         <template v-for="(tab, tidx) in sidebarTabs" :key="tab.id || ('d'+tidx)">
           <div v-if="tab.divider" style="border-top:1px solid currentColor; opacity:0.2; margin:8px 0"></div>
@@ -164,7 +164,7 @@
     </v-navigation-drawer>
 
     <!-- Main Content -->
-    <v-main>
+    <v-main :style="mobile ? 'padding-bottom: 64px' : ''">
       <v-container fluid class="pa-4">
         <!-- Archive Toggle -->
         <v-tabs v-if="hasArchive" v-model="viewingArchive" density="compact" class="mb-3">
@@ -358,7 +358,7 @@
             </tbody>
             </template>
           </v-table>
-          <v-btn v-if="canMutateRows" variant="text" prepend-icon="mdi-plus" @click="addRow" class="ma-2">{{ t('btn.add') }} {{ t('tab.' + currentTable) }}</v-btn>
+          <v-btn v-if="canMutateRows && !mobile" variant="text" prepend-icon="mdi-plus" @click="addRow" class="ma-2">{{ t('btn.add') }} {{ t((currentConfig.sources ? 'view.' : 'tab.') + currentTable) }}</v-btn>
           <!-- Text entries and embedded rows -->
           <template v-for="(ei, eidx) in embedItems" :key="'bemb'+eidx">
           <div v-if="!ei.config.afterColumn && (ei.isDoc ? ei.show : ei.rows.length)" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
@@ -555,6 +555,21 @@
         </v-card>
       </v-container>
     </v-main>
+
+    <!-- FAB: floating add button on mobile -->
+    <v-btn v-if="mobile && canMutateRows && isDataView" icon="mdi-plus" color="primary" size="large" style="position:fixed; bottom:72px; right:16px; z-index:100" elevation="4" @click="addRow"></v-btn>
+
+    <!-- Bottom navigation for mobile -->
+    <v-bottom-navigation v-if="mobile && !loading && navLayout !== 'tabs'" :model-value="currentTable" @update:model-value="selectTab($event)" grow>
+      <v-btn v-for="tab in bottomNavVisible" :key="tab.id" :value="tab.id" size="small">
+        <v-icon>{{ tab.icon || 'mdi-view-list' }}</v-icon>
+        <span style="font-size:0.6rem; max-width:64px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ tab.title }}</span>
+      </v-btn>
+      <v-btn v-if="bottomNavTabs.length > 5" size="small" @click.stop="drawerOpen = true">
+        <v-icon>mdi-dots-horizontal</v-icon>
+        <span style="font-size:0.6rem">{{ t('btn.more') || 'More' }}</span>
+      </v-btn>
+    </v-bottom-navigation>
 
     <!-- Snackbar -->
     <v-snackbar v-model="snackbar" :timeout="2000" location="bottom">{{ snackText }}</v-snackbar>
