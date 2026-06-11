@@ -10,6 +10,7 @@
     async function loadApp() {
       // Backend mode from localStorage only (no URL params)
       var mode = localStorage.getItem('app_mode');
+      var backendFile;
       if (mode === 'sheets') { backendFile = '/backend-oauth.html'; }
       else if (mode === 'crdt') { backendFile = '/backend-crdt.html'; }
       else if (mode === 'crdt-local') { backendFile = '/backend-crdt-local.html'; }
