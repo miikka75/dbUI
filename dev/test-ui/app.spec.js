@@ -1786,3 +1786,78 @@ test.describe('Export/import includes edited page bodies', () => {
     expect(rows2.find(r => r.id === 'all').markdown).toBe('# Edited content\n\n{{self}}');
   });
 });
+
+// Shared-link URL-param path (index.html loadApp): a ?mode=... link persists
+// config to localStorage, then strips the params from the URL via replaceState
+// so a refresh doesn't re-apply / leak them. The param block runs synchronously
+// at the top of loadApp() before any backend fetch.
+test.describe('Shared-link URL params', () => {
+  // Non-firebase branch: restores app_folder + oauth_client_id and boots cleanly
+  // in local mode (mode!=='sheets/crdt/crdt-local/firebase' falls through to the
+  // local dev backend, exactly like the other tests' default setup).
+  test('mode link restores folder/clientId and strips the URL', async ({ page }) => {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCHEMA } });
+    await page.goto('/?mode=local&folder=local&clientId=shared-client-123');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+
+    const ls = await page.evaluate(() => ({
+      mode: localStorage.getItem('app_mode'),
+      folder: localStorage.getItem('app_folder'),
+      clientId: localStorage.getItem('oauth_client_id'),
+    }));
+    expect(ls.mode).toBe('local');
+    expect(ls.folder).toBe('local');
+    expect(ls.clientId).toBe('shared-client-123');
+
+    // Params stripped from the URL after restore.
+    const loc = await page.evaluate(() => ({ search: location.search, pathname: location.pathname }));
+    expect(loc.search).toBe('');
+    expect(loc.pathname).toBe('/');
+  });
+
+  // Firebase branch with discrete k/d/p params. The firebase backend + external
+  // SDK scripts are stubbed empty so the param-restoration contract can be
+  // asserted without a real firebase boot (which can't run in the test env).
+  test('firebase k/d/p link restores firebase_config and strips the URL', async ({ page }) => {
+    await page.route(/gstatic\.com|\/backend-firebase\.html|\/storage-firestore\.html/, r =>
+      r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
+    await page.goto('/?mode=firebase&k=API_KEY_1&d=app.example.com&p=proj-123');
+    await page.waitForFunction(() => localStorage.getItem('app_mode') === 'firebase', { timeout: 6000 });
+
+    const cfg = await page.evaluate(() => JSON.parse(localStorage.getItem('firebase_config') || 'null'));
+    expect(cfg).toEqual({ apiKey: 'API_KEY_1', authDomain: 'app.example.com', projectId: 'proj-123' });
+
+    const loc = await page.evaluate(() => ({ search: location.search, pathname: location.pathname }));
+    expect(loc.search).toBe('');
+    expect(loc.pathname).toBe('/');
+  });
+
+  // Firebase branch with a base64-encoded config blob.
+  test('firebase base64 config link restores firebase_config', async ({ page }) => {
+    await page.route(/gstatic\.com|\/backend-firebase\.html|\/storage-firestore\.html/, r =>
+      r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
+    const config = { apiKey: 'AK2', authDomain: 'b.example.com', projectId: 'p2' };
+    const b64 = Buffer.from(JSON.stringify(config)).toString('base64');
+    await page.goto('/?mode=firebase&config=' + encodeURIComponent(b64));
+    await page.waitForFunction(() => localStorage.getItem('app_mode') === 'firebase', { timeout: 6000 });
+
+    const cfg = await page.evaluate(() => JSON.parse(localStorage.getItem('firebase_config') || 'null'));
+    expect(cfg).toEqual(config);
+  });
+
+  // Guard: with no mode param the restore block is skipped — existing localStorage
+  // is untouched and unrelated query params are left on the URL (not stripped).
+  test('no mode param leaves URL and localStorage untouched', async ({ page }) => {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCHEMA } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/?foo=bar');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+
+    const loc = await page.evaluate(() => location.search);
+    expect(loc).toBe('?foo=bar');
+    const mode = await page.evaluate(() => localStorage.getItem('app_mode'));
+    expect(mode).toBe('local');
+  });
+});
