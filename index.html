@@ -8,7 +8,29 @@
   <div id="app-root"></div>
   <script>
     async function loadApp() {
-      // Backend mode from localStorage only (no URL params)
+      // Shared-link support: persist URL params to localStorage, then read mode.
+      // shareLink generates: ?mode=firebase&k=<apiKey>&d=<authDomain>&p=<projectId>
+      //                  or: ?mode=sheets&folder=<id>&clientId=<id>
+      try {
+        var qp = new URLSearchParams(location.search);
+        var urlMode = qp.get('mode');
+        if (urlMode) {
+          localStorage.setItem('app_mode', urlMode);
+          if (urlMode === 'firebase') {
+            if (qp.get('config')) {
+              try { localStorage.setItem('firebase_config', atob(qp.get('config'))); } catch(e) {}
+            } else if (qp.get('k') && qp.get('d') && qp.get('p')) {
+              localStorage.setItem('firebase_config', JSON.stringify({ apiKey: qp.get('k'), authDomain: qp.get('d'), projectId: qp.get('p') }));
+            }
+          } else {
+            if (qp.get('folder')) localStorage.setItem('app_folder', qp.get('folder'));
+            if (qp.get('clientId')) localStorage.setItem('oauth_client_id', qp.get('clientId'));
+          }
+          // Strip params from the URL so a refresh doesn't re-apply / leak config
+          history.replaceState(null, '', location.origin + location.pathname);
+        }
+      } catch(e) {}
+
       var mode = localStorage.getItem('app_mode');
       var backendFile;
       if (mode === 'sheets') { backendFile = '/backend-oauth.html'; }
