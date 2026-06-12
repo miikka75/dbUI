@@ -204,6 +204,14 @@ test.describe('Print', () => {
     await expect(page.locator('button:has(.mdi-printer)')).toBeVisible();
   });
 
+  test('print button hidden on a view without the printable flag', async ({ page }) => {
+    await ensureAppReady(page);
+    // all_items has no "printable" flag -> printing is opt-in, so no print button
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'all_items' }).first().click();
+    await page.waitForTimeout(200);
+    await expect(page.locator('.v-main .v-card button:has(.mdi-printer)')).toHaveCount(0);
+  });
+
   test('print opens new window', async ({ page, context }) => {
     await ensureAppReady(page);
     await page.locator('button:has(.mdi-plus)').click();
@@ -1156,7 +1164,7 @@ test.describe('Print with doc-view embed', () => {
     tables: { t: { columns: [{ name: 'title', type: 'text' }], partition: 'active' } },
     views: [
       { name: 'doc', markdown: '**Doc**\n\n{{table:t}}' },
-      { name: 'main', sources: ['t'], mode: 'union', layout: 'card', columns: ['title', { view: 'doc', bare: true }] }
+      { name: 'main', sources: ['t'], mode: 'union', layout: 'card', printable: ["view","cards"], columns: ['title', { view: 'doc', bare: true }] }
     ],
     nav: { items: [{ view: 'main' }, { table: 't' }] }
   };
@@ -1269,7 +1277,7 @@ test.describe('Print honors per-column hideEmpty (card)', () => {
   const V3 = {
     defaultLanguage: 'en',
     tables: { t: { columns: [{ name: 'title', type: 'text' }, { name: 'note', type: 'text' }, { name: 'extra', type: 'text' }], partition: 'active' } },
-    views: [{ name: 'main', sources: ['t'], mode: 'union', layout: 'card', hideEmpty: true, columns: ['title', { name: 'note', hideEmpty: false }, 'extra'] }],
+    views: [{ name: 'main', sources: ['t'], mode: 'union', layout: 'card', hideEmpty: true, printable: ["view","cards"], columns: ['title', { name: 'note', hideEmpty: false }, 'extra'] }],
     nav: { items: [{ view: 'main' }, { table: 't' }] }
   };
   test('force-shown empty column prints; default-hidden empty column does not', async ({ page, context }) => {
@@ -1429,7 +1437,7 @@ test.describe('Print inline embed markdown', () => {
   const V3 = {
     defaultLanguage: 'en',
     tables: { t: { columns: [{ name: 'title', type: 'text' }, { name: 'status', type: 'text' }], partition: 'active' } },
-    views: [{ name: 'main', sources: ['t'], mode: 'union', layout: 'card', columns: ['title',
+    views: [{ name: 'main', sources: ['t'], mode: 'union', layout: 'card', printable: ["view","cards"], columns: ['title',
       { sources: ['t'], mode: 'union', filter: { status: 'open' }, columns: ['title'], hideEmpty: true, bare: true, markdown: '**Open Items**\n\n{{self}}\n\n_end of open_' }
     ] }],
     nav: { items: [{ view: 'main' }, { table: 't' }] }
@@ -1859,5 +1867,50 @@ test.describe('Shared-link URL params', () => {
     expect(loc).toBe('?foo=bar');
     const mode = await page.evaluate(() => localStorage.getItem('app_mode'));
     expect(mode).toBe('local');
+  });
+});
+
+test.describe('PWA manifest + apple-icon from remote icon', () => {
+  const http = require('http');
+  const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#e91e63"/></svg>';
+  let iconServer, iconUrl;
+
+  test.beforeAll(async () => {
+    iconServer = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Access-Control-Allow-Origin': '*' });
+      res.end(SVG);
+    });
+    await new Promise(resolve => iconServer.listen(0, '127.0.0.1', resolve));
+    iconUrl = 'http://127.0.0.1:' + iconServer.address().port + '/icon.svg';
+  });
+  test.afterAll(async () => { await new Promise(resolve => iconServer.close(resolve)); });
+
+  test('remote SVG icon is cached then reused as manifest base64 + rasterized apple PNG', async ({ page }) => {
+    test.setTimeout(20000);
+    const S = {
+      defaultLanguage: 'en', icon: iconUrl,
+      tables: { a: { columns: [{ name: 'x' }] } },
+      views: [{ name: 'va', sources: ['a'], columns: ['x'] }],
+      nav: { layout: 'drawer', items: [{ view: 'va' }] }
+    };
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: S } });
+    await page.request.post('/api/initSchema', { data: { schema: S.tables } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 10000 });
+    // Wait for the async favicon fetch to cache the data URI and refresh manifest/apple-icon.
+    await page.waitForFunction(() => {
+      try { var c = JSON.parse(localStorage.getItem('_favicon')); return c && /^http/.test(c.src) && (c.data || '').startsWith('data:'); } catch (e) { return false; }
+    }, { timeout: 6000 });
+    const r = await page.evaluate(async () => {
+      const manLink = document.querySelector('link[rel=manifest]');
+      const man = JSON.parse(await (await fetch(manLink.href)).text());
+      const apple = document.querySelector('link[rel="apple-touch-icon"]');
+      return { manifestIconSrc: man.icons[0].src, manifestIconType: man.icons[0].type, appleHref: apple ? apple.href : null };
+    });
+    expect(r.manifestIconSrc.startsWith('data:image/svg+xml')).toBe(true);
+    expect(r.manifestIconType).toBe('image/svg+xml');
+    expect(r.appleHref && r.appleHref.startsWith('data:image/png')).toBe(true);
   });
 });
