@@ -1,4 +1,4 @@
-# Drive Sync App
+# dbUI App
 
 A schema-driven web app with multiple backend options. No build step — Vue 3 + Vuetify 3 via CDN.
 
