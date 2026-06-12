@@ -1,0 +1,290 @@
+{
+  "defaultLanguage": "en",
+  "tables": {
+    "tasks": {
+      "columns": [
+        {
+          "name": "date",
+          "type": "date",
+          "syncFrom": "notes"
+        },
+        {
+          "name": "title",
+          "type": "text",
+          "syncFrom": "notes"
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "list": "status"
+        },
+        {
+          "name": "assigned_to",
+          "type": "select",
+          "list": "assigned_to",
+          "allowNew": true
+        },
+        {
+          "name": "city",
+          "type": "ref",
+          "table": "cities",
+          "valueCol": "city",
+          "filterBy": {
+            "state": "state"
+          }
+        },
+        {
+          "name": "created_at",
+          "type": "text",
+          "hidden": true
+        },
+        {
+          "name": "updated_at",
+          "type": "text",
+          "hidden": true
+        }
+      ],
+      "archivable": true
+    },
+    "notes": {
+      "printable": ["view", "cards"],
+      "columns": [
+        {
+          "name": "date",
+          "type": "date"
+        },
+        {
+          "name": "title",
+          "type": "text"
+        },
+        {
+          "name": "content",
+          "type": "text"
+        },
+        {
+          "name": "author",
+          "type": "select",
+          "list": "assigned_to",
+          "allowNew": true
+        },
+        {
+          "name": "created_at",
+          "type": "text",
+          "hidden": true
+        },
+        {
+          "name": "updated_at",
+          "type": "text",
+          "hidden": true
+        }
+      ],
+      "archivable": true
+    },
+    "cities": {
+      "columns": [
+        {
+          "name": "state",
+          "type": "text"
+        },
+        {
+          "name": "city",
+          "type": "text"
+        },
+        {
+          "name": "created_at",
+          "type": "text",
+          "hidden": true
+        },
+        {
+          "name": "updated_at",
+          "type": "text",
+          "hidden": true
+        }
+      ],
+      "isLookup": true
+    }
+  },
+  "views": [
+    {
+      "name": "combined",
+      "printable": ["view", "cards"],
+      "sources": [
+        "tasks",
+        "notes"
+      ],
+      "mode": "join",
+      "columns": [
+        {
+          "text": "view.combined.header"
+        },
+        "date",
+        "title",
+        {
+          "filter": {
+            "status": "open"
+          },
+          "columns": [
+            "date",
+            "title",
+            "assigned_to"
+          ],
+          "defaultSort": "date",
+          "sources": [
+            "tasks"
+          ]
+        },
+        {
+          "filter": {
+            "status": "in_progress"
+          },
+          "columns": [
+            "date",
+            "title",
+            "assigned_to"
+          ],
+          "layout": "table",
+          "hideEmpty": true,
+          "sources": [
+            "tasks"
+          ]
+        },
+        "status",
+        "assigned_to",
+        "city",
+        "content",
+        "author",
+        {
+          "text": "view.combined.footer"
+        }
+      ],
+      "defaultSort": "date"
+    },
+    {
+      "name": "attendance",
+      "sources": [
+        "tasks",
+        "notes"
+      ],
+      "mode": "union",
+      "groupBy": {
+        "column": "person",
+        "from": [
+          "assigned_to",
+          "author"
+        ]
+      },
+      "collect": "date",
+      "columns": [
+        "person",
+        "latest",
+        "previous",
+        "3rd"
+      ],
+      "icon": "mdi-account-group"
+    },
+    {
+      "name": "progress_report",
+      "icon": "mdi-progress-clock",
+      "columns": [
+        {
+          "text": "view.progress_report.header"
+        },
+        {
+          "filter": {
+            "status": "open"
+          },
+          "columns": [
+            {
+              "text": "embed.open.title"
+            },
+            "date",
+            "title",
+            "status",
+            "assigned_to",
+            "content",
+            "author"
+          ],
+          "text": "embed.open.label",
+          "sources": [
+            "tasks",
+            "notes"
+          ],
+          "mode": "join"
+        },
+        {
+          "filter": {
+            "status": "in_progress"
+          },
+          "columns": [
+            {
+              "text": "embed.ip.title"
+            },
+            "date",
+            "title",
+            "assigned_to",
+            {
+              "text": "embed.ip.attention"
+            }
+          ],
+          "sources": [
+            "tasks"
+          ]
+        },
+        {
+          "text": "view.progress_report.footer"
+        }
+      ],
+      "readonly": true,
+      "sources": [
+        "tasks"
+      ],
+      "mode": "union"
+    },
+    {
+      "name": "all_items",
+      "sources": [
+        "tasks",
+        "notes"
+      ],
+      "columns": [
+        "date",
+        "title",
+        "status",
+        "assigned_to",
+        "city",
+        "content",
+        "author"
+      ],
+      "mode": "union",
+      "defaultSort": "date",
+      "layout": "table"
+    }
+  ],
+  "nav": {
+    "layout": "drawer",
+    "items": [
+      {
+        "view": "combined",
+        "items": [
+          {
+            "view": "attendance",
+            "icon": "mdi-account-group"
+          },
+          {
+            "view": "progress_report",
+            "icon": "mdi-progress-clock"
+          }
+        ]
+      },
+      {
+        "view": "all_items"
+      },
+      {
+        "table": "tasks"
+      },
+      {
+        "table": "notes"
+      }
+    ]
+  }
+}
