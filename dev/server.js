@@ -122,7 +122,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (!fs.existsSync(filePath)) { res.writeHead(404); return res.end('Not found'); }
   const ext = path.extname(filePath);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
+  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
   res.writeHead(200, { 'Content-Type': types[ext] || 'text/plain' });
   res.end(fs.readFileSync(filePath));
 });
