@@ -86,6 +86,7 @@ function createVueApp() {
       drawer: true,
       rail: false,
       drawerOpen: false,
+      openedGroups: [],
       navLayoutOverride: localStorage.getItem('app_nav_layout') || null,
       mobile: window.innerWidth < 768,
       windowWidth: window.innerWidth,
@@ -110,6 +111,8 @@ function createVueApp() {
     computed: {
       appTitle: function() { return this.t('app.title'); },
       langItems: function() { return this.languages.map(function(l) { return { title: l.name, value: l.code }; }); },
+      // All sidebar group ids (parents with children) — used to expand all on the mobile "More" drawer.
+      allGroupIds: function() { return this.sidebarTabs.filter(function(t) { return t.children; }).map(function(t) { return t.id; }); },
       sidebarTabs: function() {
         var self = this;
         var allowedTables = self.userAllowedTables;
@@ -239,7 +242,7 @@ function createVueApp() {
       embedConfigs: function() {
         var self = this;
         var cfg = this.currentConfig;
-        // Extract inline embeds from columns array (text entries are deprecated -> use pages)
+        // Extract inline embeds from columns array (dead `text` entries are stripped at load)
         var embeds = [];
         var lastCol = null;
         var cols = cfg.columns;
@@ -247,11 +250,9 @@ function createVueApp() {
           cols.forEach(function(c) {
             if (isViewEmbed(c)) { embeds.push(Object.assign({ afterColumn: lastCol }, VIEWS[c.view] || {}, c)); } // named-view embed (its sources/columns + entry overrides)
             else if (isEmbed(c)) { embeds.push(Object.assign({ afterColumn: lastCol }, c)); }
-            else if (!isText(c)) { lastCol = colName(c); }
+            else { lastCol = colName(c); }
           });
         }
-        // Legacy: separate embed array
-        if (cfg.embed) (Array.isArray(cfg.embed) ? cfg.embed : [cfg.embed]).forEach(function(e) { embeds.push(e); });
         // Filter out embeds whose sources include inaccessible tables
         var allowed = self.userAllowedTables;
         if (allowed) {
@@ -269,7 +270,7 @@ function createVueApp() {
             return { config: cfg, isDoc: true, blocks: self.mdBlocks(cfg.markdown, cfg.name), show: self.docHasData(cfg.markdown, cfg.name) };
           }
           var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
-          var columns = raw.filter(function(c) { return !(typeof c === 'object' && c.text && !c.sources); }).map(function(c) { return colName(c); });
+          var columns = raw.map(function(c) { return colName(c); });
           var rows = buildRows(cfg, self.dataCache);
           resolveComputed(rows, cfg.columns || []);
           if (cfg.defaultSort) { rows = sortByCol(rows, cfg.defaultSort); }
@@ -317,7 +318,7 @@ function createVueApp() {
         if (!this.currentTable) return [];
         var view = VIEWS[this.currentTable];
         var cols;
-        if (view) { cols = (view.columns || []).filter(function(c) { return !isEmbed(c) && !isViewEmbed(c) && !isText(c); }).map(function(c) { return colName(c); }); }
+        if (view) { cols = (view.columns || []).filter(function(c) { return !isEmbed(c) && !isViewEmbed(c); }).map(function(c) { return colName(c); }); }
         else {
           cols = getColumns(this.currentTable).filter(function(c) {
             if (c === 'id') return false;
@@ -704,6 +705,8 @@ function createVueApp() {
       },
 
       // Navigation
+      // Mobile bottom-nav "More": open the drawer AND expand every group so all sub-items are visible at once.
+      openMoreDrawer: function() { this.openedGroups = this.allGroupIds.slice(); this.drawerOpen = true; },
       selectTab: function(id) {
         this.currentTable = id;
         if (this.mobile) this.drawerOpen = false;
@@ -757,7 +760,7 @@ function createVueApp() {
         return !any;
       },
       embedCols: function(type, name) {
-        if (type === 'view' && VIEWS[name]) return (VIEWS[name].columns || []).filter(function(c) { return !isEmbed(c) && !isViewEmbed(c) && !isText(c); }).map(colName);
+        if (type === 'view' && VIEWS[name]) return (VIEWS[name].columns || []).filter(function(c) { return !isEmbed(c) && !isViewEmbed(c); }).map(colName);
         if (type === 'table' && SCHEMA[name]) return getColumns(name).filter(function(c) { var d = SCHEMA[name].columns[c]; return c !== 'id' && !(d && typeof d === 'object' && d.hidden); });
         return [];
       },
@@ -1558,9 +1561,9 @@ function createVueApp() {
         chain.then(function() {
           return Promise.resolve(backend.getTableData('_pages', 'active')).then(function(d) {
             var pages = (d && d.rows || []).filter(function(r) { return r.id && r.markdown; });
-            // Strip runtime-injected properties (implicit id, legacy partition fields)
+            // Strip runtime-injected implicit id column
             var schema = JSON.parse(JSON.stringify(self.schemaData));
-            if (schema.tables) Object.keys(schema.tables).forEach(function(t) { var c = schema.tables[t].columns; if (c) { delete c.id; } delete schema.tables[t].partition; delete schema.tables[t].archivePartition; });
+            if (schema.tables) Object.keys(schema.tables).forEach(function(t) { var c = schema.tables[t].columns; if (c) { delete c.id; } });
             var json = JSON.stringify({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations, pages: pages.length ? pages : undefined, exportedAt: new Date().toISOString() }, null, 2);
             var blob = new Blob([json], { type: 'application/json' });
             var a = document.createElement('a');
@@ -1622,14 +1625,12 @@ function createVueApp() {
             if (isRawSchema) { imported = { schema: imported, tables: {} }; }
             // Structural check: block import if the schema has dangling view/table references
             if (imported.schema) {
-              foldPages(imported.schema);
               var refErrs = validateRefs(imported.schema);
               if (refErrs.length) { self.notify('Import blocked: ' + refErrs[0] + (refErrs.length > 1 ? ' (+' + (refErrs.length - 1) + ' more)' : '')); return; }
             }
             // Import schema if present (initializes empty databases)
             if (imported.schema && backend.saveSchema) {
               chain = chain.then(function() {
-                foldPages(imported.schema);
                 // Rebuild VIEWS from new schema so lockedListValues works
                 if (Array.isArray(imported.schema.views)) {
                   _viewsNav = imported.schema.views;
