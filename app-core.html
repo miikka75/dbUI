@@ -127,11 +127,11 @@ function createVueApp() {
         // Schema can define explicit bottom nav items: nav.bottomNav = ["view1", "view2", ...]
         var navCfg = this.navConfig;
         if (navCfg && Array.isArray(navCfg.bottomNav)) {
-          var all = this.sidebarTabs; var flat = []; all.forEach(function(t) { if (t.divider) return; if (t.children) t.children.forEach(function(c) { flat.push(c); }); else flat.push(t); });
+          var all = this.sidebarTabs; var flat = []; all.forEach(function(t) { if (t.divider) return; flat.push(t); if (t.children) t.children.forEach(function(c) { flat.push(c); }); });
           return navCfg.bottomNav.map(function(id) { return flat.find(function(t) { return t.id === id; }); }).filter(Boolean);
         }
         // Fallback: first 5 flattened items
-        var tabs = []; this.sidebarTabs.forEach(function(t) { if (t.divider) return; if (t.children) t.children.forEach(function(c) { tabs.push(c); }); else tabs.push(t); });
+        var tabs = []; this.sidebarTabs.forEach(function(t) { if (t.divider) return; tabs.push(t); if (t.children) t.children.forEach(function(c) { tabs.push(c); }); });
         return tabs.slice(0, 5);
       },
       bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
@@ -216,6 +216,9 @@ function createVueApp() {
         return base + params;
       },
       currentConfig: function() { return VIEWS[this.currentTable] || SCHEMA[this.currentTable] || {}; },
+      // Printing is opt-in via "printable": "view" (toolbar), "cards" (per-card), or ["view","cards"] (both). Off by default.
+      canPrintView: function() { var p = this.currentConfig.printable; return this.isDataView && (p === 'view' || (Array.isArray(p) && p.indexOf('view') >= 0)); },
+      canPrintCard: function() { var p = this.currentConfig.printable; return this.isDataView && (p === 'cards' || (Array.isArray(p) && p.indexOf('cards') >= 0)); },
       isUnionView: function() { return false; },
       useCardLayout: function() {
         var layout = this.currentConfig.layout;
@@ -463,6 +466,7 @@ function createVueApp() {
         this.theme = this.theme === 'dark' ? 'light' : 'dark';
         this.$vuetify.theme.global.name = this.theme;
         localStorage.setItem('app_theme', this.theme);
+        this._updateManifest();
       },
 
       notify: function(text) { this.snackText = text; this.snackbar = true; },
@@ -1808,9 +1812,73 @@ function createVueApp() {
         if (cached) { try { var c = JSON.parse(cached); if (c.src === icon) { self._setFaviconEl(c.data); return; } } catch(e) {} }
         fetch(icon).then(function(r) { return r.blob(); }).then(function(blob) {
           var reader = new FileReader();
-          reader.onload = function() { var dataUri = reader.result; localStorage.setItem(cacheKey, JSON.stringify({ src: icon, data: dataUri })); self._setFaviconEl(dataUri); };
+          reader.onload = function() { var dataUri = reader.result; localStorage.setItem(cacheKey, JSON.stringify({ src: icon, data: dataUri })); self._setFaviconEl(dataUri); self._updateManifest(); self._updateAppleIcon(); };
           reader.readAsDataURL(blob);
         }).catch(function() { self._setFaviconEl(icon); }); // fallback: use URL directly
+      },
+      // Returns the cached _favicon data URI when it matches schema.icon (offline-safe, avoids cross-origin canvas taint); else the raw icon.
+      _resolvedIcon: function() {
+        var icon = (this.schemaData && this.schemaData.icon) || './favicon.svg';
+        try { var c = JSON.parse(localStorage.getItem('_favicon')); if (c && c.src === icon && c.data) return c.data; } catch (e) {}
+        return icon;
+      },
+      // Runtime PWA manifest: builds name/icon from schema appTitle + icon, swaps the <link rel="manifest"> Blob.
+      _updateManifest: function() {
+        try {
+          var title = this.appTitle || 'App';
+          var icon = this._resolvedIcon();
+          var iconType = /\.png(\?|$)/i.test(icon) ? 'image/png' : (/^data:image\/png/.test(icon) ? 'image/png' : 'image/svg+xml');
+          // Follow the live Vuetify theme palette
+          var colors = (this.$vuetify && this.$vuetify.theme && this.$vuetify.theme.current && this.$vuetify.theme.current.colors) || {};
+          var bg = colors.background || '#ffffff';
+          var tc = colors.surface || colors.primary || '#1976d2';
+          // Blob-URL manifests resolve relative URLs against the (invalid) blob base,
+          // so start_url/scope/icon src must be absolute (resolved against the page).
+          var base = new URL('./', location.href).href;
+          var iconSrc = /^data:/.test(icon) ? icon : new URL(icon, location.href).href;
+          var manifest = {
+            name: title, short_name: title, start_url: base, scope: base,
+            display: 'standalone', background_color: bg, theme_color: tc,
+            icons: [{ src: iconSrc, sizes: 'any', type: iconType, purpose: 'any maskable' }]
+          };
+          var blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+          var url = URL.createObjectURL(blob);
+          var link = document.querySelector('link[rel="manifest"]');
+          if (!link) { link = document.createElement('link'); link.rel = 'manifest'; document.head.appendChild(link); }
+          if (link._blobUrl) URL.revokeObjectURL(link._blobUrl);
+          link.href = url; link._blobUrl = url;
+          // Dynamic theme-color meta tracks the in-app theme (overrides the media-query tags once the app loads)
+          var meta = document.getElementById('dyn-theme-color');
+          if (!meta) { meta = document.createElement('meta'); meta.name = 'theme-color'; meta.id = 'dyn-theme-color'; document.head.appendChild(meta); }
+          meta.content = tc;
+        } catch (e) {}
+      },
+      // apple-touch-icon for iOS (ignores manifest icons). PNG used directly; SVG rasterized to PNG via canvas.
+      _updateAppleIcon: function() {
+        try {
+          var icon = this._resolvedIcon();
+          var setLink = function(href) {
+            var el = document.querySelector('link[rel="apple-touch-icon"]');
+            if (!el) { el = document.createElement('link'); el.rel = 'apple-touch-icon'; document.head.appendChild(el); }
+            el.href = href;
+          };
+          var isPng = /\.png(\?|$)/i.test(icon) || /^data:image\/png/i.test(icon);
+          if (isPng) { setLink(icon); return; }
+          // Remote (uncached) SVG URL: skip — rasterizing cross-origin taints the canvas.
+          // _applyFavicon caches it as a data URI then re-invokes this; we rasterize then.
+          if (/^https?:/i.test(icon)) return;
+          // SVG (data URI or same-origin path): rasterize to a 180x180 PNG
+          var img = new Image();
+          img.onload = function() {
+            try {
+              var c = document.createElement('canvas'); c.width = 180; c.height = 180;
+              var ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0, 180, 180);
+              setLink(c.toDataURL('image/png'));
+            } catch (e) { setLink(icon); } // tainted canvas / cross-origin: fall back to raw
+          };
+          img.onerror = function() { setLink(icon); };
+          img.src = icon;
+        } catch (e) {}
       },
       // (PRINT_CSS is a module-level var defined above createVueApp)
       _pe: function(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); },
@@ -1818,7 +1886,7 @@ function createVueApp() {
       _printCardHtml: function(cols, item) {
         var self = this, pe = this._pe, html = '<div class="card"><dl>';
         cols.forEach(function(c) {
-          if (!self.isColumnHidden(c, item) && (item[c] || !self.colHideEmpty(c))) html += '<dt>' + pe(self.t('field.' + c) || c) + '</dt><dd>' + pe(item[c]) + '</dd>';
+          if (!self.isColumnHidden(c, item) && (item[c] || !self.colHideEmpty(c))) html += '<dt>' + pe(self.t('field.' + c) || c) + '</dt><dd>' + pe(self._printCell(c, item[c])) + '</dd>';
           self.embedItems.forEach(function(ei) { if (ei.config.afterColumn === c && self._printable(ei, item)) html += '</dl>' + self._printEmbed(ei, item) + '<dl>'; });
         });
         html += '</dl>';
@@ -1842,14 +1910,14 @@ function createVueApp() {
           body += '<table><thead><tr>';
           colsBefore.forEach(function(c) { body += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
           body += '</tr></thead><tbody>';
-          self.sortedData.forEach(function(row) { body += '<tr>'; colsBefore.forEach(function(c) { body += '<td>' + pe(row[c]) + '</td>'; }); body += '</tr>'; });
+          self.sortedData.forEach(function(row) { body += '<tr>'; colsBefore.forEach(function(c) { body += '<td>' + pe(self._printCell(c, row[c])) + '</td>'; }); body += '</tr>'; });
           body += '</tbody></table>';
           self.embedItems.forEach(function(ei) { if (ei.config.afterColumn && self._printable(ei)) body += self._printEmbed(ei); });
           if (colsAfter.length) {
             body += '<table><thead><tr>';
             colsAfter.forEach(function(c) { body += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
             body += '</tr></thead><tbody>';
-            self.sortedData.forEach(function(row) { body += '<tr>'; colsAfter.forEach(function(c) { body += '<td>' + pe(row[c]) + '</td>'; }); body += '</tr>'; });
+            self.sortedData.forEach(function(row) { body += '<tr>'; colsAfter.forEach(function(c) { body += '<td>' + pe(self._printCell(c, row[c])) + '</td>'; }); body += '</tr>'; });
             body += '</tbody></table>';
           }
           self.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && self._printable(ei)) body += self._printEmbed(ei); });
@@ -1860,6 +1928,8 @@ function createVueApp() {
       embedLayout: function(ei) { return ei.config.layout || 'table'; },
 
       _printable: function(ei, item) { if (ei.isDoc) return !!ei.show; var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows; return !!(rows && rows.length); },
+      // Format a print cell to match the web grid: dates -> toDateStr, list/groupBy values -> displayValue.
+      _printCell: function(c, v) { return this.colIsDate(c) ? this.toDateStr(v) : this.displayValue(c, v); },
       _printEmbed: function(ei, item) {
         var self = this, pe = this._pe;
         var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows;
@@ -1872,7 +1942,7 @@ function createVueApp() {
             dh += '<table><thead><tr>';
             cols.forEach(function(c) { dh += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
             dh += '</tr></thead><tbody>';
-            rows.forEach(function(r) { dh += '<tr>'; cols.forEach(function(c) { dh += '<td>' + pe(r[c]) + '</td>'; }); dh += '</tr>'; });
+            rows.forEach(function(r) { dh += '<tr>'; cols.forEach(function(c) { dh += '<td>' + pe(self._printCell(c, r[c])) + '</td>'; }); dh += '</tr>'; });
             dh += '</tbody></table>';
           });
           return dh + '</div>';
@@ -1885,7 +1955,7 @@ function createVueApp() {
               html += '<table><thead><tr>';
               ei.columns.forEach(function(c) { html += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
               html += '</tr></thead><tbody>';
-              rows.forEach(function(r) { html += '<tr>'; ei.columns.forEach(function(c) { html += '<td>' + pe(r[c]) + '</td>'; }); html += '</tr>'; });
+              rows.forEach(function(r) { html += '<tr>'; ei.columns.forEach(function(c) { html += '<td>' + pe(self._printCell(c, r[c])) + '</td>'; }); html += '</tr>'; });
               html += '</tbody></table>';
             }
           });
@@ -1895,7 +1965,7 @@ function createVueApp() {
           html += '<table><thead><tr>';
           ei.columns.forEach(function(c) { html += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
           html += '</tr></thead><tbody>';
-          rows.forEach(function(r) { html += '<tr>'; ei.columns.forEach(function(c) { html += '<td>' + pe(r[c]) + '</td>'; }); html += '</tr>'; });
+          rows.forEach(function(r) { html += '<tr>'; ei.columns.forEach(function(c) { html += '<td>' + pe(self._printCell(c, r[c])) + '</td>'; }); html += '</tr>'; });
           html += '</tbody></table>';
           var ftr = ei.config.footer && self.t(ei.config.footer) !== ei.config.footer ? self.t(ei.config.footer) : '';
           if (ftr) html += '<p style="font-size:13px;opacity:0.6;margin:4px 0 0">' + ftr + '</p>';
@@ -1906,7 +1976,7 @@ function createVueApp() {
 
       printCard: function(item) {
         var cols = this.visibleCols;
-        var title = this._pe(item[cols[0]] || item.id);
+        var title = this._pe(this.displayValue(cols[0], item[cols[0]]) || item.id);
         this._printOpen(title, this._printCardHtml(cols, item));
       }
     },
@@ -1914,8 +1984,10 @@ function createVueApp() {
     watch: {
       schemaData: { immediate: true, handler: function(s) {
         if (s && s.icon) { this._applyFavicon(s.icon); }
+        this._updateManifest();
+        this._updateAppleIcon();
       }},
-      appTitle: { immediate: true, handler: function(t) { if (t) document.title = t; } },
+      appTitle: { immediate: true, handler: function(t) { if (t) document.title = t; this._updateManifest(); } },
       viewingArchive: function() { this.loadTableData(); },
       sortedData: function(val) { if (this.currentConfig.collapsed && val.length) this.expandedCard = val[0].id; }
     },
