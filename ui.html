@@ -149,7 +149,7 @@
 
     <!-- Sidebar -->
     <v-navigation-drawer v-if="!loading && navLayout !== 'tabs'" :permanent="!mobile" :temporary="mobile" :rail="rail && !mobile" :expand-on-hover="rail && !mobile" :model-value="mobile ? drawerOpen : true" @update:model-value="drawerOpen = $event">
-      <v-list density="compact" nav>
+      <v-list density="compact" nav v-model:opened="openedGroups">
         <template v-for="(tab, tidx) in sidebarTabs" :key="tab.id || ('d'+tidx)">
           <div v-if="tab.divider" style="border-top:1px solid currentColor; opacity:0.2; margin:8px 0"></div>
           <v-list-group v-else-if="tab.children" :value="tab.id">
@@ -565,7 +565,7 @@
         <v-icon>{{ tab.icon || 'mdi-view-list' }}</v-icon>
         <span style="font-size:0.6rem; max-width:64px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ tab.title }}</span>
       </v-btn>
-      <v-btn v-if="bottomNavTabs.length > 5" size="small" @click.stop="drawerOpen = true">
+      <v-btn v-if="bottomNavTabs.length > 5" size="small" @click.stop="openMoreDrawer()">
         <v-icon>mdi-dots-horizontal</v-icon>
         <span style="font-size:0.6rem">{{ t('btn.more') || 'More' }}</span>
       </v-btn>
