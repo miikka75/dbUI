@@ -222,10 +222,10 @@ A view with a `markdown` field renders as a **document** instead of a data grid:
 
 ## `text` entries (removed)
 The `{ "text": "<key>" }` column entry (free-form text interleaved in a view's columns)
-is **removed**: it is no longer rendered — any leftover `text` entries are silently ignored.
-Author prose with a `markdown` view instead (a filtered view + markdown + another view
-replaces text-between-columns). `migrate-schema.js` converts existing `text` automatically.
-Do not author new `text` entries.
+is **removed**: it is no longer rendered — any leftover `text` entries are **stripped at load**
+(`_stripTextEntries`) so they never surface as phantom columns. Author prose with a `markdown`
+view instead (a filtered view + markdown + another view replaces text-between-columns).
+`migrate-schema.js` converts existing `text` to markdown views. Do not author new `text` entries.
 
 ## Migration
 `migrate-schema.js <schema-or-export>.json` normalizes a schema:
@@ -234,8 +234,11 @@ Do not author new `text` entries.
 - Converts `text` entries to a `markdown` view: splits the view at **every** text boundary
   into sub-views (`name`, `name_2`, …) and interleaves `{{t:key}}` tokens with one
   `{{view:subview}}` embed per run of real columns; points nav at the markdown view.
-- Converts a legacy `pages` map into `markdown` views (also folded in automatically at load,
-  so older schemas keep working without re-migration).
+- Converts a legacy `pages` map into `markdown` views and rewrites `{page:x}` nav → `{view:x}`.
+  (The runtime no longer auto-folds `pages` at load — older schemas **must** be re-migrated
+  with this tool before loading.)
+- Converts a legacy table `header`/`footer` into a `markdown` doc-view that embeds the table
+  (`<table>_doc` with `{{table:<name>}}`); the old behavior emitted now-removed `text` entries.
 - **Export bundles**: if the input has a `.schema` key (an exported JSON with `tables` data,
   `lists`, `translations`), only `schema` is migrated in place; data/lists/translations are
   preserved, so the result re-imports cleanly.
