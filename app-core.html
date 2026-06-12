@@ -1561,9 +1561,19 @@ function createVueApp() {
         chain.then(function() {
           return Promise.resolve(backend.getTableData('_pages', 'active')).then(function(d) {
             var pages = (d && d.rows || []).filter(function(r) { return r.id && r.markdown; });
-            // Strip runtime-injected implicit id column
+            // Export columns as the documented array-of-objects form (strip runtime-injected id; restore order + name).
             var schema = JSON.parse(JSON.stringify(self.schemaData));
-            if (schema.tables) Object.keys(schema.tables).forEach(function(t) { var c = schema.tables[t].columns; if (c) { delete c.id; } });
+            if (schema.tables) Object.keys(schema.tables).forEach(function(t) {
+              var c = schema.tables[t].columns;
+              if (c && typeof c === 'object' && !Array.isArray(c)) {
+                delete c.id;
+                var order = (window._columnOrders && window._columnOrders[t]) || Object.keys(c);
+                schema.tables[t].columns = order.filter(function(n) { return n !== 'id' && (n in c); }).map(function(n) {
+                  var def = c[n];
+                  return (def && typeof def === 'object') ? Object.assign({ name: n }, def) : { name: n };
+                });
+              }
+            });
             var json = JSON.stringify({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations, pages: pages.length ? pages : undefined, exportedAt: new Date().toISOString() }, null, 2);
             var blob = new Blob([json], { type: 'application/json' });
             var a = document.createElement('a');
