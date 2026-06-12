@@ -102,6 +102,39 @@ function matchFilter(r, f) {
   return true;
 }
 function filterRows(rows, filter) { if (!filter) return rows; return rows.filter(function(r) { return matchFilter(r, filter); }); }
+// Rewrite array-IN filter values ({col:[a,b]}) into explicit $or of equalities, recursively.
+// Used by export + migrate so the array shorthand can eventually be retired; runtime still accepts both.
+function filterToOr(f) {
+  if (!f || typeof f !== 'object' || Array.isArray(f)) return f;
+  if (f.$or) return { $or: f.$or.map(filterToOr) };
+  if (f.$and) return { $and: f.$and.map(filterToOr) };
+  var keys = Object.keys(f);
+  if (!keys.some(function(k) { return Array.isArray(f[k]); })) return f; // no array values -> leave flat (AND)
+  var clauses = keys.map(function(k) {
+    var v = f[k];
+    if (Array.isArray(v)) return { $or: v.map(function(x) { var o = {}; o[k] = x; return o; }) };
+    var o = {}; o[k] = v; return o;
+  });
+  return clauses.length === 1 ? clauses[0] : { $and: clauses };
+}
+// Walk a views array and convert every filter (view, groupBy, embed, conditional column) via filterToOr.
+function convertViewFilters(views) {
+  (views || []).forEach(function(v) {
+    if (v.filter) v.filter = filterToOr(v.filter);
+    if (v.groupBy && v.groupBy.filter) v.groupBy.filter = filterToOr(v.groupBy.filter);
+    (function walkCols(cols) {
+      (cols || []).forEach(function(c) {
+        if (!c || typeof c !== 'object') return;
+        if (c.filter) c.filter = filterToOr(c.filter);
+        if (!c.name && !c.sources && !c.view && !c.markdown && !c.computed) { // conditional column { col: {filter} }
+          var ck = Object.keys(c)[0];
+          if (ck && c[ck] && typeof c[ck] === 'object' && !Array.isArray(c[ck])) c[ck] = filterToOr(c[ck]);
+        }
+        if (Array.isArray(c.columns)) walkCols(c.columns);
+      });
+    })(v.columns);
+  });
+}
 function sortByCol(rows, col, view) { if (!col) return rows; var listOrder = null; var ln = getColumnList(null, col); if (!ln && view && view.groupBy && typeof view.groupBy === 'object' && view.groupBy.column === col && view.groupBy.from) { for (var i = 0; i < view.groupBy.from.length && !ln; i++) ln = getColumnList(null, view.groupBy.from[i]); } if (ln && window._listsCache && window._listsCache[ln]) { listOrder = {}; window._listsCache[ln].forEach(function(v, i) { listOrder[v] = i; }); } return rows.slice().sort(function(a, b) { if (listOrder) { var ia = listOrder[a[col]] !== undefined ? listOrder[a[col]] : 9999, ib = listOrder[b[col]] !== undefined ? listOrder[b[col]] : 9999; return ia - ib; } var va = String(a[col] || ''), vb = String(b[col] || ''); if (!va && vb) return 1; if (va && !vb) return -1; return va.localeCompare(vb); }); }
 // Tiny markdown -> HTML for pages (headings, bold/italic, lists, links, paragraphs). Embed tokens are split out before this runs.
 function mdToHtml(md) {
@@ -134,12 +167,11 @@ function buildRows(cfg, dataCache) {
 // Aggregate a groupBy/collect view's rows into one row per key (collected values -> Nth columns).
 function aggregateRows(view, rows) {
   if (!(view.groupBy && view.collect)) return rows;
-  var byObj = typeof view.groupBy === 'object' && !Array.isArray(view.groupBy);
-  var keyCol = byObj ? view.groupBy.column : view.columns[0];
-  var keysFrom = byObj ? view.groupBy.from : view.groupBy;
+  var keyCol = view.groupBy.column;
+  var keysFrom = view.groupBy.from;
   var withRole = view.collectWith; // e.g. "role" — if set, collected values include the source column name
   var groups = {};
-  var groupFilter = byObj ? view.groupBy.filter : null;
+  var groupFilter = view.groupBy.filter || null;
   rows.forEach(function(r) {
     keysFrom.forEach(function(k) {
       var key = r[k];
