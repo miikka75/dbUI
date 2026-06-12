@@ -15,10 +15,13 @@ nav     ← navigation tree + layout, references views/tables by name
 ```json
 { "icon": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>📋</text></svg>" }
 ```
-- **`icon`** — sets the browser favicon. Accepts:
+- **`icon`** — sets the browser favicon **and** the PWA install icon. Accepts:
   - `data:` URI (inline SVG/PNG — recommended, no network)
   - Relative path (`"./favicon.png"`)
   - External URL (`"https://..."`) — fetched once, cached as base64 in localStorage; re-fetched when the URL changes
+  - Also drives the **PWA manifest icon** (remote icons are embedded as the cached base64) and
+    the **apple-touch-icon** for iOS (PNG used directly; SVG rasterized to a 180×180 PNG via
+    canvas). See the README "Installable (PWA)" section.
 - **Browser tab title** — derived from the `app.title` translation key (set in Languages tab), not a schema field. The tab title updates reactively when the translation changes.
 
 `nav` is **required** and defines the sidebar (there is no auto-derived nav). `views` and
@@ -30,6 +33,44 @@ nav     ← navigation tree + layout, references views/tables by name
 ```
 `archivable: true` enables archive/restore for the table (rows move between the fixed
 `active` and `archive` partitions). Omit it for tables that are never archived.
+`isLookup: true` marks a reference/lookup table (managed in the Lookup tab, not the sidebar).
+
+> **`id` is implicit** — every table gets an `id` column auto-injected (storage primary key +
+> join/archive match key). Do not declare it in `columns`.
+
+### column types
+| Type | Description |
+|------|-------------|
+| `text` | Plain text (default) |
+| `date` | Date picker, stored as `YYYY-MM-DD` |
+| `select` | Dropdown from a named list |
+| `ref` | Reference to a lookup-table column |
+
+### column properties
+| Property | Description |
+|----------|-------------|
+| `name` | Column identifier (required) |
+| `type` | Column type (default `"text"`) |
+| `hidden` | Don't display in UI (e.g. `created_at`) |
+| `list` | List name for `select` type |
+| `allowNew` | Allow adding new list values (combobox) |
+| `sorted` | Sort dropdown items alphabetically |
+| `syncFrom` | Mirror this column's value from another table |
+| `table` | Reference table name (for `ref`) |
+| `valueCol` | Column used as value (for `ref`) |
+| `filterBy` | Filter ref options by another column (for `ref`) |
+
+```json
+"tasks": {
+  "columns": [
+    { "name": "date", "type": "date" },
+    { "name": "status", "type": "select", "list": "status" },
+    { "name": "assigned_to", "type": "select", "list": "assigned_to", "allowNew": true, "sorted": true },
+    { "name": "city", "type": "ref", "table": "cities", "valueCol": "city", "filterBy": {"state": "state"} }
+  ],
+  "archivable": true
+}
+```
 
 ## views (flat)
 Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` nesting).
@@ -40,6 +81,23 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 ]
 ```
 
+### view properties
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | View identifier |
+| `sources` | string[] | Table names to pull data from |
+| `mode` | string | `"union"` (stack rows) or `"join"` (merge by `id`) |
+| `columns` | array | Column names, embeds, conditional/computed columns (below) |
+| `filter` | object | Static row filter (see **filters**) |
+| `readonly` | boolean | Disable editing (report views) |
+| `layout` | string | `"table"`, `"card"`, or `"list"` |
+| `collapsed` | boolean | Cards start collapsed (accordion) |
+| `defaultSort` | string | Default sort column |
+| `hideEmpty` | boolean | Hide columns where all rows are empty |
+| `icon` | string | MDI icon for the sidebar |
+| `printable` | `"view"` \| `"cards"` \| `["view","cards"]` | Opt-in print buttons. `"view"` = view toolbar print only; `"cards"` = per-card buttons only; `["view","cards"]` = both. **Off by default** — omit to hide all print buttons. Note: per-card buttons only render in `card`/`list` layout, so `"cards"` on a `table` layout shows nothing. Applies to views and tables |
+| `markdown` | string | Makes this a **document** view (see below) instead of a data grid |
+
 A view's `columns` may contain, besides plain column names:
 - **Conditional column** `{ "<col>": { <filter> } }` — show the column only for rows matching the filter.
 - **Inline embed** `{ "sources": [...], "filter": {...}, "columns": [...] }` — a filtered sub-table at that position.
@@ -49,6 +107,9 @@ A view's `columns` may contain, besides plain column names:
   inline at that position; the whole block is hidden when all its embedded tables are empty.
   `"bare": true` suppresses the box wrapper (background + padding + border-radius) — the embed
   renders flush with the card content. Applies to both screen and print.
+  > **Markdown columns** must go through a named-view embed: there is **no** inline
+  > `{ "markdown": "..." }` column (it would be treated as a data column named `markdown`).
+  > Define a `{ "name": "x", "markdown": "..." }` doc-view and reference it with `{ "view": "x" }`.
 - **Per-column hideEmpty** `{ "name": "<col>", "hideEmpty": true|false }` — override the view-level
   `hideEmpty` for a specific column. `false` forces the column to always show (even when empty);
   `true` hides it when empty even if the view shows empties. Works in both table and card layout.
@@ -146,13 +207,18 @@ A view with a `markdown` field renders as a **document** instead of a data grid:
     { "view": "home", "icon": "mdi-home" },
     { "group": "Data", "icon": "mdi-database", "items": [ { "view": "combined" }, { "table": "tasks" } ] },
     { "view": "attendance" }
-  ]
+  ],
+  "bottomNav": ["home", "combined", "attendance"]
 }
 ```
 - Item kinds: `{view}`, `{table}`, or `{group, items:[...]}` (one level). A `{view}` may point
   at a data view or a view with `markdown`.
 - Each item: optional `icon`, `title`. Access-filtered (a view needs all its sources).
 - System tabs (Lookup / Languages / Settings) are appended automatically.
+- **`bottomNav`** (string[], optional) — **mobile only**: view/table ids shown in the bottom
+  navigation bar, in this order. More than 5 → the first 4 plus a "⋯ More" button that opens the
+  drawer. Omit to auto-pick the first 5 flattened nav items. Ids must match `items` entries
+  (including nested group children); unresolved ids are silently dropped.
 
 ## `text` entries (removed)
 The `{ "text": "<key>" }` column entry (free-form text interleaved in a view's columns)
@@ -174,6 +240,10 @@ Do not author new `text` entries.
   `lists`, `translations`), only `schema` is migrated in place; data/lists/translations are
   preserved, so the result re-imports cleanly.
 
-## Translation keys
-- `nav.<group>` (group label), `{{t:<key>}}` tokens in markdown, plus existing
-  `view.*` / `field.*` / `list.*`.
+## Lists and translations
+- **List values** are stored as stable keys (e.g. `"in_progress"`, not "In Progress").
+- **Display** uses translations: `list.status.in_progress` → "Käynnissä" / "In Progress".
+- **Locked values**: list values referenced in schema filters are auto-seeded and non-deletable.
+- **Translation keys** are auto-generated: `tab.*`, `view.*`, `field.*`, `list.*.*`,
+  `nav.<group>` (group labels), and `{{t:<key>}}` tokens in markdown views — all collected
+  into the Languages tab.
