@@ -14,7 +14,7 @@ function getLangSpreadsheet(folderId) {
 
 function doGet() {
   return HtmlService.createTemplateFromFile('index').evaluate()
-    .setTitle('Drive Sync App')
+    .setTitle('dbUI App')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
