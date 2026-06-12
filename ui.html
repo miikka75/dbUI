@@ -190,7 +190,7 @@
         <v-card v-if="isDataView" variant="outlined">
           <div class="d-flex align-center pa-2" style="min-height:0">
             <v-spacer></v-spacer>
-            <v-btn icon="mdi-printer" size="small" variant="text" @click="printView()"></v-btn>
+            <v-btn v-if="canPrintView" icon="mdi-printer" size="small" variant="text" @click="printView()"></v-btn>
           </div>
           <!-- Header text entries (before columns) -->
           <template v-for="(ei, eidx) in embedItems" :key="'htxt'+eidx">
@@ -203,7 +203,7 @@
                   <span v-for="(col, i) in visibleCols" :key="col" style="font-size:0.85rem">{{ displayValue(col, item[col]) }}<span v-if="i < visibleCols.length - 1" style="opacity:0.3; margin:0 6px">·</span></span>
                 </template>
                 <template v-slot:append>
-                  <v-btn icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>
+                  <v-btn v-if="canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>
                   <template v-if="canMutateRows">
                   <v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archiveRow(item)"></v-btn>
                   <v-btn :icon="isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="isArmed('row:'+item.id) ? 'error' : ''" @click="deleteRow(item)"></v-btn>
@@ -292,7 +292,7 @@
               </template>
               </template>
               <div class="mt-2">
-                <v-btn icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>
+                <v-btn v-if="canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>
                 <template v-if="canMutateRows">
                 <v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archiveRow(item)"></v-btn>
                 <v-btn :icon="isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="isArmed('row:'+item.id) ? 'error' : ''" @click="deleteRow(item)"></v-btn>
