@@ -3,26 +3,26 @@
 if (typeof localStorage === 'undefined') { window.localStorage = { _d:{}, getItem:function(k){return this._d[k]||null;}, setItem:function(k,v){this._d[k]=String(v);}, removeItem:function(k){delete this._d[k];}, clear:function(){this._d={};} }; }
 
 // Default schema bundled in app — used when Drive has no schema.json yet
-var defaultSchema = {"tables":{},"views":{}};
+var defaultSchema = {"tables":{},"views":[]};
 
 // Active schema — initially from defaultSchema, overwritten from Drive on boot
 var SCHEMA = defaultSchema.tables;
-var _viewsNav = Array.isArray(defaultSchema.views) ? defaultSchema.views : [];
-var VIEWS = {};
+var _viewsNav = Array.isArray(defaultSchema.views) ? defaultSchema.views : [];var VIEWS = {};
 function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string')) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
-// Back-compat: fold a legacy `pages` map into doc-views (views with `markdown`) and rewrite {page:x} nav -> {view:x}.
-function foldPages(s) {
-  if (!s || !s.pages) return s;
-  if (!Array.isArray(s.views)) s.views = [];
-  Object.keys(s.pages).forEach(function(p) { if (!s.views.some(function(v) { return v.name === p; })) s.views.push({ name: p, markdown: (s.pages[p] && s.pages[p].markdown) || '' }); });
-  if (s.nav && s.nav.items) (function fix(items) { items.forEach(function(it) { if (it.page) { it.view = it.page; delete it.page; } if (it.items) fix(it.items); }); })(s.nav.items);
-  delete s.pages;
+// Strip dead `text` entries ({text}-only columns — a removed feature) from view + embed columns at load,
+// so downstream consumers never see them. (Legacy `pages` map / {page:} nav are no longer supported — migrate-schema.js converts them.)
+function _stripTextEntries(s) {
+  function strip(cols) {
+    if (!Array.isArray(cols)) return cols;
+    return cols.filter(function(c) { return !(c && typeof c === 'object' && c.text && !c.name && !c.sources); })
+               .map(function(c) { if (c && typeof c === 'object' && Array.isArray(c.columns)) c.columns = strip(c.columns); return c; });
+  }
+  if (!s) return s;
+  var views = Array.isArray(s.views) ? s.views : (s.views ? Object.keys(s.views).map(function(k) { return s.views[k]; }) : []);
+  views.forEach(function(v) { if (v && Array.isArray(v.columns)) v.columns = strip(v.columns); });
   return s;
 }
-// Support legacy object format: { viewName: viewDef }
-if (defaultSchema.views && !Array.isArray(defaultSchema.views)) {
-  for (var _k in defaultSchema.views) { VIEWS[_k] = defaultSchema.views[_k]; }
-} else { _flattenViews(_viewsNav); }
+_flattenViews(_viewsNav);
 var DEFAULT_LANGUAGE = defaultSchema.defaultLanguage || null;
 
 // Schema helpers
@@ -34,18 +34,15 @@ function ensureImplicitId(schema, orders) {
     if (!cols.id) { cols.id = 'text'; if (orders && orders[t] && orders[t].indexOf('id') === -1) orders[t].unshift('id'); }
   });
 }
-// Shared schema normalization: foldPages + set globals + colMap + ensureImplicitId. Returns nothing; mutates globals.
+// Shared schema normalization: strip dead text entries + set globals + colMap + ensureImplicitId. Returns nothing; mutates globals.
 function _normalizeSchema(parsed) {
-  foldPages(parsed);
+  _stripTextEntries(parsed);
   SCHEMA = parsed.tables || SCHEMA;
   _viewsNav = Array.isArray(parsed.views) ? parsed.views : _viewsNav;
   VIEWS = {};
-  if (parsed.views && !Array.isArray(parsed.views)) { for (var _vk in parsed.views) VIEWS[_vk] = parsed.views[_vk]; }
-  else _flattenViews(_viewsNav);
+  _flattenViews(_viewsNav);
   window._columnOrders = {};
   Object.keys(SCHEMA).forEach(function(t) {
-    // Legacy compat: convert archivePartition/partition to archivable flag
-    if (SCHEMA[t].archivePartition || SCHEMA[t].partition) { if (SCHEMA[t].archivePartition) SCHEMA[t].archivable = true; delete SCHEMA[t].partition; delete SCHEMA[t].archivePartition; }
     if (Array.isArray(SCHEMA[t].columns)) {
       var colMap = {}; window._columnOrders[t] = [];
       SCHEMA[t].columns.forEach(function(c) { if (!c.name) return; window._columnOrders[t].push(c.name); var def = Object.assign({}, c); delete def.name; colMap[c.name] = Object.keys(def).length ? def : 'text'; });
