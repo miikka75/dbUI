@@ -694,9 +694,8 @@ test.describe('v3 nav + pages + tabs layout', () => {
   const V3 = {
     defaultLanguage: 'en',
     tables: { tasks: { columns: [{ name: 'title', type: 'text' }], archivable: true } },
-    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }],
-    pages: { home: { markdown: '# Hello Page\n\nTasks below:\n\n{{table:tasks}}\n\nVia view:\n\n{{view:all}}' } },
-    nav: { layout: 'tabs', items: [{ page: 'home', icon: 'mdi-home' }, { view: 'all' }, { table: 'tasks' }] }
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }, { name: 'home', markdown: '# Hello Page\n\nTasks below:\n\n{{table:tasks}}\n\nVia view:\n\n{{view:all}}' }],
+    nav: { layout: 'tabs', items: [{ view: 'home', icon: 'mdi-home' }, { view: 'all' }, { table: 'tasks' }] }
   };
   test('top tabs render, drawer hidden, markdown page shows prose + embedded data', async ({ page }) => {
     test.setTimeout(20000);
@@ -724,9 +723,8 @@ test.describe('v3 interactive page embed', () => {
   const V3 = {
     defaultLanguage: 'en',
     tables: { tasks: { columns: [{ name: 'title', type: 'text' }], archivable: true } },
-    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }],
-    pages: { home: { markdown: 'Edit below:\n\n{{view:all}}' } },
-    nav: { layout: 'tabs', items: [{ page: 'home' }, { view: 'all' }] }
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }, { name: 'home', markdown: 'Edit below:\n\n{{view:all}}' }],
+    nav: { layout: 'tabs', items: [{ view: 'home' }, { view: 'all' }] }
   };
   test('editing a cell in an embedded view persists', async ({ page }) => {
     test.setTimeout(20000);
@@ -753,9 +751,8 @@ test.describe('v3 embed row controls', () => {
   const V3 = {
     defaultLanguage: 'en',
     tables: { tasks: { columns: [{ name: 'title', type: 'text' }], archivable: true } },
-    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }],
-    pages: { home: { markdown: '{{view:all}}' } },
-    nav: { layout: 'tabs', items: [{ page: 'home' }, { view: 'all' }] }
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }, { name: 'home', markdown: '{{view:all}}' }],
+    nav: { layout: 'tabs', items: [{ view: 'home' }, { view: 'all' }] }
   };
   const count = (page, tab) => page.request.post('/api/getTableData', { data: { tableId: 'tasks', tab } }).then(r => r.json()).then(d => d.rows.length);
   test('add/archive/delete from an embedded view operate on the underlying table', async ({ page }) => {
@@ -787,9 +784,8 @@ test.describe('v3 hide-empty embed', () => {
     views: [
       { name: 'open', sources: ['tasks'], mode: 'union', filter: { status: 'open' }, columns: ['title'] },
       { name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }
-    ],
-    pages: { home: { markdown: '{{view:open?}}\n\n{{view:all}}' } },
-    nav: { layout: 'tabs', items: [{ page: 'home' }, { view: 'all' }] }
+    , { name: 'home', markdown: '{{view:open?}}\n\n{{view:all}}' }],
+    nav: { layout: 'tabs', items: [{ view: 'home' }, { view: 'all' }] }
   };
   test('{{view:x?}} block is skipped when the view yields 0 rows', async ({ page }) => {
     test.setTimeout(20000);
@@ -1585,9 +1581,8 @@ test.describe('v3 aggregate view embed', () => {
   const V3 = {
     defaultLanguage: 'en',
     tables: { tasks: { columns: [{ name: 'date', type: 'date' }, { name: 'who', type: 'text' }] } },
-    views: [{ name: 'byperson', sources: ['tasks'], mode: 'union', groupBy: { column: 'person', from: ['who'] }, collect: 'date', columns: ['person', 'latest'] }],
-    pages: { home: { markdown: '{{view:byperson}}' } },
-    nav: { layout: 'tabs', items: [{ page: 'home' }, { view: 'byperson' }] }
+    views: [{ name: 'byperson', sources: ['tasks'], mode: 'union', groupBy: { column: 'person', from: ['who'] }, collect: 'date', columns: ['person', 'latest'] }, { name: 'home', markdown: '{{view:byperson}}' }],
+    nav: { layout: 'tabs', items: [{ view: 'home' }, { view: 'byperson' }] }
   };
   test('embedded groupBy/collect view shows aggregated rows (not blank)', async ({ page }) => {
     test.setTimeout(20000);
@@ -1612,9 +1607,8 @@ test.describe('v3 archived table embed', () => {
   const V3 = {
     defaultLanguage: 'en',
     tables: { tasks: { columns: [{ name: 'title', type: 'text' }], archivable: true } },
-    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }],
-    pages: { home: { markdown: '## Active\n\n{{table:tasks}}\n\n## Archived\n\n{{table:tasks@archive}}' } },
-    nav: { layout: 'tabs', items: [{ page: 'home' }, { view: 'all' }] }
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }, { name: 'home', markdown: '## Active\n\n{{table:tasks}}\n\n## Archived\n\n{{table:tasks@archive}}' }],
+    nav: { layout: 'tabs', items: [{ view: 'home' }, { view: 'all' }] }
   };
   test('{{table:x@archive}} shows archived rows (read-only)', async ({ page }) => {
     test.setTimeout(20000);
@@ -1640,9 +1634,8 @@ test.describe('v3 page body stored on server', () => {
   const V3 = {
     defaultLanguage: 'en',
     tables: { tasks: { columns: [{ name: 'title', type: 'text' }] } },
-    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }],
-    pages: { home: { markdown: '# Seed' } },
-    nav: { layout: 'tabs', items: [{ page: 'home' }, { view: 'all' }] }
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }, { name: 'home', markdown: '# Seed' }],
+    nav: { layout: 'tabs', items: [{ view: 'home' }, { view: 'all' }] }
   };
   test('editing a page saves to the _pages collection (not schema) and survives reload', async ({ page }) => {
     test.setTimeout(20000);
@@ -1699,9 +1692,8 @@ test.describe('Page {{t:key}} translatable token', () => {
   const V3 = {
     defaultLanguage: 'en',
     tables: { tasks: { columns: [{ name: 'title', type: 'text' }], archivable: true } },
-    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }],
-    pages: { home: { markdown: '{{t:page.home.intro}}\n\n{{view:all}}' } },
-    nav: { items: [{ page: 'home' }, { view: 'all' }] }
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }, { name: 'home', markdown: '{{t:page.home.intro}}\n\n{{view:all}}' }],
+    nav: { items: [{ view: 'home' }, { view: 'all' }] }
   };
   test('{{t:key}} resolves via translations in a page', async ({ page }) => {
     test.setTimeout(20000);
