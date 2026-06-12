@@ -1913,3 +1913,30 @@ test.describe('PWA manifest + apple-icon from remote icon', () => {
     expect(r.appleHref && r.appleHref.startsWith('data:image/png')).toBe(true);
   });
 });
+
+test.describe('Filter array-IN -> $or on export', () => {
+  test('exported view filter uses $or instead of an array (forward-deprecation)', async ({ page }) => {
+    const SCH = {
+      defaultLanguage: 'en',
+      tables: { t: { columns: [{ name: 'status', type: 'text' }] } },
+      views: [{ name: 'v', sources: ['t'], mode: 'union', filter: { status: ['open', 'wip'] }, columns: ['status'] }],
+      nav: { layout: 'drawer', items: [{ view: 'v' }, { table: 't' }] }
+    };
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
+    await page.waitForTimeout(200);
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator('button:has(.mdi-download)').click()
+    ]);
+    const fs = require('fs');
+    const body = JSON.parse(fs.readFileSync(await download.path(), 'utf8'));
+    const f = body.schema.views.find(v => v.name === 'v').filter;
+    expect(Array.isArray(f.status)).toBe(false);
+    expect(f.$or).toEqual([{ status: 'open' }, { status: 'wip' }]);
+  });
+});
