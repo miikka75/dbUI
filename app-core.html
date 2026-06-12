@@ -1574,6 +1574,7 @@ function createVueApp() {
                 });
               }
             });
+            convertViewFilters(schema.views);   // emit array-IN filters as explicit $or (forward-deprecation)
             var json = JSON.stringify({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations, pages: pages.length ? pages : undefined, exportedAt: new Date().toISOString() }, null, 2);
             var blob = new Blob([json], { type: 'application/json' });
             var a = document.createElement('a');
@@ -1971,15 +1972,11 @@ function createVueApp() {
             }
           });
         } else {
-          var hdr = ei.config.header && self.t(ei.config.header) !== ei.config.header ? self.t(ei.config.header) : '';
-          if (hdr) html += '<h4>' + hdr + '</h4>';
           html += '<table><thead><tr>';
           ei.columns.forEach(function(c) { html += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
           html += '</tr></thead><tbody>';
           rows.forEach(function(r) { html += '<tr>'; ei.columns.forEach(function(c) { html += '<td>' + pe(self._printCell(c, r[c])) + '</td>'; }); html += '</tr>'; });
           html += '</tbody></table>';
-          var ftr = ei.config.footer && self.t(ei.config.footer) !== ei.config.footer ? self.t(ei.config.footer) : '';
-          if (ftr) html += '<p style="font-size:13px;opacity:0.6;margin:4px 0 0">' + ftr + '</p>';
         }
         html += '</div>';
         return html;
