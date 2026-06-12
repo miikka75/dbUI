@@ -12,7 +12,8 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 - **Documents**: a view with `markdown` is an editable document with interactive embeds (`{{view:x}}`, `{{self}}` for its own grid, `{{view:x?}}` hides when empty) — bodies stored on the server, not in the schema
 - **Nav**: explicit sidebar tree with drawer/tabs layout and nested groups
 - **Print**: layout-aware printing (table or card mode), per-card print, embeds included
-- **Responsive**: auto-switches between table and card layout based on column count
+- **Responsive**: auto-switches between table and card layout based on column count; mobile gets a bottom navigation bar (`nav.bottomNav`) + floating add button
+- **Installable (PWA)**: web manifest + service worker → install to home screen / desktop and run in a standalone window (no address bar). Name, icon, and theme color follow the schema and the live light/dark theme
 - **Validation**: schema validated at boot time with error reporting
 
 ## Backends
@@ -75,6 +76,10 @@ https://your-app.github.io/?mode=sheets&folder=DRIVE_FOLDER_ID
 
 The app reads URL params on load, stores them in localStorage, then cleans the URL. One click = connected.
 
+> Firebase links also accept the config as discrete params instead of base64:
+> `?mode=firebase&k=<apiKey>&d=<authDomain>&p=<projectId>`. Sheets links also accept
+> `&clientId=<oauthClientId>`.
+
 Generate the link from Settings tab (shown under "Share link" for Firebase mode).
 
 ### User Access by Backend
@@ -117,10 +122,35 @@ One hosted instance serves multiple independent databases:
 - Different users on the same URL can connect to different Firebase projects or Drive folders
 - Share a pre-configured URL to onboard users to a specific database
 
+## Installable (PWA)
+
+The app is a Progressive Web App — installable to a phone home screen or desktop, running in a
+standalone window with no browser address bar.
+
+- **Static manifest** (`manifest.json`) + `<link rel="manifest">` in `index.html` provide the
+  baseline name/icon/`display: standalone` before the app boots.
+- **Runtime manifest**: once the schema loads, `_updateManifest()` rebuilds the manifest from
+  the live app title + schema `icon` and swaps in a Blob URL, so the installed app shows the
+  real app name and icon. `start_url`/`scope`/icon `src` are written as **absolute** URLs
+  (a Blob-URL manifest can't resolve relative paths). `background_color`/`theme_color` follow
+  the current Vuetify theme; a dynamic `theme-color` meta tracks the in-app light/dark toggle.
+- **Service worker** (`sw.js`): minimal pass-through `fetch` (no offline caching) — its purpose
+  is to satisfy the browser installability check so the install prompt appears reliably.
+- **Icons**: the manifest icon accepts a path **or** a base64 `data:` URI; a remote
+  cross-origin icon is fetched once, cached in `localStorage._favicon` as a data URI, and reused
+  by both the manifest and the apple-touch-icon. `apple-touch-icon` (iOS ignores manifest icons)
+  is the PNG directly, or an SVG rasterized to a 180×180 PNG via canvas.
+- **Requirements**: install needs HTTPS (Firebase Hosting provides it) and a valid manifest.
+  The dev server must serve `.svg`/`.png`/`.json` with correct MIME types (a `text/plain` icon
+  is rejected as "not a valid image").
+
 ## Project Structure
 
 ```
 index.html                     ← unified entry point (auto-detects backend)
+manifest.json                  ← static PWA manifest (baseline name/icon, display: standalone)
+sw.js                          ← minimal service worker (enables install prompt; no caching)
+favicon.svg                    ← default app icon
 app-core.html                  ← Vue app logic + computeds + helpers
 ui.html                        ← Vue template (data views, forms, setup)
 style.html                     ← CSS styles
@@ -160,244 +190,24 @@ dev/                           ← Local development (dev-server-only files live
 
 ## Schema Reference (`schema.json`)
 
-The schema has these top-level sections:
+The complete schema reference is maintained in **[`dev/SCHEMA.md`](dev/SCHEMA.md)** — the single
+source of truth. It covers: `icon`/title, tables (column types & properties), views (data &
+document), embeds (inline / named-view / `filterBy`), filters (`$or`/`$and`/`matchList`),
+aggregate views (`groupBy`/`collect`/`collectWith`), computed columns, markdown documents and
+their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens, `nav` (layout, groups, `bottomNav`),
+lists & translations, and `migrate-schema.js`.
 
 ```json
 {
-  "defaultLanguage": "en",
-  "tables": { ... },
-  "views": [ ... ],
-  "nav": { "layout": "drawer", "items": [ ... ] }
+  "icon": "data: URI | path | URL (favicon + PWA icon)",
+  "tables": { "...": { "columns": [ ... ], "archivable": true } },
+  "views":  [ { "name": "...", "sources": [ ... ], "columns": [ ... ] } ],
+  "nav":    { "layout": "drawer", "items": [ ... ], "bottomNav": [ ... ] }
 }
 ```
 
-> `nav` defines the sidebar and is **required**. `views` are flat — grouping and nesting live
-> in `nav`, not in the views. A view is either a **data view** (sources/columns) or a
-> **document** (a view with a `markdown` field that embeds other views/tables). `defaultLanguage`
-> is optional (defaults to the first defined language).
-
-### Tables
-
-Tables define data structure. Each table has columns and storage configuration.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `columns` | array | Column definitions (array of objects) |
-| `archivable` | boolean | Enable archive/restore (rows move between the fixed `active` and `archive` partitions) |
-| `isLookup` | boolean | Reference/lookup table (managed in Lookup tab, not sidebar) |
-
-```json
-"tasks": {
-  "columns": [
-    { "name": "date", "type": "date", "syncFrom": "notes" },
-    { "name": "title", "type": "text", "syncFrom": "notes" },
-    { "name": "status", "type": "select", "list": "status" },
-    { "name": "assigned_to", "type": "select", "list": "assigned_to", "allowNew": true, "sorted": true },
-    { "name": "city", "type": "ref", "table": "cities", "valueCol": "city", "filterBy": {"state": "state"} }
-  ],
-  "archivable": true
-}
-```
-
-> **`id` is implicit** — every table gets an `id` column auto-injected (storage primary key + join/archive match key). Do not declare it in `columns`.
-
-#### Column types
-
-| Type | Description |
-|------|-------------|
-| `text` | Plain text (default) |
-| `date` | Date picker, stored as `YYYY-MM-DD` |
-| `select` | Dropdown from a named list |
-| `ref` | Reference to a lookup table column |
-
-#### Column properties
-
-| Property | Description |
-|----------|-------------|
-| `name` | Column identifier (required) |
-| `type` | Column type (default: `"text"`) |
-| `hidden` | Don't display in UI (e.g., `created_at`, `updated_at`) |
-| `list` | List name for `select` type |
-| `allowNew` | Allow adding new values to the list (combobox) |
-| `sorted` | Sort dropdown items alphabetically (for `select`/`list` columns) |
-| `syncFrom` | Mirror this column's value from another table |
-| `table` | Reference table name (for `ref` type) |
-| `valueCol` | Column to use as value (for `ref` type) |
-| `filterBy` | Filter reference options by another column (for `ref` type) |
-
-### Views
-
-Views define presentation and data transformations. They are **flat, reusable data
-components** — the sidebar structure (order, grouping, nesting) lives in `nav`, not here.
-
-Each entry is either a **view definition** (has `name` + `sources`) or a **table reference** (has `table`):
-
-```json
-"views": [
-  { "name": "dashboard", "sources": ["tasks", "notes"], "mode": "union", ... },
-  { "name": "report", "sources": ["tasks"], "mode": "union", ... },
-  { "table": "tasks" }
-]
-```
-
-#### View properties
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | View identifier |
-| `sources` | string[] | Table names to pull data from |
-| `mode` | string | `"union"` (stack rows) or `"join"` (merge rows by `id`) |
-| `columns` | array | Mix of column names, inline embeds, and conditional columns |
-| `filter` | object | Static row filter (e.g., `{"status": "in_progress"}`) |
-| `readonly` | boolean | Disable editing (report views) |
-| `layout` | string | `"table"`, `"card"`, or `"list"` |
-| `collapsed` | boolean | Cards start collapsed (accordion) |
-| `defaultSort` | string | Default sort column |
-| `hideEmpty` | boolean | Hide columns where all rows are empty |
-| `icon` | string | MDI icon for sidebar |
-
-#### Aggregate views
-
-Add `groupBy` + `collect` to group rows and collect values into fixed columns:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `groupBy` | `{ column, from }` or `string[]` | Group key: `column` = output name, `from` = source columns |
-| `collect` | string | Source column to collect per group (sorted descending) |
-
-```json
-{
-  "name": "attendance",
-  "sources": ["tasks", "notes"],
-  "mode": "union",
-  "groupBy": { "column": "person", "from": ["assigned_to", "author"] },
-  "collect": "date",
-  "columns": ["person", "latest", "previous", "3rd"]
-}
-```
-
-Output: one row per person with their N most recent dates. Read-only, sortable.
-
-### Markdown (documents)
-
-A view with a `markdown` field is a **document** (rather than a data grid) that embeds live
-views/tables. It is the content layer, editable in-app (Edit toggle → Save).
-
-```json
-{ "name": "home", "markdown": "# Welcome\n\nOpen items:\n\n{{view:report}}\n\n{{t:home.note}}" }
-```
-
-- `{{view:<name>}}` / `{{table:<name>}}` — render live data inline. Embeds are **interactive**:
-  inline cell editing plus add/delete/archive row controls (gated by the same permission/
-  read-only rules as the main grid). A view with a `filter` embeds only its matching rows, so
-  composing several filtered views in a markdown view replaces in-view sectioning.
-- `{{self}}` — render *this* view's own data grid inline. Use it when a view has both
-  `sources`/`columns` and `markdown` (one view = prose **plus** its own data), avoiding having
-  to reference the view by name.
-- `{{view:<name>?}}` / `{{table:<name>?}}` — append `?` to hide the embed when it has 0 rows.
-- `{{view:<name>@archive}}` / `{{table:<name>@archive}}` — embed a non-active partition (read-only).
-- `{{t:<key>}}` — translatable text token (collected into the Languages tab).
-- Markdown supports headings, bold/italic, lists, links, paragraphs.
-- Bodies are stored on the server in a `_pages` collection (one `{id, markdown}` row per
-  view), not in `schema.json`. Edit via the toggle in the corner → textarea → Save. The view's
-  schema `markdown` is a seed/fallback until first saved. (Legacy `pages` schemas still load —
-  they're folded into `markdown` views automatically.)
-
-### Nav (sidebar structure + layout)
-
-`nav` defines the sidebar (required). It references views/tables by name and sets layout.
-
-```json
-"nav": {
-  "layout": "drawer",
-  "items": [
-    { "view": "home", "icon": "mdi-home" },
-    { "view": "report", "items": [ { "view": "sub_report" } ] },
-    { "group": "Data", "icon": "mdi-database", "items": [ { "table": "tasks" } ] }
-  ]
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `layout` | string | `"drawer"` (default, side) or `"tabs"` (top, desktop) |
-| `items` | array | Nav entries: `{view}`, `{table}`, or `{group, items}` (a `{view}` may be a data view or a view with `markdown`) |
-| item `items` | array | Child entries (one level) — a clickable parent with nested children |
-| item `icon` / `title` | string | Optional per-item icon / label override |
-
-System tabs (Lookup / Languages / Settings) are appended automatically. Access filtering is unchanged: a view is visible only if the user can access all its source tables.
-
-### Columns array
-
-The `columns` array in views can contain:
-
-#### 1. Column names (strings)
-```json
-"date", "title", "status"
-```
-
-#### 2. Conditional columns (show field only when condition met)
-```json
-{ "content": { "status": "in_progress" } }
-```
-Shows `content` column only for rows where `status === "in_progress"`.
-
-#### 3. Inline embeds (filtered table data)
-```json
-{ "sources": ["tasks"], "filter": {"status": "open"}, "columns": ["date", "title"], "layout": "table" }
-```
-Renders a filtered subset of another table. Hidden when filter produces 0 rows.
-
-Embed properties:
-
-| Property | Description |
-|----------|-------------|
-| `sources` | Source table(s) (array) |
-| `mode` | `"union"` or `"join"` (for multi-source embeds) |
-| `filter` | Row filter |
-| `columns` | Columns to display |
-| `layout` | `"table"`, `"card"`, or `"chip"` (default) |
-| `defaultSort` | Sort column for embed rows |
-| `hideEmpty` | Hide columns where all embed rows are empty |
-
-#### 4. Named-view embeds
-```json
-{ "view": "report_open", "filter": {"status": "in_progress"}, "hideEmpty": true }
-```
-Embeds a defined view at that position, reusing its `sources`/`columns`/`mode`. The entry's
-`filter`/`hideEmpty`/`layout` override the embedded view's — so one view can be reused as a
-template with different filters. If the named view has `markdown`, its document renders inline
-(header + nested embeds + footer), and the whole block is hidden when all its embedded tables
-are empty — useful for a per-card header/table/footer section.
-
-#### Full example
-
-```json
-{
-  "name": "combined",
-  "sources": ["tasks", "notes"],
-  "mode": "join",
-  "defaultSort": "date",
-  "columns": [
-    "date", "title",
-    { "sources": ["tasks"], "filter": {"status": "open"}, "columns": ["date", "title", "assigned_to"], "defaultSort": "date" },
-    { "sources": ["tasks"], "filter": {"status": "in_progress"}, "columns": ["date", "title", "assigned_to"], "layout": "table", "hideEmpty": true },
-    "status", "assigned_to", "city", "content", "author"
-  ]
-}
-```
-
-### Lists and translations
-
-- **List values** are stored as stable keys (e.g., `"in_progress"`, not "In Progress")
-- **Display** uses translations: `list.status.in_progress` → "Käynnissä" / "In Progress"
-- **Locked values**: list values referenced in schema filters are auto-seeded and non-deletable
-- **Translation keys** auto-generated: `tab.*`, `view.*`, `field.*`, `list.*.*`, and `{{t:}}` tokens in markdown views
-
-### Schema migration
-
-`migrate-schema.js` normalizes/converts a schema (or an exported bundle) to the current
-format. Run it against a schema file or export JSON to upgrade older layouts.
+> `nav` is **required**; `views` are flat (hierarchy lives in `nav`). A view is either a
+> **data view** (`sources`/`columns`) or a **document** (a view with a `markdown` field).
 
 ---
 
