@@ -259,6 +259,13 @@ test.describe('Import/Export', () => {
       page.locator('button:has(.mdi-download)').click()
     ]);
     expect(download.suggestedFilename()).toMatch(/\.json$/);
+    // Columns must export as the documented array-of-objects form (with name, no implicit id)
+    const fs = require('fs');
+    const body = JSON.parse(fs.readFileSync(await download.path(), 'utf8'));
+    const cols = body.schema.tables.notes.columns;
+    expect(Array.isArray(cols)).toBe(true);
+    expect(cols.every(c => c && typeof c === 'object' && typeof c.name === 'string')).toBe(true);
+    expect(cols.some(c => c.name === 'id')).toBe(false);
   });
 });
 
