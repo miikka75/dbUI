@@ -118,10 +118,15 @@ A view's `columns` may contain, besides plain column names:
 A `filter` (on a view, an inline/named-view embed, or a conditional column) matches rows:
 - **Flat object** = AND of equality: `{ "status": "open", "city": "X" }` -> `status==open AND city==X`.
 - **Array value** = IN (OR on one column): `{ "status": ["open", "in_progress"] }`.
+  > ⚠️ **Being phased out.** The runtime still accepts it, but **export and `migrate-schema.js`
+  > rewrite array-IN into explicit `$or`** (`{ "$or": [ {"status":"open"}, {"status":"in_progress"} ] }`)
+  > so the shorthand can be retired later. Prefer `$or` in new schemas.
 - **`matchList` (dynamic)** = value must be in a named list: `{ "speaker": { "matchList": "guests" } }`.
   The list is resolved at runtime from the Lookup tab — adding/removing items in the list
   immediately changes which rows pass the filter. Use for filters that should stay in sync
   with user-editable lists.
+- **`notMatchList` (dynamic)** = value must **not** be in a named list:
+  `{ "jäsen": { "notMatchList": "vieraat" } }`. Same dynamic resolution as `matchList`, negated.
 - **`$or` / `$and`** = explicit logical groups, nestable:
   `{ "$and": [ { "city": "X" }, { "$or": [ {"status":"open"}, {"status":"in_progress"} ] } ] }`.
 
