@@ -9,19 +9,8 @@ var defaultSchema = {"tables":{},"views":[]};
 var SCHEMA = defaultSchema.tables;
 var _viewsNav = Array.isArray(defaultSchema.views) ? defaultSchema.views : [];var VIEWS = {};
 function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string')) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
-// Strip dead `text` entries ({text}-only columns — a removed feature) from view + embed columns at load,
-// so downstream consumers never see them. (Legacy `pages` map / {page:} nav are no longer supported — migrate-schema.js converts them.)
-function _stripTextEntries(s) {
-  function strip(cols) {
-    if (!Array.isArray(cols)) return cols;
-    return cols.filter(function(c) { return !(c && typeof c === 'object' && c.text && !c.name && !c.sources); })
-               .map(function(c) { if (c && typeof c === 'object' && Array.isArray(c.columns)) c.columns = strip(c.columns); return c; });
-  }
-  if (!s) return s;
-  var views = Array.isArray(s.views) ? s.views : (s.views ? Object.keys(s.views).map(function(k) { return s.views[k]; }) : []);
-  views.forEach(function(v) { if (v && Array.isArray(v.columns)) v.columns = strip(v.columns); });
-  return s;
-}
+// (Legacy `pages` map / {page:} nav and `text` entries are removed features — migrate-schema.js
+//  upgrades any legacy schema: text -> markdown {{t:}} doc-views, pages -> markdown views.)
 _flattenViews(_viewsNav);
 var DEFAULT_LANGUAGE = defaultSchema.defaultLanguage || null;
 
@@ -36,7 +25,7 @@ function ensureImplicitId(schema, orders) {
 }
 // Shared schema normalization: strip dead text entries + set globals + colMap + ensureImplicitId. Returns nothing; mutates globals.
 function _normalizeSchema(parsed) {
-  _stripTextEntries(parsed);
+  convertViewFilters(parsed.views);   // upgrade legacy array-IN ({col:[a,b]})->$or and shorthand conditional cols ({col:{cond}})->{name,when}
   SCHEMA = parsed.tables || SCHEMA;
   _viewsNav = Array.isArray(parsed.views) ? parsed.views : _viewsNav;
   VIEWS = {};
@@ -95,13 +84,7 @@ function withMirrors(base) {
   }
   return set;
 }
-function matchFilter(r, f) {
-  if (f.$or) return f.$or.some(function(s) { return matchFilter(r, s); });
-  if (f.$and) return f.$and.every(function(s) { return matchFilter(r, s); });
-  for (var k in f) { if (k[0] === '$') continue; var v = f[k]; if (v && typeof v === 'object' && !Array.isArray(v) && v.matchList) { if (!window._listsCache || !window._listsCache[v.matchList] || window._listsCache[v.matchList].indexOf(r[k]) < 0) return false; } else if (v && typeof v === 'object' && !Array.isArray(v) && v.notMatchList) { if (window._listsCache && window._listsCache[v.notMatchList] && window._listsCache[v.notMatchList].indexOf(r[k]) >= 0) return false; } else if (Array.isArray(v) ? v.indexOf(r[k]) < 0 : r[k] !== v) return false; }
-  return true;
-}
-function filterRows(rows, filter) { if (!filter) return rows; return rows.filter(function(r) { return matchFilter(r, filter); }); }
+function filterRows(rows, filter) { if (!filter) return rows; return rows.filter(function(r) { return condMatches(r, filter); }); }
 // Rewrite array-IN filter values ({col:[a,b]}) into explicit $or of equalities, recursively.
 // Used by export + migrate so the array shorthand can eventually be retired; runtime still accepts both.
 function filterToOr(f) {
@@ -117,18 +100,24 @@ function filterToOr(f) {
   });
   return clauses.length === 1 ? clauses[0] : { $and: clauses };
 }
-// Walk a views array and convert every filter (view, groupBy, embed, conditional column) via filterToOr.
+// Walk a views array: upgrade legacy array-IN filters to $or (view/groupBy/embed/conditional/when),
+// and canonicalize the legacy shorthand conditional column { "<col>": {cond} } -> { name, when }.
 function convertViewFilters(views) {
   (views || []).forEach(function(v) {
     if (v.filter) v.filter = filterToOr(v.filter);
     if (v.groupBy && v.groupBy.filter) v.groupBy.filter = filterToOr(v.groupBy.filter);
     (function walkCols(cols) {
-      (cols || []).forEach(function(c) {
+      if (!Array.isArray(cols)) return;
+      cols.forEach(function(c, i) {
         if (!c || typeof c !== 'object') return;
         if (c.filter) c.filter = filterToOr(c.filter);
-        if (!c.name && !c.sources && !c.view && !c.markdown && !c.computed) { // conditional column { col: {filter} }
+        if (c.when) c.when = filterToOr(c.when);
+        if (!c.name && !c.sources && !c.view && !c.markdown && !c.computed) { // legacy shorthand conditional column { "<col>": {cond} }
           var ck = Object.keys(c)[0];
-          if (ck && c[ck] && typeof c[ck] === 'object' && !Array.isArray(c[ck])) c[ck] = filterToOr(c[ck]);
+          if (ck && c[ck] && typeof c[ck] === 'object' && !Array.isArray(c[ck])) {
+            cols[i] = { name: ck, when: filterToOr(c[ck]) }; // canonicalize to { name, when } — one syntax
+            return;
+          }
         }
         if (Array.isArray(c.columns)) walkCols(c.columns);
       });
@@ -176,7 +165,7 @@ function aggregateRows(view, rows) {
     keysFrom.forEach(function(k) {
       var key = r[k];
       if (!key || !r[view.collect]) return;
-      if (groupFilter) { var tmp = {}; tmp[keyCol] = key; if (!matchFilter(tmp, groupFilter)) return; }
+      if (groupFilter) { var tmp = {}; tmp[keyCol] = key; if (!condMatches(tmp, groupFilter)) return; }
       if (!groups[key]) groups[key] = [];
       groups[key].push(withRole ? { date: r[view.collect], role: k } : r[view.collect]);
     });
@@ -219,7 +208,43 @@ function resolveComputed(rows, columns) {
   });
   return rows;
 }
-function colCondition(c) { if (!c || typeof c !== 'object' || c.name || c.sources || c.view || c.text) return null; var v = c[Object.keys(c)[0]]; return (v && typeof v === 'object') ? v : null; }
+// (colCondition removed — the legacy shorthand conditional column { "<col>": {cond} } is now
+//  canonicalized to { name, when } at load by convertViewFilters; isColumnHidden reads `when`.)
+// Unified per-row condition matcher. Single source of truth for BOTH row filtering
+// (view/embed `filter`, via condMatches/filterRows) AND column/embed visibility (conditional
+// columns, the `when` clause, embedWhenOk — via isColumnHidden/embedWhenOk). True = row matches.
+// Forms (a field maps to a scalar = equality, or an operator object):
+//   { "$or": [ ... ] } / { "$and": [ ... ] }   logical groups (nestable)
+//   { "f": "v" }                                 equality
+//   { "f": { "matchList": "L" } }                value is in named list L (dynamic, Lookup tab)
+//   { "f": { "notMatchList": "L" } }             value is NOT in named list L
+//   { "f": { "notEmpty": true } }                value is truthy (set) — works on computed values
+//   { "f": { "empty": true } }                   value is falsy (blank)
+//   { "f": { "ne": v } }                         !==  (equality is the scalar form above)
+// Membership is expressed with `$or` of equalities (array-IN shorthand was retired; convertViewFilters
+// upgrades any legacy `{f:[a,b]}` to `$or` at load). Empty/absent cond => true.
+function condMatches(item, cond) {
+  if (!cond || typeof cond !== 'object') return true;
+  item = item || {};
+  if (cond.$or) return cond.$or.some(function(s) { return condMatches(item, s); });
+  if (cond.$and) return cond.$and.every(function(s) { return condMatches(item, s); });
+  for (var k in cond) {
+    if (k[0] === '$') continue;
+    var c = cond[k], v = item[k];
+    if (c && typeof c === 'object' && !Array.isArray(c)) {
+      if (c.matchList) { if (!window._listsCache || !window._listsCache[c.matchList] || window._listsCache[c.matchList].indexOf(v) < 0) return false; }
+      else if (c.notMatchList) { if (window._listsCache && window._listsCache[c.notMatchList] && window._listsCache[c.notMatchList].indexOf(v) >= 0) return false; }
+      else {
+        if (c.notEmpty && !v) return false;
+        if (c.empty && v) return false;
+        if ('ne' in c && v === c.ne) return false;
+      }
+    } else {
+      if (v !== c) return false;
+    }
+  }
+  return true;
+}
 function toDateStr(v) { if (!v) return ''; var s = String(v); if (s.length === 10) return s; var d = new Date(s); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 function parseTableResult(r) { if (!r) return { headers: [], rows: [] }; if (typeof r === 'string') return JSON.parse(r); return r; }
 function validateSchema() {
