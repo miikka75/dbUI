@@ -99,7 +99,10 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `markdown` | string | Makes this a **document** view (see below) instead of a data grid |
 
 A view's `columns` may contain, besides plain column names:
-- **Conditional column** `{ "<col>": { <filter> } }` — show the column only for rows matching the filter.
+- **Conditional column** `{ "name": "<col>", "when": { <cond> } }` — show the column only on rows
+  matching `when` (the unified condition language; works on plain **and** computed columns).
+  *Legacy shorthand `{ "<col>": { <cond> } }` is auto-canonicalized to the `{ name, when }` form at
+  load (`convertViewFilters`) — prefer the explicit `when` form in new schemas.*
 - **Inline embed** `{ "sources": [...], "filter": {...}, "columns": [...] }` — a filtered sub-table at that position.
 - **Named-view embed** `{ "view": "<name>", "filter": {...}, "hideEmpty": true, "bare": true }` — embed a defined
   view (reuses its sources/columns/mode), with the entry's `filter`/`hideEmpty`/`bare` overriding.
@@ -117,10 +120,9 @@ A view's `columns` may contain, besides plain column names:
 ### filters
 A `filter` (on a view, an inline/named-view embed, or a conditional column) matches rows:
 - **Flat object** = AND of equality: `{ "status": "open", "city": "X" }` -> `status==open AND city==X`.
-- **Array value** = IN (OR on one column): `{ "status": ["open", "in_progress"] }`.
-  > ⚠️ **Being phased out.** The runtime still accepts it, but **export and `migrate-schema.js`
-  > rewrite array-IN into explicit `$or`** (`{ "$or": [ {"status":"open"}, {"status":"in_progress"} ] }`)
-  > so the shorthand can be retired later. Prefer `$or` in new schemas.
+- **Array value** = IN — **retired.** `{ "status": ["open","in_progress"] }` is **auto-upgraded to
+  `$or` at load** (`convertViewFilters`) and on export; the matcher itself no longer accepts raw
+  arrays. **Use `$or`** in new schemas (legacy arrays keep working via the load-time upgrade).
 - **`matchList` (dynamic)** = value must be in a named list: `{ "speaker": { "matchList": "guests" } }`.
   The list is resolved at runtime from the Lookup tab — adding/removing items in the list
   immediately changes which rows pass the filter. Use for filters that should stay in sync
@@ -129,12 +131,16 @@ A `filter` (on a view, an inline/named-view embed, or a conditional column) matc
   `{ "jäsen": { "notMatchList": "vieraat" } }`. Same dynamic resolution as `matchList`, negated.
 - **`$or` / `$and`** = explicit logical groups, nestable:
   `{ "$and": [ { "city": "X" }, { "$or": [ {"status":"open"}, {"status":"in_progress"} ] } ] }`.
+- **Value operators** (also usable in column `when` / conditional columns — same engine):
+  `{ "col": { "notEmpty": true } }`, `{ "empty": true }`, `{ "ne": v }`.
+  `notEmpty`/`empty` work on **computed** values too. Row filters and column/embed conditions share
+  one matcher (`condMatches`), so **every operator above works in `filter`, `when`, and embed `when`.**
 
 **Static vs Dynamic filtering:**
 | Syntax | When to use |
 |--------|-------------|
 | `"col": "value"` | Fixed filter value known at schema design time |
-| `"col": ["a","b","c"]` | Fixed set of values known at schema design time |
+| `{ "$or": [ {"col":"a"}, {"col":"b"} ] }` | Fixed set of values (membership; array shorthand retired) |
 | `"col": { "matchList": "listName" }` | Filter should track a user-editable list (Lookup tab) |
 
 ### aggregate views (groupBy + collect)
@@ -177,6 +183,35 @@ A column with `computed` derives its value from other columns at render time (no
   ```
 - Computed columns are read-only (no cell editor renders for them).
 - They appear in the view's visible columns and in card/table layout.
+
+### conditional computed columns (`when`) + condition operators
+Any **named or computed** column may carry a `when` clause that gates its **per-row** visibility
+(card/list: hides the field on that card; table: blanks the cell). Because computed values are
+resolved into the row before visibility is evaluated, a `when` can be driven by a computed column:
+```json
+{ "name": "vieraat", "computed": { "fromColumns": ["puhe1","puhe2"], "matchList": "vieraat" },
+  "when": { "vieraat": { "notEmpty": true } } }
+```
+Conditions (used by `when`, row `filter`s, and embed `when` — all the same engine) match a
+row when **every** field matches. Each field accepts a scalar (equality) or an operator object:
+
+| Form | Meaning |
+|------|---------|
+| `{ "f": "v" }` | `row.f === "v"` (equality) |
+| `{ "f": { "notEmpty": true } }` | `row.f` is truthy (set) |
+| `{ "f": { "empty": true } }` | `row.f` is falsy (blank) |
+| `{ "f": { "ne": v } }` | `row.f !== v` |
+| `{ "$or": [...] }` / `{ "$and": [...] }` | logical groups (membership via `$or` of equalities) |
+| `{ "f": { "matchList": "L" } }` / `notMatchList` | value in / not in named list |
+
+`when`/conditional columns and row `filter`s share **one matcher** (`condMatches`), so anything
+valid in a `filter` is valid in a `when` and vice-versa — `$or`/`$and`,
+`matchList`/`notMatchList`, equality, and the operators above. `notEmpty`/`empty` work
+on **computed** values, so you can show a column only when a computed result is present.
+A `when` clause also works on an **embed** (inline, named-view, or markdown prose block) in a
+view's `columns`: the embed renders per-card only when the card's row matches — e.g. a markdown
+prose block placed above a column, shown only when a computed value is present:
+`{ "view": "vieraat_otsikko", "bare": true, "when": { "vieraat": { "notEmpty": true } } }`.
 
 ## markdown (documents)
 A view with a `markdown` field renders as a **document** instead of a data grid:
@@ -227,10 +262,11 @@ A view with a `markdown` field renders as a **document** instead of a data grid:
 
 ## `text` entries (removed)
 The `{ "text": "<key>" }` column entry (free-form text interleaved in a view's columns)
-is **removed**: it is no longer rendered — any leftover `text` entries are **stripped at load**
-(`_stripTextEntries`) so they never surface as phantom columns. Author prose with a `markdown`
-view instead (a filtered view + markdown + another view replaces text-between-columns).
-`migrate-schema.js` converts existing `text` to markdown views. Do not author new `text` entries.
+is **fully removed** — there is no longer any runtime handling for it (the old `_stripTextEntries`
+load-time stripper was deleted). Author prose with a `markdown` view instead (a filtered view +
+markdown + another view replaces text-between-columns). **Legacy schemas with `text` entries must be
+upgraded with `migrate-schema.js`** (which converts `text` → `markdown` doc-views) before deploying —
+otherwise the entries would surface as phantom columns. Do not author new `text` entries.
 
 ## Migration
 `migrate-schema.js <schema-or-export>.json` normalizes a schema:
