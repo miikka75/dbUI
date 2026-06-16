@@ -183,10 +183,9 @@ deploy root** (next to `index.html`); the host must serve them with correct imag
 | File | Size | Purpose |
 |------|------|---------|
 | `favicon.svg` | any | browser-tab favicon (`<link rel="icon">`) |
-| `icon-192.png` | 192×192 | apple-touch-icon + manifest install icon |
-| `icon-512.png` | 512×512 | manifest splash / maskable icon |
+| `icon-512.png` | 512×512 | apple-touch-icon + manifest install / splash / maskable icon |
 
-To customize the app's icon for a deployment, **replace these three files** (the repo ships
+To customize the app's icon for a deployment, **replace these two files** (the repo ships
 defaults rasterized from `favicon.svg`, e.g. via `convert -background white -density 512
 favicon.svg -resize 512x512 icon-512.png`).
 
@@ -200,8 +199,7 @@ index.html                     ← unified entry point (auto-detects backend)
 manifest.json                  ← static PWA manifest (baseline name/icons, display: standalone)
 sw.js                          ← minimal service worker (enables install prompt; no caching)
 favicon.svg                    ← static favicon (replace to rebrand)
-icon-192.png                   ← static apple-touch + manifest install icon (192×192)
-icon-512.png                   ← static manifest splash/maskable icon (512×512)
+icon-512.png                   ← static apple-touch + manifest install/splash/maskable icon (512×512)
 app-core.html                  ← Vue app logic + computeds + helpers
 ui.html                        ← Vue template (data views, forms, setup)
 style.html                     ← CSS styles
