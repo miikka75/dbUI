@@ -1,0 +1,7 @@
+{
+  "local@dev": {
+    "role": "admin",
+    "user": "local@dev",
+    "tables": "all"
+  }
+}
