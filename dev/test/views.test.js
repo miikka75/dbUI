@@ -65,8 +65,8 @@ describe('Union view data access', () => {
       for (const col of view.columns) {
         if (typeof col === 'object' && col.view) continue; // named-view embed
         if (typeof col === 'object' && col.sources && !col.name) continue; // inline embed
-        if (typeof col === 'object' && col.text) continue; // inline text
-        const colStr = typeof col === 'object' ? Object.keys(col)[0] : col;
+        if (typeof col === 'object' && col.computed) continue; // computed column (derived, not in a source table)
+        const colStr = typeof col === 'object' ? (col.name || Object.keys(col)[0]) : col;
         const found = view.sources.some(src => getColumns(src).includes(colStr));
         assert.ok(found, 'View "' + name + '" column "' + colStr + '" not in any source table');
       }
@@ -217,15 +217,20 @@ describe('Aggregate view logic', () => {
 });
 
 describe('Schema property coverage', () => {
-  it('text entries are filtered from visibleCols', () => {
-    // Text entries in view columns should not appear as visible columns
-    const view = VIEWS.progress_report || VIEWS.combined;
-    if (!view) return; // skip if view doesn't exist
-    const cols = (view.columns || []);
-    const textEntries = cols.filter(c => typeof c === 'object' && c.text && !c.sources);
-    const embedEntries = cols.filter(c => typeof c === 'object' && c.sources);
-    // Text and embed entries should exist in the schema
-    assert.ok(textEntries.length > 0 || embedEntries.length > 0, 'Schema should have text or embed entries in columns');
+  it('text entries are a removed feature (none remain in any view)', () => {
+    function countText(cols) {
+      let n = 0;
+      (cols || []).forEach(c => {
+        if (c && typeof c === 'object') {
+          if (c.text && !c.name && !c.sources) n++;
+          if (Array.isArray(c.columns)) n += countText(c.columns);
+        }
+      });
+      return n;
+    }
+    let total = 0;
+    for (const vn in VIEWS) total += countText(VIEWS[vn].columns);
+    assert.equal(total, 0, 'No {text} entries should remain (feature removed)');
   });
 
   it('readonly view property exists in schema', () => {
