@@ -58,7 +58,6 @@ function createVueApp() {
       setupMode: 'sheets',
       folderValid: false,
       oauthReady: false,
-      firebaseUid: null,
       currentUserEmail: null,
       serverStorage: '',
       userList: [],
@@ -95,7 +94,6 @@ function createVueApp() {
       snackbar: false,
       snackText: '',
       settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false },
-      appMode: localStorage.getItem('app_mode') || 'oauth',
       saveTimers: {},
       pendingDelete: null,
       pendingDeleteTimer: null,
@@ -232,12 +230,6 @@ function createVueApp() {
         return needed > (this.windowWidth - 72);
       },
       useListLayout: function() { return this.currentConfig.layout === 'list'; },
-      cardLabelWidth: function() {
-        var self = this;
-        var max = 0;
-        this.visibleCols.forEach(function(c) { var l = (self.t('field.' + c) || c).length; if (l > max) max = l; });
-        return Math.max(80, max * 7.5 + 16) + 'px';
-      },
       isReadonlyView: function() { return this.viewReadonly(this.currentTable); },
       embedConfigs: function() {
         var self = this;
@@ -392,12 +384,11 @@ function createVueApp() {
               keys.push('view.' + v.name);
               (v.columns || []).forEach(function(c) {
                 if (typeof c !== 'object') { keys.push('field.' + c); return; }          // plain column name
-                if (c.text && !c.sources) return;                                        // deprecated text entry -> no key
                 if (c.sources && c.columns) {                                            // inline embed
-                  c.columns.forEach(function(ec) { if (!(typeof ec === 'object' && ec.text)) keys.push('field.' + colName(ec)); });
+                  c.columns.forEach(function(ec) { keys.push('field.' + colName(ec)); });
                   return;
                 }
-                keys.push('field.' + colName(c));                                        // conditional column {col:{filter}}
+                keys.push('field.' + colName(c));                                        // conditional ({name,when}) / computed column
               });
               if (v.views) addViewKeys(v.views);
             }
@@ -783,6 +774,10 @@ function createVueApp() {
           return true;
         });
       },
+      // Per-row embed visibility: an embed entry may carry a `when` filter (same condMatches engine
+      // as columns/row-filters) to show a prose/data block only on cards whose row matches — e.g.
+      // a markdown block above a column shown only when a computed value is present.
+      embedWhenOk: function(ei, item) { return !ei.config.when || condMatches(item || {}, ei.config.when); },
       // Embed row controls — operate on the active partition across the mirror cluster (dataCache is reactive)
       embedSources: function(type, name) { return type === 'view' && VIEWS[name] ? (VIEWS[name].sources || []) : [name]; },
       canMutateEmbed: function(type, name) {
@@ -879,14 +874,13 @@ function createVueApp() {
       isColumnHidden: function(col, item) {
         var cfg = this.currentConfig;
         if (this.colHideEmpty(col) && !item[col]) return true;
-        // Inline condition: {"colName": {"field": "value"}}
         var cols = cfg.columns;
         if (!cols || !Array.isArray(cols)) return false;
-        var colDef = cols.find(function(c) { return colName(c) === col && colCondition(c); });
-        if (colDef) {
-          var cond = colCondition(colDef);
-          for (var k in cond) { if (item[k] !== cond[k]) return true; }
-        }
+        // `when` clause on a column entry: { "name": col, "computed"?: {...}, "when": { <condition> } }
+        // — the canonical conditional form; gates the column per-row (legacy shorthand
+        // { "<col>": {cond} } is rewritten to this at load by convertViewFilters).
+        var named = cols.find(function(c) { return c && typeof c === 'object' && c.name === col && c.when; });
+        if (named && !condMatches(item, named.when)) return true;
         return false;
       },
 
@@ -1439,7 +1433,6 @@ function createVueApp() {
         var req = indexedDB.deleteDatabase('dbui');
         req.onsuccess = req.onerror = req.onblocked = done;
       },
-      copyUid: function() { this.copyText(this.firebaseUid); },
       copyText: function(text) {
         if (navigator.clipboard) { navigator.clipboard.writeText(text); }
         else { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); }
@@ -1595,33 +1588,6 @@ function createVueApp() {
           });
         });
       },
-      backupToDrive: function() {
-        var self = this;
-        var data = {};
-        Object.keys(SCHEMA).forEach(function(table) {
-          data[table] = self.dataCache[table] || [];
-          var archiveKey = aKey(table);
-          if (self.dataCache[archiveKey]) data[archiveKey] = self.dataCache[archiveKey];
-        });
-        var translations = {};
-        var chain = Promise.resolve();
-        self.languages.forEach(function(lang) {
-          chain = chain.then(function() {
-            return backend.getTranslations(self.folderId, lang.code).then(function(t) { translations[lang.code] = t; });
-          });
-        });
-        chain.then(function() {
-          var backup = { tables: data, lists: self.listsCache, languages: self.languages, translations: translations, exportedAt: new Date().toISOString() };
-        // Use backend-agnostic approach: saveChangesets repurposed, or direct _uploadFile if available
-          if (typeof _uploadFile === 'function') {
-            _uploadFile(self.folderId, 'backup.json', JSON.stringify(backup)).then(function() { self.notify('Backup saved'); });
-          } else if (backend.saveChangesets) {
-            backend.saveChangesets(self.folderId, 'backup', JSON.stringify(backup)).then(function() { self.notify('Backup saved'); });
-          } else {
-            self.notify('Backup not supported in this mode');
-          }
-        });
-      },
       importData: function(event) {
         var self = this;
         var file = event.target.files[0];
@@ -1738,18 +1704,16 @@ function createVueApp() {
         }
       },
 
-      switchMode: function(mode) {
-        localStorage.setItem('app_mode', mode);
-        location.reload();
-      },
-
       // Sync
-      syncAndReload: function() {
+      refreshData: function() {
         var self = this;
         self.syncing = true;
-        // Reload current table data from backend
+        // Re-fetch the current view's source tables from the backend and rebuild the view.
         var view = VIEWS[self.currentTable];
-        var sources = view ? view.sources : [self.currentTable];
+        // Source tables to refresh: a data view's sources, else the current table itself.
+        // Doc-views (markdown, no sources) and "no table open" yield [] — refresh is a safe no-op + rebuild.
+        var sources = (view && Array.isArray(view.sources)) ? view.sources
+          : (SCHEMA[self.currentTable] ? [self.currentTable] : []);
         var chain = Promise.resolve();
         sources.forEach(function(src) {
           chain = chain.then(function() {
@@ -1908,7 +1872,7 @@ function createVueApp() {
 
       embedLayout: function(ei) { return ei.config.layout || 'table'; },
 
-      _printable: function(ei, item) { if (ei.isDoc) return !!ei.show; var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows; return !!(rows && rows.length); },
+      _printable: function(ei, item) { if (!this.embedWhenOk(ei, item)) return false; if (ei.isDoc) return !!ei.show; var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows; return !!(rows && rows.length); },
       // Format a print cell to match the web grid: dates -> toDateStr, list/groupBy values -> displayValue.
       _printCell: function(c, v) { return this.colIsDate(c) ? this.toDateStr(v) : this.displayValue(c, v); },
       _printEmbed: function(ei, item) {
