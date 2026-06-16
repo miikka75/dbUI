@@ -236,7 +236,8 @@
         "assigned_to",
         { "name": "city", "hideEmpty": false },
         {
-          "content": {
+          "name": "content",
+          "when": {
             "status": "in_progress"
           }
         },
