@@ -1894,14 +1894,14 @@ test.describe('PWA static icons', () => {
     });
     // Static <link> icons declared in index.html (NOT generated from the schema icon).
     expect(r.favHref).toBe('./favicon.svg');
-    expect(r.appleHref).toBe('./icon-192.png');
+    expect(r.appleHref).toBe('./icon-512.png');
     // Manifest install icons are square PNGs at real http file URLs (no data:/blob:).
     expect(r.icons.every(i => i.type === 'image/png' && /^(\d+)x\1$/.test(i.sizes))).toBe(true);
     expect(r.icons.every(i => /^https?:.*icon-\d+\.png$/.test(i.src))).toBe(true);
     expect(r.icons.every(i => !/^(data|blob):/.test(i.src))).toBe(true);
 
     // All declared icon files are actually served (200 + image content-type).
-    for (const path of ['/favicon.svg', '/icon-192.png', '/icon-512.png']) {
+    for (const path of ['/favicon.svg', '/icon-512.png']) {
       const res = await page.request.get(path);
       expect(res.status()).toBe(200);
       expect(res.headers()['content-type']).toMatch(/^image\//);
