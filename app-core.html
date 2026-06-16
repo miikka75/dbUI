@@ -1814,44 +1814,40 @@ function createVueApp() {
 
       isArmed: function(key) { return this.pendingDelete === key; },
 
-      _setFaviconEl: function(href) { var el = document.querySelector('link[rel="icon"]') || document.createElement('link'); el.rel = 'icon'; el.href = href; document.head.appendChild(el); },
-      _applyFavicon: function(icon) {
-        var self = this;
-        // data: URIs and relative paths: use directly (no fetch needed)
-        if (/^data:|^[./]/.test(icon)) { self._setFaviconEl(icon); return; }
-        // External URL: check cache, fetch+store if changed
-        var cacheKey = '_favicon', cached = localStorage.getItem(cacheKey);
-        if (cached) { try { var c = JSON.parse(cached); if (c.src === icon) { self._setFaviconEl(c.data); return; } } catch(e) {} }
-        fetch(icon).then(function(r) { return r.blob(); }).then(function(blob) {
-          var reader = new FileReader();
-          reader.onload = function() { var dataUri = reader.result; localStorage.setItem(cacheKey, JSON.stringify({ src: icon, data: dataUri })); self._setFaviconEl(dataUri); self._updateManifest(); self._updateAppleIcon(); };
-          reader.readAsDataURL(blob);
-        }).catch(function() { self._setFaviconEl(icon); }); // fallback: use URL directly
+      // Per-database favicon + apple-touch-icon from schema.icons (absolute URLs, may be cross-origin).
+      // Missing fields keep the bundled static defaults declared in index.html, so switching databases
+      // (or clearing a field) always resolves to a correct icon.
+      _applyIconLinks: function() {
+        var sIcons = (this.schemaData && this.schemaData.icons) || {};
+        var fav = document.querySelector('link[rel="icon"]');
+        if (fav) fav.setAttribute('href', sIcons.favicon || './favicon.svg');
+        var apple = document.querySelector('link[rel="apple-touch-icon"]');
+        if (apple) apple.setAttribute('href', sIcons.appleTouch || './icon-192.png');
       },
-      // Returns the cached _favicon data URI when it matches schema.icon (offline-safe, avoids cross-origin canvas taint); else the raw icon.
-      _resolvedIcon: function() {
-        var icon = (this.schemaData && this.schemaData.icon) || './favicon.svg';
-        try { var c = JSON.parse(localStorage.getItem('_favicon')); if (c && c.src === icon && c.data) return c.data; } catch (e) {}
-        return icon;
-      },
-      // Runtime PWA manifest: builds name/icon from schema appTitle + icon, swaps the <link rel="manifest"> Blob.
+
       _updateManifest: function() {
         try {
           var title = this.appTitle || 'App';
-          var icon = this._resolvedIcon();
-          var iconType = /\.png(\?|$)/i.test(icon) ? 'image/png' : (/^data:image\/png/.test(icon) ? 'image/png' : 'image/svg+xml');
           // Follow the live Vuetify theme palette
           var colors = (this.$vuetify && this.$vuetify.theme && this.$vuetify.theme.current && this.$vuetify.theme.current.colors) || {};
           var bg = colors.background || '#ffffff';
           var tc = colors.surface || colors.primary || '#1976d2';
-          // Blob-URL manifests resolve relative URLs against the (invalid) blob base,
-          // so start_url/scope/icon src must be absolute (resolved against the page).
+          // Blob-URL manifests resolve relative URLs against the (invalid) blob base, so use absolute URLs.
           var base = new URL('./', location.href).href;
-          var iconSrc = /^data:/.test(icon) ? icon : new URL(icon, location.href).href;
+          // Single install icon (512). Chromium needs one square PNG >=144px for install, and 512
+          // also covers the splash/maskable role — so a separate small icon isn't required.
+          // schema.icons.png512 may be an absolute (cross-origin) PNG URL hosted anywhere (works with
+          // Firebase = DB only); else the bundled ./icon-512.png. png512Sizes overrides the declared
+          // size so a differently-sized source is declared accurately (no DevTools size-mismatch warning).
+          var sIcons = (this.schemaData && this.schemaData.icons) || {};
+          var icon512 = new URL(sIcons.png512 || './icon-512.png', location.href).href;
+          var icon512Sizes = sIcons.png512Sizes || '512x512';
           var manifest = {
             name: title, short_name: title, start_url: base, scope: base,
             display: 'standalone', background_color: bg, theme_color: tc,
-            icons: [{ src: iconSrc, sizes: 'any', type: iconType, purpose: 'any maskable' }]
+            icons: [
+              { src: icon512, sizes: icon512Sizes, type: 'image/png', purpose: 'any maskable' }
+            ]
           };
           var blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
           var url = URL.createObjectURL(blob);
@@ -1863,33 +1859,6 @@ function createVueApp() {
           var meta = document.getElementById('dyn-theme-color');
           if (!meta) { meta = document.createElement('meta'); meta.name = 'theme-color'; meta.id = 'dyn-theme-color'; document.head.appendChild(meta); }
           meta.content = tc;
-        } catch (e) {}
-      },
-      // apple-touch-icon for iOS (ignores manifest icons). PNG used directly; SVG rasterized to PNG via canvas.
-      _updateAppleIcon: function() {
-        try {
-          var icon = this._resolvedIcon();
-          var setLink = function(href) {
-            var el = document.querySelector('link[rel="apple-touch-icon"]');
-            if (!el) { el = document.createElement('link'); el.rel = 'apple-touch-icon'; document.head.appendChild(el); }
-            el.href = href;
-          };
-          var isPng = /\.png(\?|$)/i.test(icon) || /^data:image\/png/i.test(icon);
-          if (isPng) { setLink(icon); return; }
-          // Remote (uncached) SVG URL: skip — rasterizing cross-origin taints the canvas.
-          // _applyFavicon caches it as a data URI then re-invokes this; we rasterize then.
-          if (/^https?:/i.test(icon)) return;
-          // SVG (data URI or same-origin path): rasterize to a 180x180 PNG
-          var img = new Image();
-          img.onload = function() {
-            try {
-              var c = document.createElement('canvas'); c.width = 180; c.height = 180;
-              var ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0, 180, 180);
-              setLink(c.toDataURL('image/png'));
-            } catch (e) { setLink(icon); } // tainted canvas / cross-origin: fall back to raw
-          };
-          img.onerror = function() { setLink(icon); };
-          img.src = icon;
         } catch (e) {}
       },
       // (PRINT_CSS is a module-level var defined above createVueApp)
@@ -1991,9 +1960,10 @@ function createVueApp() {
 
     watch: {
       schemaData: { immediate: true, handler: function(s) {
-        if (s && s.icon) { this._applyFavicon(s.icon); }
+        // Per-database icons: favicon + apple-touch from schema.icons (or static defaults); the
+        // runtime manifest carries the per-database name, theme color, and install icons.
+        this._applyIconLinks();
         this._updateManifest();
-        this._updateAppleIcon();
       }},
       appTitle: { immediate: true, handler: function(t) { if (t) document.title = t; this._updateManifest(); } },
       viewingArchive: function() { this.loadTableData(); },
