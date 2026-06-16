@@ -143,7 +143,7 @@
       </v-tabs>
       <v-spacer v-else></v-spacer>
       <v-select v-if="languages.length > 1" v-model="currentLang" name="current-lang" :items="langItems" density="compact" variant="plain" hide-details style="max-width:120px" class="mr-2" @update:model-value="switchLanguage"></v-select>
-      <v-btn icon="mdi-refresh" @click="syncAndReload" :loading="syncing"></v-btn>
+      <v-btn icon="mdi-refresh" @click="refreshData" :loading="syncing"></v-btn>
       <v-btn :icon="theme === 'dark' ? 'mdi-weather-sunny' : 'mdi-weather-night'" @click="toggleTheme"></v-btn>
     </v-app-bar>
 
@@ -192,9 +192,6 @@
             <v-spacer></v-spacer>
             <v-btn v-if="canPrintView" icon="mdi-printer" size="small" variant="text" @click="printView()"></v-btn>
           </div>
-          <!-- Header text entries (before columns) -->
-          <template v-for="(ei, eidx) in embedItems" :key="'htxt'+eidx">
-          </template>
           <!-- List layout: compact single-line items -->
           <div v-if="useListLayout">
             <v-list density="compact">
@@ -229,7 +226,7 @@
               <div v-show="!currentConfig.collapsed || expandedCard === item.id">
               <!-- Embeds positioned after the first/title column (rendered here since visibleCols.slice(1) skips it) -->
               <template v-for="(ei, eidx) in embedItems" :key="'emb0'+eidx">
-              <div v-if="ei.config.afterColumn === visibleCols[0] && (ei.isDoc ? ei.show : (ei.config.filterBy ? embedRowsForItem(ei, item).length : ei.rows.length))" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
+              <div v-if="ei.config.afterColumn === visibleCols[0] && embedWhenOk(ei, item) && (ei.isDoc ? ei.show : (ei.config.filterBy ? embedRowsForItem(ei, item).length : ei.rows.length))" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
                 <template v-if="ei.inlineBlocks" v-for="(blk, bi) in ei.inlineBlocks" :key="'ib0'+bi">
                   <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
                   <table v-else-if="blk.self" style="width:100%; font-size:0.75rem; border-collapse:collapse">
@@ -262,7 +259,7 @@
               </div>
               <!-- Inline text/embed after this column -->
               <template v-for="(ei, eidx) in embedItems" :key="'emb'+col+eidx">
-              <div v-if="ei.config.afterColumn === col && (ei.isDoc ? ei.show : (ei.config.filterBy ? embedRowsForItem(ei, item).length : ei.rows.length))" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
+              <div v-if="ei.config.afterColumn === col && embedWhenOk(ei, item) && (ei.isDoc ? ei.show : (ei.config.filterBy ? embedRowsForItem(ei, item).length : ei.rows.length))" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
                 <template v-if="ei.isDoc" v-for="(blk, bi) in ei.blocks" :key="bi">
                   <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
                   <embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>
@@ -382,8 +379,6 @@
           </div>
           </template>
         </v-card>
-
-        <!-- Detail card view -->
 
         <!-- Languages Tab -->
         <v-card v-if="currentTable === '__languages'" variant="outlined">
