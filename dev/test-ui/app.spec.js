@@ -1869,25 +1869,11 @@ test.describe('Shared-link URL params', () => {
   });
 });
 
-test.describe('PWA manifest + apple-icon from remote icon', () => {
-  const http = require('http');
-  const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#e91e63"/></svg>';
-  let iconServer, iconUrl;
-
-  test.beforeAll(async () => {
-    iconServer = http.createServer((req, res) => {
-      res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Access-Control-Allow-Origin': '*' });
-      res.end(SVG);
-    });
-    await new Promise(resolve => iconServer.listen(0, '127.0.0.1', resolve));
-    iconUrl = 'http://127.0.0.1:' + iconServer.address().port + '/icon.svg';
-  });
-  test.afterAll(async () => { await new Promise(resolve => iconServer.close(resolve)); });
-
-  test('remote SVG icon is cached then reused as manifest base64 + rasterized apple PNG', async ({ page }) => {
+test.describe('PWA static icons', () => {
+  test('favicon, apple-touch-icon, and manifest icons are static served files', async ({ page }) => {
     test.setTimeout(20000);
     const S = {
-      defaultLanguage: 'en', icon: iconUrl,
+      defaultLanguage: 'en', icon: 'https://example.com/ignored.svg',   // schema icon is ignored now (fully static)
       tables: { a: { columns: [{ name: 'x' }] } },
       views: [{ name: 'va', sources: ['a'], columns: ['x'] }],
       nav: { layout: 'drawer', items: [{ view: 'va' }] }
@@ -1898,19 +1884,28 @@ test.describe('PWA manifest + apple-icon from remote icon', () => {
     await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.goto('/');
     await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 10000 });
-    // Wait for the async favicon fetch to cache the data URI and refresh manifest/apple-icon.
-    await page.waitForFunction(() => {
-      try { var c = JSON.parse(localStorage.getItem('_favicon')); return c && /^http/.test(c.src) && (c.data || '').startsWith('data:'); } catch (e) { return false; }
-    }, { timeout: 6000 });
+
     const r = await page.evaluate(async () => {
+      const fav = document.querySelector('link[rel="icon"]');
+      const apple = document.querySelector('link[rel="apple-touch-icon"]');
       const manLink = document.querySelector('link[rel=manifest]');
       const man = JSON.parse(await (await fetch(manLink.href)).text());
-      const apple = document.querySelector('link[rel="apple-touch-icon"]');
-      return { manifestIconSrc: man.icons[0].src, manifestIconType: man.icons[0].type, appleHref: apple ? apple.href : null };
+      return { favHref: fav ? fav.getAttribute('href') : null, appleHref: apple ? apple.getAttribute('href') : null, icons: man.icons };
     });
-    expect(r.manifestIconSrc.startsWith('data:image/svg+xml')).toBe(true);
-    expect(r.manifestIconType).toBe('image/svg+xml');
-    expect(r.appleHref && r.appleHref.startsWith('data:image/png')).toBe(true);
+    // Static <link> icons declared in index.html (NOT generated from the schema icon).
+    expect(r.favHref).toBe('./favicon.svg');
+    expect(r.appleHref).toBe('./icon-192.png');
+    // Manifest install icons are square PNGs at real http file URLs (no data:/blob:).
+    expect(r.icons.every(i => i.type === 'image/png' && /^(\d+)x\1$/.test(i.sizes))).toBe(true);
+    expect(r.icons.every(i => /^https?:.*icon-\d+\.png$/.test(i.src))).toBe(true);
+    expect(r.icons.every(i => !/^(data|blob):/.test(i.src))).toBe(true);
+
+    // All declared icon files are actually served (200 + image content-type).
+    for (const path of ['/favicon.svg', '/icon-192.png', '/icon-512.png']) {
+      const res = await page.request.get(path);
+      expect(res.status()).toBe(200);
+      expect(res.headers()['content-type']).toMatch(/^image\//);
+    }
   });
 });
 
@@ -1938,5 +1933,70 @@ test.describe('Filter array-IN -> $or on export', () => {
     const f = body.schema.views.find(v => v.name === 'v').filter;
     expect(Array.isArray(f.status)).toBe(false);
     expect(f.$or).toEqual([{ status: 'open' }, { status: 'wip' }]);
+  });
+});
+
+test.describe('PWA installability (no errors)', () => {
+  test('boots installable: valid manifest, square PNG icons, SW registered, no errors', async ({ page }) => {
+    test.setTimeout(20000);
+    const errors = [];
+    const allConsole = [];
+    page.on('console', m => { allConsole.push(m.text()); if (m.type() === 'error') errors.push(m.text()); });
+    page.on('pageerror', e => errors.push(String(e)));
+
+    await ensureAppReady(page);   // resets data, loads SCHEMA fixture, opens a table tab
+    // Wait for the runtime manifest to be built with its (bundled, http) PNG install icons.
+    await page.waitForFunction(async () => {
+      try {
+        var link = document.querySelector('link[rel=manifest]');
+        var m = JSON.parse(await (await fetch(link.href)).text());
+        return (m.icons || []).length >= 2 && m.icons.every(i => /^https?:.*icon-\d+\.png$/.test(i.src));
+      } catch (e) { return false; }
+    }, { timeout: 8000 });
+    await page.waitForTimeout(500);   // let Chromium fetch/validate the manifest icons
+
+    // 1) Service worker is registered (localhost is a secure context, so SW is allowed over http).
+    const sw = await page.evaluate(async () => {
+      if (!('serviceWorker' in navigator)) return { supported: false, registered: false };
+      const reg = await navigator.serviceWorker.getRegistration();
+      return { supported: true, registered: !!reg };
+    });
+    expect(sw.supported).toBe(true);
+    expect(sw.registered).toBe(true);
+
+    // 2) Manifest is valid, has install fields, and every icon is a square raster PNG (blob:) that decodes.
+    const man = await page.evaluate(async () => {
+      const link = document.querySelector('link[rel=manifest]');
+      const m = JSON.parse(await (await fetch(link.href)).text());
+      const decoded = await Promise.all((m.icons || []).map(i => new Promise(res => {
+        const im = new Image();
+        im.onload = () => res({ ok: true, w: im.naturalWidth, h: im.naturalHeight });
+        im.onerror = () => res({ ok: false });
+        im.src = i.src;
+      })));
+      return { name: m.name, start_url: m.start_url, display: m.display, icons: m.icons, decoded };
+    });
+    expect(man.name).toBeTruthy();
+    expect(man.start_url).toBeTruthy();
+    expect(man.display).toBe('standalone');
+    const sq = man.icons.filter(i => i.type === 'image/png' && /^(\d+)x\1$/.test(i.sizes));
+    expect(sq.some(i => parseInt(i.sizes, 10) >= 192)).toBe(true);   // install icon
+    expect(sq.some(i => parseInt(i.sizes, 10) >= 512)).toBe(true);   // splash/maskable icon
+    expect(man.icons.every(i => /^https?:.*icon-\d+\.png$/.test(i.src))).toBe(true);   // real http file, not data:/blob:
+    expect(man.decoded.every(d => d.ok && d.w === d.h && d.w >= 192)).toBe(true);
+
+    // 3) Chromium's own manifest parser reports no critical errors and nothing wrong with the icons.
+    const client = await page.context().newCDPSession(page);
+    const appMan = await client.send('Page.getAppManifest');
+    const errs = appMan.errors || [];
+    expect(errs.filter(e => e.critical)).toEqual([]);
+
+    // 4) Chromium did NOT log "Icon ... failed to load" or "require ... square icon" (the real-world symptom).
+    const iconConsoleErrors = allConsole.filter(t => /icon.*failed to load/i.test(t) || /square icon/i.test(t));
+    expect(iconConsoleErrors).toEqual([]);
+
+    // 5) No console / page errors during boot (ignore unrelated network noise).
+    const real = errors.filter(e => !/favicon|net::ERR|\b404\b|Failed to load resource/i.test(e));
+    expect(real).toEqual([]);
   });
 });
