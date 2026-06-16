@@ -218,9 +218,9 @@
               <!-- First visible field always shown + expand toggle -->
               <div class="d-flex align-center" @click="currentConfig.collapsed ? (expandedCard = expandedCard === item.id ? null : item.id) : null" :style="currentConfig.collapsed ? 'cursor:pointer' : ''">
                 <div style="flex:1">
-                  <div v-if="visibleCols.length" class="d-flex align-center mb-1">
-                    <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + visibleCols[0]) || visibleCols[0] }}</span>
-                    <span style="opacity:0.8">{{ displayValue(visibleCols[0], item[visibleCols[0]]) }}</span>
+                  <div v-if="visibleCols.length" class="card-field mb-2">
+                    <span class="card-field-label">{{ t('field.' + visibleCols[0]) || visibleCols[0] }}</span>
+                    <span style="opacity:0.9">{{ displayValue(visibleCols[0], item[visibleCols[0]]) }}</span>
                   </div>
                 </div>
                 <v-icon v-if="currentConfig.collapsed" size="small">{{ expandedCard === item.id || (!currentConfig.collapsed) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
@@ -246,8 +246,8 @@
               </div>
               </template>
               <template v-for="col in visibleCols.slice(1)" :key="col">
-              <div v-if="!isColumnHidden(col, item)" class="d-flex align-center mb-1">
-                <span :style="'min-width:' + cardLabelWidth + '; flex-shrink:0; font-size:0.75rem; opacity:0.6; padding-right:8px'">{{ t('field.' + col) || col }}</span>
+              <div v-if="!isColumnHidden(col, item)" class="card-field mb-2">
+                <span class="card-field-label">{{ t('field.' + col) || col }}</span>
                 <span v-if="cellReadonly(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
                 <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
                 <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || ''" :items="getListOptions(col, isAltList(col, item) ? colListSwitch(col).list : null)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>
