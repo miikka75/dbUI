@@ -45,4 +45,11 @@ html, body { margin: 0; padding: 0; height: 100%; background: #1a1a1a; }
 td { vertical-align: middle; padding: 4px 8px !important; }
 input[type="date"] { border: 1px solid rgb(var(--v-theme-outline), 0.3); border-radius: 4px; padding: 6px 10px; min-height: 32px; background: transparent; color: inherit; font: inherit; }
 input[type="date"]:focus { outline: none; border-color: rgb(var(--v-theme-primary)); }
+/* Card view field rows: stacked "overline" label on narrow/mobile (the cramped case); inline
+   label+value gutter on wide screens (≥600px) where horizontal space is plentiful. */
+.card-field-label { display: block; font-size: 0.6rem; letter-spacing: 0.05em; text-transform: uppercase; opacity: 0.55; line-height: 1.5; }
+@media (min-width: 600px) {
+  .card-field { display: flex; align-items: baseline; }
+  .card-field-label { flex: 0 0 auto; min-width: 110px; padding-right: 8px; font-size: 0.75rem; letter-spacing: normal; text-transform: none; opacity: 0.6; }
+}
 </style>
