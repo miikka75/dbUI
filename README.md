@@ -128,29 +128,80 @@ The app is a Progressive Web App — installable to a phone home screen or deskt
 standalone window with no browser address bar.
 
 - **Static manifest** (`manifest.json`) + `<link rel="manifest">` in `index.html` provide the
-  baseline name/icon/`display: standalone` before the app boots.
-- **Runtime manifest**: once the schema loads, `_updateManifest()` rebuilds the manifest from
-  the live app title + schema `icon` and swaps in a Blob URL, so the installed app shows the
-  real app name and icon. `start_url`/`scope`/icon `src` are written as **absolute** URLs
-  (a Blob-URL manifest can't resolve relative paths). `background_color`/`theme_color` follow
-  the current Vuetify theme; a dynamic `theme-color` meta tracks the in-app light/dark toggle.
+  baseline name/icons/`display: standalone` before the app boots.
+- **Runtime manifest**: once the schema loads, `_updateManifest()` rebuilds the manifest with the
+  live **app title** (per-database name) + theme colors and swaps in a Blob URL.
+  `start_url`/`scope`/icon `src` are written as **absolute** URLs (a Blob-URL manifest can't
+  resolve relative paths). `background_color`/`theme_color` follow the current Vuetify theme; a
+  dynamic `theme-color` meta tracks the in-app light/dark toggle. The runtime manifest's install
+  icons come from **`schema.icons` when set, else the bundled static files** (below).
 - **Service worker** (`sw.js`): minimal pass-through `fetch` (no offline caching) — its purpose
   is to satisfy the browser installability check so the install prompt appears reliably.
-- **Icons**: the manifest icon accepts a path **or** a base64 `data:` URI; a remote
-  cross-origin icon is fetched once, cached in `localStorage._favicon` as a data URI, and reused
-  by both the manifest and the apple-touch-icon. `apple-touch-icon` (iOS ignores manifest icons)
-  is the PNG directly, or an SVG rasterized to a 180×180 PNG via canvas.
-- **Requirements**: install needs HTTPS (Firebase Hosting provides it) and a valid manifest.
-  The dev server must serve `.svg`/`.png`/`.json` with correct MIME types (a `text/plain` icon
-  is rejected as "not a valid image").
+- **Per-database icons via `schema.icons` (optional).** All three icon surfaces can be driven
+  from the database schema using **absolute URLs** to PNG/SVG files hosted **anywhere** (a CDN,
+  Firebase Storage, S3, GitHub raw, …). This works with the *Firebase-for-database-only, no app
+  server* model because the icon files are just static objects on some HTTPS host — no runtime
+  rasterization or app server is required. Schema shape (every field optional):
+
+  ```json
+  "icons": {
+    "favicon":     "https://cdn.example.com/db/icon-512.png",
+    "appleTouch":  "https://cdn.example.com/db/icon-512.png",
+    "png512":      "https://cdn.example.com/db/icon-512.png",
+    "png512Sizes": "512x512"
+  }
+  ```
+
+  The **manifest install icon is a single 512×512 PNG** (`png512`) — Chromium only needs one square
+  PNG ≥144px and 512 also covers the splash/maskable role, so no separate small icon is required.
+  `png512Sizes` (optional, default `"512x512"`) lets a differently-sized source be declared
+  accurately (e.g. a 256×256 PNG → `"256x256"`) to avoid a DevTools size-mismatch warning.
+  `_applyIconLinks()` sets `<link rel="icon">` / `<link rel="apple-touch-icon">` and
+  `_updateManifest()` emits the manifest install icons from these URLs. **Any missing field falls
+  back to the bundled static file**, so a deployment can mix (e.g. per-database favicon, shared
+  bundled install icon) or omit `icons` entirely for the all-static default.
+
+  Hard rules that still apply (why `data:`/`blob:` don't work):
+  - The manifest **install** icon must be a **square raster PNG** (`png192`/`png512`); SVG /
+    `sizes:"any"` is skipped for install (fine as a `favicon`).
+  - URLs must be **absolute `http(s)`** and reachable. Chromium's manifest icon downloader runs
+    outside the document and **cannot fetch renderer-minted `data:`/`blob:` URLs** (both log
+    *"Icon … failed to load"*) — but it **can** fetch a real network URL, including cross-origin
+    (icons are exempt from the same-origin rule that binds `start_url`/`scope`).
+  - Production must be **HTTPS→HTTPS** (a cross-origin `http:` icon on an HTTPS page is
+    mixed-content blocked).
+
+  > Note: automated headless tests verify the manifest/links carry the URLs and that the browser
+  > fetches+decodes the cross-origin PNG (no-CORS image path — the same mode the install-icon
+  > downloader uses), but headless Chromium does **not** run the desktop install-icon download.
+  > Confirm the actual install icon once in real Chrome → DevTools → Application → Manifest.
+
+### Bundled static icon files (default / fallback)
+When `schema.icons` is absent (or a field is omitted), the app uses these files shipped **at the
+deploy root** (next to `index.html`); the host must serve them with correct image MIME types:
+
+| File | Size | Purpose |
+|------|------|---------|
+| `favicon.svg` | any | browser-tab favicon (`<link rel="icon">`) |
+| `icon-192.png` | 192×192 | apple-touch-icon + manifest install icon |
+| `icon-512.png` | 512×512 | manifest splash / maskable icon |
+
+To customize the app's icon for a deployment, **replace these three files** (the repo ships
+defaults rasterized from `favicon.svg`, e.g. via `convert -background white -density 512
+favicon.svg -resize 512x512 icon-512.png`).
+
+- **Requirements**: install needs HTTPS (Firebase Hosting provides it) and a valid manifest;
+  the icon files must be reachable and served as `image/*`.
 
 ## Project Structure
 
 ```
 index.html                     ← unified entry point (auto-detects backend)
-manifest.json                  ← static PWA manifest (baseline name/icon, display: standalone)
+manifest.json                  ← static PWA manifest (baseline name/icons, display: standalone)
 sw.js                          ← minimal service worker (enables install prompt; no caching)
-favicon.svg                    ← default app icon
+favicon.svg                    ← static favicon (replace to rebrand)
+icon-192.png                   ← static apple-touch + manifest install icon (192×192)
+icon-512.png                   ← static manifest splash/maskable icon (512×512)
 app-core.html                  ← Vue app logic + computeds + helpers
 ui.html                        ← Vue template (data views, forms, setup)
 style.html                     ← CSS styles
