@@ -17,7 +17,6 @@ const fs = require('fs');
 const path = require('path');
 
 const DEV_DIR = path.join(__dirname, '..');
-const PNG192 = fs.readFileSync(path.join(DEV_DIR, 'icon-192.png'));
 const PNG512 = fs.readFileSync(path.join(DEV_DIR, 'icon-512.png'));
 
 let server, ORIGIN;
@@ -27,7 +26,6 @@ test.beforeAll(async () => {
   server = http.createServer((req, res) => {
     hits.push(req.url);
     const send = (buf) => { res.writeHead(200, { 'Content-Type': 'image/png', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' }); res.end(buf); };
-    if (req.url.startsWith('/icon-192.png')) return send(PNG192);
     if (req.url.startsWith('/icon-512.png')) return send(PNG512);
     res.writeHead(404); res.end('nope');
   });
