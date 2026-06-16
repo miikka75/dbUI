@@ -91,7 +91,7 @@ function bootData(folderId, schema) {
   for (var name in tableMap) {
     var def = tables[name];
     data[name] = getTableData(tableMap[name], def.partition || 'active');
-    var ap = def.archivable ? 'archive' : def.archivePartition; // archivable -> fixed 'archive'; legacy archivePartition still honored
+    var ap = def.archivable ? 'archive' : null; // archivable -> fixed 'archive' partition (legacy archivePartition dropped)
     if (ap) { try { data[name + '__' + ap] = getTableData(tableMap[name], ap); } catch(e2) {} }
   }
   // Return schema as object + explicit key order arrays (google.script.run scrambles object keys)
