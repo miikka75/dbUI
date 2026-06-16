@@ -107,7 +107,7 @@ function _startFirebase(config) {
   _auth = firebase.auth();
   _db.enablePersistence().catch(function() {});
   _auth.onAuthStateChanged(function(user) {
-    if (user) { appInstance.firebaseUid = user.uid; appInstance.currentUserEmail = user.email; init(); }
+    if (user) { appInstance.currentUserEmail = user.email; init(); }
     else { appInstance.needsReauth = true; appInstance.loading = false; }
   });
 }
