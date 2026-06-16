@@ -1195,7 +1195,7 @@ test.describe('Print with doc-view embed', () => {
 });
 
 test.describe('filterRows operators', () => {
-  test('supports flat AND, array-IN, $or, and $and', async ({ page }) => {
+  test('supports flat AND, $or, $and; array-IN is retired (upgraded to $or via filterToOr)', async ({ page }) => {
     test.setTimeout(20000);
     await page.goto('/');
     await page.waitForFunction(() => typeof filterRows === 'function');
@@ -1209,17 +1209,19 @@ test.describe('filterRows operators', () => {
       const ids = (f) => filterRows(rows, f).map((x) => x.id);
       return {
         flatAnd: ids({ state: 'open', city: 'X' }),
-        arrayIn: ids({ state: ['open', 'in_progress'] }),
+        arrayInRaw: ids({ state: ['open', 'in_progress'] }),          // array-IN no longer matched directly
+        arrayInUpgraded: ids(filterToOr({ state: ['open', 'in_progress'] })), // ...but filterToOr -> $or works
         or: ids({ $or: [{ state: 'open' }, { state: 'in_progress' }] }),
         and: ids({ $and: [{ city: 'X' }, { $or: [{ state: 'open' }, { state: 'in_progress' }] }] }),
         noFilter: ids(null).length
       };
     });
-    expect(r.flatAnd).toEqual([1]);          // AND of equality (backward compatible)
-    expect(r.arrayIn).toEqual([1, 2, 4]);    // array value = IN
-    expect(r.or).toEqual([1, 2, 4]);         // $or
-    expect(r.and).toEqual([1, 2]);           // city X AND (open OR in_progress)
-    expect(r.noFilter).toBe(4);              // no filter = all rows
+    expect(r.flatAnd).toEqual([1]);              // AND of equality (backward compatible)
+    expect(r.arrayInRaw).toEqual([]);            // raw array-IN is retired at the matcher level
+    expect(r.arrayInUpgraded).toEqual([1, 2, 4]); // upgraded to $or (as convertViewFilters does at load)
+    expect(r.or).toEqual([1, 2, 4]);             // $or
+    expect(r.and).toEqual([1, 2]);               // city X AND (open OR in_progress)
+    expect(r.noFilter).toBe(4);                  // no filter = all rows
   });
 });
 
@@ -1998,5 +2000,67 @@ test.describe('PWA installability (no errors)', () => {
     // 5) No console / page errors during boot (ignore unrelated network noise).
     const real = errors.filter(e => !/favicon|net::ERR|\b404\b|Failed to load resource/i.test(e));
     expect(real).toEqual([]);
+  });
+});
+
+test.describe('conditional computed columns (when)', () => {
+  test('condMatches supports equality + notEmpty/empty/eq/ne/in operators (drives when/conditional columns)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const f = (typeof condMatches !== 'undefined') ? condMatches : window.condMatches;
+      return {
+        eqTrue:        f({ a: 'x' }, { a: 'x' }),
+        eqFalse:       f({ a: 'y' }, { a: 'x' }),
+        notEmptyTrue:  f({ a: 'x' }, { a: { notEmpty: true } }),
+        notEmptyFalse: f({ a: '' },  { a: { notEmpty: true } }),
+        emptyTrue:     f({ a: '' },  { a: { empty: true } }),
+        emptyFalse:    f({ a: 'x' }, { a: { empty: true } }),
+        neTrue:        f({ a: 'x' }, { a: { ne: 'y' } }),
+        neFalse:       f({ a: 'y' }, { a: { ne: 'y' } }),
+        multi:         f({ a: 'x', b: 'y' }, { a: { notEmpty: true }, b: 'y' }),
+        orTrue:        f({ a: 'z' }, { $or: [ { a: 'x' }, { a: 'z' } ] }),
+        orFalse:       f({ a: 'q' }, { $or: [ { a: 'x' }, { a: 'z' } ] }),
+        andTrue:       f({ a: 'x', b: 'y' }, { $and: [ { a: 'x' }, { b: { notEmpty: true } } ] }),
+        andFalse:      f({ a: 'x', b: '' },  { $and: [ { a: 'x' }, { b: { notEmpty: true } } ] }),
+        emptyCondTrue: f({ a: 'x' }, {})
+      };
+    });
+    expect(r).toEqual({
+      eqTrue: true, eqFalse: false,
+      notEmptyTrue: true, notEmptyFalse: false,
+      emptyTrue: true, emptyFalse: false,
+      neTrue: true, neFalse: false,
+      multi: true,
+      orTrue: true, orFalse: false,
+      andTrue: true, andFalse: false,
+      emptyCondTrue: true
+    });
+  });
+
+  test('embedWhenOk gates an embed/prose block per-row by its `when` clause', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const a = window.appInstance;
+      const mk = (when) => ({ config: when ? { when } : {} });
+      return {
+        noWhen:  a.embedWhenOk(mk(null), { vieraat: '' }),                 // no when -> always show
+        match:   a.embedWhenOk(mk({ vieraat: { notEmpty: true } }), { vieraat: 'Matti' }),
+        noMatch: a.embedWhenOk(mk({ vieraat: { notEmpty: true } }), { vieraat: '' }),
+        orMatch: a.embedWhenOk(mk({ $or: [ { tila: 'x' }, { vieraat: { notEmpty: true } } ] }), { tila: '', vieraat: 'M' })
+      };
+    });
+    expect(r).toEqual({ noWhen: true, match: true, noMatch: false, orMatch: true });
+  });
+
+  test('convertViewFilters canonicalizes legacy shorthand conditional columns to {name, when} (+ array-IN to $or)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const views = [{ name: 'v', columns: [ 'a', { content: { status: 'in_progress' } }, { tag: { x: ['p', 'q'] } } ] }];
+      convertViewFilters(views);
+      return views[0].columns;
+    });
+    expect(r[0]).toBe('a');                                              // plain column untouched
+    expect(r[1]).toEqual({ name: 'content', when: { status: 'in_progress' } });   // shorthand -> {name, when}
+    expect(r[2]).toEqual({ name: 'tag', when: { $or: [ { x: 'p' }, { x: 'q' } ] } }); // + inner array-IN -> $or
   });
 });
