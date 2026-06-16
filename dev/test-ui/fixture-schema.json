@@ -47,7 +47,10 @@
       "archivable": true
     },
     "notes": {
-      "printable": ["view", "cards"],
+      "printable": [
+        "view",
+        "cards"
+      ],
       "columns": [
         {
           "name": "date",
@@ -107,16 +110,16 @@
   "views": [
     {
       "name": "combined",
-      "printable": ["view", "cards"],
+      "printable": [
+        "view",
+        "cards"
+      ],
       "sources": [
         "tasks",
         "notes"
       ],
       "mode": "join",
       "columns": [
-        {
-          "text": "view.combined.header"
-        },
         "date",
         "title",
         {
@@ -152,10 +155,7 @@
         "assigned_to",
         "city",
         "content",
-        "author",
-        {
-          "text": "view.combined.footer"
-        }
+        "author"
       ],
       "defaultSort": "date"
     },
@@ -187,16 +187,10 @@
       "icon": "mdi-progress-clock",
       "columns": [
         {
-          "text": "view.progress_report.header"
-        },
-        {
           "filter": {
             "status": "open"
           },
           "columns": [
-            {
-              "text": "embed.open.title"
-            },
             "date",
             "title",
             "status",
@@ -204,7 +198,6 @@
             "content",
             "author"
           ],
-          "text": "embed.open.label",
           "sources": [
             "tasks",
             "notes"
@@ -216,22 +209,13 @@
             "status": "in_progress"
           },
           "columns": [
-            {
-              "text": "embed.ip.title"
-            },
             "date",
             "title",
-            "assigned_to",
-            {
-              "text": "embed.ip.attention"
-            }
+            "assigned_to"
           ],
           "sources": [
             "tasks"
           ]
-        },
-        {
-          "text": "view.progress_report.footer"
         }
       ],
       "readonly": true,
