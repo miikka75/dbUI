@@ -1842,7 +1842,16 @@ test.describe('Shared-link URL params', () => {
     expect(loc.pathname).toBe('/');
   });
 
-  // Firebase branch with a base64-encoded config blob.
+  // Firebase branch with d= omitted: authDomain must default to <projectId>.firebaseapp.com.
+  test('firebase k/p link without d= derives authDomain from projectId', async ({ page }) => {
+    await page.route(/gstatic\.com|\/backend-firebase\.html|\/storage-firestore\.html/, r =>
+      r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
+    await page.goto('/?mode=firebase&k=API_KEY_9&p=proj-999');
+    await page.waitForFunction(() => localStorage.getItem('app_mode') === 'firebase', { timeout: 6000 });
+
+    const cfg = await page.evaluate(() => JSON.parse(localStorage.getItem('firebase_config') || 'null'));
+    expect(cfg).toEqual({ apiKey: 'API_KEY_9', authDomain: 'proj-999.firebaseapp.com', projectId: 'proj-999' });
+  });
   test('firebase base64 config link restores firebase_config', async ({ page }) => {
     await page.route(/gstatic\.com|\/backend-firebase\.html|\/storage-firestore\.html/, r =>
       r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
