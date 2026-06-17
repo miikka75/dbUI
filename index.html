@@ -28,8 +28,10 @@
           if (urlMode === 'firebase') {
             if (qp.get('config')) {
               try { localStorage.setItem('firebase_config', atob(qp.get('config'))); } catch(e) {}
-            } else if (qp.get('k') && qp.get('d') && qp.get('p')) {
-              localStorage.setItem('firebase_config', JSON.stringify({ apiKey: qp.get('k'), authDomain: qp.get('d'), projectId: qp.get('p') }));
+            } else if (qp.get('k') && qp.get('p')) {
+              // d= (authDomain) is optional: defaults to <projectId>.firebaseapp.com (the standard
+              // Firebase auth domain). Only needed when a custom/non-default authDomain is used.
+              localStorage.setItem('firebase_config', JSON.stringify({ apiKey: qp.get('k'), authDomain: qp.get('d') || (qp.get('p') + '.firebaseapp.com'), projectId: qp.get('p') }));
             }
           } else {
             if (qp.get('folder')) localStorage.setItem('app_folder', qp.get('folder'));
