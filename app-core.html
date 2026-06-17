@@ -206,7 +206,10 @@ function createVueApp() {
         if (mode === 'firebase') {
           var cfg = localStorage.getItem('firebase_config');
           if (!cfg) return base;
-          try { var c = JSON.parse(cfg); return base + '?mode=firebase&k=' + encodeURIComponent(c.apiKey) + '&d=' + encodeURIComponent(c.authDomain) + '&p=' + encodeURIComponent(c.projectId); }
+          try { var c = JSON.parse(cfg);
+            // Only emit d= when authDomain is NOT the default <projectId>.firebaseapp.com (derived on load).
+            var d = (c.authDomain && c.authDomain !== c.projectId + '.firebaseapp.com') ? '&d=' + encodeURIComponent(c.authDomain) : '';
+            return base + '?mode=firebase&k=' + encodeURIComponent(c.apiKey) + d + '&p=' + encodeURIComponent(c.projectId); }
           catch(e) { return base + '?mode=firebase&config=' + btoa(cfg); } // fallback to full encoding
         }
         var folder = localStorage.getItem('app_folder');
