@@ -60,6 +60,26 @@ First user is auto-registered as admin (bootstrap mode). After that, only regist
 
 Firebase config is stored in browser localStorage. Share a pre-configured URL to onboard users without manual setup.
 
+### Firefox: "Sign in with Google" fails (third-party cookies)
+
+Google sign-in (`signInWithPopup`) loads Firebase's auth handler from `<projectId>.firebaseapp.com`.
+When the app is hosted on a **different origin** (e.g. GitHub Pages) that handler runs as a
+*third party*, and Firefox's **Enhanced Tracking Protection** + **Total Cookie Protection** (default
+since FF 103) block its cookies/storage — so sign-in silently fails. Same applies to Safari ITP.
+
+User-side fixes (easiest first):
+
+1. **Per-site (recommended):** click the **shield icon** left of the address bar → turn
+   **Enhanced Tracking Protection OFF** for this site → reload.
+2. **Cookie exception:** Settings → Privacy & Security → Cookies and Site Data →
+   **Manage Exceptions** → add `https://<projectId>.firebaseapp.com` → **Allow**.
+3. **Global:** set ETP to **Standard** (not Strict) — least reliable, since Standard still
+   partitions third-party storage; prefer the exception in (2).
+
+Robust fix (no per-user setting): serve the auth handler **same-origin** with the app — host on
+**Firebase Hosting** (or a custom domain whose `authDomain` matches the app's origin). Then the auth
+popup is first-party and no third-party cookies are involved.
+
 ## Sharing & Access
 
 ### Shareable Links (URL params)
@@ -77,7 +97,9 @@ https://your-app.github.io/?mode=sheets&folder=DRIVE_FOLDER_ID
 The app reads URL params on load, stores them in localStorage, then cleans the URL. One click = connected.
 
 > Firebase links also accept the config as discrete params instead of base64:
-> `?mode=firebase&k=<apiKey>&d=<authDomain>&p=<projectId>`. Sheets links also accept
+> `?mode=firebase&k=<apiKey>&p=<projectId>` (with optional `&d=<authDomain>`). `d=` is
+> **optional** — it defaults to `<projectId>.firebaseapp.com` (the standard Firebase auth
+> domain), so it's only needed for a custom/non-default `authDomain`. Sheets links also accept
 > `&clientId=<oauthClientId>`.
 
 Generate the link from Settings tab (shown under "Share link" for Firebase mode).
