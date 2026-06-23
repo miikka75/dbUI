@@ -37,6 +37,16 @@ function getSetting(key, def) {
   try { var s = JSON.parse(localStorage.getItem('app_settings') || '{}'); return s[key] !== undefined ? s[key] : def; } catch(e) { return def; }
 }
 
+// Privacy: keep the first word, reduce every later word to an initial. "Name Surname" -> "Name S.";
+function obscureName(s) {
+  if (s == null) return s;
+  var str = String(s).trim();
+  if (!str) return str;
+  var parts = str.split(/\s+/);
+  if (parts.length < 2) return str;
+  return parts[0] + ' ' + parts.slice(1).map(function(p) { return p.charAt(0).toUpperCase() + '.'; }).join(' ');
+}
+
 var PRINT_CSS = 'body{font-family:system-ui;margin:20px;font-size:13px}.card{border:1px solid #ddd;padding:12px;margin-bottom:12px;border-radius:6px;page-break-inside:avoid}dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0}dt{font-weight:bold;font-size:13px;opacity:0.7}dd{margin:0;font-size:13px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:4px 8px;text-align:left;font-size:13px}th{background:#f5f5f5}.embed{margin:8px 0;padding:8px;background:#f9f9f9;border-radius:4px}.embed h4{margin:0 0 4px;font-size:13px;opacity:0.7}h1,h2,h3,h4,h5,h6{font-size:13px;margin:6px 0}@media print{button{display:none}}';
 function createVueApp() {
   var vuetify = Vuetify.createVuetify({
@@ -94,6 +104,7 @@ function createVueApp() {
       snackbar: false,
       snackText: '',
       settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false },
+      appConfig: null,
       saveTimers: {},
       pendingDelete: null,
       pendingDeleteTimer: null,
@@ -144,9 +155,13 @@ function createVueApp() {
       rotationViewCols: function() {
         var v = VIEWS[this.currentTable];
         if (!v || !v.rotationView) return [];
-        return ['_period'].concat((v.rotationView.columns || []).map(function(c) { return c.name; }));
+        var rv = v.rotationView;
+        var names = rv.areas ? rv.areas.slice() : (rv.columns || []).map(function(c) { return c.name; });
+        return ['_period'].concat(names);
       },
       rotationViewRows: function() { return this.isRotationView ? this.currentData : []; },
+      rotationAnchorForView: function() { return this.anchorForView(this.currentTable); },
+      isReorderable: function() { var t = this.currentTable; return !!(SCHEMA[t] && SCHEMA[t].reorderable && this.isDataView && !this.viewingArchive && this.canMutateRows); },
       navConfig: function() { return (this.schemaData && this.schemaData.nav) || null; },
       navLayout: function() { return this.navLayoutOverride || (this.navConfig && this.navConfig.layout) || 'drawer'; },
       currentPage: function() {
@@ -228,7 +243,7 @@ function createVueApp() {
       },
       currentConfig: function() { return VIEWS[this.currentTable] || SCHEMA[this.currentTable] || {}; },
       // Printing is opt-in via "printable": "view" (toolbar), "cards" (per-card), or ["view","cards"] (both). Off by default.
-      canPrintView: function() { var p = this.currentConfig.printable; return this.isDataView && (p === 'view' || (Array.isArray(p) && p.indexOf('view') >= 0)); },
+      canPrintView: function() { var p = this.currentConfig.printable; return (this.isDataView || this.isRotationView) && (p === 'view' || (Array.isArray(p) && p.indexOf('view') >= 0)); },
       canPrintCard: function() { var p = this.currentConfig.printable; return this.isDataView && (p === 'cards' || (Array.isArray(p) && p.indexOf('cards') >= 0)); },
       isUnionView: function() { return false; },
       useCardLayout: function() {
@@ -274,7 +289,7 @@ function createVueApp() {
           var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
           var columns = raw.map(function(c) { return colName(c); });
           var rows = buildRows(cfg, self.dataCache);
-          resolveComputed(rows, cfg.columns || [], { dataCache: self.dataCache });
+          resolveComputed(rows, cfg.columns || [], { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
           if (cfg.defaultSort) { rows = sortByCol(rows, cfg.defaultSort); }
           if (cfg.hideEmpty) { columns = columns.filter(function(col) { return rows.some(function(r) { return r[col]; }); }); }
           // markdown on a filterBy/inline embed: store as header HTML (rendered per-card by the template)
@@ -509,7 +524,7 @@ function createVueApp() {
         localStorage.setItem('app_folder', this.setupFolderId);
         localStorage.setItem('app_mode', this.setupMode);
         this.folderId = this.setupFolderId; this.mode = this.setupMode;
-        backend.setFolderConfig(this.folderId, { mode: this.mode }).then(function() {
+        backend.setFolderConfig(this.folderId, Object.assign({}, self.appConfig || {}, { mode: this.mode })).then(function() {
           self.showSetup = false; self.startApp();
         });
       },
@@ -539,6 +554,14 @@ function createVueApp() {
         } else {
           schemaPromise = Promise.resolve().then(function() { self.schemaData = Object.freeze(defaultSchema); });
         }
+
+        // Load app-wide folder config (holds the global rotationAnchor) before rendering rotations.
+        schemaPromise = schemaPromise.then(function() {
+          if (!backend.getFolderConfig) return;
+          return Promise.resolve(backend.getFolderConfig(self.folderId)).then(function(cfg) {
+            self.appConfig = cfg || {};
+          }).catch(function() {});
+        });
 
         schemaPromise.then(function() {
         // Fast path: single batch call (Apps Script)
@@ -718,7 +741,7 @@ function createVueApp() {
         var cfg = VIEWS[id] || SCHEMA[id] || {};
         this.sortCol = cfg.defaultSort || null;
         this.sortAsc = true;
-        if (this.isDataView) this.loadTableData();
+        if (this.isDataView || this.isRotationView) this.loadTableData();
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
       // Doc-view bodies live in a server-side "_pages" collection (not in schema.json).
@@ -769,7 +792,7 @@ function createVueApp() {
         if (type === 'view' && VIEWS[name]) {
           var v = VIEWS[name], cache = this.dataCache;
           if (part) { cache = {}; var dc = this.dataCache; (v.sources || []).forEach(function(s) { cache[s] = dc[s + '__' + part] || []; }); }
-          return sortByCol(resolveComputed(aggregateRows(v, buildRows(v, cache)), v.columns, { dataCache: this.dataCache }), v.defaultSort, v);
+          return sortByCol(resolveComputed(aggregateRows(v, buildRows(v, cache)), v.columns, { dataCache: this.dataCache, rotationAnchor: this.anchorForView(v.name) }), v.defaultSort, v);
         }
         if (type === 'table' && SCHEMA[name]) return sortByCol(this.dataCache[part ? name + '__' + part : name] || [], SCHEMA[name].defaultSort);
         return [];
@@ -834,10 +857,11 @@ function createVueApp() {
             var td = new Date();
             var todayStr = td.getFullYear() + '-' + String(td.getMonth() + 1).padStart(2, '0') + '-' + String(td.getDate()).padStart(2, '0');
             var allowedRv = self.userAllowedTables;
-            var regen = function() { self.currentData = buildRotationViewRows(view, self.dataCache, todayStr); };
+            var regen = function() { self.currentData = buildRotationViewRows(view, self.dataCache, todayStr, self.anchorForView(self.currentTable)); };
             regen();
-            (view.rotationView.columns || []).forEach(function(c) {
-              var tbl = c.rotationTable;
+            var rvDef = view.rotationView;
+            var deps = rvDef.lists ? rvDef.lists.slice() : (rvDef.columns || []).map(function(c) { return c.rotationTable; });
+            deps.forEach(function(tbl) {
               if (!tbl || (allowedRv && allowedRv.indexOf(tbl) < 0) || self.dataCache[tbl]) return;
               backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
                 self.dataCache[tbl] = parseTableResult(result).rows; regen();
@@ -852,7 +876,7 @@ function createVueApp() {
             view.sources.forEach(function(src) { cache[src] = self.dataCache[aKey(src)] || []; });
           }
           var rows = buildRows(view, cache);
-          rows = resolveComputed(aggregateRows(view, rows), view.columns, { dataCache: self.dataCache });
+          rows = resolveComputed(aggregateRows(view, rows), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
           self.currentData = rows;
           // Load embed table data if not cached
           var allowed = self.userAllowedTables;
@@ -877,7 +901,7 @@ function createVueApp() {
               if (!tbl || (allowed && allowed.indexOf(tbl) < 0) || self.dataCache[tbl]) return;
               backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
                 self.dataCache[tbl] = parseTableResult(result).rows;
-                self.currentData = resolveComputed(aggregateRows(view, buildRows(view, self.dataCache)), view.columns, { dataCache: self.dataCache });
+                self.currentData = resolveComputed(aggregateRows(view, buildRows(view, self.dataCache)), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
               }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
             });
           });
@@ -1083,14 +1107,24 @@ function createVueApp() {
       displayValue: function(col, val) {
         if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x); }).filter(Boolean).join(', '); }
         if (!val) return '';
+        var out = val;
         var listName = this.colIsList(col);
         if (!listName) { var v = VIEWS[this.currentTable]; if (v && v.groupBy && typeof v.groupBy === 'object' && v.groupBy.column === col && v.groupBy.from) { for (var i = 0; i < v.groupBy.from.length && !listName; i++) listName = this.colIsList(v.groupBy.from[i]); } }
         if (listName) {
           var key = 'list.' + listName + '.' + val;
           var translated = this.t(key);
-          return translated !== key ? translated : val;
+          out = translated !== key ? translated : val;
         }
-        return val;
+        return this.shouldObscure(col) ? obscureName(out) : out;
+      },
+      // Whether the CURRENT view obscures person names in `col`. obscureNames: true = all list/multiselect
+      // columns (or all area columns for a rotationView); an array = exactly those columns. Display-only.
+      shouldObscure: function(col) {
+        var v = VIEWS[this.currentTable];
+        if (!v || !v.obscureNames) return false;
+        if (Array.isArray(v.obscureNames)) return v.obscureNames.indexOf(col) >= 0;
+        if (v.rotationView) { var rv = v.rotationView; var areas = rv.areas || (rv.columns || []).map(function(c) { return c.name; }); return areas.indexOf(col) >= 0; }
+        return !!this.colIsList(col) || this.colIsMultiselect(col);
       },
       lockedListValues: function() {
         // Extract values that schema filters/conditionals require — cannot be deleted/renamed
@@ -1432,6 +1466,43 @@ function createVueApp() {
         this.saveLists();
       },
       saveLists: function() { backend.saveLists(this.folderId, this.listsCache); },
+
+      // Per-view rotation anchor (date of period 0 for THIS view's calendar rotations), stored in
+      // synced folder config under rotationAnchors[viewName] — per-view & editable on the view, not a
+      // schema literal. Different rotation views can have different anchors.
+      anchorForView: function(name) {
+        return ((this.appConfig && this.appConfig.rotationAnchors) || {})[name] || '';
+      },
+      saveRotationAnchor: function(viewName, val) {
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.rotationAnchors = Object.assign({}, cfg.rotationAnchors || {});
+        cfg.rotationAnchors[viewName] = val || '';
+        cfg.mode = this.mode;
+        this.appConfig = cfg;
+        if (backend.setFolderConfig) backend.setFolderConfig(this.folderId, cfg);
+        if (this.currentTable === viewName) this.loadTableData();
+      },
+
+      // Reorder a row in a `reorderable` table (e.g. rotation slot lists) via up/down buttons —
+      // mirrors the Lists tab move buttons. Renumbers `position` to a clean 1..n in the new order
+      // and persists only the rows whose position actually changed.
+      moveRowPosition: function(item, dir) {
+        if (!this.isReorderable) return;
+        var self = this, table = this.currentTable;
+        var ordered = this.sortedData.slice();
+        var i = ordered.findIndex(function(r) { return r.id === item.id; });
+        var j = i + dir;
+        if (i < 0 || j < 0 || j >= ordered.length) return;
+        ordered.splice(j, 0, ordered.splice(i, 1)[0]); // move item to its new slot
+        ordered.forEach(function(r, k) {
+          var np = k + 1;
+          if (Number(r.position) !== np) {
+            r.position = String(np); // keep as string — sortedData sorts via localeCompare (number would throw)
+            r.updated_at = new Date().toISOString();
+            backend.putRow(self.tableMap[table], r, 'active');
+          }
+        });
+      },
 
       // Propagate edited syncFrom column values to mirror-linked tables (downstream details + upstream masters)
       propagateMirror: function(id, sourceTable, rowData) {
@@ -1889,8 +1960,16 @@ function createVueApp() {
       },
 
       printView: function() {
-        var self = this, pe = this._pe, cols = this.visibleCols;
-        var title = this.t((this.currentConfig.sources ? 'view.' : 'tab.') + this.currentTable) || this.currentTable;
+        var self = this, pe = this._pe;
+        var title = this.t((VIEWS[this.currentTable] ? 'view.' : 'tab.') + this.currentTable) || this.currentTable;
+        if (this.isRotationView) {
+          var rcols = this.rotationViewCols, rrows = this.rotationViewRows, rb = '<h2>' + pe(title) + '</h2><table><thead><tr>';
+          rcols.forEach(function(c) { rb += '<th>' + pe(c === '_period' ? 'Date' : (self.t('field.' + c) || c)) + '</th>'; });
+          rb += '</tr></thead><tbody>';
+          rrows.forEach(function(row) { rb += '<tr>'; rcols.forEach(function(c) { rb += '<td>' + pe(c === '_period' ? self.toDateStr(row[c]) : self.displayValue(c, row[c])) + '</td>'; }); rb += '</tr>'; });
+          rb += '</tbody></table>'; this._printOpen(title, rb); return;
+        }
+        var cols = this.visibleCols;
         var body = '<h2>' + title + '</h2>';
         if (this.useCardLayout) {
           this.sortedData.forEach(function(row) { body += self._printCardHtml(cols, row); });
