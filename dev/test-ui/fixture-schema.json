@@ -105,6 +105,25 @@
         }
       ],
       "isLookup": true
+    },
+    "crew_rotation": {
+      "columns": [
+        {
+          "name": "position",
+          "type": "number"
+        },
+        {
+          "name": "people",
+          "type": "multiselect",
+          "list": "crew",
+          "allowNew": true
+        },
+        {
+          "name": "anchor",
+          "type": "date"
+        }
+      ],
+      "defaultSort": "position"
     }
   },
   "views": [
@@ -242,6 +261,24 @@
       "mode": "union",
       "defaultSort": "date",
       "layout": "table"
+    },
+    {
+      "name": "crewrota",
+      "rotationView": {
+        "columns": [
+          {
+            "name": "crew",
+            "rotationTable": "crew_rotation",
+            "advanceBy": "calendar",
+            "interval": "weekly"
+          }
+        ],
+        "range": {
+          "from": "2026-01-01",
+          "periods": 3
+        }
+      },
+      "layout": "table"
     }
   ],
   "nav": {
@@ -268,6 +305,12 @@
       },
       {
         "table": "notes"
+      },
+      {
+        "view": "crewrota"
+      },
+      {
+        "table": "crew_rotation"
       }
     ]
   }
