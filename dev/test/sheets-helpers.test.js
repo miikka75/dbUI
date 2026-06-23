@@ -88,3 +88,22 @@ describe('Apps Script helpers - parseTranslations', () => {
     assert.deepEqual(h.parseTranslations(values), { hello: 'Hei', bye: 'Moi' });
   });
 });
+
+describe('Apps Script helpers - multiselect arrays', () => {
+  it('multiselectCols extracts multiselect column names (object + array forms)', () => {
+    assert.deepEqual(h.multiselectCols({ a: 'text', h: { type: 'multiselect', list: 'p' } }), ['h']);
+    assert.deepEqual(h.multiselectCols([{ name: 'a', type: 'text' }, { name: 'h', type: 'multiselect' }]), ['h']);
+  });
+  it('objectToValues JSON-encodes array cells; valuesToObjects(msCols) decodes them', () => {
+    const headers = ['id', 'title', 'people'];
+    const enc = h.objectToValues({ id: 'r1', title: 'Doormen', people: ['Matti', 'Liisa'] }, headers);
+    assert.equal(enc[2], '["Matti","Liisa"]');           // array -> JSON string for the cell
+    const back = h.valuesToObjects([headers, enc], ['people']).rows[0];
+    assert.deepEqual(back.people, ['Matti', 'Liisa']); // decoded back to array
+    assert.equal(back.title, 'Doormen');                  // scalar untouched
+  });
+  it('empty multiselect cell decodes to []', () => {
+    const back = h.valuesToObjects([['id', 'people'], ['r2', '']], ['people']).rows[0];
+    assert.deepEqual(back.people, []);
+  });
+});
