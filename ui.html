@@ -188,6 +188,13 @@
 
         <!-- Rotation view (generated periods; read-only) -->
         <v-card v-if="isRotationView" variant="outlined">
+          <div class="d-flex align-center pa-2" style="gap:8px">
+            <span class="text-caption" style="opacity:0.7">{{ (t('settings.rotation_anchor') !== 'settings.rotation_anchor' ? t('settings.rotation_anchor') : 'Start date') }}</span>
+            <v-text-field :model-value="rotationAnchorForView" name="rotation-anchor" type="date" density="compact" variant="outlined" hide-details style="max-width:180px" :disabled="!canMutateRows" @update:model-value="saveRotationAnchor(currentTable, $event)" data-testid="rotation-anchor"></v-text-field>
+            <v-spacer></v-spacer>
+            <v-btn v-if="canPrintView" icon="mdi-printer" size="small" variant="text" @click="printView()"></v-btn>
+          </div>
+          <v-divider></v-divider>
           <v-table density="compact"><template v-slot:default>
             <thead><tr><th v-for="col in rotationViewCols" :key="col">{{ col === '_period' ? (t('field.period') !== 'field.period' ? t('field.period') : 'Date') : (t('field.' + col) || col) }}</th></tr></thead>
             <tbody>
@@ -340,6 +347,8 @@
                 </td>
                 <td v-if="isUnionView"><v-chip size="x-small" variant="tonal">{{ item._source }}</v-chip></td>
                 <td style="white-space:nowrap">
+                  <v-btn v-if="isReorderable" icon="mdi-arrow-up" size="small" variant="text" :disabled="sortedData.indexOf(item) === 0" @click="moveRowPosition(item, -1)"></v-btn>
+                  <v-btn v-if="isReorderable" icon="mdi-arrow-down" size="small" variant="text" :disabled="sortedData.indexOf(item) === sortedData.length - 1" @click="moveRowPosition(item, 1)"></v-btn>
                   <v-btn v-if="!viewingArchive && hasArchive && canMutateRows" icon="mdi-archive-outline" size="small" variant="text" class="mr-2" @click="archiveRow(item)"></v-btn>
                   <v-btn v-if="viewingArchive && canMutateRows" icon="mdi-archive-arrow-up-outline" size="small" variant="text" class="mr-2" @click="restoreRow(item)"></v-btn>
                   <v-btn v-if="canMutateRows" :icon="isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('row:'+item.id) ? 'error' : ''" @click="deleteRow(item)"></v-btn>
