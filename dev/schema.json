@@ -25,7 +25,10 @@
           "list": "assigned_to",
           "allowNew": true,
           "sorted": true,
-          "listSwitch": { "label": "External", "list": "external_workers" }
+          "listSwitch": {
+            "label": "External",
+            "list": "external_workers"
+          }
         },
         {
           "name": "city",
@@ -104,6 +107,25 @@
         }
       ],
       "isLookup": true
+    },
+    "crew_rotation": {
+      "columns": [
+        {
+          "name": "position",
+          "type": "number"
+        },
+        {
+          "name": "people",
+          "type": "multiselect",
+          "list": "crew",
+          "allowNew": true
+        },
+        {
+          "name": "anchor",
+          "type": "date"
+        }
+      ],
+      "defaultSort": "position"
     }
   },
   "views": [
@@ -234,7 +256,10 @@
         "title",
         "status",
         "assigned_to",
-        { "name": "city", "hideEmpty": false },
+        {
+          "name": "city",
+          "hideEmpty": false
+        },
         {
           "name": "content",
           "when": {
@@ -249,11 +274,18 @@
     },
     {
       "name": "open_tasks",
-      "sources": ["tasks"],
+      "sources": [
+        "tasks"
+      ],
       "mode": "union",
-      "filter": { "status": "open" },
+      "filter": {
+        "status": "open"
+      },
       "readonly": true,
-      "columns": ["date", "title"]
+      "columns": [
+        "date",
+        "title"
+      ]
     },
     {
       "name": "summary_cards",
@@ -268,7 +300,14 @@
         "title",
         "status",
         "assigned_to",
-        { "view": "open_tasks", "filterBy": { "assigned_to": "assigned_to" }, "hideEmpty": true, "bare": true }
+        {
+          "view": "open_tasks",
+          "filterBy": {
+            "assigned_to": "assigned_to"
+          },
+          "hideEmpty": true,
+          "bare": true
+        }
       ]
     },
     {
@@ -331,6 +370,24 @@
         "status",
         "assigned_to"
       ]
+    },
+    {
+      "name": "crewrota",
+      "rotationView": {
+        "columns": [
+          {
+            "name": "crew",
+            "rotationTable": "crew_rotation",
+            "advanceBy": "calendar",
+            "interval": "weekly"
+          }
+        ],
+        "range": {
+          "from": "today",
+          "periods": 12
+        }
+      },
+      "layout": "table"
     }
   ],
   "nav": {
@@ -377,6 +434,12 @@
             "table": "notes"
           }
         ]
+      },
+      {
+        "view": "crewrota"
+      },
+      {
+        "table": "crew_rotation"
       }
     ]
   }
