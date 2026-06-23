@@ -8,7 +8,8 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 - **Six backends**: Google Sheets (Apps Script), OAuth REST API, Browser + CRDT Sync (Google Drive), Browser + CRDT Sync (Local Server), Firebase (Firestore), Dev Server (SQLite)
 - **Unified CRDT**: one offline-first engine; Drive and local server differ only in the transport
 - **i18n**: multi-language with auto-generated translation keys from schema
-- **Views**: flat union, join, and aggregate views; columns can embed named views/inline tables
+- **Views**: flat union, join, and aggregate views, plus **rotationView** (a generated rotating-roster table); columns can embed named views/inline tables
+- **Rotating rosters**: `multiselect` columns hold a group of people; rotation tables cycle a group per occurrence (tied to another table's rows) or per calendar interval (`daily/weekly/monthly/yearly` or `<n><unit>` like `3w`), with the anchor stored as editable data
 - **Documents**: a view with `markdown` is an editable document with interactive embeds (`{{view:x}}`, `{{self}}` for its own grid, `{{view:x?}}` hides when empty) — bodies stored on the server, not in the schema
 - **Nav**: explicit sidebar tree with drawer/tabs layout and nested groups
 - **Print**: layout-aware printing (table or card mode), per-card print, embeds included
@@ -262,9 +263,10 @@ dev/                           ← Local development (dev-server-only files live
 ## Schema Reference (`schema.json`)
 
 The complete schema reference is maintained in **[`dev/SCHEMA.md`](dev/SCHEMA.md)** — the single
-source of truth. It covers: `icon`/title, tables (column types & properties), views (data &
-document), embeds (inline / named-view / `filterBy`), filters (`$or`/`$and`/`matchList`),
-aggregate views (`groupBy`/`collect`/`collectWith`), computed columns, markdown documents and
+source of truth. It covers: `icon`/title, tables (column types incl. `multiselect` & properties), views
+(data, document & rotationView), embeds (inline / named-view / `filterBy`), filters
+(`$or`/`$and`/`matchList`), aggregate views (`groupBy`/`collect`/`collectWith`), computed columns
+(incl. rotation columns — occurrence/calendar), markdown documents and
 their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens, `nav` (layout, groups, `bottomNav`),
 lists & translations, and `migrate-schema.js`.
 
@@ -277,8 +279,9 @@ lists & translations, and `migrate-schema.js`.
 }
 ```
 
-> `nav` is **required**; `views` are flat (hierarchy lives in `nav`). A view is either a
-> **data view** (`sources`/`columns`) or a **document** (a view with a `markdown` field).
+> `nav` is **required**; `views` are flat (hierarchy lives in `nav`). A view is one of three kinds: a
+> **data view** (`sources`/`columns`), a **document** (a view with a `markdown` field), or a
+> **rotationView** (a generated rotating-roster table).
 
 ---
 
