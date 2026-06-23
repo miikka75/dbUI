@@ -8,7 +8,7 @@ var defaultSchema = {"tables":{},"views":[]};
 // Active schema — initially from defaultSchema, overwritten from Drive on boot
 var SCHEMA = defaultSchema.tables;
 var _viewsNav = Array.isArray(defaultSchema.views) ? defaultSchema.views : [];var VIEWS = {};
-function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string')) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
+function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string' || v.rotationView)) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
 // (Legacy `pages` map / {page:} nav and `text` entries are removed features — migrate-schema.js
 //  upgrades any legacy schema: text -> markdown {{t:}} doc-views, pages -> markdown views.)
 _flattenViews(_viewsNav);
@@ -182,21 +182,37 @@ function aggregateRows(view, rows) {
     return row;
   });
 }
-function resolveComputed(rows, columns) {
-  if (!columns || !window._listsCache) return rows;
+function resolveComputed(rows, columns, ctx) {
+  if (!columns) return rows;
   var defs = [];
   (Array.isArray(columns) ? columns : []).forEach(function(c) {
     if (c && typeof c === 'object' && c.name && c.computed) defs.push(c);
   });
   if (!defs.length) return rows;
+  var cache = (ctx && ctx.dataCache) || {};
   rows.forEach(function(r) {
     defs.forEach(function(d) {
-      var comp = d.computed, ml = comp.matchList;
-      if (!ml) return;
+      var comp = d.computed;
+      // Rotation columns: index into a pre-authored ordered list (rotationTable) by computed POSITION
+      // (occurrence count or elapsed calendar intervals). Output is the slot's value (often an array).
+      if (comp.rotationTable) {
+        var rot = cache[comp.rotationTable] || [];
+        if (comp.advanceBy === 'occurrence') {
+          r[d.name] = resolveByOccurrence(rot, cache[comp.occurrenceSource] || rows, r, comp.occurrenceSort);
+        } else if (comp.advanceBy === 'calendar') {
+          var target = comp.dateField ? r[comp.dateField] : (ctx && ctx.todayDate);
+          r[d.name] = resolveByCalendar(rot, target, resolveAnchorDate(rot, comp), comp.interval);
+        } else {
+          r[d.name] = [];
+        }
+        return;
+      }
+      var ml = comp.matchList;
+      if (!ml || !window._listsCache) return;
       if (typeof ml === 'string') {
         // String matchList: collect values from fromColumns that are in the named list
         var list = window._listsCache[ml] || [];
-        var vals = (comp.fromColumns || []).map(function(c) { return r[c]; }).filter(function(v) { return v && list.indexOf(v) >= 0; });
+        var vals = (comp.fromColumns || []).reduce(function(acc, c) { var x = r[c]; if (Array.isArray(x)) { acc.push.apply(acc, x); } else if (x != null && x !== '') { acc.push(x); } return acc; }, []).filter(function(v) { return list.indexOf(v) >= 0; });
         r[d.name] = vals.join(', ');
       } else if (typeof ml === 'object') {
         // Object matchList: categorize fromColumn value by which list it belongs to
@@ -207,6 +223,114 @@ function resolveComputed(rows, columns) {
     });
   });
   return rows;
+}
+
+// --- Rotation resolvers (Spec: Rotation Lists). Position-in-sequence only is computed; the
+//     authored ordered list (rotationTable rows, sorted by `position`) supplies who/what. ---
+
+// Occurrence mode: position = count of source rows at/before the current row (sorted by sortKey,
+// id tie-break). Looping is automatic via modulo. Returns the slot's stored group value (or '').
+function resolveByOccurrence(rotationRows, sourceRows, currentRow, sortKey) {
+  if (!rotationRows || !rotationRows.length || !currentRow) return [];
+  var sorted = (sourceRows || []).slice().sort(function(a, b) {
+    var av = sortKey ? String(a[sortKey] || '') : '', bv = sortKey ? String(b[sortKey] || '') : '';
+    if (av !== bv) return av.localeCompare(bv);
+    return String(a.id || '').localeCompare(String(b.id || '')); // stable tie-break
+  });
+  var index = sorted.findIndex(function(r) { return r.id === currentRow.id; });
+  if (index === -1) return [];
+  var cells = rotationRows.slice().sort(function(a, b) { return (a.position || 0) - (b.position || 0); });
+  return cells[index % cells.length].people;
+}
+
+// Calendar mode: position = whole intervals elapsed between anchorDate and targetDate. Looping via
+// negative-safe modulo. Independent of whether any row exists for a given interval.
+function resolveByCalendar(rotationRows, targetDate, anchorDate, interval) {
+  if (!rotationRows || !rotationRows.length || !targetDate || !anchorDate) return [];
+  var elapsed = wholeIntervalsBetween(anchorDate, targetDate, interval);
+  var cells = rotationRows.slice().sort(function(a, b) { return (a.position || 0) - (b.position || 0); });
+  var index = ((elapsed % cells.length) + cells.length) % cells.length;
+  return cells[index].people;
+}
+
+// Resolve the calendar anchor (the date of slot position 0). An explicit literal `anchorDate` on the
+// column wins (fixed/printable schedules); otherwise the anchor is read from the rotation table's
+// first slot (lowest `position`) via `anchorField` (default "anchor") — so the anchor lives as
+// editable DB data, not a schema literal. Returns null if neither is available.
+function resolveAnchorDate(rotationRows, spec) {
+  if (spec && spec.anchorDate) return spec.anchorDate;
+  var field = (spec && spec.anchorField) || 'anchor';
+  var first = (rotationRows || []).slice().sort(function(a, b) { return (a.position || 0) - (b.position || 0); })[0];
+  return (first && first[field]) ? first[field] : null;
+}
+
+// Parse an interval spec into { count, unit } where unit ∈ d|w|m. Accepts named aliases
+// (daily/weekly/monthly/yearly) and the compact
+// "<n><d|w|m|y>" form (e.g. "1d", "3w", "2m", "1y"). Years normalize to months (1y = 12m) so
+// month/year share calendar arithmetic. Unparseable input falls back to weekly (validation rejects
+// bad values at load, so this fallback only guards against malformed runtime data).
+function parseInterval(interval) {
+  var aliases = { daily: '1d', weekly: '1w', monthly: '1m', yearly: '1y' };
+  var s = aliases[interval] || interval || '1w';
+  var m = /^(\d+)\s*([dwmy])$/.exec(String(s).trim().toLowerCase());
+  if (!m) return { count: 1, unit: 'w' };
+  var n = parseInt(m[1], 10) || 1, u = m[2];
+  if (u === 'y') { u = 'm'; n *= 12; }
+  return { count: n, unit: u };
+}
+
+// True if `interval` is an accepted spec (named alias or "<n><d|w|m|y>"). Validation uses this so
+// typos surface at load instead of silently resolving to weekly.
+function isValidInterval(interval) {
+  if (interval == null) return false;
+  var named = { daily: 1, weekly: 1, monthly: 1, yearly: 1 };
+  if (named[interval]) return true;
+  return /^\d+\s*[dwmy]$/.test(String(interval).trim().toLowerCase());
+}
+
+// Whole intervals between two YYYY-MM-DD dates. Day/week use uniform arithmetic; month/year use real
+// calendar arithmetic (never days/30). Multi-count specs (e.g. "3w") floor-divide the base-unit count
+// — floor(floor(x/a)/b) === floor(x/(ab)) for positive a,b, so this stays correct (incl. negatives).
+function wholeIntervalsBetween(anchor, target, interval) {
+  var a = new Date(anchor), t = new Date(target);
+  if (isNaN(a) || isNaN(t)) return 0;
+  var p = parseInterval(interval), base;
+  if (p.unit === 'm') {
+    base = (t.getFullYear() - a.getFullYear()) * 12 + (t.getMonth() - a.getMonth());
+    if (t.getDate() < a.getDate()) base -= 1; // not a full month until the anchor day-of-month is reached
+  } else {
+    var days = Math.floor((t - a) / 86400000);
+    base = (p.unit === 'w') ? Math.floor(days / 7) : days; // 'd' = raw days
+  }
+  return Math.floor(base / p.count);
+}
+
+// Inverse of wholeIntervalsBetween: add n whole intervals to a YYYY-MM-DD date, return YYYY-MM-DD.
+function addIntervals(dateStr, n, interval) {
+  var d = new Date(dateStr), p = parseInterval(interval), step = n * p.count;
+  if (p.unit === 'm') { d.setMonth(d.getMonth() + step); }
+  else if (p.unit === 'w') { d.setDate(d.getDate() + step * 7); }
+  else { d.setDate(d.getDate() + step); } // 'd'
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+// rotationView: the third view kind. Generates `range.periods` rows from `range.from` (calendar mode
+// only — occurrence rotations render inside ordinary data views). Each row resolves every column
+// independently at that period's date. Pure function of (rotation tables, range) — no stored rows.
+function buildRotationViewRows(view, dataCache, todayStr) {
+  var rv = view && view.rotationView; if (!rv) return [];
+  var cols = rv.columns || [], range = rv.range || {};
+  var periods = range.periods || 12;
+  var from = (!range.from || range.from === 'today') ? todayStr : range.from;
+  var stepInterval = (cols[0] && cols[0].interval) || 'weekly'; // date axis follows the first column
+  var out = [];
+  for (var i = 0; i < periods; i++) {
+    var target = addIntervals(from, i, stepInterval);
+    var row = { id: 'rv' + i, _period: target };
+    cols.forEach(function(c) { var rot = dataCache[c.rotationTable] || []; row[c.name] = resolveByCalendar(rot, target, resolveAnchorDate(rot, c), c.interval); });
+    out.push(row);
+  }
+  return out;
 }
 // (colCondition removed — the legacy shorthand conditional column { "<col>": {cond} } is now
 //  canonicalized to { name, when } at load by convertViewFilters; isColumnHidden reads `when`.)
@@ -232,8 +356,8 @@ function condMatches(item, cond) {
     if (k[0] === '$') continue;
     var c = cond[k], v = item[k];
     if (c && typeof c === 'object' && !Array.isArray(c)) {
-      if (c.matchList) { if (!window._listsCache || !window._listsCache[c.matchList] || window._listsCache[c.matchList].indexOf(v) < 0) return false; }
-      else if (c.notMatchList) { if (window._listsCache && window._listsCache[c.notMatchList] && window._listsCache[c.notMatchList].indexOf(v) >= 0) return false; }
+      if (c.matchList) { var _L = window._listsCache && window._listsCache[c.matchList]; var _ok = _L && (Array.isArray(v) ? v.some(function(x){ return _L.indexOf(x) >= 0; }) : _L.indexOf(v) >= 0); if (!_ok) return false; }
+      else if (c.notMatchList) { var _Ln = window._listsCache && window._listsCache[c.notMatchList]; var _hit = _Ln && (Array.isArray(v) ? v.some(function(x){ return _Ln.indexOf(x) >= 0; }) : _Ln.indexOf(v) >= 0); if (_hit) return false; }
       else {
         if (c.notEmpty && !v) return false;
         if (c.empty && v) return false;
@@ -262,6 +386,30 @@ function validateSchema() {
       var found = (view.sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].columns && SCHEMA[s].columns[col]; });
       if (!found) errors.push('View "' + v + '": column "' + col + '" not found in sources [' + (view.sources || []).join(', ') + ']');
     });
+    // Rotation computed columns: trigger must be declared and references must resolve.
+    (view.columns || []).forEach(function(c) {
+      if (!c || typeof c !== 'object' || !c.computed || !c.computed.rotationTable) return;
+      var comp = c.computed, nm = c.name || '?';
+      if (!SCHEMA[comp.rotationTable]) errors.push('View "' + v + '": rotation column "' + nm + '" references non-existent rotationTable "' + comp.rotationTable + '"');
+      if (comp.advanceBy !== 'occurrence' && comp.advanceBy !== 'calendar') errors.push('View "' + v + '": rotation column "' + nm + '" needs advanceBy "occurrence" or "calendar"');
+      if (comp.advanceBy === 'occurrence' && comp.occurrenceSource && !SCHEMA[comp.occurrenceSource]) errors.push('View "' + v + '": rotation column "' + nm + '" occurrenceSource "' + comp.occurrenceSource + '" not found');
+      if (comp.advanceBy === 'calendar') {
+        if (!isValidInterval(comp.interval)) errors.push('View "' + v + '": calendar rotation column "' + nm + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
+        var _af = comp.anchorField || 'anchor', _rt = SCHEMA[comp.rotationTable];
+        if (!comp.anchorDate && !(_rt && _rt.columns && _rt.columns[_af])) errors.push('View "' + v + '": calendar rotation column "' + nm + '" needs anchorDate literal or an "' + _af + '" date column on rotationTable "' + comp.rotationTable + '"');
+      }
+    });
+    // rotationView (third view kind): calendar-mode columns only.
+    if (view.rotationView) {
+      (view.rotationView.columns || []).forEach(function(c) {
+        var nm = (c && c.name) || '?';
+        if (!c || !SCHEMA[c.rotationTable]) errors.push('rotationView "' + v + '" column "' + nm + '" references non-existent rotationTable "' + (c && c.rotationTable) + '"');
+        if (c && c.advanceBy && c.advanceBy !== 'calendar') errors.push('rotationView "' + v + '" column "' + nm + '" supports advanceBy "calendar" only (use a data view for occurrence mode)');
+        var _vaf = (c && c.anchorField) || 'anchor', _vrt = c && SCHEMA[c.rotationTable];
+        if (!c || !isValidInterval(c.interval)) errors.push('rotationView "' + v + '" column "' + nm + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
+        else if (!c.anchorDate && !(_vrt && _vrt.columns && _vrt.columns[_vaf])) errors.push('rotationView "' + v + '" column "' + nm + '" needs anchorDate literal or an "' + _vaf + '" date column on rotationTable "' + (c && c.rotationTable) + '"');
+      });
+    }
   }
   // Check list references
   for (var t2 in SCHEMA) { for (var c2 in SCHEMA[t2].columns) {
@@ -315,7 +463,8 @@ function buildNavTabs(navItems, t, canAccess, opts) {
     if (it.view && !VIEWS[gid]) return null;
     if (it.table && !SCHEMA[gid]) return null;
     var isV = !!it.view, isDoc = isV && typeof VIEWS[gid].markdown === 'string';
-    var tb = { id: gid, title: t((isV ? 'view.' : 'tab.') + gid) || gid, icon: it.icon || (isDoc ? 'mdi-file-document-outline' : (isV ? 'mdi-view-list' : 'mdi-table')) };
+    var isRot = isV && VIEWS[gid] && !!VIEWS[gid].rotationView;
+    var tb = { id: gid, title: t((isV ? 'view.' : 'tab.') + gid) || gid, icon: it.icon || (isDoc ? 'mdi-file-document-outline' : (isRot ? 'mdi-calendar-clock' : (isV ? 'mdi-view-list' : 'mdi-table'))) };
     if (it.items) { var kids = it.items.map(navTab).filter(Boolean); if (kids.length) tb.children = kids; }
     return tb;
   }
