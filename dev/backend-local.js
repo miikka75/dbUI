@@ -9,6 +9,22 @@ function createLocalBackend(dbPath) {
   // Quote a SQL identifier safely: wrap in "" and escape embedded quotes (blocks identifier injection).
   function qid(n) { return '"' + String(n).replace(/"/g, '""') + '"'; }
 
+  // multiselect columns are stored as JSON-encoded arrays in TEXT cells (SQLite has no array type).
+  // Return a set of multiselect column names for a table, read from the stored schema.
+  function msMultiCols(tableId) {
+    try {
+      var row = db.prepare('SELECT value FROM _schema WHERE key = ?').get('schema');
+      if (!row) return {};
+      var def = (JSON.parse(row.value).tables || {})[tableId];
+      var out = {};
+      if (def && def.columns) Object.keys(def.columns).forEach(function(c) {
+        var d = def.columns[c];
+        if (d && typeof d === 'object' && d.type === 'multiselect') out[c] = true;
+      });
+      return out;
+    } catch (e) { return {}; }
+  }
+
   // Internal: folder config storage
   db.exec('CREATE TABLE IF NOT EXISTS _config (key TEXT PRIMARY KEY, value TEXT)');
   // Internal: track table metadata
@@ -106,6 +122,11 @@ function createLocalBackend(dbPath) {
         const rows = db.prepare('SELECT * FROM ' + qid(actualTable)).all();
         const meta = db.prepare('SELECT columns FROM _tables WHERE name = ?').get(tableId);
         const headers = meta ? JSON.parse(meta.columns) : H.deriveHeaders(rows);
+        const msc = Object.keys(msMultiCols(tableId));
+        if (msc.length) rows.forEach(function(r) { msc.forEach(function(c) {
+          if (typeof r[c] === 'string' && r[c]) { try { var p = JSON.parse(r[c]); r[c] = Array.isArray(p) ? p : r[c]; } catch (e) {} }
+          else if (r[c] == null || r[c] === '') r[c] = [];
+        }); });
         return { headers, rows };
       } catch (e) {
         return { headers: [], rows: [] };
@@ -128,7 +149,7 @@ function createLocalBackend(dbPath) {
         const cols = columns.map(c => c === 'id' ? qid(c) + ' TEXT PRIMARY KEY' : qid(c) + ' TEXT').join(', ');
         db.exec('CREATE TABLE IF NOT EXISTS ' + qid(actualTable) + ' (' + cols + ')');
       }
-      const values = columns.map(c => rowData[c] !== undefined ? rowData[c] : '');
+      const values = columns.map(c => { const v = rowData[c]; if (Array.isArray(v)) return JSON.stringify(v); return v !== undefined ? v : ''; });
       if (values.length !== columns.length) console.error('putRow mismatch:', tableId, 'cols:', columns.length, 'vals:', values.length);
       const badVals = values.filter(v => typeof v === 'object' && v !== null);
       if (badVals.length) console.error('putRow has object values:', badVals, 'for cols:', columns.filter((c,i) => typeof values[i] === 'object'));
