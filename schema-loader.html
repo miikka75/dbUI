@@ -201,7 +201,7 @@ function resolveComputed(rows, columns, ctx) {
           r[d.name] = resolveByOccurrence(rot, cache[comp.occurrenceSource] || rows, r, comp.occurrenceSort);
         } else if (comp.advanceBy === 'calendar') {
           var target = comp.dateField ? r[comp.dateField] : (ctx && ctx.todayDate);
-          r[d.name] = resolveByCalendar(rot, target, resolveAnchorDate(rot, comp), comp.interval);
+          r[d.name] = resolveByCalendar(rot, target, resolveAnchorDate(comp, ctx && ctx.rotationAnchor), comp.interval);
         } else {
           r[d.name] = [];
         }
@@ -253,15 +253,12 @@ function resolveByCalendar(rotationRows, targetDate, anchorDate, interval) {
   return cells[index].people;
 }
 
-// Resolve the calendar anchor (the date of slot position 0). An explicit literal `anchorDate` on the
-// column wins (fixed/printable schedules); otherwise the anchor is read from the rotation table's
-// first slot (lowest `position`) via `anchorField` (default "anchor") — so the anchor lives as
-// editable DB data, not a schema literal. Returns null if neither is available.
-function resolveAnchorDate(rotationRows, spec) {
-  if (spec && spec.anchorDate) return spec.anchorDate;
-  var field = (spec && spec.anchorField) || 'anchor';
-  var first = (rotationRows || []).slice().sort(function(a, b) { return (a.position || 0) - (b.position || 0); })[0];
-  return (first && first[field]) ? first[field] : null;
+// Resolve the calendar anchor (the date of slot position 0). A literal `anchorDate` on the column
+// wins (fixed/printable one-off schedules); otherwise the single app-wide anchor (folder config
+// `rotationAnchor`, passed in as globalAnchor) is used — one global date for all rotations, stored
+// as synced config rather than a schema literal or per-row column. Returns null if neither is set.
+function resolveAnchorDate(spec, globalAnchor) {
+  return (spec && spec.anchorDate) || globalAnchor || null;
 }
 
 // Parse an interval spec into { count, unit } where unit ∈ d|w|m. Accepts named aliases
@@ -315,19 +312,43 @@ function addIntervals(dateStr, n, interval) {
 }
 
 // rotationView: the third view kind. Generates `range.periods` rows from `range.from` (calendar mode
-// only — occurrence rotations render inside ordinary data views). Each row resolves every column
-// independently at that period's date. Pure function of (rotation tables, range) — no stored rows.
-function buildRotationViewRows(view, dataCache, todayStr) {
+// only — occurrence rotations render inside ordinary data views). Pure function of (rotation tables,
+// range, global anchor) — no stored rows. Two forms:
+//   (a) columns: each area column fixed to its own rotationTable.
+//   (b) areas+lists (rotating): the list→area assignment cyclically rotates one step every
+//       `rotateEvery` periods — generalizes "swap" (2 lists, rotateEvery 1) to N lists / M areas.
+//       Each list still advances on its OWN length; only which list feeds which area rotates.
+function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor) {
   var rv = view && view.rotationView; if (!rv) return [];
-  var cols = rv.columns || [], range = rv.range || {};
+  var range = rv.range || {};
   var periods = range.periods || 12;
   var from = (!range.from || range.from === 'today') ? todayStr : range.from;
+  var out = [], i, target, row;
+
+  if (rv.areas && rv.lists) {
+    var areas = rv.areas, lists = rv.lists, N = lists.length;
+    var interval = rv.interval || 'weekly';
+    var rotateEvery = rv.rotateEvery || 0;
+    var anchor = resolveAnchorDate(rv, rotationAnchor);
+    for (i = 0; i < periods; i++) {
+      target = addIntervals(from, i, interval);
+      row = { id: 'rv' + i, _period: target };
+      var s = (rotateEvery > 0 && N) ? (Math.floor(i / rotateEvery) % N) : 0;
+      areas.forEach(function(area, k) {
+        var listName = N ? lists[(((k + s) % N) + N) % N] : null;
+        row[area] = resolveByCalendar(dataCache[listName] || [], target, anchor, interval);
+      });
+      out.push(row);
+    }
+    return out;
+  }
+
+  var cols = rv.columns || [];
   var stepInterval = (cols[0] && cols[0].interval) || 'weekly'; // date axis follows the first column
-  var out = [];
-  for (var i = 0; i < periods; i++) {
-    var target = addIntervals(from, i, stepInterval);
-    var row = { id: 'rv' + i, _period: target };
-    cols.forEach(function(c) { var rot = dataCache[c.rotationTable] || []; row[c.name] = resolveByCalendar(rot, target, resolveAnchorDate(rot, c), c.interval); });
+  for (i = 0; i < periods; i++) {
+    target = addIntervals(from, i, stepInterval);
+    row = { id: 'rv' + i, _period: target };
+    cols.forEach(function(c) { var rot = dataCache[c.rotationTable] || []; row[c.name] = resolveByCalendar(rot, target, resolveAnchorDate(c, rotationAnchor), c.interval); });
     out.push(row);
   }
   return out;
@@ -393,22 +414,24 @@ function validateSchema() {
       if (!SCHEMA[comp.rotationTable]) errors.push('View "' + v + '": rotation column "' + nm + '" references non-existent rotationTable "' + comp.rotationTable + '"');
       if (comp.advanceBy !== 'occurrence' && comp.advanceBy !== 'calendar') errors.push('View "' + v + '": rotation column "' + nm + '" needs advanceBy "occurrence" or "calendar"');
       if (comp.advanceBy === 'occurrence' && comp.occurrenceSource && !SCHEMA[comp.occurrenceSource]) errors.push('View "' + v + '": rotation column "' + nm + '" occurrenceSource "' + comp.occurrenceSource + '" not found');
-      if (comp.advanceBy === 'calendar') {
-        if (!isValidInterval(comp.interval)) errors.push('View "' + v + '": calendar rotation column "' + nm + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
-        var _af = comp.anchorField || 'anchor', _rt = SCHEMA[comp.rotationTable];
-        if (!comp.anchorDate && !(_rt && _rt.columns && _rt.columns[_af])) errors.push('View "' + v + '": calendar rotation column "' + nm + '" needs anchorDate literal or an "' + _af + '" date column on rotationTable "' + comp.rotationTable + '"');
-      }
+      if (comp.advanceBy === 'calendar' && !isValidInterval(comp.interval)) errors.push('View "' + v + '": calendar rotation column "' + nm + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
     });
     // rotationView (third view kind): calendar-mode columns only.
     if (view.rotationView) {
+      var rvv = view.rotationView;
+      if (rvv.areas && rvv.lists) {
+        if (rvv.advanceBy && rvv.advanceBy !== 'calendar') errors.push('rotationView "' + v + '" supports advanceBy "calendar" only (use a data view for occurrence mode)');
+        if (!isValidInterval(rvv.interval)) errors.push('rotationView "' + v + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
+        (rvv.lists || []).forEach(function(t3) { if (!SCHEMA[t3]) errors.push('rotationView "' + v + '" references non-existent list table "' + t3 + '"'); });
+        if ((rvv.lists || []).length < (rvv.areas || []).length) errors.push('rotationView "' + v + '": fewer lists (' + (rvv.lists || []).length + ') than areas (' + (rvv.areas || []).length + ') — some areas would be unstaffed or double-booked each period');
+      } else {
       (view.rotationView.columns || []).forEach(function(c) {
         var nm = (c && c.name) || '?';
         if (!c || !SCHEMA[c.rotationTable]) errors.push('rotationView "' + v + '" column "' + nm + '" references non-existent rotationTable "' + (c && c.rotationTable) + '"');
         if (c && c.advanceBy && c.advanceBy !== 'calendar') errors.push('rotationView "' + v + '" column "' + nm + '" supports advanceBy "calendar" only (use a data view for occurrence mode)');
-        var _vaf = (c && c.anchorField) || 'anchor', _vrt = c && SCHEMA[c.rotationTable];
         if (!c || !isValidInterval(c.interval)) errors.push('rotationView "' + v + '" column "' + nm + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
-        else if (!c.anchorDate && !(_vrt && _vrt.columns && _vrt.columns[_vaf])) errors.push('rotationView "' + v + '" column "' + nm + '" needs anchorDate literal or an "' + _vaf + '" date column on rotationTable "' + (c && c.rotationTable) + '"');
       });
+      }
     }
   }
   // Check list references
