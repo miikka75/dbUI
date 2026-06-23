@@ -2129,10 +2129,9 @@ test.describe('rotation resolvers', () => {
         calLoop:  rc(rot, '2026-01-22', '2026-01-01', 'weekly'),  // elapsed 3 % 3 = 0 -> ['A']
         calNeg:   rc(rot, '2025-12-25', '2026-01-01', 'weekly'),  // elapsed -1 -> negative-safe -> ['D']
         emptyRot: rc([], '2026-01-15', '2026-01-01', 'weekly'),   // no slots -> []
-        anchorLit:   ra([{ position: 1, anchor: '2026-09-09' }], { anchorDate: '2026-02-02' }), // literal wins
-        anchorTbl:   ra([{ position: 2, anchor: '2026-03-03' }, { position: 1, anchor: '2026-01-01' }], {}), // first slot by position
-        anchorField: ra([{ position: 1, start: '2026-05-05' }], { anchorField: 'start' }),      // custom field name
-        anchorNone:  ra([{ position: 1, people: ['X'] }], {}),    // neither -> null
+        anchorLit:    ra({ anchorDate: '2026-02-02' }, '2026-01-01'), // literal column wins over global
+        anchorGlobal: ra({}, '2026-01-01'),                           // global app-wide anchor used
+        anchorNone:   ra({}, ''),                                     // neither -> null
         d3:    wi('2026-01-01', '2026-01-04', '1d'),               // 3 days -> 3
         w3:    wi('2026-01-01', '2026-01-22', '3w'),               // 21 days = 3 weeks /3 -> 1
         y1:    wi('2026-01-01', '2027-01-01', '1y'),               // 12 months /12 -> 1
@@ -2156,8 +2155,7 @@ test.describe('rotation resolvers', () => {
     expect(r.calNeg).toEqual(['D']);
     expect(r.emptyRot).toEqual([]);
     expect(r.anchorLit).toBe('2026-02-02');
-    expect(r.anchorTbl).toBe('2026-01-01');
-    expect(r.anchorField).toBe('2026-05-05');
+    expect(r.anchorGlobal).toBe('2026-01-01');
     expect(r.anchorNone).toBe(null);
     expect(r.d3).toBe(3);
     expect(r.w3).toBe(1);
@@ -2180,12 +2178,12 @@ test.describe('rotationView (third view kind, e2e)', () => {
     const r = await page.evaluate(() => {
       const app = window.appInstance;
       // Seed the rotation slot list (people is the group the resolver reads).
+      app.appConfig = { rotationAnchors: { crewrota: '2026-01-01' } }; // per-view anchor (folder config map)
       app.dataCache['crew_rotation'] = [
-        { id: 's1', position: 1, people: ['Alpha'], anchor: '2026-01-01' },
+        { id: 's1', position: 1, people: ['Alpha'] },
         { id: 's2', position: 2, people: ['Beta', 'Gamma'] }
       ];
-      app.currentTable = 'crewrota';
-      app.loadTableData(); // generates rows synchronously from the seeded cache
+      app.selectTab('crewrota'); // nav path must load rotationView data (regression: was only via loadTableData)
       return {
         isRot: app.isRotationView,
         cols: app.rotationViewCols,
@@ -2201,5 +2199,105 @@ test.describe('rotationView (third view kind, e2e)', () => {
     expect(r.rows[2]).toEqual({ period: '2026-01-15', crew: ['Alpha'] });        // elapsed 2 -> loop -> slot 0
     expect(r.joined).toBe('Beta, Gamma');                                        // multiselect display join
   });
+
+  test('rotating areas/lists swap assignment every rotateEvery periods', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const view = { rotationView: {
+        areas: ['alue_a', 'alue_b'], lists: ['L_a', 'L_b'],
+        advanceBy: 'calendar', interval: 'weekly', rotateEvery: 1,
+        range: { from: '2026-01-01', periods: 4 }
+      } };
+      const cache = {
+        L_a: [{ position: 1, people: ['A0'] }, { position: 2, people: ['A1'] }],
+        L_b: [{ position: 1, people: ['B0'] }, { position: 2, people: ['B1'] }]
+      };
+      return window.buildRotationViewRows(view, cache, '2026-01-01', '2026-01-01')
+        .map(function(x) { return { p: x._period, a: x.alue_a, b: x.alue_b }; });
+    });
+    // even periods: a<-L_a, b<-L_b ; odd periods (s=1): swapped a<-L_b, b<-L_a. Member idx = period % 2.
+    expect(r[0]).toEqual({ p: '2026-01-01', a: ['A0'], b: ['B0'] });
+    expect(r[1]).toEqual({ p: '2026-01-08', a: ['B1'], b: ['A1'] });
+    expect(r[2]).toEqual({ p: '2026-01-15', a: ['A0'], b: ['B0'] });
+    expect(r[3]).toEqual({ p: '2026-01-22', a: ['B1'], b: ['A1'] });
+  });
 });
 
+
+test.describe('reorderable tables (up/down)', () => {
+  test('moveRowPosition reorders rows and renumbers position as strings', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.currentTable = 'crew_rotation';   // reorderable:true in the fixture
+      app.sortCol = 'position'; app.sortAsc = true;
+      app.viewingArchive = false;
+      app.currentData = [
+        { id: 'r1', position: '1', people: ['A'] },
+        { id: 'r2', position: '2', people: ['B'] },
+        { id: 'r3', position: '3', people: ['C'] }
+      ];
+      const reorderable = app.isReorderable;
+      app.moveRowPosition(app.currentData[0], 1); // move r1 down one slot
+      return {
+        reorderable: reorderable,
+        order: app.sortedData.map(function(x) { return x.id; }),
+        positions: app.currentData.reduce(function(m, x) { m[x.id] = x.position; return m; }, {}),
+        allStrings: app.currentData.every(function(x) { return typeof x.position === 'string'; }),
+        visible: app.visibleCols
+      };
+    });
+    expect(r.reorderable).toBe(true);
+    expect(r.order).toEqual(['r2', 'r1', 'r3']);              // r1 moved below r2
+    expect(r.positions).toEqual({ r1: '2', r2: '1', r3: '3' });
+    expect(r.allStrings).toBe(true);                          // strings, not numbers -> no localeCompare crash
+    expect(r.visible).not.toContain('position');              // position hidden; order driven by arrows only
+  });
+});
+
+test.describe('per-view rotation anchor', () => {
+  test('saveRotationAnchor stores per-view in folder config map', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.saveRotationAnchor('siivous', '2026-03-03');
+      app.saveRotationAnchor('doormen', '2026-05-05'); // different view -> different anchor
+      return {
+        siivous: app.anchorForView('siivous'),
+        doormen: app.anchorForView('doormen'),
+        other: app.anchorForView('nope'),
+        map: app.appConfig.rotationAnchors
+      };
+    });
+    expect(r.siivous).toBe('2026-03-03');
+    expect(r.doormen).toBe('2026-05-05'); // per-view anchors are independent
+    expect(r.other).toBe('');
+    expect(r.map).toEqual({ siivous: '2026-03-03', doormen: '2026-05-05' });
+  });
+});
+
+test.describe('obscureNames (privacy)', () => {
+  test('obscureName transform + per-view displayValue obscuring', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      const o = window.obscureName;
+      window.VIEWS.crewrota.obscureNames = true; // obscure this rotationView's area columns
+      app.currentTable = 'crewrota';
+      return {
+        one: o('Miikka Tuppurainen'),
+        two: o('Anna Maria Lehtimäki'),
+        single: o('Cher'),
+        empty: o(''),
+        disp: app.displayValue('crew', 'Miikka Tuppurainen'),
+        arr: app.displayValue('crew', ['Aatos Suontausta', 'Anna Lehtimäki'])
+      };
+    });
+    expect(r.one).toBe('Miikka T.');
+    expect(r.two).toBe('Anna M. L.');
+    expect(r.single).toBe('Cher');
+    expect(r.empty).toBe('');
+    expect(r.disp).toBe('Miikka T.');            // per-view obscuring via displayValue
+    expect(r.arr).toBe('Aatos S., Anna L.');      // multiselect: each member obscured then joined
+  });
+});
