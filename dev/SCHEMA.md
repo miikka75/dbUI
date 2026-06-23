@@ -121,6 +121,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `printable` | `"view"` \| `"cards"` \| `["view","cards"]` | Opt-in print buttons. `"view"` = view toolbar print only; `"cards"` = per-card buttons only; `["view","cards"]` = both. **Off by default** — omit to hide all print buttons. Note: per-card buttons only render in `card`/`list` layout, so `"cards"` on a `table` layout shows nothing. Applies to views and tables |
 | `markdown` | string | Makes this a **document** view (see below) instead of a data grid |
 | `rotationView` | object | Makes this a **rotationView** (third view kind) — a generated rotating-roster table (see below) |
+| `obscureNames` | boolean \| string[] | Display-only privacy: abbreviate person names to "First L." in this view. `true` = all list/multiselect columns (or all area columns of a rotationView); an array = exactly those columns. Stored data is untouched |
 
 A view's `columns` may contain, besides plain column names:
 - **Conditional column** `{ "name": "<col>", "when": { <cond> } }` — show the column only on rows
@@ -258,7 +259,10 @@ multiselect column (the group for that slot — variable size, not capped):
 ```
 
 > The slot's group column **must be named `people`** — the resolver reads `cells[i].people`
-> (hardcoded coupling). Slots are ordered by the `position` column.
+> (hardcoded coupling). Slots are ordered by the `position` column. Set `"reorderable": true` on the
+> table to get **up/down arrow buttons** in the grid that move a slot and auto-renumber `position`
+> (like the Lists tab) — no manual renumbering needed. Set `position` to `hidden: true` to drop it
+> from the grid entirely — only `people` shows and order is controlled **only** by the arrows.
 
 **Resolution — a `computed` column** in an ordinary view that indexes into the rotation table.
 `advanceBy` declares the trigger explicitly (it is never inferred):
@@ -280,7 +284,7 @@ multiselect column (the group for that slot — variable size, not capped):
 | `advanceBy` | Position formula | Use when | Extra fields |
 |-------------|------------------|----------|--------------|
 | `"occurrence"` | count of `occurrenceSource` rows at/before the current row (sorted by `occurrenceSort`, `id` tie-break) | the duty exists *because* a row exists (one team per session) | `occurrenceSource`, `occurrenceSort` |
-| `"calendar"` | whole intervals elapsed between the anchor date and the row's date | the duty runs on a fixed schedule regardless of rows (weekly cleanup) | `interval`, anchor (from the rotation table — see below) (+ `dateField`) |
+| `"calendar"` | whole intervals elapsed between the anchor date and the row's date | the duty runs on a fixed schedule regardless of rows (weekly cleanup) | `interval`, anchor (per-view — see below) (+ `dateField`) |
 
 - **Output** is the slot's `people` **array** → renders via the multiselect display-join (`"Alex, Sam"`).
 - **Looping** is automatic (modulo over slot count); negative-safe in calendar mode.
@@ -301,22 +305,21 @@ multiselect column (the group for that slot — variable size, not capped):
   and years normalize to 12 months. Sub-day units (hours) are **not** supported — dates are stored as
   `YYYY-MM-DD` with no time component. Unknown/typo values are **rejected at load** (no silent weekly
   fallback). Defaults to weekly when omitted.
-- **Calendar anchor (DB-backed, not a schema literal)**: the anchor is the date of slot position 0.
-  It is read from the **rotation table itself** — the value in the first slot's (lowest `position`)
-  `anchor` date column (rename via `anchorField`, default `"anchor"`). This keeps the anchor as
-  editable, synced **data** rather than a hardcoded date in `schema.json`. A literal `anchorDate` on
-  the column is still accepted and **takes precedence** (handy for a fixed/printable one-off schedule);
-  if neither is present the column resolves to empty. Occurrence mode ignores the anchor entirely.
-- **Independent lists (R3)**: multiple rotations are separate tables; nothing couples them. To author
-  two lists on a shared timeline, give each rotation table the **same first-slot `anchor` value** —
-  that fixes which period is index 0 without coupling contents or lengths (different-length lists
-  drift, which is correct).
+- **Calendar anchor (per-view, DB-backed)**: the anchor is the date of slot position 0 for *this view*.
+  It is stored **per view** in synced folder config under `rotationAnchors[<viewName>]` and edited
+  **inline on the rotation view itself** (a "Start date" field at the top) — so different rotation
+  views (e.g. `siivous` vs `doormen`) can have different anchors. It is *not* a schema literal and
+  *not* a per-row column. A literal `anchorDate` on a column overrides the per-view value (handy for a
+  fixed/printable one-off); if neither is set, calendar columns resolve to empty. Occurrence mode
+  ignores the anchor.
+- **Independent lists (R3)**: multiple rotations are separate tables; nothing couples them. Within one
+  view, sharing that view's anchor only fixes which calendar period is index 0 — each list keeps its own length and
+  contents (different-length lists drift relative to each other over time, which is correct).
 - **Dependency preload**: `rotationTable` (and `occurrenceSource`) are auto-loaded into the data cache
   before resolution — they need not appear in the view's `sources`.
 - **Validation** (load-time): `rotationTable` must exist; `advanceBy` must be `occurrence` or
-  `calendar`; occurrence needs a resolvable `occurrenceSource`; calendar needs a **valid `interval`**
-  and a **resolvable anchor** (an `anchor`/`anchorField` date column on the rotation table, or a
-  literal `anchorDate`).
+  `calendar`; occurrence needs a resolvable `occurrenceSource`; calendar needs a **valid `interval`**.
+  The anchor is runtime data (global config or a literal `anchorDate`), so it is not statically validated.
 
 ## markdown (documents)
 A view with a `markdown` field renders as a **document** instead of a data grid:
@@ -349,7 +352,9 @@ A view with a `rotationView` field renders a rotating roster across a **range of
 at once (e.g. "next 12 weeks of cleanup duty," or a fixed printable schedule). It has **no
 underlying stored rows** — every output row is *generated* by repeated calendar-mode resolver calls
 — so it is neither a data view (`sources`/`columns`) nor a document (`markdown`). It's a distinct,
-read-only third kind.
+read-only third kind. It has **two forms**: the simple **`columns`** form (each area column fixed to
+its own rotation table, below) and the **rotating `areas`+`lists`** form (the list→area assignment
+rotates over time — see "Rotating assignment").
 
 ```json
 {
@@ -367,7 +372,7 @@ read-only third kind.
 
 | Field | Description |
 |-------|-------------|
-| `rotationView.columns` | One entry per rotation, each a **calendar-mode** spec (`name`, `rotationTable`, `advanceBy: "calendar"`, `interval`). The anchor comes from each rotation table's first-slot `anchor` column (`anchorField` to rename; a literal `anchorDate` still wins if set). Resolved independently per generated row. |
+| `rotationView.columns` | One entry per rotation, each a **calendar-mode** spec (`name`, `rotationTable`, `advanceBy: "calendar"`, `interval`). The anchor is the **per-view** `rotationAnchors[<viewName>]` (folder config, edited inline on the view); a literal `anchorDate` on a column overrides it. Resolved independently per generated row. |
 | `range.from` | `"today"` for a rolling window (recomputed each open) **or** a literal `YYYY-MM-DD` for a fixed window (printing/sharing). |
 | `range.periods` | A **count of intervals** to generate rows for (not an end date) — matches how calendar resolution counts elapsed intervals. |
 | `layout` | `"table"` (minimum supported). |
@@ -377,17 +382,57 @@ read-only third kind.
 - **Calendar-mode only** — validation rejects `advanceBy: "occurrence"` here. Occurrence-mode
   rotations render inside an ordinary data view (as a rotation computed column) where each row already
   has its own date/context, so they don't need this view kind.
-- **Shared anchor** across columns aligns "which period is index 0" while keeping each list's length
-  and contents independent (lists of different lengths drift relative to each other — expected). Give
-  each rotation table the **same first-slot `anchor` value** to align them.
+- **Shared anchor** — all columns in a view use that **view's** anchor, so they align at period 0 while
+  keeping independent lengths/contents (different-length lists drift relative to each other — expected).
 - **Read-only & recomputed**: a `rotationView` is a pure function of *(rotation-table contents, range)*
   at render time. There is no snapshot — editing a slot table changes what every past *and* future
   period resolves to on the next render. This is intended, not a gap.
 - **Dependency preload**: each `rotationTable` is fetched into the data cache before generation.
 - **Nav**: reference it by `name` like any view; it gets a default `mdi-calendar-clock` icon.
 - **Validation** (load-time): each column's `rotationTable` must exist, `advanceBy` may only be
-  `calendar`, the `interval` must be **valid**, and an anchor must be **resolvable** (an
-  `anchor`/`anchorField` date column on the rotation table, or a literal `anchorDate`).
+  `calendar`, and the `interval` must be **valid**. The anchor is runtime data (global config or a
+  literal `anchorDate`), so it is not statically validated.
+
+### Rotating assignment (`areas` + `lists` + `rotateEvery`)
+Instead of fixing each area to one list, you can rotate the **list→area assignment** over time — the
+generalization of a 2-list "swap." Use ordered `areas` (output columns) and ordered `lists` (rotation
+tables), with one shared `interval`/`advanceBy` and a `rotateEvery`:
+
+```json
+{
+  "name": "siivous",
+  "rotationView": {
+    "areas": ["alue_a", "alue_b"],
+    "lists": ["siivous_a", "siivous_b"],
+    "advanceBy": "calendar",
+    "interval": "weekly",
+    "rotateEvery": 1,
+    "range": { "from": "today", "periods": 12 }
+  },
+  "layout": "table"
+}
+```
+
+**Two independent clocks** drive it:
+1. **Per-list member rotation** — each list advances one slot per period on its **own length** (the
+   lists stay fully independent, can be different lengths, and are maintained separately — R3).
+2. **List→area assignment rotation** — every `rotateEvery` periods the assignment shifts one step,
+   cyclically. At period `p`: `shift s = floor(p / rotateEvery) mod N` (N = number of lists), and
+   `area[k] ← list[(k + s) mod N]` resolved at that list's member index `p mod len`.
+
+- **Swap is the `N=2`, `rotateEvery:1` case** — areas served `[a,b]`, then `[b,a]`, then `[a,b]`…
+  (exactly the alternating doormen/cleanup pattern).
+- **Each period is a permutation** of lists across areas (with `N = areas.length`), so **no area is
+  double-staffed or left empty**. Over `N` assignment-cycles every list visits every area.
+- **`rotateEvery: 0` / omitted** = no assignment rotation (each area fixed to `lists[k]`) — equivalent
+  to the `columns` form.
+- **Anchor / interval**: the per-view `rotationAnchors[<viewName>]` (or a literal `anchorDate` on the
+  `rotationView`) anchors period 0; `interval` accepts the same values as elsewhere.
+- **N lists vs M areas**: `N = M` → clean permutation (recommended). `N > M` → round-robin where
+  `N − M` lists "rest" each period and everyone eventually serves every area. `N < M` → **rejected at
+  load** (some areas would be unstaffed/double-booked).
+- **Validation**: every `lists` table must exist; `advanceBy` (if set) must be `calendar`; `interval`
+  must be valid; `lists.length` must be `>= areas.length`.
 
 ### Worked example (occurrence + calendar end-to-end)
 An event needs **security** (one team per session — occurrence-driven) and a two-zone **cleanup**
@@ -415,16 +460,14 @@ an occurrence-mode computed column, and one `rotationView` for the calendar rota
     "zone_a_rotation": {
       "columns": [
         { "name": "position", "type": "number" },
-        { "name": "people", "type": "multiselect", "list": "staff", "allowNew": true },
-        { "name": "anchor", "type": "date" }
+        { "name": "people", "type": "multiselect", "list": "staff", "allowNew": true }
       ],
       "defaultSort": "position"
     },
     "zone_b_rotation": {
       "columns": [
         { "name": "position", "type": "number" },
-        { "name": "people", "type": "multiselect", "list": "staff", "allowNew": true },
-        { "name": "anchor", "type": "date" }
+        { "name": "people", "type": "multiselect", "list": "staff", "allowNew": true }
       ],
       "defaultSort": "position"
     }
@@ -478,19 +521,19 @@ an occurrence-mode computed column, and one `rotationView` for the calendar rota
 | table | position 1 | position 2 | position 3 |
 |-------|-----------|-----------|-----------|
 | `security_rotation` | `["Alex"]` | `["Sam","Jordan"]` | `["Riley"]` |
-| `zone_a_rotation` | `["Alex"]` (anchor `2026-01-01`) | `["Sam"]` | — |
-| `zone_b_rotation` | `["Riley"]` (anchor `2026-01-01`) | `["Jordan"]` | `["Casey"]` |
+| `zone_a_rotation` | `["Alex"]` | `["Sam"]` | — |
+| `zone_b_rotation` | `["Riley"]` | `["Jordan"]` | `["Casey"]` |
 
-(`security_rotation` is occurrence-mode, so it needs no `anchor`. The two calendar zone tables carry
-the anchor on their **first slot** — both `2026-01-01` so they align at period 0.)
+(The view's anchor `rotationAnchors["cleanup_schedule"]` — set inline on the view, e.g. `2026-01-01` — fixes period 0 for both zone
+columns; `security_rotation` is occurrence-mode and ignores the anchor entirely.)
 
 - **`session_schedule`** (occurrence): sessions sorted by `date`; the 1st session → `security` =
   `"Alex"`, 2nd → `"Sam, Jordan"`, 3rd → `"Riley"`, **4th loops** → `"Alex"`. Deleting the 2nd
   session shifts every later session back one slot (no gap).
-- **`cleanup_schedule`** (calendar `rotationView`): 12 weekly rows from today. Both zone tables' first
-  slot carries `anchor: "2026-01-01"`, so period 0 is the same week for both — but they keep
-  independent lengths, so `zone_a` (2 slots) loops every 2 weeks while `zone_b` (3 slots) loops every
-  3 weeks, drifting against each other (expected).
+- **`cleanup_schedule`** (calendar `rotationView`): 12 weekly rows from today. The global
+  `rotationAnchor` fixes period 0 for both columns — but they keep independent lengths, so `zone_a`
+  (2 slots) loops every 2 weeks while `zone_b` (3 slots) loops every 3 weeks, drifting against each
+  other (expected).
 - The slot tables stay directly editable in the **Rotations** nav group; both schedules recompute on
   next render.
 
