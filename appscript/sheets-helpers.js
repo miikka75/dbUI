@@ -21,23 +21,31 @@ function normalizeColumns(columns) {
 
 // Convert a 2D sheet value array (row 0 = headers) into { headers, rows } of string-coerced objects.
 // Empty headers are dropped but remaining columns keep their original positions (no misalignment).
-function valuesToObjects(values) {
+// `msCols` (optional): array or {name:true} map of multiselect columns whose JSON-encoded cells are
+// decoded back into arrays ('' -> []). Other columns are left as string-coerced scalars.
+function valuesToObjects(values, msCols) {
   if (!values || !values.length) return { headers: [], rows: [] };
+  var ms = Array.isArray(msCols) ? msCols.reduce(function(a, c) { a[c] = true; return a; }, {}) : (msCols || {});
   var cols = [];
   values[0].forEach(function(h, i) { var name = String(h || ''); if (name) cols.push({ name: name, idx: i }); });
   var headers = cols.map(function(c) { return c.name; });
   if (values.length < 2) return { headers: headers, rows: [] };
   var rows = values.slice(1).map(function(row) {
     var obj = {};
-    cols.forEach(function(c) { obj[c.name] = formatCell(row[c.idx]); });
+    cols.forEach(function(c) {
+      var v = formatCell(row[c.idx]);
+      if (ms[c.name]) { if (v) { try { var p = JSON.parse(v); if (Array.isArray(p)) v = p; } catch (e) {} } else { v = []; } }
+      obj[c.name] = v;
+    });
     return obj;
   });
   return { headers: headers, rows: rows };
 }
 
 // Map a row object to a values array ordered by headers (missing keys -> '').
+// Array values (multiselect cells) are JSON-encoded since a sheet cell holds only a scalar.
 function objectToValues(rowData, headers) {
-  return headers.map(function(h) { return rowData[h] !== undefined ? rowData[h] : ''; });
+  return headers.map(function(h) { var v = rowData[h]; if (Array.isArray(v)) return JSON.stringify(v); return v !== undefined ? v : ''; });
 }
 
 // Find the 0-based index into `data` whose `idCol` column matches `id` (string compare).
@@ -66,6 +74,13 @@ function parseTranslations(values) {
   return out;
 }
 
+// Names of multiselect columns from a columns definition (object map or array of {name,type}).
+function multiselectCols(columns) {
+  if (!columns) return [];
+  if (Array.isArray(columns)) return columns.filter(function(c) { return c && typeof c === 'object' && c.type === 'multiselect'; }).map(function(c) { return c.name; });
+  return Object.keys(columns).filter(function(k) { var d = columns[k]; return d && typeof d === 'object' && d.type === 'multiselect'; });
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { formatCell, normalizeColumns, valuesToObjects, objectToValues, findRowIndex, buildColumnOrders, parseTranslations };
+  module.exports = { formatCell, normalizeColumns, valuesToObjects, objectToValues, findRowIndex, buildColumnOrders, parseTranslations, multiselectCols };
 }
