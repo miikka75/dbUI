@@ -90,9 +90,10 @@ function bootData(folderId, schema) {
   var data = {};
   for (var name in tableMap) {
     var def = tables[name];
-    data[name] = getTableData(tableMap[name], def.partition || 'active');
+    var msc = multiselectCols(def.columns);
+    data[name] = getTableData(tableMap[name], def.partition || 'active', msc);
     var ap = def.archivable ? 'archive' : null; // archivable -> fixed 'archive' partition (legacy archivePartition dropped)
-    if (ap) { try { data[name + '__' + ap] = getTableData(tableMap[name], ap); } catch(e2) {} }
+    if (ap) { try { data[name + '__' + ap] = getTableData(tableMap[name], ap, msc); } catch(e2) {} }
   }
   // Return schema as object + explicit key order arrays (google.script.run scrambles object keys)
   return { schema: parsed, tableOrder: Object.keys(tables), columnOrders: buildColumnOrders(tables), tableMap: tableMap, languages: languages, lists: lists, data: data };
@@ -137,11 +138,11 @@ function ensureTable(folder, tableName, columns, tabName) {
   return ss.getId();
 }
 
-function getTableData(spreadsheetId, tabName) {
+function getTableData(spreadsheetId, tabName, msCols) {
   try {
     const sheet = getSheet(spreadsheetId, tabName);
     if (!sheet || sheet.getLastRow() < 1) return { headers: [], rows: [] };
-    return valuesToObjects(sheet.getDataRange().getValues());
+    return valuesToObjects(sheet.getDataRange().getValues(), msCols);
   } catch (e) {
     return { headers: [], rows: [] };
   }
