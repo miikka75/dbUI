@@ -16,11 +16,14 @@ function createLocalBackend(dbPath) {
       var row = db.prepare('SELECT value FROM _schema WHERE key = ?').get('schema');
       if (!row) return {};
       var def = (JSON.parse(row.value).tables || {})[tableId];
-      var out = {};
-      if (def && def.columns) Object.keys(def.columns).forEach(function(c) {
-        var d = def.columns[c];
-        if (d && typeof d === 'object' && d.type === 'multiselect') out[c] = true;
-      });
+      var out = {}, cols = def && def.columns;
+      if (Array.isArray(cols)) {
+        // Authored/stored form: columns is an array of {name,type,...} objects.
+        cols.forEach(function(d) { if (d && typeof d === 'object' && d.type === 'multiselect' && d.name) out[d.name] = true; });
+      } else if (cols) {
+        // Normalized colMap form: { <name>: {type,...} }.
+        Object.keys(cols).forEach(function(c) { var d = cols[c]; if (d && typeof d === 'object' && d.type === 'multiselect') out[c] = true; });
+      }
       return out;
     } catch (e) { return {}; }
   }
