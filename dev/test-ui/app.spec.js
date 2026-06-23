@@ -2073,3 +2073,133 @@ test.describe('conditional computed columns (when)', () => {
     expect(r[2]).toEqual({ name: 'tag', when: { $or: [ { x: 'p' }, { x: 'q' } ] } }); // + inner array-IN -> $or
   });
 });
+
+test.describe('multiselect column type', () => {
+  test('condMatches matchList matches when ANY array element is in the list; displayValue joins arrays', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const f = (typeof condMatches !== 'undefined') ? condMatches : window.condMatches;
+      window._listsCache = window._listsCache || {};
+      window._listsCache.guests = ['Matti', 'Liisa'];
+      const dv = window.appInstance && window.appInstance.displayValue;
+      return {
+        anyMatch:     f({ h: ['Pekka', 'Liisa'] }, { h: { matchList: 'guests' } }), // Liisa in list -> true
+        noneMatch:    f({ h: ['Pekka', 'Sanna'] }, { h: { matchList: 'guests' } }), // none -> false
+        scalarStill:  f({ h: 'Matti' },            { h: { matchList: 'guests' } }), // scalar still works
+        notMatchAny:  f({ h: ['Pekka', 'Liisa'] }, { h: { notMatchList: 'guests' } }), // Liisa present -> false
+        displayJoin:  dv ? dv('h', ['Matti', 'Liisa']) : null,
+        displayEmpty: dv ? dv('h', []) : null
+      };
+    });
+    expect(r.anyMatch).toBe(true);
+    expect(r.noneMatch).toBe(false);
+    expect(r.scalarStill).toBe(true);
+    expect(r.notMatchAny).toBe(false);
+    expect(r.displayJoin).toBe('Matti, Liisa');
+    expect(r.displayEmpty).toBe('');
+  });
+});
+
+test.describe('rotation resolvers', () => {
+  test('occurrence + calendar position resolution and looping', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const rot = [
+        { id: 'c1', position: 1, people: ['A'] },
+        { id: 'c2', position: 2, people: ['B', 'C'] },
+        { id: 'c3', position: 3, people: ['D'] }
+      ];
+      const src = [
+        { id: 'k1', pvm: '2026-01-01' },
+        { id: 'k2', pvm: '2026-02-01' },
+        { id: 'k3', pvm: '2026-03-01' }
+      ];
+      const wi = window.wholeIntervalsBetween, ro = window.resolveByOccurrence, rc = window.resolveByCalendar;
+      const ra = window.resolveAnchorDate;
+      const ai = window.addIntervals, iv = window.isValidInterval;
+      return {
+        wkly2:    wi('2026-01-01', '2026-01-15', 'weekly'),    // 14 days -> 2
+        wkly0:    wi('2026-01-01', '2026-01-05', 'weekly'),    // 4 days -> 0
+        mon2:     wi('2026-01-01', '2026-03-01', 'monthly'),   // 2 months
+        monPart:  wi('2026-01-15', '2026-02-10', 'monthly'),   // day 10 < 15 -> 0 full months
+        occ0:     ro(rot, src, src[0], 'pvm'),                 // index 0 -> ['A']
+        occ1:     ro(rot, src, src[1], 'pvm'),                 // index 1 -> ['B','C']
+        occLoop:  ro([rot[0], rot[1]], src, src[2], 'pvm'),    // index 2 % 2 = 0 -> ['A']
+        cal2:     rc(rot, '2026-01-15', '2026-01-01', 'weekly'),  // elapsed 2 -> cells[2] ['D']
+        calLoop:  rc(rot, '2026-01-22', '2026-01-01', 'weekly'),  // elapsed 3 % 3 = 0 -> ['A']
+        calNeg:   rc(rot, '2025-12-25', '2026-01-01', 'weekly'),  // elapsed -1 -> negative-safe -> ['D']
+        emptyRot: rc([], '2026-01-15', '2026-01-01', 'weekly'),   // no slots -> []
+        anchorLit:   ra([{ position: 1, anchor: '2026-09-09' }], { anchorDate: '2026-02-02' }), // literal wins
+        anchorTbl:   ra([{ position: 2, anchor: '2026-03-03' }, { position: 1, anchor: '2026-01-01' }], {}), // first slot by position
+        anchorField: ra([{ position: 1, start: '2026-05-05' }], { anchorField: 'start' }),      // custom field name
+        anchorNone:  ra([{ position: 1, people: ['X'] }], {}),    // neither -> null
+        d3:    wi('2026-01-01', '2026-01-04', '1d'),               // 3 days -> 3
+        w3:    wi('2026-01-01', '2026-01-22', '3w'),               // 21 days = 3 weeks /3 -> 1
+        y1:    wi('2026-01-01', '2027-01-01', '1y'),               // 12 months /12 -> 1
+        q2:    wi('2026-01-01', '2026-07-01', '3m'),               // 6 months /3 -> 2
+        addD:  ai('2026-01-01', 2, '1d'),                          // 2026-01-03
+        add3w: ai('2026-01-01', 2, '3w'),                          // +6 weeks = +42 days -> 2026-02-12
+        addY:  ai('2026-01-01', 1, '1y'),                          // 2027-01-01
+        ivOk1: iv('1d'), ivOk2: iv('3w'), ivOk3: iv('daily'),
+        ivBad1: iv('1h'), ivBad2: iv('weeklyy')
+      };
+    });
+    expect(r.wkly2).toBe(2);
+    expect(r.wkly0).toBe(0);
+    expect(r.mon2).toBe(2);
+    expect(r.monPart).toBe(0);
+    expect(r.occ0).toEqual(['A']);
+    expect(r.occ1).toEqual(['B', 'C']);
+    expect(r.occLoop).toEqual(['A']);
+    expect(r.cal2).toEqual(['D']);
+    expect(r.calLoop).toEqual(['A']);
+    expect(r.calNeg).toEqual(['D']);
+    expect(r.emptyRot).toEqual([]);
+    expect(r.anchorLit).toBe('2026-02-02');
+    expect(r.anchorTbl).toBe('2026-01-01');
+    expect(r.anchorField).toBe('2026-05-05');
+    expect(r.anchorNone).toBe(null);
+    expect(r.d3).toBe(3);
+    expect(r.w3).toBe(1);
+    expect(r.y1).toBe(1);
+    expect(r.q2).toBe(2);
+    expect(r.addD).toBe('2026-01-03');
+    expect(r.add3w).toBe('2026-02-12');
+    expect(r.addY).toBe('2027-01-01');
+    expect(r.ivOk1).toBe(true);
+    expect(r.ivOk2).toBe(true);
+    expect(r.ivOk3).toBe(true);
+    expect(r.ivBad1).toBe(false);
+    expect(r.ivBad2).toBe(false);
+  });
+});
+
+test.describe('rotationView (third view kind, e2e)', () => {
+  test('generates calendar-period rows resolving rotation slots (fixture crew_rotation + crewrota)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // Seed the rotation slot list (people is the group the resolver reads).
+      app.dataCache['crew_rotation'] = [
+        { id: 's1', position: 1, people: ['Alpha'], anchor: '2026-01-01' },
+        { id: 's2', position: 2, people: ['Beta', 'Gamma'] }
+      ];
+      app.currentTable = 'crewrota';
+      app.loadTableData(); // generates rows synchronously from the seeded cache
+      return {
+        isRot: app.isRotationView,
+        cols: app.rotationViewCols,
+        rows: (app.rotationViewRows || []).map(function(x) { return { period: x._period, crew: x.crew }; }),
+        joined: app.displayValue('crew', ['Beta', 'Gamma'])
+      };
+    });
+    expect(r.isRot).toBe(true);
+    expect(r.cols).toEqual(['_period', 'crew']);
+    expect(r.rows.length).toBe(3);                                              // range.periods = 3
+    expect(r.rows[0]).toEqual({ period: '2026-01-01', crew: ['Alpha'] });        // elapsed 0 -> slot 0
+    expect(r.rows[1]).toEqual({ period: '2026-01-08', crew: ['Beta', 'Gamma'] }); // elapsed 1 -> slot 1
+    expect(r.rows[2]).toEqual({ period: '2026-01-15', crew: ['Alpha'] });        // elapsed 2 -> loop -> slot 0
+    expect(r.joined).toBe('Beta, Gamma');                                        // multiselect display join
+  });
+});
+
