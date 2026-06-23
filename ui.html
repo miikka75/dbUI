@@ -186,6 +186,18 @@
           </template>
         </v-card>
 
+        <!-- Rotation view (generated periods; read-only) -->
+        <v-card v-if="isRotationView" variant="outlined">
+          <v-table density="compact"><template v-slot:default>
+            <thead><tr><th v-for="col in rotationViewCols" :key="col">{{ col === '_period' ? (t('field.period') !== 'field.period' ? t('field.period') : 'Date') : (t('field.' + col) || col) }}</th></tr></thead>
+            <tbody>
+              <tr v-for="row in rotationViewRows" :key="row.id">
+                <td v-for="col in rotationViewCols" :key="col" style="padding:3px 8px">{{ col === '_period' ? toDateStr(row[col]) : displayValue(col, row[col]) }}</td>
+              </tr>
+            </tbody>
+          </template></v-table>
+        </v-card>
+
         <!-- Data Table -->
         <v-card v-if="isDataView" variant="outlined">
           <div class="d-flex align-center pa-2" style="min-height:0">
@@ -247,6 +259,8 @@
                 <span class="card-field-label">{{ t('field.' + col) || col }}</span>
                 <span v-if="cellReadonly(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
                 <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
+                <v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
+                <v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
                 <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || ''" :items="getListOptions(col, isAltList(col, item) ? colListSwitch(col).list : null)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>
                   <template v-if="colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? 'primary' : ''" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || 'Switch list'">mdi-swap-horizontal</v-icon></template>
                 </v-combobox>
@@ -312,6 +326,8 @@
                 <td v-for="col in visibleCols" :key="col">
                   <span v-if="cellReadonly(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
                   <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
+                  <v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
+                  <v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
                   <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || ''" :items="getListOptions(col, isAltList(col, item) ? colListSwitch(col).list : null)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>
                     <template v-if="colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? 'primary' : ''" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || 'Switch list'">mdi-swap-horizontal</v-icon></template>
                   </v-combobox>
