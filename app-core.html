@@ -138,8 +138,15 @@ function createVueApp() {
       bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
       isDataView: function() {
         var v = VIEWS[this.currentTable];
-        return this.currentTable && this.currentTable[0] !== '_' && !(v && typeof v.markdown === 'string') && (v || SCHEMA[this.currentTable]);
+        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotationView)) && (v || SCHEMA[this.currentTable]);
       },
+      isRotationView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rotationView); },
+      rotationViewCols: function() {
+        var v = VIEWS[this.currentTable];
+        if (!v || !v.rotationView) return [];
+        return ['_period'].concat((v.rotationView.columns || []).map(function(c) { return c.name; }));
+      },
+      rotationViewRows: function() { return this.isRotationView ? this.currentData : []; },
       navConfig: function() { return (this.schemaData && this.schemaData.nav) || null; },
       navLayout: function() { return this.navLayoutOverride || (this.navConfig && this.navConfig.layout) || 'drawer'; },
       currentPage: function() {
@@ -267,7 +274,7 @@ function createVueApp() {
           var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
           var columns = raw.map(function(c) { return colName(c); });
           var rows = buildRows(cfg, self.dataCache);
-          resolveComputed(rows, cfg.columns || []);
+          resolveComputed(rows, cfg.columns || [], { dataCache: self.dataCache });
           if (cfg.defaultSort) { rows = sortByCol(rows, cfg.defaultSort); }
           if (cfg.hideEmpty) { columns = columns.filter(function(col) { return rows.some(function(r) { return r[col]; }); }); }
           // markdown on a filterBy/inline embed: store as header HTML (rendered per-card by the template)
@@ -762,7 +769,7 @@ function createVueApp() {
         if (type === 'view' && VIEWS[name]) {
           var v = VIEWS[name], cache = this.dataCache;
           if (part) { cache = {}; var dc = this.dataCache; (v.sources || []).forEach(function(s) { cache[s] = dc[s + '__' + part] || []; }); }
-          return sortByCol(resolveComputed(aggregateRows(v, buildRows(v, cache)), v.columns), v.defaultSort, v);
+          return sortByCol(resolveComputed(aggregateRows(v, buildRows(v, cache)), v.columns, { dataCache: this.dataCache }), v.defaultSort, v);
         }
         if (type === 'table' && SCHEMA[name]) return sortByCol(this.dataCache[part ? name + '__' + part : name] || [], SCHEMA[name].defaultSort);
         return [];
@@ -773,7 +780,7 @@ function createVueApp() {
         if (!ei.config.filterBy || !item) return ei.rows;
         var fb = ei.config.filterBy; // { embedCol: cardCol } or { embedCol: { matchList: "listName" } }
         return ei.rows.filter(function(r) {
-          for (var k in fb) { var v = fb[k]; if (v && typeof v === 'object' && v.matchList) { if (!window._listsCache || !window._listsCache[v.matchList] || window._listsCache[v.matchList].indexOf(r[k]) < 0) return false; } else if (r[k] !== item[v]) return false; }
+          for (var k in fb) { var v = fb[k]; if (v && typeof v === 'object' && v.matchList) { var _L = window._listsCache && window._listsCache[v.matchList]; var _rv = r[k]; var _ok = _L && (Array.isArray(_rv) ? _rv.some(function(x){ return _L.indexOf(x) >= 0; }) : _L.indexOf(_rv) >= 0); if (!_ok) return false; } else if (r[k] !== item[v]) return false; }
           return true;
         });
       },
@@ -822,6 +829,22 @@ function createVueApp() {
         var self = this;
         var view = VIEWS[this.currentTable];
         if (view) {
+          // rotationView (third view kind): generate rows from range; no sources to read.
+          if (view.rotationView) {
+            var td = new Date();
+            var todayStr = td.getFullYear() + '-' + String(td.getMonth() + 1).padStart(2, '0') + '-' + String(td.getDate()).padStart(2, '0');
+            var allowedRv = self.userAllowedTables;
+            var regen = function() { self.currentData = buildRotationViewRows(view, self.dataCache, todayStr); };
+            regen();
+            (view.rotationView.columns || []).forEach(function(c) {
+              var tbl = c.rotationTable;
+              if (!tbl || (allowedRv && allowedRv.indexOf(tbl) < 0) || self.dataCache[tbl]) return;
+              backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
+                self.dataCache[tbl] = parseTableResult(result).rows; regen();
+              }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
+            });
+            return;
+          }
           // Union or join view
           var cache = self.dataCache;
           if (self.viewingArchive) {
@@ -829,7 +852,7 @@ function createVueApp() {
             view.sources.forEach(function(src) { cache[src] = self.dataCache[aKey(src)] || []; });
           }
           var rows = buildRows(view, cache);
-          rows = resolveComputed(aggregateRows(view, rows), view.columns);
+          rows = resolveComputed(aggregateRows(view, rows), view.columns, { dataCache: self.dataCache });
           self.currentData = rows;
           // Load embed table data if not cached
           var allowed = self.userAllowedTables;
@@ -845,6 +868,17 @@ function createVueApp() {
                   self.dataCache[tbl] = parseTableResult(result).rows;
                 });
               }
+            });
+          });
+          // Preload rotation-column dependencies (rotationTable + occurrenceSource), then recompute.
+          (view.columns || []).forEach(function(c) {
+            if (!c || typeof c !== 'object' || !c.computed || !c.computed.rotationTable) return;
+            [c.computed.rotationTable, c.computed.occurrenceSource].forEach(function(tbl) {
+              if (!tbl || (allowed && allowed.indexOf(tbl) < 0) || self.dataCache[tbl]) return;
+              backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
+                self.dataCache[tbl] = parseTableResult(result).rows;
+                self.currentData = resolveComputed(aggregateRows(view, buildRows(view, self.dataCache)), view.columns, { dataCache: self.dataCache });
+              }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
             });
           });
         } else {
@@ -894,8 +928,10 @@ function createVueApp() {
 
       // Cell editing
       saveField: function(item, col, value, ownerId) {
-        if (typeof value === "object" && value !== null) value = value.value || value.title || String(value);
-        if (item[col] === value) return;
+        // Coerce Vuetify {value,title} option objects to scalars, but preserve arrays (multiselect cells).
+        if (typeof value === "object" && value !== null && !Array.isArray(value)) value = value.value || value.title || String(value);
+        if (Array.isArray(value)) value = value.map(function(x) { return (x && typeof x === 'object') ? (x.value || x.title || String(x)) : x; });
+        if (item[col] === value) return; // reference compare; arrays always differ -> always saved (intended)
         item[col] = value;
         item.updated_at = new Date().toISOString();
         var self = this;
@@ -1013,6 +1049,10 @@ function createVueApp() {
         for (var t in SCHEMA) { var l = getColumnList(t, col); if (l) return l; }
         return null;
       },
+      colIsMultiselect: function(col) {
+        for (var t in SCHEMA) { if (getColumnType(t, col) === 'multiselect') return true; }
+        return false;
+      },
       getListOptions: function(col, altList) {
         var self = this;
         var listName = altList || this.colIsList(col);
@@ -1041,6 +1081,7 @@ function createVueApp() {
         this.listSwitchOverrides[key] = !this.isAltList(col, item);
       },
       displayValue: function(col, val) {
+        if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x); }).filter(Boolean).join(', '); }
         if (!val) return '';
         var listName = this.colIsList(col);
         if (!listName) { var v = VIEWS[this.currentTable]; if (v && v.groupBy && typeof v.groupBy === 'object' && v.groupBy.column === col && v.groupBy.from) { for (var i = 0; i < v.groupBy.from.length && !listName; i++) listName = this.colIsList(v.groupBy.from[i]); } }
@@ -1106,10 +1147,14 @@ function createVueApp() {
         var value = item[col];
         if (!value) return;
         var listName = this.colIsList(col);
-        if (listName && this.listsCache[listName] && this.listsCache[listName].indexOf(value) === -1) {
-          this.listsCache[listName].push(value);
-          backend.putListItem(this.folderId, listName, value);
-        }
+        if (!listName || !this.listsCache[listName]) return;
+        var self = this, vals = Array.isArray(value) ? value : [value];
+        vals.forEach(function(v) {
+          if (v && self.listsCache[listName].indexOf(v) === -1) {
+            self.listsCache[listName].push(v);
+            backend.putListItem(self.folderId, listName, v);
+          }
+        });
       },
 
       colIsRef: function(col) {
@@ -2002,6 +2047,7 @@ function createVueApp() {
       t: function(k) { return appInstance ? appInstance.t(k) : k; },
       colIsDate: function(c) { return appInstance && appInstance.colIsDate(c); },
       colIsList: function(c) { return appInstance && appInstance.colIsList(c); },
+      colIsMultiselect: function(c) { return appInstance && appInstance.colIsMultiselect(c); },
       colAllowNew: function(c) { return appInstance && appInstance.colAllowNew(c); },
       colIsRef: function(c) { return appInstance && appInstance.colIsRef(c); },
       getListOptions: function(c) { return appInstance ? appInstance.getListOptions(c) : []; },
@@ -2031,6 +2077,8 @@ function createVueApp() {
       + '<thead><tr><th v-for="c in cols" :key="c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
       + '<tbody><tr v-for="(item, ri) in rows" :key="item.id || ri"><td v-for="col in cols" :key="col">'
       + '<span v-if="cellRO(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
+      + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)"></v-combobox>'
+      + '<v-autocomplete v-else-if="colIsMultiselect(col)" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details @update:model-value="save(item, col, $event)"></v-autocomplete>'
       + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :model-value="item[col] || \'\'" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)"></v-combobox>'
       + '<v-autocomplete v-else-if="colIsList(col)" :model-value="item[col] || \'\'" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="save(item, col, $event)"></v-autocomplete>'
       + '<v-autocomplete v-else-if="colIsRef(col)" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="save(item, col, $event)"></v-autocomplete>'
