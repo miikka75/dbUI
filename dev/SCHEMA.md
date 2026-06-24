@@ -434,6 +434,29 @@ tables), with one shared `interval`/`advanceBy` and a `rotateEvery`:
 - **Validation**: every `lists` table must exist; `advanceBy` (if set) must be `calendar`; `interval`
   must be valid; `lists.length` must be `>= areas.length`.
 
+#### Per-person area coverage — list length (L) vs rotation cadence (R)
+The two clocks can **alias**, which decides whether a given person eventually works *every* area or
+stays **locked** to one. For a person at position `p` in a list of length **`L`**, with swap cadence
+`rotateEvery` = **`R`** and `N` lists/areas:
+- They return to duty every `L` periods (member clock); the area they get is set by the assignment
+  shift `s = floor(period / R) mod N` (swap clock, full cycle = `N·R` periods).
+- They cover **all areas** iff their duty subsequence isn't stuck on one `s` value — i.e. iff `L` and
+  the swap cycle don't share a common factor that pins them. They stay **locked to one area** iff `L`
+  divides evenly into the swap rhythm.
+
+For the common `siivous` case (**`N=2`, `R=1`**, swap period = 2):
+- **Odd `L`** → period parity flips on each return → **alternates areas every turn** (everyone cleans
+  both areas; back to the start area every 2nd turn). ✅
+- **Even `L`** → period parity is constant on each return → **locked**: even positions always area 0,
+  odd positions always area 1. ⚠️
+
+This app uses `rotateEvery: 1` and **relies on odd-length lists** to guarantee everyone rotates
+through both areas. To make coverage hold for **any** length (even `L`), use **equal-length lists**
+and set `R = L` (swap once per full roster pass) — then every person flips area on each successive
+turn regardless of parity. With **unequal, independently-maintained** lengths, only "eventually
+covers both" is achievable (per-turn balance drifts), so equal lengths is the real requirement for a
+clean guarantee.
+
 ### Worked example (occurrence + calendar end-to-end)
 An event needs **security** (one team per session — occurrence-driven) and a two-zone **cleanup**
 rota (every week regardless of sessions — calendar-driven). Three rotation tables, one data view with
