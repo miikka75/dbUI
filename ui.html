@@ -423,13 +423,13 @@
               <v-table v-if="editingLang && editingLang.code === lang.code" density="compact">
                 <template v-slot:default>
                 <tbody>
-                  <tr @click="settings._collapseApp = !settings._collapseApp" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseApp ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> App</td></tr>
+                  <tr @click="settings._collapseApp = !settings._collapseApp" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseApp ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ t('lang.app') !== 'lang.app' ? t('lang.app') : 'App' }}</td></tr>
                   <tr v-show="!settings._collapseApp"><th style="opacity:0.6">{{ t('field.key') }}</th><th style="opacity:0.6">{{ t('field.translation') }}</th></tr>
                   <tr v-for="key in staticTranslationKeys" :key="key" v-show="!settings._collapseApp">
                     <td>{{ key }}</td>
                     <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="saveTranslation(key, $event.target.textContent)">{{ currentTranslations[key] || '' }}</span></td>
                   </tr>
-                  <tr @click="settings._collapseSchema = !settings._collapseSchema" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseSchema ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> Schema</td></tr>
+                  <tr @click="settings._collapseSchema = !settings._collapseSchema" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseSchema ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ t('lang.schema') !== 'lang.schema' ? t('lang.schema') : 'Schema' }}</td></tr>
                   <tr v-show="!settings._collapseSchema"><th style="opacity:0.6">{{ t('field.key') }}</th><th style="opacity:0.6">{{ t('field.translation') }}</th></tr>
                   <tr v-for="key in schemaTranslationKeys" :key="key" v-show="!settings._collapseSchema">
                     <td>{{ key }}</td>
