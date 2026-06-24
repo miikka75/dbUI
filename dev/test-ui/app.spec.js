@@ -695,6 +695,23 @@ test.describe('Translation keys for view columns', () => {
     for (const k of ['field.person', 'field.latest', 'field.previous', 'field.3rd']) expect(keys).toContain(k);
     expect(keys).toContain('field.title');            // normal table column still covered
   });
+
+  test('rotationView area/column names get field.* keys (+ period)', async ({ page }) => {
+    await ensureAppReady(page);
+    const keys = await page.evaluate(() => {
+      // areas form
+      appInstance.schemaData = { tables: {}, views: [
+        { name: 'rota', rotationView: { areas: ['alue_a', 'alue_b'], lists: ['la', 'lb'], interval: 'weekly' } },
+        { name: 'rota2', rotationView: { columns: [{ name: 'crew' }], interval: 'weekly' } }   // columns form
+      ] };
+      return appInstance.schemaTranslationKeys;
+    });
+    expect(keys).toContain('field.alue_a');   // areas form (regression: was missing)
+    expect(keys).toContain('field.alue_b');
+    expect(keys).toContain('field.crew');     // columns form
+    expect(keys).toContain('field.period');   // generated period column
+    expect(keys).toContain('view.rota');
+  });
 });
 
 test.describe('v3 nav + pages + tabs layout', () => {
@@ -2299,5 +2316,117 @@ test.describe('obscureNames (privacy)', () => {
     expect(r.empty).toBe('');
     expect(r.disp).toBe('Miikka T.');            // per-view obscuring via displayValue
     expect(r.arr).toBe('Aatos S., Anna L.');      // multiselect: each member obscured then joined
+  });
+});
+
+test.describe('archive tab reverse sort', () => {
+  test('viewing archive reverses the default sort direction', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      const tick = () => new Promise(res => setTimeout(res, 30));
+      app.currentTable = 'crew_rotation';   // defaultSort: 'position'
+      app.viewingArchive = false; await tick();
+      app.viewingArchive = true;  await tick();   // -> archive: descending
+      const arch = { col: app.sortCol, asc: app.sortAsc };
+      app.viewingArchive = false; await tick();    // -> active: ascending
+      const act = { col: app.sortCol, asc: app.sortAsc };
+      return { arch, act };
+    });
+    expect(r.arch).toEqual({ col: 'position', asc: false });  // today -> past
+    expect(r.act).toEqual({ col: 'position', asc: true });    // today -> future
+  });
+});
+
+test.describe('list-item delete/rename cascade into table data', () => {
+  test('delete scrubs value (blank select / drop multiselect element) across both partitions', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      const puts = [];
+      window.backend.putRow = (t, row, part) => { puts.push({ t, id: row.id, part, status: row.status, people: row.people && row.people.slice() }); };
+      app.tableMap = Object.assign({}, app.tableMap, { tasks: 'tasks', crew_rotation: 'crew_rotation' });
+      app.listsCache = { status: ['open', 'done'], crew: ['A', 'B', 'C'] };
+      // active + archive rows seeded directly in cache so no fetch is needed
+      app.dataCache['tasks'] = [ { id: 't1', status: 'open' }, { id: 't2', status: 'done' } ];
+      app.dataCache['tasks__archive'] = [ { id: 't3', status: 'open' } ];
+      app.dataCache['crew_rotation'] = [ { id: 'c1', people: ['A', 'B'] }, { id: 'c2', people: ['C'] } ];
+      // delete 'open' from status, and 'A' from crew — armed two-click delete
+      app.removeListItem2('status', 0); app.removeListItem2('status', 0); // arm + confirm
+      app.removeListItem2('crew', 0);   app.removeListItem2('crew', 0);
+      await new Promise(res => setTimeout(res, 50));
+      return {
+        statusList: app.listsCache.status, crewList: app.listsCache.crew,
+        t1: app.dataCache['tasks'][0].status, t2: app.dataCache['tasks'][1].status,
+        t3: app.dataCache['tasks__archive'][0].status,
+        c1: app.dataCache['crew_rotation'][0].people, c2: app.dataCache['crew_rotation'][1].people,
+        puts
+      };
+    });
+    expect(r.statusList).toEqual(['done']);          // list item removed
+    expect(r.crewList).toEqual(['B', 'C']);
+    expect(r.t1).toBe('');                            // select cell blanked
+    expect(r.t2).toBe('done');                        // untouched
+    expect(r.t3).toBe('');                            // archive partition scrubbed too
+    expect(r.c1).toEqual(['B']);                      // multiselect element dropped
+    expect(r.c2).toEqual(['C']);                      // untouched
+    // only changed rows persisted (t1 active, t3 archive, c1 active)
+    const ids = r.puts.map(p => p.id + ':' + p.part).sort();
+    expect(ids).toEqual(['c1:active', 't1:active', 't3:archive']);
+  });
+
+  test('rename rewrites the stored value across rows (select + multiselect)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      const puts = [];
+      window.backend.putRow = (t, row, part) => { puts.push(row.id + ':' + part); };
+      app.tableMap = Object.assign({}, app.tableMap, { tasks: 'tasks', crew_rotation: 'crew_rotation' });
+      app.listsCache = { status: ['open', 'done'], crew: ['A', 'B'] };
+      app.dataCache['tasks'] = [ { id: 't1', status: 'open' } ];
+      app.dataCache['tasks__archive'] = [ { id: 't3', status: 'open' } ];
+      app.dataCache['crew_rotation'] = [ { id: 'c1', people: ['A', 'B'] } ];
+      app.updateListItem2('status', 0, 'in_progress'); // rename open -> in_progress
+      app.updateListItem2('crew', 0, 'Alice');         // rename A -> Alice
+      await new Promise(res => setTimeout(res, 50));
+      return {
+        statusList: app.listsCache.status,
+        t1: app.dataCache['tasks'][0].status, t3: app.dataCache['tasks__archive'][0].status,
+        c1: app.dataCache['crew_rotation'][0].people,
+        puts: puts.sort()
+      };
+    });
+    expect(r.statusList).toEqual(['in_progress', 'done']);
+    expect(r.t1).toBe('in_progress');                 // rename propagated to active row
+    expect(r.t3).toBe('in_progress');                 // and to archive row
+    expect(r.c1).toEqual(['Alice', 'B']);             // multiselect element renamed in place
+    expect(r.puts).toEqual(['c1:active', 't1:active', 't3:archive']);
+  });
+
+  test('listSwitch move: deleting from primary list spares rows whose value is in the alt list', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      const puts = [];
+      window.backend.putRow = (t, row, part) => { puts.push(row.id + ':' + part); };
+      app.tableMap = Object.assign({}, app.tableMap, { tasks: 'tasks' });
+      // status column gets a listSwitch alt list 'guests' (mirrors kokoukset puhe* : seurakuntalaiset + vieraat)
+      SCHEMA.tasks.columns.status.listSwitch = { list: 'guests', label: 'Guest' };
+      app.listsCache = { status: ['done'], guests: ['Matti'] }; // 'Matti' moved: added to guests, removed from status
+      app.dataCache['tasks'] = [
+        { id: 't1', status: 'Matti' },  // value lives in the alt list -> must be spared
+        { id: 't2', status: 'Pekka' }   // not in alt list -> must be scrubbed
+      ];
+      app.dataCache['tasks__archive'] = [];
+      app.propagateListChange('status', 'Matti', null); // delete 'Matti' from the primary list
+      await new Promise(res => setTimeout(res, 30));
+      app.propagateListChange('status', 'Pekka', null); // control: a true orphan
+      await new Promise(res => setTimeout(res, 30));
+      delete SCHEMA.tasks.columns.status.listSwitch; // cleanup so other tests are unaffected
+      return { t1: app.dataCache['tasks'][0].status, t2: app.dataCache['tasks'][1].status, puts: puts.sort() };
+    });
+    expect(r.t1).toBe('Matti');   // spared: still valid via the alt list (the "move" is lossless)
+    expect(r.t2).toBe('');        // scrubbed: genuine orphan, not in any list
+    expect(r.puts).toEqual(['t2:active']); // only the orphan row was persisted
   });
 });
