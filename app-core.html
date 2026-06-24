@@ -378,7 +378,8 @@ function createVueApp() {
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access',
-         'settings.user_id', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all'].sort();
+         'settings.user_id', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all',
+         'settings.rotation_anchor', 'lang.app', 'lang.schema'].sort();
       },
       schemaTranslationKeys: function() {
         var keys = [];
@@ -407,6 +408,11 @@ function createVueApp() {
           (arr || []).forEach(function(v) {
             if (v.name) {
               keys.push('view.' + v.name);
+              if (v.rotationView) {                                                      // rotationView: cols live under rotationView.areas/columns, not v.columns
+                keys.push('field.period');
+                (v.rotationView.areas || []).forEach(function(a) { keys.push('field.' + a); });
+                (v.rotationView.columns || []).forEach(function(c) { keys.push('field.' + colName(c)); });
+              }
               (v.columns || []).forEach(function(c) {
                 if (typeof c !== 'object') { keys.push('field.' + c); return; }          // plain column name
                 if (c.sources && c.columns) {                                            // inline embed
@@ -1443,8 +1449,12 @@ function createVueApp() {
         });
       },
       updateListItem2: function(name, i, value) {
+        var oldVal = this.listsCache[name][i];
         this.listsCache[name][i] = value;
         this.saveLists();
+        // Rename propagation: text is stored in rows, so rewrite the old value -> new value across
+        // every table column backed by this list (both partitions). Skip no-ops / blank endpoints.
+        if (oldVal && value && oldVal !== value) this.propagateListChange(name, oldVal, value);
       },
       focusNextListItem: function(e) {
         var el = e.target;
@@ -1457,8 +1467,12 @@ function createVueApp() {
         var key = 'list_' + name + '_' + i;
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
         this.pendingDelete = null;
+        var oldVal = this.listsCache[name][i];
         this.listsCache[name].splice(i, 1);
         this.saveLists();
+        // Delete cascade: scrub the removed value from stored rows (text storage) so no orphans
+        // remain — blank the cell for select columns, drop the element for multiselect columns.
+        if (oldVal) this.propagateListChange(name, oldVal, null);
       },
       moveListItem: function(name, i, dir) {
         var arr = this.listsCache[name]; var j = i + dir;
@@ -1466,6 +1480,81 @@ function createVueApp() {
         this.saveLists();
       },
       saveLists: function() { backend.saveLists(this.folderId, this.listsCache); },
+
+      // All [table,col] pairs whose column is backed by `listName` (select or multiselect).
+      // altList = the column's listSwitch alt list (if any) — a value still present in the alt list
+      // is NOT an orphan of `listName`, so the cascade must leave it alone (enables move-between-lists).
+      listBackedColumns: function(listName) {
+        var out = [];
+        for (var t in SCHEMA) {
+          var cols = (SCHEMA[t] && SCHEMA[t].columns) || {};
+          for (var c in cols) {
+            if (getColumnList(t, c) === listName) {
+              var def = cols[c];
+              var alt = (def && typeof def === 'object' && def.listSwitch && def.listSwitch.list) || null;
+              out.push({ table: t, col: c, multi: getColumnType(t, c) === 'multiselect', altList: alt });
+            }
+          }
+        }
+        return out;
+      },
+      // Propagate a list-item rename (newVal truthy) or deletion (newVal falsy) into stored table
+      // data. Text storage is kept, so the literal value lives in rows; this rewrites it everywhere:
+      //   rename  -> oldVal replaced by newVal (select: cell value; multiselect: array element)
+      //   delete  -> oldVal removed (select: cell blanked; multiselect: element dropped)
+      // Covers BOTH the active and archive partitions (archive rows are fetched if not cached) and
+      // persists only the rows that actually changed. Returns a promise of the changed-row count.
+      propagateListChange: function(listName, oldVal, newVal) {
+        if (!oldVal || oldVal === newVal) return Promise.resolve(0);
+        var self = this, del = !newVal;
+        var targets = this.listBackedColumns(listName);
+        if (!targets.length) return Promise.resolve(0);
+        var byTable = {};
+        targets.forEach(function(t) { (byTable[t.table] = byTable[t.table] || []).push(t); });
+        var jobs = [];
+        Object.keys(byTable).forEach(function(table) {
+          var tcs = byTable[table];
+          var apply = function(rows, partition) {
+            var changed = 0;
+            (rows || []).forEach(function(row) {
+              var rowChanged = false;
+              tcs.forEach(function(tc) {
+                var v = row[tc.col];
+                // listSwitch guard: if oldVal is still a valid option via this column's alt list,
+                // it isn't an orphan of `listName` (e.g. the name was added to `vieraat` before being
+                // removed from `seurakuntalaiset`) — leave the row untouched so the move is lossless.
+                if (tc.altList && self.listsCache[tc.altList] && self.listsCache[tc.altList].indexOf(oldVal) >= 0) return;
+                if (tc.multi) {
+                  if (Array.isArray(v) && v.indexOf(oldVal) >= 0) {
+                    row[tc.col] = del ? v.filter(function(x) { return x !== oldVal; })
+                                      : v.map(function(x) { return x === oldVal ? newVal : x; });
+                    rowChanged = true;
+                  }
+                } else if (v === oldVal) {
+                  row[tc.col] = del ? '' : newVal;
+                  rowChanged = true;
+                }
+              });
+              if (rowChanged) { row.updated_at = new Date().toISOString(); backend.putRow(self.tableMap[table], row, partition); changed++; }
+            });
+            return changed;
+          };
+          [['active', table], ['archive', aKey(table)]].forEach(function(p) {
+            var partition = p[0], cacheKey = p[1];
+            if (self.dataCache[cacheKey]) {
+              jobs.push(Promise.resolve(apply(self.dataCache[cacheKey], partition)));
+            } else {
+              jobs.push(Promise.resolve(backend.getTableData(self.tableMap[table], partition)).then(function(result) {
+                var rows = parseTableResult(result).rows;
+                var n = apply(rows, partition);
+                if (n) self.dataCache[cacheKey] = rows; // cache so app state stays consistent after scrub
+                return n;
+              }).catch(function() { return 0; }));
+            }
+          });
+        });
+        return Promise.all(jobs).then(function(counts) { return counts.reduce(function(a, b) { return a + b; }, 0); });
+      },
 
       // Per-view rotation anchor (date of period 0 for THIS view's calendar rotations), stored in
       // synced folder config under rotationAnchors[viewName] — per-view & editable on the view, not a
@@ -2057,7 +2146,13 @@ function createVueApp() {
         this._updateManifest();
       }},
       appTitle: { immediate: true, handler: function(t) { if (t) document.title = t; this._updateManifest(); } },
-      viewingArchive: function() { this.loadTableData(); },
+      viewingArchive: function() {
+        // Active tab sorts the default column ascending (today -> future); the archive tab reverses it
+        // (today -> past, most-recently-archived first). Only applies when a defaultSort is set.
+        var cfg = this.currentConfig || {};
+        if (cfg.defaultSort) { this.sortCol = cfg.defaultSort; this.sortAsc = !this.viewingArchive; }
+        this.loadTableData();
+      },
       sortedData: function(val) { if (this.currentConfig.collapsed && val.length) this.expandedCard = val[0].id; }
     },
 
