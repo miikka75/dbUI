@@ -149,18 +149,25 @@ function createVueApp() {
       bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
       isDataView: function() {
         var v = VIEWS[this.currentTable];
-        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotationView)) && (v || SCHEMA[this.currentTable]);
+        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation)) && (v || SCHEMA[this.currentTable]);
       },
-      isRotationView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rotationView); },
+      isRotationView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rotation); },
       rotationViewCols: function() {
         var v = VIEWS[this.currentTable];
-        if (!v || !v.rotationView) return [];
-        var rv = v.rotationView;
-        var names = rv.areas ? rv.areas.slice() : (rv.columns || []).map(function(c) { return c.name; });
+        if (!v || !v.rotation) return [];
+        var rv = v.rotation;
+        var names = rv.slots ? rv.slots.slice() : (rv.columns || []).map(function(c) { return c.name; });
+        if (v.hideEmpty) { // drop slot columns that are empty in every period
+          var rows = this.currentData || [];
+          names = names.filter(function(n) { return rows.some(function(r) { var val = r[n]; return Array.isArray(val) ? val.length : !!val; }); });
+        }
         return ['_period'].concat(names);
       },
+      rotationSlotCols: function() { return this.rotationViewCols.filter(function(c) { return c !== '_period'; }); },
+      rotationLayout: function() { var v = VIEWS[this.currentTable]; return (v && (v.layout || (v.rotation && v.rotation.layout))) || 'table'; },
       rotationViewRows: function() { return this.isRotationView ? this.currentData : []; },
       rotationAnchorForView: function() { return this.anchorForView(this.currentTable); },
+      rotationRangeForView: function() { return this.rangeForView(this.currentTable); },
       isReorderable: function() { var t = this.currentTable; return !!(SCHEMA[t] && SCHEMA[t].reorderable && this.isDataView && !this.viewingArchive && this.canMutateRows); },
       navConfig: function() { return (this.schemaData && this.schemaData.nav) || null; },
       navLayout: function() { return this.navLayoutOverride || (this.navConfig && this.navConfig.layout) || 'drawer'; },
@@ -286,6 +293,15 @@ function createVueApp() {
           if (typeof cfg.markdown === 'string' && !cfg.filterBy && cfg.name) { // named doc-view embed (no filterBy: global show/hide)
             return { config: cfg, isDoc: true, blocks: self.mdBlocks(cfg.markdown, cfg.name), show: self.docHasData(cfg.markdown, cfg.name) };
           }
+          if (cfg.rotation) { // rotationView embed (a {view:x} where x is a rotationView) -> generate period rows
+            var rv = cfg.rotation;
+            var td = new Date();
+            var todayStr = td.getFullYear() + '-' + String(td.getMonth() + 1).padStart(2, '0') + '-' + String(td.getDate()).padStart(2, '0');
+            var anchorName = cfg.view || cfg.name || self.currentTable;
+            var rrows = buildRotationViewRows({ rotation: rv }, self.dataCache, todayStr, self.anchorForView(anchorName), self.rangeForView(anchorName));
+            var slotNames = rv.slots ? rv.slots.slice() : (rv.columns || []).map(function(c) { return c.name; });
+            return { config: cfg, isRotation: true, columns: ['_period'].concat(slotNames), rows: rrows };
+          }
           var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
           var columns = raw.map(function(c) { return colName(c); });
           var rows = buildRows(cfg, self.dataCache);
@@ -379,7 +395,7 @@ function createVueApp() {
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access',
          'settings.user_id', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all',
-         'settings.rotation_anchor', 'lang.app', 'lang.schema'].sort();
+         'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'btn.today', 'lang.app', 'lang.schema'].sort();
       },
       schemaTranslationKeys: function() {
         var keys = [];
@@ -408,10 +424,10 @@ function createVueApp() {
           (arr || []).forEach(function(v) {
             if (v.name) {
               keys.push('view.' + v.name);
-              if (v.rotationView) {                                                      // rotationView: cols live under rotationView.areas/columns, not v.columns
+              if (v.rotation) {                                                      // rotation: cols live under rotationView.slots/columns, not v.columns
                 keys.push('field.period');
-                (v.rotationView.areas || []).forEach(function(a) { keys.push('field.' + a); });
-                (v.rotationView.columns || []).forEach(function(c) { keys.push('field.' + colName(c)); });
+                (v.rotation.slots || []).forEach(function(a) { keys.push('field.' + a); });
+                (v.rotation.columns || []).forEach(function(c) { keys.push('field.' + colName(c)); });
               }
               (v.columns || []).forEach(function(c) {
                 if (typeof c !== 'object') { keys.push('field.' + c); return; }          // plain column name
@@ -859,14 +875,18 @@ function createVueApp() {
         var view = VIEWS[this.currentTable];
         if (view) {
           // rotationView (third view kind): generate rows from range; no sources to read.
-          if (view.rotationView) {
+          if (view.rotation) {
             var td = new Date();
             var todayStr = td.getFullYear() + '-' + String(td.getMonth() + 1).padStart(2, '0') + '-' + String(td.getDate()).padStart(2, '0');
             var allowedRv = self.userAllowedTables;
-            var regen = function() { self.currentData = buildRotationViewRows(view, self.dataCache, todayStr, self.anchorForView(self.currentTable)); };
+            var regen = function() {
+              var rows = buildRotationViewRows(view, self.dataCache, todayStr, self.anchorForView(self.currentTable), self.rangeForView(self.currentTable));
+              if (view.filter) rows = filterRows(rows, view.filter); // filter generated period rows
+              self.currentData = rows;
+            };
             regen();
-            var rvDef = view.rotationView;
-            var deps = rvDef.lists ? rvDef.lists.slice() : (rvDef.columns || []).map(function(c) { return c.rotationTable; });
+            var rvDef = view.rotation;
+            var deps = rvDef.rosters ? rvDef.rosters.slice() : (rvDef.columns || []).map(function(c) { return c.rotationTable; });
             deps.forEach(function(tbl) {
               if (!tbl || (allowedRv && allowedRv.indexOf(tbl) < 0) || self.dataCache[tbl]) return;
               backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
@@ -889,7 +909,12 @@ function createVueApp() {
           (view.columns || []).forEach(function(c) {
             var embedSources = [];
             if (isEmbed(c)) { embedSources = c.sources || []; }
-            else if (isViewEmbed(c) && VIEWS[c.view]) { embedSources = VIEWS[c.view].sources || []; }
+            else if (isViewEmbed(c) && VIEWS[c.view]) {
+              embedSources = VIEWS[c.view].sources || [];
+              // rotationView embed: its rosters aren't in `sources` — preload them so the embed resolves
+              var erv = VIEWS[c.view].rotation;
+              if (erv) embedSources = embedSources.concat(erv.rosters || (erv.columns || []).map(function(rc) { return rc.rotationTable; }));
+            }
             embedSources.forEach(function(tbl) {
               if (allowed && allowed.indexOf(tbl) < 0) return;
               if (tbl && !self.dataCache[tbl]) {
@@ -1129,7 +1154,7 @@ function createVueApp() {
         var v = VIEWS[this.currentTable];
         if (!v || !v.obscureNames) return false;
         if (Array.isArray(v.obscureNames)) return v.obscureNames.indexOf(col) >= 0;
-        if (v.rotationView) { var rv = v.rotationView; var areas = rv.areas || (rv.columns || []).map(function(c) { return c.name; }); return areas.indexOf(col) >= 0; }
+        if (v.rotation) { var rv = v.rotation; var areas = rv.slots || (rv.columns || []).map(function(c) { return c.name; }); return areas.indexOf(col) >= 0; }
         return !!this.colIsList(col) || this.colIsMultiselect(col);
       },
       lockedListValues: function() {
@@ -1566,6 +1591,30 @@ function createVueApp() {
         var cfg = Object.assign({}, this.appConfig || {});
         cfg.rotationAnchors = Object.assign({}, cfg.rotationAnchors || {});
         cfg.rotationAnchors[viewName] = val || '';
+        cfg.mode = this.mode;
+        this.appConfig = cfg;
+        if (backend.setFolderConfig) backend.setFolderConfig(this.folderId, cfg);
+        if (this.currentTable === viewName) this.loadTableData();
+      },
+      // Per-view range override (periods + optional fixed start) in synced folder config
+      // rotationRanges[viewName], merged over the schema rotation.range default — mirrors the per-view
+      // anchor. A blank/removed `from` rolls from "today"; clearing `periods` falls back to the schema default.
+      rangeForView: function(name) {
+        var v = VIEWS[name];
+        var base = (v && v.rotation && v.rotation.range) || {};
+        var ov = ((this.appConfig && this.appConfig.rotationRanges) || {})[name] || {};
+        return Object.assign({}, base, ov);
+      },
+      saveRotationRange: function(viewName, patch) {
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.rotationRanges = Object.assign({}, cfg.rotationRanges || {});
+        var cur = Object.assign({}, cfg.rotationRanges[viewName] || {});
+        Object.keys(patch).forEach(function(k) {
+          var val = patch[k];
+          if (val === '' || val === null || val === undefined) delete cur[k]; // reset that field to schema default
+          else cur[k] = val;
+        });
+        if (Object.keys(cur).length) cfg.rotationRanges[viewName] = cur; else delete cfg.rotationRanges[viewName];
         cfg.mode = this.mode;
         this.appConfig = cfg;
         if (backend.setFolderConfig) backend.setFolderConfig(this.folderId, cfg);
