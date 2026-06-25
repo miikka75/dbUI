@@ -8,7 +8,7 @@ var defaultSchema = {"tables":{},"views":[]};
 // Active schema — initially from defaultSchema, overwritten from Drive on boot
 var SCHEMA = defaultSchema.tables;
 var _viewsNav = Array.isArray(defaultSchema.views) ? defaultSchema.views : [];var VIEWS = {};
-function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string' || v.rotationView)) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
+function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string' || v.rotation)) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
 // (Legacy `pages` map / {page:} nav and `text` entries are removed features — migrate-schema.js
 //  upgrades any legacy schema: text -> markdown {{t:}} doc-views, pages -> markdown views.)
 _flattenViews(_viewsNav);
@@ -311,22 +311,22 @@ function addIntervals(dateStr, n, interval) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-// rotationView: the third view kind. Generates `range.periods` rows from `range.from` (calendar mode
+// rotation: the third view kind. Generates `range.periods` rows from `range.from` (calendar mode
 // only — occurrence rotations render inside ordinary data views). Pure function of (rotation tables,
 // range, global anchor) — no stored rows. Two forms:
 //   (a) columns: each area column fixed to its own rotationTable.
 //   (b) areas+lists (rotating): the list→area assignment cyclically rotates one step every
 //       `rotateEvery` periods — generalizes "swap" (2 lists, rotateEvery 1) to N lists / M areas.
 //       Each list still advances on its OWN length; only which list feeds which area rotates.
-function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor) {
-  var rv = view && view.rotationView; if (!rv) return [];
-  var range = rv.range || {};
+function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor, rangeOverride) {
+  var rv = view && view.rotation; if (!rv) return [];
+  var range = rangeOverride || rv.range || {}; // DB-backed per-view range override (folder config) wins over schema
   var periods = range.periods || 12;
   var from = (!range.from || range.from === 'today') ? todayStr : range.from;
   var out = [], i, target, row;
 
-  if (rv.areas && rv.lists) {
-    var areas = rv.areas, lists = rv.lists, N = lists.length;
+  if (rv.slots && rv.rosters) {
+    var slots = rv.slots, rosters = rv.rosters, N = rosters.length;
     var interval = rv.interval || 'weekly';
     var rotateEvery = rv.rotateEvery || 0;
     var anchor = resolveAnchorDate(rv, rotationAnchor);
@@ -334,9 +334,9 @@ function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor) {
       target = addIntervals(from, i, interval);
       row = { id: 'rv' + i, _period: target };
       var s = (rotateEvery > 0 && N) ? (Math.floor(i / rotateEvery) % N) : 0;
-      areas.forEach(function(area, k) {
-        var listName = N ? lists[(((k + s) % N) + N) % N] : null;
-        row[area] = resolveByCalendar(dataCache[listName] || [], target, anchor, interval);
+      slots.forEach(function(slot, k) {
+        var rosterName = N ? rosters[(((k + s) % N) + N) % N] : null;
+        row[slot] = resolveByCalendar(dataCache[rosterName] || [], target, anchor, interval);
       });
       out.push(row);
     }
@@ -417,15 +417,15 @@ function validateSchema() {
       if (comp.advanceBy === 'calendar' && !isValidInterval(comp.interval)) errors.push('View "' + v + '": calendar rotation column "' + nm + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
     });
     // rotationView (third view kind): calendar-mode columns only.
-    if (view.rotationView) {
-      var rvv = view.rotationView;
-      if (rvv.areas && rvv.lists) {
+    if (view.rotation) {
+      var rvv = view.rotation;
+      if (rvv.slots && rvv.rosters) {
         if (rvv.advanceBy && rvv.advanceBy !== 'calendar') errors.push('rotationView "' + v + '" supports advanceBy "calendar" only (use a data view for occurrence mode)');
         if (!isValidInterval(rvv.interval)) errors.push('rotationView "' + v + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
-        (rvv.lists || []).forEach(function(t3) { if (!SCHEMA[t3]) errors.push('rotationView "' + v + '" references non-existent list table "' + t3 + '"'); });
-        if ((rvv.lists || []).length < (rvv.areas || []).length) errors.push('rotationView "' + v + '": fewer lists (' + (rvv.lists || []).length + ') than areas (' + (rvv.areas || []).length + ') — some areas would be unstaffed or double-booked each period');
+        (rvv.rosters || []).forEach(function(t3) { if (!SCHEMA[t3]) errors.push('rotationView "' + v + '" references non-existent roster table "' + t3 + '"'); });
+        if ((rvv.rosters || []).length < (rvv.slots || []).length) errors.push('rotationView "' + v + '": fewer rosters (' + (rvv.rosters || []).length + ') than slots (' + (rvv.slots || []).length + ') — some slots would be unstaffed or double-booked each period');
       } else {
-      (view.rotationView.columns || []).forEach(function(c) {
+      (view.rotation.columns || []).forEach(function(c) {
         var nm = (c && c.name) || '?';
         if (!c || !SCHEMA[c.rotationTable]) errors.push('rotationView "' + v + '" column "' + nm + '" references non-existent rotationTable "' + (c && c.rotationTable) + '"');
         if (c && c.advanceBy && c.advanceBy !== 'calendar') errors.push('rotationView "' + v + '" column "' + nm + '" supports advanceBy "calendar" only (use a data view for occurrence mode)');
@@ -486,7 +486,7 @@ function buildNavTabs(navItems, t, canAccess, opts) {
     if (it.view && !VIEWS[gid]) return null;
     if (it.table && !SCHEMA[gid]) return null;
     var isV = !!it.view, isDoc = isV && typeof VIEWS[gid].markdown === 'string';
-    var isRot = isV && VIEWS[gid] && !!VIEWS[gid].rotationView;
+    var isRot = isV && VIEWS[gid] && !!VIEWS[gid].rotation;
     var tb = { id: gid, title: t((isV ? 'view.' : 'tab.') + gid) || gid, icon: it.icon || (isDoc ? 'mdi-file-document-outline' : (isRot ? 'mdi-calendar-clock' : (isV ? 'mdi-view-list' : 'mdi-table'))) };
     if (it.items) { var kids = it.items.map(navTab).filter(Boolean); if (kids.length) tb.children = kids; }
     return tb;
