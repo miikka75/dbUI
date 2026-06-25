@@ -699,14 +699,14 @@ test.describe('Translation keys for view columns', () => {
   test('rotationView area/column names get field.* keys (+ period)', async ({ page }) => {
     await ensureAppReady(page);
     const keys = await page.evaluate(() => {
-      // areas form
+      // slots form
       appInstance.schemaData = { tables: {}, views: [
-        { name: 'rota', rotationView: { areas: ['alue_a', 'alue_b'], lists: ['la', 'lb'], interval: 'weekly' } },
-        { name: 'rota2', rotationView: { columns: [{ name: 'crew' }], interval: 'weekly' } }   // columns form
+        { name: 'rota', rotation: { slots: ['alue_a', 'alue_b'], rosters: ['la', 'lb'], interval: 'weekly' } },
+        { name: 'rota2', rotation: { columns: [{ name: 'crew' }], interval: 'weekly' } }   // columns form
       ] };
       return appInstance.schemaTranslationKeys;
     });
-    expect(keys).toContain('field.alue_a');   // areas form (regression: was missing)
+    expect(keys).toContain('field.alue_a');   // slots form (regression: was missing)
     expect(keys).toContain('field.alue_b');
     expect(keys).toContain('field.crew');     // columns form
     expect(keys).toContain('field.period');   // generated period column
@@ -2217,11 +2217,11 @@ test.describe('rotationView (third view kind, e2e)', () => {
     expect(r.joined).toBe('Beta, Gamma');                                        // multiselect display join
   });
 
-  test('rotating areas/lists swap assignment every rotateEvery periods', async ({ page }) => {
+  test('rotating slots/rosters swap assignment every rotateEvery periods', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
-      const view = { rotationView: {
-        areas: ['alue_a', 'alue_b'], lists: ['L_a', 'L_b'],
+      const view = { rotation: {
+        slots: ['alue_a', 'alue_b'], rosters: ['L_a', 'L_b'],
         advanceBy: 'calendar', interval: 'weekly', rotateEvery: 1,
         range: { from: '2026-01-01', periods: 4 }
       } };
@@ -2240,6 +2240,88 @@ test.describe('rotationView (third view kind, e2e)', () => {
   });
 });
 
+
+test.describe('rotationView embedding in data views', () => {
+  test('a {view:rota} embed yields an isRotation embed with slot columns + generated rows', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.rota_e = { name: 'rota_e', rotation: { slots: ['alue_a', 'alue_b'], rosters: ['RL_a', 'RL_b'], advanceBy: 'calendar', interval: 'weekly', rotateEvery: 1, range: { from: '2026-01-01', periods: 2 } } };
+      window.VIEWS.host_e = { name: 'host_e', sources: ['tasks'], columns: ['title', { view: 'rota_e' }] };
+      app.dataCache['RL_a'] = [{ position: 1, people: ['A0'] }];
+      app.dataCache['RL_b'] = [{ position: 1, people: ['B0'] }];
+      app.appConfig = Object.assign({}, app.appConfig, { rotationAnchors: { rota_e: '2026-01-01' } });
+      app.currentTable = 'host_e';
+      const rot = app.embedItems.find(function(e) { return e.isRotation; });
+      return rot ? { cols: rot.columns, rows: rot.rows.map(function(x) { return { p: x._period, a: x.alue_a, b: x.alue_b }; }) } : null;
+    });
+    expect(r).not.toBeNull();                                   // the rotationView embed is recognized
+    expect(r.cols).toEqual(['_period', 'alue_a', 'alue_b']);    // period + slot columns
+    expect(r.rows[0]).toEqual({ p: '2026-01-01', a: ['A0'], b: ['B0'] });
+    expect(r.rows[1]).toEqual({ p: '2026-01-08', a: ['B0'], b: ['A0'] }); // rotateEvery:1 swap
+  });
+});
+
+test.describe('rotationView filter / hideEmpty / layout', () => {
+  test('filter narrows generated periods', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const view = { filter: { _period: '2026-01-15' }, rotation: { slots: ['alue_a'], rosters: ['R'], advanceBy: 'calendar', interval: 'weekly', rotateEvery: 0, range: { from: '2026-01-01', periods: 3 } } };
+      const cache = { R: [{ position: 1, people: ['A0'] }] };
+      let rows = window.buildRotationViewRows(view, cache, '2026-01-01', '2026-01-01');
+      rows = window.filterRows(rows, view.filter);
+      return rows.map(function(x) { return x._period; });
+    });
+    expect(r).toEqual(['2026-01-15']); // only the matching period survives the filter
+  });
+
+  test('hideEmpty drops slot columns empty in every period; rotationLayout reads layout', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.rot_he = { name: 'rot_he', layout: 'card', hideEmpty: true, rotation: { slots: ['alue_a', 'alue_b'], rosters: ['X', 'Y'] } };
+      app.currentTable = 'rot_he';
+      app.currentData = [
+        { id: 'r0', _period: '2026-01-01', alue_a: ['A0'], alue_b: [] },
+        { id: 'r1', _period: '2026-01-08', alue_a: ['A1'], alue_b: [] }
+      ];
+      return { cols: app.rotationViewCols, slotCols: app.rotationSlotCols, layout: app.rotationLayout };
+    });
+    expect(r.cols).toEqual(['_period', 'alue_a']); // alue_b empty in every period -> dropped
+    expect(r.slotCols).toEqual(['alue_a']);
+    expect(r.layout).toBe('card');
+  });
+
+  test('DB-backed range: saveRotationRange overrides periods/from, merges over schema, reset-to-today', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.rng_v = { name: 'rng_v', rotation: { slots: ['a'], rosters: ['R'], interval: 'weekly', range: { from: 'today', periods: 12 } } };
+      app.appConfig = Object.assign({}, app.appConfig, { rotationRanges: {} });
+      app.currentTable = 'rng_v';
+      const clone = function() { return JSON.parse(JSON.stringify(app.rangeForView('rng_v'))); };
+      app.saveRotationRange('rng_v', { periods: 4 });        var afterPeriods = clone();
+      app.saveRotationRange('rng_v', { from: '2026-03-01' }); var afterFrom = clone();
+      app.saveRotationRange('rng_v', { from: 'today' });      var afterReset = clone();  // reset start to today
+      app.saveRotationRange('rng_v', { periods: '' });        var afterClear = clone();  // clear periods -> schema default
+      return { afterPeriods, afterFrom, afterReset, afterClear };
+    });
+    expect(r.afterPeriods).toEqual({ from: 'today', periods: 4 });
+    expect(r.afterFrom).toEqual({ from: '2026-03-01', periods: 4 });
+    expect(r.afterReset).toEqual({ from: 'today', periods: 4 });   // start rolls from today again
+    expect(r.afterClear).toEqual({ from: 'today', periods: 12 });  // periods override removed -> schema 12
+  });
+
+  test('buildRotationViewRows honors rangeOverride (periods + fixed from)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const view = { rotation: { slots: ['a'], rosters: ['R'], advanceBy: 'calendar', interval: 'weekly', rotateEvery: 0, range: { from: '2026-01-01', periods: 12 } } };
+      const cache = { R: [{ position: 1, people: ['A0'] }] };
+      return window.buildRotationViewRows(view, cache, '2099-01-01', '2026-01-01', { from: '2026-02-01', periods: 2 }).map(function(x) { return x._period; });
+    });
+    expect(r).toEqual(['2026-02-01', '2026-02-08']); // override start + periods=2 win over schema range
+  });
+});
 
 test.describe('reorderable tables (up/down)', () => {
   test('moveRowPosition reorders rows and renumbers position as strings', async ({ page }) => {
