@@ -191,11 +191,16 @@
           <div class="d-flex align-center pa-2" style="gap:8px">
             <span class="text-caption" style="opacity:0.7">{{ (t('settings.rotation_anchor') !== 'settings.rotation_anchor' ? t('settings.rotation_anchor') : 'Start date') }}</span>
             <v-text-field :model-value="rotationAnchorForView" name="rotation-anchor" type="date" density="compact" variant="outlined" hide-details style="max-width:180px" :disabled="!canMutateRows" @update:model-value="saveRotationAnchor(currentTable, $event)" data-testid="rotation-anchor"></v-text-field>
+            <span class="text-caption" style="opacity:0.7">{{ (t('settings.rotation_from') !== 'settings.rotation_from' ? t('settings.rotation_from') : 'Show from') }}</span>
+            <v-text-field :model-value="(rotationRangeForView.from && rotationRangeForView.from !== 'today') ? rotationRangeForView.from : ''" name="rotation-from" type="date" density="compact" variant="outlined" hide-details style="max-width:160px" :disabled="!canMutateRows" @update:model-value="saveRotationRange(currentTable, { from: $event || 'today' })" data-testid="rotation-from"></v-text-field>
+            <v-btn icon="mdi-calendar-today" size="x-small" variant="text" :disabled="!canMutateRows" @click="saveRotationRange(currentTable, { from: 'today' })" :title="t('btn.today') !== 'btn.today' ? t('btn.today') : 'Today'"></v-btn>
+            <span class="text-caption" style="opacity:0.7">{{ (t('settings.rotation_periods') !== 'settings.rotation_periods' ? t('settings.rotation_periods') : 'Periods') }}</span>
+            <v-text-field :model-value="rotationRangeForView.periods" name="rotation-periods" type="number" density="compact" variant="outlined" hide-details style="max-width:90px" :disabled="!canMutateRows" @update:model-value="saveRotationRange(currentTable, { periods: $event === '' ? '' : Number($event) })" data-testid="rotation-periods"></v-text-field>
             <v-spacer></v-spacer>
             <v-btn v-if="canPrintView" icon="mdi-printer" size="small" variant="text" @click="printView()"></v-btn>
           </div>
           <v-divider></v-divider>
-          <v-table density="compact"><template v-slot:default>
+          <v-table v-if="rotationLayout === 'table'" density="compact"><template v-slot:default>
             <thead><tr><th v-for="col in rotationViewCols" :key="col">{{ col === '_period' ? (t('field.period') !== 'field.period' ? t('field.period') : 'Date') : (t('field.' + col) || col) }}</th></tr></thead>
             <tbody>
               <tr v-for="row in rotationViewRows" :key="row.id">
@@ -203,6 +208,20 @@
               </tr>
             </tbody>
           </template></v-table>
+          <!-- card layout: one block per period -->
+          <div v-else-if="rotationLayout === 'card'" style="display:grid; gap:8px; padding:8px">
+            <div v-for="row in rotationViewRows" :key="row.id" style="padding:8px 12px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:8px">
+              <div style="font-weight:600; margin-bottom:4px">{{ toDateStr(row._period) }}</div>
+              <div v-for="col in rotationSlotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ t('field.' + col) || col }}: </span>{{ displayValue(col, row[col]) }}</div>
+            </div>
+          </div>
+          <!-- list layout: one compact line per period -->
+          <div v-else style="padding:4px 0">
+            <div v-for="row in rotationViewRows" :key="row.id" style="padding:4px 12px; border-bottom:1px solid rgb(var(--v-theme-outline),0.08); font-size:0.9rem">
+              <span style="font-weight:600; margin-right:8px">{{ toDateStr(row._period) }}</span>
+              <span v-for="(col, i) in rotationSlotCols" :key="col"><span style="opacity:0.6">{{ t('field.' + col) || col }}: </span>{{ displayValue(col, row[col]) }}<span v-if="i < rotationSlotCols.length - 1" style="opacity:0.3"> · </span></span>
+            </div>
+          </div>
         </v-card>
 
         <!-- Data Table -->
@@ -253,6 +272,12 @@
                     <tbody><tr v-for="er in (ei.config.filterBy ? embedRowsForItem(ei, item) : ei.rows)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ displayValue(ec, er[ec]) }}</td></tr></tbody>
                   </table>
                 </template>
+                <template v-else-if="ei.isRotation">
+                  <table style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ ec === '_period' ? (t('field.period') !== 'field.period' ? t('field.period') : 'Date') : (t('field.' + ec) || ec) }}</th></tr></thead>
+                    <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ ec === '_period' ? toDateStr(er[ec]) : displayValue(ec, er[ec]) }}</td></tr></tbody>
+                  </table>
+                </template>
                 <template v-else-if="!ei.isDoc">
                   <table style="width:100%; font-size:0.75rem; border-collapse:collapse">
                     <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
@@ -290,6 +315,12 @@
                   <table v-else-if="blk.self" style="width:100%; font-size:0.75rem; border-collapse:collapse">
                     <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
                     <tbody><tr v-for="er in (ei.config.filterBy ? embedRowsForItem(ei, item) : ei.rows)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ displayValue(ec, er[ec]) }}</td></tr></tbody>
+                  </table>
+                </template>
+                <template v-else-if="ei.isRotation">
+                  <table style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ ec === '_period' ? (t('field.period') !== 'field.period' ? t('field.period') : 'Date') : (t('field.' + ec) || ec) }}</th></tr></thead>
+                    <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ ec === '_period' ? toDateStr(er[ec]) : displayValue(ec, er[ec]) }}</td></tr></tbody>
                   </table>
                 </template>
                 <template v-else-if="!ei.isDoc">
