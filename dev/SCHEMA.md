@@ -2,7 +2,7 @@
 
 A schema has three layers. Views are the unit of presentation: a view is one of three kinds — a
 **data view** (sources/columns), a **document** (a view with a `markdown` field), or a
-**rotationView** (a view with a `rotationView` field — a generated rotating-duty-roster table,
+**rotationView** (a view with a `rotation` field — a generated rotating-duty-roster table,
 see below).
 
 ```
@@ -120,7 +120,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `icon` | string | MDI icon for the sidebar |
 | `printable` | `"view"` \| `"cards"` \| `["view","cards"]` | Opt-in print buttons. `"view"` = view toolbar print only; `"cards"` = per-card buttons only; `["view","cards"]` = both. **Off by default** — omit to hide all print buttons. Note: per-card buttons only render in `card`/`list` layout, so `"cards"` on a `table` layout shows nothing. Applies to views and tables |
 | `markdown` | string | Makes this a **document** view (see below) instead of a data grid |
-| `rotationView` | object | Makes this a **rotationView** (third view kind) — a generated rotating-roster table (see below) |
+| `rotation` | object | Makes this a **rotationView** (third view kind) — a generated rotating-roster table (see below) |
 | `obscureNames` | boolean \| string[] | Display-only privacy: abbreviate person names to "First L." in this view. `true` = all list/multiselect columns (or all area columns of a rotationView); an array = exactly those columns. Stored data is untouched |
 
 A view's `columns` may contain, besides plain column names:
@@ -297,7 +297,7 @@ multiselect column (the group for that slot — variable size, not capped):
   give the rows a secondary sort value (a `time`/`seq` column) and sort by it. The only ways two rows
   resolve to the *same* group are a single-slot rotation (`index % 1`) or duplicate row `id`s.
 - **Calendar mode, per-row** needs a date source: it reads `dateField` (a date column on the row),
-  falling back to "today" if absent. Calendar mode is primarily intended for `rotationView` (below);
+  falling back to "today" if absent. Calendar mode is primarily intended for `rotation` (below);
   for per-row computed columns, prefer **occurrence** mode.
 - **`interval`**: a named value — `"daily"`, `"weekly"`, `"monthly"`, `"yearly"` — **or** a compact
   `"<n><unit>"` form where unit is `d`/`w`/`m`/`y` (e.g. `"3w"` = every 3 weeks, `"2m"`, `"10d"`,
@@ -348,7 +348,7 @@ A view with a `markdown` field renders as a **document** instead of a data grid:
   seed/fallback until first saved.
 
 ## rotationView (third view kind)
-A view with a `rotationView` field renders a rotating roster across a **range of calendar periods**
+A view with a `rotation` field renders a rotating roster across a **range of calendar periods**
 at once (e.g. "next 12 weeks of cleanup duty," or a fixed printable schedule). It has **no
 underlying stored rows** — every output row is *generated* by repeated calendar-mode resolver calls
 — so it is neither a data view (`sources`/`columns`) nor a document (`markdown`). It's a distinct,
@@ -359,7 +359,7 @@ rotates over time — see "Rotating assignment").
 ```json
 {
   "name": "cleanup_schedule",
-  "rotationView": {
+  "rotation": {
     "columns": [
       { "name": "zone_a", "rotationTable": "zone_a_rotation", "advanceBy": "calendar", "interval": "weekly" },
       { "name": "zone_b", "rotationTable": "zone_b_rotation", "advanceBy": "calendar", "interval": "weekly" }
@@ -384,7 +384,7 @@ rotates over time — see "Rotating assignment").
   has its own date/context, so they don't need this view kind.
 - **Shared anchor** — all columns in a view use that **view's** anchor, so they align at period 0 while
   keeping independent lengths/contents (different-length lists drift relative to each other — expected).
-- **Read-only & recomputed**: a `rotationView` is a pure function of *(rotation-table contents, range)*
+- **Read-only & recomputed**: a `rotation` is a pure function of *(rotation-table contents, range)*
   at render time. There is no snapshot — editing a slot table changes what every past *and* future
   period resolves to on the next render. This is intended, not a gap.
 - **Dependency preload**: each `rotationTable` is fetched into the data cache before generation.
@@ -393,17 +393,17 @@ rotates over time — see "Rotating assignment").
   `calendar`, and the `interval` must be **valid**. The anchor is runtime data (global config or a
   literal `anchorDate`), so it is not statically validated.
 
-### Rotating assignment (`areas` + `lists` + `rotateEvery`)
-Instead of fixing each area to one list, you can rotate the **list→area assignment** over time — the
-generalization of a 2-list "swap." Use ordered `areas` (output columns) and ordered `lists` (rotation
+### Rotating assignment (`slots` + `rosters` + `rotateEvery`)
+Instead of fixing each slot to one roster, you can rotate the **roster→slot assignment** over time — the
+generalization of a 2-roster "swap." Use ordered `slots` (output columns) and ordered `rosters` (rotation
 tables), with one shared `interval`/`advanceBy` and a `rotateEvery`:
 
 ```json
 {
   "name": "siivous",
-  "rotationView": {
-    "areas": ["alue_a", "alue_b"],
-    "lists": ["siivous_a", "siivous_b"],
+  "rotation": {
+    "slots": ["alue_a", "alue_b"],
+    "rosters": ["siivous_a", "siivous_b"],
     "advanceBy": "calendar",
     "interval": "weekly",
     "rotateEvery": 1,
@@ -413,42 +413,49 @@ tables), with one shared `interval`/`advanceBy` and a `rotateEvery`:
 }
 ```
 
-**Two independent clocks** drive it:
-1. **Per-list member rotation** — each list advances one slot per period on its **own length** (the
-   lists stay fully independent, can be different lengths, and are maintained separately — R3).
-2. **List→area assignment rotation** — every `rotateEvery` periods the assignment shifts one step,
-   cyclically. At period `p`: `shift s = floor(p / rotateEvery) mod N` (N = number of lists), and
-   `area[k] ← list[(k + s) mod N]` resolved at that list's member index `p mod len`.
+> Naming: a **slot** is an output assignment column (a cleaning area, doorman post, shift, etc.); a
+> **roster** is an ordered pool/table whose members take turns. (These replace the older `areas`/`lists`
+> keys — there is no back-compat alias, schemas must use `slots`/`rosters`.)
 
-- **Swap is the `N=2`, `rotateEvery:1` case** — areas served `[a,b]`, then `[b,a]`, then `[a,b]`…
+**Two independent clocks** drive it:
+1. **Per-roster member rotation** — each roster advances one slot per period on its **own length** (the
+   rosters stay fully independent, can be different lengths, and are maintained separately — R3).
+2. **Roster→slot assignment rotation** — every `rotateEvery` periods the assignment shifts one step,
+   cyclically. At period `p`: `shift s = floor(p / rotateEvery) mod N` (N = number of rosters), and
+   `slot[k] ← roster[(k + s) mod N]` resolved at that roster's member index `p mod len`.
+
+- **Swap is the `N=2`, `rotateEvery:1` case** — slots served `[a,b]`, then `[b,a]`, then `[a,b]`…
   (exactly the alternating doormen/cleanup pattern).
-- **Each period is a permutation** of lists across areas (with `N = areas.length`), so **no area is
-  double-staffed or left empty**. Over `N` assignment-cycles every list visits every area.
-- **`rotateEvery: 0` / omitted** = no assignment rotation (each area fixed to `lists[k]`) — equivalent
+- **Each period is a permutation** of rosters across slots (with `N = slots.length`), so **no slot is
+  double-staffed or left empty**. Over `N` assignment-cycles every roster visits every slot.
+- **`rotateEvery: 0` / omitted** = no assignment rotation (each slot fixed to `rosters[k]`) — equivalent
   to the `columns` form.
 - **Anchor / interval**: the per-view `rotationAnchors[<viewName>]` (or a literal `anchorDate` on the
-  `rotationView`) anchors period 0; `interval` accepts the same values as elsewhere.
-- **N lists vs M areas**: `N = M` → clean permutation (recommended). `N > M` → round-robin where
-  `N − M` lists "rest" each period and everyone eventually serves every area. `N < M` → **rejected at
-  load** (some areas would be unstaffed/double-booked).
-- **Validation**: every `lists` table must exist; `advanceBy` (if set) must be `calendar`; `interval`
-  must be valid; `lists.length` must be `>= areas.length`.
+  `rotation`) anchors period 0; `interval` accepts the same values as elsewhere.
+- **N rosters vs M slots**: `N = M` → clean permutation (recommended). `N > M` → round-robin where
+  `N − M` rosters "rest" each period and everyone eventually serves every slot. `N < M` → **rejected at
+  load** (some slots would be unstaffed/double-booked).
+- **Validation**: every `rosters` table must exist; `advanceBy` (if set) must be `calendar`; `interval`
+  must be valid; `rosters.length` must be `>= slots.length`.
+- **Embedding**: a data view can embed a rotationView via a `{ "view": "<rotationViewName>" }` column —
+  it renders the generated period table inline (date + slot columns), e.g. a cleaning schedule shown
+  inside a program view.
 
-#### Per-person area coverage — list length (L) vs rotation cadence (R)
-The two clocks can **alias**, which decides whether a given person eventually works *every* area or
-stays **locked** to one. For a person at position `p` in a list of length **`L`**, with swap cadence
-`rotateEvery` = **`R`** and `N` lists/areas:
-- They return to duty every `L` periods (member clock); the area they get is set by the assignment
+#### Per-person slot coverage — roster length (L) vs rotation cadence (R)
+The two clocks can **alias**, which decides whether a given person eventually works *every* slot or
+stays **locked** to one. For a person at position `p` in a roster of length **`L`**, with swap cadence
+`rotateEvery` = **`R`** and `N` rosters/slots:
+- They return to duty every `L` periods (member clock); the slot they get is set by the assignment
   shift `s = floor(period / R) mod N` (swap clock, full cycle = `N·R` periods).
-- They cover **all areas** iff their duty subsequence isn't stuck on one `s` value — i.e. iff `L` and
-  the swap cycle don't share a common factor that pins them. They stay **locked to one area** iff `L`
+- They cover **all slots** iff their duty subsequence isn't stuck on one `s` value — i.e. iff `L` and
+  the swap cycle don't share a common factor that pins them. They stay **locked to one slot** iff `L`
   divides evenly into the swap rhythm.
 
 For the common `siivous` case (**`N=2`, `R=1`**, swap period = 2):
-- **Odd `L`** → period parity flips on each return → **alternates areas every turn** (everyone cleans
-  both areas; back to the start area every 2nd turn). ✅
-- **Even `L`** → period parity is constant on each return → **locked**: even positions always area 0,
-  odd positions always area 1. ⚠️
+- **Odd `L`** → period parity flips on each return → **alternates slots every turn** (everyone cleans
+  both slots; back to the start slot every 2nd turn). ✅
+- **Even `L`** → period parity is constant on each return → **locked**: even positions always slot 0,
+  odd positions always slot 1. ⚠️
 
 This app uses `rotateEvery: 1` and **relies on odd-length lists** to guarantee everyone rotates
 through both areas. To make coverage hold for **any** length (even `L`), use **equal-length lists**
@@ -460,7 +467,7 @@ clean guarantee.
 ### Worked example (occurrence + calendar end-to-end)
 An event needs **security** (one team per session — occurrence-driven) and a two-zone **cleanup**
 rota (every week regardless of sessions — calendar-driven). Three rotation tables, one data view with
-an occurrence-mode computed column, and one `rotationView` for the calendar rota:
+an occurrence-mode computed column, and one `rotation` for the calendar rota:
 
 ```json
 {
@@ -514,7 +521,7 @@ an occurrence-mode computed column, and one `rotationView` for the calendar rota
     },
     {
       "name": "cleanup_schedule",
-      "rotationView": {
+      "rotation": {
         "columns": [
           { "name": "zone_a", "rotationTable": "zone_a_rotation", "advanceBy": "calendar", "interval": "weekly" },
           { "name": "zone_b", "rotationTable": "zone_b_rotation", "advanceBy": "calendar", "interval": "weekly" }
@@ -553,7 +560,7 @@ columns; `security_rotation` is occurrence-mode and ignores the anchor entirely.
 - **`session_schedule`** (occurrence): sessions sorted by `date`; the 1st session → `security` =
   `"Alex"`, 2nd → `"Sam, Jordan"`, 3rd → `"Riley"`, **4th loops** → `"Alex"`. Deleting the 2nd
   session shifts every later session back one slot (no gap).
-- **`cleanup_schedule`** (calendar `rotationView`): 12 weekly rows from today. The global
+- **`cleanup_schedule`** (calendar `rotation`): 12 weekly rows from today. The global
   `rotationAnchor` fixes period 0 for both columns — but they keep independent lengths, so `zone_a`
   (2 slots) loops every 2 weeks while `zone_b` (3 slots) loops every 3 weeks, drifting against each
   other (expected).
