@@ -7,6 +7,18 @@ const path = require('path');
 const defaultSchema = require('./schema.json');
 const SCHEMA = defaultSchema.tables;
 
+// Owning tables of a list = tables with a column referencing it (list or listSwitch.list).
+// Mirrors listOwningTables in schema-loader.html (shape-agnostic: object-map or array columns).
+function listOwningTables(schemaTables, listName) {
+  const out = [];
+  Object.keys(schemaTables || {}).forEach(t => {
+    const cols = (schemaTables[t] && schemaTables[t].columns) || {};
+    const defs = Array.isArray(cols) ? cols : Object.keys(cols).map(k => cols[k]);
+    if (defs.some(d => d && typeof d === 'object' && (d.list === listName || (d.listSwitch && d.listSwitch.list === listName)))) out.push(t);
+  });
+  return out;
+}
+
 const PORT = 3000;
 const USE_FS = process.argv.includes('--fs');
 const backend = USE_FS
@@ -89,8 +101,33 @@ const server = http.createServer(async (req, res) => {
       case 'createLanguage': return json(res, { id: backend.createLanguage(body.folderId || 'local', body.code, body.name, body.keys) });
       case 'deleteLanguage': backend.deleteLanguage(body.folderId || 'local', body.code); return json(res, { ok: true });
       case 'getFileModifiedTime': return json(res, { time: backend.getFileModifiedTime(body.fileId) });
-      case 'getLists': return json(res, backend.getLists('local'));
-      case 'saveLists': backend.saveLists('local', body.lists); return json(res, { ok: true });
+      case 'getLists': {
+        const all = backend.getLists('local');
+        const allowed = getAllowedTables();          // null => unrestricted (admin/no users)
+        if (!allowed) return json(res, all);
+        // Per-list access: return only lists owned by a table the user can access.
+        const schemaTables = (backend.getSchema('local') || {}).tables || {};
+        const filtered = {};
+        Object.keys(all).forEach(name => {
+          const owners = listOwningTables(schemaTables, name);
+          if (owners.some(t => allowed.indexOf(t) >= 0)) filtered[name] = all[name];
+        });
+        return json(res, filtered);
+      }
+      case 'saveLists': {
+        const allowedW = getAllowedTables();
+        if (!allowedW) { backend.saveLists('local', body.lists); return json(res, { ok: true }); }
+        // Restricted user: merge their (owned) lists over the existing set — never drop lists they
+        // can't see (their submitted map is a filtered subset). Also ignore writes to lists they don't own.
+        const schemaTablesW = (backend.getSchema('local') || {}).tables || {};
+        const merged = backend.getLists('local');
+        const submitted = body.lists || {};
+        Object.keys(submitted).forEach(name => {
+          if (listOwningTables(schemaTablesW, name).some(t => allowedW.indexOf(t) >= 0)) merged[name] = submitted[name];
+        });
+        backend.saveLists('local', merged);
+        return json(res, { ok: true });
+      }
       case 'putListItem': if (!checkTableAccess(body.listName)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.putListItem('local', body.listName, body.value); return json(res, { ok: true });
       case 'moveRow': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.moveRow(body.tableId, body.rowData, body.fromTab, body.toTab); return json(res, { ok: true });
       case 'saveChangesets': backend.saveChangesets('local', body.siteId, body.json); return json(res, { ok: true });
