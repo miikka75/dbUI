@@ -100,6 +100,32 @@ function filterToOr(f) {
   });
   return clauses.length === 1 ? clauses[0] : { $and: clauses };
 }
+
+// --- Per-list access (Phase 1: Firebase + local) ---
+// Owning tables of a list = every table with a column that references the list, via `list` or the
+// dual-list `listSwitch.list`. Shape-agnostic: handles columns as an object map (runtime/normalized)
+// or an array of {name,...} (stored/exported). Used to (a) stamp each per-list storage unit with its
+// owning tables so server rules can gate reads, and (b) filter which lists a restricted user receives.
+function listOwningTables(schemaTables, listName) {
+  var out = [];
+  Object.keys(schemaTables || {}).forEach(function(t) {
+    var cols = (schemaTables[t] && schemaTables[t].columns) || {};
+    var defs = Array.isArray(cols) ? cols : Object.keys(cols).map(function(k) { return cols[k]; });
+    var hit = defs.some(function(d) {
+      return d && typeof d === 'object' && (d.list === listName || (d.listSwitch && d.listSwitch.list === listName));
+    });
+    if (hit) out.push(t);
+  });
+  return out;
+}
+// Filter list names to those a user may access. allowedTables===null => unrestricted (admin) => all.
+// A list with no owning table (orphan) is admin-only (hidden from restricted users).
+function accessibleListNames(schemaTables, allowedTables, allListNames) {
+  if (!allowedTables) return (allListNames || []).slice();
+  return (allListNames || []).filter(function(name) {
+    return listOwningTables(schemaTables, name).some(function(t) { return allowedTables.indexOf(t) >= 0; });
+  });
+}
 // Walk a views array: upgrade legacy array-IN filters to $or (view/groupBy/embed/conditional/when),
 // and canonicalize the legacy shorthand conditional column { "<col>": {cond} } -> { name, when }.
 function convertViewFilters(views) {
