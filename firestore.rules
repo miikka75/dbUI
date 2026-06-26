@@ -9,21 +9,36 @@ service cloud.firestore {
       let table = collection.split('__')[0];
       return userData().tables == 'all' || table in userData().tables;
     }
+    function listAllowed() {
+      return userData().tables == 'all' || userData().tables.hasAny(resource.data.tables);
+    }
 
     // Meta: read by registered. Write by admin (or bootstrap). Editors may write the shared lists doc only.
+    // The legacy `lists` doc is admin-only read now that per-list `_lists/*` is the source of truth.
     match /_meta/{doc} {
-      allow read: if request.auth != null && isRegistered();
+      allow read: if request.auth != null && isRegistered() && (doc != 'lists' || noUsers() || role() == 'admin');
       allow write: if request.auth != null && (
         noUsers() || role() == 'admin' || (doc == 'lists' && role() == 'editor')
       );
     }
 
-    // Data tables (never _meta). Read needs table access; write additionally requires a writable role (viewers are read-only).
+    // Per-list storage: each list is its own doc carrying its owning `tables`. Read/write gated on
+    // whether the user has access to any owning table (admins/bootstrap unrestricted).
+    match /_lists/{listName} {
+      allow read: if request.auth != null && isRegistered() && (
+        noUsers() || role() == 'admin' || listAllowed()
+      );
+      allow write: if request.auth != null && isRegistered() && (
+        noUsers() || role() == 'admin' || (role() == 'editor' && listAllowed())
+      );
+    }
+
+    // Data tables (never _meta or _lists). Read needs table access; write additionally requires a writable role (viewers are read-only).
     match /{collection}/{doc} {
-      allow read: if request.auth != null && isRegistered() && collection != '_meta' && (
+      allow read: if request.auth != null && isRegistered() && collection != '_meta' && collection != '_lists' && (
         noUsers() || role() == 'admin' || hasTableAccess(collection)
       );
-      allow write: if request.auth != null && isRegistered() && collection != '_meta' && (
+      allow write: if request.auth != null && isRegistered() && collection != '_meta' && collection != '_lists' && (
         noUsers() || role() == 'admin' || (role() == 'editor' && hasTableAccess(collection))
       );
     }
