@@ -189,19 +189,19 @@
         <!-- Rotation view (generated periods; read-only) -->
         <v-card v-if="isRotationView" variant="outlined">
           <div class="d-flex align-center pa-2" style="gap:8px">
-            <span class="text-caption" style="opacity:0.7">{{ (t('settings.rotation_anchor') !== 'settings.rotation_anchor' ? t('settings.rotation_anchor') : 'Start date') }}</span>
+            <span class="text-caption" style="opacity:0.7">{{ t('settings.rotation_anchor') }}</span>
             <v-text-field :model-value="rotationAnchorForView" name="rotation-anchor" type="date" density="compact" variant="outlined" hide-details style="max-width:180px" :disabled="!canMutateRows" @update:model-value="saveRotationAnchor(currentTable, $event)" data-testid="rotation-anchor"></v-text-field>
-            <span class="text-caption" style="opacity:0.7">{{ (t('settings.rotation_from') !== 'settings.rotation_from' ? t('settings.rotation_from') : 'Show from') }}</span>
+            <span class="text-caption" style="opacity:0.7">{{ t('settings.rotation_from') }}</span>
             <v-text-field :model-value="(rotationRangeForView.from && rotationRangeForView.from !== 'today') ? rotationRangeForView.from : ''" name="rotation-from" type="date" density="compact" variant="outlined" hide-details style="max-width:160px" :disabled="!canMutateRows" @update:model-value="saveRotationRange(currentTable, { from: $event || 'today' })" data-testid="rotation-from"></v-text-field>
-            <v-btn icon="mdi-calendar-today" size="x-small" variant="text" :disabled="!canMutateRows" @click="saveRotationRange(currentTable, { from: 'today' })" :title="t('btn.today') !== 'btn.today' ? t('btn.today') : 'Today'"></v-btn>
-            <span class="text-caption" style="opacity:0.7">{{ (t('settings.rotation_periods') !== 'settings.rotation_periods' ? t('settings.rotation_periods') : 'Periods') }}</span>
+            <v-btn icon="mdi-calendar-today" size="x-small" variant="text" :disabled="!canMutateRows" @click="saveRotationRange(currentTable, { from: 'today' })" :title="t('btn.today')"></v-btn>
+            <span class="text-caption" style="opacity:0.7">{{ t('settings.rotation_periods') }}</span>
             <v-text-field :model-value="rotationRangeForView.periods" name="rotation-periods" type="number" density="compact" variant="outlined" hide-details style="max-width:90px" :disabled="!canMutateRows" @update:model-value="saveRotationRange(currentTable, { periods: $event === '' ? '' : Number($event) })" data-testid="rotation-periods"></v-text-field>
             <v-spacer></v-spacer>
             <v-btn v-if="canPrintView" icon="mdi-printer" size="small" variant="text" @click="printView()"></v-btn>
           </div>
           <v-divider></v-divider>
           <v-table v-if="rotationLayout === 'table'" density="compact"><template v-slot:default>
-            <thead><tr><th v-for="col in rotationViewCols" :key="col">{{ col === '_period' ? (t('field.period') !== 'field.period' ? t('field.period') : 'Date') : (t('field.' + col) || col) }}</th></tr></thead>
+            <thead><tr><th v-for="col in rotationViewCols" :key="col">{{ col === '_period' ? t('field.period') : (t('field.' + col) || col) }}</th></tr></thead>
             <tbody>
               <tr v-for="row in rotationViewRows" :key="row.id">
                 <td v-for="col in rotationViewCols" :key="col" style="padding:3px 8px">{{ col === '_period' ? toDateStr(row[col]) : displayValue(col, row[col]) }}</td>
@@ -274,7 +274,7 @@
                 </template>
                 <template v-else-if="ei.isRotation">
                   <table style="width:100%; font-size:0.75rem; border-collapse:collapse">
-                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ ec === '_period' ? (t('field.period') !== 'field.period' ? t('field.period') : 'Date') : (t('field.' + ec) || ec) }}</th></tr></thead>
+                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ ec === '_period' ? t('field.period') : (t('field.' + ec) || ec) }}</th></tr></thead>
                     <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ ec === '_period' ? toDateStr(er[ec]) : displayValue(ec, er[ec]) }}</td></tr></tbody>
                   </table>
                 </template>
@@ -319,7 +319,7 @@
                 </template>
                 <template v-else-if="ei.isRotation">
                   <table style="width:100%; font-size:0.75rem; border-collapse:collapse">
-                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ ec === '_period' ? (t('field.period') !== 'field.period' ? t('field.period') : 'Date') : (t('field.' + ec) || ec) }}</th></tr></thead>
+                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ ec === '_period' ? t('field.period') : (t('field.' + ec) || ec) }}</th></tr></thead>
                     <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ ec === '_period' ? toDateStr(er[ec]) : displayValue(ec, er[ec]) }}</td></tr></tbody>
                   </table>
                 </template>
@@ -454,13 +454,13 @@
               <v-table v-if="editingLang && editingLang.code === lang.code" density="compact">
                 <template v-slot:default>
                 <tbody>
-                  <tr @click="settings._collapseApp = !settings._collapseApp" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseApp ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ t('lang.app') !== 'lang.app' ? t('lang.app') : 'App' }}</td></tr>
+                  <tr @click="settings._collapseApp = !settings._collapseApp" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseApp ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ t('lang.app') }}</td></tr>
                   <tr v-show="!settings._collapseApp"><th style="opacity:0.6">{{ t('field.key') }}</th><th style="opacity:0.6">{{ t('field.translation') }}</th></tr>
                   <tr v-for="key in staticTranslationKeys" :key="key" v-show="!settings._collapseApp">
                     <td>{{ key }}</td>
                     <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="saveTranslation(key, $event.target.textContent)">{{ currentTranslations[key] || '' }}</span></td>
                   </tr>
-                  <tr @click="settings._collapseSchema = !settings._collapseSchema" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseSchema ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ t('lang.schema') !== 'lang.schema' ? t('lang.schema') : 'Schema' }}</td></tr>
+                  <tr @click="settings._collapseSchema = !settings._collapseSchema" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseSchema ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ t('lang.schema') }}</td></tr>
                   <tr v-show="!settings._collapseSchema"><th style="opacity:0.6">{{ t('field.key') }}</th><th style="opacity:0.6">{{ t('field.translation') }}</th></tr>
                   <tr v-for="key in schemaTranslationKeys" :key="key" v-show="!settings._collapseSchema">
                     <td>{{ key }}</td>
@@ -591,8 +591,8 @@
                 <tr v-for="u in userList" :key="u.key">
                   <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="renameUser(u, $event.target.textContent.trim())">{{ u.addr }}</span></td>
                   <td><v-select :model-value="u.role" :name="'role-' + u.key" :items="['admin','editor','viewer']" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>
-                  <td><v-chip-group :model-value="u.tables === 'all' ? ['all'] : u.tables" multiple @update:model-value="updateUserTables(u, $event)">
-                    <v-chip v-for="tn in ['all'].concat(Object.keys(schemaData && schemaData.tables || {}))" :key="tn" :value="tn" size="x-small" filter variant="outlined">{{ tn === 'all' ? t('settings.all') : (t('tab.' + tn) || tn) }}</v-chip>
+                  <td><v-chip-group :model-value="userFeatures(u)" multiple @update:model-value="updateUserTables(u, $event)">
+                    <v-chip v-for="c in grantFeatureChips" :key="c.id" :value="c.id" size="x-small" filter variant="outlined">{{ c.label }}</v-chip>
                   </v-chip-group></td>
                   <td><v-btn :icon="isArmed('user:'+u.key) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('user:'+u.key) ? 'error' : ''" @click="isArmed('user:'+u.key) ? removeUser(u.key) : armDelete('user:'+u.key)"></v-btn></td>
                 </tr>
@@ -618,7 +618,7 @@
       </v-btn>
       <v-btn v-if="bottomNavTabs.length > 5" size="small" @click.stop="openMoreDrawer()">
         <v-icon>mdi-dots-horizontal</v-icon>
-        <span style="font-size:0.6rem">{{ t('btn.more') || 'More' }}</span>
+        <span style="font-size:0.6rem">{{ t('btn.more') }}</span>
       </v-btn>
     </v-bottom-navigation>
 
