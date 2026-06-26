@@ -198,3 +198,156 @@ describe('Server-side table access check', () => {
     assert.equal(checkTableAccess('cities__archive', users, 'editor@dev'), false);
   });
 });
+
+describe('Permission features (primary chips + materialized closure)', () => {
+  // Pure copies of the app-core.html feature helpers, parameterized by (schema, views).
+  function getMirrorSource(schema, t) {
+    var cols = (schema[t] && schema[t].columns) || {};
+    for (var c in cols) { var d = cols[c]; if (d && typeof d === 'object' && d.syncFrom) return d.syncFrom; }
+    return null;
+  }
+  function viewRosters(v) { return (v && v.rotation && Array.isArray(v.rotation.rosters)) ? v.rotation.rosters.slice() : []; }
+  function viewComputedHelpers(v) {
+    var out = [];
+    if (v && v.rotation && Array.isArray(v.rotation.columns)) v.rotation.columns.forEach(function(c) { if (c && c.rotationTable) out.push(c.rotationTable); });
+    ((v && v.columns) || []).forEach(function(c) {
+      if (c && typeof c === 'object' && c.computed) {
+        if (c.computed.rotationTable) out.push(c.computed.rotationTable);
+        if (c.computed.occurrenceSource) out.push(c.computed.occurrenceSource);
+      }
+    });
+    return out;
+  }
+  function viewHelperTables(v) { return viewRosters(v).concat(viewComputedHelpers(v)); }
+  function viewTables(v) { return ((v && v.sources) || []).concat(viewHelperTables(v)); }
+  function isPureMirror(schema, t) {
+    var cols = (schema[t] && schema[t].columns) || {}, hasMirror = false, hasOwn = false;
+    Object.keys(cols).forEach(function(c) {
+      if (c === 'id') return;
+      var d = cols[c];
+      if (d && typeof d === 'object' && d.syncFrom) hasMirror = true; else hasOwn = true;
+    });
+    return hasMirror && !hasOwn;
+  }
+  function satelliteTables(schema, views) {
+    var sat = {};
+    Object.keys(views).forEach(function(n) { viewComputedHelpers(views[n]).forEach(function(t) { sat[t] = true; }); });
+    Object.keys(schema).forEach(function(t) { if (isPureMirror(schema, t)) sat[t] = true; });
+    return sat;
+  }
+  function grantFeatures(schema, views) {
+    var sat = satelliteTables(schema, views), feats = [];
+    Object.keys(schema).forEach(function(t) { if (!sat[t]) feats.push(t); });
+    Object.keys(views).forEach(function(n) {
+      var v = views[n], srcs = v.sources || [];
+      if (v.rotation && viewRosters(v).length) return;       // rosters are the chips, not the view
+      var hasPrimarySource = srcs.some(function(s) { return !sat[s]; });
+      if (srcs.length && !hasPrimarySource) feats.push(n);
+    });
+    return feats;
+  }
+  function featureClosure(id, schema, views) {
+    var S = {};
+    if (views[id]) viewTables(views[id]).forEach(function(t) { S[t] = true; });
+    else S[id] = true;
+    var changed = true;
+    while (changed) {
+      changed = false;
+      Object.keys(views).forEach(function(n) {
+        var v = views[n], src = v.sources || [];
+        if (!src.length) return;
+        if (!src.every(function(s) { return S[s]; })) return;
+        viewHelperTables(v).forEach(function(t) { if (!S[t]) { S[t] = true; changed = true; } });
+      });
+    }
+    return Object.keys(S).sort();
+  }
+  // canAccess for a sourceless rotation view: unlocked by ANY roster (missing roster -> blank cells).
+  function canAccessRotationView(viewName, views, allowedTables) {
+    var v = views[viewName]; var rosters = viewRosters(v);
+    if (v.sources && v.sources.length) return v.sources.every(function(s) { return allowedTables.indexOf(s) >= 0; });
+    if (rosters.length) return rosters.some(function(t) { return allowedTables.indexOf(t) >= 0; });
+    return true;
+  }
+  function expandFeatureGrants(ids, schema, views) {
+    var S = {};
+    ids.forEach(function(f) { featureClosure(f, schema, views).forEach(function(t) { S[t] = true; }); });
+    return Object.keys(S).sort();
+  }
+  function selectedFeatures(tableList, schema, views) {
+    var have = {}; tableList.forEach(function(t) { have[t] = true; });
+    return grantFeatures(schema, views).filter(function(f) { return featureClosure(f, schema, views).every(function(t) { return have[t]; }); });
+  }
+
+  // Church-shaped fixture: kokoukset master; musiikki mirrors it but has OWN song columns (-> own feature);
+  // ovimiehet_vuorot is a pure mirror (only pvm) -> satellite; rosters feed rotation/occurrence.
+  const schema = {
+    kokoukset: { columns: { pvm: 'date', johtaja: { type: 'select', list: 'p' } } },
+    musiikki: { columns: { pvm: { syncFrom: 'kokoukset' }, laulu: { type: 'select', list: 'laulut' } } },
+    ovimiehet_vuorot: { columns: { pvm: { syncFrom: 'kokoukset' } } },
+    ovimiehet_lista: { columns: { people: { type: 'multiselect', list: 's' } } },
+    siivous_a: { columns: { people: { type: 'multiselect', list: 's' } } },
+    siivous_b: { columns: { people: { type: 'multiselect', list: 's' } } },
+    tehtavat: { columns: { who: { type: 'select', list: 's' } } }
+  };
+  const views = {
+    kokous: { sources: ['kokoukset'] },
+    musiikki: { sources: ['musiikki'] },
+    ohjelma: { sources: ['kokoukset', 'musiikki'], columns: [{ name: 'ovimies', computed: { rotationTable: 'ovimiehet_lista', occurrenceSource: 'ovimiehet_vuorot' } }] },
+    ovimiehet: { sources: ['ovimiehet_vuorot'], columns: [{ name: 'ovimies', computed: { rotationTable: 'ovimiehet_lista', occurrenceSource: 'ovimiehet_vuorot' } }] },
+    siivous: { rotation: { rosters: ['siivous_a', 'siivous_b'] } },
+    tehtavat: { sources: ['tehtavat'] }
+  };
+
+  it('rotation rosters are NOT satellites (per-roster grants); only computed helpers + pure mirrors are', () => {
+    assert.equal(isPureMirror(schema, 'ovimiehet_vuorot'), true);
+    assert.equal(isPureMirror(schema, 'musiikki'), false);
+    assert.deepEqual(Object.keys(satelliteTables(schema, views)).sort(),
+      ['ovimiehet_lista', 'ovimiehet_vuorot']);          // siivous_a/b no longer satellites
+  });
+  it('siivous_a and siivous_b are separate chips; the siivous view is NOT a chip', () => {
+    assert.deepEqual(grantFeatures(schema, views).sort(),
+      ['kokoukset', 'musiikki', 'ovimiehet', 'siivous_a', 'siivous_b', 'tehtavat']);
+  });
+  it('each siivous roster grants ONLY itself (siivous_b never pulls siivous_a)', () => {
+    assert.deepEqual(featureClosure('siivous_a', schema, views), ['siivous_a']);
+    assert.deepEqual(featureClosure('siivous_b', schema, views), ['siivous_b']);
+  });
+  it('siivous view is unlocked by ANY roster; the missing roster simply renders blank', () => {
+    assert.equal(canAccessRotationView('siivous', views, ['siivous_b']), true);  // siivous_b coordinator
+    assert.equal(canAccessRotationView('siivous', views, ['siivous_a']), true);
+    assert.equal(canAccessRotationView('siivous', views, []), false);            // neither roster -> hidden
+  });
+  it('siivous_b coordinator cannot access the siivous_a table (server-enforced blanking)', () => {
+    var allowed = featureClosure('siivous_b', schema, views);
+    assert.equal(allowed.indexOf('siivous_a'), -1);
+    assert.equal(allowed.indexOf('siivous_b') >= 0, true);
+  });
+  it('musiikki closure is musiikki only — it does NOT pull kokoukset', () => {
+    var c = featureClosure('musiikki', schema, views);
+    assert.deepEqual(c, ['musiikki']);
+    assert.equal(c.indexOf('kokoukset'), -1);
+  });
+  it('ovimiehet closure = its roster + date mirror only (seurakuntalaiset list auto-derives)', () => {
+    assert.deepEqual(featureClosure('ovimiehet', schema, views), ['ovimiehet_lista', 'ovimiehet_vuorot']);
+  });
+  it('kokoukset closure is decoupled: just kokoukset (no doormen, no music)', () => {
+    assert.deepEqual(featureClosure('kokoukset', schema, views), ['kokoukset']);
+  });
+  it('independent primary stays isolated', () => {
+    assert.deepEqual(featureClosure('tehtavat', schema, views), ['tehtavat']);
+  });
+  it('materializes the union of selected feature closures', () => {
+    assert.deepEqual(expandFeatureGrants(['kokoukset', 'musiikki', 'ovimiehet', 'siivous_b'], schema, views),
+      ['kokoukset', 'musiikki', 'ovimiehet_lista', 'ovimiehet_vuorot', 'siivous_b']);
+  });
+  it('reverse-maps a stored table list back to selected features', () => {
+    assert.deepEqual(selectedFeatures(['ovimiehet_lista', 'ovimiehet_vuorot'], schema, views), ['ovimiehet']);
+    assert.deepEqual(selectedFeatures(['siivous_b'], schema, views), ['siivous_b']);
+    assert.deepEqual(selectedFeatures(['kokoukset'], schema, views), ['kokoukset']);
+  });
+  it('a partially-granted feature is not shown as selected', () => {
+    // ovimiehet_vuorot alone (missing the roster ovimiehet_lista) -> ovimiehet not covered
+    assert.deepEqual(selectedFeatures(['ovimiehet_vuorot'], schema, views), []);
+  });
+});
