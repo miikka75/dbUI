@@ -29,6 +29,135 @@ function getTableMirrorSource(tables, tableName) {
   return null;
 }
 
+// --- Permission "features": collapse helper tables under primary features so the access UI stays
+//     short, while grants still MATERIALIZE to literal table names (Firestore rules + reads operate
+//     on table names, not features). A grant chip = a primary table or a sourceless rotation view;
+//     selecting it stores that feature's full table closure. ---
+
+// Helper tables a view needs beyond its own `sources`: rotation rosters + computed rotationTable / occurrenceSource.
+// Rotation-view rosters (rv.rosters) — each is independently grantable (its own chip), so different
+// people can manage different rosters of the same rotation view (e.g. siivous_a vs siivous_b).
+function viewRosters(v) { return (v && v.rotation && Array.isArray(v.rotation.rosters)) ? v.rotation.rosters.slice() : []; }
+// Computed helper tables (rotationTable / occurrenceSource on data-view columns, + legacy rotation
+// `columns` rotationTable). These stay satellites — folded into the view-chip that uses them.
+function viewComputedHelpers(v) {
+  var out = [];
+  if (v && v.rotation && Array.isArray(v.rotation.columns)) v.rotation.columns.forEach(function(c) { if (c && c.rotationTable) out.push(c.rotationTable); });
+  ((v && v.columns) || []).forEach(function(c) {
+    if (c && typeof c === 'object' && c.computed) {
+      if (c.computed.rotationTable) out.push(c.computed.rotationTable);
+      if (c.computed.occurrenceSource) out.push(c.computed.occurrenceSource);
+    }
+  });
+  return out;
+}
+// All helper tables a view needs beyond its `sources`: rosters + computed helpers (closure / preload).
+function viewHelperTables(v) { return viewRosters(v).concat(viewComputedHelpers(v)); }
+// Every table a view reads from (its sources + helper tables).
+function viewTables(v) { return ((v && v.sources) || []).concat(viewHelperTables(v)); }
+
+// A "pure mirror" has only synced columns (+ implicit id) and no content of its own — e.g. ovimiehet_vuorot
+// (just pvm<-kokoukset). It rides with its master. A mirror table that ALSO has its own data columns
+// (e.g. musiikki: songs/accompanist/leader) is a real feature and gets its own grant chip.
+function isPureMirror(t) {
+  var cols = (SCHEMA[t] && SCHEMA[t].columns) || {};
+  var hasMirror = false, hasOwn = false;
+  Object.keys(cols).forEach(function(c) {
+    if (c === 'id') return;
+    var d = cols[c];
+    if (d && typeof d === 'object' && d.syncFrom) hasMirror = true;
+    else hasOwn = true;
+  });
+  return hasMirror && !hasOwn;
+}
+
+// "Satellite" tables are never granted directly and are hidden from the chips:
+//   - computed helpers: rotationTable / occurrenceSource targets (exist only to feed a view), and
+//   - PURE mirror tables (only synced columns, no own content, e.g. ovimiehet_vuorot).
+// They are pulled in automatically by the closure of whatever feature uses them.
+// NOTE: rotation-view rosters (rv.rosters) are NOT satellites — each is its own chip (per-roster grants).
+function satelliteTables() {
+  var sat = {};
+  Object.keys(VIEWS).forEach(function(n) { viewComputedHelpers(VIEWS[n]).forEach(function(t) { sat[t] = true; }); });
+  Object.keys(SCHEMA).forEach(function(t) { if (isPureMirror(t)) sat[t] = true; });
+  return sat;
+}
+
+// Grantable features (chips):
+//   - primary tables (non-satellite) — now includes rotation rosters like siivous_a / siivous_b, AND
+//   - data views with NO primary source (sourced only by satellites, e.g. ovimiehet).
+// A rotation view WITH rosters is NOT a chip — its rosters are the chips (per-roster grants), and the
+// view is unlocked by having any of them (see canAccess). Views backed by a primary table (kokous,
+// ohjelma, ...) are reached via that table's chip; markdown info pages are ungated and never chips.
+function grantFeatures() {
+  var sat = satelliteTables(), feats = [];
+  Object.keys(SCHEMA).forEach(function(t) { if (!sat[t]) feats.push({ id: t, view: false }); });
+  Object.keys(VIEWS).forEach(function(n) {
+    var v = VIEWS[n], srcs = v.sources || [];
+    if (v.rotation && viewRosters(v).length) return;   // per-roster grants: rosters are the chips, not the view
+    var hasPrimarySource = srcs.some(function(s) { return !sat[s]; });
+    if (srcs.length && !hasPrimarySource) feats.push({ id: n, view: true });
+  });
+  return feats;
+}
+
+// Full table closure granted by selecting a feature (materialized into userData().tables).
+// Pulls the feature's own tables, then the helper tables of any view fully covered by the set
+// (fixpoint). Satellite tables (pure mirrors, rosters, occurrence sources) are pulled via the
+// views that use them — NOT via a syncFrom master — so granting kokoukset does not drag the
+// doormen/music tables along.
+function featureClosure(featureId) {
+  var S = {};
+  if (VIEWS[featureId]) viewTables(VIEWS[featureId]).forEach(function(t) { S[t] = true; });
+  else S[featureId] = true;
+  var changed = true;
+  while (changed) {
+    changed = false;
+    Object.keys(VIEWS).forEach(function(n) {                        // a fully-covered view pulls its helpers
+      var v = VIEWS[n], src = v.sources || [];
+      if (!src.length) return;                                      // sourceless rotation views are their own feature
+      if (!src.every(function(s) { return S[s]; })) return;
+      viewHelperTables(v).forEach(function(t) { if (!S[t]) { S[t] = true; changed = true; } });
+    });
+  }
+  return Object.keys(S);
+}
+
+// Selected feature ids -> the literal table list to store (union of closures).
+function expandFeatureGrants(featureIds) {
+  var S = {};
+  (featureIds || []).forEach(function(f) { featureClosure(f).forEach(function(t) { S[t] = true; }); });
+  return Object.keys(S);
+}
+
+// Reverse: which features are fully covered by a stored table list (for chip selection state).
+function selectedFeatures(tableList) {
+  var have = {}; (tableList || []).forEach(function(t) { have[t] = true; });
+  return grantFeatures().filter(function(f) {
+    return featureClosure(f.id).every(function(t) { return have[t]; });
+  }).map(function(f) { return f.id; });
+}
+
+// --- Folder-config (appConfig) export/import round-trip ---
+// Folder config is exported/imported generically: EVERYTHING is round-tripped EXCEPT the keys in
+// this denylist (environment-specific values that must not cross an export boundary). This means a
+// NEW appConfig parameter is round-tripped automatically with no export/import code change — add a
+// key here only if it must stay machine-local. (See access.test.js round-trip guard test.)
+var FOLDER_CONFIG_EXPORT_EXCLUDE = { mode: true };
+function exportableConfig(appConfig) {
+  var out = {};
+  Object.keys(appConfig || {}).forEach(function(k) { if (!FOLDER_CONFIG_EXPORT_EXCLUDE[k]) out[k] = appConfig[k]; });
+  return out;
+}
+// Merge imported portable config over the current config, preserving this environment's excluded
+// keys (e.g. `mode`) — an import never changes which backend this folder uses.
+function mergeImportedConfig(currentConfig, importedConfig, mode) {
+  var merged = Object.assign({}, currentConfig || {});
+  Object.keys(importedConfig || {}).forEach(function(k) { if (!FOLDER_CONFIG_EXPORT_EXCLUDE[k]) merged[k] = importedConfig[k]; });
+  if (mode !== undefined && mode !== null && mode !== '') merged.mode = mode; else delete merged.mode;
+  return merged;
+}
+
 var app; // Vue app instance
 var appInstance; // Mounted root component proxy
 var backend; // Set by backend adapter loaded after this file
@@ -127,7 +256,17 @@ function createVueApp() {
         var allowedTables = self.userAllowedTables;
         function canAccess(id) {
           if (!allowedTables) return true;
-          if (VIEWS[id]) return (VIEWS[id].sources || []).every(function(s) { return allowedTables.indexOf(s) >= 0; });
+          if (VIEWS[id]) {
+            var v = VIEWS[id];
+            if (!(v.sources || []).every(function(s) { return allowedTables.indexOf(s) >= 0; })) return false;
+            // sourceless rotation views are unlocked by ANY of their rosters — a roster you lack
+            // simply renders blank (per-roster access, e.g. siivous_b coordinator sees siivous_a empty).
+            if (!(v.sources && v.sources.length)) {
+              var rosters = viewRosters(v);
+              if (rosters.length) return rosters.some(function(t) { return allowedTables.indexOf(t) >= 0; });
+            }
+            return true;
+          }
           if (SCHEMA[id]) return allowedTables.indexOf(id) >= 0;
           return true;
         }
@@ -222,6 +361,20 @@ function createVueApp() {
         var cache = this.listsCache;
         Object.keys(cache).forEach(function(name) { if (allowedLists[name]) result[name] = cache[name]; });
         return result;
+      },
+      grantFeatureChips: function() {
+        // Permission chips: each as { id, label }. Tables use the `tab.<id>` translation key, views
+        // use `view.<id>` (matching nav); fall back to the bare id when no translation exists (t()
+        // returns the key on a miss, so we compare against it).
+        var self = this, sd = this.schemaData, str = this.strings; // touch schema + strings for reactivity
+        void sd; void str;
+        var chips = [{ id: 'all', label: this.t('settings.all') }];
+        grantFeatures().forEach(function(f) {
+          var key = (f.view ? 'view.' : 'tab.') + f.id;
+          var s = self.t(key);
+          chips.push({ id: f.id, label: (s && s !== key) ? s : f.id });
+        });
+        return chips;
       },
       hasFirebaseConfig: function() {
         if (window.FIREBASE_CONFIG) return true;
@@ -369,7 +522,7 @@ function createVueApp() {
       tableHeaders: function() {
         var self = this;
         var hdrs = this.visibleCols.map(function(c) { return { title: self.t('field.' + c) || c, key: c, sortable: true }; });
-        if (this.isUnionView) hdrs.push({ title: self.t('field.source') || 'Source', key: '_source', sortable: true });
+        if (this.isUnionView) hdrs.push({ title: self.t('field.source'), key: '_source', sortable: true });
         hdrs.push({ title: '', key: '_actions', sortable: false, width: '100px' });
         return hdrs;
       },
@@ -389,7 +542,7 @@ function createVueApp() {
         return data;
       },
       staticTranslationKeys: function() {
-        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived',
+        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
@@ -1739,9 +1892,16 @@ function createVueApp() {
         backend_users.setUserRole(uid, role, user, tables).then(function() { self.loadUsers(); });
       },
       updateUserTables: function(u, selected) {
-        var prev = u.tables === 'all' ? ['all'] : (u.tables || []);
-        var tables = this._resolveTableSelection(selected, prev);
+        var prev = u.tables === 'all' ? ['all'] : this.userFeatures(u);
+        var feats = this._resolveTableSelection(selected, prev);   // 'all' or array of FEATURE ids
+        var tables = feats === 'all' ? 'all' : expandFeatureGrants(feats); // materialize closure -> table names
+        if (Array.isArray(tables) && !tables.length) tables = 'all';
         backend_users.setUserRole(u.key, u.role, u.addr, tables).then(this.loadUsers.bind(this));
+      },
+      userFeatures: function(u) {
+        // Stored table list -> selected feature ids (chip selection state).
+        if (!u || u.tables === 'all') return ['all'];
+        return selectedFeatures(u.tables || []);
       },
       _resolveTableSelection: function(selected, prev) {
         if (selected.indexOf('all') >= 0 && prev.indexOf('all') < 0) return 'all';
@@ -1825,7 +1985,7 @@ function createVueApp() {
               }
             });
             convertViewFilters(schema.views);   // emit array-IN filters as explicit $or (forward-deprecation)
-            var json = JSON.stringify({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations, pages: pages.length ? pages : undefined, exportedAt: new Date().toISOString() }, null, 2);
+            var json = JSON.stringify({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations, pages: pages.length ? pages : undefined, config: exportableConfig(self.appConfig), exportedAt: new Date().toISOString() }, null, 2);
             var blob = new Blob([json], { type: 'application/json' });
             var a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
@@ -1835,7 +1995,7 @@ function createVueApp() {
           }).catch(function() {
             var schema = JSON.parse(JSON.stringify(self.schemaData));
             if (schema.tables) Object.keys(schema.tables).forEach(function(t) { var c = schema.tables[t].columns; if (c) { delete c.id; } delete schema.tables[t].partition; delete schema.tables[t].archivePartition; });
-            var json = JSON.stringify({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations, exportedAt: new Date().toISOString() }, null, 2);
+            var json = JSON.stringify({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations, config: exportableConfig(self.appConfig), exportedAt: new Date().toISOString() }, null, 2);
             var blob = new Blob([json], { type: 'application/json' });
             var a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
@@ -1920,6 +2080,15 @@ function createVueApp() {
                 }
               });
             }
+            // Restore portable folder config (rotationAnchors, rotationRanges, any future portable key),
+            // preserving this environment's `mode`. Excluded keys never cross the import boundary.
+            if (imported.config && backend.setFolderConfig) {
+              chain = chain.then(function() {
+                var merged = mergeImportedConfig(self.appConfig, imported.config, self.mode);
+                self.appConfig = merged;
+                return backend.setFolderConfig(self.folderId, merged);
+              });
+            }
             chain.then(function() {
               var locked = self.lockedListValues();
               var needSave = false;
@@ -1932,7 +2101,7 @@ function createVueApp() {
               var savePromise = needSave ? backend.saveLists(self.folderId, self.listsCache) : Promise.resolve();
               savePromise.then(function() {
                 var rowCount = 0; Object.keys(tables).forEach(function(k) { var r = Array.isArray(tables[k]) ? tables[k] : (tables[k].rows || []); rowCount += r.length; });
-                var msg = 'Imported' + (imported.schema ? ' schema' : '') + (rowCount ? ' + ' + rowCount + ' rows' : '') + (imported.lists ? ' + lists' : '') + (imported.translations ? ' + translations' : '');
+                var msg = 'Imported' + (imported.schema ? ' schema' : '') + (rowCount ? ' + ' + rowCount + ' rows' : '') + (imported.lists ? ' + lists' : '') + (imported.translations ? ' + translations' : '') + (imported.config ? ' + config' : '');
                 self.notify(msg || 'Import complete');
                 setTimeout(function() {
                 if (typeof _pushChanges === 'function') { _pushChanges().then(function() { location.reload(); }); }
@@ -2102,7 +2271,7 @@ function createVueApp() {
         var title = this.t((VIEWS[this.currentTable] ? 'view.' : 'tab.') + this.currentTable) || this.currentTable;
         if (this.isRotationView) {
           var rcols = this.rotationViewCols, rrows = this.rotationViewRows, rb = '<h2>' + pe(title) + '</h2><table><thead><tr>';
-          rcols.forEach(function(c) { rb += '<th>' + pe(c === '_period' ? 'Date' : (self.t('field.' + c) || c)) + '</th>'; });
+          rcols.forEach(function(c) { rb += '<th>' + pe(c === '_period' ? self.t('field.period') : (self.t('field.' + c) || c)) + '</th>'; });
           rb += '</tr></thead><tbody>';
           rrows.forEach(function(row) { rb += '<tr>'; rcols.forEach(function(c) { rb += '<td>' + pe(c === '_period' ? self.toDateStr(row[c]) : self.displayValue(c, row[c])) + '</td>'; }); rb += '</tr>'; });
           rb += '</tbody></table>'; this._printOpen(title, rb); return;
