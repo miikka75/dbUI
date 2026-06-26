@@ -54,15 +54,71 @@ backend = {
       return self.putRow(tableId, rowData, toTab);
     });
   },
+  // --- Per-list storage (Phase 1): collection `_lists`, one doc per list { name, items, tables }.
+  // `tables` = owning tables (derived from schema), used by the /_lists Firestore rule to gate reads.
+  // Reads are rules-safe: admins read the whole collection (and lazily migrate the legacy _meta/lists
+  // doc); restricted users query `tables array-contains-any <their tables>` so the query matches the
+  // rule (Firestore rules are not filters). Restricted editors only UPSERT their lists — they never
+  // prune, since their list map is partial. Migration is additive (legacy _meta/lists is kept). ---
+  _myTables: function() {
+    // null = unrestricted (admin or no users); [] = known-but-no-access; [..] = restricted set.
+    return _db.collection('_meta').doc('users').get().then(function(doc) {
+      if (!doc.exists) return null;
+      var users = doc.data();
+      var email = (_auth && _auth.currentUser && _auth.currentUser.email) || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail);
+      var u = users[email];
+      if (!u) return [];
+      if (u.role === 'admin' || u.tables === 'all') return null;
+      return u.tables || [];
+    });
+  },
+  _legacyGetLists: function() {
+    return StorageFirestore.getMeta('lists').then(function(d) { return (d && !d._value) ? d : {}; });
+  },
   getLists: function(folderId) {
-    return StorageFirestore.getMeta('lists').then(function(d) { return d || {}; });
+    var self = this;
+    return self._myTables().then(function(tabs) {
+      if (tabs !== null && !tabs.length) return {};
+      if (tabs === null) {
+        return _db.collection('_lists').get().then(function(snap) {
+          if (!snap.empty) { var o = {}; snap.forEach(function(d) { var v = d.data(); o[v.name || d.id] = v.items || []; }); return o; }
+          // one-time additive migration of the legacy _meta/lists doc -> per-list _lists docs (admin only)
+          return self._legacyGetLists().then(function(legacy) {
+            if (!Object.keys(legacy).length) return {};
+            return self.saveLists(folderId, legacy).then(function() { return legacy; });
+          });
+        });
+      }
+      // restricted: query only the lists this user may read (matches the /_lists rule)
+      return _db.collection('_lists').where('tables', 'array-contains-any', tabs.slice(0, 30)).get().then(function(snap) {
+        var o = {}; snap.forEach(function(d) { var v = d.data(); o[v.name || d.id] = v.items || []; }); return o;
+      });
+    });
   },
   saveLists: function(folderId, lists) {
-    return StorageFirestore.setMeta('lists', lists);
+    var self = this;
+    return Promise.all([StorageFirestore.getMeta('schema'), self._myTables()]).then(function(r) {
+      var tables = (r[0] && r[0].tables) || {}, myTabs = r[1];
+      var batch = _db.batch();
+      Object.keys(lists || {}).forEach(function(name) {
+        batch.set(_db.collection('_lists').doc(name), { name: name, items: lists[name] || [], tables: listOwningTables(tables, name) });
+      });
+      if (myTabs === null) { // only an admin (full view) may prune lists absent from the map
+        return _db.collection('_lists').get().then(function(snap) {
+          snap.forEach(function(d) { if (!((lists || {})[d.id])) batch.delete(d.ref); });
+          return batch.commit();
+        });
+      }
+      return batch.commit();
+    });
   },
   putListItem: function(folderId, listName, value) {
-    var update = {}; update[listName] = firebase.firestore.FieldValue.arrayUnion(value);
-    return _db.collection('_meta').doc('lists').set(update, { merge: true });
+    return StorageFirestore.getMeta('schema').then(function(s) {
+      var tables = (s && s.tables) || {};
+      return _db.collection('_lists').doc(listName).set(
+        { name: listName, items: firebase.firestore.FieldValue.arrayUnion(value), tables: listOwningTables(tables, listName) },
+        { merge: true });
+    });
   },
   getTranslations: function(folderId, langCode) {
     return StorageFirestore.getMeta('lang_' + langCode).then(function(d) { return d || {}; });
