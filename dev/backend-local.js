@@ -28,6 +28,41 @@ function createLocalBackend(dbPath) {
     } catch (e) { return {}; }
   }
 
+  // Owning tables of a list = tables with a column referencing it (list or listSwitch.list).
+  // Mirrors listOwningTables in schema-loader.html; used to stamp each per-list row.
+  function _listOwning(listName) {
+    try {
+      var row = db.prepare('SELECT value FROM _schema WHERE key = ?').get('schema');
+      var tables = row ? (JSON.parse(row.value).tables || {}) : {};
+      var out = [];
+      Object.keys(tables).forEach(function(t) {
+        var cols = (tables[t] && tables[t].columns) || {};
+        var defs = Array.isArray(cols) ? cols : Object.keys(cols).map(function(k) { return cols[k]; });
+        if (defs.some(function(d) { return d && typeof d === 'object' && (d.list === listName || (d.listSwitch && d.listSwitch.list === listName)); })) out.push(t);
+      });
+      return out;
+    } catch (e) { return []; }
+  }
+  // Per-list storage: one row per list { name PRIMARY KEY, items JSON, tables JSON } — shape parity
+  // with Firebase _lists/{name}. Lazily migrates the legacy (name, value) one-row-per-item table.
+  function _ensureLists() {
+    db.exec('CREATE TABLE IF NOT EXISTS _lists (name TEXT PRIMARY KEY, items TEXT, tables TEXT)');
+    var cols = db.pragma('table_info(_lists)');
+    var hasValue = cols.some(function(c) { return c.name === 'value'; });
+    var hasItems = cols.some(function(c) { return c.name === 'items'; });
+    if (hasValue && !hasItems) {
+      var old = db.prepare('SELECT name, value FROM _lists').all();
+      var map = {};
+      old.forEach(function(r) { (map[r.name] = map[r.name] || []).push(r.value); });
+      db.transaction(function() {
+        db.exec('DROP TABLE _lists');
+        db.exec('CREATE TABLE _lists (name TEXT PRIMARY KEY, items TEXT, tables TEXT)');
+        var ins = db.prepare('INSERT INTO _lists (name, items, tables) VALUES (?, ?, ?)');
+        Object.keys(map).forEach(function(n) { ins.run(n, JSON.stringify(map[n]), JSON.stringify(_listOwning(n))); });
+      })();
+    }
+  }
+
   // Internal: folder config storage
   db.exec('CREATE TABLE IF NOT EXISTS _config (key TEXT PRIMARY KEY, value TEXT)');
   // Internal: track table metadata
@@ -211,27 +246,34 @@ function createLocalBackend(dbPath) {
     },
 
     getLists(folderId) {
-      // Local: read from _lists table
-      db.exec('CREATE TABLE IF NOT EXISTS _lists (name TEXT, value TEXT)');
-      const rows = db.prepare('SELECT name, value FROM _lists').all();
+      _ensureLists();
+      const rows = db.prepare('SELECT name, items FROM _lists').all();
       const result = {};
-      rows.forEach(r => { if (!result[r.name]) result[r.name] = []; result[r.name].push(r.value); });
+      rows.forEach(r => { try { result[r.name] = JSON.parse(r.items) || []; } catch (e) { result[r.name] = []; } });
       return result;
     },
 
     saveLists(folderId, lists) {
-      db.exec('CREATE TABLE IF NOT EXISTS _lists (name TEXT, value TEXT)');
-      db.exec('DELETE FROM _lists');
-      const stmt = db.prepare('INSERT INTO _lists (name, value) VALUES (?, ?)');
-      for (const [name, values] of Object.entries(lists)) {
-        (values || []).forEach(v => { if (typeof v === 'string') stmt.run(name, v); });
-      }
+      _ensureLists();
+      db.transaction(() => {
+        db.exec('DELETE FROM _lists');
+        const stmt = db.prepare('INSERT INTO _lists (name, items, tables) VALUES (?, ?, ?)');
+        for (const [name, values] of Object.entries(lists)) {
+          const items = (values || []).filter(v => typeof v === 'string');
+          stmt.run(name, JSON.stringify(items), JSON.stringify(_listOwning(name)));
+        }
+      })();
     },
 
     putListItem(folderId, listName, value) {
       if (typeof value !== 'string') return;
-      db.exec('CREATE TABLE IF NOT EXISTS _lists (name TEXT, value TEXT)');
-      db.prepare('INSERT INTO _lists (name, value) VALUES (?, ?)').run(listName, value);
+      _ensureLists();
+      const row = db.prepare('SELECT items FROM _lists WHERE name = ?').get(listName);
+      let items = [];
+      if (row) { try { items = JSON.parse(row.items) || []; } catch (e) { items = []; } }
+      if (items.indexOf(value) === -1) items.push(value);
+      db.prepare('INSERT OR REPLACE INTO _lists (name, items, tables) VALUES (?, ?, ?)')
+        .run(listName, JSON.stringify(items), JSON.stringify(_listOwning(listName)));
     },
 
     saveChangesets(folderId, siteId, json) {
