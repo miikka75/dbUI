@@ -46,10 +46,10 @@ describe('Security - SQLite identifier injection', () => {
   });
 
   it('non-ASCII table/column names work (Finnish)', () => {
-    b.initSchema('local', { 'tehtävät': { columns: ['id', 'aihe'], partition: 'tulevat' } });
-    b.putRow('tehtävät', { id: 't1', aihe: 'Testi' }, 'tulevat');
-    const r = b.getTableData('tehtävät', 'tulevat');
+    b.initSchema('local', { 'todos': { columns: ['id', 'topic'], partition: 'upcoming' } });
+    b.putRow('todos', { id: 't1', topic: 'Test' }, 'upcoming');
+    const r = b.getTableData('todos', 'upcoming');
     assert.equal(r.rows.length, 1);
-    assert.equal(r.rows[0].aihe, 'Testi');
+    assert.equal(r.rows[0].topic, 'Test');
   });
 });
