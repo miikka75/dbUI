@@ -21,10 +21,10 @@ afterEach(() => { backend.close(); });
 
 describe('multiselect array storage', () => {
   it('round-trips an array value through put/get', () => {
-    backend.putRow('duty', { id: 'r1', title: 'Doormen', people: ['Matti', 'Liisa'] }, 'active');
+    backend.putRow('duty', { id: 'r1', title: 'Crew', people: ['Alice', 'Bob'] }, 'active');
     const row = backend.getTableData('duty', 'active').rows.find(r => r.id === 'r1');
-    assert.deepEqual(row.people, ['Matti', 'Liisa']);
-    assert.equal(row.title, 'Doormen');
+    assert.deepEqual(row.people, ['Alice', 'Bob']);
+    assert.equal(row.title, 'Crew');
   });
 
   it('decodes an empty/absent multiselect cell to []', () => {
@@ -34,9 +34,9 @@ describe('multiselect array storage', () => {
   });
 
   it('preserves a single-element array (not collapsed to scalar)', () => {
-    backend.putRow('duty', { id: 'r3', title: 'One', people: ['Pekka'] }, 'active');
+    backend.putRow('duty', { id: 'r3', title: 'One', people: ['Carol'] }, 'active');
     const row = backend.getTableData('duty', 'active').rows.find(r => r.id === 'r3');
-    assert.deepEqual(row.people, ['Pekka']);
+    assert.deepEqual(row.people, ['Carol']);
   });
 
   it('leaves scalar (non-multiselect) columns untouched', () => {
