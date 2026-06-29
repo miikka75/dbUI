@@ -129,9 +129,9 @@ describe('FS Backend - Languages', () => {
 
   it('updateTranslations persists', () => {
     backend.createLanguage('local', 'fi', 'Finnish', ['hello']);
-    backend.updateTranslations('local', 'fi', { hello: 'Hei' });
+    backend.updateTranslations('local', 'fi', { hello: 'Hello' });
     var t = backend.getTranslations('local', 'fi');
-    assert.equal(t.hello, 'Hei');
+    assert.equal(t.hello, 'Hello');
   });
 
   it('deleteLanguage removes files', () => {
@@ -225,7 +225,7 @@ describe('FS Backend - CRDT export/import round-trip', () => {
     backend.saveSchema('local', { tables: SCHEMA });
     backend.saveLists('local', { status: ['open', 'done'], priority: ['high', 'low'] });
     backend.createLanguage('local', 'fi', 'Finnish', ['greeting', 'bye']);
-    backend.updateTranslations('local', 'fi', { greeting: 'Hei', bye: 'Näkemiin' });
+    backend.updateTranslations('local', 'fi', { greeting: 'Hello', bye: 'Goodbye' });
 
     // Verify all persisted correctly
     var schema = backend.getSchema('local');
@@ -241,8 +241,8 @@ describe('FS Backend - CRDT export/import round-trip', () => {
     assert.equal(langs[0].code, 'fi');
 
     var trans = backend.getTranslations('local', 'fi');
-    assert.equal(trans.greeting, 'Hei');
-    assert.equal(trans.bye, 'Näkemiin');
+    assert.equal(trans.greeting, 'Hello');
+    assert.equal(trans.bye, 'Goodbye');
   });
 
   it('table data with archive partition round-trips', () => {
