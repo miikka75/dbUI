@@ -37,9 +37,9 @@ describe('Apps Script helpers - normalizeColumns', () => {
 
 describe('Apps Script helpers - valuesToObjects', () => {
   it('maps headers + rows, coercing cells', () => {
-    const r = h.valuesToObjects([['id', 'pvm'], ['a', new Date(2026, 5, 1)], ['b', 7]]);
-    assert.deepEqual(r.headers, ['id', 'pvm']);
-    assert.deepEqual(r.rows, [{ id: 'a', pvm: '2026-06-01' }, { id: 'b', pvm: '7' }]);
+    const r = h.valuesToObjects([['id', 'date'], ['a', new Date(2026, 5, 1)], ['b', 7]]);
+    assert.deepEqual(r.headers, ['id', 'date']);
+    assert.deepEqual(r.rows, [{ id: 'a', date: '2026-06-01' }, { id: 'b', date: '7' }]);
   });
   it('filters empty headers', () => {
     const r = h.valuesToObjects([['id', '', 'name'], ['a', 'x', 'b']]);
@@ -84,8 +84,8 @@ describe('Apps Script helpers - buildColumnOrders', () => {
 
 describe('Apps Script helpers - parseTranslations', () => {
   it('builds key->text map, skips incomplete rows', () => {
-    const values = [['key', 'text'], ['hello', 'Hei'], ['empty', ''], ['', 'orphan'], ['bye', 'Moi']];
-    assert.deepEqual(h.parseTranslations(values), { hello: 'Hei', bye: 'Moi' });
+    const values = [['key', 'text'], ['hello', 'Hello'], ['empty', ''], ['', 'orphan'], ['bye', 'Bye']];
+    assert.deepEqual(h.parseTranslations(values), { hello: 'Hello', bye: 'Bye' });
   });
 });
 
@@ -96,11 +96,11 @@ describe('Apps Script helpers - multiselect arrays', () => {
   });
   it('objectToValues JSON-encodes array cells; valuesToObjects(msCols) decodes them', () => {
     const headers = ['id', 'title', 'people'];
-    const enc = h.objectToValues({ id: 'r1', title: 'Doormen', people: ['Matti', 'Liisa'] }, headers);
-    assert.equal(enc[2], '["Matti","Liisa"]');           // array -> JSON string for the cell
+    const enc = h.objectToValues({ id: 'r1', title: 'Crew', people: ['Alice', 'Bob'] }, headers);
+    assert.equal(enc[2], '["Alice","Bob"]');           // array -> JSON string for the cell
     const back = h.valuesToObjects([headers, enc], ['people']).rows[0];
-    assert.deepEqual(back.people, ['Matti', 'Liisa']); // decoded back to array
-    assert.equal(back.title, 'Doormen');                  // scalar untouched
+    assert.deepEqual(back.people, ['Alice', 'Bob']); // decoded back to array
+    assert.equal(back.title, 'Crew');                  // scalar untouched
   });
   it('empty multiselect cell decodes to []', () => {
     const back = h.valuesToObjects([['id', 'people'], ['r2', '']], ['people']).rows[0];
