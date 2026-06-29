@@ -5,7 +5,7 @@ const H = require('../../backend-helpers');
 describe('backend-helpers - storeName', () => {
   it('joins table + tab', () => assert.equal(H.storeName('tasks', 'active'), 'tasks__active'));
   it('defaults tab to active', () => assert.equal(H.storeName('tasks'), 'tasks__active'));
-  it('supports custom partitions', () => assert.equal(H.storeName('musiikki', 'tulevat'), 'musiikki__tulevat'));
+  it('supports custom partitions', () => assert.equal(H.storeName('music', 'upcoming'), 'music__upcoming'));
 });
 
 describe('backend-helpers - deriveHeaders', () => {
