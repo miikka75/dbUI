@@ -2238,6 +2238,50 @@ test.describe('rotationView (third view kind, e2e)', () => {
     expect(r[2]).toEqual({ p: '2026-01-15', a: ['A0'], b: ['B0'] });
     expect(r[3]).toEqual({ p: '2026-01-22', a: ['B1'], b: ['A1'] });
   });
+
+  test('rotateEvery:["cycle"] makes even-length rosters alternate slots every duty turn', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const view = { rotation: {
+        slots: ['alue_a', 'alue_b'], rosters: ['L_a', 'L_b'],
+        advanceBy: 'calendar', interval: 'weekly', rotateEvery: ['cycle'],
+        range: { from: '2026-01-01', periods: 4 }
+      } };
+      const cache = {  // even-length rosters (2 each)
+        L_a: [{ position: 1, people: ['A0'] }, { position: 2, people: ['A1'] }],
+        L_b: [{ position: 1, people: ['B0'] }, { position: 2, people: ['B1'] }]
+      };
+      return window.buildRotationViewRows(view, cache, '2026-01-01', '2026-01-01')
+        .map(function(x) { return { p: x._period, a: x.alue_a, b: x.alue_b }; });
+    });
+    // cycleLen=2: per-cycle swap flips every 2 periods. A0's duty turns (p0,p2) land in DIFFERENT slots.
+    expect(r[0]).toEqual({ p: '2026-01-01', a: ['A0'], b: ['B0'] }); // s=0
+    expect(r[1]).toEqual({ p: '2026-01-08', a: ['A1'], b: ['B1'] }); // s=0
+    expect(r[2]).toEqual({ p: '2026-01-15', a: ['B0'], b: ['A0'] }); // s=1 -> A0 now in slot b
+    expect(r[3]).toEqual({ p: '2026-01-22', a: ['B1'], b: ['A1'] }); // s=1 -> A1 now in slot b
+  });
+
+  test('rotateEvery:[1,"cycle"] sums per-period + per-cycle offsets', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const view = { rotation: {
+        slots: ['alue_a', 'alue_b'], rosters: ['L_a', 'L_b'],
+        advanceBy: 'calendar', interval: 'weekly', rotateEvery: [1, 'cycle'],
+        range: { from: '2026-01-01', periods: 4 }
+      } };
+      const cache = {
+        L_a: [{ position: 1, people: ['A0'] }, { position: 2, people: ['A1'] }],
+        L_b: [{ position: 1, people: ['B0'] }, { position: 2, people: ['B1'] }]
+      };
+      return window.buildRotationViewRows(view, cache, '2026-01-01', '2026-01-01')
+        .map(function(x) { return { p: x._period, a: x.alue_a, b: x.alue_b }; });
+    });
+    // s = floor(i/1)%2 + floor(i/2)%2. i=0:0, i=1:1, i=2:1, i=3:2%2=0. memberIdx=i%2.
+    expect(r[0]).toEqual({ p: '2026-01-01', a: ['A0'], b: ['B0'] }); // s=0
+    expect(r[1]).toEqual({ p: '2026-01-08', a: ['B1'], b: ['A1'] }); // s=1
+    expect(r[2]).toEqual({ p: '2026-01-15', a: ['B0'], b: ['A0'] }); // s=1
+    expect(r[3]).toEqual({ p: '2026-01-22', a: ['A1'], b: ['B1'] }); // s=2≡0
+  });
 });
 
 
