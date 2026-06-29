@@ -475,7 +475,7 @@ test.describe('Archivable flag', () => {
 });
 
 test.describe('Archive from a view whose source has a mirror table not in sources', () => {
-  // Mirrors the kokous/musiikki case: view 'mtg' sources=[meetings] only; 'music' mirrors meetings.
+  // Mirrors the meeting/music case: view 'mtg' sources=[meetings] only; 'music' mirrors meetings.
   const SCH = {
     defaultLanguage: 'en',
     tables: {
@@ -701,13 +701,13 @@ test.describe('Translation keys for view columns', () => {
     const keys = await page.evaluate(() => {
       // slots form
       appInstance.schemaData = { tables: {}, views: [
-        { name: 'rota', rotation: { slots: ['alue_a', 'alue_b'], rosters: ['la', 'lb'], interval: 'weekly' } },
+        { name: 'rota', rotation: { slots: ['area_a', 'area_b'], rosters: ['la', 'lb'], interval: 'weekly' } },
         { name: 'rota2', rotation: { columns: [{ name: 'crew' }], interval: 'weekly' } }   // columns form
       ] };
       return appInstance.schemaTranslationKeys;
     });
-    expect(keys).toContain('field.alue_a');   // slots form (regression: was missing)
-    expect(keys).toContain('field.alue_b');
+    expect(keys).toContain('field.area_a');   // slots form (regression: was missing)
+    expect(keys).toContain('field.area_b');
     expect(keys).toContain('field.crew');     // columns form
     expect(keys).toContain('field.period');   // generated period column
     expect(keys).toContain('view.rota');
@@ -975,26 +975,26 @@ test.describe('v3 hybrid self-view hide-empty ({{self}} participates)', () => {
 test.describe('v3 non-ASCII names in embed tokens', () => {
   const V3 = {
     defaultLanguage: 'en',
-    tables: { 'tehtävät': { columns: [{ name: 'otsikko', type: 'text' }], partition: 'active' } },
+    tables: { 'todos': { columns: [{ name: 'heading', type: 'text' }], partition: 'active' } },
     views: [
-      { name: 'tehtävä_block', sources: ['tehtävät'], mode: 'union', columns: ['otsikko'],
-        markdown: '**Lista**\n\n{{self}}\n\n{{table:tehtävät}}' }
+      { name: 'todo_block', sources: ['todos'], mode: 'union', columns: ['heading'],
+        markdown: '**List**\n\n{{self}}\n\n{{table:todos}}' }
     ],
-    nav: { items: [{ view: 'tehtävä_block' }, { table: 'tehtävät' }] }
+    nav: { items: [{ view: 'todo_block' }, { table: 'todos' }] }
   };
-  test('{{self}} and {{table:X}} resolve non-ASCII (ä) names', async ({ page }) => {
+  test('{{self}} and {{table:X}} resolve non-ASCII (accented) names', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: V3 } });
-    await page.request.post('/api/putRow', { data: { tableId: 'tehtävät', data: { id: 'r1', otsikko: 'FinRivi' }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'todos', data: { id: 'r1', heading: 'Café-Ñ' }, tab: 'active' } });
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.tehtävä_block' }).first().click();
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.todo_block' }).first().click();
     await page.waitForTimeout(150);
-    await expect(page.locator('.v-main')).toContainText('Lista');   // header prose
-    await expect(page.locator('.v-main')).toContainText('FinRivi'); // {{self}} + {{table:tehtävät}} both rendered the row
+    await expect(page.locator('.v-main')).toContainText('List');   // header prose
+    await expect(page.locator('.v-main')).toContainText('Café-Ñ'); // {{self}} + {{table:todos}} both rendered the row
   });
 });
 
@@ -1019,19 +1019,19 @@ test.describe('v3 dangling reference validation', () => {
 });
 
 test.describe('v3 unicode {{t:}} key', () => {
-  test('a non-ASCII (ä) {{t:}} key both resolves and is extracted', async ({ page }) => {
+  test('a non-ASCII (accented) {{t:}} key both resolves and is extracted', async ({ page }) => {
     test.setTimeout(20000);
     await page.goto('/');
     await page.waitForFunction(() => typeof appInstance !== 'undefined' && !!appInstance && typeof appInstance.mdBlocks === 'function');
     const result = await page.evaluate(() => {
-      appInstance.strings = Object.assign({}, appInstance.strings, { 'tehtävä.otsikko': 'Otsikko-ÄÖ' });
-      var resolved = appInstance.mdBlocks('{{t:tehtävä.otsikko}}', null).map(function (b) { return b.html || ''; }).join('');
-      // extractor uses the same broadened class -> confirm it captures the ä key
-      var extracted = /\{\{\s*t\s*:\s*([^\s{}:]+)\s*\}\}/.exec('{{t:tehtävä.otsikko}}');
+      appInstance.strings = Object.assign({}, appInstance.strings, { 'café.título': 'Título-ÑÇ' });
+      var resolved = appInstance.mdBlocks('{{t:café.título}}', null).map(function (b) { return b.html || ''; }).join('');
+      // extractor uses the same broadened class -> confirm it captures the accented key
+      var extracted = /\{\{\s*t\s*:\s*([^\s{}:]+)\s*\}\}/.exec('{{t:café.título}}');
       return { resolved: resolved, extracted: extracted && extracted[1] };
     });
-    expect(result.resolved).toContain('Otsikko-ÄÖ');     // resolver regex matched + substituted the ä key
-    expect(result.extracted).toBe('tehtävä.otsikko');    // extractor regex captures the ä key
+    expect(result.resolved).toContain('Título-ÑÇ');     // resolver regex matched + substituted the accented key
+    expect(result.extracted).toBe('café.título');    // extractor regex captures the accented key
   });
 });
 
@@ -1557,8 +1557,8 @@ test.describe('collectWith (role alongside date)', () => {
 test.describe('matchList (filter + filterBy + computed)', () => {
   const ML = {
     defaultLanguage: 'en',
-    tables: { events: { columns: [{ name: 'speaker', type: 'select', list: 'members' }, { name: 'guest', type: 'select', list: 'guests' }, { name: 'topic' }] } },
-    lists: { members: ['Alice', 'Bob'], guests: ['Charlie', 'Dave'] },
+    tables: { events: { columns: [{ name: 'speaker', type: 'select', list: 'staff' }, { name: 'guest', type: 'select', list: 'guests' }, { name: 'topic' }] } },
+    lists: { staff: ['Alice', 'Bob'], guests: ['Charlie', 'Dave'] },
     views: [
       { name: 'guest_events', sources: ['events'], mode: 'union', filter: { speaker: { matchList: 'guests' } }, columns: ['speaker', 'topic'] },
       { name: 'all', sources: ['events'], mode: 'union', columns: ['speaker', 'guest', 'topic', { name: 'visitors', computed: { fromColumns: ['speaker', 'guest'], matchList: 'guests' } }] }
@@ -2069,10 +2069,10 @@ test.describe('conditional computed columns (when)', () => {
       const a = window.appInstance;
       const mk = (when) => ({ config: when ? { when } : {} });
       return {
-        noWhen:  a.embedWhenOk(mk(null), { vieraat: '' }),                 // no when -> always show
-        match:   a.embedWhenOk(mk({ vieraat: { notEmpty: true } }), { vieraat: 'Matti' }),
-        noMatch: a.embedWhenOk(mk({ vieraat: { notEmpty: true } }), { vieraat: '' }),
-        orMatch: a.embedWhenOk(mk({ $or: [ { tila: 'x' }, { vieraat: { notEmpty: true } } ] }), { tila: '', vieraat: 'M' })
+        noWhen:  a.embedWhenOk(mk(null), { guests: '' }),                 // no when -> always show
+        match:   a.embedWhenOk(mk({ guests: { notEmpty: true } }), { guests: 'Alice' }),
+        noMatch: a.embedWhenOk(mk({ guests: { notEmpty: true } }), { guests: '' }),
+        orMatch: a.embedWhenOk(mk({ $or: [ { tila: 'x' }, { guests: { notEmpty: true } } ] }), { tila: '', guests: 'M' })
       };
     });
     expect(r).toEqual({ noWhen: true, match: true, noMatch: false, orMatch: true });
@@ -2097,14 +2097,14 @@ test.describe('multiselect column type', () => {
     const r = await page.evaluate(() => {
       const f = (typeof condMatches !== 'undefined') ? condMatches : window.condMatches;
       window._listsCache = window._listsCache || {};
-      window._listsCache.guests = ['Matti', 'Liisa'];
+      window._listsCache.guests = ['Alice', 'Bob'];
       const dv = window.appInstance && window.appInstance.displayValue;
       return {
-        anyMatch:     f({ h: ['Pekka', 'Liisa'] }, { h: { matchList: 'guests' } }), // Liisa in list -> true
-        noneMatch:    f({ h: ['Pekka', 'Sanna'] }, { h: { matchList: 'guests' } }), // none -> false
-        scalarStill:  f({ h: 'Matti' },            { h: { matchList: 'guests' } }), // scalar still works
-        notMatchAny:  f({ h: ['Pekka', 'Liisa'] }, { h: { notMatchList: 'guests' } }), // Liisa present -> false
-        displayJoin:  dv ? dv('h', ['Matti', 'Liisa']) : null,
+        anyMatch:     f({ h: ['Carol', 'Bob'] }, { h: { matchList: 'guests' } }), // Bob in list -> true
+        noneMatch:    f({ h: ['Carol', 'Dave'] }, { h: { matchList: 'guests' } }), // none -> false
+        scalarStill:  f({ h: 'Alice' },            { h: { matchList: 'guests' } }), // scalar still works
+        notMatchAny:  f({ h: ['Carol', 'Bob'] }, { h: { notMatchList: 'guests' } }), // Bob present -> false
+        displayJoin:  dv ? dv('h', ['Alice', 'Bob']) : null,
         displayEmpty: dv ? dv('h', []) : null
       };
     });
@@ -2112,7 +2112,7 @@ test.describe('multiselect column type', () => {
     expect(r.noneMatch).toBe(false);
     expect(r.scalarStill).toBe(true);
     expect(r.notMatchAny).toBe(false);
-    expect(r.displayJoin).toBe('Matti, Liisa');
+    expect(r.displayJoin).toBe('Alice, Bob');
     expect(r.displayEmpty).toBe('');
   });
 });
@@ -2127,9 +2127,9 @@ test.describe('rotation resolvers', () => {
         { id: 'c3', position: 3, people: ['D'] }
       ];
       const src = [
-        { id: 'k1', pvm: '2026-01-01' },
-        { id: 'k2', pvm: '2026-02-01' },
-        { id: 'k3', pvm: '2026-03-01' }
+        { id: 'k1', date: '2026-01-01' },
+        { id: 'k2', date: '2026-02-01' },
+        { id: 'k3', date: '2026-03-01' }
       ];
       const wi = window.wholeIntervalsBetween, ro = window.resolveByOccurrence, rc = window.resolveByCalendar;
       const ra = window.resolveAnchorDate;
@@ -2139,9 +2139,9 @@ test.describe('rotation resolvers', () => {
         wkly0:    wi('2026-01-01', '2026-01-05', 'weekly'),    // 4 days -> 0
         mon2:     wi('2026-01-01', '2026-03-01', 'monthly'),   // 2 months
         monPart:  wi('2026-01-15', '2026-02-10', 'monthly'),   // day 10 < 15 -> 0 full months
-        occ0:     ro(rot, src, src[0], 'pvm'),                 // index 0 -> ['A']
-        occ1:     ro(rot, src, src[1], 'pvm'),                 // index 1 -> ['B','C']
-        occLoop:  ro([rot[0], rot[1]], src, src[2], 'pvm'),    // index 2 % 2 = 0 -> ['A']
+        occ0:     ro(rot, src, src[0], 'date'),                 // index 0 -> ['A']
+        occ1:     ro(rot, src, src[1], 'date'),                 // index 1 -> ['B','C']
+        occLoop:  ro([rot[0], rot[1]], src, src[2], 'date'),    // index 2 % 2 = 0 -> ['A']
         cal2:     rc(rot, '2026-01-15', '2026-01-01', 'weekly'),  // elapsed 2 -> cells[2] ['D']
         calLoop:  rc(rot, '2026-01-22', '2026-01-01', 'weekly'),  // elapsed 3 % 3 = 0 -> ['A']
         calNeg:   rc(rot, '2025-12-25', '2026-01-01', 'weekly'),  // elapsed -1 -> negative-safe -> ['D']
@@ -2221,7 +2221,7 @@ test.describe('rotationView (third view kind, e2e)', () => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
       const view = { rotation: {
-        slots: ['alue_a', 'alue_b'], rosters: ['L_a', 'L_b'],
+        slots: ['area_a', 'area_b'], rosters: ['L_a', 'L_b'],
         advanceBy: 'calendar', interval: 'weekly', rotateEvery: 1,
         range: { from: '2026-01-01', periods: 4 }
       } };
@@ -2230,7 +2230,7 @@ test.describe('rotationView (third view kind, e2e)', () => {
         L_b: [{ position: 1, people: ['B0'] }, { position: 2, people: ['B1'] }]
       };
       return window.buildRotationViewRows(view, cache, '2026-01-01', '2026-01-01')
-        .map(function(x) { return { p: x._period, a: x.alue_a, b: x.alue_b }; });
+        .map(function(x) { return { p: x._period, a: x.area_a, b: x.area_b }; });
     });
     // even periods: a<-L_a, b<-L_b ; odd periods (s=1): swapped a<-L_b, b<-L_a. Member idx = period % 2.
     expect(r[0]).toEqual({ p: '2026-01-01', a: ['A0'], b: ['B0'] });
@@ -2243,7 +2243,7 @@ test.describe('rotationView (third view kind, e2e)', () => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
       const view = { rotation: {
-        slots: ['alue_a', 'alue_b'], rosters: ['L_a', 'L_b'],
+        slots: ['area_a', 'area_b'], rosters: ['L_a', 'L_b'],
         advanceBy: 'calendar', interval: 'weekly', rotateEvery: ['cycle'],
         range: { from: '2026-01-01', periods: 4 }
       } };
@@ -2252,7 +2252,7 @@ test.describe('rotationView (third view kind, e2e)', () => {
         L_b: [{ position: 1, people: ['B0'] }, { position: 2, people: ['B1'] }]
       };
       return window.buildRotationViewRows(view, cache, '2026-01-01', '2026-01-01')
-        .map(function(x) { return { p: x._period, a: x.alue_a, b: x.alue_b }; });
+        .map(function(x) { return { p: x._period, a: x.area_a, b: x.area_b }; });
     });
     // cycleLen=2: per-cycle swap flips every 2 periods. A0's duty turns (p0,p2) land in DIFFERENT slots.
     expect(r[0]).toEqual({ p: '2026-01-01', a: ['A0'], b: ['B0'] }); // s=0
@@ -2265,7 +2265,7 @@ test.describe('rotationView (third view kind, e2e)', () => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
       const view = { rotation: {
-        slots: ['alue_a', 'alue_b'], rosters: ['L_a', 'L_b'],
+        slots: ['area_a', 'area_b'], rosters: ['L_a', 'L_b'],
         advanceBy: 'calendar', interval: 'weekly', rotateEvery: [1, 'cycle'],
         range: { from: '2026-01-01', periods: 4 }
       } };
@@ -2274,7 +2274,7 @@ test.describe('rotationView (third view kind, e2e)', () => {
         L_b: [{ position: 1, people: ['B0'] }, { position: 2, people: ['B1'] }]
       };
       return window.buildRotationViewRows(view, cache, '2026-01-01', '2026-01-01')
-        .map(function(x) { return { p: x._period, a: x.alue_a, b: x.alue_b }; });
+        .map(function(x) { return { p: x._period, a: x.area_a, b: x.area_b }; });
     });
     // s = floor(i/1)%2 + floor(i/2)%2. i=0:0, i=1:1, i=2:1, i=3:2%2=0. memberIdx=i%2.
     expect(r[0]).toEqual({ p: '2026-01-01', a: ['A0'], b: ['B0'] }); // s=0
@@ -2290,17 +2290,17 @@ test.describe('rotationView embedding in data views', () => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
       const app = window.appInstance;
-      window.VIEWS.rota_e = { name: 'rota_e', rotation: { slots: ['alue_a', 'alue_b'], rosters: ['RL_a', 'RL_b'], advanceBy: 'calendar', interval: 'weekly', rotateEvery: 1, range: { from: '2026-01-01', periods: 2 } } };
+      window.VIEWS.rota_e = { name: 'rota_e', rotation: { slots: ['area_a', 'area_b'], rosters: ['RL_a', 'RL_b'], advanceBy: 'calendar', interval: 'weekly', rotateEvery: 1, range: { from: '2026-01-01', periods: 2 } } };
       window.VIEWS.host_e = { name: 'host_e', sources: ['tasks'], columns: ['title', { view: 'rota_e' }] };
       app.dataCache['RL_a'] = [{ position: 1, people: ['A0'] }];
       app.dataCache['RL_b'] = [{ position: 1, people: ['B0'] }];
       app.appConfig = Object.assign({}, app.appConfig, { rotationAnchors: { rota_e: '2026-01-01' } });
       app.currentTable = 'host_e';
       const rot = app.embedItems.find(function(e) { return e.isRotation; });
-      return rot ? { cols: rot.columns, rows: rot.rows.map(function(x) { return { p: x._period, a: x.alue_a, b: x.alue_b }; }) } : null;
+      return rot ? { cols: rot.columns, rows: rot.rows.map(function(x) { return { p: x._period, a: x.area_a, b: x.area_b }; }) } : null;
     });
     expect(r).not.toBeNull();                                   // the rotationView embed is recognized
-    expect(r.cols).toEqual(['_period', 'alue_a', 'alue_b']);    // period + slot columns
+    expect(r.cols).toEqual(['_period', 'area_a', 'area_b']);    // period + slot columns
     expect(r.rows[0]).toEqual({ p: '2026-01-01', a: ['A0'], b: ['B0'] });
     expect(r.rows[1]).toEqual({ p: '2026-01-08', a: ['B0'], b: ['A0'] }); // rotateEvery:1 swap
   });
@@ -2310,7 +2310,7 @@ test.describe('rotationView filter / hideEmpty / layout', () => {
   test('filter narrows generated periods', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
-      const view = { filter: { _period: '2026-01-15' }, rotation: { slots: ['alue_a'], rosters: ['R'], advanceBy: 'calendar', interval: 'weekly', rotateEvery: 0, range: { from: '2026-01-01', periods: 3 } } };
+      const view = { filter: { _period: '2026-01-15' }, rotation: { slots: ['area_a'], rosters: ['R'], advanceBy: 'calendar', interval: 'weekly', rotateEvery: 0, range: { from: '2026-01-01', periods: 3 } } };
       const cache = { R: [{ position: 1, people: ['A0'] }] };
       let rows = window.buildRotationViewRows(view, cache, '2026-01-01', '2026-01-01');
       rows = window.filterRows(rows, view.filter);
@@ -2323,16 +2323,16 @@ test.describe('rotationView filter / hideEmpty / layout', () => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
       const app = window.appInstance;
-      window.VIEWS.rot_he = { name: 'rot_he', layout: 'card', hideEmpty: true, rotation: { slots: ['alue_a', 'alue_b'], rosters: ['X', 'Y'] } };
+      window.VIEWS.rot_he = { name: 'rot_he', layout: 'card', hideEmpty: true, rotation: { slots: ['area_a', 'area_b'], rosters: ['X', 'Y'] } };
       app.currentTable = 'rot_he';
       app.currentData = [
-        { id: 'r0', _period: '2026-01-01', alue_a: ['A0'], alue_b: [] },
-        { id: 'r1', _period: '2026-01-08', alue_a: ['A1'], alue_b: [] }
+        { id: 'r0', _period: '2026-01-01', area_a: ['A0'], area_b: [] },
+        { id: 'r1', _period: '2026-01-08', area_a: ['A1'], area_b: [] }
       ];
       return { cols: app.rotationViewCols, slotCols: app.rotationSlotCols, layout: app.rotationLayout };
     });
-    expect(r.cols).toEqual(['_period', 'alue_a']); // alue_b empty in every period -> dropped
-    expect(r.slotCols).toEqual(['alue_a']);
+    expect(r.cols).toEqual(['_period', 'area_a']); // area_b empty in every period -> dropped
+    expect(r.slotCols).toEqual(['area_a']);
     expect(r.layout).toBe('card');
   });
 
@@ -2403,19 +2403,19 @@ test.describe('per-view rotation anchor', () => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
       const app = window.appInstance;
-      app.saveRotationAnchor('siivous', '2026-03-03');
-      app.saveRotationAnchor('doormen', '2026-05-05'); // different view -> different anchor
+      app.saveRotationAnchor('cleaning', '2026-03-03');
+      app.saveRotationAnchor('shifts', '2026-05-05'); // different view -> different anchor
       return {
-        siivous: app.anchorForView('siivous'),
-        doormen: app.anchorForView('doormen'),
+        cleaning: app.anchorForView('cleaning'),
+        shifts: app.anchorForView('shifts'),
         other: app.anchorForView('nope'),
         map: app.appConfig.rotationAnchors
       };
     });
-    expect(r.siivous).toBe('2026-03-03');
-    expect(r.doormen).toBe('2026-05-05'); // per-view anchors are independent
+    expect(r.cleaning).toBe('2026-03-03');
+    expect(r.shifts).toBe('2026-05-05'); // per-view anchors are independent
     expect(r.other).toBe('');
-    expect(r.map).toEqual({ siivous: '2026-03-03', doormen: '2026-05-05' });
+    expect(r.map).toEqual({ cleaning: '2026-03-03', shifts: '2026-05-05' });
   });
 });
 
@@ -2428,20 +2428,20 @@ test.describe('obscureNames (privacy)', () => {
       window.VIEWS.crewrota.obscureNames = true; // obscure this rotationView's area columns
       app.currentTable = 'crewrota';
       return {
-        one: o('Miikka Tuppurainen'),
-        two: o('Anna Maria Lehtimäki'),
+        one: o('John Smith'),
+        two: o('Alice Mary Brown'),
         single: o('Cher'),
         empty: o(''),
-        disp: app.displayValue('crew', 'Miikka Tuppurainen'),
-        arr: app.displayValue('crew', ['Aatos Suontausta', 'Anna Lehtimäki'])
+        disp: app.displayValue('crew', 'John Smith'),
+        arr: app.displayValue('crew', ['Charlie Green', 'Alice Brown'])
       };
     });
-    expect(r.one).toBe('Miikka T.');
-    expect(r.two).toBe('Anna M. L.');
+    expect(r.one).toBe('John S.');
+    expect(r.two).toBe('Alice M. B.');
     expect(r.single).toBe('Cher');
     expect(r.empty).toBe('');
-    expect(r.disp).toBe('Miikka T.');            // per-view obscuring via displayValue
-    expect(r.arr).toBe('Aatos S., Anna L.');      // multiselect: each member obscured then joined
+    expect(r.disp).toBe('John S.');            // per-view obscuring via displayValue
+    expect(r.arr).toBe('Charlie G., Alice B.');      // multiselect: each member obscured then joined
   });
 });
 
@@ -2536,22 +2536,22 @@ test.describe('list-item delete/rename cascade into table data', () => {
       const puts = [];
       window.backend.putRow = (t, row, part) => { puts.push(row.id + ':' + part); };
       app.tableMap = Object.assign({}, app.tableMap, { tasks: 'tasks' });
-      // status column gets a listSwitch alt list 'guests' (mirrors kokoukset puhe* : seurakuntalaiset + vieraat)
+      // status column gets a listSwitch alt list 'guests' (mirrors meetings puhe* : staff + guests)
       SCHEMA.tasks.columns.status.listSwitch = { list: 'guests', label: 'Guest' };
-      app.listsCache = { status: ['done'], guests: ['Matti'] }; // 'Matti' moved: added to guests, removed from status
+      app.listsCache = { status: ['done'], guests: ['Alice'] }; // 'Alice' moved: added to guests, removed from status
       app.dataCache['tasks'] = [
-        { id: 't1', status: 'Matti' },  // value lives in the alt list -> must be spared
-        { id: 't2', status: 'Pekka' }   // not in alt list -> must be scrubbed
+        { id: 't1', status: 'Alice' },  // value lives in the alt list -> must be spared
+        { id: 't2', status: 'Carol' }   // not in alt list -> must be scrubbed
       ];
       app.dataCache['tasks__archive'] = [];
-      app.propagateListChange('status', 'Matti', null); // delete 'Matti' from the primary list
+      app.propagateListChange('status', 'Alice', null); // delete 'Alice' from the primary list
       await new Promise(res => setTimeout(res, 30));
-      app.propagateListChange('status', 'Pekka', null); // control: a true orphan
+      app.propagateListChange('status', 'Carol', null); // control: a true orphan
       await new Promise(res => setTimeout(res, 30));
       delete SCHEMA.tasks.columns.status.listSwitch; // cleanup so other tests are unaffected
       return { t1: app.dataCache['tasks'][0].status, t2: app.dataCache['tasks'][1].status, puts: puts.sort() };
     });
-    expect(r.t1).toBe('Matti');   // spared: still valid via the alt list (the "move" is lossless)
+    expect(r.t1).toBe('Alice');   // spared: still valid via the alt list (the "move" is lossless)
     expect(r.t2).toBe('');        // scrubbed: genuine orphan, not in any list
     expect(r.puts).toEqual(['t2:active']); // only the orphan row was persisted
   });
