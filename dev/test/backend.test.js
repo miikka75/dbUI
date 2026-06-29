@@ -171,8 +171,8 @@ describe('languages', () => {
   });
   it('updateTranslations stores and retrieves', () => {
     backend.createLanguage('f1', 'fi', 'Finnish', []);
-    backend.updateTranslations('f1', 'fi', { 'app.title': 'Sovellus' });
-    assert.equal(backend.getTranslations('f1', 'fi')['app.title'], 'Sovellus');
+    backend.updateTranslations('f1', 'fi', { 'app.title': 'App' });
+    assert.equal(backend.getTranslations('f1', 'fi')['app.title'], 'App');
   });
   it('updateTranslations overwrites existing', () => {
     backend.createLanguage('f1', 'fi', 'Finnish', []);
