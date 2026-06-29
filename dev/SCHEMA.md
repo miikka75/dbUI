@@ -420,23 +420,31 @@ tables), with one shared `interval`/`advanceBy` and a `rotateEvery`:
 **Two independent clocks** drive it:
 1. **Per-roster member rotation** — each roster advances one slot per period on its **own length** (the
    rosters stay fully independent, can be different lengths, and are maintained separately — R3).
-2. **Roster→slot assignment rotation** — every `rotateEvery` periods the assignment shifts one step,
-   cyclically. At period `p`: `shift s = floor(p / rotateEvery) mod N` (N = number of rosters), and
-   `slot[k] ← roster[(k + s) mod N]` resolved at that roster's member index `p mod len`.
+2. **Roster→slot assignment rotation** — driven by `rotateEvery`, which is a **list of swap sources**
+   summed into one shift. At period `p`: `shift s = (Σ over sources) mod N` (N = number of rosters), and
+   `slot[k] ← roster[(k + s) mod N]` resolved at that roster's member index `p mod len`. Each source is:
+   - a **positive integer `n`** → `floor(p / n) mod N` (rotate one step every `n` periods), or
+   - **`"cycle"`** → `floor((phase + p) / L) mod N`, where `L` = the live length of `rosters[0]` and
+     `phase` anchors the boundary to the global anchor — rotates once per **full roster cycle**, so
+     even-length rosters alternate slots every duty turn (see parity below).
+   A **scalar is shorthand** for a 1-element list (`"rotateEvery": 1` ≡ `[1]`); `0`/omitted = no swap.
+   Sources are summed, so **order doesn't matter** and the result is always a permutation (no double-book).
 
 - **Swap is the `N=2`, `rotateEvery:1` case** — slots served `[a,b]`, then `[b,a]`, then `[a,b]`…
   (exactly the alternating doormen/cleanup pattern).
 - **Each period is a permutation** of rosters across slots (with `N = slots.length`), so **no slot is
   double-staffed or left empty**. Over `N` assignment-cycles every roster visits every slot.
 - **`rotateEvery: 0` / omitted** = no assignment rotation (each slot fixed to `rosters[k]`) — equivalent
-  to the `columns` form.
+  to the `columns` form. Useful list values: `[1]` per-period swap (≡ scalar `1`), `["cycle"]` per-cycle
+  swap, `[1, "cycle"]` both. Extra elements just superimpose more swap frequencies (valid but rarely useful).
 - **Anchor / interval**: the per-view `rotationAnchors[<viewName>]` (or a literal `anchorDate` on the
   `rotation`) anchors period 0; `interval` accepts the same values as elsewhere.
 - **N rosters vs M slots**: `N = M` → clean permutation (recommended). `N > M` → round-robin where
   `N − M` rosters "rest" each period and everyone eventually serves every slot. `N < M` → **rejected at
   load** (some slots would be unstaffed/double-booked).
 - **Validation**: every `rosters` table must exist; `advanceBy` (if set) must be `calendar`; `interval`
-  must be valid; `rosters.length` must be `>= slots.length`.
+  must be valid; `rosters.length` must be `>= slots.length`; every `rotateEvery` element must be a
+  non-negative integer or `"cycle"`.
 - **Embedding**: a data view can embed a rotationView via a `{ "view": "<rotationViewName>" }` column —
   it renders the generated period table inline (date + slot columns), e.g. a cleaning schedule shown
   inside a program view.
@@ -457,12 +465,16 @@ For the common `siivous` case (**`N=2`, `R=1`**, swap period = 2):
 - **Even `L`** → period parity is constant on each return → **locked**: even positions always slot 0,
   odd positions always slot 1. ⚠️
 
-This app uses `rotateEvery: 1` and **relies on odd-length lists** to guarantee everyone rotates
-through both areas. To make coverage hold for **any** length (even `L`), use **equal-length lists**
-and set `R = L` (swap once per full roster pass) — then every person flips area on each successive
-turn regardless of parity. With **unequal, independently-maintained** lengths, only "eventually
-covers both" is achievable (per-turn balance drifts), so equal lengths is the real requirement for a
-clean guarantee.
+This app can use `rotateEvery: [1]` and **rely on odd-length lists**, OR — the clean fix for **any**
+length — add the **`"cycle"`** source. `"cycle"` swaps once per full roster pass (cadence = live `L`),
+so every person flips slot on each successive duty turn regardless of parity, with no manual `R = L`
+bookkeeping when a roster grows or shrinks:
+- **`rotateEvery: ["cycle"]`** — per-cycle swap only; even-length rosters alternate slots every turn. ✅
+- **`rotateEvery: [1, "cycle"]`** — per-period spread **and** per-cycle alternation, summed.
+
+For equal-length lists the older `R = L` trick still works; `"cycle"` generalizes it to the live length.
+With **unequal, independently-maintained** lengths only "eventually covers both" is achievable (per-turn
+balance drifts), so equal lengths remains the requirement for a strict per-turn guarantee.
 
 ### Worked example (occurrence + calendar end-to-end)
 An event needs **security** (one team per session — occurrence-driven) and a two-zone **cleanup**
