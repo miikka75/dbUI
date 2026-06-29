@@ -16,6 +16,12 @@
 <body>
   <div id="app-root"></div>
   <script>
+    // Boot-phase instrumentation: each mark() records ms-since-navigation so a test
+    // (or the browser console) can attribute blank time to a specific phase.
+    window.__bootPhases = {};
+    function bootMark(name) { window.__bootPhases[name] = performance.now(); }
+    bootMark('loadAppStart');
+
     async function loadApp() {
       // Shared-link support: persist URL params to localStorage, then read mode.
       // shareLink generates: ?mode=firebase&k=<apiKey>&d=<authDomain>&p=<projectId>
@@ -64,12 +70,15 @@
         fetch('/app-core.html'),
         fetch(backendFile)
       ]);
+      bootMark('fragmentsFetched');
 
       document.head.insertAdjacentHTML('beforeend', await styleResp.text());
       document.getElementById('app-root').innerHTML = await uiResp.text();
+      bootMark('fragmentsApplied');
 
       await loadScript('/vendor/vue.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vue@3.5.34/dist/vue.global.prod.js'); });
       await loadScript('/vendor/vuetify.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vuetify@4.0.7/dist/vuetify.min.js'); });
+      bootMark('vueLibsLoaded');
 
       // Shared pure backend helpers (used by Firebase + CRDT backends)
       if (backendFile === '/backend-firebase.html' || backendFile === '/backend-crdt.html' || backendFile === '/backend-crdt-local.html') {
@@ -84,10 +93,12 @@
         await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js');
         await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js');
       }
+      bootMark('sdkLoaded');
 
       execScript(await (await fetch('/schema-loader.html')).text());
       execScript(await coreResp.text());
       createVueApp();
+      bootMark('vueMounted');
       // Load shared auth before backend for OAuth/CRDT(Drive)
       if (backendFile === '/backend-oauth.html' || backendFile === '/backend-crdt.html') {
         var authResp = await fetch('/auth-oauth.html');
