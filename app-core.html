@@ -2357,6 +2357,12 @@ function createVueApp() {
     },
 
     watch: {
+      loading: function(v) {
+        // Boot-time marker for perf measurement: record ms from navigation to first ready state.
+        if (!v && typeof window !== 'undefined' && window.__bootMs == null) {
+          try { window.__bootMs = (window.performance && performance.now) ? performance.now() : (Date.now() - (window.__bootStart || Date.now())); } catch (e) {}
+        }
+      },
       schemaData: { immediate: true, handler: function(s) {
         // Per-database icons: favicon + apple-touch from schema.icons (or static defaults); the
         // runtime manifest carries the per-database name, theme color, and install icons.
