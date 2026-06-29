@@ -89,6 +89,30 @@ const server = http.createServer(async (req, res) => {
       case 'getFolderConfig': return json(res, backend.getFolderConfig('local'));
       case 'setFolderConfig': backend.setFolderConfig('local', body.config); return json(res, { ok: true });
       case 'initSchema': if (!body.schema) return json(res, {}); return json(res, backend.initSchema('local', body.schema));
+      case 'bootData': {
+        // One-round-trip boot: schema + tableMap + languages + lists + all accessible table data,
+        // read in-process (SQLite). Access-filtered server-side (per-table + per-list) by X-User.
+        const schemaB = backend.getSchema('local');
+        if (!schemaB) return json(res, { schema: null }); // first boot: client saves the default schema
+        const tablesB = schemaB.tables || {};
+        const tableMapB = backend.initSchema('local', tablesB);
+        const languagesB = backend.getAvailableLanguages('local');
+        const allowedB = getAllowedTables(); // null => unrestricted (admin / no users)
+        let listsB = backend.getLists('local');
+        if (allowedB) {
+          const f = {};
+          Object.keys(listsB).forEach(name => { if (listOwningTables(tablesB, name).some(t => allowedB.indexOf(t) >= 0)) f[name] = listsB[name]; });
+          listsB = f;
+        }
+        const dataB = {};
+        Object.keys(tableMapB).forEach(name => {
+          if (allowedB && allowedB.indexOf(name) < 0) return; // skip tables the user can't access
+          try { dataB[name] = backend.getTableData(tableMapB[name], 'active'); } catch (e) {}
+          const def = tablesB[name];
+          if (def && def.archivable) { try { dataB[name + '__archive'] = backend.getTableData(tableMapB[name], 'archive'); } catch (e) {} }
+        });
+        return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), tableMap: tableMapB, languages: languagesB, lists: listsB, data: dataB });
+      }
       case 'resetData': backend.resetData(); backend._users = undefined; saveUsers(); return json(res, { ok: true });
       case 'getAvailableTables': return json(res, backend.getAvailableTables('local'));
       case 'serverInfo': return json(res, { storage: USE_FS ? 'fs' : 'sqlite' });
