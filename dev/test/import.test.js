@@ -6,8 +6,8 @@ let backend;
 
 // Schema with custom partition names (like the Finnish church schema)
 const CUSTOM_SCHEMA = {
-  musiikki: { columns: ['id', 'pvm', 'aihe'], partition: 'tulevat', archivePartition: 'menneet' },
-  kokoukset: { columns: ['id', 'pvm', 'paikka'], partition: 'tulevat', archivePartition: 'menneet' }
+  music: { columns: ['id', 'date', 'topic'], partition: 'upcoming', archivePartition: 'past' },
+  meetings: { columns: ['id', 'date', 'place'], partition: 'upcoming', archivePartition: 'past' }
 };
 
 beforeEach(() => { backend = createLocalBackend(); });
@@ -17,18 +17,18 @@ describe('Import - initSchema creates tables for custom partitions', () => {
   it('creates partition + archivePartition tables', () => {
     backend.initSchema('local', CUSTOM_SCHEMA);
     // putRow must succeed (no "no such table") for custom partition
-    backend.putRow('musiikki', { id: 'm1', pvm: '2026-06-01', aihe: 'Test' }, 'tulevat');
-    backend.putRow('musiikki', { id: 'm2', pvm: '2026-05-01', aihe: 'Old' }, 'menneet');
-    assert.equal(backend.getTableData('musiikki', 'tulevat').rows.length, 1);
-    assert.equal(backend.getTableData('musiikki', 'menneet').rows.length, 1);
+    backend.putRow('music', { id: 'm1', date: '2026-06-01', topic: 'Test' }, 'upcoming');
+    backend.putRow('music', { id: 'm2', date: '2026-05-01', topic: 'Old' }, 'past');
+    assert.equal(backend.getTableData('music', 'upcoming').rows.length, 1);
+    assert.equal(backend.getTableData('music', 'past').rows.length, 1);
   });
 
   it('getTableData returns correct rows by partition', () => {
     backend.initSchema('local', CUSTOM_SCHEMA);
-    backend.putRow('kokoukset', { id: 'k1', pvm: '2026-06-01', paikka: 'Hall' }, 'tulevat');
-    var result = backend.getTableData('kokoukset', 'tulevat');
+    backend.putRow('meetings', { id: 'k1', date: '2026-06-01', place: 'Hall' }, 'upcoming');
+    var result = backend.getTableData('meetings', 'upcoming');
     assert.equal(result.rows.length, 1);
-    assert.equal(result.rows[0].paikka, 'Hall');
+    assert.equal(result.rows[0].place, 'Hall');
   });
 });
 
@@ -37,7 +37,7 @@ describe('Import - schema persistence and reset', () => {
     backend.saveSchema('local', { tables: CUSTOM_SCHEMA, defaultLanguage: 'fi' });
     var s = backend.getSchema('local');
     assert.equal(s.defaultLanguage, 'fi');
-    assert.ok(s.tables.musiikki);
+    assert.ok(s.tables.music);
   });
 
   it('getSchema returns null when nothing saved (no schema.json fallback)', () => {
@@ -47,7 +47,7 @@ describe('Import - schema persistence and reset', () => {
   it('resetData drops tables, schema, lists, languages, changesets', () => {
     backend.initSchema('local', CUSTOM_SCHEMA);
     backend.saveSchema('local', { tables: CUSTOM_SCHEMA });
-    backend.putRow('musiikki', { id: 'm1', pvm: '2026-06-01', aihe: 'X' }, 'tulevat');
+    backend.putRow('music', { id: 'm1', date: '2026-06-01', topic: 'X' }, 'upcoming');
     backend.saveLists('local', { genre: ['hymn'] });
     backend.createLanguage('local', 'fi', 'Finnish', ['hello']);
     backend.saveChangesets('local', 'site-a', '{"changes":[]}');
@@ -60,17 +60,17 @@ describe('Import - schema persistence and reset', () => {
     assert.equal(backend.getAvailableLanguages('local').length, 0);
     assert.equal(backend.loadChangesets('local', '').length, 0);
     // Table dropped -> getTableData returns empty (no rows)
-    assert.equal(backend.getTableData('musiikki', 'tulevat').rows.length, 0);
+    assert.equal(backend.getTableData('music', 'upcoming').rows.length, 0);
   });
 
   it('after reset, re-import works cleanly', () => {
     backend.initSchema('local', CUSTOM_SCHEMA);
-    backend.putRow('musiikki', { id: 'm1', pvm: '2026-06-01', aihe: 'X' }, 'tulevat');
+    backend.putRow('music', { id: 'm1', date: '2026-06-01', topic: 'X' }, 'upcoming');
     backend.resetData();
     // Re-import
     backend.initSchema('local', CUSTOM_SCHEMA);
-    backend.putRow('musiikki', { id: 'm2', pvm: '2026-06-02', aihe: 'Y' }, 'tulevat');
-    var result = backend.getTableData('musiikki', 'tulevat');
+    backend.putRow('music', { id: 'm2', date: '2026-06-02', topic: 'Y' }, 'upcoming');
+    var result = backend.getTableData('music', 'upcoming');
     assert.equal(result.rows.length, 1);
     assert.equal(result.rows[0].id, 'm2');
   });
