@@ -29,7 +29,7 @@ function runFileStoreTests(name, makeBackend, teardown) {
     });
 
     it('deleteFile removes the file', () => {
-      b.writeFile('local', 'lang_fi.json', { hello: 'Hei' });
+      b.writeFile('local', 'lang_fi.json', { hello: 'Hello' });
       b.deleteFile('local', 'lang_fi.json');
       assert.equal(b.readFile('local', 'lang_fi.json'), null);
     });
