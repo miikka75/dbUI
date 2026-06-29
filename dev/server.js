@@ -19,17 +19,24 @@ function listOwningTables(schemaTables, listName) {
   return out;
 }
 
-const PORT = 3000;
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const USE_FS = process.argv.includes('--fs');
+// APP_DB overrides the SQLite path; ":memory:" (or empty) uses an isolated in-memory DB — tests set
+// this so they never read or clobber the real dev local.db. Default stays dev/local.db.
+const APP_DB = process.env.APP_DB;
+const DB_PATH = (APP_DB && APP_DB !== ':memory:') ? path.resolve(__dirname, APP_DB) : undefined;
 const backend = USE_FS
   ? require('./storage-fs').createFsBackend(path.join(__dirname, 'data'))
-  : require('./backend-local').createLocalBackend(path.join(__dirname, 'local.db'));
+  : require('./backend-local').createLocalBackend(APP_DB === ':memory:' ? undefined : (DB_PATH || path.join(__dirname, 'local.db')));
 const STATIC_DIR = path.join(__dirname, '..');
 
 // No auto-init -- schema must be imported explicitly
 
-// Persist users to file
-const USERS_PATH = path.join(__dirname, 'users.json');
+// Persist users to file. In isolated (in-memory test) mode use a throwaway path so resetData/test
+// runs never overwrite the real dev users.json.
+const USERS_PATH = (APP_DB === ':memory:')
+  ? path.join(__dirname, 'test-ui', '.test-users.json')
+  : path.join(__dirname, 'users.json');
 if (fs.existsSync(USERS_PATH)) backend._users = JSON.parse(fs.readFileSync(USERS_PATH, 'utf8'));
 function saveUsers() { fs.writeFileSync(USERS_PATH, JSON.stringify(backend._users || {}, null, 2)); }
 
