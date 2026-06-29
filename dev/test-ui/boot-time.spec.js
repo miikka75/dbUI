@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const SCHEMA = require('./fixture-schema.json');
 
 // Measures app boot time AND attributes it to each phase, so blank-screen time can be
 // quantified rather than guessed. All numbers are ms-since-navigation (performance.now()).
@@ -24,6 +25,13 @@ const TARGET = process.env.BOOT_URL || '/';
 
 test('boot time + phase breakdown reported', async ({ page }) => {
   test.setTimeout(60000);
+  // Local target: seed the isolated in-memory fixture DB + set local mode so the app boots with data
+  // (mirrors ensureAppReady). External BOOT_URL targets a deployed site — never seed there.
+  if (TARGET === '/') {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCHEMA } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+  }
   await page.goto(TARGET, { waitUntil: 'load' });
 
   // Best-effort: give the instrumented build time to flip loading=false. If __bootMs never
