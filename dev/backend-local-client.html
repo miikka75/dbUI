@@ -7,6 +7,7 @@ backend = {
   getFolderConfig: (folderId) => _post('getFolderConfig', { folderId }),
   setFolderConfig: (folderId, config) => _post('setFolderConfig', { folderId, config }),
   initSchema: (folderId, schema) => _post('initSchema', { folderId, schema }),
+  bootData: (folderId) => _post('bootData', { folderId }),
   getAvailableTables: (folderId) => _post('getAvailableTables', { folderId }),
   getAvailableLanguages: (folderId) => _post('getAvailableLanguages', { folderId }),
   getTableData: (tableId, tab) => _post('getTableData', { tableId, tab }),
