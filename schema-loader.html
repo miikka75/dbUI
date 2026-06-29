@@ -344,6 +344,9 @@ function addIntervals(dateStr, n, interval) {
 //   (b) areas+lists (rotating): the list→area assignment cyclically rotates one step every
 //       `rotateEvery` periods — generalizes "swap" (2 lists, rotateEvery 1) to N lists / M areas.
 //       Each list still advances on its OWN length; only which list feeds which area rotates.
+//       `rotateEvery` may be a list of summed swap sources: a positive int n (rotate every n periods)
+//       or "cycle" (rotate once per full roster cycle so EVEN-length rosters alternate slots). E.g.
+//       [1,"cycle"] = per-period swap AND per-cycle swap. A scalar is shorthand for a 1-element list.
 function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor, rangeOverride) {
   var rv = view && view.rotation; if (!rv) return [];
   var range = rangeOverride || rv.range || {}; // DB-backed per-view range override (folder config) wins over schema
@@ -354,12 +357,28 @@ function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor, rangeO
   if (rv.slots && rv.rosters) {
     var slots = rv.slots, rosters = rv.rosters, N = rosters.length;
     var interval = rv.interval || 'weekly';
-    var rotateEvery = rv.rotateEvery || 0;
     var anchor = resolveAnchorDate(rv, rotationAnchor);
+    // Slot-swap sources. `rotateEvery` is a list of independent offsets that are SUMMED into s, then
+    // slot k <- rosters[(k + s) % N] (a bijection for any integer s -> never double-books). Each source:
+    //   * positive integer n -> floor(i/n) % N (period swap: rotate one step every n periods).
+    //   * "cycle"            -> floor((phase+i)/L) % N where L = live roster length (rosters[0]) and
+    //     phase aligns the boundary to the global anchor -- rotates once per FULL roster cycle so even-
+    //     length rosters alternate slots every duty turn (fixes the parity lock). 
+    // A scalar is shorthand for a 1-element list (rotateEvery: 1 == [1]); 0/absent == no swap.
+    // Common: [1] fast only, ["cycle"] per-cycle only, [1,"cycle"] both. Member index within a roster
+    // advances one step per period (resolveByCalendar) independent of these offsets.
+    var sources = (rv.rotateEvery == null) ? []
+      : (Array.isArray(rv.rotateEvery) ? rv.rotateEvery : [rv.rotateEvery]);
+    var cycleLen = sources.indexOf('cycle') >= 0 ? ((dataCache[rosters[0]] || []).length || 0) : 0;
+    var phase = cycleLen > 0 ? wholeIntervalsBetween(anchor, from, interval) : 0;
     for (i = 0; i < periods; i++) {
       target = addIntervals(from, i, interval);
       row = { id: 'rv' + i, _period: target };
-      var s = (rotateEvery > 0 && N) ? (Math.floor(i / rotateEvery) % N) : 0;
+      var s = 0;
+      if (N) sources.forEach(function(src) {
+        if (src === 'cycle') { if (cycleLen > 0) s += Math.floor((phase + i) / cycleLen) % N; }
+        else if (typeof src === 'number' && src > 0) { s += Math.floor(i / src) % N; }
+      });
       slots.forEach(function(slot, k) {
         var rosterName = N ? rosters[(((k + s) % N) + N) % N] : null;
         row[slot] = resolveByCalendar(dataCache[rosterName] || [], target, anchor, interval);
@@ -450,6 +469,13 @@ function validateSchema() {
         if (!isValidInterval(rvv.interval)) errors.push('rotationView "' + v + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
         (rvv.rosters || []).forEach(function(t3) { if (!SCHEMA[t3]) errors.push('rotationView "' + v + '" references non-existent roster table "' + t3 + '"'); });
         if ((rvv.rosters || []).length < (rvv.slots || []).length) errors.push('rotationView "' + v + '": fewer rosters (' + (rvv.rosters || []).length + ') than slots (' + (rvv.slots || []).length + ') — some slots would be unstaffed or double-booked each period');
+        if (rvv.rotateEvery != null) {
+          var _re = Array.isArray(rvv.rotateEvery) ? rvv.rotateEvery : [rvv.rotateEvery];
+          _re.forEach(function(_e) {
+            var _ok = (_e === 'cycle') || (typeof _e === 'number' && _e >= 0 && _e === Math.floor(_e));
+            if (!_ok) errors.push('rotationView "' + v + '" rotateEvery elements must be a non-negative integer or "cycle" (got ' + JSON.stringify(_e) + ')');
+          });
+        }
       } else {
       (view.rotation.columns || []).forEach(function(c) {
         var nm = (c && c.name) || '?';
