@@ -112,43 +112,43 @@ describe('FS Backend - Lists', () => {
 
 describe('FS Backend - Languages', () => {
   it('createLanguage persists language file', () => {
-    backend.createLanguage('local', 'fi', 'Finnish', ['hello', 'world']);
+    backend.createLanguage('local', 'xx', 'TestLang', ['hello', 'world']);
     assert.ok(fs.existsSync(path.join(DATA_DIR, 'languages.json')));
-    assert.ok(fs.existsSync(path.join(DATA_DIR, 'lang_fi.json')));
+    assert.ok(fs.existsSync(path.join(DATA_DIR, 'lang_xx.json')));
     var langs = backend.getAvailableLanguages('local');
     assert.equal(langs.length, 1);
-    assert.equal(langs[0].code, 'fi');
+    assert.equal(langs[0].code, 'xx');
   });
 
   it('getTranslations returns empty keys', () => {
-    backend.createLanguage('local', 'fi', 'Finnish', ['hello', 'world']);
-    var t = backend.getTranslations('local', 'fi');
+    backend.createLanguage('local', 'xx', 'TestLang', ['hello', 'world']);
+    var t = backend.getTranslations('local', 'xx');
     assert.equal(t.hello, '');
     assert.equal(t.world, '');
   });
 
   it('updateTranslations persists', () => {
-    backend.createLanguage('local', 'fi', 'Finnish', ['hello']);
-    backend.updateTranslations('local', 'fi', { hello: 'Hello' });
-    var t = backend.getTranslations('local', 'fi');
+    backend.createLanguage('local', 'xx', 'TestLang', ['hello']);
+    backend.updateTranslations('local', 'xx', { hello: 'Hello' });
+    var t = backend.getTranslations('local', 'xx');
     assert.equal(t.hello, 'Hello');
   });
 
   it('deleteLanguage removes files', () => {
-    backend.createLanguage('local', 'fi', 'Finnish', ['hello']);
-    backend.deleteLanguage('local', 'fi');
+    backend.createLanguage('local', 'xx', 'TestLang', ['hello']);
+    backend.deleteLanguage('local', 'xx');
     assert.equal(backend.getAvailableLanguages('local').length, 0);
-    assert.ok(!fs.existsSync(path.join(DATA_DIR, 'lang_fi.json')));
+    assert.ok(!fs.existsSync(path.join(DATA_DIR, 'lang_xx.json')));
   });
 
   it('renameLanguage updates name, keeps code + translations file', () => {
-    backend.createLanguage('local', 'fi', 'Finnish', ['hello']);
-    backend.updateTranslations('local', 'fi', { hello: 'Hei' });
-    backend.renameLanguage('local', 'fi', 'Suomi');
+    backend.createLanguage('local', 'xx', 'TestLang', ['hello']);
+    backend.updateTranslations('local', 'xx', { hello: 'Hi' });
+    backend.renameLanguage('local', 'xx', 'Renamed');
     var langs = backend.getAvailableLanguages('local');
-    assert.equal(langs[0].code, 'fi');                       // code stable
-    assert.equal(langs[0].name, 'Suomi');                    // name renamed
-    assert.equal(backend.getTranslations('local', 'fi').hello, 'Hei'); // translations intact
+    assert.equal(langs[0].code, 'xx');                       // code stable
+    assert.equal(langs[0].name, 'Renamed');                    // name renamed
+    assert.equal(backend.getTranslations('local', 'xx').hello, 'Hi'); // translations intact
   });
 });
 
@@ -234,8 +234,8 @@ describe('FS Backend - CRDT export/import round-trip', () => {
     backend.initSchema('local', SCHEMA);
     backend.saveSchema('local', { tables: SCHEMA });
     backend.saveLists('local', { status: ['open', 'done'], priority: ['high', 'low'] });
-    backend.createLanguage('local', 'fi', 'Finnish', ['greeting', 'bye']);
-    backend.updateTranslations('local', 'fi', { greeting: 'Hello', bye: 'Goodbye' });
+    backend.createLanguage('local', 'xx', 'TestLang', ['greeting', 'bye']);
+    backend.updateTranslations('local', 'xx', { greeting: 'Hello', bye: 'Goodbye' });
 
     // Verify all persisted correctly
     var schema = backend.getSchema('local');
@@ -248,9 +248,9 @@ describe('FS Backend - CRDT export/import round-trip', () => {
 
     var langs = backend.getAvailableLanguages('local');
     assert.equal(langs.length, 1);
-    assert.equal(langs[0].code, 'fi');
+    assert.equal(langs[0].code, 'xx');
 
-    var trans = backend.getTranslations('local', 'fi');
+    var trans = backend.getTranslations('local', 'xx');
     assert.equal(trans.greeting, 'Hello');
     assert.equal(trans.bye, 'Goodbye');
   });
