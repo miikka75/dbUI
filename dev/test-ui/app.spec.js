@@ -1738,24 +1738,24 @@ test.describe('Page {{t:key}} translatable token', () => {
 
   test('renameLanguage decouples name from code: rename preserves code + translations', async ({ page }) => {
     await page.request.post('/api/resetData');
-    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'fi', name: 'Suomi', keys: ['app.title'] } });
-    await page.request.post('/api/updateTranslations', { data: { folderId: 'local', langCode: 'fi', updates: { 'app.title': 'Sovellus' } } });
-    // Rename the (default) language's display name — code 'fi' must stay, translations must survive
-    const r = await page.request.post('/api/renameLanguage', { data: { folderId: 'local', code: 'fi', name: 'Finnish' } });
+    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'xx', name: 'TestLang', keys: ['app.title'] } });
+    await page.request.post('/api/updateTranslations', { data: { folderId: 'local', langCode: 'xx', updates: { 'app.title': 'Hello' } } });
+    // Rename the (default) language's display name — code 'xx' must stay, translations must survive
+    const r = await page.request.post('/api/renameLanguage', { data: { folderId: 'local', code: 'xx', name: 'Renamed' } });
     expect(r.ok()).toBeTruthy();
     const langs = await (await page.request.post('/api/getAvailableLanguages', { data: {} })).json();
-    const fi = langs.find(l => l.code === 'fi');
-    expect(fi).toBeTruthy();             // code 'fi' still present (stable)
-    expect(fi.name).toBe('Finnish');     // display name updated
-    const tr = await (await page.request.post('/api/getTranslations', { data: { folderId: 'local', langCode: 'fi' } })).json();
-    expect(tr['app.title']).toBe('Sovellus'); // translations preserved across rename
+    const lang = langs.find(l => l.code === 'xx');
+    expect(lang).toBeTruthy();             // code 'xx' still present (stable)
+    expect(lang.name).toBe('Renamed');     // display name updated
+    const tr = await (await page.request.post('/api/getTranslations', { data: { folderId: 'local', langCode: 'xx' } })).json();
+    expect(tr['app.title']).toBe('Hello'); // translations preserved across rename
   });
 
   test('deleting the default language repoints the default to a remaining language', async ({ page }) => {
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: { defaultLanguage: 'en', tables: { t: { columns: [{ name: 'a', type: 'text' }] } }, views: [{ table: 't' }], nav: { items: [{ table: 't' }] } } } });
     await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'en', name: 'English', keys: ['tab.t'] } });
-    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'fi', name: 'Suomi', keys: ['tab.t'] } });
+    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'xx', name: 'TestLang', keys: ['tab.t'] } });
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
@@ -1768,9 +1768,9 @@ test.describe('Page {{t:key}} translatable token', () => {
       return { langs: app.languages.map(l => l.code), def: app.defaultLanguage, schemaDef: app.schemaData.defaultLanguage };
     });
     expect(r.langs).not.toContain('en');   // default was deletable
-    expect(r.langs).toContain('fi');
-    expect(r.def).toBe('fi');              // default repointed to the remaining language
-    expect(r.schemaDef).toBe('fi');        // repoint persisted to schema
+    expect(r.langs).toContain('xx');
+    expect(r.def).toBe('xx');              // default repointed to the remaining language
+    expect(r.schemaDef).toBe('xx');        // repoint persisted to schema
   });
 
   test('deleting the last language clears default and falls back to raw keys', async ({ page }) => {
@@ -2353,7 +2353,7 @@ test.describe('reorderable tables: position seeding on add', () => {
       try { app.addRow(); } catch (e) {}
       return (app.dataCache['crew_rotation'] || []).map(function (x) { return x.position; });
     });
-    expect(r).toEqual(['1', '2']); // seeded sequentially — empty positions were the church-siivous bug
+    expect(r).toEqual(['1', '2']); // seeded sequentially — empty positions were the partial-position bug
   });
 });
 
@@ -2533,7 +2533,7 @@ test.describe('reorderable tables (up/down)', () => {
       app.sortCol = 'position'; app.sortAsc = true;
       app.viewingArchive = false;
       // 12 rows positioned "1".."12" as strings (how moveRowPosition/addRow store them).
-      // Lexicographic sort would give 1,10,11,12,2,...,9 — the church-siivous "whole table shuffles" bug.
+      // Lexicographic sort would give 1,10,11,12,2,...,9 — the partial-position "whole table shuffles" bug.
       app.currentData = [];
       for (var i = 1; i <= 12; i++) app.currentData.push({ id: 'r' + i, position: String(i), people: ['P' + i] });
       var displayed = app.sortedData.map(function(x) { return x.position; });
