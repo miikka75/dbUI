@@ -140,6 +140,16 @@ describe('FS Backend - Languages', () => {
     assert.equal(backend.getAvailableLanguages('local').length, 0);
     assert.ok(!fs.existsSync(path.join(DATA_DIR, 'lang_fi.json')));
   });
+
+  it('renameLanguage updates name, keeps code + translations file', () => {
+    backend.createLanguage('local', 'fi', 'Finnish', ['hello']);
+    backend.updateTranslations('local', 'fi', { hello: 'Hei' });
+    backend.renameLanguage('local', 'fi', 'Suomi');
+    var langs = backend.getAvailableLanguages('local');
+    assert.equal(langs[0].code, 'fi');                       // code stable
+    assert.equal(langs[0].name, 'Suomi');                    // name renamed
+    assert.equal(backend.getTranslations('local', 'fi').hello, 'Hei'); // translations intact
+  });
 });
 
 describe('FS Backend - Folder config', () => {
