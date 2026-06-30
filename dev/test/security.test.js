@@ -45,11 +45,11 @@ describe('Security - SQLite identifier injection', () => {
     assert.deepEqual(b.getAvailableTables('local').map(t => t.id), ['real']);
   });
 
-  it('non-ASCII table/column names work (Finnish)', () => {
-    b.initSchema('local', { 'todos': { columns: ['id', 'topic'], partition: 'upcoming' } });
-    b.putRow('todos', { id: 't1', topic: 'Test' }, 'upcoming');
-    const r = b.getTableData('todos', 'upcoming');
+  it('non-ASCII table/column names work', () => {
+    b.initSchema('local', { 'café': { columns: ['id', 'résumé'], partition: 'upcoming' } });
+    b.putRow('café', { id: 't1', 'résumé': 'Test' }, 'upcoming');
+    const r = b.getTableData('café', 'upcoming');
     assert.equal(r.rows.length, 1);
-    assert.equal(r.rows[0].topic, 'Test');
+    assert.equal(r.rows[0]['résumé'], 'Test');
   });
 });
