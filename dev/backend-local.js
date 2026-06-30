@@ -241,6 +241,11 @@ function createLocalBackend(dbPath) {
       db.prepare('DELETE FROM _translations WHERE code = ?').run(code);
     },
 
+    // Rename display name only; code + translations (keyed by code) are preserved.
+    renameLanguage(folderId, code, name) {
+      db.prepare('UPDATE _languages SET name = ? WHERE code = ?').run(name, code);
+    },
+
     getFileModifiedTime(fileId) {
       return new Date().toISOString();
     },
