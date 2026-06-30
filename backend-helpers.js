@@ -27,6 +27,12 @@
       return (list || []).filter(function(l) { return l.code !== code; });
     },
 
+    // Rename a language's display NAME by code (code stays stable) — non-mutating.
+    // Decouples display name from the stable code used to key translations.
+    renameLanguage: function(list, code, newName) {
+      return (list || []).map(function(l) { return l.code === code ? { code: l.code, name: newName } : l; });
+    },
+
     // Build an empty-string translation map from keys
     emptyTranslations: function(keys) {
       var t = {}; if (keys) keys.forEach(function(k) { t[k] = ''; }); return t;
