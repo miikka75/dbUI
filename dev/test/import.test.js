@@ -4,7 +4,7 @@ const { createLocalBackend } = require('../backend-local');
 
 let backend;
 
-// Schema with custom partition names (like the Finnish church schema)
+// Schema with custom partition names
 const CUSTOM_SCHEMA = {
   music: { columns: ['id', 'date', 'topic'], partition: 'upcoming', archivePartition: 'past' },
   meetings: { columns: ['id', 'date', 'place'], partition: 'upcoming', archivePartition: 'past' }
@@ -34,9 +34,9 @@ describe('Import - initSchema creates tables for custom partitions', () => {
 
 describe('Import - schema persistence and reset', () => {
   it('saveSchema + getSchema round-trips imported schema', () => {
-    backend.saveSchema('local', { tables: CUSTOM_SCHEMA, defaultLanguage: 'fi' });
+    backend.saveSchema('local', { tables: CUSTOM_SCHEMA, defaultLanguage: 'xx' });
     var s = backend.getSchema('local');
-    assert.equal(s.defaultLanguage, 'fi');
+    assert.equal(s.defaultLanguage, 'xx');
     assert.ok(s.tables.music);
   });
 
@@ -49,7 +49,7 @@ describe('Import - schema persistence and reset', () => {
     backend.saveSchema('local', { tables: CUSTOM_SCHEMA });
     backend.putRow('music', { id: 'm1', date: '2026-06-01', topic: 'X' }, 'upcoming');
     backend.saveLists('local', { genre: ['hymn'] });
-    backend.createLanguage('local', 'fi', 'Finnish', ['hello']);
+    backend.createLanguage('local', 'xx', 'TestLang', ['hello']);
     backend.saveChangesets('local', 'site-a', '{"changes":[]}');
 
     backend.resetData();
