@@ -131,6 +131,7 @@ const server = http.createServer(async (req, res) => {
       case 'updateTranslations': backend.updateTranslations(body.folderId || 'local', body.langCode, body.updates); return json(res, { ok: true });
       case 'createLanguage': return json(res, { id: backend.createLanguage(body.folderId || 'local', body.code, body.name, body.keys) });
       case 'deleteLanguage': backend.deleteLanguage(body.folderId || 'local', body.code); return json(res, { ok: true });
+      case 'renameLanguage': backend.renameLanguage(body.folderId || 'local', body.code, body.name); return json(res, { ok: true });
       case 'getFileModifiedTime': return json(res, { time: backend.getFileModifiedTime(body.fileId) });
       case 'getLists': {
         const all = backend.getLists('local');
