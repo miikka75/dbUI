@@ -14,8 +14,8 @@ function runFileStoreTests(name, makeBackend, teardown) {
     afterEach(() => { teardown(b); });
 
     it('writeFile + readFile round-trips an object', () => {
-      b.writeFile('local', 'schema.json', { tables: { t1: {} }, defaultLanguage: 'fi' });
-      assert.deepEqual(b.readFile('local', 'schema.json'), { tables: { t1: {} }, defaultLanguage: 'fi' });
+      b.writeFile('local', 'schema.json', { tables: { t1: {} }, defaultLanguage: 'xx' });
+      assert.deepEqual(b.readFile('local', 'schema.json'), { tables: { t1: {} }, defaultLanguage: 'xx' });
     });
 
     it('readFile returns null for missing file', () => {
