@@ -160,42 +160,42 @@ describe('languages', () => {
     assert.equal(backend.getAvailableLanguages('f1').length, 0);
   });
   it('createLanguage adds a language', () => {
-    backend.createLanguage('f1', 'fi', 'Finnish', ['app.title']);
+    backend.createLanguage('f1', 'xx', 'TestLang', ['app.title']);
     const langs = backend.getAvailableLanguages('f1');
     assert.equal(langs.length, 1);
-    assert.equal(langs[0].code, 'fi');
+    assert.equal(langs[0].code, 'xx');
   });
   it('getTranslations returns empty for new language', () => {
-    backend.createLanguage('f1', 'fi', 'Finnish', ['app.title']);
-    assert.deepEqual(backend.getTranslations('f1', 'fi'), {});
+    backend.createLanguage('f1', 'xx', 'TestLang', ['app.title']);
+    assert.deepEqual(backend.getTranslations('f1', 'xx'), {});
   });
   it('updateTranslations stores and retrieves', () => {
-    backend.createLanguage('f1', 'fi', 'Finnish', []);
-    backend.updateTranslations('f1', 'fi', { 'app.title': 'App' });
-    assert.equal(backend.getTranslations('f1', 'fi')['app.title'], 'App');
+    backend.createLanguage('f1', 'xx', 'TestLang', []);
+    backend.updateTranslations('f1', 'xx', { 'app.title': 'App' });
+    assert.equal(backend.getTranslations('f1', 'xx')['app.title'], 'App');
   });
   it('updateTranslations overwrites existing', () => {
-    backend.createLanguage('f1', 'fi', 'Finnish', []);
-    backend.updateTranslations('f1', 'fi', { 'k': 'v1' });
-    backend.updateTranslations('f1', 'fi', { 'k': 'v2' });
-    assert.equal(backend.getTranslations('f1', 'fi')['k'], 'v2');
+    backend.createLanguage('f1', 'xx', 'TestLang', []);
+    backend.updateTranslations('f1', 'xx', { 'k': 'v1' });
+    backend.updateTranslations('f1', 'xx', { 'k': 'v2' });
+    assert.equal(backend.getTranslations('f1', 'xx')['k'], 'v2');
   });
   it('deleteLanguage removes language and translations', () => {
-    backend.createLanguage('f1', 'fi', 'Finnish', []);
-    backend.updateTranslations('f1', 'fi', { 'k': 'v' });
-    backend.deleteLanguage('f1', 'fi');
+    backend.createLanguage('f1', 'xx', 'TestLang', []);
+    backend.updateTranslations('f1', 'xx', { 'k': 'v' });
+    backend.deleteLanguage('f1', 'xx');
     assert.equal(backend.getAvailableLanguages('f1').length, 0);
-    assert.deepEqual(backend.getTranslations('f1', 'fi'), {});
+    assert.deepEqual(backend.getTranslations('f1', 'xx'), {});
   });
   it('renameLanguage changes the display name but keeps code + translations', () => {
-    backend.createLanguage('f1', 'fi', 'Finnish', []);
-    backend.updateTranslations('f1', 'fi', { 'app.title': 'Sovellus' });
-    backend.renameLanguage('f1', 'fi', 'Suomi');
+    backend.createLanguage('f1', 'xx', 'TestLang', []);
+    backend.updateTranslations('f1', 'xx', { 'app.title': 'Hello' });
+    backend.renameLanguage('f1', 'xx', 'Renamed');
     const langs = backend.getAvailableLanguages('f1');
     assert.equal(langs.length, 1);
-    assert.equal(langs[0].code, 'fi');                 // code unchanged (stable key)
-    assert.equal(langs[0].name, 'Suomi');              // display name updated
-    assert.equal(backend.getTranslations('f1', 'fi')['app.title'], 'Sovellus'); // translations preserved
+    assert.equal(langs[0].code, 'xx');                 // code unchanged (stable key)
+    assert.equal(langs[0].name, 'Renamed');              // display name updated
+    assert.equal(backend.getTranslations('f1', 'xx')['app.title'], 'Hello'); // translations preserved
   });
 });
 
