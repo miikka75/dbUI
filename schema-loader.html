@@ -265,8 +265,22 @@ function resolveByOccurrence(rotationRows, sourceRows, currentRow, sortKey) {
   });
   var index = sorted.findIndex(function(r) { return r.id === currentRow.id; });
   if (index === -1) return [];
-  var cells = rotationRows.slice().sort(function(a, b) { return (a.position || 0) - (b.position || 0); });
+  var cells = sortRosterRows(rotationRows);
   return cells[index % cells.length].people;
+}
+
+// Order roster rows by their `position` (the 1..n value the arrow-button reorder writes). Rows with an
+// empty / missing / non-numeric position keep their insertion order AFTER all positioned rows, so
+// PARTIAL position data (e.g. rows added via addRow before any reorder) never scrambles the rotation
+// — previously `(position||0)` coerced "" to 0 and floated unpositioned rows to the front. Array.sort
+// is stable, so equal keys (incl. all-unpositioned) preserve insertion order.
+function sortRosterRows(rows) {
+  return rows.slice().sort(function(a, b) {
+    var pa = (a.position === '' || a.position == null) ? NaN : Number(a.position);
+    var pb = (b.position === '' || b.position == null) ? NaN : Number(b.position);
+    var ka = isNaN(pa) ? Infinity : pa, kb = isNaN(pb) ? Infinity : pb;
+    return ka === kb ? 0 : ka - kb;
+  });
 }
 
 // Calendar mode: position = whole intervals elapsed between anchorDate and targetDate. Looping via
@@ -274,7 +288,7 @@ function resolveByOccurrence(rotationRows, sourceRows, currentRow, sortKey) {
 function resolveByCalendar(rotationRows, targetDate, anchorDate, interval) {
   if (!rotationRows || !rotationRows.length || !targetDate || !anchorDate) return [];
   var elapsed = wholeIntervalsBetween(anchorDate, targetDate, interval);
-  var cells = rotationRows.slice().sort(function(a, b) { return (a.position || 0) - (b.position || 0); });
+  var cells = sortRosterRows(rotationRows);
   var index = ((elapsed % cells.length) + cells.length) % cells.length;
   return cells[index].people;
 }
@@ -347,7 +361,7 @@ function addIntervals(dateStr, n, interval) {
 //       `rotateEvery` may be a list of summed swap sources: a positive int n (rotate every n periods)
 //       or "cycle" (rotate once per full roster cycle so EVEN-length rosters alternate slots). E.g.
 //       [1,"cycle"] = per-period swap AND per-cycle swap. A scalar is shorthand for a 1-element list.
-function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor, rangeOverride) {
+function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor, rangeOverride, rotateEveryOverride) {
   var rv = view && view.rotation; if (!rv) return [];
   var range = rangeOverride || rv.range || {}; // DB-backed per-view range override (folder config) wins over schema
   var periods = range.periods || 12;
@@ -357,6 +371,9 @@ function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor, rangeO
   if (rv.slots && rv.rosters) {
     var slots = rv.slots, rosters = rv.rosters, N = rosters.length;
     var interval = rv.interval || 'weekly';
+    // DB-backed per-view rotateEvery override (folder config) wins over schema, like anchor/range.
+    // undefined override = use schema; a present value (incl. []) is a full replacement.
+    var rotateEveryEff = (rotateEveryOverride === undefined) ? rv.rotateEvery : rotateEveryOverride;
     var anchor = resolveAnchorDate(rv, rotationAnchor);
     // Slot-swap sources. `rotateEvery` is a list of independent offsets that are SUMMED into s, then
     // slot k <- rosters[(k + s) % N] (a bijection for any integer s -> never double-books). Each source:
@@ -367,8 +384,8 @@ function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor, rangeO
     // A scalar is shorthand for a 1-element list (rotateEvery: 1 == [1]); 0/absent == no swap.
     // Common: [1] fast only, ["cycle"] per-cycle only, [1,"cycle"] both. Member index within a roster
     // advances one step per period (resolveByCalendar) independent of these offsets.
-    var sources = (rv.rotateEvery == null) ? []
-      : (Array.isArray(rv.rotateEvery) ? rv.rotateEvery : [rv.rotateEvery]);
+    var sources = (rotateEveryEff == null) ? []
+      : (Array.isArray(rotateEveryEff) ? rotateEveryEff : [rotateEveryEff]);
     var cycleLen = sources.indexOf('cycle') >= 0 ? ((dataCache[rosters[0]] || []).length || 0) : 0;
     var phase = cycleLen > 0 ? wholeIntervalsBetween(anchor, from, interval) : 0;
     for (i = 0; i < periods; i++) {
