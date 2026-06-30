@@ -1735,6 +1735,64 @@ test.describe('Page {{t:key}} translatable token', () => {
     await page.waitForTimeout(150);
     await expect(page.locator('.v-main')).toContainText('Welcome translated intro'); // {{t:page.home.intro}} resolved
   });
+
+  test('renameLanguage decouples name from code: rename preserves code + translations', async ({ page }) => {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'fi', name: 'Suomi', keys: ['app.title'] } });
+    await page.request.post('/api/updateTranslations', { data: { folderId: 'local', langCode: 'fi', updates: { 'app.title': 'Sovellus' } } });
+    // Rename the (default) language's display name — code 'fi' must stay, translations must survive
+    const r = await page.request.post('/api/renameLanguage', { data: { folderId: 'local', code: 'fi', name: 'Finnish' } });
+    expect(r.ok()).toBeTruthy();
+    const langs = await (await page.request.post('/api/getAvailableLanguages', { data: {} })).json();
+    const fi = langs.find(l => l.code === 'fi');
+    expect(fi).toBeTruthy();             // code 'fi' still present (stable)
+    expect(fi.name).toBe('Finnish');     // display name updated
+    const tr = await (await page.request.post('/api/getTranslations', { data: { folderId: 'local', langCode: 'fi' } })).json();
+    expect(tr['app.title']).toBe('Sovellus'); // translations preserved across rename
+  });
+
+  test('deleting the default language repoints the default to a remaining language', async ({ page }) => {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: { defaultLanguage: 'en', tables: { t: { columns: [{ name: 'a', type: 'text' }] } }, views: [{ table: 't' }], nav: { items: [{ table: 't' }] } } } });
+    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'en', name: 'English', keys: ['tab.t'] } });
+    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'fi', name: 'Suomi', keys: ['tab.t'] } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.deleteLang({ code: 'en', name: 'English' });  // arm
+      app.deleteLang({ code: 'en', name: 'English' });  // confirm
+      await new Promise(res => setTimeout(res, 200));
+      return { langs: app.languages.map(l => l.code), def: app.defaultLanguage, schemaDef: app.schemaData.defaultLanguage };
+    });
+    expect(r.langs).not.toContain('en');   // default was deletable
+    expect(r.langs).toContain('fi');
+    expect(r.def).toBe('fi');              // default repointed to the remaining language
+    expect(r.schemaDef).toBe('fi');        // repoint persisted to schema
+  });
+
+  test('deleting the last language clears default and falls back to raw keys', async ({ page }) => {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: { defaultLanguage: 'en', tables: { t: { columns: [{ name: 'a', type: 'text' }] } }, views: [{ table: 't' }], nav: { items: [{ table: 't' }] } } } });
+    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'en', name: 'English', keys: ['tab.t'] } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.deleteLang({ code: 'en', name: 'English' });  // arm
+      app.deleteLang({ code: 'en', name: 'English' });  // confirm
+      await new Promise(res => setTimeout(res, 200));
+      return { langs: app.languages.map(l => l.code), def: app.defaultLanguage, stringCount: Object.keys(app.strings).length, tabT: app.t('tab.t') };
+    });
+    expect(r.langs).toEqual([]);     // last language deletable
+    expect(r.def).toBeNull();        // no default
+    expect(r.stringCount).toBe(0);   // no translations loaded
+    expect(r.tabT).toBe('tab.t');    // t() falls back to the raw key
+  });
 });
 
 test.describe('demo schema (dev/schema.json) is valid v3', () => {
@@ -2284,6 +2342,21 @@ test.describe('rotationView (third view kind, e2e)', () => {
   });
 });
 
+test.describe('reorderable tables: position seeding on add', () => {
+  test('addRow assigns the next position so new rows append in order (not empty)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.currentTable = 'crew_rotation'; // reorderable in fixture-schema
+      app.dataCache['crew_rotation'] = [];
+      try { app.addRow(); } catch (e) {}  // focusLastEditable may no-op in headless; seeding runs first
+      try { app.addRow(); } catch (e) {}
+      return (app.dataCache['crew_rotation'] || []).map(function (x) { return x.position; });
+    });
+    expect(r).toEqual(['1', '2']); // seeded sequentially — empty positions were the church-siivous bug
+  });
+});
+
 
 test.describe('rotationView embedding in data views', () => {
   test('a {view:rota} embed yields an isRotation embed with slot columns + generated rows', async ({ page }) => {
@@ -2336,6 +2409,22 @@ test.describe('rotationView filter / hideEmpty / layout', () => {
     expect(r.layout).toBe('card');
   });
 
+  test('rotationDisplayLayout falls back table->card on mobile (wide table overflows phones)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.lay_t = { name: 'lay_t', rotation: { slots: ['a', 'b'], rosters: ['X', 'Y'] } }; // no layout -> default 'table'
+      window.VIEWS.lay_l = { name: 'lay_l', layout: 'list', rotation: { slots: ['a'], rosters: ['X'] } };
+      app.currentTable = 'lay_t'; var deskTable = (app.mobile = false, app.rotationDisplayLayout); var mobTable = (app.mobile = true, app.rotationDisplayLayout);
+      app.currentTable = 'lay_l'; var mobList = app.rotationDisplayLayout; // explicit non-table layout is preserved on mobile
+      app.mobile = false;
+      return { deskTable, mobTable, mobList };
+    });
+    expect(r.deskTable).toBe('table'); // desktop keeps the table
+    expect(r.mobTable).toBe('card');   // mobile swaps table -> card (stacked, no horizontal overflow)
+    expect(r.mobList).toBe('list');    // an explicitly-chosen layout is left alone
+  });
+
   test('DB-backed range: saveRotationRange overrides periods/from, merges over schema, reset-to-today', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
@@ -2364,6 +2453,45 @@ test.describe('rotationView filter / hideEmpty / layout', () => {
       return window.buildRotationViewRows(view, cache, '2099-01-01', '2026-01-01', { from: '2026-02-01', periods: 2 }).map(function(x) { return x._period; });
     });
     expect(r).toEqual(['2026-02-01', '2026-02-08']); // override start + periods=2 win over schema range
+  });
+
+  test('DB-backed rotateEvery: saveRotationRotateEvery composes [n,"cycle"], full-replaces schema, reset clears', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.re_v = { name: 're_v', rotation: { slots: ['a', 'b'], rosters: ['RA', 'RB'], interval: 'weekly', rotateEvery: [1] } };
+      app.appConfig = Object.assign({}, app.appConfig, { rotationRotateEvery: {} });
+      app.currentTable = 're_v';
+      const eff = function() { return app.rotateEveryForView('re_v'); };
+      const ui = function() { return { every: app.rotationEveryForView, cycle: app.rotationCycleForView, overridden: app.rotationRotateEveryOverridden }; };
+      var schemaDefault = eff();                                            // no override yet -> schema
+      app.saveRotationRotateEvery('re_v', { every: 0, cycle: true });  var cycleOnly = eff(); var uiCycle = ui();
+      app.saveRotationRotateEvery('re_v', { every: 2, cycle: true });  var both = eff();
+      app.saveRotationRotateEvery('re_v', { every: 0, cycle: false }); var noSwap = eff();   // explicit "no swap" (NOT schema fallthrough)
+      app.saveRotationRotateEvery('re_v', null);                       var afterReset = eff(); var uiReset = ui();
+      return { schemaDefault, cycleOnly, both, noSwap, afterReset, uiCycle, uiReset };
+    });
+    expect(r.schemaDefault).toEqual([1]);          // falls back to schema when no override
+    expect(r.cycleOnly).toEqual(['cycle']);        // every:0 drops the numeric source
+    expect(r.both).toEqual([2, 'cycle']);          // composed array
+    expect(r.noSwap).toEqual([]);                  // present override [] = explicit no-swap, full replacement
+    expect(r.afterReset).toEqual([1]);             // null clears override -> schema default returns
+    expect(r.uiCycle).toEqual({ every: 0, cycle: true, overridden: true });
+    expect(r.uiReset).toEqual({ every: 1, cycle: false, overridden: false }); // decomposed from schema [1]
+  });
+
+  test('buildRotationViewRows honors rotateEveryOverride (overrides schema rotateEvery)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      // schema says no swap (rotateEvery:0); override forces a per-period swap -> rosters alternate slots
+      const view = { rotation: { slots: ['a', 'b'], rosters: ['RA', 'RB'], advanceBy: 'calendar', interval: 'weekly', rotateEvery: 0, range: { from: '2026-01-01', periods: 2 } } };
+      const cache = { RA: [{ position: 1, people: ['A0'] }], RB: [{ position: 1, people: ['B0'] }] };
+      const noOv = window.buildRotationViewRows(view, cache, '2099-01-01', '2026-01-01').map(function(x) { return { a: x.a, b: x.b }; });
+      const ov = window.buildRotationViewRows(view, cache, '2099-01-01', '2026-01-01', undefined, [1]).map(function(x) { return { a: x.a, b: x.b }; });
+      return { noOv, ov };
+    });
+    expect(r.noOv[1]).toEqual({ a: ['A0'], b: ['B0'] });   // schema rotateEvery:0 -> no swap in period 1
+    expect(r.ov[1]).toEqual({ a: ['B0'], b: ['A0'] });     // override [1] -> swap in period 1
   });
 });
 
@@ -2395,6 +2523,29 @@ test.describe('reorderable tables (up/down)', () => {
     expect(r.positions).toEqual({ r1: '2', r2: '1', r3: '3' });
     expect(r.allStrings).toBe(true);                          // strings, not numbers -> no localeCompare crash
     expect(r.visible).not.toContain('position');              // position hidden; order driven by arrows only
+  });
+
+  test('sortedData sorts numeric position numerically past 9 rows (no lexicographic shuffle)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.currentTable = 'crew_rotation'; // reorderable, defaultSort:'position', position type number
+      app.sortCol = 'position'; app.sortAsc = true;
+      app.viewingArchive = false;
+      // 12 rows positioned "1".."12" as strings (how moveRowPosition/addRow store them).
+      // Lexicographic sort would give 1,10,11,12,2,...,9 — the church-siivous "whole table shuffles" bug.
+      app.currentData = [];
+      for (var i = 1; i <= 12; i++) app.currentData.push({ id: 'r' + i, position: String(i), people: ['P' + i] });
+      var displayed = app.sortedData.map(function(x) { return x.position; });
+      // Press the arrow on the FIRST displayed row -> move it down one. Must swap only rows 1<->2.
+      app.moveRowPosition(app.sortedData[0], 1);
+      var afterMove = app.sortedData.map(function(x) { return x.position; });
+      return { displayed: displayed, afterMove: afterMove };
+    });
+    // Display is numeric order, NOT lexicographic ['1','10','11','12','2',...]
+    expect(r.displayed).toEqual(['1','2','3','4','5','6','7','8','9','10','11','12']);
+    // One arrow press swaps only the top two; the rest stay put (no full-table shuffle)
+    expect(r.afterMove).toEqual(['1','2','3','4','5','6','7','8','9','10','11','12']);
   });
 });
 
