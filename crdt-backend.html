@@ -62,6 +62,12 @@ backend = {
       return Transport.writeJson('languages.json', BackendHelpers.removeLanguage(langs, code));
     }).then(function() { return Transport.deleteFile('lang_' + code + '.json'); });
   },
+  renameLanguage: function(folderId, code, name) {
+    // Update only the languages index entry; the lang_<code>.json translations file is untouched.
+    return Transport.readJson('languages.json').then(function(langs) {
+      return Transport.writeJson('languages.json', BackendHelpers.renameLanguage(langs, code, name));
+    });
+  },
   getFileModifiedTime: function() { return Promise.resolve(new Date().toISOString()); },
   saveChangesets: function() { return CrdtEngine.pushChanges(); },
   loadChangesets: function() { return CrdtEngine.pullChanges(); }
