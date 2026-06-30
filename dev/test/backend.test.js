@@ -187,6 +187,16 @@ describe('languages', () => {
     assert.equal(backend.getAvailableLanguages('f1').length, 0);
     assert.deepEqual(backend.getTranslations('f1', 'fi'), {});
   });
+  it('renameLanguage changes the display name but keeps code + translations', () => {
+    backend.createLanguage('f1', 'fi', 'Finnish', []);
+    backend.updateTranslations('f1', 'fi', { 'app.title': 'Sovellus' });
+    backend.renameLanguage('f1', 'fi', 'Suomi');
+    const langs = backend.getAvailableLanguages('f1');
+    assert.equal(langs.length, 1);
+    assert.equal(langs[0].code, 'fi');                 // code unchanged (stable key)
+    assert.equal(langs[0].name, 'Suomi');              // display name updated
+    assert.equal(backend.getTranslations('f1', 'fi')['app.title'], 'Sovellus'); // translations preserved
+  });
 });
 
 describe('changesets (CRDT sync)', () => {
