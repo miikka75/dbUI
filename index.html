@@ -14,12 +14,35 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body>
+  <!-- Instant splash: pure HTML/CSS, painted before any JS runs, so the screen isn't blank during
+       the ~1.6s boot (auth + data fetch dominate). Removed when the app's `loading` flips false. -->
+  <div id="app-splash" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#ffffff;z-index:9999;transition:opacity .25s ease">
+    <div class="app-splash-spinner"></div>
+  </div>
+  <style>
+    @keyframes app-splash-spin { to { transform: rotate(360deg); } }
+    .app-splash-spinner { width:44px;height:44px;border:4px solid rgba(0,0,0,.12);border-top-color:#1976d2;border-radius:50%;animation:app-splash-spin .8s linear infinite; }
+    @media (prefers-color-scheme: dark) { #app-splash { background:#121212 !important; } .app-splash-spinner { border-color:rgba(255,255,255,.16);border-top-color:#90caf9; } }
+  </style>
   <div id="app-root"></div>
   <script>
-    // Boot-phase instrumentation: each mark() records ms-since-navigation so a test
-    // (or the browser console) can attribute blank time to a specific phase.
+    // Boot-phase instrumentation. Each bootMark() records ms-since-navigation into window.__bootPhases
+    // (read by the boot-time test / console) AND emits a User Timing mark + a measure span from the
+    // previous phase, so the phases show as flags and the deltas as bars in the DevTools Performance
+    // panel's "Timings" track (no console pasting needed).
     window.__bootPhases = {};
-    function bootMark(name) { window.__bootPhases[name] = performance.now(); }
+    var __lastBootMark = null;
+    function bootMark(name) {
+      var t = performance.now();
+      window.__bootPhases[name] = t;
+      try {
+        if (performance.mark) performance.mark('boot:' + name);
+        if (performance.measure && __lastBootMark) {
+          performance.measure('boot ' + __lastBootMark + ' \u2192 ' + name, 'boot:' + __lastBootMark, 'boot:' + name);
+        }
+        __lastBootMark = name;
+      } catch (e) {}
+    }
     bootMark('loadAppStart');
 
     async function loadApp() {
