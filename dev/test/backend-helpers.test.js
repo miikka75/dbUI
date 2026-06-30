@@ -19,7 +19,7 @@ describe('backend-helpers - unwrapSchemaDoc', () => {
     assert.deepEqual(H.unwrapSchemaDoc({ _json: '{"tables":{"t":{}}}' }), { tables: { t: {} } });
   });
   it('{tables} -> as-is', () => {
-    const d = { tables: { t: {} }, defaultLanguage: 'fi' };
+    const d = { tables: { t: {} }, defaultLanguage: 'xx' };
     assert.equal(H.unwrapSchemaDoc(d), d);
   });
   it('null/empty -> null', () => {
@@ -34,22 +34,22 @@ describe('backend-helpers - unwrapSchemaDoc', () => {
 
 describe('backend-helpers - addLanguage / removeLanguage', () => {
   it('addLanguage appends without mutating', () => {
-    const list = [{ code: 'fi', name: 'Suomi' }];
+    const list = [{ code: 'xx', name: 'TestLang' }];
     const out = H.addLanguage(list, 'en', 'English');
-    assert.deepEqual(out, [{ code: 'fi', name: 'Suomi' }, { code: 'en', name: 'English' }]);
+    assert.deepEqual(out, [{ code: 'xx', name: 'TestLang' }, { code: 'en', name: 'English' }]);
     assert.equal(list.length, 1); // original untouched
   });
   it('addLanguage handles null list', () => {
-    assert.deepEqual(H.addLanguage(null, 'fi', 'Suomi'), [{ code: 'fi', name: 'Suomi' }]);
+    assert.deepEqual(H.addLanguage(null, 'xx', 'TestLang'), [{ code: 'xx', name: 'TestLang' }]);
   });
   it('removeLanguage filters by code without mutating', () => {
-    const list = [{ code: 'fi', name: 'Suomi' }, { code: 'en', name: 'English' }];
-    const out = H.removeLanguage(list, 'fi');
+    const list = [{ code: 'xx', name: 'TestLang' }, { code: 'en', name: 'English' }];
+    const out = H.removeLanguage(list, 'xx');
     assert.deepEqual(out, [{ code: 'en', name: 'English' }]);
     assert.equal(list.length, 2);
   });
   it('removeLanguage handles null list', () => {
-    assert.deepEqual(H.removeLanguage(null, 'fi'), []);
+    assert.deepEqual(H.removeLanguage(null, 'xx'), []);
   });
 });
 
