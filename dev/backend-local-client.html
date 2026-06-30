@@ -17,6 +17,7 @@ backend = {
   updateTranslations: (folderId, langCode, updates) => _post('updateTranslations', { folderId, langCode, updates }),
   createLanguage: (folderId, code, name, keys) => _post('createLanguage', { folderId, code, name, keys }),
   deleteLanguage: (folderId, code) => _post('deleteLanguage', { folderId, code }),
+  renameLanguage: (folderId, code, name) => _post('renameLanguage', { folderId, code, name }),
   getFileModifiedTime: (fileId) => _post('getFileModifiedTime', { fileId }).then(r => r.time),
   getLists: (folderId) => _post('getLists', { folderId }),
   saveLists: (folderId, lists) => _post('saveLists', { folderId, lists }),
