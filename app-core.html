@@ -183,7 +183,13 @@ function createVueApp() {
       defaultTheme: localStorage.getItem('app_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
       themes: {
         light: { colors: { primary: '#4285f4', secondary: '#5cbbf6', surface: '#ffffff', background: '#f5f5f5' } },
-        dark: { colors: { primary: '#8ab4f8', secondary: '#5cbbf6', surface: '#2a2a2a', background: '#1a1a1a' } }
+        dark: {
+          dark: true,
+          // Explicit bright text colors + higher emphasis so column text stands out from the dark
+          // surface/background (Vuetify's derived defaults rendered too dim against #2a2a2a/#1a1a1a).
+          colors: { primary: '#8ab4f8', secondary: '#5cbbf6', surface: '#2a2a2a', background: '#1a1a1a', 'on-surface': '#f1f3f4', 'on-background': '#f1f3f4' },
+          variables: { 'high-emphasis-opacity': 0.96, 'medium-emphasis-opacity': 0.78 }
+        }
       }
     }
   });
@@ -304,9 +310,19 @@ function createVueApp() {
       },
       rotationSlotCols: function() { return this.rotationViewCols.filter(function(c) { return c !== '_period'; }); },
       rotationLayout: function() { var v = VIEWS[this.currentTable]; return (v && (v.layout || (v.rotation && v.rotation.layout))) || 'table'; },
+      // On phones a wide multi-column table overflows horizontally; fall back to the stacked card layout.
+      rotationDisplayLayout: function() { return (this.mobile && this.rotationLayout === 'table') ? 'card' : this.rotationLayout; },
       rotationViewRows: function() { return this.isRotationView ? this.currentData : []; },
       rotationAnchorForView: function() { return this.anchorForView(this.currentTable); },
       rotationRangeForView: function() { return this.rangeForView(this.currentTable); },
+      // rotateEvery UI decomposition: numeric "every n periods" part + the "alternate each cycle" flag.
+      rotationEveryForView: function() {
+        var arr = this.rotateEveryForView(this.currentTable);
+        for (var i = 0; i < arr.length; i++) { if (typeof arr[i] === 'number' && arr[i] > 0) return arr[i]; }
+        return 0;
+      },
+      rotationCycleForView: function() { return this.rotateEveryForView(this.currentTable).indexOf('cycle') >= 0; },
+      rotationRotateEveryOverridden: function() { return !!((this.appConfig && this.appConfig.rotationRotateEvery) || {})[this.currentTable]; },
       isReorderable: function() { var t = this.currentTable; return !!(SCHEMA[t] && SCHEMA[t].reorderable && this.isDataView && !this.viewingArchive && this.canMutateRows); },
       navConfig: function() { return (this.schemaData && this.schemaData.nav) || null; },
       navLayout: function() { return this.navLayoutOverride || (this.navConfig && this.navConfig.layout) || 'drawer'; },
@@ -451,7 +467,7 @@ function createVueApp() {
             var td = new Date();
             var todayStr = td.getFullYear() + '-' + String(td.getMonth() + 1).padStart(2, '0') + '-' + String(td.getDate()).padStart(2, '0');
             var anchorName = cfg.view || cfg.name || self.currentTable;
-            var rrows = buildRotationViewRows({ rotation: rv }, self.dataCache, todayStr, self.anchorForView(anchorName), self.rangeForView(anchorName));
+            var rrows = buildRotationViewRows({ rotation: rv }, self.dataCache, todayStr, self.anchorForView(anchorName), self.rangeForView(anchorName), self.rotateEveryForView(anchorName));
             var slotNames = rv.slots ? rv.slots.slice() : (rv.columns || []).map(function(c) { return c.name; });
             return { config: cfg, isRotation: true, columns: ['_period'].concat(slotNames), rows: rrows };
           }
@@ -532,11 +548,21 @@ function createVueApp() {
           var col = this.sortCol, asc = this.sortAsc, lo = null, ln = this.colIsList(col);
           if (!ln) { var v = VIEWS[this.currentTable]; if (v && v.groupBy && typeof v.groupBy === 'object' && v.groupBy.column === col && v.groupBy.from) { for (var i = 0; i < v.groupBy.from.length && !ln; i++) ln = this.colIsList(v.groupBy.from[i]); } }
           if (ln && this.listsCache[ln]) { lo = {}; this.listsCache[ln].forEach(function(v, i) { lo[v] = i; }); }
+          // Number columns (e.g. reorderable `position`, stored as strings) must sort numerically,
+          // not lexicographically — else "10" sorts before "2" and the table shuffles past 9 rows.
+          var numericCol = !lo && SCHEMA[this.currentTable] && getColumnType(this.currentTable, col) === 'number';
           data.sort(function(a, b) {
             if (lo) { var ia = lo[a[col]] !== undefined ? lo[a[col]] : 9999, ib = lo[b[col]] !== undefined ? lo[b[col]] : 9999; return asc ? ia - ib : ib - ia; }
+            if (numericCol) {
+              var na = (a[col] === '' || a[col] == null) ? Infinity : Number(a[col]);
+              var nb = (b[col] === '' || b[col] == null) ? Infinity : Number(b[col]);
+              if (isNaN(na)) na = Infinity; if (isNaN(nb)) nb = Infinity;
+              if (na === nb) return 0;
+              return asc ? na - nb : nb - na;
+            }
             var va = a[col] || '', vb = b[col] || '';
             if (!va && vb) return 1; if (va && !vb) return -1;
-            return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+            return asc ? va.localeCompare(vb, undefined, { numeric: true }) : vb.localeCompare(va, undefined, { numeric: true });
           });
         }
         return data;
@@ -548,7 +574,7 @@ function createVueApp() {
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access',
          'settings.user_id', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all',
-         'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'btn.today', 'lang.app', 'lang.schema'].sort();
+         'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset', 'lang.app', 'lang.schema'].sort();
       },
       schemaTranslationKeys: function() {
         var keys = [];
@@ -1033,7 +1059,7 @@ function createVueApp() {
             var todayStr = td.getFullYear() + '-' + String(td.getMonth() + 1).padStart(2, '0') + '-' + String(td.getDate()).padStart(2, '0');
             var allowedRv = self.userAllowedTables;
             var regen = function() {
-              var rows = buildRotationViewRows(view, self.dataCache, todayStr, self.anchorForView(self.currentTable), self.rangeForView(self.currentTable));
+              var rows = buildRotationViewRows(view, self.dataCache, todayStr, self.anchorForView(self.currentTable), self.rangeForView(self.currentTable), self.rotateEveryForView(self.currentTable));
               if (view.filter) rows = filterRows(rows, view.filter); // filter generated period rows
               self.currentData = rows;
             };
@@ -1198,6 +1224,13 @@ function createVueApp() {
           getColumns(src).forEach(function(c) { if (!row[c]) row[c] = ''; });
           var cacheKey = self.viewingArchive ? aKey(src) : src;
           if (!self.dataCache[cacheKey]) self.dataCache[cacheKey] = [];
+          // Reorderable tables order by `position`; seed the next number so new rows append in order
+          // (otherwise they get an empty position and the hardened sort floats them after positioned rows).
+          if (SCHEMA[src] && SCHEMA[src].reorderable) {
+            var _mp = 0;
+            self.dataCache[cacheKey].forEach(function(r) { var n = Number(r.position); if (!isNaN(n) && n > _mp) _mp = n; });
+            row.position = String(_mp + 1);
+          }
           self.dataCache[cacheKey].push(row);
           var tab = self.viewingArchive ? 'archive' : 'active';
           backend.putRow(self.tableMap[src], row, tab);
@@ -1579,34 +1612,44 @@ function createVueApp() {
           self.languages.push(newLang);
           self.openLangEditor(newLang);
           self.notify('Language added');
-          self.focusLastEditable('.v-main .v-card .v-list .editable-cell');
+          self.$nextTick(function() { var el = document.querySelector('[data-lang-code="' + name + '"] input'); if (el) el.focus(); });
         });
       },
       renameLang: function(lang, newName) {
         newName = (newName || '').trim();
-        if (newName === lang.name) return;
+        if (!newName || newName === lang.name) return;
         var self = this;
-        var oldCode = lang.code;
-        // Persist: delete old, create new with same translations
-        backend.getTranslations(self.folderId, oldCode).then(function(trans) {
-          return backend.deleteLanguage(self.folderId, oldCode).then(function() {
-            return backend.createLanguage(self.folderId, newName, newName, self.translationKeys).then(function() {
-              if (trans && Object.keys(trans).length) backend.updateTranslations(self.folderId, newName, trans);
-            });
-          });
-        });
+        // Rename the DISPLAY NAME only. The language `code` stays stable, so translations
+        // (keyed by code) and the default-language reference are preserved — this makes even
+        // the default language safely renamable. Backends without renameLanguage (e.g. Sheets,
+        // where the name IS the code) just skip persistence via the guard.
+        if (backend.renameLanguage) backend.renameLanguage(self.folderId, lang.code, newName);
         lang.name = newName;
-        lang.code = newName;
-        if (self.currentLang === oldCode) self.currentLang = newName;
-        if (self.editingLang && self.editingLang.code === oldCode) self.editingLang = lang;
+        self.notify('Language renamed');
       },
       deleteLang: function(lang) {
         var key = 'lang:' + lang.code;
-        if (this.pendingDelete !== key) { this.armDelete(key); return; }
+        if (this.pendingDelete !== key) { this.armDelete(key); return; }  // arm-then-confirm (double click)
         var self = this;
         backend.deleteLanguage(self.folderId, lang.code).then(function() {
           self.languages = self.languages.filter(function(l) { return l.code !== lang.code; });
           if (self.editingLang && self.editingLang.code === lang.code) self.editingLang = null;
+          // Deleting the (explicit) default is allowed: repoint it to a remaining language, or clear
+          // it when none remain. schemaData is frozen, so replace it with an updated copy + persist.
+          if (self.schemaData && self.schemaData.defaultLanguage === lang.code) {
+            var newDef = self.languages.length ? self.languages[0].code : null;
+            var newSchema = Object.assign({}, self.schemaData, { defaultLanguage: newDef });
+            self.schemaData = Object.freeze(newSchema);
+            if (backend.saveSchema) backend.saveSchema(self.folderId, newSchema);
+          }
+          if (self.languages.length === 0) {
+            self.strings = {};            // no languages -> UI shows the translation keys themselves
+            self.currentLang = null;
+            localStorage.removeItem('app_lang');
+          } else {
+            if (self.currentLang === lang.code) self.currentLang = self.languages[0].code;
+            self.switchLanguage(self.currentLang);  // rebuild base(default)+current with the new default
+          }
           self.notify('Deleted');
         });
       },
@@ -1774,9 +1817,35 @@ function createVueApp() {
         if (this.currentTable === viewName) this.loadTableData();
       },
 
-      // Reorder a row in a `reorderable` table (e.g. rotation slot lists) via up/down buttons —
-      // mirrors the Lists tab move buttons. Renumbers `position` to a clean 1..n in the new order
-      // and persists only the rows whose position actually changed.
+      // Per-view rotateEvery override (synced folder config). Like the anchor/range overrides, a
+      // present value (incl. []) FULLY REPLACES the schema rotateEvery; absent = schema default.
+      // Always returns an array so callers/buildRotationViewRows can treat it uniformly.
+      rotateEveryForView: function(name) {
+        var ov = ((this.appConfig && this.appConfig.rotationRotateEvery) || {})[name];
+        var raw = (ov !== undefined) ? ov : ((VIEWS[name] && VIEWS[name].rotation && VIEWS[name].rotation.rotateEvery));
+        if (raw == null) return [];
+        return Array.isArray(raw) ? raw.slice() : [raw];
+      },
+      // Save the rotateEvery override. opts = { every: n, cycle: bool } -> composed into a summed
+      // array (n>0 contributes a per-period swap, cycle contributes the per-cycle swap). opts === null
+      // clears the override -> schema default. Mirrors saveRotationAnchor/Range persistence.
+      saveRotationRotateEvery: function(viewName, opts) {
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.rotationRotateEvery = Object.assign({}, cfg.rotationRotateEvery || {});
+        if (opts === null || opts === undefined) {
+          delete cfg.rotationRotateEvery[viewName];
+        } else {
+          var arr = [];
+          var n = Number(opts.every);
+          if (!isNaN(n) && n > 0) arr.push(n);
+          if (opts.cycle) arr.push('cycle');
+          cfg.rotationRotateEvery[viewName] = arr;
+        }
+        cfg.mode = this.mode;
+        this.appConfig = cfg;
+        if (backend.setFolderConfig) backend.setFolderConfig(this.folderId, cfg);
+        if (this.currentTable === viewName) this.loadTableData();
+      },
       moveRowPosition: function(item, dir) {
         if (!this.isReorderable) return;
         var self = this, table = this.currentTable;
@@ -2361,6 +2430,14 @@ function createVueApp() {
         // Boot-time marker for perf measurement: record ms from navigation to first ready state.
         if (!v && typeof window !== 'undefined' && window.__bootMs == null) {
           try { window.__bootMs = (window.performance && performance.now) ? performance.now() : (Date.now() - (window.__bootStart || Date.now())); } catch (e) {}
+          try { if (window.bootMark) window.bootMark('dataReady'); } catch (e) {} // mark + closing measure span for DevTools
+          // Total boot span: navigation start (time origin) -> dataReady. Undefined start = navigationStart.
+          try { if (performance.measure) performance.measure('boot total (navStart \u2192 dataReady)', undefined, 'boot:dataReady'); } catch (e) {}
+        }
+        // Remove the instant splash once the app is ready (data loaded / setup / reauth shown).
+        if (!v && typeof document !== 'undefined') {
+          var _sp = document.getElementById('app-splash');
+          if (_sp) { _sp.style.opacity = '0'; setTimeout(function () { if (_sp && _sp.parentNode) _sp.parentNode.removeChild(_sp); }, 250); }
         }
       },
       schemaData: { immediate: true, handler: function(s) {
