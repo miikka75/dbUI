@@ -107,6 +107,9 @@ function createFsBackend(dataDir) {
       writeJSON(F_LANGS, H.removeLanguage(readJSON(F_LANGS), code));
       try { fs.unlinkSync(filePath(fLang(code))); } catch(e) {}
     },
+    renameLanguage(folderId, code, name) {
+      writeJSON(F_LANGS, H.renameLanguage(readJSON(F_LANGS), code, name));
+    },
     getFileModifiedTime(fileId) { return new Date().toISOString(); },
     saveChangesets(folderId, siteId, json) {
       var dir = path.join(dataDir, '_sync');
