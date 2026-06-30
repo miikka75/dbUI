@@ -176,6 +176,13 @@ backend = {
       return _db.collection('_meta').doc('lang_' + code).delete();
     });
   },
+  renameLanguage: function(folderId, code, name) {
+    // Update only the languages index; the lang_<code> translations doc is left intact.
+    return StorageFirestore.getMeta('languages').then(function(d) {
+      var langs = BackendHelpers.renameLanguage(d ? (d.list || []) : [], code, name);
+      return StorageFirestore.setMeta('languages', { list: langs });
+    });
+  },
   saveChangesets: function() { return Promise.resolve(); },
   loadChangesets: function() { return Promise.resolve(); }
 };
@@ -197,6 +204,7 @@ function _startFirebase(config) {
   _auth = firebase.auth();
   _db.enablePersistence().catch(function() {});
   _auth.onAuthStateChanged(function(user) {
+    if (typeof window !== 'undefined' && window.bootMark) window.bootMark('authReady'); // auth RTT resolved
     if (user) { appInstance.currentUserEmail = user.email; init(); }
     else { appInstance.needsReauth = true; appInstance.loading = false; }
   });
