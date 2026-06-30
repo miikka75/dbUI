@@ -188,19 +188,21 @@
 
         <!-- Rotation view (generated periods; read-only) -->
         <v-card v-if="isRotationView" variant="outlined">
-          <div class="d-flex align-center pa-2" style="gap:8px">
-            <span class="text-caption" style="opacity:0.7">{{ t('settings.rotation_anchor') }}</span>
-            <v-text-field :model-value="rotationAnchorForView" name="rotation-anchor" type="date" density="compact" variant="outlined" hide-details style="max-width:180px" :disabled="!canMutateRows" @update:model-value="saveRotationAnchor(currentTable, $event)" data-testid="rotation-anchor"></v-text-field>
-            <span class="text-caption" style="opacity:0.7">{{ t('settings.rotation_from') }}</span>
-            <v-text-field :model-value="(rotationRangeForView.from && rotationRangeForView.from !== 'today') ? rotationRangeForView.from : ''" name="rotation-from" type="date" density="compact" variant="outlined" hide-details style="max-width:160px" :disabled="!canMutateRows" @update:model-value="saveRotationRange(currentTable, { from: $event || 'today' })" data-testid="rotation-from"></v-text-field>
-            <v-btn icon="mdi-calendar-today" size="x-small" variant="text" :disabled="!canMutateRows" @click="saveRotationRange(currentTable, { from: 'today' })" :title="t('btn.today')"></v-btn>
-            <span class="text-caption" style="opacity:0.7">{{ t('settings.rotation_periods') }}</span>
-            <v-text-field :model-value="rotationRangeForView.periods" name="rotation-periods" type="number" density="compact" variant="outlined" hide-details style="max-width:90px" :disabled="!canMutateRows" @update:model-value="saveRotationRange(currentTable, { periods: $event === '' ? '' : Number($event) })" data-testid="rotation-periods"></v-text-field>
+          <div class="d-flex align-center flex-wrap pa-2" style="gap:10px 12px">
+            <v-text-field :model-value="rotationAnchorForView" name="rotation-anchor" type="date" :label="t('settings.rotation_anchor')" density="compact" variant="outlined" hide-details style="max-width:175px" :disabled="!canMutateRows" @update:model-value="saveRotationAnchor(currentTable, $event)" data-testid="rotation-anchor"></v-text-field>
+            <div class="d-flex align-center" style="gap:2px">
+              <v-text-field :model-value="(rotationRangeForView.from && rotationRangeForView.from !== 'today') ? rotationRangeForView.from : ''" name="rotation-from" type="date" :label="t('settings.rotation_from')" density="compact" variant="outlined" hide-details style="max-width:165px" :disabled="!canMutateRows" @update:model-value="saveRotationRange(currentTable, { from: $event || 'today' })" data-testid="rotation-from"></v-text-field>
+              <v-btn icon="mdi-calendar-today" size="small" variant="text" :disabled="!canMutateRows" @click="saveRotationRange(currentTable, { from: 'today' })" :title="t('btn.today')"></v-btn>
+            </div>
+            <v-text-field :model-value="rotationRangeForView.periods" name="rotation-periods" type="number" :label="t('settings.rotation_periods')" density="compact" variant="outlined" hide-details style="max-width:115px" :disabled="!canMutateRows" @update:model-value="saveRotationRange(currentTable, { periods: $event === '' ? '' : Number($event) })" data-testid="rotation-periods"></v-text-field>
+            <v-text-field :model-value="rotationEveryForView" name="rotation-every" type="number" min="0" :label="t('settings.rotation_every')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!canMutateRows" @update:model-value="saveRotationRotateEvery(currentTable, { every: $event === '' ? 0 : Number($event), cycle: rotationCycleForView })" data-testid="rotation-every"></v-text-field>
+            <v-switch :model-value="rotationCycleForView" @update:model-value="v => saveRotationRotateEvery(currentTable, { every: rotationEveryForView, cycle: v })" color="primary" density="compact" hide-details :label="t('settings.rotation_cycle')" :disabled="!canMutateRows" data-testid="rotation-cycle"></v-switch>
+            <v-btn v-if="rotationRotateEveryOverridden" icon="mdi-restore" size="small" variant="text" :disabled="!canMutateRows" @click="saveRotationRotateEvery(currentTable, null)" :title="t('btn.reset')" data-testid="rotation-every-reset"></v-btn>
             <v-spacer></v-spacer>
             <v-btn v-if="canPrintView" icon="mdi-printer" size="small" variant="text" @click="printView()"></v-btn>
           </div>
           <v-divider></v-divider>
-          <v-table v-if="rotationLayout === 'table'" density="compact"><template v-slot:default>
+          <v-table v-if="rotationDisplayLayout === 'table'" density="compact"><template v-slot:default>
             <thead><tr><th v-for="col in rotationViewCols" :key="col">{{ col === '_period' ? t('field.period') : (t('field.' + col) || col) }}</th></tr></thead>
             <tbody>
               <tr v-for="row in rotationViewRows" :key="row.id">
@@ -209,7 +211,7 @@
             </tbody>
           </template></v-table>
           <!-- card layout: one block per period -->
-          <div v-else-if="rotationLayout === 'card'" style="display:grid; gap:8px; padding:8px">
+          <div v-else-if="rotationDisplayLayout === 'card'" style="display:grid; gap:8px; padding:8px">
             <div v-for="row in rotationViewRows" :key="row.id" style="padding:8px 12px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:8px">
               <div style="font-weight:600; margin-bottom:4px">{{ toDateStr(row._period) }}</div>
               <div v-for="col in rotationSlotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ t('field.' + col) || col }}: </span>{{ displayValue(col, row[col]) }}</div>
@@ -289,8 +291,8 @@
               <template v-for="col in visibleCols.slice(1)" :key="col">
               <div v-if="!isColumnHidden(col, item)" class="card-field mb-2">
                 <span class="card-field-label">{{ t('field.' + col) || col }}</span>
-                <span v-if="cellReadonly(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
-                <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
+                <span v-if="cellReadonly(item, col)" style="opacity:0.75">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
+                <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.82">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
                 <v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
                 <v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
                 <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || ''" :items="getListOptions(col, isAltList(col, item) ? colListSwitch(col).list : null)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>
@@ -362,8 +364,8 @@
               <template v-for="item in sortedData" :key="item.id">
               <tr>
                 <td v-for="col in visibleCols" :key="col">
-                  <span v-if="cellReadonly(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
-                  <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.6">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
+                  <span v-if="cellReadonly(item, col)" style="opacity:0.75">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
+                  <span v-else-if="colIsMirrorForTable(col)" style="opacity:0.82">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>
                   <v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>
                   <v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>
                   <v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || ''" :items="getListOptions(col, isAltList(col, item) ? colListSwitch(col).list : null)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>
@@ -443,10 +445,12 @@
             <v-list-group v-for="lang in languages" :key="lang.code" :value="lang.code">
               <template v-slot:activator="{ props }">
                 <v-list-item v-bind="props" @click="openLangEditor(lang)">
-                  <span v-if="lang.code !== defaultLanguage" class="editable-cell" contenteditable @click.stop @blur="renameLang(lang, $event.target.textContent)">{{ lang.name }}</span>
-                  <span v-else>{{ lang.name }}</span>
+                  <v-text-field :model-value="lang.name"
+                    :data-lang-code="lang.code" data-testid="lang-name"
+                    density="compact" variant="outlined" hide-details style="max-width:260px"
+                    @click.stop @change="renameLang(lang, $event.target.value)"></v-text-field>
                   <template v-slot:append>
-                    <v-btn v-if="lang.code !== defaultLanguage" :icon="isArmed('lang:'+lang.code) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="isArmed('lang:'+lang.code) ? 'error' : ''" @click.stop="deleteLang(lang)" class="mr-2"></v-btn>
+                    <v-btn :icon="isArmed('lang:'+lang.code) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="isArmed('lang:'+lang.code) ? 'error' : ''" @click.stop="deleteLang(lang)" class="mr-2"></v-btn>
                     <v-icon>mdi-chevron-down</v-icon>
                   </template>
                 </v-list-item>
@@ -455,16 +459,12 @@
                 <template v-slot:default>
                 <tbody>
                   <tr @click="settings._collapseApp = !settings._collapseApp" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseApp ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ t('lang.app') }}</td></tr>
-                  <tr v-show="!settings._collapseApp"><th style="opacity:0.6">{{ t('field.key') }}</th><th style="opacity:0.6">{{ t('field.translation') }}</th></tr>
                   <tr v-for="key in staticTranslationKeys" :key="key" v-show="!settings._collapseApp">
-                    <td>{{ key }}</td>
-                    <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="saveTranslation(key, $event.target.textContent)">{{ currentTranslations[key] || '' }}</span></td>
+                    <td colspan="2"><v-textarea :model-value="currentTranslations[key] || ''" @update:model-value="saveTranslation(key, $event)" :label="key" auto-grow rows="1" density="compact" variant="outlined" hide-details></v-textarea></td>
                   </tr>
                   <tr @click="settings._collapseSchema = !settings._collapseSchema" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseSchema ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ t('lang.schema') }}</td></tr>
-                  <tr v-show="!settings._collapseSchema"><th style="opacity:0.6">{{ t('field.key') }}</th><th style="opacity:0.6">{{ t('field.translation') }}</th></tr>
                   <tr v-for="key in schemaTranslationKeys" :key="key" v-show="!settings._collapseSchema">
-                    <td>{{ key }}</td>
-                    <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="saveTranslation(key, $event.target.textContent)">{{ currentTranslations[key] || '' }}</span></td>
+                    <td colspan="2"><v-textarea :model-value="currentTranslations[key] || ''" @update:model-value="saveTranslation(key, $event)" :label="key" auto-grow rows="1" density="compact" variant="outlined" hide-details></v-textarea></td>
                   </tr>
                 </tbody>
                 </template>
