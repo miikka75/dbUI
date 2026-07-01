@@ -166,6 +166,11 @@
     <!-- Main Content -->
     <v-main :style="mobile ? 'padding-bottom: 64px' : ''">
       <v-container fluid class="pa-4">
+        <!-- Access notice: signed-in user matches no _meta/users record -> all reads are denied by
+             rules. Hardcoded English (translations aren't loaded for an unregistered user). -->
+        <v-alert v-if="isUnregisteredUser" type="warning" variant="tonal" density="compact" class="mb-3" icon="mdi-account-alert">
+          Your account (<strong>{{ currentUserEmail }}</strong>) is not registered for this database, so no data can load. Ask an administrator to add this exact email under Settings → Users.
+        </v-alert>
         <!-- Archive Toggle -->
         <v-tabs v-if="hasArchive" v-model="viewingArchive" density="compact" class="mb-3">
           <v-tab :value="false">{{ t('btn.show_active') }}</v-tab>
@@ -588,8 +593,8 @@
               <template v-slot:default>
               <thead><tr><th>{{ t('settings.user_id') }}</th><th>{{ t('settings.role') }}</th><th>{{ t('settings.tables') }}</th><th></th></tr></thead>
               <tbody>
-                <tr v-for="u in userList" :key="u.key">
-                  <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="renameUser(u, $event.target.textContent.trim())">{{ u.addr }}</span></td>
+                <tr v-for="u in sortedUserList" :key="u.key">
+                  <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="renameUser(u, $event.target.textContent.trim())">{{ u.key.indexOf('_new_') === 0 ? '' : u.key }}</span></td>
                   <td><v-select :model-value="u.role" :name="'role-' + u.key" :items="['admin','editor','viewer']" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>
                   <td><v-chip-group :model-value="userFeatures(u)" multiple @update:model-value="updateUserTables(u, $event)">
                     <v-chip v-for="c in grantFeatureChips" :key="c.id" :value="c.id" size="x-small" filter variant="outlined">{{ c.label }}</v-chip>
