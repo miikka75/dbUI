@@ -1795,6 +1795,96 @@ test.describe('Page {{t:key}} translatable token', () => {
   });
 });
 
+test.describe('access control: user matching + fail-closed', () => {
+  test('matches by key/addr (case-insensitive), fails closed for unmatched, admin unrestricted', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      const setUsers = (list, email) => { app.usersLoaded = true; app.userList = list; app.currentUserEmail = email; };
+      const snap = () => ({ allowed: app.userAllowedTables, unreg: app.isUnregisteredUser, admin: app.isAdmin, role: app.currentUserRole });
+      // 1. matched by KEY (login email), editor restricted to one table
+      setUsers([{ key: 'a@x.com', addr: '', role: 'editor', tables: ['musiikki'] }], 'a@x.com');
+      const byKey = snap();
+      // 2. case-insensitive key match (Firestore key was stored with different casing)
+      setUsers([{ key: 'A@X.com', addr: '', role: 'editor', tables: ['musiikki'] }], 'a@x.com');
+      const caseIns = snap();
+      // 3. legacy match by addr (user field) when key is a placeholder
+      setUsers([{ key: '_new_1', addr: 'b@x.com', role: 'editor', tables: ['siivous_a'] }], 'b@x.com');
+      const byAddr = snap();
+      // 4. registered users exist but the signed-in user matches none -> FAIL CLOSED
+      setUsers([{ key: 'a@x.com', addr: 'a@x.com', role: 'editor', tables: ['musiikki'] }], 'ghost@x.com');
+      const unmatched = snap();
+      // 5. admin -> unrestricted
+      setUsers([{ key: 'a@x.com', addr: 'a@x.com', role: 'admin', tables: 'all' }], 'a@x.com');
+      const admin = snap();
+      return { byKey, caseIns, byAddr, unmatched, admin };
+    });
+    expect(r.byKey).toEqual({ allowed: ['musiikki'], unreg: false, admin: false, role: 'editor' });
+    expect(r.caseIns.allowed).toEqual(['musiikki']);          // case-insensitive key match
+    expect(r.caseIns.unreg).toBe(false);
+    expect(r.byAddr.allowed).toEqual(['siivous_a']);          // legacy addr fallback still works
+    expect(r.unmatched).toEqual({ allowed: [], unreg: true, admin: false, role: null }); // fail closed + notice
+    expect(r.admin).toEqual({ allowed: null, unreg: false, admin: true, role: 'admin' }); // unrestricted
+  });
+
+  test('unmatched user gets no data nav tabs (fail closed hides tables/views)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.usersLoaded = true;
+      app.userList = [{ key: 'a@x.com', addr: 'a@x.com', role: 'editor', tables: ['tasks'] }];
+      app.currentUserEmail = 'ghost@x.com';   // not in the list
+      // sidebarTabs must contain no schema-table / data-view tabs for an unmatched user
+      const ids = app.sidebarTabs.filter(function (t) { return !t.divider && t.id; }).map(function (t) { return t.id; });
+      const leaks = ids.filter(function (id) { return window.SCHEMA[id] || (window.VIEWS[id] && (window.VIEWS[id].sources || []).length); });
+      return { unreg: app.isUnregisteredUser, leaks: leaks };
+    });
+    expect(r.unreg).toBe(true);
+    expect(r.leaks).toEqual([]);   // no data-backed tabs leak through to an unmatched user
+  });
+
+  test('renameUser lowercases + trims the email key at write time', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      let captured = null;
+      window.backend_users = {
+        removeUser: function () { return Promise.resolve(); },
+        setUserRole: function (uid, role, user, tables) { if (!captured) captured = { uid: uid, user: user }; return Promise.resolve(); },
+        getUsers: function () { return Promise.resolve({}); }
+      };
+      app.renameUser({ key: '_new_1', addr: '', role: 'editor', tables: ['musiikki'] }, '  Foo@X.COM ');
+      await new Promise(function (res) { setTimeout(res, 50); });
+      return captured;
+    });
+    expect(r.uid).toBe('foo@x.com');   // doc key: trimmed + lowercased to match the auth email
+    expect(r.user).toBe('foo@x.com');  // user field mirrors the normalized key
+  });
+
+  test('sortedUserList is stable (by key) across rebuilds -> rows do not jump', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.userList = [
+        { key: 'zoe@x.com', role: 'editor', tables: [] },
+        { key: 'Amy@x.com', role: 'admin', tables: 'all' },
+        { key: 'bob@x.com', role: 'viewer', tables: [] }
+      ];
+      const order1 = app.sortedUserList.map(function (u) { return u.key; });
+      // Simulate a loadUsers() refetch that returns users in a different raw order
+      app.userList = [
+        { key: 'bob@x.com', role: 'viewer', tables: [] },
+        { key: 'zoe@x.com', role: 'editor', tables: [] },
+        { key: 'Amy@x.com', role: 'admin', tables: 'all' }
+      ];
+      const order2 = app.sortedUserList.map(function (u) { return u.key; });
+      return { order1: order1, order2: order2 };
+    });
+    expect(r.order1).toEqual(['Amy@x.com', 'bob@x.com', 'zoe@x.com']); // case-insensitive alphabetical
+    expect(r.order2).toEqual(['Amy@x.com', 'bob@x.com', 'zoe@x.com']); // identical after rebuild -> no jump
+  });
+});
+
 test.describe('demo schema (dev/schema.json) is valid v3', () => {
   const DEMO = require('../schema.json');
   test('boots and nav exposes a group + nested items', async ({ page }) => {
