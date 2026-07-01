@@ -336,11 +336,20 @@ function createVueApp() {
         var p = this.currentPage;
         return p ? this.mdBlocks(p.markdown, this.currentTable) : [];
       },
+      // Identify the signed-in user in the user list. Firestore rules key _meta/users by the
+      // login email (the map KEY), so we match on `key` first (case-insensitive), falling back to
+      // the legacy `addr`/user field for older records. Returns null when not found.
+      currentUserEntry: function() {
+        var email = (this.currentUserEmail || '').toLowerCase();
+        if (!email) return null;
+        return this.userList.find(function(x) {
+          return (x.key || '').toLowerCase() === email || (x.addr || '').toLowerCase() === email;
+        }) || null;
+      },
       currentUserRole: function() {
         if (!this.usersLoaded) return null;
         if (!this.userList.length) return 'admin'; // bootstrap
-        var email = this.currentUserEmail;
-        var u = this.userList.find(function(x) { return x.addr === email; });
+        var u = this.currentUserEntry;
         return u ? u.role : null;
       },
       isAdmin: function() {
@@ -348,18 +357,30 @@ function createVueApp() {
         if (!this.userList.length) return true; // no users = bootstrap
         return this.currentUserRole === 'admin';
       },
+      // True once users exist and are loaded but the signed-in user matches no record -> Firestore
+      // will deny every read. Surface a clear notice instead of a misleading empty-but-full nav.
+      isUnregisteredUser: function() {
+        return this.usersLoaded && this.userList.length > 0 && !this.currentUserEntry;
+      },
+      // Stable display order for the Settings user table. userList is rebuilt from Firestore map-key
+      // iteration order on every loadUsers(), which is unstable — sorting by key here keeps rows put
+      // across role/tables edits (the key is unchanged) instead of jumping around.
+      sortedUserList: function() {
+        return this.userList.slice().sort(function(a, b) {
+          return (a.key || '').toLowerCase().localeCompare((b.key || '').toLowerCase());
+        });
+      },
       userAllowedTables: function() {
         if (this.isAdmin) return null; // null = unrestricted
-        var email = this.currentUserEmail;
-        var u = this.userList.find(function(x) { return x.addr === email; });
-        if (!u || u.tables === 'all') return null;
+        var u = this.currentUserEntry;
+        if (!u) return [];             // FAIL CLOSED: registered users exist but we're not one -> no access
+        if (u.tables === 'all') return null;
         return u.tables || [];
       },
       visibleLists: function() {
         if (this.isAdmin) return this.listsCache;
         // Find tables this user can access
-        var email = this.currentUserEmail;
-        var u = this.userList.find(function(x) { return x.addr === email; });
+        var u = this.currentUserEntry;
         if (!u) return {};
         var userTables = u.tables === 'all' ? Object.keys(SCHEMA) : (u.tables || []);
         // Find which lists are used by accessible tables
@@ -886,8 +907,9 @@ function createVueApp() {
               var list = [];
               Object.keys(u || {}).forEach(function(k) { var v = u[k]; if (v && typeof v === 'object' && v.role) list.push({key: k, addr: v.user || '', role: v.role, tables: v.tables || 'all'}); });
               if (!list.length && self.currentUserEmail) {
-                backend_users.setUserRole(self.currentUserEmail, 'admin', self.currentUserEmail, 'all').then(function() {
-                  self.userList = [{key: self.currentUserEmail, addr: self.currentUserEmail, role: 'admin', tables: 'all'}];
+                var adminEmail = self.currentUserEmail.toLowerCase();  // normalize key to match auth email
+                backend_users.setUserRole(adminEmail, 'admin', adminEmail, 'all').then(function() {
+                  self.userList = [{key: adminEmail, addr: adminEmail, role: 'admin', tables: 'all'}];
                   self.usersLoaded = true;
                   resolve();
                 });
@@ -1932,8 +1954,9 @@ function createVueApp() {
             Object.keys(u || {}).forEach(function(k) { var v = u[k]; if (v && typeof v === 'object' && v.role) list.push({key: k, addr: v.user || '', role: v.role, tables: v.tables || 'all'}); });
             // Auto-admin: first sign-in with no users -> register as admin
             if (!list.length && self.currentUserEmail) {
-              backend_users.setUserRole(self.currentUserEmail, 'admin', self.currentUserEmail, 'all').then(function() {
-                self.userList = [{key: self.currentUserEmail, addr: self.currentUserEmail, role: 'admin', tables: 'all'}];
+              var adminEmail = self.currentUserEmail.toLowerCase();  // normalize key to match auth email
+              backend_users.setUserRole(adminEmail, 'admin', adminEmail, 'all').then(function() {
+                self.userList = [{key: adminEmail, addr: adminEmail, role: 'admin', tables: 'all'}];
                 self.usersLoaded = true;
                 self.loading = false;
             self._autoSelectTab();
@@ -1990,10 +2013,13 @@ function createVueApp() {
         });
       },
       renameUser: function(u, newAddr) {
-        if (!newAddr || newAddr === u.addr) return;
+        // Normalize to lowercase so the doc key matches the (lowercased) Firebase auth email —
+        // Firestore rules look up _meta/users[request.auth.token.email] with an EXACT key match.
+        newAddr = (newAddr || '').trim().toLowerCase();
+        if (!newAddr || newAddr === u.key) return;   // key IS the identity Firestore rules match on
         var self = this;
         backend_users.removeUser(u.key).then(function() {
-          return backend_users.setUserRole(newAddr, u.role, newAddr, u.tables);
+          return backend_users.setUserRole(newAddr, u.role, newAddr, u.tables);  // re-key doc: key = email
         }).then(function() { self.loadUsers(); });
       },
       saveFirebaseConfig: function() {
