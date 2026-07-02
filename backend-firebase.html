@@ -38,7 +38,7 @@ backend = {
     return Promise.all([
       StorageFirestore.getMeta('schema'),
       StorageFirestore.getMeta('languages'),
-      self.getLists(folderId),   // per-list collection, already access-filtered
+      self.getLists(folderId).catch(function() { return {}; }),   // lists are optional — never let one denied read fail-fast the whole boot
       self._myTables()           // null = unrestricted; [] = none; [..] = restricted set
     ]).then(function(r) {
       if (!r[0]) return { schema: null }; // first boot -> client saves the bundled default
@@ -96,15 +96,18 @@ backend = {
   // prune, since their list map is partial. Migration is additive (legacy _meta/lists is kept). ---
   _myTables: function() {
     // null = unrestricted (admin or no users); [] = known-but-no-access; [..] = restricted set.
-    return _db.collection('_meta').doc('users').get().then(function(doc) {
-      if (!doc.exists) return null;
-      var users = doc.data();
-      var email = (_auth && _auth.currentUser && _auth.currentUser.email) || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail);
-      var u = users[email];
-      if (!u) return [];
-      if (u.role === 'admin' || u.tables === 'all') return null;
-      return u.tables || [];
-    });
+    var email = ((( _auth && _auth.currentUser && _auth.currentUser.email) || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail)) || '').toLowerCase();
+    if (!email) return Promise.resolve([]);
+    return _db.collection('_users').doc(email).get().then(function(d) {
+      if (d.exists) { var v = d.data(); return (v.role === 'admin' || v.tables === 'all') ? null : (v.tables || []); }
+      // No per-user doc yet: bootstrap (no users) or un-migrated -> consult the legacy _meta/users map.
+      return _db.collection('_meta').doc('users').get().then(function(doc) {
+        if (!doc.exists) return null;                 // bootstrap
+        var u = doc.data()[email];
+        if (!u) return [];                            // registered but not me
+        return (u.role === 'admin' || u.tables === 'all') ? null : (u.tables || []);
+      }).catch(function() { return []; });            // map read denied -> fail closed
+    }).catch(function() { return []; });
   },
   _legacyGetLists: function() {
     return StorageFirestore.getMeta('lists').then(function(d) { return (d && !d._value) ? d : {}; });
@@ -123,9 +126,34 @@ backend = {
           });
         });
       }
-      // restricted: query only the lists this user may read (matches the /_lists rule)
-      return _db.collection('_lists').where('tables', 'array-contains-any', tabs.slice(0, 30)).get().then(function(snap) {
-        var o = {}; snap.forEach(function(d) { var v = d.data(); o[v.name || d.id] = v.items || []; }); return o;
+      // restricted: Firestore rules can't prove-authorize an `array-contains-any` query against a
+      // get()-fetched allow-set (userData().tables), so the collection query is denied. Instead read
+      // each accessible list DOC individually — single-doc reads ARE authorized by the /_lists
+      // `listAllowed()` rule (it evaluates that one doc's `resource.data.tables`). The candidate list
+      // names are exactly the lists referenced by the user's accessible tables' columns.
+      return StorageFirestore.getMeta('schema').then(function(sd) {
+        var parsed = BackendHelpers.unwrapSchemaDoc(sd) || {};
+        var schemaTables = parsed.tables || {};
+        var wanted = {};
+        tabs.forEach(function(t) {
+          var cols = (schemaTables[t] && schemaTables[t].columns) || {};
+          var defs = Array.isArray(cols) ? cols : Object.keys(cols).map(function(k) { return cols[k]; });
+          defs.forEach(function(d) {
+            if (d && typeof d === 'object') {
+              if (d.list) wanted[d.list] = 1;
+              if (d.listSwitch && d.listSwitch.list) wanted[d.listSwitch.list] = 1;
+            }
+          });
+        });
+        var names = Object.keys(wanted);
+        if (!names.length) return {};
+        return Promise.all(names.map(function(name) {
+          return _db.collection('_lists').doc(name).get()
+            .then(function(d) { return d.exists ? { name: (d.data().name || name), items: (d.data().items || []) } : null; })
+            .catch(function() { return null; });   // denied/missing list doc -> skip (fail-closed per list)
+        })).then(function(arr) {
+          var o = {}; arr.forEach(function(x) { if (x) o[x.name] = x.items; }); return o;
+        });
       });
     });
   },
@@ -216,16 +244,58 @@ function triggerOAuth() {
 }
 
 var backend_users = {
-  getUsers: function() { return _db.collection('_meta').doc('users').get().then(function(d) { return d.exists ? d.data() : {}; }); },
+  // The CURRENT user's own access only (self-scoped) so non-admins never read the whole users map.
+  getMyAccess: function() {
+    var email = ((( _auth && _auth.currentUser && _auth.currentUser.email) || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail)) || '').toLowerCase();
+    if (!email) return Promise.resolve({ registered: false });
+    return _db.collection('_users').doc(email).get().then(function(d) {
+      if (d.exists) { var v = d.data(); return { role: v.role, tables: v.tables || 'all' }; }
+      return _db.collection('_meta').doc('users').get().then(function(m) {
+        if (!m.exists) return { bootstrap: true };    // no users configured
+        var u = m.data()[email];
+        return u ? { role: u.role, tables: u.tables || 'all' } : { registered: false };
+      }).catch(function() { return { registered: false }; });  // map denied (non-admin, post-close) -> fail closed
+    }).catch(function() { return { registered: false }; });
+  },
+  // Admin roster for the Users tab. Lists per-user docs; if the collection is empty, one-time
+  // ADDITIVE migration from the legacy _meta/users map (admin only) then returns it.
+  getUsers: function() {
+    return _db.collection('_users').get().then(function(snap) {
+      if (!snap.empty) {
+        var o = {}; snap.forEach(function(d) { var v = d.data(); o[d.id] = { role: v.role, user: v.user || d.id, tables: v.tables || 'all' }; });
+        return o;
+      }
+      return _db.collection('_meta').doc('users').get().then(function(m) {
+        if (!m.exists) return {};
+        var map = m.data(), batch = _db.batch(), o = {};
+        Object.keys(map).forEach(function(k) {
+          var v = map[k] || {}, key = String(k).toLowerCase();
+          var doc = { role: v.role, user: v.user || key, tables: v.tables || 'all' };
+          batch.set(_db.collection('_users').doc(key), doc); o[key] = doc;
+        });
+        return batch.commit().then(function() { return o; }).catch(function() { return o; });
+      });
+    });
+  },
   setUserRole: function(uid, role, user, tables) {
-    return _db.collection('_meta').doc('users').set(
-      Object.fromEntries([[uid, { role: role, user: user || '', tables: tables || 'all' }]]),
-      { merge: true }
-    );
+    var key = String(uid || '').toLowerCase();
+    var doc = { role: role, user: user || key, tables: tables || 'all' };
+    // Source of truth = /_users/<key>; also mirror into the legacy _meta/users map so a rules
+    // rollback keeps working during the transition.
+    return Promise.all([
+      _db.collection('_users').doc(key).set(doc),
+      _db.collection('_meta').doc('users').set(Object.fromEntries([[key, doc]]), { merge: true })
+    ]);
   },
   removeUser: function(uid) {
-    var update = {}; update[uid] = firebase.firestore.FieldValue.delete();
-    return _db.collection('_meta').doc('users').update(update);
+    var key = String(uid || '').toLowerCase();
+    var del = firebase.firestore.FieldValue.delete();
+    var upd = {}; upd[uid] = del; if (key !== uid) upd[key] = del;
+    return Promise.all([
+      _db.collection('_users').doc(key).delete(),
+      (key !== uid ? _db.collection('_users').doc(uid).delete().catch(function() {}) : Promise.resolve()),
+      _db.collection('_meta').doc('users').update(upd).catch(function() {})
+    ]);
   }
 };
 
