@@ -187,6 +187,7 @@
           <v-textarea v-if="pageEditing" v-model="pageEditText" auto-grow variant="outlined" density="compact" placeholder="# Markdown — embed views with {{view:name}} or {{table:name}}"></v-textarea>
           <template v-else v-for="(blk, bi) in pageBlocks" :key="bi">
             <div v-if="blk.html" v-html="blk.html"></div>
+            <calendar-embed v-else-if="blk.embedType === 'view' && isCalendarName(blk.embedName)" :name="blk.embedName"></calendar-embed>
             <embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>
           </template>
         </v-card>
@@ -229,6 +230,85 @@
               <span v-for="(col, i) in rotationSlotCols" :key="col"><span style="opacity:0.6">{{ t('field.' + col) || col }}: </span>{{ displayValue(col, row[col]) }}<span v-if="i < rotationSlotCols.length - 1" style="opacity:0.3"> · </span></span>
             </div>
           </div>
+        </v-card>
+
+        <!-- Calendar view (compact month/week/list + selected-day panel) -->
+        <v-card v-if="isCalendarView" variant="outlined" data-testid="cal-view">
+          <div class="d-flex align-center flex-wrap pa-2" style="gap:8px">
+            <v-btn icon="mdi-chevron-left" size="small" variant="text" @click="calPrev()"></v-btn>
+            <v-btn icon="mdi-chevron-right" size="small" variant="text" @click="calNext()"></v-btn>
+            <v-btn size="small" variant="text" @click="calGoToday()">{{ tOr('cal.today','Today') }}</v-btn>
+            <span style="font-weight:600;min-width:150px">{{ calTitle }}</span>
+            <v-spacer></v-spacer>
+            <v-btn-toggle :model-value="calMode" density="compact" variant="outlined" divided mandatory @update:model-value="calSetMode($event)">
+              <v-btn value="month" size="small">{{ tOr('cal.month','Month') }}</v-btn>
+              <v-btn value="week" size="small">{{ tOr('cal.week','Week') }}</v-btn>
+              <v-btn value="list" size="small">{{ tOr('cal.list','List') }}</v-btn>
+            </v-btn-toggle>
+          </div>
+          <v-divider></v-divider>
+
+          <!-- MONTH grid (compact: day number + neutral-accent count badge) -->
+          <div v-if="calDisplayMode === 'month'" style="padding:8px">
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:0.62rem;opacity:0.55;text-transform:uppercase;margin-bottom:3px">
+              <div v-for="d in calDowNames" :key="d" style="text-align:center">{{ d }}</div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">
+              <div v-for="c in calMonthCells" :key="c.date"
+                   :style="{ position:'relative', height:'34px', display:'flex', alignItems:'center', justifyContent:'center', borderRadius:'6px', fontSize:'0.82rem', opacity: c.inMonth ? 1 : 0.3, cursor: c.count ? 'pointer' : 'default', background: (c.date===calSelectedDay ? 'rgba(var(--v-theme-primary),0.22)' : (c.count ? 'rgba(var(--v-theme-on-surface),0.04)' : 'transparent')), outline: (c.date===calSelectedDay ? '1px solid rgb(var(--v-theme-primary))' : 'none') }"
+                   @click="c.count ? calSelectDay(c.date) : null">
+                <span :style="c.isToday ? 'background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-weight:600' : ''">{{ c.day }}</span>
+                <span v-if="c.count" style="position:absolute;top:1px;right:3px;background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));font-size:0.6rem;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center">{{ c.count }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- WEEK strip (compact: weekday + day number + count badge) -->
+          <div v-else-if="calDisplayMode === 'week'" style="padding:8px">
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">
+              <div v-for="(c, wi) in calWeekCells" :key="c.date"
+                   :style="{ position:'relative', height:'52px', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', borderRadius:'6px', cursor: c.count ? 'pointer' : 'default', background: (c.date===calSelectedDay ? 'rgba(var(--v-theme-primary),0.22)' : (c.count ? 'rgba(var(--v-theme-on-surface),0.04)' : 'transparent')), outline: (c.date===calSelectedDay ? '1px solid rgb(var(--v-theme-primary))' : 'none') }"
+                   @click="c.count ? calSelectDay(c.date) : null">
+                <span style="font-size:0.6rem;opacity:0.55">{{ calDowNames[wi] }}</span>
+                <span :style="c.isToday ? 'background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-weight:600' : 'font-weight:600'">{{ c.day }}</span>
+                <span v-if="c.count" style="position:absolute;top:2px;right:4px;background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));font-size:0.58rem;font-weight:700;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center">{{ c.count }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- LIST / agenda (full window; also the mobile month fallback) -->
+          <div v-else>
+            <template v-for="d in calListDays" :key="d.date">
+              <div style="background:rgb(var(--v-theme-on-surface),0.06);padding:4px 12px;font-size:0.72rem;font-weight:600;opacity:0.85">{{ d.label }} · {{ d.events.length }}</div>
+              <div v-for="ev in d.events" :key="ev.id" style="display:flex;align-items:center;gap:8px;padding:5px 12px;font-size:0.88rem;border-bottom:1px solid rgb(var(--v-theme-outline),0.06)">
+                <span :style="{ width:'9px', height:'9px', borderRadius:'50%', background: ev.color, flex:'0 0 auto' }"></span>
+                <b style="opacity:0.8">{{ ev.label }}</b> <span style="opacity:0.85">{{ ev.title }}</span>
+                <span v-if="ev.readOnly" style="opacity:0.5;font-size:0.7rem">(read-only)</span>
+              </div>
+            </template>
+            <template v-if="calUndated.length">
+              <div style="background:rgb(var(--v-theme-on-surface),0.06);padding:4px 12px;font-size:0.72rem;font-weight:600;opacity:0.55">{{ tOr('cal.undated','Undated') }} · {{ calUndated.length }}</div>
+              <div v-for="ev in calUndated" :key="ev.id" style="display:flex;align-items:center;gap:8px;padding:5px 12px;font-size:0.88rem;border-bottom:1px solid rgb(var(--v-theme-outline),0.06)">
+                <span :style="{ width:'9px', height:'9px', borderRadius:'50%', background: ev.color, flex:'0 0 auto' }"></span>
+                <b style="opacity:0.8">{{ ev.label }}</b> <span style="opacity:0.85">{{ ev.title }}</span>
+              </div>
+            </template>
+            <div v-if="!calListDays.length && !calUndated.length" style="padding:12px;opacity:0.6;font-size:0.85rem">{{ tOr('cal.no_events','No events') }}</div>
+          </div>
+
+          <!-- Selected-day panel (month/week only; single-day slice) -->
+          <template v-if="calDisplayMode !== 'list'">
+            <v-divider></v-divider>
+            <div style="padding:10px 12px">
+              <div style="font-weight:600;margin-bottom:6px">{{ calSelectedLabel }} <span style="opacity:0.5;font-weight:400">· {{ calSelectedEvents.length }} {{ tOr('cal.items','items') }}</span></div>
+              <div v-if="!calSelectedEvents.length" style="opacity:0.6;font-size:0.85rem">{{ tOr('cal.no_events','No events') }}</div>
+              <div v-for="ev in calSelectedEvents" :key="ev.id" style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:0.9rem">
+                <span :style="{ width:'9px', height:'9px', borderRadius:'50%', background: ev.color, flex:'0 0 auto' }"></span>
+                <b style="opacity:0.8">{{ ev.label }}</b> <span style="opacity:0.85">{{ ev.title }}</span>
+                <span v-if="ev.readOnly" style="opacity:0.5;font-size:0.7rem">(read-only)</span>
+              </div>
+            </div>
+          </template>
         </v-card>
 
         <!-- Data Table -->
