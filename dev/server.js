@@ -169,6 +169,12 @@ const server = http.createServer(async (req, res) => {
       case 'deleteFile': backend.deleteFile('local', body.name); return json(res, { ok: true });
       case 'saveConfig': { var allowed = ['firebase-config.json', 'config.json']; var fn = path.basename(body.filename || 'config.json'); if (!allowed.includes(fn)) return json(res, { error: 'filename not allowed' }, 403); fs.writeFileSync(path.join(STATIC_DIR, fn), JSON.stringify(body.data, null, 2)); return json(res, { ok: true }); }
       case 'getUsers': return json(res, backend._users || {});
+      case 'getMyAccess': {
+        if (!backend._users || !Object.keys(backend._users).length) return json(res, { bootstrap: true });
+        const mine = Object.values(backend._users).find(v => v.user === userEmail)
+          || backend._users[userEmail] || backend._users[(userEmail || '').toLowerCase()];
+        return json(res, mine ? { role: mine.role, tables: mine.tables || 'all' } : { registered: false });
+      }
       case 'setUserRole': { if (!backend._users) backend._users = {}; backend._users[body.uid] = { role: body.role, user: body.user || '', tables: body.tables || 'all' }; saveUsers(); return json(res, { ok: true }); }
       case 'removeUser': { if (backend._users) delete backend._users[body.uid]; saveUsers(); return json(res, { ok: true }); }
       default: res.writeHead(404); return res.end('Not found');
