@@ -207,6 +207,10 @@ function createVueApp() {
       serverStorage: '',
       userList: [],
       usersLoaded: false,
+      // True when users exist but the signed-in user is not one of them (self-scoped getMyAccess said
+      // registered:false). Distinguishes "unregistered" from "bootstrap" (both have an empty userList
+      // for a non-admin who can't read the whole roster).
+      selfUnregistered: false,
       firestoreRules: '',
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
       oauthClientId: localStorage.getItem('oauth_client_id') || '',
@@ -250,6 +254,9 @@ function createVueApp() {
       pageCache: {},
       expandedCard: null,
       listSwitchOverrides: {}, // {itemId_col: true} — tracks which cells are toggled to alt list
+      calMode: null,        // calendar view: 'month'|'week'|'list' (from calendar.defaultView on open)
+      calAnchor: null,      // 'YYYY-MM-DD' — the visible month/week contains this date (defaults today)
+      calSelectedDay: null, // 'YYYY-MM-DD' — day whose events show in the panel below (defaults today)
     }; },
 
     computed: {
@@ -294,9 +301,35 @@ function createVueApp() {
       bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
       isDataView: function() {
         var v = VIEWS[this.currentTable];
-        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation)) && (v || SCHEMA[this.currentTable]);
+        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation || v.calendar)) && (v || SCHEMA[this.currentTable]);
       },
       isRotationView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rotation); },
+      isCalendarView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.calendar); },
+      // --- Calendar view (compact month/week/list; single-source in phase 1) ---
+      calWeekStart: function() { var v = VIEWS[this.currentTable]; return (v && v.calendar && v.calendar.weekStart != null) ? Number(v.calendar.weekStart) : 1; },
+      calEvents: function() { return this.isCalendarView ? this.calEventsFor(this.currentTable, this._calWindowFor(this.calAnchor || this._calToday(), this.calMode, this.calWeekStart)) : {}; },
+      calDisplayMode: function() { return (this.mobile && this.calMode === 'month') ? 'list' : (this.calMode || 'month'); },
+      calMonthCells: function() { var self = this, ev = this.calEvents; return this._calCellsMonth(this.calAnchor || this._calToday(), this.calWeekStart).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
+      calWeekCells: function() { var self = this, ev = this.calEvents; return this._calCellsWeek(this.calAnchor || this._calToday(), this.calWeekStart).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
+      calDowNames: function() { var loc = this.calLocale(), ws = this.calWeekStart, fmt = new Intl.DateTimeFormat(loc, { weekday: 'short' }), out = []; for (var i = 0; i < 7; i++) { out.push(fmt.format(new Date(2023, 0, 1 + ((ws + i) % 7)))); } return out; },
+      calTitle: function() {
+        var loc = this.calLocale(), a = this.calAnchor || this._calToday();
+        if (this.calMode === 'week') {
+          var cells = this._calCellsWeek(a, this.calWeekStart), f = cells[0].date.split('-'), l = cells[6].date.split('-');
+          return new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' }).format(new Date(+f[0], +f[1] - 1, +f[2])) + ' – ' + new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(+l[0], +l[1] - 1, +l[2]));
+        }
+        var p = a.split('-'); return new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, 1));
+      },
+      calSelectedEvents: function() { return this.calEvents[this.calSelectedDay] || []; },
+      calSelectedLabel: function() { if (!this.calSelectedDay) return ''; var p = this.calSelectedDay.split('-'); return new Intl.DateTimeFormat(this.calLocale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, +p[2])); },
+      calListDays: function() {
+        var self = this, ev = this.calEvents;
+        return Object.keys(ev).filter(function(k) { return k !== '__undated__'; }).sort().map(function(k) {
+          var p = k.split('-');
+          return { date: k, label: new Intl.DateTimeFormat(self.calLocale(), { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: ev[k] };
+        });
+      },
+      calUndated: function() { return this.calEvents['__undated__'] || []; },
       rotationViewCols: function() {
         var v = VIEWS[this.currentTable];
         if (!v || !v.rotation) return [];
@@ -348,18 +381,21 @@ function createVueApp() {
       },
       currentUserRole: function() {
         if (!this.usersLoaded) return null;
+        if (this.selfUnregistered) return null;    // users exist but not us -> no role (fail closed)
         if (!this.userList.length) return 'admin'; // bootstrap
         var u = this.currentUserEntry;
         return u ? u.role : null;
       },
       isAdmin: function() {
         if (!this.usersLoaded) return true; // default until loaded
+        if (this.selfUnregistered) return false;   // not a registered user
         if (!this.userList.length) return true; // no users = bootstrap
         return this.currentUserRole === 'admin';
       },
       // True once users exist and are loaded but the signed-in user matches no record -> Firestore
       // will deny every read. Surface a clear notice instead of a misleading empty-but-full nav.
       isUnregisteredUser: function() {
+        if (this.selfUnregistered) return true;
         return this.usersLoaded && this.userList.length > 0 && !this.currentUserEntry;
       },
       // Stable display order for the Settings user table. userList is rebuilt from Firestore map-key
@@ -371,6 +407,7 @@ function createVueApp() {
         });
       },
       userAllowedTables: function() {
+        if (this.selfUnregistered) return [];   // FAIL CLOSED: users exist but we're not one
         if (this.isAdmin) return null; // null = unrestricted
         var u = this.currentUserEntry;
         if (!u) return [];             // FAIL CLOSED: registered users exist but we're not one -> no access
@@ -595,7 +632,9 @@ function createVueApp() {
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access',
          'settings.user_id', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all',
-         'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset', 'lang.app', 'lang.schema'].sort();
+         'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset',
+         'cal.today', 'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
+         'lang.app', 'lang.schema'].sort();
       },
       schemaTranslationKeys: function() {
         var keys = [];
@@ -700,6 +739,7 @@ function createVueApp() {
 
     methods: {
       t: function(key) { return this.strings[key] || key; },
+      tOr: function(key, fallback) { return this.strings[key] || fallback; }, // translated label or a built-in English default
 
       toggleTheme: function() {
         this.theme = this.theme === 'dark' ? 'light' : 'dark';
@@ -964,9 +1004,112 @@ function createVueApp() {
         var cfg = VIEWS[id] || SCHEMA[id] || {};
         this.sortCol = cfg.defaultSort || null;
         this.sortAsc = true;
-        if (this.isDataView || this.isRotationView) this.loadTableData();
+        if (this.isCalendarView) {
+          this.calMode = (VIEWS[id].calendar.defaultView) || 'month';
+          this.calAnchor = this.calSelectedDay = this._calToday();
+          this.loadTableData();
+        }
+        else if (this.isDataView || this.isRotationView) this.loadTableData();
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
+      // --- Calendar helpers (used by the calendar view + calendar embeds) ---
+      _calToday: function() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); },
+      _calFmtDate: function(dt) { return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0'); },
+      _calCellsMonth: function(anchor, weekStart) {
+        var p = (anchor || this._calToday()).split('-'), y = +p[0], m = +p[1] - 1;
+        var first = new Date(y, m, 1), off = ((first.getDay() - weekStart) + 7) % 7, start = new Date(y, m, 1 - off), today = this._calToday(), cells = [];
+        for (var i = 0; i < 42; i++) { var dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i), key = this._calFmtDate(dt); cells.push({ date: key, day: dt.getDate(), inMonth: dt.getMonth() === m, isToday: key === today }); }
+        return cells;
+      },
+      _calCellsWeek: function(anchor, weekStart) {
+        var p = (anchor || this._calToday()).split('-'), dt0 = new Date(+p[0], +p[1] - 1, +p[2]);
+        var off = ((dt0.getDay() - weekStart) + 7) % 7, start = new Date(dt0.getFullYear(), dt0.getMonth(), dt0.getDate() - off), today = this._calToday(), cells = [];
+        for (var i = 0; i < 7; i++) { var dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i), key = this._calFmtDate(dt); cells.push({ date: key, day: dt.getDate(), isToday: key === today }); }
+        return cells;
+      },
+      // BCP-47 locale for Intl date names: language.locale, then a name/code guess, then browser/'en'.
+      calLocale: function() {
+        var code = this.currentLang, lang = (this.languages || []).find(function(l) { return l.code === code; });
+        if (lang && lang.locale) return lang.locale;
+        var guess = { Suomi: 'fi', Finnish: 'fi', English: 'en', Swedish: 'sv', Ruotsi: 'sv' };
+        return (lang && guess[lang.name]) || guess[code] || (typeof navigator !== 'undefined' && navigator.language) || 'en';
+      },
+      hashColor: function(key) {
+        var pal = ['#5b8def', '#26a69a', '#ab47bc', '#ef6c00', '#66bb6a', '#ec407a', '#8d6e63', '#c62828', '#00897b', '#7e57c2'];
+        var s = String(key || ''), h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+        return pal[h % pal.length];
+      },
+      // Resolve a calendar view's source specs (single-source `source` sugar -> one-element list).
+      calSources: function(name) {
+        var v = VIEWS[name]; if (!v || !v.calendar) return [];
+        var c = v.calendar;
+        return c.sources || [{ table: c.source, dateColumn: c.dateColumn, titleColumns: c.titleColumns, filter: c.filter, label: c.label }];
+      },
+      // Rotation views overlaid on a calendar as generated read-only duty events.
+      calRotationSources: function(name) { var v = VIEWS[name]; return (v && v.calendar && v.calendar.rotationSources) || []; },
+      // Visible grid window {from, toExclusive} for a calendar's anchor+mode (month/list -> month grid,
+      // week -> week strip). Bounds rotation generation to what's actually on screen.
+      _calWindowFor: function(anchor, mode, weekStart) {
+        var cells = (mode === 'week') ? this._calCellsWeek(anchor || this._calToday(), weekStart) : this._calCellsMonth(anchor || this._calToday(), weekStart);
+        var last = cells[cells.length - 1].date.split('-');
+        return { from: cells[0].date, toExclusive: this._calFmtDate(new Date(+last[0], +last[1] - 1, +last[2] + 1)) };
+      },
+      // Periods to generate from `fromStr` (the rotation view's OWN start) to reach `toExclusive`. We
+      // start from the rotation's own `from` — not the grid start — so the numeric slot-swap phase
+      // (floor(i/n)) matches the rotation view exactly (single source of truth); events are then
+      // clipped to the window. 0 when the window ends before the rotation begins.
+      _periodsToCover: function(fromStr, toExclusive, interval) {
+        var n = wholeIntervalsBetween(fromStr, toExclusive, interval);
+        return n < 0 ? 0 : n + 2;
+      },
+      // Build the { 'YYYY-MM-DD': [events] } map for a calendar view. Undated rows -> '__undated__'.
+      // Fail-closed per source: a table the user cannot read contributes nothing. When `window` is
+      // given, rotationSources' generated duties are added (bounded to that window).
+      calEventsFor: function(name, window) {
+        var self = this, out = {}, allowed = this.userAllowedTables;
+        this.calSources(name).forEach(function(s) {
+          if (!s || !s.table || !s.dateColumn) return;
+          if (allowed && allowed.indexOf(s.table) < 0) return;
+          var rows = filterRows(self.dataCache[s.table] || [], s.filter);
+          var tag = s.label || self.t('tab.' + s.table);
+          rows.forEach(function(r) {
+            var title = (s.titleColumns || []).map(function(c) { return self.displayValue(c, r[c]); }).filter(Boolean).join(' — ');
+            var ev = { id: s.table + ':' + s.dateColumn + ':' + r.id, title: title || tag, label: tag, color: self.hashColor(s.label || s.table), table: s.table, dateCol: s.dateColumn, row: r };
+            var d = toDateStr(r[s.dateColumn]);
+            var key = d || '__undated__';
+            (out[key] = out[key] || []).push(ev);
+          });
+        });
+        // Rotation sources -> generated read-only duty events, bounded to the visible window.
+        if (window) this.calRotationSources(name).forEach(function(rs) {
+          var v = VIEWS[rs.view]; if (!v || !v.rotation) return;
+          var rv = v.rotation, rosters = rv.rosters || [];
+          if (allowed && rosters.length && !rosters.some(function(t) { return allowed.indexOf(t) >= 0; })) return; // per-roster access (fail-closed)
+          var range = self.rangeForView(rs.view);
+          var fromStr = (!range.from || range.from === 'today') ? self._calToday() : range.from;
+          var interval = rv.interval || 'weekly';
+          var periods = self._periodsToCover(fromStr, window.toExclusive, interval);
+          if (!periods) return;
+          var rows = buildRotationViewRows(v, self.dataCache, self._calToday(), self.anchorForView(rs.view), { from: fromStr, periods: Math.min(periods, 520) }, self.rotateEveryForView(rs.view));
+          var slots = rv.slots || [], tag = rs.label || self.tOr('tab.' + rs.view, rs.view);
+          rows.forEach(function(r) {
+            if (r._period < window.from || r._period >= window.toExclusive) return; // clip to visible grid
+            slots.forEach(function(slot) {
+              var ppl = r[slot]; if (!(ppl && ppl.length)) return;
+              var title = self.tOr('field.' + slot, slot) + ': ' + self.displayValue(slot, ppl);
+              (out[r._period] = out[r._period] || []).push({ id: 'rot:' + rs.view + ':' + slot + ':' + r._period, title: title, label: tag, color: self.hashColor(rs.label || rs.view), table: null, readOnly: true, row: r });
+            });
+          });
+        });
+        Object.keys(out).forEach(function(k) { out[k].sort(function(a, b) { return (a.label + a.title).localeCompare(b.label + b.title); }); });
+        return out;
+      },
+      calPrev: function() { this.calAnchor = addIntervals(this.calAnchor || this._calToday(), -1, this.calMode === 'week' ? 'weekly' : 'monthly'); },
+      calNext: function() { this.calAnchor = addIntervals(this.calAnchor || this._calToday(), 1, this.calMode === 'week' ? 'weekly' : 'monthly'); },
+      calGoToday: function() { this.calAnchor = this.calSelectedDay = this._calToday(); },
+      calSetMode: function(m) { this.calMode = m; },
+      calSelectDay: function(d) { this.calSelectedDay = d; },
+      isCalendarName: function(name) { return !!(VIEWS[name] && VIEWS[name].calendar); },
       // Doc-view bodies live in a server-side "_pages" collection (not in schema.json).
       // Falls back to the view's schema-defined `markdown` (seed), then caches it.
       loadPage: function(name) {
@@ -1075,6 +1218,25 @@ function createVueApp() {
         var self = this;
         var view = VIEWS[this.currentTable];
         if (view) {
+          // Calendar view: load each distinct source table (deduped); the grid/panel read from
+          // dataCache via calEventsFor. No stored calendar rows — pure presentation of source rows.
+          if (view.calendar) {
+            var allowedCal = self.userAllowedTables;
+            var calTables = [];
+            self.calSources(self.currentTable).forEach(function(s) { if (s && s.table && calTables.indexOf(s.table) < 0) calTables.push(s.table); });
+            // Also preload each rotationSource's rosters so generated duty events can resolve.
+            self.calRotationSources(self.currentTable).forEach(function(rs) {
+              var rvv = VIEWS[rs.view] && VIEWS[rs.view].rotation;
+              ((rvv && rvv.rosters) || []).forEach(function(tbl) { if (tbl && calTables.indexOf(tbl) < 0) calTables.push(tbl); });
+            });
+            calTables.forEach(function(tbl) {
+              if (self.dataCache[tbl] || (allowedCal && allowedCal.indexOf(tbl) < 0)) return;
+              backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
+                self.dataCache[tbl] = parseTableResult(result).rows;
+              }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
+            });
+            return;
+          }
           // rotationView (third view kind): generate rows from range; no sources to read.
           if (view.rotation) {
             var td = new Date();
@@ -1944,40 +2106,53 @@ function createVueApp() {
       },
       loadUsers: function() {
         var self = this;
-        if (typeof backend_users !== 'undefined') {
-          if (!self.currentUserEmail) {
-            var p = new URLSearchParams(location.search);
-            self.currentUserEmail = p.get('user') || localStorage.getItem('test_user') || 'local@dev';
-          }
-          backend_users.getUsers().then(function(u) {
-            var list = [];
-            Object.keys(u || {}).forEach(function(k) { var v = u[k]; if (v && typeof v === 'object' && v.role) list.push({key: k, addr: v.user || '', role: v.role, tables: v.tables || 'all'}); });
-            // Auto-admin: first sign-in with no users -> register as admin
-            if (!list.length && self.currentUserEmail) {
-              var adminEmail = self.currentUserEmail.toLowerCase();  // normalize key to match auth email
-              backend_users.setUserRole(adminEmail, 'admin', adminEmail, 'all').then(function() {
-                self.userList = [{key: adminEmail, addr: adminEmail, role: 'admin', tables: 'all'}];
-                self.usersLoaded = true;
-                self.loading = false;
-            self._autoSelectTab();
-                self.notify('You are registered as admin');
-              });
-              return;
-            }
-            self.userList = list;
-            self.usersLoaded = true;
-            self.loading = false;
-            self._autoSelectTab();
-          }).catch(function() {
-            self.usersLoaded = true;
-            self.loading = false;
-            self._autoSelectTab();
-          });
-        } else {
-          self.usersLoaded = true;
-          self.loading = false;
-          if (!self.currentTable) { var ft = self.sidebarTabs.find(function(t) { return !t.divider; }); if (ft) self.selectTab(ft.id); }
+        if (typeof backend_users === 'undefined') {
+          self.usersLoaded = true; self.loading = false;
+          if (!self.currentTable) { var ft0 = self.sidebarTabs.find(function(t) { return !t.divider; }); if (ft0) self.selectTab(ft0.id); }
+          return;
         }
+        if (!self.currentUserEmail) {
+          var p = new URLSearchParams(location.search);
+          self.currentUserEmail = p.get('user') || localStorage.getItem('test_user') || 'local@dev';
+        }
+        var done = function() { self.usersLoaded = true; self.loading = false; self._autoSelectTab(); };
+        // Legacy backends without getMyAccess: keep the full-map path (rules-free local/Drive).
+        if (typeof backend_users.getMyAccess !== 'function') {
+          backend_users.getUsers().then(function(u) {
+            var list = self._buildUserList(u);
+            if (!list.length && self.currentUserEmail) return self._bootstrapAdmin(done);
+            self.userList = list; done();
+          }).catch(function() { done(); });
+          return;
+        }
+        // Preferred: learn OUR OWN access via a self-scoped read so non-admins never read the whole
+        // users roster (which holds every user's email/role/grants).
+        backend_users.getMyAccess().then(function(a) {
+          a = a || { registered: false };
+          self.selfUnregistered = false;
+          if (a.bootstrap) return self._bootstrapAdmin(done);
+          if (a.registered === false) { self.selfUnregistered = true; self.userList = []; return done(); }
+          var email = (self.currentUserEmail || '').toLowerCase();
+          if (a.role === 'admin' || a.tables === 'all') {
+            backend_users.getUsers().then(function(u) { self.userList = self._buildUserList(u); done(); })
+              .catch(function() { self.userList = [{ key: email, addr: email, role: a.role, tables: a.tables || 'all' }]; done(); });
+          } else {
+            self.userList = [{ key: email, addr: email, role: a.role, tables: a.tables }]; done();
+          }
+        }).catch(function() { self.selfUnregistered = true; self.userList = []; done(); });
+      },
+      _buildUserList: function(u) {
+        var list = [];
+        Object.keys(u || {}).forEach(function(k) { var v = u[k]; if (v && typeof v === 'object' && v.role) list.push({ key: k, addr: v.user || '', role: v.role, tables: v.tables || 'all' }); });
+        return list;
+      },
+      _bootstrapAdmin: function(done) {
+        var self = this, adminEmail = (self.currentUserEmail || '').toLowerCase();
+        return backend_users.setUserRole(adminEmail, 'admin', adminEmail, 'all').then(function() {
+          self.selfUnregistered = false;
+          self.userList = [{ key: adminEmail, addr: adminEmail, role: 'admin', tables: 'all' }];
+          done(); self.notify('You are registered as admin');
+        }).catch(function() { done(); });
       },
       setUserRole: function(uid, role, user, tables) {
         var self = this;
@@ -2591,6 +2766,78 @@ function createVueApp() {
       + '</td></tr></tbody>'
       + '</template></v-table>'
       + '<v-btn v-if="canMutate" variant="text" size="small" prepend-icon="mdi-plus" @click="addRow">{{ t(\'btn.add\') || \'Add\' }}</v-btn>'
+      + '</div>'
+  });
+
+  // Compact calendar embed — used by markdown pages via {{view:calendarName}}. Holds its own
+  // month/anchor/selected-day state; reuses appInstance calendar helpers (calEventsFor, cell
+  // builders, i18n). Source tables are already in dataCache (boot preload / calendar view load).
+  app.component('calendar-embed', {
+    props: { name: { type: String, required: true } },
+    data: function() {
+      var cfg = (window.VIEWS[this.name] && window.VIEWS[this.name].calendar) || {};
+      var today = appInstance ? appInstance._calToday() : '';
+      return { mode: cfg.defaultView || 'month', anchor: today, sel: today };
+    },
+    computed: {
+      weekStart: function() { var v = window.VIEWS[this.name]; return (v && v.calendar && v.calendar.weekStart != null) ? Number(v.calendar.weekStart) : 1; },
+      events: function() { return appInstance ? appInstance.calEventsFor(this.name, appInstance._calWindowFor(this.anchor, this.mode, this.weekStart)) : {}; },
+      displayMode: function() { return (appInstance && appInstance.mobile && this.mode === 'month') ? 'list' : (this.mode || 'month'); },
+      monthCells: function() { var ev = this.events; return appInstance._calCellsMonth(this.anchor, this.weekStart).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
+      weekCells: function() { var ev = this.events; return appInstance._calCellsWeek(this.anchor, this.weekStart).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
+      dowNames: function() { var loc = appInstance.calLocale(), ws = this.weekStart, fmt = new Intl.DateTimeFormat(loc, { weekday: 'short' }), out = []; for (var i = 0; i < 7; i++) out.push(fmt.format(new Date(2023, 0, 1 + ((ws + i) % 7)))); return out; },
+      title: function() { var loc = appInstance.calLocale(); if (this.mode === 'week') { var cs = appInstance._calCellsWeek(this.anchor, this.weekStart), f = cs[0].date.split('-'), l = cs[6].date.split('-'); return new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' }).format(new Date(+f[0], +f[1] - 1, +f[2])) + ' – ' + new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(+l[0], +l[1] - 1, +l[2])); } var p = this.anchor.split('-'); return new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, 1)); },
+      selEvents: function() { return this.events[this.sel] || []; },
+      selLabel: function() { if (!this.sel) return ''; var p = this.sel.split('-'); return new Intl.DateTimeFormat(appInstance.calLocale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, +p[2])); },
+      listDays: function() { var ev = this.events; return Object.keys(ev).filter(function(k) { return k !== '__undated__'; }).sort().map(function(k) { var p = k.split('-'); return { date: k, label: new Intl.DateTimeFormat(appInstance.calLocale(), { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: ev[k] }; }); },
+      undated: function() { return this.events['__undated__'] || []; }
+    },
+    methods: {
+      tOr: function(k, f) { return appInstance ? appInstance.tOr(k, f) : f; },
+      prev: function() { this.anchor = addIntervals(this.anchor, -1, this.mode === 'week' ? 'weekly' : 'monthly'); },
+      next: function() { this.anchor = addIntervals(this.anchor, 1, this.mode === 'week' ? 'weekly' : 'monthly'); },
+      goToday: function() { this.anchor = this.sel = appInstance._calToday(); },
+      setMode: function(m) { this.mode = m; },
+      selectDay: function(d) { this.sel = d; }
+    },
+    template: ''
+      + '<div class="my-2" style="border:1px solid rgb(var(--v-theme-outline),0.2);border-radius:8px">'
+      + '<div class="d-flex align-center flex-wrap pa-2" style="gap:8px">'
+      + '<v-btn icon="mdi-chevron-left" size="small" variant="text" @click="prev()"></v-btn>'
+      + '<v-btn icon="mdi-chevron-right" size="small" variant="text" @click="next()"></v-btn>'
+      + '<v-btn size="small" variant="text" @click="goToday()">{{ tOr(\'cal.today\',\'Today\') }}</v-btn>'
+      + '<span style="font-weight:600;min-width:150px">{{ title }}</span><v-spacer></v-spacer>'
+      + '<v-btn-toggle :model-value="mode" density="compact" variant="outlined" divided mandatory @update:model-value="setMode($event)">'
+      + '<v-btn value="month" size="small">{{ tOr(\'cal.month\',\'Month\') }}</v-btn>'
+      + '<v-btn value="week" size="small">{{ tOr(\'cal.week\',\'Week\') }}</v-btn>'
+      + '<v-btn value="list" size="small">{{ tOr(\'cal.list\',\'List\') }}</v-btn></v-btn-toggle></div>'
+      + '<v-divider></v-divider>'
+      // month
+      + '<div v-if="displayMode===\'month\'" style="padding:8px">'
+      + '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:0.62rem;opacity:0.55;text-transform:uppercase;margin-bottom:3px"><div v-for="d in dowNames" :key="d" style="text-align:center">{{ d }}</div></div>'
+      + '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">'
+      + '<div v-for="c in monthCells" :key="c.date" :style="{ position:\'relative\', height:\'34px\', display:\'flex\', alignItems:\'center\', justifyContent:\'center\', borderRadius:\'6px\', fontSize:\'0.82rem\', opacity: c.inMonth?1:0.3, cursor: c.count?\'pointer\':\'default\', background: (c.date===sel?\'rgba(var(--v-theme-primary),0.22)\':(c.count?\'rgba(var(--v-theme-on-surface),0.04)\':\'transparent\')), outline: (c.date===sel?\'1px solid rgb(var(--v-theme-primary))\':\'none\') }" @click="c.count?selectDay(c.date):null">'
+      + '<span :style="c.isToday?\'background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-weight:600\':\'\'">{{ c.day }}</span>'
+      + '<span v-if="c.count" style="position:absolute;top:1px;right:3px;background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));font-size:0.6rem;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center">{{ c.count }}</span>'
+      + '</div></div></div>'
+      // week
+      + '<div v-else-if="displayMode===\'week\'" style="padding:8px"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">'
+      + '<div v-for="(c,wi) in weekCells" :key="c.date" :style="{ position:\'relative\', height:\'52px\', display:\'flex\', flexDirection:\'column\', alignItems:\'center\', justifyContent:\'center\', borderRadius:\'6px\', cursor: c.count?\'pointer\':\'default\', background: (c.date===sel?\'rgba(var(--v-theme-primary),0.22)\':(c.count?\'rgba(var(--v-theme-on-surface),0.04)\':\'transparent\')), outline: (c.date===sel?\'1px solid rgb(var(--v-theme-primary))\':\'none\') }" @click="c.count?selectDay(c.date):null">'
+      + '<span style="font-size:0.6rem;opacity:0.55">{{ dowNames[wi] }}</span>'
+      + '<span :style="c.isToday?\'background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-weight:600\':\'font-weight:600\'">{{ c.day }}</span>'
+      + '<span v-if="c.count" style="position:absolute;top:2px;right:4px;background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));font-size:0.58rem;font-weight:700;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center">{{ c.count }}</span>'
+      + '</div></div></div>'
+      // list
+      + '<div v-else><template v-for="d in listDays" :key="d.date">'
+      + '<div style="background:rgb(var(--v-theme-on-surface),0.06);padding:4px 12px;font-size:0.72rem;font-weight:600;opacity:0.85">{{ d.label }} · {{ d.events.length }}</div>'
+      + '<div v-for="ev in d.events" :key="ev.id" style="display:flex;align-items:center;gap:8px;padding:5px 12px;font-size:0.88rem;border-bottom:1px solid rgb(var(--v-theme-outline),0.06)"><span :style="{ width:\'9px\', height:\'9px\', borderRadius:\'50%\', background: ev.color, flex:\'0 0 auto\' }"></span><b style="opacity:0.8">{{ ev.label }}</b> <span style="opacity:0.85">{{ ev.title }}</span><span v-if="ev.readOnly" style="opacity:0.5;font-size:0.7rem">(read-only)</span></div>'
+      + '</template><div v-if="!listDays.length" style="padding:12px;opacity:0.6;font-size:0.85rem">{{ tOr(\'cal.no_events\',\'No events\') }}</div></div>'
+      // selected-day panel (month/week)
+      + '<template v-if="displayMode!==\'list\'"><v-divider></v-divider><div style="padding:10px 12px">'
+      + '<div style="font-weight:600;margin-bottom:6px">{{ selLabel }} <span style="opacity:0.5;font-weight:400">· {{ selEvents.length }} {{ tOr(\'cal.items\',\'items\') }}</span></div>'
+      + '<div v-if="!selEvents.length" style="opacity:0.6;font-size:0.85rem">{{ tOr(\'cal.no_events\',\'No events\') }}</div>'
+      + '<div v-for="ev in selEvents" :key="ev.id" style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:0.9rem"><span :style="{ width:\'9px\', height:\'9px\', borderRadius:\'50%\', background: ev.color, flex:\'0 0 auto\' }"></span><b style="opacity:0.8">{{ ev.label }}</b> <span style="opacity:0.85">{{ ev.title }}</span><span v-if="ev.readOnly" style="opacity:0.5;font-size:0.7rem">(read-only)</span></div>'
+      + '</div></template>'
       + '</div>'
   });
   appInstance = app.mount('#vue-app');
