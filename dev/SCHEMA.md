@@ -579,6 +579,94 @@ columns; `security_rotation` is occurrence-mode and ignores the anchor entirely.
 - The slot tables stay directly editable in the **Rotations** nav group; both schedules recompute on
   next render.
 
+## calendar (fourth view kind)
+
+A view with a `calendar` field renders its source rows on a compact **month / week / list**
+calendar, bucketed by a date column — like a lightweight Google Calendar. It has **no stored rows
+of its own**: it's a *presentation* of existing table rows (and generated rotation duties).
+Distinct from data views, documents, and rotationViews.
+
+### Layout
+- **Month**: compact grid (day number + a single **neutral-accent count badge** on days with
+  events — NOT one chip per event). Clicking a day opens that day's events in a **selected-day panel
+  below the grid** (a one-day agenda slice; it does NOT switch to List mode).
+- **Week**: a 7-day strip (day number + count badge); click fills the same panel.
+- **List / agenda**: a flat multi-day list (date subheading + event rows), plus an **Undated**
+  section for rows with an empty date. This is also the automatic **mobile fallback** for Month.
+- Event dots in the panel/list are coloured by **event type** (the `label`, or the source table's
+  translated `tab.<table>` name). The month/week count badge is always the neutral accent.
+
+### Single source
+```json
+{ "name": "chore_calendar",
+  "calendar": {
+    "source": "chore_log",        // REQUIRED (or `sources`) — one table
+    "dateColumn": "done_on",       // REQUIRED — a date column of `source` (YYYY-MM-DD)
+    "titleColumns": ["chore", "person"], // OPTIONAL — joined with " — " for the event label
+    "defaultView": "month",        // OPTIONAL — "month" | "week" | "list" (default "month")
+    "weekStart": 1                 // OPTIONAL — 0=Sun, 1=Mon (default 1)
+  }
+}
+```
+
+### Multi source ("all events")
+Use `sources` (instead of `source`) to merge several tables into one calendar. Each source declares
+its own date + title; the **same table may appear twice** with different `dateColumn`s (e.g. an
+appointment date and an expiry date):
+```json
+"calendar": {
+  "sources": [
+    { "table": "kokoukset",   "dateColumn": "pvm",        "titleColumns": ["aihe"],   "label": "Kokous" },
+    { "table": "keskustelut", "dateColumn": "tapaaminen", "titleColumns": ["person"], "label": "Keskustelu" },
+    { "table": "keskustelut", "dateColumn": "päättyy",    "titleColumns": ["person"], "label": "Suositus päättyy" }
+  ],
+  "defaultView": "month"
+}
+```
+Per-source fields: `table` (req), `dateColumn` (req), `titleColumns` (opt), `filter` (opt, data-view
+grammar), `label` (opt — the type tag + colour key; defaults to the table's translated `tab.<table>`).
+
+### Rotation duties (`rotationSources`)
+Overlay a **rotation view's** generated duties (e.g. `siivous` cleaning turns) onto the calendar as
+**read-only** events. Rotation rows aren't stored — they're generated per date from the rosters +
+anchor — so the calendar generates them on demand for the visible window and drops any outside it.
+```json
+"calendar": {
+  "sources": [ { "table": "kokoukset", "dateColumn": "pvm", "titleColumns": ["aihe"], "label": "Kokous" } ],
+  "rotationSources": [ { "view": "siivous", "label": "Siivous" } ],
+  "defaultView": "month"
+}
+```
+- `view` (req) — names an existing **rotation** view (`v.rotation`); each populated slot on a
+  generated period becomes one event titled `<slotLabel>: <people>` (e.g. `"Alakerta: Kati, Jaana"`).
+- `label` (opt) — the type tag + dot colour key (defaults to the rotation view's `tab.<view>` name).
+- **Single source of truth**: generation reuses the rotation view's own **anchor**, **range start**,
+  and **rotateEvery**, so the calendar shows the *same* assignments as the rotation view. Duties land
+  on their true duty date (e.g. weekly rotations on the anchor's weekday), not the grid boundary.
+- **Read-only**: rotation events carry `table: null` / `readOnly: true` (no stored row to open) and
+  render with a `(read-only)` tag in the panel/list.
+- **Per-roster access (fail-closed)**: a rotation source is included only if the signed-in user can
+  read **≥1** of its rosters; otherwise it contributes no events.
+- Duties only exist from the rotation's start date onward (grid cells before it stay empty).
+
+### Access & i18n
+- **Fail-closed per source**: a source whose table the signed-in user cannot read contributes no
+  events. A restricted user sees only the event types they're permitted.
+- **Labels**: chrome uses `cal.*` translation keys (`cal.today`/`cal.month`/`cal.week`/`cal.list`/
+  `cal.undated`/`cal.no_events`/`cal.items`) with built-in English fallbacks; event tags default to
+  `tab.<table>`; titles use `field.*` + list-value translations. Weekday/month names come from
+  `Intl` using an optional per-language `locale` (e.g. `"fi"`), falling back to a name guess / `"en"`.
+
+### Embedding
+A calendar can be **embedded in a markdown/document page** via `{{view:calendarName}}` (renders as a
+compact calendar with its own state) — e.g. a "Home" dashboard page with prose + the month calendar.
+A view is still one kind at top level; the document *hosts* the calendar via the embed.
+
+### Notes / limits
+- Events are **single-day** (point events). Multi-day spans are not modelled yet.
+- Rows with an empty `dateColumn` go to the **Undated** list bucket (not lost).
+- Data-view `{view:cal}` inline embeds are deferred (use a markdown-page `{{view:cal}}` embed).
+
 ## nav (structure + layout)
 ```json
 "nav": {
