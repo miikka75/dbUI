@@ -124,6 +124,32 @@
       ],
       "reorderable": true,
       "defaultSort": "position"
+    },
+    "chore_log": {
+      "archivable": true,
+      "defaultSort": "done_on",
+      "columns": [
+        {
+          "name": "chore",
+          "type": "select",
+          "list": "chores",
+          "allowNew": true
+        },
+        {
+          "name": "person",
+          "type": "select",
+          "list": "members",
+          "allowNew": true
+        },
+        {
+          "name": "done_on",
+          "type": "date"
+        },
+        {
+          "name": "points",
+          "type": "number"
+        }
+      ]
     }
   },
   "views": [
@@ -386,6 +412,18 @@
         }
       },
       "layout": "table"
+    },
+    {
+      "name": "chore_calendar",
+      "calendar": {
+        "source": "chore_log",
+        "dateColumn": "done_on",
+        "titleColumns": [
+          "chore",
+          "person"
+        ],
+        "defaultView": "month"
+      }
     }
   ],
   "nav": {
@@ -438,6 +476,13 @@
       },
       {
         "table": "crew_rotation"
+      },
+      {
+        "view": "chore_calendar",
+        "icon": "mdi-calendar-check"
+      },
+      {
+        "table": "chore_log"
       }
     ]
   }
