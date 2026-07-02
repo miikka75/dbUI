@@ -502,6 +502,26 @@ function validateSchema() {
       });
       }
     }
+    // Calendar view (fourth view kind): validate source(s) + date columns.
+    if (view.calendar) {
+      var cvv = view.calendar;
+      if (cvv.source && cvv.sources) errors.push('calendar "' + v + '": use `source` OR `sources`, not both');
+      if (cvv.defaultView && ['month', 'week', 'list'].indexOf(cvv.defaultView) < 0) errors.push('calendar "' + v + '" defaultView must be month/week/list');
+      var csrcs = cvv.sources || [{ table: cvv.source, dateColumn: cvv.dateColumn, titleColumns: cvv.titleColumns }];
+      csrcs.forEach(function(s) {
+        if (!s || !s.table) { errors.push('calendar "' + v + '": each source needs a table'); return; }
+        if (!SCHEMA[s.table]) { errors.push('calendar "' + v + '" references non-existent table "' + s.table + '"'); return; }
+        var ccols = SCHEMA[s.table].columns || {};
+        if (!s.dateColumn) { errors.push('calendar "' + v + '" source "' + s.table + '" needs a dateColumn'); }
+        else {
+          var dd = ccols[s.dateColumn], dt = (typeof dd === 'string') ? dd : (dd && dd.type);
+          if (!dd) errors.push('calendar "' + v + '" dateColumn "' + s.dateColumn + '" not found in "' + s.table + '"');
+          else if (dt !== 'date') errors.push('calendar "' + v + '" dateColumn "' + s.dateColumn + '" in "' + s.table + '" must be a date column');
+        }
+        (s.titleColumns || []).forEach(function(tc) { if (!ccols[tc]) errors.push('calendar "' + v + '" titleColumns references non-existent column "' + tc + '" in "' + s.table + '"'); });
+      });
+      (cvv.rotationSources || []).forEach(function(rs) { if (!rs || !rs.view) errors.push('calendar "' + v + '": each rotationSources entry needs a view'); });
+    }
   }
   // Check list references
   for (var t2 in SCHEMA) { for (var c2 in SCHEMA[t2].columns) {
