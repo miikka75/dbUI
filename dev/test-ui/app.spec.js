@@ -1827,6 +1827,31 @@ test.describe('access control: user matching + fail-closed', () => {
     expect(r.admin).toEqual({ allowed: null, unreg: false, admin: true, role: 'admin' }); // unrestricted
   });
 
+  test('selfUnregistered separates unregistered (fail closed) from bootstrap (admin); non-admin self-entry restricts', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      const snap = () => ({ allowed: app.userAllowedTables, unreg: app.isUnregisteredUser, admin: app.isAdmin, role: app.currentUserRole });
+      app.usersLoaded = true;
+      // Bootstrap: no users configured, not flagged -> admin / unrestricted.
+      app.userList = []; app.selfUnregistered = false; app.currentUserEmail = 'x@x.com';
+      const bootstrap = snap();
+      // Unregistered: getMyAccess said registered:false. An empty userList (a non-admin can't read the
+      // roster) MUST NOT be mistaken for bootstrap -> must fail closed.
+      app.userList = []; app.selfUnregistered = true;
+      const unregistered = snap();
+      // Restricted non-admin with ONLY their own entry visible (the Firebase per-user-doc case).
+      app.selfUnregistered = false;
+      app.userList = [{ key: 'm@x.com', addr: 'm@x.com', role: 'editor', tables: ['musiikki', 'siivous_a'] }];
+      app.currentUserEmail = 'm@x.com';
+      const selfOnly = snap();
+      return { bootstrap, unregistered, selfOnly };
+    });
+    expect(r.bootstrap).toEqual({ allowed: null, unreg: false, admin: true, role: 'admin' });
+    expect(r.unregistered).toEqual({ allowed: [], unreg: true, admin: false, role: null });   // NOT bootstrap
+    expect(r.selfOnly).toEqual({ allowed: ['musiikki', 'siivous_a'], unreg: false, admin: false, role: 'editor' });
+  });
+
   test('unmatched user gets no data nav tabs (fail closed hides tables/views)', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
@@ -1882,6 +1907,187 @@ test.describe('access control: user matching + fail-closed', () => {
     });
     expect(r.order1).toEqual(['Amy@x.com', 'bob@x.com', 'zoe@x.com']); // case-insensitive alphabetical
     expect(r.order2).toEqual(['Amy@x.com', 'bob@x.com', 'zoe@x.com']); // identical after rebuild -> no jump
+  });
+});
+
+test.describe('calendar view', () => {
+  test('calEventsFor buckets rows by date (+ undated), month cells + counts + selected day', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.cal_test = { name: 'cal_test', calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'], defaultView: 'month' } };
+      app.dataCache['tasks'] = [
+        { id: 'a', date: '2026-07-08', title: 'Alpha' },
+        { id: 'b', date: '2026-07-08', title: 'Beta' },
+        { id: 'c', date: '2026-07-20', title: 'Gamma' },
+        { id: 'd', date: '', title: 'NoDate' }
+      ];
+      app.userList = []; app.usersLoaded = true;        // admin / unrestricted
+      app.currentTable = 'cal_test';
+      app.calMode = 'month'; app.calAnchor = '2026-07-15'; app.calSelectedDay = '2026-07-08';
+      var ev = app.calEvents;
+      return {
+        d8: (ev['2026-07-08'] || []).map(function(e) { return e.title; }),
+        d20: (ev['2026-07-20'] || []).length,
+        undated: (ev['__undated__'] || []).length,
+        cells: app.calMonthCells.length,
+        cnt8: app.calMonthCells.find(function(c) { return c.date === '2026-07-08'; }).count,
+        selCount: app.calSelectedEvents.length,
+        listDays: app.calListDays.map(function(d) { return d.date; })
+      };
+    });
+    expect(r.d8).toEqual(['Alpha', 'Beta']);   // two events on the 8th, sorted
+    expect(r.d20).toBe(1);
+    expect(r.undated).toBe(1);                 // empty-date row -> Undated bucket
+    expect(r.cells).toBe(42);                  // 6x7 month grid
+    expect(r.cnt8).toBe(2);                    // count badge value
+    expect(r.selCount).toBe(2);                // selected-day panel shows the 8th's events
+    expect(r.listDays).toEqual(['2026-07-08', '2026-07-20']); // agenda excludes undated, sorted
+  });
+
+  test('navigation: prev/next/today move the anchor (month + week steps)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.cal_nav = { name: 'cal_nav', calendar: { source: 'tasks', dateColumn: 'date' } };
+      app.currentTable = 'cal_nav'; app.calMode = 'month'; app.calAnchor = '2026-07-15';
+      app.calNext(); var n = app.calAnchor;
+      app.calPrev(); app.calPrev(); var p = app.calAnchor;
+      app.calGoToday(); var isToday = app.calAnchor === app._calToday();
+      app.calMode = 'week'; app.calAnchor = '2026-07-15'; app.calNext(); var wk = app.calAnchor;
+      return { n: n, p: p, isToday: isToday, wk: wk };
+    });
+    expect(r.n).toBe('2026-08-15');   // +1 month
+    expect(r.p).toBe('2026-06-15');   // back to -1 month
+    expect(r.isToday).toBe(true);
+    expect(r.wk).toBe('2026-07-22');  // +1 week
+  });
+
+  test('validateSchema flags a bad calendar (non-date dateColumn + missing table)', async ({ page }) => {
+    await ensureAppReady(page);
+    const joined = await page.evaluate(() => {
+      window.VIEWS.cal_bad1 = { name: 'cal_bad1', calendar: { source: 'tasks', dateColumn: 'title' } }; // title is not a date column
+      window.VIEWS.cal_bad2 = { name: 'cal_bad2', calendar: { source: 'nope', dateColumn: 'x' } };       // missing table
+      var errs = window.validateSchema();
+      delete window.VIEWS.cal_bad1; delete window.VIEWS.cal_bad2;
+      return errs.join(' | ');
+    });
+    expect(joined).toContain('cal_bad1');
+    expect(joined.toLowerCase()).toContain('must be a date column');
+    expect(joined).toContain('non-existent table');
+  });
+
+  test('calendar renders in a markdown page embed ({{view:cal}})', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.cal_md = { name: 'cal_md', calendar: { source: 'tasks', dateColumn: 'date' } };
+      return { isCal: app.isCalendarName('cal_md') === true, notCal: app.isCalendarName('tasks') === false };
+    });
+    expect(r.isCal).toBe(true);    // markdown embed routes calendar views to <calendar-embed>
+    expect(r.notCal).toBe(true);
+  });
+
+  test('calendar card renders in the DOM (month grid + count badge + selected-day panel)', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.cal_dom = { name: 'cal_dom', calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'], defaultView: 'month' } };
+      app.dataCache['tasks'] = [{ id: 'a', date: '2026-07-08', title: 'Alpha' }, { id: 'b', date: '2026-07-08', title: 'Beta' }];
+      app.userList = []; app.usersLoaded = true;
+      app.selectTab('cal_dom');
+      app.calAnchor = '2026-07-15'; app.calSelectedDay = '2026-07-08';
+    });
+    await page.waitForTimeout(200);
+    const card = page.locator('[data-testid="cal-view"]');
+    await expect(card).toBeVisible();
+    // 7 weekday headers + 42 day cells => the count badge "2" for Jul 8 is present
+    await expect(card).toContainText('2');
+    // selected-day panel shows the two events
+    await expect(card).toContainText('Alpha');
+    await expect(card).toContainText('Beta');
+  });
+
+  test('multi-source: merges multiple tables (incl. same table twice) + per-source fail-closed', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.cal_multi = { name: 'cal_multi', calendar: { sources: [
+        { table: 'tasks', dateColumn: 'date', titleColumns: ['title'], label: 'Task' },
+        { table: 'notes', dateColumn: 'date', titleColumns: ['title'], label: 'Note' },
+        { table: 'notes', dateColumn: 'date', titleColumns: ['author'], label: 'Author' }
+      ] } };
+      app.dataCache['tasks'] = [{ id: 't1', date: '2026-07-08', title: 'DoThing' }];
+      app.dataCache['notes'] = [{ id: 'n1', date: '2026-07-08', title: 'Memo', author: 'Alice' }];
+      app.userList = []; app.usersLoaded = true;   // admin
+      app.currentTable = 'cal_multi';
+      var evAdmin = app.calEvents['2026-07-08'] || [];
+      // now restrict to only 'tasks' -> notes sources drop out (fail closed)
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: ['tasks'] }];
+      app.currentUserEmail = 'u@x.com';
+      var evRestricted = (app.calEvents['2026-07-08'] || []).map(function(e) { return e.label; });
+      return {
+        adminLabels: evAdmin.map(function(e) { return e.label; }).sort(),
+        adminCount: evAdmin.length,
+        restricted: evRestricted
+      };
+    });
+    expect(r.adminCount).toBe(3);                                  // task + note + note-as-author
+    expect(r.adminLabels).toEqual(['Author', 'Note', 'Task']);    // three source specs merged
+    expect(r.restricted).toEqual(['Task']);                        // notes-backed sources denied -> only Task
+  });
+
+  test('rotationSources: generated duties become read-only events, clipped to window, per-roster fail-closed', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // A weekly rotation starting 2026-07-01 (Wed): area_a<-L_a (Alice), area_b<-L_b (Bob), no swap.
+      window.VIEWS.rota3 = { name: 'rota3', rotation: { slots: ['area_a', 'area_b'], rosters: ['L_a', 'L_b'], interval: 'weekly', range: { from: '2026-07-01', periods: 12 } } };
+      window.VIEWS.cal_rot = { name: 'cal_rot', calendar: { rotationSources: [{ view: 'rota3', label: 'Duty' }], defaultView: 'month' } };
+      app.appConfig = { rotationAnchors: { rota3: '2026-07-01' } };
+      app.dataCache['L_a'] = [{ id: 'a1', position: 1, people: ['Alice'] }];
+      app.dataCache['L_b'] = [{ id: 'b1', position: 1, people: ['Bob'] }];
+      app.userList = []; app.usersLoaded = true;               // admin / unrestricted
+      app.currentTable = 'cal_rot';
+      app.calMode = 'month'; app.calAnchor = '2026-07-15'; app.calSelectedDay = '2026-07-15';
+
+      var d15 = app.calEvents['2026-07-15'] || [];
+      var win = app._calWindowFor('2026-07-15', 'month', 1);
+      var out = {
+        d15titles: d15.map(function(e) { return e.title; }).sort(),
+        d15readonly: d15.every(function(e) { return e.readOnly === true && e.table === null; }),
+        d15label: d15.map(function(e) { return e.label; }).sort(),
+        // period on the true duty date (07-29 is a rotation period), one per populated slot
+        d29: (app.calEvents['2026-07-29'] || []).length,
+        // a grid cell BEFORE the rotation starts (06-29 is in the July grid) has no duties
+        preStart: (app.calEvents['2026-06-29'] || []).length,
+        winFrom: win.from
+      };
+
+      // Navigate to a month entirely before the rotation begins -> no rotation events generated.
+      app.calAnchor = '2026-01-15';
+      out.farPast = Object.keys(app.calEvents).length;
+
+      // Per-roster fail-closed: user who can read neither roster sees no duties.
+      app.calAnchor = '2026-07-15';
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: ['tasks'] }];
+      app.currentUserEmail = 'u@x.com';
+      out.restricted = Object.keys(app.calEvents).length;
+
+      // User who can read at least one roster still sees the duties.
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: ['L_a'] }];
+      out.oneRoster = (app.calEvents['2026-07-15'] || []).length;
+      return out;
+    });
+    expect(r.d15titles).toEqual(['area_a: Alice', 'area_b: Bob']); // one event per populated slot
+    expect(r.d15readonly).toBe(true);                              // generated -> read-only, no stored row
+    expect(r.d15label).toEqual(['Duty', 'Duty']);                  // rotationSources label
+    expect(r.d29).toBe(2);                                         // duties land on their true weekly date
+    expect(r.preStart).toBe(0);                                    // clipped: nothing before rotation start
+    expect(r.winFrom).toBe('2026-06-29');                          // Monday-start July grid begins 06-29
+    expect(r.farPast).toBe(0);                                     // window before start -> zero periods
+    expect(r.restricted).toBe(0);                                  // no readable roster -> fail closed
+    expect(r.oneRoster).toBe(2);                                   // >=1 readable roster -> duties shown
   });
 });
 
