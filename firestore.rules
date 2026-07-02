@@ -2,7 +2,16 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function noUsers() { return !exists(/databases/$(database)/documents/_meta/users); }
-    function userData() { return get(/databases/$(database)/documents/_meta/users).data[request.auth.token.email]; }
+    function myEmail() { return request.auth.token.email.lower(); }
+    // Per-user access lives in /_users/<lowercased-email>. Fall back to the legacy _meta/users map
+    // (privileged get() — bypasses read rules) for users not yet migrated, so there is no lockout
+    // during rollout. Only evaluated when noUsers() is false (callers short-circuit on bootstrap),
+    // so the fallback get() never runs against a missing _meta/users doc.
+    function userData() {
+      return exists(/databases/$(database)/documents/_users/$(myEmail()))
+        ? get(/databases/$(database)/documents/_users/$(myEmail())).data
+        : get(/databases/$(database)/documents/_meta/users).data[myEmail()];
+    }
     function role() { return noUsers() ? 'admin' : (userData() != null ? userData().role : null); } // bootstrap = admin
     function isRegistered() { return noUsers() || userData() != null; }
     function hasTableAccess(collection) {
@@ -13,13 +22,24 @@ service cloud.firestore {
       return userData().tables == 'all' || userData().tables.hasAny(resource.data.tables);
     }
 
-    // Meta: read by registered. Write by admin (or bootstrap). Editors may write the shared lists doc only.
-    // The legacy `lists` doc is admin-only read now that per-list `_lists/*` is the source of truth.
+    // Meta: read by registered. `lists` and `users` docs are admin-only reads (users holds every
+    // member's email/role/grants; per-user access now lives in /_users). Write by admin (or bootstrap);
+    // editors may write the shared lists doc only.
     match /_meta/{doc} {
-      allow read: if request.auth != null && isRegistered() && (doc != 'lists' || noUsers() || role() == 'admin');
+      allow read: if request.auth != null && isRegistered() && (
+        (doc != 'lists' && doc != 'users') || noUsers() || role() == 'admin'
+      );
       allow write: if request.auth != null && (
         noUsers() || role() == 'admin' || (doc == 'lists' && role() == 'editor')
       );
+    }
+
+    // Per-user access docs: a user reads only their OWN doc; admins read/list/write all. Replaces the
+    // single _meta/users map for reads so a restricted user can learn their own access without seeing
+    // everyone else's email/role/grants.
+    match /_users/{email} {
+      allow read: if request.auth != null && (noUsers() || myEmail() == email || role() == 'admin');
+      allow write: if request.auth != null && (noUsers() || role() == 'admin');
     }
 
     // Per-list storage: each list is its own doc carrying its owning `tables`. Read/write gated on
