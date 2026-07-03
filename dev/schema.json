@@ -1,6 +1,9 @@
 {
   "icon": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>📋</text></svg>",
   "defaultLanguage": "en",
+  "listSources": {
+    "members": "users"
+  },
   "tables": {
     "tasks": {
       "columns": [
@@ -131,9 +134,9 @@
       "columns": [
         {
           "name": "chore",
-          "type": "select",
-          "list": "chores",
-          "allowNew": true
+          "type": "ref",
+          "table": "chores",
+          "valueCol": "chore"
         },
         {
           "name": "person",
@@ -144,6 +147,14 @@
         {
           "name": "done_on",
           "type": "date"
+        }
+      ]
+    },
+    "chores": {
+      "columns": [
+        {
+          "name": "chore",
+          "type": "text"
         },
         {
           "name": "points",
@@ -424,6 +435,132 @@
         ],
         "defaultView": "month"
       }
+    },
+    {
+      "name": "leaderboard",
+      "sources": [
+        "chore_log"
+      ],
+      "mode": "union",
+      "groupBy": {
+        "column": "person",
+        "from": [
+          "person"
+        ]
+      },
+      "compute": [
+        {
+          "name": "points",
+          "computed": {
+            "lookup": {
+              "table": "chores",
+              "match": "chore",
+              "on": "chore",
+              "field": "points"
+            }
+          }
+        }
+      ],
+      "aggregate": {
+        "sum": "points",
+        "into": "total"
+      },
+      "columns": [
+        "person",
+        "total"
+      ],
+      "period": "month",
+      "filter": {
+        "done_on": {
+          "within": "@month"
+        }
+      }
+    },
+    {
+      "name": "leaderboard_week",
+      "sources": [
+        "chore_log"
+      ],
+      "mode": "union",
+      "groupBy": {
+        "column": "person",
+        "from": [
+          "person"
+        ]
+      },
+      "compute": [
+        {
+          "name": "points",
+          "computed": {
+            "lookup": {
+              "table": "chores",
+              "match": "chore",
+              "on": "chore",
+              "field": "points"
+            }
+          }
+        }
+      ],
+      "aggregate": {
+        "sum": "points",
+        "into": "total"
+      },
+      "columns": [
+        "person",
+        "total"
+      ],
+      "period": "week",
+      "filter": {
+        "done_on": {
+          "within": "@week"
+        }
+      },
+      "icon": "mdi-trophy-variant"
+    },
+    {
+      "name": "chores_last_month",
+      "sources": [
+        "chore_log"
+      ],
+      "mode": "union",
+      "groupBy": {
+        "column": "person",
+        "from": [
+          "person"
+        ]
+      },
+      "aggregate": {
+        "count": true,
+        "into": "total"
+      },
+      "columns": [
+        "person",
+        "total"
+      ],
+      "filter": {
+        "done_on": {
+          "within": "@month-1"
+        }
+      },
+      "readonly": true,
+      "icon": "mdi-history"
+    },
+    {
+      "name": "my_chores",
+      "sources": [
+        "chore_log"
+      ],
+      "mode": "union",
+      "defaultSort": "done_on",
+      "columns": [
+        "done_on",
+        "chore"
+      ],
+      "filter": {
+        "person": "@me"
+      },
+      "readonly": true,
+      "icon": "mdi-account-check"
     }
   ],
   "nav": {
@@ -483,6 +620,26 @@
       },
       {
         "table": "chore_log"
+      },
+      {
+        "view": "leaderboard",
+        "icon": "mdi-trophy"
+      },
+      {
+        "view": "leaderboard_week",
+        "icon": "mdi-trophy-variant"
+      },
+      {
+        "view": "chores_last_month",
+        "icon": "mdi-history"
+      },
+      {
+        "view": "my_chores",
+        "icon": "mdi-account-check"
+      },
+      {
+        "table": "chores",
+        "icon": "mdi-format-list-checks"
       }
     ]
   }
