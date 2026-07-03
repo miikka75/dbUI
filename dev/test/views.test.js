@@ -61,7 +61,7 @@ describe('Union view data access', () => {
   it('VIEWS columns exist in at least one source table', () => {
     for (const [name, view] of Object.entries(VIEWS)) {
       if (typeof view.markdown === 'string') continue; // doc-view (no columns)
-      if (view.groupBy && view.collect) continue; // aggregate views have computed columns
+      if (view.groupBy && (view.collect || view.aggregate)) continue; // aggregate views have computed output columns (collect Nth values, or count/sum `into`)
       for (const col of view.columns) {
         if (typeof col === 'object' && col.view) continue; // named-view embed
         if (typeof col === 'object' && col.sources && !col.name) continue; // inline embed
