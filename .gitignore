@@ -1,4 +1,18 @@
 node_modules/
-dev/local.db*
+dev/local.db
+dev/local.db-wal
+dev/local.db-shm
 test-results/
 playwright-report/
+
+# dev-server runtime persistence (real user/role/profile/request data — never commit)
+dev/users.json
+dev/access-requests.json
+dev/profiles.json
+dev/data/
+
+# throwaway seed / test databases (see seed-demo.js)
+dev/seed-test-*.db
+dev/seed-test-*.db-wal
+dev/seed-test-*.db-shm
+
