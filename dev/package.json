@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "seed": "node seed-translations.js",
+    "seed:demo": "node seed-demo.js",
     "test": "node --test test/",
     "test:ui": "npx playwright test --config=playwright.config.js"
   },
