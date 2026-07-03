@@ -169,13 +169,26 @@
         <!-- Access notice: signed-in user matches no _meta/users record -> all reads are denied by
              rules. Hardcoded English (translations aren't loaded for an unregistered user). -->
         <v-alert v-if="isUnregisteredUser" type="warning" variant="tonal" density="compact" class="mb-3" icon="mdi-account-alert">
-          Your account (<strong>{{ currentUserEmail }}</strong>) is not registered for this database, so no data can load. Ask an administrator to add this exact email under Settings → Users.
+          <div>Your account (<strong>{{ currentUserEmail }}</strong>) is not registered for this database, so no data can load.</div>
+          <div v-if="!accessRequested" class="d-flex align-center flex-wrap mt-2" style="gap:8px">
+            <v-text-field v-model="accessRequestName" :label="tOr('access.your_name','Your name')" :rules="[v => !!(v && v.trim()) || '']" density="compact" hide-details variant="outlined" style="max-width:240px"></v-text-field>
+            <v-btn size="small" color="primary" variant="flat" prepend-icon="mdi-account-plus" :disabled="!accessRequestName || !accessRequestName.trim()" @click="requestAccess">{{ tOr('access.request_access','Request access') }}</v-btn>
+          </div>
+          <div v-else class="mt-2">{{ tOr('access.request_sent','Access request sent') }} — an administrator will review it.</div>
         </v-alert>
         <!-- Archive Toggle -->
         <v-tabs v-if="hasArchive" v-model="viewingArchive" density="compact" class="mb-3">
           <v-tab :value="false">{{ t('btn.show_active') }}</v-tab>
           <v-tab :value="true">{{ t('btn.show_archived') }}</v-tab>
         </v-tabs>
+
+        <!-- Leaderboard ‹ › period navigation (views with `period`) -->
+        <div v-if="hasPeriodNav()" class="d-flex align-center mb-3" style="gap:6px">
+          <v-btn icon="mdi-chevron-left" size="small" variant="text" @click="periodPrev()" data-testid="period-prev"></v-btn>
+          <div style="font-weight:600;min-width:150px;text-align:center" data-testid="period-label">{{ periodLabel() }}</div>
+          <v-btn icon="mdi-chevron-right" size="small" variant="text" :disabled="periodOffset === 0" @click="periodNext()" data-testid="period-next"></v-btn>
+          <v-btn size="small" variant="text" :disabled="periodOffset === 0" @click="periodToday()">{{ tOr('period.current','Current') }}</v-btn>
+        </div>
 
         <!-- Markdown page (v3): prose + embedded views/tables -->
         <v-card v-if="currentPage" variant="outlined" class="pa-4">
@@ -665,10 +678,35 @@
             </template>
             <v-divider class="my-4"></v-divider>
             <v-btn variant="outlined" :color="isArmed('reset') ? 'error' : 'warning'" :prepend-icon="isArmed('reset') ? 'mdi-check-circle' : 'mdi-refresh'" @click="isArmed('reset') ? resetApp() : armDelete('reset')">{{ isArmed('reset') ? t('settings.confirm_reset') : t('settings.reset') }}</v-btn>
+            <template v-if="usersLoaded && !isUnregisteredUser && userBackedLists().length">
+            <v-divider class="my-4"></v-divider>
+            <p class="text-subtitle-1 font-weight-bold mb-2">{{ tOr('profile.title','My profile') }}</p>
+            <div class="d-flex align-center flex-wrap" style="gap:12px">
+              <v-text-field v-model="myProfile.name" :label="tOr('profile.your_name','Display name')" density="compact" hide-details variant="outlined" style="max-width:240px"></v-text-field>
+              <v-switch v-model="myProfile.shared" :label="tOr('profile.share_name','Share my name with others')" density="compact" hide-details color="primary"></v-switch>
+              <v-btn size="small" color="primary" variant="flat" prepend-icon="mdi-content-save" @click="saveMyProfile">{{ tOr('profile.save','Save') }}</v-btn>
+            </div>
+            </template>
             <template v-if="usersLoaded && userList.length && isAdmin">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-1 font-weight-bold mb-2">Firebase</p>
             <p class="text-subtitle-2 mb-2">{{ t('settings.user_access') }}</p>
+            <template v-if="accessRequests.length">
+              <p class="text-subtitle-2 mb-1">{{ tOr('access.pending_requests','Pending access requests') }}</p>
+              <v-table density="compact" class="mb-3">
+                <tbody>
+                  <tr v-for="req in accessRequests" :key="req.email">
+                    <td>{{ req.email }}</td>
+                    <td>{{ req.name }}</td>
+                    <td class="text-medium-emphasis">{{ req.note }}</td>
+                    <td style="white-space:nowrap">
+                      <v-btn size="x-small" color="success" variant="text" prepend-icon="mdi-check" @click="approveRequest(req)">{{ tOr('access.approve','Approve') }}</v-btn>
+                      <v-btn size="x-small" color="error" variant="text" prepend-icon="mdi-close" @click="denyRequest(req)">{{ tOr('access.deny','Deny') }}</v-btn>
+                    </td>
+                  </tr>
+                </tbody>
+              </v-table>
+            </template>
             <v-table v-if="userList.length" density="compact">
               <template v-slot:default>
               <thead><tr><th>{{ t('settings.user_id') }}</th><th>{{ t('settings.role') }}</th><th>{{ t('settings.tables') }}</th><th></th></tr></thead>
