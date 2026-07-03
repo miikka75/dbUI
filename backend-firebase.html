@@ -296,6 +296,48 @@ var backend_users = {
       (key !== uid ? _db.collection('_users').doc(uid).delete().catch(function() {}) : Promise.resolve()),
       _db.collection('_meta').doc('users').update(upd).catch(function() {})
     ]);
+  },
+  // --- Membership requests (self-service; admin approves) ---
+  // An unregistered user submits a request for access; only they can write their own request doc.
+  requestAccess: function(name, note) {
+    var email = ((( _auth && _auth.currentUser && _auth.currentUser.email) || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail)) || '').toLowerCase();
+    if (!email) return Promise.reject(new Error('not signed in'));
+    return _db.collection('_access_requests').doc(email).set({ email: email, name: name || '', note: note || '', ts: Date.now() });
+  },
+  getAccessRequests: function() {   // admin only
+    return _db.collection('_access_requests').get().then(function(snap) {
+      var o = {}; snap.forEach(function(d) { o[d.id] = d.data(); }); return o;
+    });
+  },
+  removeAccessRequest: function(email) {
+    return _db.collection('_access_requests').doc(String(email || '').toLowerCase()).delete();
+  },
+  // --- Opt-in display-name profiles (for user-backed lists / leaderboard identity) ---
+  getMyProfile: function() {
+    var email = ((( _auth && _auth.currentUser && _auth.currentUser.email) || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail)) || '').toLowerCase();
+    if (!email) return Promise.resolve({ name: '', shared: false });
+    return _db.collection('_profiles').doc(email).get()
+      .then(function(d) { return d.exists ? { name: d.data().name || '', shared: !!d.data().shared } : { name: '', shared: false }; })
+      .catch(function() { return { name: '', shared: false }; });
+  },
+  setMyProfile: function(name, shared) {
+    var email = ((( _auth && _auth.currentUser && _auth.currentUser.email) || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail)) || '').toLowerCase();
+    if (!email) return Promise.reject(new Error('not signed in'));
+    return _db.collection('_profiles').doc(email).set({ name: name || '', shared: !!shared });
+  },
+  // Names of users who opted to share -- the query is rules-provable (constant shared==true).
+  getSharedNames: function() {
+    return _db.collection('_profiles').where('shared', '==', true).get().then(function(snap) {
+      var out = []; snap.forEach(function(d) { var n = (d.data().name || '').trim(); if (n && out.indexOf(n) < 0) out.push(n); });
+      return out.sort(function(a, b) { return a.localeCompare(b); });
+    }).catch(function() { return []; });
+  },
+  // Admin-only: seed another user's profile display name (e.g. from their access request on approval).
+  // Merges name only so an existing `shared` opt-in is preserved. Rules allow admin to write any profile.
+  setProfileName: function(email, name) {
+    var k = String(email || '').toLowerCase();
+    if (!k) return Promise.resolve();
+    return _db.collection('_profiles').doc(k).set({ name: name || '' }, { merge: true });
   }
 };
 
