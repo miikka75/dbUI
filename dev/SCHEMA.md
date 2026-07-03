@@ -167,6 +167,8 @@ A `filter` (on a view, an inline/named-view embed, or a conditional column) matc
 | `"col": "value"` | Fixed filter value known at schema design time |
 | `{ "$or": [ {"col":"a"}, {"col":"b"} ] }` | Fixed set of values (membership; array shorthand retired) |
 | `"col": { "matchList": "listName" }` | Filter should track a user-editable list (Lookup tab) |
+| `"col": "@me"` | Resolves to the signed-in user's **profile display name** (see **user profiles**). Empty profile name → matches nothing (fail-closed). Works in `filter`, `groupBy.filter`, calendar `sources[].filter`, rotation `filter`, and embeds. Display-only — never widens server-enforced access. |
+| `"col": { "within": "@month" }` | Date column falls in the current period. Token: `@today`/`@week`/`@month`/`@year`, with an optional **back-offset** (`@month-1` = last month, `@week-2` = two weeks ago). Recomputed from *today* each render, so it **auto-resets** (a `@month` leaderboard rolls to the new month); weeks are Monday-start; unknown tokens match nothing. Ideal for a period-scoped `groupBy.filter` (e.g. this-month leaderboard). |
 
 ### aggregate views (groupBy + collect)
 A view with `groupBy` + `collect` groups rows by person/key and collects a column's values:
@@ -181,6 +183,57 @@ A view with `groupBy` + `collect` groups rows by person/key and collects a colum
 - **`collectWith`** (optional): when set, collected values include the source column name:
   `"collectWith": "role"` → values render as `"2026-06-01 (talk1)"` instead of just `"2026-06-01"`.
   Useful for cross-table aggregates where you need to see *which role* produced each entry.
+
+#### Leaderboard totals (`aggregate` count/sum)
+Instead of `collect`, use `aggregate` to produce one **numeric** row per group, ranked highest-first:
+```json
+{ "name": "leaderboard", "sources": ["chore_log"], "mode": "union",
+  "groupBy": { "column": "person", "from": ["person"] },
+  "compute": [ { "name": "points", "computed": { "lookup": { "table": "chores", "match": "chore", "field": "points" } } } ],
+  "aggregate": { "sum": "points", "into": "total" },
+  "columns": ["person", "total"] }
+```
+- `aggregate.count: true` → number of rows per group; `aggregate.sum: "<col>"` → numeric total of that
+  column per group. `into` = output column name (default `"total"`).
+- Results are returned **sorted by total descending** (a ranking).
+- **Scoping:** put a **row/date filter** in the top-level `filter` (applied to source rows before
+  grouping — e.g. `"filter": { "done_on": { "within": "@month" } }` for this month's board). Use
+  `groupBy.filter` only to restrict by the **group key** itself (e.g. `{ "person": "@me" }` for just my
+  own row) — a date filter there won't work because `groupBy.filter` matches the key, not source columns.
+- **`period` navigation** (optional): set `"period": "month"` (or `week`/`year`) to show ‹ › controls
+  that step a back-offset into the view's bare `@period` tokens (`@month` → `@month-1` = last month…),
+  letting users browse past periods. Offset resets to the current period when you open the view.
+- **`view.compute`**: an array of computed defs resolved on the **source rows before grouping** — so an
+  aggregate can `sum` a *looked-up* (or otherwise computed) per-row value, not just a stored column.
+  These are preparation-only (not displayed); the displayed columns are `columns`.
+
+##### Worked example — chores with per-chore points → ranked leaderboard
+The demo schema (`dev/schema.json`) wires this up: a `chores` ref table holds each chore's point value,
+`chore_log.chore` is a `ref` into it, and the `leaderboard` view sums the looked-up points per person.
+Structure is in the schema; you add the rows at runtime. Example data:
+
+| `chores` (ref table) | points |
+|---|---|
+| Dishes | 2 |
+| Vacuum | 3 |
+| Mow lawn | 5 |
+
+| `chore_log` | person | chore | done_on |
+|---|---|---|---|
+| | Ann | Dishes | 2026-07-01 |
+| | Ann | Mow lawn | 2026-07-02 |
+| | Ann | Dishes | 2026-07-05 |
+| | Bob | Vacuum | 2026-07-03 |
+
+The `points` lookup resolves each log row (2, 5, 2, 3), then `aggregate.sum` totals per person and ranks:
+
+| Leaderboard | total |
+|---|---|
+| Ann | 9 |
+| Bob | 3 |
+
+Scope it to a period by adding a date `filter` (or, once built, a `{ "done_on": { "within": "@month" } }`
+token); scope to the current user with `groupBy.filter: { person: "@me" }`.
 
 ### filterBy (per-card master-detail)
 A `{view}` column embed with `filterBy` dynamically filters embed rows per card:
@@ -206,6 +259,14 @@ A column with `computed` derives its value from other columns at render time (no
   ```json
   { "name": "type", "computed": { "fromColumn": "person", "matchList": { "members": "Internal", "guests": "External" } } }
   ```
+- **Lookup a field** (`lookup`): denormalize one field from another (keyed / `ref`) table into the row.
+  Matches this row's `lookup.match` column against the target table's `lookup.on` column (defaults to the
+  same name) and copies `lookup.field` (or `lookup.default` when there's no match):
+  ```json
+  { "name": "points", "computed": { "lookup": { "table": "chores", "match": "chore", "field": "points" } } }
+  ```
+  General-purpose — chore→points, member→role/phone, room→capacity, category→colour, etc. Pairs with
+  `view.compute` + `aggregate.sum` to total a looked-up value (see **Leaderboard totals**).
 - Computed columns are read-only (no cell editor renders for them).
 - They appear in the view's visible columns and in card/table layout.
 
@@ -439,6 +500,12 @@ tables), with one shared `interval`/`advanceBy` and a `rotateEvery`:
   swap, `[1, "cycle"]` both. Extra elements just superimpose more swap frequencies (valid but rarely useful).
 - **Anchor / interval**: the per-view `rotationAnchors[<viewName>]` (or a literal `anchorDate` on the
   `rotation`) anchors period 0; `interval` accepts the same values as elsewhere.
+- **Display window is assignment-invariant**: `range.from` selects only *which* periods are shown — it
+  never changes who is assigned. Both swap sources index off the absolute period count from the
+  **anchor** (`abs = wholeIntervalsBetween(anchor, from) + i`), so scrolling the window (or a rolling
+  `"today"` start, or a per-view DB range override) yields the same roster→slot pairing for any given
+  date. (Earlier a numeric `rotateEvery` counted from `from`, which reshuffled assignments when the
+  window moved — fixed 2026-07.)
 - **N rosters vs M slots**: `N = M` → clean permutation (recommended). `N > M` → round-robin where
   `N − M` rosters "rest" each period and everyone eventually serves every slot. `N < M` → **rejected at
   load** (some slots would be unstaffed/double-booked).
@@ -666,6 +733,38 @@ A view is still one kind at top level; the document *hosts* the calendar via the
 - Events are **single-day** (point events). Multi-day spans are not modelled yet.
 - Rows with an empty `dateColumn` go to the **Undated** list bucket (not lost).
 - Data-view `{view:cal}` inline embeds are deferred (use a markdown-page `{{view:cal}}` embed).
+
+## user profiles, user-backed lists & membership (Firebase)
+
+These features are Firebase-backed (the local/dev backend mirrors them for tests). They build on the
+per-user access model (`_users/<lowercased-email>` docs; the legacy `_meta/users` map is admin-read
+only).
+
+### `_profiles/<email>` — opt-in display name
+Each user has an optional profile `{ name, shared }`, editable only by themselves (or an admin) under
+**Settings → My profile**:
+- `name` — the user's display name; the identity that `@me` resolves to and that a user-backed list
+  shows. Optional (a registered user may have no name → `@me` matches nothing).
+- `shared` — opt-in (default `false`). When `true`, the name is readable by any registered user via a
+  **rules-provable** `.where('shared','==',true)` query (a constant comparison — unlike an
+  intersection query, which Firestore cannot prove-authorize).
+
+### `listSources: { "<listName>": "users" }` — a name list fed by profiles
+A top-level schema map marking a list as user-backed. On boot the app overlays that list's values with
+the opted-in shared display names, so `select`/`multiselect` columns and rotation `rosters` referencing
+it become **assignable to registered users** — no manual list upkeep. Example:
+```json
+"listSources": { "members": "users" },
+"tables": { "chore_log": { "columns": { "person": { "type": "select", "list": "members" } } } }
+```
+
+### Membership requests (self-service, admin-approved)
+An unregistered (but signed-in) user submits a request from the "not registered" banner: a **required**
+display name → writes `_access_requests/<email>` (rules: self create/read/delete; admin read/write).
+An admin sees a **Pending requests** table in Settings → Users and **Approves** (registers as `editor`
+with no tables yet — grant access via the chips; the request name is **seeded into the user's profile**
+so `@me` works immediately, still not shared) or **Denies** (deletes the request). The email is taken
+from the authenticated session — never asked for.
 
 ## nav (structure + layout)
 ```json
