@@ -211,6 +211,11 @@ function createVueApp() {
       // registered:false). Distinguishes "unregistered" from "bootstrap" (both have an empty userList
       // for a non-admin who can't read the whole roster).
       selfUnregistered: false,
+      accessRequests: [],       // admin: pending membership requests
+      accessRequested: false,   // unregistered user: have I already submitted a request this session
+      accessRequestName: '',    // optional display name entered on the request banner
+      myProfile: { name: '', shared: false },   // this user's opt-in display-name profile
+      periodOffset: 0,          // leaderboard ‹ › navigation: periods back from now (0 = current)
       firestoreRules: '',
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
       oauthClientId: localStorage.getItem('oauth_client_id') || '',
@@ -531,7 +536,7 @@ function createVueApp() {
           }
           var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
           var columns = raw.map(function(c) { return colName(c); });
-          var rows = buildRows(cfg, self.dataCache);
+          var rows = buildRows(self._viewWithMe(cfg), self.dataCache);
           resolveComputed(rows, cfg.columns || [], { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
           if (cfg.defaultSort) { rows = sortByCol(rows, cfg.defaultSort); }
           if (cfg.hideEmpty) { columns = columns.filter(function(col) { return rows.some(function(r) { return r[col]; }); }); }
@@ -634,6 +639,9 @@ function createVueApp() {
          'settings.user_id', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset',
          'cal.today', 'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
+         'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
+         'profile.title', 'profile.your_name', 'profile.share_name', 'profile.save', 'profile.saved',
+         'period.this_week', 'period.weeks_ago', 'period.current',
          'lang.app', 'lang.schema'].sort();
       },
       schemaTranslationKeys: function() {
@@ -1009,7 +1017,7 @@ function createVueApp() {
           this.calAnchor = this.calSelectedDay = this._calToday();
           this.loadTableData();
         }
-        else if (this.isDataView || this.isRotationView) this.loadTableData();
+        else if (this.isDataView || this.isRotationView) { this.periodOffset = 0; this.loadTableData(); }
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
       // --- Calendar helpers (used by the calendar view + calendar embeds) ---
@@ -1070,7 +1078,7 @@ function createVueApp() {
         this.calSources(name).forEach(function(s) {
           if (!s || !s.table || !s.dateColumn) return;
           if (allowed && allowed.indexOf(s.table) < 0) return;
-          var rows = filterRows(self.dataCache[s.table] || [], s.filter);
+          var rows = filterRows(self.dataCache[s.table] || [], self.resolveMeTokens(s.filter));
           var tag = s.label || self.t('tab.' + s.table);
           rows.forEach(function(r) {
             var title = (s.titleColumns || []).map(function(c) { return self.displayValue(c, r[c]); }).filter(Boolean).join(' — ');
@@ -1158,7 +1166,10 @@ function createVueApp() {
         if (type === 'view' && VIEWS[name]) {
           var v = VIEWS[name], cache = this.dataCache;
           if (part) { cache = {}; var dc = this.dataCache; (v.sources || []).forEach(function(s) { cache[s] = dc[s + '__' + part] || []; }); }
-          return sortByCol(resolveComputed(aggregateRows(v, buildRows(v, cache)), v.columns, { dataCache: this.dataCache, rotationAnchor: this.anchorForView(v.name) }), v.defaultSort, v);
+          var vMe = this._viewWithMe(v);
+          var esrc = buildRows(vMe, cache);
+          if (v.compute) esrc = resolveComputed(esrc, v.compute, { dataCache: this.dataCache, rotationAnchor: this.anchorForView(v.name) });
+          return sortByCol(resolveComputed(aggregateRows(vMe, esrc), v.columns, { dataCache: this.dataCache, rotationAnchor: this.anchorForView(v.name) }), v.defaultSort, v);
         }
         if (type === 'table' && SCHEMA[name]) return sortByCol(this.dataCache[part ? name + '__' + part : name] || [], SCHEMA[name].defaultSort);
         return [];
@@ -1244,7 +1255,7 @@ function createVueApp() {
             var allowedRv = self.userAllowedTables;
             var regen = function() {
               var rows = buildRotationViewRows(view, self.dataCache, todayStr, self.anchorForView(self.currentTable), self.rangeForView(self.currentTable), self.rotateEveryForView(self.currentTable));
-              if (view.filter) rows = filterRows(rows, view.filter); // filter generated period rows
+              if (view.filter) rows = filterRows(rows, self.resolveMeTokens(view.filter)); // filter generated period rows
               self.currentData = rows;
             };
             regen();
@@ -1264,8 +1275,17 @@ function createVueApp() {
             cache = {};
             view.sources.forEach(function(src) { cache[src] = self.dataCache[aKey(src)] || []; });
           }
-          var rows = buildRows(view, cache);
-          rows = resolveComputed(aggregateRows(view, rows), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
+          var vMe = self._viewWithMe(view);
+          // Interactive ‹ › period navigation: inject the current back-offset into bare @period tokens.
+          if (view.period && self.periodOffset) {
+            vMe = Object.assign({}, vMe);
+            if (vMe.filter) vMe.filter = self.resolvePeriodTokens(vMe.filter, self.periodOffset);
+            if (vMe.groupBy) { vMe.groupBy = Object.assign({}, vMe.groupBy); if (vMe.groupBy.filter) vMe.groupBy.filter = self.resolvePeriodTokens(vMe.groupBy.filter, self.periodOffset); }
+          }
+          var srcRows = buildRows(vMe, cache);
+          // Resolve source-row computeds (e.g. a per-row lookup) BEFORE grouping so an aggregate can sum them.
+          if (view.compute) srcRows = resolveComputed(srcRows, view.compute, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
+          var rows = resolveComputed(aggregateRows(vMe, srcRows), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
           self.currentData = rows;
           // Load embed table data if not cached
           var allowed = self.userAllowedTables;
@@ -1295,7 +1315,10 @@ function createVueApp() {
               if (!tbl || (allowed && allowed.indexOf(tbl) < 0) || self.dataCache[tbl]) return;
               backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
                 self.dataCache[tbl] = parseTableResult(result).rows;
-                self.currentData = resolveComputed(aggregateRows(view, buildRows(view, self.dataCache)), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
+                var vMe2 = self._viewWithMe(view);
+                var src2 = buildRows(vMe2, self.dataCache);
+                if (view.compute) src2 = resolveComputed(src2, view.compute, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
+                self.currentData = resolveComputed(aggregateRows(vMe2, src2), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
               }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
             });
           });
@@ -2115,7 +2138,7 @@ function createVueApp() {
           var p = new URLSearchParams(location.search);
           self.currentUserEmail = p.get('user') || localStorage.getItem('test_user') || 'local@dev';
         }
-        var done = function() { self.usersLoaded = true; self.loading = false; self._autoSelectTab(); };
+        var done = function() { self.usersLoaded = true; self.loading = false; self.loadMyProfile(); self._overlayUserLists(); self._autoSelectTab(); };
         // Legacy backends without getMyAccess: keep the full-map path (rules-free local/Drive).
         if (typeof backend_users.getMyAccess !== 'function') {
           backend_users.getUsers().then(function(u) {
@@ -2134,7 +2157,7 @@ function createVueApp() {
           if (a.registered === false) { self.selfUnregistered = true; self.userList = []; return done(); }
           var email = (self.currentUserEmail || '').toLowerCase();
           if (a.role === 'admin' || a.tables === 'all') {
-            backend_users.getUsers().then(function(u) { self.userList = self._buildUserList(u); done(); })
+            backend_users.getUsers().then(function(u) { self.userList = self._buildUserList(u); self.loadAccessRequests(); done(); })
               .catch(function() { self.userList = [{ key: email, addr: email, role: a.role, tables: a.tables || 'all' }]; done(); });
           } else {
             self.userList = [{ key: email, addr: email, role: a.role, tables: a.tables }]; done();
@@ -2158,6 +2181,117 @@ function createVueApp() {
         var self = this;
         backend_users.setUserRole(uid, role, user, tables).then(function() { self.loadUsers(); });
       },
+      // --- Membership requests ---
+      // Unregistered user submits a request; only they can write their own request doc (rules-enforced).
+      requestAccess: function() {
+        var self = this;
+        if (typeof backend_users === 'undefined' || !backend_users.requestAccess) return;
+        var name = (this.accessRequestName || '').trim();
+        if (!name) { self.notify(self.tOr('access.name_required', 'Please enter your name first')); return; }
+        backend_users.requestAccess(name, '').then(function() {
+          self.accessRequested = true; self.notify(self.tOr('access.request_sent', 'Access request sent'));
+        }).catch(function(e) { self.notify((e && e.message) || 'Request failed'); });
+      },
+      loadAccessRequests: function() {
+        var self = this;
+        if (typeof backend_users === 'undefined' || !backend_users.getAccessRequests) { self.accessRequests = []; return; }
+        backend_users.getAccessRequests().then(function(m) {
+          self.accessRequests = Object.keys(m || {}).map(function(k) { var v = m[k] || {}; return { email: v.email || k, name: v.name || '', note: v.note || '', ts: v.ts || 0 }; })
+            .sort(function(a, b) { return (a.ts || 0) - (b.ts || 0); });
+        }).catch(function() { self.accessRequests = []; });
+      },
+      // Approve: register the user (editor, no tables yet -> admin grants access via the chip UI), seed
+      // their profile display name from the request (so @me identity works right away), then clear it.
+      approveRequest: function(req) {
+        var self = this, email = (req.email || '').toLowerCase(), name = (req.name || '').trim();
+        return backend_users.setUserRole(email, 'editor', email, []).then(function() {
+          return (name && backend_users.setProfileName) ? backend_users.setProfileName(email, name) : null;
+        }).then(function() {
+          return backend_users.removeAccessRequest(email);
+        }).then(function() { self.loadUsers(); }).catch(function(e) { self.notify((e && e.message) || 'Approve failed'); });
+      },
+      denyRequest: function(req) {
+        var self = this;
+        backend_users.removeAccessRequest((req.email || '').toLowerCase()).then(function() { self.loadAccessRequests(); }).catch(function() {});
+      },
+      // --- Opt-in display-name profiles + user-backed lists ---
+      // A schema list marked `listSources[name] === "users"` is populated from opted-in display names.
+      userBackedLists: function() {
+        var ls = (this.schemaData && this.schemaData.listSources) || {};
+        return Object.keys(ls).filter(function(n) { return ls[n] === 'users'; });
+      },
+      _overlayUserLists: function() {
+        var self = this, names = this.userBackedLists();
+        if (!names.length || typeof backend_users === 'undefined' || !backend_users.getSharedNames) return Promise.resolve();
+        return backend_users.getSharedNames().then(function(shared) {
+          var patch = {}; names.forEach(function(n) { patch[n] = (shared || []).slice(); });
+          self.listsCache = Object.assign({}, self.listsCache, patch);
+          window._listsCache = self.listsCache;
+        }).catch(function() {});
+      },
+      loadMyProfile: function() {
+        var self = this;
+        if (typeof backend_users === 'undefined' || !backend_users.getMyProfile) return;
+        backend_users.getMyProfile().then(function(p) { self.myProfile = { name: (p && p.name) || '', shared: !!(p && p.shared) }; }).catch(function() {});
+      },
+      saveMyProfile: function() {
+        var self = this;
+        if (typeof backend_users === 'undefined' || !backend_users.setMyProfile) return;
+        backend_users.setMyProfile((this.myProfile.name || '').trim(), !!this.myProfile.shared).then(function() {
+          self.notify(self.tOr('profile.saved', 'Profile saved'));
+          self._overlayUserLists();   // reflect the added/removed shared name in user-backed lists immediately
+        }).catch(function(e) { self.notify((e && e.message) || 'Save failed'); });
+      },
+      // Resolve the "@me" filter token to the current user's profile display name (as stored). An empty
+      // profile name -> a sentinel that matches nothing (the user has no assigned identity yet).
+      // Display-only client filter -- it never widens server-enforced access.
+      resolveMeTokens: function(filter) {
+        if (filter == null) return filter;
+        var me = ((this.myProfile && this.myProfile.name) || '').trim() || '\u0000__no_me__';
+        var walk = function(v) {
+          if (v === '@me') return me;
+          if (Array.isArray(v)) return v.map(walk);
+          if (v && typeof v === 'object') { var o = {}; Object.keys(v).forEach(function(k) { o[k] = walk(v[k]); }); return o; }
+          return v;
+        };
+        return walk(filter);
+      },
+      // Shallow view clone with @me resolved in view.filter + view.groupBy.filter (returns the original
+      // untouched when no @me token is present, to avoid needless churn).
+      _viewWithMe: function(view) {
+        if (!view) return view;
+        var hasMe = (JSON.stringify(view.filter || null).indexOf('"@me"') >= 0) || (JSON.stringify((view.groupBy && view.groupBy.filter) || null).indexOf('"@me"') >= 0);
+        if (!hasMe) return view;
+        var v = Object.assign({}, view);
+        if (view.filter) v.filter = this.resolveMeTokens(view.filter);
+        if (view.groupBy) { v.groupBy = Object.assign({}, view.groupBy); if (view.groupBy.filter) v.groupBy.filter = this.resolveMeTokens(view.groupBy.filter); }
+        return v;
+      },
+      // Inject the leaderboard's ‹ › back-offset into bare @period tokens (@month -> @month-<offset>).
+      // Offset 0 leaves tokens unchanged; only bare tokens (no existing -N) are rewritten.
+      resolvePeriodTokens: function(filter, offset) {
+        if (!offset || filter == null) return filter;
+        var re = /^@(today|day|week|month|year)$/;
+        var walk = function(v) {
+          if (typeof v === 'string' && re.test(v)) return v + '-' + offset;
+          if (Array.isArray(v)) return v.map(walk);
+          if (v && typeof v === 'object') { var o = {}; Object.keys(v).forEach(function(k) { o[k] = walk(v[k]); }); return o; }
+          return v;
+        };
+        return walk(filter);
+      },
+      hasPeriodNav: function() { var v = VIEWS[this.currentTable]; return !!(v && v.period); },
+      periodUnit: function() { var v = VIEWS[this.currentTable]; return (v && v.period) || 'month'; },
+      periodLabel: function() {
+        var unit = this.periodUnit(), off = this.periodOffset, now = new Date(), loc = this.calLocale();
+        if (unit === 'month') { return new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(new Date(now.getFullYear(), now.getMonth() - off, 1)); }
+        if (unit === 'year') { return String(now.getFullYear() - off); }
+        if (unit === 'week') { return off === 0 ? this.tOr('period.this_week', 'This week') : (off + ' ' + this.tOr('period.weeks_ago', 'weeks ago')); }
+        var dd = new Date(now); dd.setDate(dd.getDate() - off); return new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', year: 'numeric' }).format(dd);
+      },
+      periodPrev: function() { this.periodOffset++; this.loadTableData(); },                 // older
+      periodNext: function() { if (this.periodOffset > 0) { this.periodOffset--; this.loadTableData(); } }, // newer (not past present)
+      periodToday: function() { if (this.periodOffset !== 0) { this.periodOffset = 0; this.loadTableData(); } },
       updateUserTables: function(u, selected) {
         var prev = u.tables === 'all' ? ['all'] : this.userFeatures(u);
         var feats = this._resolveTableSelection(selected, prev);   // 'all' or array of FEATURE ids
