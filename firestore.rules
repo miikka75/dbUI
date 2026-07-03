@@ -42,6 +42,22 @@ service cloud.firestore {
       allow write: if request.auth != null && (noUsers() || role() == 'admin');
     }
 
+    // Membership requests: a signed-in but unregistered user may create/read/withdraw ONLY their own
+    // request doc; admins read/list/delete all. The request is inert until an admin approves it by
+    // writing a /_users doc (the role/tables are the admin's choice, never the requester's).
+    match /_access_requests/{email} {
+      allow read, create, delete: if request.auth != null && myEmail() == email;
+      allow read, write:          if request.auth != null && !noUsers() && role() == 'admin';
+    }
+
+    // Opt-in display-name profiles. A user reads/writes ONLY their own doc; a profile with
+    // shared==true is readable by any registered user (so `.where('shared','==',true)` — which IS
+    // query-provable, unlike an intersection — can populate a user-backed name list). Admins read all.
+    match /_profiles/{email} {
+      allow read:  if request.auth != null && (resource.data.shared == true || myEmail() == email || (!noUsers() && role() == 'admin'));
+      allow write: if request.auth != null && (myEmail() == email || (!noUsers() && role() == 'admin'));
+    }
+
     // Per-list storage: each list is its own doc carrying its owning `tables`. Read/write gated on
     // whether the user has access to any owning table (admins/bootstrap unrestricted).
     match /_lists/{listName} {
