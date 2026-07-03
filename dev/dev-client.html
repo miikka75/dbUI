@@ -14,6 +14,13 @@ var backend_users = {
   getUsers: function() { return _post('getUsers', {}); },
   getMyAccess: function() { return _post('getMyAccess', {}); },
   setUserRole: function(uid, role, user, tables) { return _post('setUserRole', { uid: uid, role: role, user: user, tables: tables }); },
-  removeUser: function(uid) { return _post('removeUser', { uid: uid }); }
+  removeUser: function(uid) { return _post('removeUser', { uid: uid }); },
+  requestAccess: function(name, note) { return _post('requestAccess', { name: name, note: note }); },
+  getAccessRequests: function() { return _post('getAccessRequests', {}); },
+  removeAccessRequest: function(email) { return _post('removeAccessRequest', { email: email }); },
+  getMyProfile: function() { return _post('getMyProfile', {}); },
+  setMyProfile: function(name, shared) { return _post('setMyProfile', { name: name, shared: shared }); },
+  getSharedNames: function() { return _post('getSharedNames', {}); },
+  setProfileName: function(email, name) { return _post('setProfileName', { email: email, name: name }); }
 };
 </script>
