@@ -40,6 +40,20 @@ const USERS_PATH = (APP_DB === ':memory:')
 if (fs.existsSync(USERS_PATH)) backend._users = JSON.parse(fs.readFileSync(USERS_PATH, 'utf8'));
 function saveUsers() { fs.writeFileSync(USERS_PATH, JSON.stringify(backend._users || {}, null, 2)); }
 
+// Membership requests (self-service; admin approves). Isolated file in in-memory test mode.
+const REQ_PATH = (APP_DB === ':memory:')
+  ? path.join(__dirname, 'test-ui', '.test-access-requests.json')
+  : path.join(__dirname, 'access-requests.json');
+if (fs.existsSync(REQ_PATH)) backend._accessRequests = JSON.parse(fs.readFileSync(REQ_PATH, 'utf8'));
+function saveRequests() { fs.writeFileSync(REQ_PATH, JSON.stringify(backend._accessRequests || {}, null, 2)); }
+
+// Opt-in display-name profiles. Isolated file in in-memory test mode.
+const PROF_PATH = (APP_DB === ':memory:')
+  ? path.join(__dirname, 'test-ui', '.test-profiles.json')
+  : path.join(__dirname, 'profiles.json');
+if (fs.existsSync(PROF_PATH)) backend._profiles = JSON.parse(fs.readFileSync(PROF_PATH, 'utf8'));
+function saveProfiles() { fs.writeFileSync(PROF_PATH, JSON.stringify(backend._profiles || {}, null, 2)); }
+
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -120,7 +134,7 @@ const server = http.createServer(async (req, res) => {
         });
         return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), tableMap: tableMapB, languages: languagesB, lists: listsB, data: dataB });
       }
-      case 'resetData': backend.resetData(); backend._users = undefined; saveUsers(); return json(res, { ok: true });
+      case 'resetData': backend.resetData(); backend._users = undefined; saveUsers(); backend._accessRequests = undefined; saveRequests(); backend._profiles = undefined; saveProfiles(); return json(res, { ok: true });
       case 'getAvailableTables': return json(res, backend.getAvailableTables('local'));
       case 'serverInfo': return json(res, { storage: USE_FS ? 'fs' : 'sqlite' });
       case 'getAvailableLanguages': return json(res, backend.getAvailableLanguages('local'));
@@ -177,6 +191,27 @@ const server = http.createServer(async (req, res) => {
       }
       case 'setUserRole': { if (!backend._users) backend._users = {}; backend._users[body.uid] = { role: body.role, user: body.user || '', tables: body.tables || 'all' }; saveUsers(); return json(res, { ok: true }); }
       case 'removeUser': { if (backend._users) delete backend._users[body.uid]; saveUsers(); return json(res, { ok: true }); }
+      case 'requestAccess': {
+        if (!backend._accessRequests) backend._accessRequests = {};
+        const rk = (userEmail || '').toLowerCase();
+        backend._accessRequests[rk] = { email: rk, name: body.name || '', note: body.note || '', ts: Date.now() };
+        saveRequests(); return json(res, { ok: true });
+      }
+      case 'getAccessRequests': return json(res, backend._accessRequests || {});
+      case 'removeAccessRequest': { if (backend._accessRequests) delete backend._accessRequests[(body.email || '').toLowerCase()]; saveRequests(); return json(res, { ok: true }); }
+      case 'getMyProfile': { const p = (backend._profiles || {})[(userEmail || '').toLowerCase()]; return json(res, p ? { name: p.name || '', shared: !!p.shared } : { name: '', shared: false }); }
+      case 'setMyProfile': { if (!backend._profiles) backend._profiles = {}; backend._profiles[(userEmail || '').toLowerCase()] = { name: body.name || '', shared: !!body.shared }; saveProfiles(); return json(res, { ok: true }); }
+      case 'getSharedNames': {
+        const names = Object.values(backend._profiles || {}).filter(p => p && p.shared && (p.name || '').trim()).map(p => p.name.trim());
+        return json(res, Array.from(new Set(names)).sort((a, b) => a.localeCompare(b)));
+      }
+      case 'setProfileName': {
+        if (!backend._profiles) backend._profiles = {};
+        const k = (body.email || '').toLowerCase();
+        const ex = backend._profiles[k] || {};
+        backend._profiles[k] = { name: body.name || '', shared: !!ex.shared };  // merge: preserve opt-in
+        saveProfiles(); return json(res, { ok: true });
+      }
       default: res.writeHead(404); return res.end('Not found');
     }
     } catch (err) {
