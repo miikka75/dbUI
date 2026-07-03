@@ -1852,6 +1852,192 @@ test.describe('access control: user matching + fail-closed', () => {
     expect(r.selfOnly).toEqual({ allowed: ['musiikki', 'siivous_a'], unreg: false, admin: false, role: 'editor' });
   });
 
+  test('membership request -> admin approve registers the user and clears the request', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      // Submit a request as a new (unregistered) user (the _post header follows test_user).
+      localStorage.setItem('test_user', 'newbie@x.com');
+      await backend_users.requestAccess('New Bie', 'please add me');
+      // Switch to admin (local@dev was bootstrap-registered as admin at boot).
+      localStorage.setItem('test_user', 'local@dev');
+      const reqs = await backend_users.getAccessRequests();
+      await backend_users.setUserRole('newbie@x.com', 'editor', 'newbie@x.com', ['tasks']);  // approve
+      await backend_users.removeAccessRequest('newbie@x.com');
+      const reqsAfter = await backend_users.getAccessRequests();
+      const users = await backend_users.getUsers();
+      // The approved user now resolves their OWN access via getMyAccess.
+      localStorage.setItem('test_user', 'newbie@x.com');
+      const mine = await backend_users.getMyAccess();
+      // Cleanup so the shared isolated users file returns to its prior state.
+      localStorage.setItem('test_user', 'local@dev');
+      await backend_users.removeUser('newbie@x.com');
+      return {
+        hadReq: !!reqs['newbie@x.com'], reqName: (reqs['newbie@x.com'] || {}).name,
+        clearedAfter: !reqsAfter['newbie@x.com'], userCreated: !!users['newbie@x.com'], mine: mine
+      };
+    });
+    expect(r.hadReq).toBe(true);
+    expect(r.reqName).toBe('New Bie');
+    expect(r.userCreated).toBe(true);
+    expect(r.clearedAfter).toBe(true);
+    expect(r.mine).toEqual({ role: 'editor', tables: ['tasks'] });
+  });
+
+  test('approveRequest seeds the approved user profile name from their request (enables @me)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      localStorage.setItem('test_user', 'seed@x.com'); await backend_users.requestAccess('Seed Person', '');
+      localStorage.setItem('test_user', 'local@dev');   // admin
+      await app.approveRequest({ email: 'seed@x.com', name: 'Seed Person' });
+      const users = await backend_users.getUsers();
+      localStorage.setItem('test_user', 'seed@x.com');
+      const prof = await backend_users.getMyProfile();
+      const reqsAfter = await backend_users.getAccessRequests();
+      localStorage.setItem('test_user', 'local@dev');
+      await backend_users.removeUser('seed@x.com');       // cleanup
+      await backend_users.setProfileName('seed@x.com', '');
+      return { registered: !!users['seed@x.com'], profName: prof.name, profShared: prof.shared, cleared: !reqsAfter['seed@x.com'] };
+    });
+    expect(r.registered).toBe(true);
+    expect(r.profName).toBe('Seed Person');   // seeded from the request
+    expect(r.profShared).toBe(false);          // NOT auto-shared (still opt-in)
+    expect(r.cleared).toBe(true);              // request removed after approval
+  });
+
+  test('user-backed list: opted-in shared profile names populate a listSources:"users" list', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      localStorage.setItem('test_user', 'ann@x.com'); await backend_users.setMyProfile('Ann', true);
+      localStorage.setItem('test_user', 'bob@x.com'); await backend_users.setMyProfile('Bob', false);   // opted out
+      localStorage.setItem('test_user', 'cara@x.com'); await backend_users.setMyProfile('Cara', true);
+      localStorage.setItem('test_user', 'local@dev');
+      const shared = await backend_users.getSharedNames();
+      const app = window.appInstance;
+      app.schemaData = Object.freeze(Object.assign({}, app.schemaData, { listSources: { members: 'users' } }));
+      await app._overlayUserLists();
+      const listed = (app.listsCache['members'] || []).slice();
+      // cleanup so the isolated profiles file doesn't leak into other tests
+      localStorage.setItem('test_user', 'ann@x.com'); await backend_users.setMyProfile('Ann', false);
+      localStorage.setItem('test_user', 'cara@x.com'); await backend_users.setMyProfile('Cara', false);
+      localStorage.setItem('test_user', 'local@dev');
+      return { shared, listed };
+    });
+    expect(r.shared).toEqual(['Ann', 'Cara']);   // Bob opted out -> excluded
+    expect(r.listed).toEqual(['Ann', 'Cara']);   // the user-backed list is filled from shared names
+  });
+
+  test('@me filter token resolves to the current user profile name (data-view + groupBy.filter)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      const cache = { tasks: [{ id: 1, person: 'Ann', task: 'A' }, { id: 2, person: 'Bob', task: 'B' }, { id: 3, person: 'Ann', task: 'C' }] };
+      app.myProfile = { name: 'Ann', shared: true };
+      // data-view filter { person: '@me' } -> only my rows
+      const dataRows = window.buildRows(app._viewWithMe({ sources: ['tasks'], filter: { person: '@me' } }), cache).map(function (x) { return x.task; }).sort();
+      // groupBy.filter { person: '@me' } -> only my aggregated row
+      const gb = { groupBy: { column: 'person', from: ['person'], filter: { person: '@me' } }, collect: 'task', columns: ['person', 't1', 't2'] };
+      const vmg = app._viewWithMe(gb);
+      const aggKeys = window.aggregateRows(vmg, window.buildRows(Object.assign({ sources: ['tasks'] }, vmg), cache)).map(function (x) { return x.person; });
+      // empty profile name -> @me matches nothing (no assigned identity)
+      app.myProfile = { name: '', shared: false };
+      const none = window.buildRows(app._viewWithMe({ sources: ['tasks'], filter: { person: '@me' } }), cache).length;
+      return { dataRows: dataRows, aggKeys: aggKeys, none: none };
+    });
+    expect(r.dataRows).toEqual(['A', 'C']);   // only Ann's task rows
+    expect(r.aggKeys).toEqual(['Ann']);        // only my aggregated (per-person) row
+    expect(r.none).toBe(0);                    // empty display name -> matches nothing
+  });
+
+  test('lookup computed + aggregate (sum/count) build a ranked leaderboard', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const chores = [{ chore: 'Dishes', points: 2 }, { chore: 'Mow', points: 5 }];
+      const log = [
+        { id: 1, person: 'Ann', chore: 'Dishes' }, { id: 2, person: 'Ann', chore: 'Mow' },
+        { id: 3, person: 'Bob', chore: 'Dishes' }, { id: 4, person: 'Ann', chore: 'Dishes' }
+      ];
+      const ctx = { dataCache: { chores: chores } };
+      const compute = [{ name: 'points', computed: { lookup: { table: 'chores', match: 'chore', on: 'chore', field: 'points' } } }];
+      const resolved = window.resolveComputed(log.map(function (x) { return Object.assign({}, x); }), compute, ctx);
+      const sumView = { groupBy: { column: 'person', from: ['person'] }, aggregate: { sum: 'points', into: 'total' }, columns: ['person', 'total'] };
+      const cntView = { groupBy: { column: 'person', from: ['person'] }, aggregate: { count: true, into: 'total' }, columns: ['person', 'total'] };
+      return {
+        pts: resolved.map(function (x) { return x.points; }),
+        board: window.aggregateRows(sumView, resolved).map(function (x) { return { p: x.person, t: x.total }; }),
+        counts: window.aggregateRows(cntView, resolved).map(function (x) { return { p: x.person, t: x.total }; })
+      };
+    });
+    expect(r.pts).toEqual([2, 5, 2, 2]);                                   // per-chore points looked up
+    expect(r.board).toEqual([{ p: 'Ann', t: 9 }, { p: 'Bob', t: 2 }]);      // sum, ranked desc (Ann 2+5+2)
+    expect(r.counts).toEqual([{ p: 'Ann', t: 3 }, { p: 'Bob', t: 1 }]);     // count, ranked desc
+  });
+
+  test('`within` period operator: @month/@week/@year + back-offset, auto-relative to today', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const fmt = function (d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+      const now = new Date(); now.setHours(0, 0, 0, 0);
+      const rows = [
+        { id: 'today', d: fmt(now) },
+        { id: 'mstart', d: fmt(new Date(now.getFullYear(), now.getMonth(), 1)) },      // 1st of this month
+        { id: 'last', d: fmt(new Date(now.getFullYear(), now.getMonth() - 1, 15)) },   // mid last month
+        { id: 'prevyr', d: fmt(new Date(now.getFullYear() - 1, 5, 15)) }               // last year
+      ];
+      const ids = function (cond) { return window.filterRows(rows, { d: cond }).map(function (x) { return x.id; }).sort(); };
+      const has = function (cond, id) { return window.filterRows(rows, { d: cond }).some(function (x) { return x.id === id; }); };
+      return {
+        month: ids({ within: '@month' }),
+        lastMonth: ids({ within: '@month-1' }),
+        weekHasToday: has({ within: '@week' }, 'today'),
+        yearHasToday: has({ within: '@year' }, 'today'),
+        yearHasPrevYr: has({ within: '@year' }, 'prevyr'),
+        bad: window.filterRows(rows, { d: { within: '@decade' } }).length
+      };
+    });
+    expect(r.month).toEqual(['mstart', 'today']);   // this month: today + 1st; excludes last month & prev year
+    expect(r.lastMonth).toEqual(['last']);           // @month-1 = previous month only
+    expect(r.weekHasToday).toBe(true);               // today is within this week
+    expect(r.yearHasToday).toBe(true);               // this year includes today
+    expect(r.yearHasPrevYr).toBe(false);             // ...but not the previous-year row
+    expect(r.bad).toBe(0);                           // unknown token matches nothing (fail-closed)
+  });
+
+  test('leaderboard ‹ › navigation: periodOffset injects @month-N and re-scopes; label tracks', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      const fmt = function (d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+      const now = new Date(); now.setHours(0, 0, 0, 0);
+      const thisM = fmt(new Date(now.getFullYear(), now.getMonth(), 1));
+      const lastM = fmt(new Date(now.getFullYear(), now.getMonth() - 1, 15));
+      const chores = [{ chore: 'X', points: 1 }];
+      const log = [{ id: 1, person: 'Ann', chore: 'X', done_on: thisM }, { id: 2, person: 'Ann', chore: 'X', done_on: lastM }, { id: 3, person: 'Bob', chore: 'X', done_on: lastM }];
+      const resolved = window.resolveComputed(log.map(function (x) { return Object.assign({}, x); }), [{ name: 'points', computed: { lookup: { table: 'chores', match: 'chore', on: 'chore', field: 'points' } } }], { dataCache: { chores: chores } });
+      const baseFilter = { done_on: { within: '@month' } };
+      const board = function (offset) {
+        var scoped = window.filterRows(resolved, app.resolvePeriodTokens(baseFilter, offset));   // view.filter on source rows
+        var view = { groupBy: { column: 'person', from: ['person'] }, aggregate: { count: true, into: 'total' }, columns: ['person', 'total'] };
+        return window.aggregateRows(view, scoped).map(function (x) { return { p: x.person, t: x.total }; }).sort(function (a, b) { return a.p.localeCompare(b.p); });
+      };
+      window.VIEWS.lb_test = { name: 'lb_test', period: 'month' };
+      app.currentTable = 'lb_test'; app.periodOffset = 0; var lblNow = app.periodLabel(); app.periodOffset = 1; var lblPrev = app.periodLabel(); app.periodOffset = 0;
+      var im = function (o) { return new Intl.DateTimeFormat(app.calLocale(), { month: 'long', year: 'numeric' }).format(new Date(now.getFullYear(), now.getMonth() - o, 1)); };
+      return {
+        tok0: JSON.stringify(app.resolvePeriodTokens(baseFilter, 0)),
+        tok2: JSON.stringify(app.resolvePeriodTokens(baseFilter, 2)),
+        thisMonth: board(0), lastMonth: board(1),
+        lblNow: lblNow, lblPrev: lblPrev, expNow: im(0), expPrev: im(1)
+      };
+    });
+    expect(r.tok0).toBe(JSON.stringify({ done_on: { within: '@month' } }));      // offset 0 -> unchanged
+    expect(r.tok2).toBe(JSON.stringify({ done_on: { within: '@month-2' } }));    // offset injected
+    expect(r.thisMonth).toEqual([{ p: 'Ann', t: 1 }]);                           // current month
+    expect(r.lastMonth).toEqual([{ p: 'Ann', t: 1 }, { p: 'Bob', t: 1 }]);        // one month back
+    expect(r.lblNow).toBe(r.expNow);                                             // label = current month
+    expect(r.lblPrev).toBe(r.expPrev);                                           // label = previous month
+  });
+
   test('unmatched user gets no data nav tabs (fail closed hides tables/views)', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
@@ -2635,6 +2821,23 @@ test.describe('rotationView (third view kind, e2e)', () => {
     expect(r[1]).toEqual({ p: '2026-01-08', a: ['B1'], b: ['A1'] }); // s=1
     expect(r[2]).toEqual({ p: '2026-01-15', a: ['B0'], b: ['A0'] }); // s=1
     expect(r[3]).toEqual({ p: '2026-01-22', a: ['A1'], b: ['B1'] }); // s=2≡0
+  });
+
+  test('numeric rotateEvery is anchored: shifting the window `from` does NOT change a date\'s assignment', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const view = { rotation: { slots: ['area_a', 'area_b'], rosters: ['L_a', 'L_b'], advanceBy: 'calendar', interval: 'weekly', rotateEvery: 1 } };
+      const cache = { L_a: [{ position: 1, people: ['A0'] }], L_b: [{ position: 1, people: ['B0'] }] };
+      const anchor = '2026-01-01';
+      // Same anchor, two different window starts. The overlapping date 2026-01-08 must resolve to the
+      // SAME slot assignment regardless of where the window begins (window is display-only).
+      const pick = function (rows, d) { return rows.filter(function (x) { return x._period === d; }).map(function (x) { return { a: x.area_a, b: x.area_b }; })[0]; };
+      const fromAnchor = window.buildRotationViewRows(view, cache, anchor, anchor, { from: '2026-01-01', periods: 4 });
+      const fromShifted = window.buildRotationViewRows(view, cache, anchor, anchor, { from: '2026-01-08', periods: 4 });
+      return { anchored: pick(fromAnchor, '2026-01-08'), shifted: pick(fromShifted, '2026-01-08') };
+    });
+    expect(r.anchored).toEqual({ a: ['B0'], b: ['A0'] });  // week 1 from anchor -> swapped (abs=1)
+    expect(r.shifted).toEqual(r.anchored);                 // window start does NOT reshuffle the assignment
   });
 });
 
