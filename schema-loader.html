@@ -181,6 +181,25 @@ function buildRows(cfg, dataCache) {
 }
 // Aggregate a groupBy/collect view's rows into one row per key (collected values -> Nth columns).
 function aggregateRows(view, rows) {
+  // Leaderboard-style numeric aggregate: one row per group with a count or a sum, ranked highest-first.
+  // aggregate = { count:true } | { sum:"<col>" }, optional `into` (output column, default "total").
+  if (view.aggregate && view.groupBy) {
+    var akeyCol = view.groupBy.column, akeysFrom = view.groupBy.from || [akeyCol];
+    var agg = view.aggregate, sumCol = agg.sum, into = agg.into || 'total', agf = view.groupBy.filter || null;
+    var totals = {};
+    rows.forEach(function(r) {
+      akeysFrom.forEach(function(k) {
+        var key = r[k];
+        if (key == null || key === '') return;
+        if (agf) { var tmp = {}; tmp[akeyCol] = key; if (!condMatches(tmp, agf)) return; }
+        if (totals[key] == null) totals[key] = 0;
+        if (sumCol) { var n = Number(r[sumCol]); if (!isNaN(n)) totals[key] += n; }
+        else totals[key] += 1;
+      });
+    });
+    return Object.keys(totals).map(function(key) { var row = { id: key }; row[akeyCol] = key; row[into] = totals[key]; return row; })
+      .sort(function(a, b) { return b[into] - a[into]; });   // rank: highest total first
+  }
   if (!(view.groupBy && view.collect)) return rows;
   var keyCol = view.groupBy.column;
   var keysFrom = view.groupBy.from;
@@ -231,6 +250,15 @@ function resolveComputed(rows, columns, ctx) {
         } else {
           r[d.name] = [];
         }
+        return;
+      }
+      // Lookup: denormalize ONE field from a keyed/referenced table into this row. Matches the local
+      // column `lookup.match` against the target table's `lookup.on` column (defaults to the same name)
+      // and copies `lookup.field`. General — reusable for chore->points, member->role/phone, etc.
+      if (comp.lookup) {
+        var lk = comp.lookup, lsrc = cache[lk.table] || [], onCol = lk.on || lk.match, lkey = r[lk.match], lhit = null;
+        for (var li = 0; li < lsrc.length; li++) { if (lsrc[li][onCol] === lkey) { lhit = lsrc[li]; break; } }
+        r[d.name] = (lhit && lhit[lk.field] != null) ? lhit[lk.field] : (lk.default != null ? lk.default : '');
         return;
       }
       var ml = comp.matchList;
@@ -387,14 +415,18 @@ function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor, rangeO
     var sources = (rotateEveryEff == null) ? []
       : (Array.isArray(rotateEveryEff) ? rotateEveryEff : [rotateEveryEff]);
     var cycleLen = sources.indexOf('cycle') >= 0 ? ((dataCache[rosters[0]] || []).length || 0) : 0;
-    var phase = cycleLen > 0 ? wholeIntervalsBetween(anchor, from, interval) : 0;
+    // Absolute period index origin: periods from the rotation ANCHOR to the window start. Both swap
+    // sources key off this absolute index so the assignment for a given date is invariant to `from`
+    // (the display window) -- moving the window never reshuffles who is in which slot.
+    var base = anchor ? wholeIntervalsBetween(anchor, from, interval) : 0;
     for (i = 0; i < periods; i++) {
       target = addIntervals(from, i, interval);
       row = { id: 'rv' + i, _period: target };
+      var abs = base + i;   // absolute period index measured from the anchor
       var s = 0;
       if (N) sources.forEach(function(src) {
-        if (src === 'cycle') { if (cycleLen > 0) s += Math.floor((phase + i) / cycleLen) % N; }
-        else if (typeof src === 'number' && src > 0) { s += Math.floor(i / src) % N; }
+        if (src === 'cycle') { if (cycleLen > 0) s += Math.floor(abs / cycleLen) % N; }
+        else if (typeof src === 'number' && src > 0) { s += Math.floor(abs / src) % N; }
       });
       slots.forEach(function(slot, k) {
         var rosterName = N ? rosters[(((k + s) % N) + N) % N] : null;
@@ -430,6 +462,25 @@ function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor, rangeO
 //   { "f": { "ne": v } }                         !==  (equality is the scalar form above)
 // Membership is expressed with `$or` of equalities (array-IN shorthand was retired; convertViewFilters
 // upgrades any legacy `{f:[a,b]}` to `$or` at load). Empty/absent cond => true.
+// Relative period membership for the `within` filter operator. Token: @today|@day|@week|@month|@year,
+// with an optional back-offset (@month-1 = last month, @week-2 = two weeks ago). Computed from *now*
+// each call, so it auto-resets (a `@month` leaderboard rolls to the new month automatically). Weeks are
+// Monday-start. Compares the row's YYYY-MM-DD date against [start, end) as ISO strings (lexicographic).
+function _withinPeriod(dateVal, token) {
+  if (!dateVal) return false;
+  var m = /^@(today|day|week|month|year)(?:-(\d+))?$/.exec(String(token || '').trim());
+  if (!m) return false;
+  var unit = (m[1] === 'day') ? 'today' : m[1], back = m[2] ? parseInt(m[2], 10) : 0;
+  var now = new Date(); now.setHours(0, 0, 0, 0);
+  var start, end;
+  if (unit === 'today') { start = new Date(now); start.setDate(start.getDate() - back); end = new Date(start); end.setDate(end.getDate() + 1); }
+  else if (unit === 'week') { var dow = (now.getDay() + 6) % 7; start = new Date(now); start.setDate(now.getDate() - dow - back * 7); end = new Date(start); end.setDate(start.getDate() + 7); }
+  else if (unit === 'month') { start = new Date(now.getFullYear(), now.getMonth() - back, 1); end = new Date(start.getFullYear(), start.getMonth() + 1, 1); }
+  else { start = new Date(now.getFullYear() - back, 0, 1); end = new Date(start.getFullYear() + 1, 0, 1); }
+  var fmt = function(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  var ds = String(dateVal).slice(0, 10);
+  return ds >= fmt(start) && ds < fmt(end);
+}
 function condMatches(item, cond) {
   if (!cond || typeof cond !== 'object') return true;
   item = item || {};
@@ -441,6 +492,7 @@ function condMatches(item, cond) {
     if (c && typeof c === 'object' && !Array.isArray(c)) {
       if (c.matchList) { var _L = window._listsCache && window._listsCache[c.matchList]; var _ok = _L && (Array.isArray(v) ? v.some(function(x){ return _L.indexOf(x) >= 0; }) : _L.indexOf(v) >= 0); if (!_ok) return false; }
       else if (c.notMatchList) { var _Ln = window._listsCache && window._listsCache[c.notMatchList]; var _hit = _Ln && (Array.isArray(v) ? v.some(function(x){ return _Ln.indexOf(x) >= 0; }) : _Ln.indexOf(v) >= 0); if (_hit) return false; }
+      else if ('within' in c) { if (!_withinPeriod(v, c.within)) return false; }
       else {
         if (c.notEmpty && !v) return false;
         if (c.empty && v) return false;
