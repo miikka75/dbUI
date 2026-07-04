@@ -16,8 +16,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const DEV_DIR = path.join(__dirname, '..');
-const PNG512 = fs.readFileSync(path.join(DEV_DIR, 'icon-512.png'));
+const REPO_ROOT = path.join(__dirname, '..', '..');   // __dirname = dev/test-ui; icon-512.png is served from the repo root (server.js STATIC_DIR)
+const PNG512 = fs.readFileSync(path.join(REPO_ROOT, 'icon-512.png'));
 
 let server, ORIGIN;
 const hits = [];   // records every request the cross-origin server receives (proves the browser fetched it)

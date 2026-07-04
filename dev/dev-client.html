@@ -21,6 +21,7 @@ var backend_users = {
   getMyProfile: function() { return _post('getMyProfile', {}); },
   setMyProfile: function(name, shared) { return _post('setMyProfile', { name: name, shared: shared }); },
   getSharedNames: function() { return _post('getSharedNames', {}); },
-  setProfileName: function(email, name) { return _post('setProfileName', { email: email, name: name }); }
+  setProfileName: function(email, name) { return _post('setProfileName', { email: email, name: name }); },
+  getProfiles: function() { return _post('getProfiles', {}); }
 };
 </script>

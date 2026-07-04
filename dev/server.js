@@ -212,6 +212,7 @@ const server = http.createServer(async (req, res) => {
         backend._profiles[k] = { name: body.name || '', shared: !!ex.shared };  // merge: preserve opt-in
         saveProfiles(); return json(res, { ok: true });
       }
+      case 'getProfiles': return json(res, backend._profiles || {});
       default: res.writeHead(404); return res.end('Not found');
     }
     } catch (err) {

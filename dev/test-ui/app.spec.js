@@ -1927,6 +1927,53 @@ test.describe('access control: user matching + fail-closed', () => {
     expect(r.listed).toEqual(['Ann', 'Cara']);   // the user-backed list is filled from shared names
   });
 
+  test('admin can view and rename another user\'s profile name from the Users table', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => { appInstance.setUserRole('bob@x.com', 'editor', 'bob@x.com', ['tasks']); });
+    await page.waitForTimeout(300);   // let loadUsers()/loadAllProfiles() resolve
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
+    const row = page.locator('.v-table tbody tr', { hasText: 'bob@x.com' });
+    await expect(row).toHaveCount(1);
+    const nameCell = row.locator('.editable-cell').nth(1);   // [0] = email/id, [1] = name
+    await expect(nameCell).toHaveText('');   // no profile yet
+    await nameCell.click();
+    await page.keyboard.type('Bob Builder');
+    await nameCell.blur();
+    await page.waitForTimeout(400);
+    const r = await page.evaluate(async () => {
+      const profiles = await backend_users.getProfiles();
+      await backend_users.removeUser('bob@x.com'); await backend_users.setProfileName('bob@x.com', '');   // cleanup
+      return { saved: (profiles['bob@x.com'] || {}).name, cached: appInstance.userDisplayName({ key: 'bob@x.com' }) };
+    });
+    expect(r.saved).toBe('Bob Builder');
+    expect(r.cached).toBe('Bob Builder');
+  });
+
+  test('a registered user with no table access still sees and can edit their own profile name (not gated by user-backed lists)', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => { appInstance.setUserRole('noaccess@x.com', 'editor', 'noaccess@x.com', []); });
+    await page.waitForTimeout(300);
+    await page.evaluate(() => { localStorage.setItem('test_user', 'noaccess@x.com'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    // fixture schema defines no listSources -> user-backed lists feature is unused for anyone here.
+    expect(await page.evaluate(() => appInstance.userBackedLists().length)).toBe(0);
+    expect(await page.evaluate(() => appInstance.isUnregisteredUser)).toBe(false);
+    expect(await page.evaluate(() => appInstance.userAllowedTables)).toEqual([]);
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
+    // No translations loaded in the fixture -> labels render as their raw keys (no English fallback).
+    await expect(page.locator('.v-main')).toContainText('profile.title');
+    const nameField = page.locator('label:has-text("profile.your_name")').locator('..').locator('input');
+    await nameField.fill('No Access Person');
+    await nameField.blur();   // no Save button -> the name auto-saves on blur
+    await page.waitForTimeout(400);
+    const saved = await page.evaluate(() => backend_users.getMyProfile());
+    // cleanup as admin
+    await page.evaluate(() => { localStorage.setItem('test_user', 'local@dev'); });
+    await page.evaluate(async () => { await backend_users.removeUser('noaccess@x.com'); await backend_users.setProfileName('noaccess@x.com', ''); });
+    expect(saved.name).toBe('No Access Person');
+  });
+
   test('@me filter token resolves to the current user profile name (data-view + groupBy.filter)', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {

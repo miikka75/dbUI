@@ -7,11 +7,11 @@
     "start": "node server.js",
     "seed": "node seed-translations.js",
     "seed:demo": "node seed-demo.js",
-    "test": "node --test test/",
+    "test": "node --test test/*.test.js",
     "test:ui": "npx playwright test --config=playwright.config.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
-    "better-sqlite3": "^11.0.0"
+    "better-sqlite3": "^12.11.1"
   }
 }

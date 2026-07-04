@@ -35,17 +35,22 @@ backend = {
   // filters — querying a denied collection would throw). Replaces ~20 sequential round-trips.
   bootData: function(folderId) {
     var self = this;
+    var DENIED = { __denied: true };
     return Promise.all([
-      StorageFirestore.getMeta('schema'),
-      StorageFirestore.getMeta('languages'),
+      // Denied (not just missing) for a not-yet-registered user: /_meta reads require isRegistered().
+      // Marked distinctly from "doc doesn't exist" so we don't mistake it for first-boot below and
+      // try to write a default schema we have no permission to save.
+      StorageFirestore.getMeta('schema').catch(function() { return DENIED; }),
+      StorageFirestore.getMeta('languages').catch(function() { return DENIED; }),
       self.getLists(folderId).catch(function() { return {}; }),   // lists are optional — never let one denied read fail-fast the whole boot
       self._myTables()           // null = unrestricted; [] = none; [..] = restricted set
     ]).then(function(r) {
+      if (r[0] === DENIED) return { schema: null, denied: true };
       if (!r[0]) return { schema: null }; // first boot -> client saves the bundled default
       var parsed = BackendHelpers.unwrapSchemaDoc(r[0]);
       var tables = (parsed && parsed.tables) || {};
       var tableMap = {}; Object.keys(tables).forEach(function(t) { tableMap[t] = t; });
-      var languages = (r[1] && (r[1].list || [])) || [];
+      var languages = (r[1] !== DENIED && r[1] && (r[1].list || [])) || [];
       var lists = r[2] || {};
       var allowed = r[3];
       var names = Object.keys(tableMap).filter(function(t) { return !allowed || allowed.indexOf(t) >= 0; });
@@ -59,7 +64,10 @@ backend = {
       return Promise.all(jobs).then(function(results) {
         var data = {};
         results.forEach(function(x) { data[x.key] = x.res; });
-        return { schema: parsed, tableOrder: Object.keys(tables), tableMap: tableMap, languages: languages, lists: lists, data: data };
+        // unrestricted: false tells the caller not to auto-seed/write shared list scaffolding -- a
+        // restricted editor's writes to lists outside their own tables would be denied wholesale
+        // (Firestore batch commits are atomic), whereas an admin/bootstrap (allowed === null) may.
+        return { schema: parsed, tableOrder: Object.keys(tables), tableMap: tableMap, languages: languages, lists: lists, data: data, unrestricted: allowed === null };
       });
     });
   },
@@ -332,12 +340,20 @@ var backend_users = {
       return out.sort(function(a, b) { return a.localeCompare(b); });
     }).catch(function() { return []; });
   },
-  // Admin-only: seed another user's profile display name (e.g. from their access request on approval).
-  // Merges name only so an existing `shared` opt-in is preserved. Rules allow admin to write any profile.
+  // Admin-only: seed/rename another user's profile display name (e.g. from their access request on
+  // approval, or from the Users table). Merges name only so an existing `shared` opt-in is preserved.
+  // Rules allow admin to write any profile.
   setProfileName: function(email, name) {
     var k = String(email || '').toLowerCase();
     if (!k) return Promise.resolve();
     return _db.collection('_profiles').doc(k).set({ name: name || '' }, { merge: true });
+  },
+  // Admin-only: every user's profile ({name, shared} keyed by email), for the Users management table.
+  // Rules allow admin to read the whole /_profiles collection regardless of each doc's `shared` flag.
+  getProfiles: function() {
+    return _db.collection('_profiles').get().then(function(snap) {
+      var o = {}; snap.forEach(function(d) { o[d.id] = d.data(); }); return o;
+    }).catch(function() { return {}; });
   }
 };
 
