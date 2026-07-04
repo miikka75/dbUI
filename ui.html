@@ -678,45 +678,45 @@
             </template>
             <v-divider class="my-4"></v-divider>
             <v-btn variant="outlined" :color="isArmed('reset') ? 'error' : 'warning'" :prepend-icon="isArmed('reset') ? 'mdi-check-circle' : 'mdi-refresh'" @click="isArmed('reset') ? resetApp() : armDelete('reset')">{{ isArmed('reset') ? t('settings.confirm_reset') : t('settings.reset') }}</v-btn>
-            <template v-if="usersLoaded && !isUnregisteredUser && userBackedLists().length">
+            <template v-if="usersLoaded && !isUnregisteredUser">
             <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-1 font-weight-bold mb-2">{{ tOr('profile.title','My profile') }}</p>
+            <p class="text-subtitle-1 font-weight-bold mb-2">{{ t('profile.title') }}</p>
             <div class="d-flex align-center flex-wrap" style="gap:12px">
-              <v-text-field v-model="myProfile.name" :label="tOr('profile.your_name','Display name')" density="compact" hide-details variant="outlined" style="max-width:240px"></v-text-field>
-              <v-switch v-model="myProfile.shared" :label="tOr('profile.share_name','Share my name with others')" density="compact" hide-details color="primary"></v-switch>
-              <v-btn size="small" color="primary" variant="flat" prepend-icon="mdi-content-save" @click="saveMyProfile">{{ tOr('profile.save','Save') }}</v-btn>
+              <v-text-field v-model="myProfile.name" :label="t('profile.your_name')" density="compact" hide-details variant="outlined" style="max-width:240px" @blur="saveMyProfile" @keydown.enter="$event.target.blur()" @keydown.home.stop @keydown.end.stop></v-text-field>
+              <v-switch v-if="userBackedLists().length" :model-value="myProfile.shared" @update:model-value="v => { myProfile.shared = v; saveMyProfile(); }" :label="t('profile.share_name')" density="compact" hide-details color="primary"></v-switch>
             </div>
             </template>
             <template v-if="usersLoaded && userList.length && isAdmin">
             <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-1 font-weight-bold mb-2">Firebase</p>
+            <p class="text-subtitle-1 font-weight-bold mb-2">{{ t('settings.user_access_title') }}</p>
             <p class="text-subtitle-2 mb-2">{{ t('settings.user_access') }}</p>
             <template v-if="accessRequests.length">
-              <p class="text-subtitle-2 mb-1">{{ tOr('access.pending_requests','Pending access requests') }}</p>
+              <p class="text-subtitle-2 mb-1">{{ t('access.pending_requests') }}</p>
               <v-table density="compact" class="mb-3">
+                <template v-slot:default>
                 <tbody>
                   <tr v-for="req in accessRequests" :key="req.email">
                     <td>{{ req.email }}</td>
                     <td>{{ req.name }}</td>
                     <td class="text-medium-emphasis">{{ req.note }}</td>
                     <td style="white-space:nowrap">
-                      <v-btn size="x-small" color="success" variant="text" prepend-icon="mdi-check" @click="approveRequest(req)">{{ tOr('access.approve','Approve') }}</v-btn>
-                      <v-btn size="x-small" color="error" variant="text" prepend-icon="mdi-close" @click="denyRequest(req)">{{ tOr('access.deny','Deny') }}</v-btn>
+                      <v-btn size="x-small" color="success" variant="text" prepend-icon="mdi-check" @click="approveRequest(req)">{{ t('access.approve') }}</v-btn>
+                      <v-btn size="x-small" color="error" variant="text" prepend-icon="mdi-close" @click="denyRequest(req)">{{ t('access.deny') }}</v-btn>
                     </td>
                   </tr>
                 </tbody>
+                </template>
               </v-table>
             </template>
             <v-table v-if="userList.length" density="compact">
               <template v-slot:default>
-              <thead><tr><th>{{ t('settings.user_id') }}</th><th>{{ t('settings.role') }}</th><th>{{ t('settings.tables') }}</th><th></th></tr></thead>
+              <thead><tr><th>{{ t('settings.user_id') }}</th><th>{{ t('settings.name') }}</th><th>{{ t('settings.role') }}</th><th>{{ t('settings.tables') }}</th><th></th></tr></thead>
               <tbody>
                 <tr v-for="u in sortedUserList" :key="u.key">
                   <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="renameUser(u, $event.target.textContent.trim())">{{ u.key.indexOf('_new_') === 0 ? '' : u.key }}</span></td>
-                  <td><v-select :model-value="u.role" :name="'role-' + u.key" :items="['admin','editor','viewer']" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>
-                  <td><v-chip-group :model-value="userFeatures(u)" multiple @update:model-value="updateUserTables(u, $event)">
-                    <v-chip v-for="c in grantFeatureChips" :key="c.id" :value="c.id" size="x-small" filter variant="outlined">{{ c.label }}</v-chip>
-                  </v-chip-group></td>
+                  <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="renameUserProfile(u, $event.target.textContent)">{{ userDisplayName(u) }}</span></td>
+                  <td><v-select :model-value="u.role" :name="'role-' + u.key" :items="roleItems" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>
+                  <td><v-select :model-value="userFeatures(u)" :items="grantFeatureChips" item-title="label" item-value="id" multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:180px;max-width:320px" @update:model-value="updateUserTables(u, $event)"></v-select></td>
                   <td><v-btn :icon="isArmed('user:'+u.key) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('user:'+u.key) ? 'error' : ''" @click="isArmed('user:'+u.key) ? removeUser(u.key) : armDelete('user:'+u.key)"></v-btn></td>
                 </tr>
               </tbody>

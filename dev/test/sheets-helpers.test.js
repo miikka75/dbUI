@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const h = require('../../apps-script/sheets-helpers');
+const h = require('../../appscript/sheets-helpers');
 
 describe('Apps Script helpers - formatCell', () => {
   it('formats Date as local YYYY-MM-DD (no UTC shift)', () => {

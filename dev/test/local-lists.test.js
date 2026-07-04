@@ -51,6 +51,7 @@ describe('Local per-list storage + legacy migration', () => {
     const lists = b.getLists('local'); // triggers _ensureLists migration
     assert.deepEqual(lists.staff, ['A', 'B', 'C']);
     assert.deepEqual(lists.cleaners, ['Z']);
+    b.close();   // release the file handle -- Windows can't unlink an open db (and reopens it readonly next)
 
     // table is now the new shape (has items + tables columns, no value rows duplicated)
     const check = new Database(path, { readonly: true });

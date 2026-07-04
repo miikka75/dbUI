@@ -215,6 +215,8 @@ function createVueApp() {
       accessRequested: false,   // unregistered user: have I already submitted a request this session
       accessRequestName: '',    // optional display name entered on the request banner
       myProfile: { name: '', shared: false },   // this user's opt-in display-name profile
+      profileSaved: null,       // last-persisted {name, shared} snapshot -> skip redundant blur saves
+      profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
       periodOffset: 0,          // leaderboard ‹ › navigation: periods back from now (0 = current)
       firestoreRules: '',
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
@@ -455,6 +457,15 @@ function createVueApp() {
         });
         return chips;
       },
+      // Role dropdown options for the Users table: translatable label (role.<id>, shows the raw key
+      // when untranslated) + the stored role VALUE (unchanged, so setUserRole keeps writing
+      // 'admin'/'editor'/'viewer').
+      roleItems: function() {
+        var self = this, str = this.strings; void str; // touch strings for reactivity
+        return ['admin', 'editor', 'viewer'].map(function(r) {
+          return { value: r, title: self.t('role.' + r) };
+        });
+      },
       hasFirebaseConfig: function() {
         if (window.FIREBASE_CONFIG) return true;
         var s = localStorage.getItem('firebase_config');
@@ -635,12 +646,13 @@ function createVueApp() {
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
-         'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access',
-         'settings.user_id', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all',
+         'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
+         'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all',
+         'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset',
          'cal.today', 'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
-         'profile.title', 'profile.your_name', 'profile.share_name', 'profile.save', 'profile.saved',
+         'profile.title', 'profile.your_name', 'profile.share_name',
          'period.this_week', 'period.weeks_ago', 'period.current',
          'lang.app', 'lang.schema'].sort();
       },
@@ -806,7 +818,7 @@ function createVueApp() {
 
         // Load schema from backend, fall back to default
         var schemaPromise;
-        if (backend.getSchema) {
+        if (backend.getSchema && !backend.bootData) {
           schemaPromise = backend.getSchema(self.folderId).then(function(s) {
             if (s) {
               var parsed = typeof s === 'string' ? JSON.parse(s) : s;
@@ -839,6 +851,9 @@ function createVueApp() {
           backend.bootData(self.folderId).then(function(result) {
             if (!result) { self.notify('Server error: bootData returned null'); self.loading = false; return; }
             if (result.error) { self.notify('Server error: ' + result.error); self.loading = false; return; }
+            // Not registered yet: skip schema/data entirely and fall through to loadUsers() below,
+            // which will detect this via the self-scoped access check and show the request-access banner.
+            if (result.denied) return;
             // bootData may return schema too
             if (result.schema) {
               var parsedSchema = typeof result.schema === 'string' ? JSON.parse(result.schema) : result.schema;
@@ -857,15 +872,22 @@ function createVueApp() {
             self.tableMap = result.tableMap || {};
             self.languages = result.languages || [];
             self.listsCache = result.lists || {}; window._listsCache = self.listsCache;
-            // Auto-seed lists: create missing list names + seed mandatory values from filters
-            Object.keys(SCHEMA).forEach(function(t) {
-              Object.keys(SCHEMA[t].columns).forEach(function(c) {
-                var def = SCHEMA[t].columns[c];
-                if (def && typeof def === 'object' && def.list && !self.listsCache[def.list]) { self.listsCache[def.list] = []; }
-                if (def && typeof def === 'object' && def.listSwitch && def.listSwitch.list && !self.listsCache[def.listSwitch.list]) { self.listsCache[def.listSwitch.list] = []; }
+            // Auto-seed lists (create missing list names + seed mandatory filter values): admin-only
+            // maintenance. A restricted user's listsCache is already scoped to their own tables
+            // server-side; seeding+saving here would add entries for tables they don't own, and
+            // saveLists's batch write would then be denied wholesale (Firestore batches are atomic --
+            // one disallowed doc fails the lot). result.unrestricted is only ever explicitly false
+            // for a scoped Firebase user; other backends don't set it, so they keep seeding as before.
+            if (result.unrestricted !== false) {
+              Object.keys(SCHEMA).forEach(function(t) {
+                Object.keys(SCHEMA[t].columns).forEach(function(c) {
+                  var def = SCHEMA[t].columns[c];
+                  if (def && typeof def === 'object' && def.list && !self.listsCache[def.list]) { self.listsCache[def.list] = []; }
+                  if (def && typeof def === 'object' && def.listSwitch && def.listSwitch.list && !self.listsCache[def.listSwitch.list]) { self.listsCache[def.listSwitch.list] = []; }
+                });
               });
-            });
-            if (_seedListValues(self.listsCache)) backend.saveLists(self.folderId, self.listsCache);
+              if (_seedListValues(self.listsCache)) backend.saveLists(self.folderId, self.listsCache);
+            }
             // Populate data cache
             for (var key in result.data) {
               var d = result.data[key];
@@ -2157,7 +2179,7 @@ function createVueApp() {
           if (a.registered === false) { self.selfUnregistered = true; self.userList = []; return done(); }
           var email = (self.currentUserEmail || '').toLowerCase();
           if (a.role === 'admin' || a.tables === 'all') {
-            backend_users.getUsers().then(function(u) { self.userList = self._buildUserList(u); self.loadAccessRequests(); done(); })
+            backend_users.getUsers().then(function(u) { self.userList = self._buildUserList(u); self.loadAccessRequests(); self.loadAllProfiles(); done(); })
               .catch(function() { self.userList = [{ key: email, addr: email, role: a.role, tables: a.tables || 'all' }]; done(); });
           } else {
             self.userList = [{ key: email, addr: email, role: a.role, tables: a.tables }]; done();
@@ -2232,14 +2254,39 @@ function createVueApp() {
       loadMyProfile: function() {
         var self = this;
         if (typeof backend_users === 'undefined' || !backend_users.getMyProfile) return;
-        backend_users.getMyProfile().then(function(p) { self.myProfile = { name: (p && p.name) || '', shared: !!(p && p.shared) }; }).catch(function() {});
+        backend_users.getMyProfile().then(function(p) {
+          self.myProfile = { name: (p && p.name) || '', shared: !!(p && p.shared) };
+          self.profileSaved = { name: self.myProfile.name, shared: self.myProfile.shared };
+        }).catch(function() {});
       },
+      // Auto-saves on blur (name) / toggle (shared) -- no explicit Save button. Skips the write when
+      // nothing changed since the last save so a plain focus-out doesn't churn the backend + lists.
       saveMyProfile: function() {
         var self = this;
         if (typeof backend_users === 'undefined' || !backend_users.setMyProfile) return;
-        backend_users.setMyProfile((this.myProfile.name || '').trim(), !!this.myProfile.shared).then(function() {
-          self.notify(self.tOr('profile.saved', 'Profile saved'));
+        var name = (this.myProfile.name || '').trim(), shared = !!this.myProfile.shared;
+        if (this.profileSaved && this.profileSaved.name === name && this.profileSaved.shared === shared) return;
+        backend_users.setMyProfile(name, shared).then(function() {
+          self.profileSaved = { name: name, shared: shared };
           self._overlayUserLists();   // reflect the added/removed shared name in user-backed lists immediately
+        }).catch(function(e) { self.notify((e && e.message) || 'Save failed'); });
+      },
+      // Admin: every user's display name, for the Users management table (own name uses
+      // myProfile/saveMyProfile above instead -- this is for viewing/editing OTHER users' names).
+      loadAllProfiles: function() {
+        var self = this;
+        if (typeof backend_users === 'undefined' || !backend_users.getProfiles) { self.profilesByEmail = {}; return; }
+        backend_users.getProfiles().then(function(m) { self.profilesByEmail = m || {}; }).catch(function() { self.profilesByEmail = {}; });
+      },
+      userDisplayName: function(u) {
+        return (this.profilesByEmail[(u.key || '').toLowerCase()] || {}).name || '';
+      },
+      renameUserProfile: function(u, name) {
+        var self = this, email = (u.key || '').toLowerCase(), trimmed = (name || '').trim();
+        if (typeof backend_users === 'undefined' || !backend_users.setProfileName) return;
+        backend_users.setProfileName(email, trimmed).then(function() {
+          var patch = {}; patch[email] = Object.assign({}, self.profilesByEmail[email], { name: trimmed });
+          self.profilesByEmail = Object.assign({}, self.profilesByEmail, patch);
         }).catch(function(e) { self.notify((e && e.message) || 'Save failed'); });
       },
       // Resolve the "@me" filter token to the current user's profile display name (as stored). An empty
