@@ -647,12 +647,12 @@ function createVueApp() {
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
-         'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all',
+         'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all', 'settings.save_failed',
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset',
          'cal.today', 'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
-         'profile.title', 'profile.your_name', 'profile.share_name',
+         'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name',
          'period.this_week', 'period.weeks_ago', 'period.current',
          'lang.app', 'lang.schema'].sort();
       },
@@ -2012,14 +2012,25 @@ function createVueApp() {
       anchorForView: function(name) {
         return ((this.appConfig && this.appConfig.rotationAnchors) || {})[name] || '';
       },
+      // Rotation controls (anchor/range/rotateEvery) persist to the synced folder config. Everyone with
+      // access to the view may change them LOCALLY (optimistic appConfig update + re-render); only an
+      // admin writes them through to the database. A failed/denied DB write is surfaced with a notice
+      // (rules allow only admins to write _meta/config), instead of silently reverting on next reload.
+      _saveFolderConfig: function(cfg, viewName) {
+        var self = this;
+        this.appConfig = cfg;                       // local override for everyone with view access
+        if (this.isAdmin && backend.setFolderConfig) {
+          Promise.resolve(backend.setFolderConfig(this.folderId, cfg))
+            .catch(function() { self.notify(self.t('settings.save_failed')); });
+        }
+        if (this.currentTable === viewName) this.loadTableData();
+      },
       saveRotationAnchor: function(viewName, val) {
         var cfg = Object.assign({}, this.appConfig || {});
         cfg.rotationAnchors = Object.assign({}, cfg.rotationAnchors || {});
         cfg.rotationAnchors[viewName] = val || '';
         cfg.mode = this.mode;
-        this.appConfig = cfg;
-        if (backend.setFolderConfig) backend.setFolderConfig(this.folderId, cfg);
-        if (this.currentTable === viewName) this.loadTableData();
+        this._saveFolderConfig(cfg, viewName);
       },
       // Per-view range override (periods + optional fixed start) in synced folder config
       // rotationRanges[viewName], merged over the schema rotation.range default — mirrors the per-view
@@ -2041,9 +2052,7 @@ function createVueApp() {
         });
         if (Object.keys(cur).length) cfg.rotationRanges[viewName] = cur; else delete cfg.rotationRanges[viewName];
         cfg.mode = this.mode;
-        this.appConfig = cfg;
-        if (backend.setFolderConfig) backend.setFolderConfig(this.folderId, cfg);
-        if (this.currentTable === viewName) this.loadTableData();
+        this._saveFolderConfig(cfg, viewName);
       },
 
       // Per-view rotateEvery override (synced folder config). Like the anchor/range overrides, a
@@ -2071,9 +2080,7 @@ function createVueApp() {
           cfg.rotationRotateEvery[viewName] = arr;
         }
         cfg.mode = this.mode;
-        this.appConfig = cfg;
-        if (backend.setFolderConfig) backend.setFolderConfig(this.folderId, cfg);
-        if (this.currentTable === viewName) this.loadTableData();
+        this._saveFolderConfig(cfg, viewName);
       },
       moveRowPosition: function(item, dir) {
         if (!this.isReorderable) return;
