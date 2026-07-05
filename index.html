@@ -118,6 +118,8 @@
       }
       bootMark('sdkLoaded');
 
+      // Pure permission-features model (AccessFeatures.*) — needed by the access UI for every backend.
+      await loadScript('/access-features.js');
       execScript(await (await fetch('/schema-loader.html')).text());
       execScript(await coreResp.text());
       createVueApp();

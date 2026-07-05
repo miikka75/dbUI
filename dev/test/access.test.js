@@ -200,83 +200,25 @@ describe('Server-side table access check', () => {
 });
 
 describe('Permission features (primary chips + materialized closure)', () => {
-  // Pure copies of the app-core.html feature helpers, parameterized by (schema, views).
-  function getMirrorSource(schema, t) {
-    var cols = (schema[t] && schema[t].columns) || {};
-    for (var c in cols) { var d = cols[c]; if (d && typeof d === 'object' && d.syncFrom) return d.syncFrom; }
-    return null;
-  }
-  function viewRosters(v) { return (v && v.rotation && Array.isArray(v.rotation.rosters)) ? v.rotation.rosters.slice() : []; }
-  function viewComputedHelpers(v) {
-    var out = [];
-    if (v && v.rotation && Array.isArray(v.rotation.columns)) v.rotation.columns.forEach(function(c) { if (c && c.rotationTable) out.push(c.rotationTable); });
-    ((v && v.columns) || []).forEach(function(c) {
-      if (c && typeof c === 'object' && c.computed) {
-        if (c.computed.rotationTable) out.push(c.computed.rotationTable);
-        if (c.computed.occurrenceSource) out.push(c.computed.occurrenceSource);
-      }
-    });
-    return out;
-  }
-  function viewHelperTables(v) { return viewRosters(v).concat(viewComputedHelpers(v)); }
-  function viewTables(v) { return ((v && v.sources) || []).concat(viewHelperTables(v)); }
-  function isPureMirror(schema, t) {
-    var cols = (schema[t] && schema[t].columns) || {}, hasMirror = false, hasOwn = false;
-    Object.keys(cols).forEach(function(c) {
-      if (c === 'id') return;
-      var d = cols[c];
-      if (d && typeof d === 'object' && d.syncFrom) hasMirror = true; else hasOwn = true;
-    });
-    return hasMirror && !hasOwn;
-  }
-  function satelliteTables(schema, views) {
-    var sat = {};
-    Object.keys(views).forEach(function(n) { viewComputedHelpers(views[n]).forEach(function(t) { sat[t] = true; }); });
-    Object.keys(schema).forEach(function(t) { if (isPureMirror(schema, t)) sat[t] = true; });
-    return sat;
-  }
-  function grantFeatures(schema, views) {
-    var sat = satelliteTables(schema, views), feats = [];
-    Object.keys(schema).forEach(function(t) { if (!sat[t]) feats.push(t); });
-    Object.keys(views).forEach(function(n) {
-      var v = views[n], srcs = v.sources || [];
-      if (v.rotation && viewRosters(v).length) return;       // rosters are the chips, not the view
-      var hasPrimarySource = srcs.some(function(s) { return !sat[s]; });
-      if (srcs.length && !hasPrimarySource) feats.push(n);
-    });
-    return feats;
-  }
-  function featureClosure(id, schema, views) {
-    var S = {};
-    if (views[id]) viewTables(views[id]).forEach(function(t) { S[t] = true; });
-    else S[id] = true;
-    var changed = true;
-    while (changed) {
-      changed = false;
-      Object.keys(views).forEach(function(n) {
-        var v = views[n], src = v.sources || [];
-        if (!src.length) return;
-        if (!src.every(function(s) { return S[s]; })) return;
-        viewHelperTables(v).forEach(function(t) { if (!S[t]) { S[t] = true; changed = true; } });
-      });
-    }
-    return Object.keys(S).sort();
-  }
+  // Feature helpers are the REAL module (../../access-features), shared with app-core.html — no more
+  // hand-copied logic that can drift. Thin adapters preserve this suite's expected shapes: grantFeatures
+  // -> ids (the module returns { id, view }); featureClosure/expandFeatureGrants sorted for stable
+  // assertions (the module returns insertion order, which the app doesn't depend on).
+  const AF = require('../../access-features');
+  const viewRosters = AF.viewRosters;
+  const isPureMirror = (schema, t) => AF.isPureMirror(t, schema);
+  const satelliteTables = AF.satelliteTables;
+  const grantFeatures = (schema, views) => AF.grantFeatures(schema, views).map((f) => f.id);
+  const featureClosure = (id, schema, views) => AF.featureClosure(id, schema, views).sort();
+  const expandFeatureGrants = (ids, schema, views) => AF.expandFeatureGrants(ids, schema, views).sort();
+  const selectedFeatures = AF.selectedFeatures;
   // canAccess for a sourceless rotation view: unlocked by ANY roster (missing roster -> blank cells).
+  // Kept local — this mirrors inline canAccess logic in sidebarTabs, not a standalone module function.
   function canAccessRotationView(viewName, views, allowedTables) {
     var v = views[viewName]; var rosters = viewRosters(v);
     if (v.sources && v.sources.length) return v.sources.every(function(s) { return allowedTables.indexOf(s) >= 0; });
     if (rosters.length) return rosters.some(function(t) { return allowedTables.indexOf(t) >= 0; });
     return true;
-  }
-  function expandFeatureGrants(ids, schema, views) {
-    var S = {};
-    ids.forEach(function(f) { featureClosure(f, schema, views).forEach(function(t) { S[t] = true; }); });
-    return Object.keys(S).sort();
-  }
-  function selectedFeatures(tableList, schema, views) {
-    var have = {}; tableList.forEach(function(t) { have[t] = true; });
-    return grantFeatures(schema, views).filter(function(f) { return featureClosure(f, schema, views).every(function(t) { return have[t]; }); });
   }
 
   // Church-shaped fixture: meetings master; music mirrors it but has OWN song columns (-> own feature);
