@@ -1,33 +1,12 @@
 <script>
-function getColumnType(table, col) {
-  var def = SCHEMA[table].columns[col];
-  if (!def) return 'text';
-  if (typeof def === 'string') return def;
-  return def.type || 'text';
-}
-function getColumnList(table, col) {
-  if (!table) { for (var t in SCHEMA) { var l = getColumnList(t, col); if (l) return l; } return null; }
-  var def = SCHEMA[table].columns[col];
-  return (def && typeof def === 'object') ? def.list : null;
-}
-function getColumnRef(table, col) {
-  var def = SCHEMA[table].columns[col];
-  return (def && typeof def === 'object' && def.type === 'ref') ? def : null;
-}
-
-function colIsMirror(tables, col, tableName) {
-  var def = tables[tableName] && tables[tableName].columns[col];
-  return def && typeof def === 'object' && !!def.syncFrom;
-}
-function getTableMirrorSource(tables, tableName) {
-  var cols = tables[tableName] && tables[tableName].columns;
-  if (!cols) return null;
-  for (var c in cols) {
-    var def = cols[c];
-    if (def && typeof def === 'object' && def.syncFrom) return def.syncFrom;
-  }
-  return null;
-}
+// Column typing primitives — extracted to /columns.js (Columns.*), pure over the schema map and
+// shared with dev/schema.js + unit tests. These thin globals bind the app's SCHEMA and preserve the
+// existing signatures (incl. getColumnList(null, col) scanning every table) so all call sites stand.
+function getColumnType(table, col) { return Columns.columnType(SCHEMA, table, col); }
+function getColumnList(table, col) { return Columns.columnList(SCHEMA, table, col); }
+function getColumnRef(table, col) { return Columns.columnRef(SCHEMA, table, col); }
+function colIsMirror(tables, col, tableName) { return Columns.isMirror(tables, tableName, col); }
+function getTableMirrorSource(tables, tableName) { return Columns.tableMirrorSource(tables, tableName); }
 
 // --- Permission "features" model: extracted to /access-features.js (AccessFeatures.*), a pure module
 //     over (schema, views) shared with the unit tests. These thin wrappers bind the app's global
@@ -1420,19 +1399,10 @@ function createVueApp() {
       },
 
       // Column helpers
-      colIsDate: function(col) {
-        for (var t in SCHEMA) { if (getColumnType(t, col) === 'date') return true; }
-        return false;
-      },
+      colIsDate: function(col) { return Columns.colIsDate(SCHEMA, col); },
       toDateStr: function(v) { return toDateStr(v); },
-      colIsList: function(col) {
-        for (var t in SCHEMA) { var l = getColumnList(t, col); if (l) return l; }
-        return null;
-      },
-      colIsMultiselect: function(col) {
-        for (var t in SCHEMA) { if (getColumnType(t, col) === 'multiselect') return true; }
-        return false;
-      },
+      colIsList: function(col) { return Columns.colIsList(SCHEMA, col); },
+      colIsMultiselect: function(col) { return Columns.colIsMultiselect(SCHEMA, col); },
       getListOptions: function(col, altList) {
         var self = this;
         var listName = altList || this.colIsList(col);
@@ -1444,10 +1414,7 @@ function createVueApp() {
         if (this.colIsSorted(col)) result.sort(function(a, b) { return a.title.localeCompare(b.title); });
         return result;
       },
-      colListSwitch: function(col) {
-        for (var t in SCHEMA) { var d = SCHEMA[t].columns[col]; if (d && typeof d === 'object' && d.listSwitch) return d.listSwitch; }
-        return null;
-      },
+      colListSwitch: function(col) { return Columns.colListSwitch(SCHEMA, col); },
       isAltList: function(col, item) {
         var key = item && item.id ? item.id + '_' + col : '';
         if (this.listSwitchOverrides[key] !== undefined) return this.listSwitchOverrides[key];
@@ -1519,20 +1486,8 @@ function createVueApp() {
         var lv = this.lockedListValues();
         return !!(lv[listName] && lv[listName][val]);
       },
-      colAllowNew: function(col) {
-        for (var t in SCHEMA) {
-          var def = SCHEMA[t].columns[col];
-          if (def && typeof def === 'object' && def.allowNew) return true;
-        }
-        return false;
-      },
-      colIsSorted: function(col) {
-        for (var t in SCHEMA) {
-          var def = SCHEMA[t].columns[col];
-          if (def && typeof def === 'object' && def.sorted) return true;
-        }
-        return false;
-      },
+      colAllowNew: function(col) { return Columns.colAllowNew(SCHEMA, col); },
+      colIsSorted: function(col) { return Columns.colIsSorted(SCHEMA, col); },
       addToListOnBlur: function(item, col) {
         var value = item[col];
         if (!value) return;
@@ -1547,10 +1502,7 @@ function createVueApp() {
         });
       },
 
-      colIsRef: function(col) {
-        for (var t in SCHEMA) { var r = getColumnRef(t, col); if (r) return true; }
-        return false;
-      },
+      colIsRef: function(col) { return Columns.colIsRef(SCHEMA, col); },
       colIsMirrorForTable: function(col) {
         var table = this.currentTable;
         if (VIEWS[table]) return false;
