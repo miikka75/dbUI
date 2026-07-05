@@ -351,6 +351,8 @@ function createVueApp() {
         return ['_period'].concat(names);
       },
       rotationSlotCols: function() { return this.rotationViewCols.filter(function(c) { return c !== '_period'; }); },
+      // Registry-selected body element for the rotation view (unknown/`list` layout -> the list part).
+      rotationBodyComponent: function() { return (window.viewPartFor && window.viewPartFor('rotation', this.rotationDisplayLayout)) || 'rotation-list'; },
       rotationLayout: function() { var v = VIEWS[this.currentTable]; return (v && (v.layout || (v.rotation && v.rotation.layout))) || 'table'; },
       // On phones a wide multi-column table overflows horizontally; fall back to the stacked card layout.
       rotationDisplayLayout: function() { return (this.mobile && this.rotationLayout === 'table') ? 'card' : this.rotationLayout; },
@@ -2966,7 +2968,10 @@ function createVueApp() {
   // full calendar view (ui.html) and the compact {{view:cal}} embed compose these same parts — one
   // source of truth per element. This is the element-level seam behind "views are parts that combine":
   // to place a different body, register another component under VIEW_PARTS.calendar[<mode>].
-  window.VIEW_PARTS = { calendar: { month: 'cal-month', week: 'cal-week', list: 'cal-agenda' } };
+  window.VIEW_PARTS = {
+    calendar: { month: 'cal-month', week: 'cal-week', list: 'cal-agenda' },
+    rotation: { table: 'rotation-table', card: 'rotation-cards', list: 'rotation-list' }
+  };
   window.viewPartFor = function(kind, mode) { return ((window.VIEW_PARTS[kind]) || {})[mode] || null; };
 
   app.component('cal-event-row', {
@@ -3027,6 +3032,46 @@ function createVueApp() {
       + '<div style="font-weight:600;margin-bottom:6px">{{ label }} <span style="opacity:0.5;font-weight:400">· {{ events.length }} {{ tOr(\'cal.items\',\'items\') }}</span></div>'
       + '<div v-if="!events.length" style="opacity:0.6;font-size:0.85rem">{{ tOr(\'cal.no_events\',\'No events\') }}</div>'
       + '<cal-event-row v-for="ev in events" :key="ev.id" :ev="ev" :compact="true"></cal-event-row>'
+      + '</div></div>'
+  });
+
+  // --- Rotation view body parts (read-only generated periods) -----------------------------------
+  // Same registry-selected pattern as the calendar body: table / cards / list share one prop contract
+  // { cols, slotCols, rows } and are swapped via VIEW_PARTS.rotation[rotationDisplayLayout].
+  var ROT_BODY_PROPS = { cols: Array, slotCols: Array, rows: Array };
+  var ROT_BODY_METHODS = {
+    t: function(k) { return appInstance ? appInstance.t(k) : k; },
+    displayValue: function(c, v) { return appInstance ? appInstance.displayValue(c, v) : v; },
+    toDateStr: toDateStr
+  };
+
+  app.component('rotation-table', {
+    props: ROT_BODY_PROPS,
+    methods: Object.assign({ head: function(col) { return col === '_period' ? this.t('field.period') : (this.t('field.' + col) || col); } }, ROT_BODY_METHODS),
+    template: ''
+      + '<v-table density="compact"><template v-slot:default>'
+      + '<thead><tr><th v-for="col in cols" :key="col">{{ head(col) }}</th></tr></thead>'
+      + '<tbody><tr v-for="row in rows" :key="row.id"><td v-for="col in cols" :key="col" style="padding:3px 8px">{{ col === \'_period\' ? toDateStr(row[col]) : displayValue(col, row[col]) }}</td></tr></tbody>'
+      + '</template></v-table>'
+  });
+
+  app.component('rotation-cards', {
+    props: ROT_BODY_PROPS, methods: ROT_BODY_METHODS,
+    template: ''
+      + '<div style="display:grid; gap:8px; padding:8px">'
+      + '<div v-for="row in rows" :key="row.id" style="padding:8px 12px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:8px">'
+      + '<div style="font-weight:600; margin-bottom:4px">{{ toDateStr(row._period) }}</div>'
+      + '<div v-for="col in slotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, row[col]) }}</div>'
+      + '</div></div>'
+  });
+
+  app.component('rotation-list', {
+    props: ROT_BODY_PROPS, methods: ROT_BODY_METHODS,
+    template: ''
+      + '<div style="padding:4px 0">'
+      + '<div v-for="row in rows" :key="row.id" style="padding:4px 12px; border-bottom:1px solid rgb(var(--v-theme-outline),0.08); font-size:0.9rem">'
+      + '<span style="font-weight:600; margin-right:8px">{{ toDateStr(row._period) }}</span>'
+      + '<span v-for="(col, i) in slotCols" :key="col"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, row[col]) }}<span v-if="i < slotCols.length - 1" style="opacity:0.3"> · </span></span>'
       + '</div></div>'
   });
 
