@@ -2887,7 +2887,7 @@ function createVueApp() {
 
   // Top-level view-kind registry: kind -> the component that renders that whole view. Kinds absent
   // here (page, data) fall through to their inline cards in ui.html until they're componentized too.
-  window.VIEW_KINDS = { calendar: 'calendar-view', rotation: 'rotation-view', page: 'page-view' };
+  window.VIEW_KINDS = { calendar: 'calendar-view', rotation: 'rotation-view', page: 'page-view', data: 'data-view' };
 
   app.component('cal-event-row', {
     props: { ev: { type: Object, required: true }, compact: { type: Boolean, default: false } },
@@ -3130,6 +3130,12 @@ function createVueApp() {
       + '</template>'
       + '</v-card>'
   });
+
+  // Data view: the largest card (layouts + interleaved embeds + controls). Its markup stays as HTML
+  // in the #data-view-tpl in-DOM template (ui.html, refs prefixed with `a.`) to avoid a giant escaped
+  // string; the `a` computed returns the root instance so those refs resolve against it. Reads must go
+  // through the computed (not setup-return, which can't see the root's data props via Vue's hasOwn).
+  app.component('data-view', { computed: { a: function() { return appInstance; } }, template: '#data-view-tpl' });
 
   appInstance = app.mount('#vue-app');
 }

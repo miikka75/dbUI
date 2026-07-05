@@ -194,176 +194,8 @@
              component). The data view is not registered yet, so its card below still renders inline. -->
         <component v-if="viewComponent" :is="viewComponent"></component>
 
-        <!-- Data Table -->
-        <v-card v-if="isDataView" variant="outlined">
-          <div class="d-flex align-center pa-2" style="min-height:0">
-            <v-spacer></v-spacer>
-            <v-btn v-if="canPrintView" icon="mdi-printer" size="small" variant="text" @click="printView()"></v-btn>
-          </div>
-          <!-- List layout: compact single-line items (registry part VIEW_PARTS.data.list) -->
-          <data-list v-if="useListLayout" :rows="sortedData" :cols="visibleCols"></data-list>
-          <!-- Mobile: card layout -->
-          <div v-else-if="useCardLayout">
-            <v-card v-for="(item, idx) in sortedData" :key="item.id" variant="flat" class="ma-2 pa-2" style="border-bottom: 1px solid rgb(var(--v-theme-outline), 0.2)">
-              <!-- First visible field always shown + expand toggle -->
-              <div class="d-flex align-center" @click="currentConfig.collapsed ? (expandedCard = expandedCard === item.id ? null : item.id) : null" :style="currentConfig.collapsed ? 'cursor:pointer' : ''">
-                <div style="flex:1">
-                  <div v-if="visibleCols.length" class="card-field mb-2">
-                    <span class="card-field-label">{{ t('field.' + visibleCols[0]) || visibleCols[0] }}</span>
-                    <span style="opacity:0.9">{{ displayValue(visibleCols[0], item[visibleCols[0]]) }}</span>
-                  </div>
-                </div>
-                <v-icon v-if="currentConfig.collapsed" size="small">{{ expandedCard === item.id || (!currentConfig.collapsed) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
-              </div>
-              <!-- Remaining fields (collapsed unless expanded or not collapsed mode) -->
-              <div v-show="!currentConfig.collapsed || expandedCard === item.id">
-              <!-- Embeds positioned after the first/title column (rendered here since visibleCols.slice(1) skips it) -->
-              <template v-for="(ei, eidx) in embedItems" :key="'emb0'+eidx">
-              <div v-if="ei.config.afterColumn === visibleCols[0] && embedWhenOk(ei, item) && (ei.isDoc ? ei.show : (ei.config.filterBy ? embedRowsForItem(ei, item).length : ei.rows.length))" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
-                <template v-if="ei.inlineBlocks" v-for="(blk, bi) in ei.inlineBlocks" :key="'ib0'+bi">
-                  <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
-                  <table v-else-if="blk.self" style="width:100%; font-size:0.75rem; border-collapse:collapse">
-                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
-                    <tbody><tr v-for="er in (ei.config.filterBy ? embedRowsForItem(ei, item) : ei.rows)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ displayValue(ec, er[ec]) }}</td></tr></tbody>
-                  </table>
-                </template>
-                <template v-else-if="ei.isRotation">
-                  <table style="width:100%; font-size:0.75rem; border-collapse:collapse">
-                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ ec === '_period' ? t('field.period') : (t('field.' + ec) || ec) }}</th></tr></thead>
-                    <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ ec === '_period' ? toDateStr(er[ec]) : displayValue(ec, er[ec]) }}</td></tr></tbody>
-                  </table>
-                </template>
-                <template v-else-if="!ei.isDoc">
-                  <table style="width:100%; font-size:0.75rem; border-collapse:collapse">
-                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
-                    <tbody><tr v-for="er in (ei.config.filterBy ? embedRowsForItem(ei, item) : ei.rows)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ displayValue(ec, er[ec]) }}</td></tr></tbody>
-                  </table>
-                </template>
-              </div>
-              </template>
-              <template v-for="col in visibleCols.slice(1)" :key="col">
-              <div v-if="!isColumnHidden(col, item)" class="card-field mb-2">
-                <span class="card-field-label">{{ t('field.' + col) || col }}</span>
-                <data-cell :item="item" :col="col"></data-cell>
-              </div>
-              <!-- Inline text/embed after this column -->
-              <template v-for="(ei, eidx) in embedItems" :key="'emb'+col+eidx">
-              <div v-if="ei.config.afterColumn === col && embedWhenOk(ei, item) && (ei.isDoc ? ei.show : (ei.config.filterBy ? embedRowsForItem(ei, item).length : ei.rows.length))" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
-                <template v-if="ei.isDoc" v-for="(blk, bi) in ei.blocks" :key="bi">
-                  <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
-                  <embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>
-                </template>
-                <template v-if="ei.inlineBlocks" v-for="(blk, bi) in ei.inlineBlocks" :key="'ib1'+bi">
-                  <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
-                  <table v-else-if="blk.self" style="width:100%; font-size:0.75rem; border-collapse:collapse">
-                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
-                    <tbody><tr v-for="er in (ei.config.filterBy ? embedRowsForItem(ei, item) : ei.rows)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ displayValue(ec, er[ec]) }}</td></tr></tbody>
-                  </table>
-                </template>
-                <template v-else-if="ei.isRotation">
-                  <table style="width:100%; font-size:0.75rem; border-collapse:collapse">
-                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ ec === '_period' ? t('field.period') : (t('field.' + ec) || ec) }}</th></tr></thead>
-                    <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ ec === '_period' ? toDateStr(er[ec]) : displayValue(ec, er[ec]) }}</td></tr></tbody>
-                  </table>
-                </template>
-                <template v-else-if="!ei.isDoc">
-                <table v-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
-                  <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
-                  <tbody><tr v-for="er in (ei.config.filterBy ? embedRowsForItem(ei, item) : ei.rows)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ displayValue(ec, er[ec]) }}</td></tr></tbody>
-                </table>
-                <div v-else-if="embedLayout(ei) === 'card'" style="display:grid; gap:6px">
-                  <div v-for="er in (ei.config.filterBy ? embedRowsForItem(ei, item) : ei.rows)" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in ei.columns" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t('field.' + ec) || ec }}: </span>{{ displayValue(ec, er[ec]) }}</span></div>
-                </div>
-                <div v-else class="d-flex align-center flex-wrap ga-1">
-                  <v-chip v-for="er in (ei.config.filterBy ? embedRowsForItem(ei, item) : ei.rows)" :key="er.id" size="small" variant="tonal" label>
-                    <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
-                  </v-chip>
-                </div>
-                </template>
-              </div>
-              </template>
-              </template>
-              <div class="mt-2">
-                <v-btn v-if="canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>
-                <template v-if="canMutateRows">
-                <v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archiveRow(item)"></v-btn>
-                <v-btn :icon="isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="isArmed('row:'+item.id) ? 'error' : ''" @click="deleteRow(item)"></v-btn>
-                </template>
-              </div>
-              </div>
-            </v-card>
-          </div>
-          <!-- Desktop: table layout -->
-          <v-table v-else-if="visibleCols.length" density="compact" hover>
-            <template v-slot:default>
-            <thead><tr>
-              <th v-for="col in visibleCols" :key="col" @click="toggleSort(col)" style="cursor:pointer">{{ t('field.' + col) || col }}</th>
-              <th v-if="isUnionView">{{ t('field.source') }}</th>
-              <th></th>
-            </tr></thead>
-            <tbody>
-              <template v-for="item in sortedData" :key="item.id">
-              <tr>
-                <td v-for="col in visibleCols" :key="col"><data-cell :item="item" :col="col"></data-cell></td>
-                <td v-if="isUnionView"><v-chip size="x-small" variant="tonal">{{ item._source }}</v-chip></td>
-                <td style="white-space:nowrap">
-                  <v-btn v-if="isReorderable" icon="mdi-arrow-up" size="small" variant="text" :disabled="sortedData.indexOf(item) === 0" @click="moveRowPosition(item, -1)"></v-btn>
-                  <v-btn v-if="isReorderable" icon="mdi-arrow-down" size="small" variant="text" :disabled="sortedData.indexOf(item) === sortedData.length - 1" @click="moveRowPosition(item, 1)"></v-btn>
-                  <v-btn v-if="!viewingArchive && hasArchive && canMutateRows" icon="mdi-archive-outline" size="small" variant="text" class="mr-2" @click="archiveRow(item)"></v-btn>
-                  <v-btn v-if="viewingArchive && canMutateRows" icon="mdi-archive-arrow-up-outline" size="small" variant="text" class="mr-2" @click="restoreRow(item)"></v-btn>
-                  <v-btn v-if="canMutateRows" :icon="isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('row:'+item.id) ? 'error' : ''" @click="deleteRow(item)"></v-btn>
-                </td>
-              </tr>
-              <template v-if="sortedData.indexOf(item) === sortedData.length - 1" v-for="(ei, eidx) in embedItems" :key="'temb'+eidx">
-              <tr v-if="ei.config.afterColumn && (ei.isDoc ? ei.show : ei.rows.length)">
-                <td :colspan="visibleCols.length + 2" style="padding:6px 12px; background: rgb(var(--v-theme-surface-variant), 0.1)">
-                  <template v-if="ei.isDoc" v-for="(blk, bi) in ei.blocks" :key="bi">
-                    <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
-                    <embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>
-                  </template>
-                  <table v-else-if="embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
-                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
-                    <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ displayValue(ec, er[ec]) }}</td></tr></tbody>
-                  </table>
-                  <div v-else-if="embedLayout(ei) === 'card'" style="display:grid; gap:6px">
-                    <div v-for="er in ei.rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in ei.columns" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t('field.' + ec) || ec }}: </span>{{ displayValue(ec, er[ec]) }}</span></div>
-                  </div>
-                  <div v-else class="d-flex align-center flex-wrap ga-1">
-                    <v-chip v-for="er in ei.rows" :key="er.id" size="small" variant="tonal" label>
-                      <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
-                    </v-chip>
-                  </div>
-                </td>
-              </tr>
-              </template>
-              </template>
-            </tbody>
-            </template>
-          </v-table>
-          <v-btn v-if="canMutateRows && !mobile" variant="text" prepend-icon="mdi-plus" @click="addRow" class="ma-2">{{ t('btn.add') }} {{ t((currentConfig.sources ? 'view.' : 'tab.') + currentTable) }}</v-btn>
-          <!-- Text entries and embedded rows -->
-          <template v-for="(ei, eidx) in embedItems" :key="'bemb'+eidx">
-          <div v-if="!ei.config.afterColumn && (ei.isDoc ? ei.show : ei.rows.length)" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
-            <template v-if="ei.isDoc" v-for="(blk, bi) in ei.blocks" :key="bi">
-              <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
-              <embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>
-            </template>
-            <div v-else style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t('tab.' + ei.config.table) || ei.config.table }} ({{ ei.rows.length }})</div>
-            <table v-if="!ei.isDoc && embedLayout(ei) === 'table'" style="width:100%; font-size:0.8rem; border-collapse:collapse">
-              <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:3px 8px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ t('field.' + ec) || ec }}</th></tr></thead>
-              <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:3px 8px">{{ displayValue(ec, er[ec]) }}</td></tr></tbody>
-            </table>
-            <div v-else-if="!ei.isDoc && embedLayout(ei) === 'card'" style="display:grid; gap:6px">
-              <div v-for="er in ei.rows" :key="er.id" style="font-size:0.8rem; padding:4px 8px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in ei.columns" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t('field.' + ec) || ec }}: </span>{{ displayValue(ec, er[ec]) }}</span></div>
-            </div>
-            <div v-else-if="!ei.isDoc" class="d-flex align-center flex-wrap ga-1">
-              <v-chip v-for="er in ei.rows" :key="er.id" size="small" variant="tonal" label>
-                <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
-              </v-chip>
-            </div>
-          </div>
-          </template>
-        </v-card>
+        <!-- Data view dispatches via VIEW_KINDS.data (<component :is="viewComponent"> above);
+             markup lives in the #data-view-tpl template at the end of this file. -->
 
         <!-- Languages Tab -->
         <v-card v-if="currentTable === '__languages'" variant="outlined">
@@ -579,3 +411,177 @@
     <v-snackbar v-model="snackbar" :timeout="2000" location="bottom">{{ snackText }}</v-snackbar>
   </v-app>
 </div>
+
+<!-- data-view component template (registered in app-core.html; read by id). Refs use the
+     `a` (root instance) proxy so the whole card resolves against the root without moving state. -->
+<template id="data-view-tpl">
+  <v-card variant="outlined">
+          <div class="d-flex align-center pa-2" style="min-height:0">
+            <v-spacer></v-spacer>
+            <v-btn v-if="a.canPrintView" icon="mdi-printer" size="small" variant="text" @click="a.printView()"></v-btn>
+          </div>
+          <!-- List layout: compact single-line items (registry part VIEW_PARTS.data.list) -->
+          <data-list v-if="a.useListLayout" :rows="a.sortedData" :cols="a.visibleCols"></data-list>
+          <!-- Mobile: card layout -->
+          <div v-else-if="a.useCardLayout">
+            <v-card v-for="(item, idx) in a.sortedData" :key="item.id" variant="flat" class="ma-2 pa-2" style="border-bottom: 1px solid rgb(var(--v-theme-outline), 0.2)">
+              <!-- First visible field always shown + expand toggle -->
+              <div class="d-flex align-center" @click="a.currentConfig.collapsed ? (a.expandedCard = a.expandedCard === item.id ? null : item.id) : null" :style="a.currentConfig.collapsed ? 'cursor:pointer' : ''">
+                <div style="flex:1">
+                  <div v-if="a.visibleCols.length" class="card-field mb-2">
+                    <span class="card-field-label">{{ a.t('field.' + a.visibleCols[0]) || a.visibleCols[0] }}</span>
+                    <span style="opacity:0.9">{{ a.displayValue(a.visibleCols[0], item[a.visibleCols[0]]) }}</span>
+                  </div>
+                </div>
+                <v-icon v-if="a.currentConfig.collapsed" size="small">{{ a.expandedCard === item.id || (!a.currentConfig.collapsed) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+              </div>
+              <!-- Remaining fields (collapsed unless expanded or not collapsed mode) -->
+              <div v-show="!a.currentConfig.collapsed || a.expandedCard === item.id">
+              <!-- Embeds positioned after the first/title column (rendered here since a.visibleCols.slice(1) skips it) -->
+              <template v-for="(ei, eidx) in a.embedItems" :key="'emb0'+eidx">
+              <div v-if="ei.config.afterColumn === a.visibleCols[0] && a.embedWhenOk(ei, item) && (ei.isDoc ? ei.show : (ei.config.filterBy ? a.embedRowsForItem(ei, item).length : ei.rows.length))" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
+                <template v-if="ei.inlineBlocks" v-for="(blk, bi) in ei.inlineBlocks" :key="'ib0'+bi">
+                  <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
+                  <table v-else-if="blk.self" style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ a.t('field.' + ec) || ec }}</th></tr></thead>
+                    <tbody><tr v-for="er in (ei.config.filterBy ? a.embedRowsForItem(ei, item) : ei.rows)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ a.displayValue(ec, er[ec]) }}</td></tr></tbody>
+                  </table>
+                </template>
+                <template v-else-if="ei.isRotation">
+                  <table style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ ec === '_period' ? a.t('field.period') : (a.t('field.' + ec) || ec) }}</th></tr></thead>
+                    <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ ec === '_period' ? a.toDateStr(er[ec]) : a.displayValue(ec, er[ec]) }}</td></tr></tbody>
+                  </table>
+                </template>
+                <template v-else-if="!ei.isDoc">
+                  <table style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ a.t('field.' + ec) || ec }}</th></tr></thead>
+                    <tbody><tr v-for="er in (ei.config.filterBy ? a.embedRowsForItem(ei, item) : ei.rows)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ a.displayValue(ec, er[ec]) }}</td></tr></tbody>
+                  </table>
+                </template>
+              </div>
+              </template>
+              <template v-for="col in a.visibleCols.slice(1)" :key="col">
+              <div v-if="!a.isColumnHidden(col, item)" class="card-field mb-2">
+                <span class="card-field-label">{{ a.t('field.' + col) || col }}</span>
+                <data-cell :item="item" :col="col"></data-cell>
+              </div>
+              <!-- Inline text/embed after this column -->
+              <template v-for="(ei, eidx) in a.embedItems" :key="'emb'+col+eidx">
+              <div v-if="ei.config.afterColumn === col && a.embedWhenOk(ei, item) && (ei.isDoc ? ei.show : (ei.config.filterBy ? a.embedRowsForItem(ei, item).length : ei.rows.length))" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
+                <template v-if="ei.isDoc" v-for="(blk, bi) in ei.blocks" :key="bi">
+                  <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
+                  <embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>
+                </template>
+                <template v-if="ei.inlineBlocks" v-for="(blk, bi) in ei.inlineBlocks" :key="'ib1'+bi">
+                  <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
+                  <table v-else-if="blk.self" style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ a.t('field.' + ec) || ec }}</th></tr></thead>
+                    <tbody><tr v-for="er in (ei.config.filterBy ? a.embedRowsForItem(ei, item) : ei.rows)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ a.displayValue(ec, er[ec]) }}</td></tr></tbody>
+                  </table>
+                </template>
+                <template v-else-if="ei.isRotation">
+                  <table style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ ec === '_period' ? a.t('field.period') : (a.t('field.' + ec) || ec) }}</th></tr></thead>
+                    <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ ec === '_period' ? a.toDateStr(er[ec]) : a.displayValue(ec, er[ec]) }}</td></tr></tbody>
+                  </table>
+                </template>
+                <template v-else-if="!ei.isDoc">
+                <table v-if="a.embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                  <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ a.t('field.' + ec) || ec }}</th></tr></thead>
+                  <tbody><tr v-for="er in (ei.config.filterBy ? a.embedRowsForItem(ei, item) : ei.rows)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ a.displayValue(ec, er[ec]) }}</td></tr></tbody>
+                </table>
+                <div v-else-if="a.embedLayout(ei) === 'card'" style="display:grid; gap:6px">
+                  <div v-for="er in (ei.config.filterBy ? a.embedRowsForItem(ei, item) : ei.rows)" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in ei.columns" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ a.t('field.' + ec) || ec }}: </span>{{ a.displayValue(ec, er[ec]) }}</span></div>
+                </div>
+                <div v-else class="d-flex align-center flex-wrap ga-1">
+                  <v-chip v-for="er in (ei.config.filterBy ? a.embedRowsForItem(ei, item) : ei.rows)" :key="er.id" size="small" variant="tonal" label>
+                    <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
+                  </v-chip>
+                </div>
+                </template>
+              </div>
+              </template>
+              </template>
+              <div class="mt-2">
+                <v-btn v-if="a.canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="a.printCard(item)"></v-btn>
+                <template v-if="a.canMutateRows">
+                <v-btn v-if="a.hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="a.archiveRow(item)"></v-btn>
+                <v-btn :icon="a.isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed('row:'+item.id) ? 'error' : ''" @click="a.deleteRow(item)"></v-btn>
+                </template>
+              </div>
+              </div>
+            </v-card>
+          </div>
+          <!-- Desktop: table layout -->
+          <v-table v-else-if="a.visibleCols.length" density="compact" hover>
+            <template v-slot:default>
+            <thead><tr>
+              <th v-for="col in a.visibleCols" :key="col" @click="a.toggleSort(col)" style="cursor:pointer">{{ a.t('field.' + col) || col }}</th>
+              <th v-if="a.isUnionView">{{ a.t('field.source') }}</th>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              <template v-for="item in a.sortedData" :key="item.id">
+              <tr>
+                <td v-for="col in a.visibleCols" :key="col"><data-cell :item="item" :col="col"></data-cell></td>
+                <td v-if="a.isUnionView"><v-chip size="x-small" variant="tonal">{{ item._source }}</v-chip></td>
+                <td style="white-space:nowrap">
+                  <v-btn v-if="a.isReorderable" icon="mdi-arrow-up" size="small" variant="text" :disabled="a.sortedData.indexOf(item) === 0" @click="a.moveRowPosition(item, -1)"></v-btn>
+                  <v-btn v-if="a.isReorderable" icon="mdi-arrow-down" size="small" variant="text" :disabled="a.sortedData.indexOf(item) === a.sortedData.length - 1" @click="a.moveRowPosition(item, 1)"></v-btn>
+                  <v-btn v-if="!a.viewingArchive && a.hasArchive && a.canMutateRows" icon="mdi-archive-outline" size="small" variant="text" class="mr-2" @click="a.archiveRow(item)"></v-btn>
+                  <v-btn v-if="a.viewingArchive && a.canMutateRows" icon="mdi-archive-arrow-up-outline" size="small" variant="text" class="mr-2" @click="a.restoreRow(item)"></v-btn>
+                  <v-btn v-if="a.canMutateRows" :icon="a.isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('row:'+item.id) ? 'error' : ''" @click="a.deleteRow(item)"></v-btn>
+                </td>
+              </tr>
+              <template v-if="a.sortedData.indexOf(item) === a.sortedData.length - 1" v-for="(ei, eidx) in a.embedItems" :key="'temb'+eidx">
+              <tr v-if="ei.config.afterColumn && (ei.isDoc ? ei.show : ei.rows.length)">
+                <td :colspan="a.visibleCols.length + 2" style="padding:6px 12px; background: rgb(var(--v-theme-surface-variant), 0.1)">
+                  <template v-if="ei.isDoc" v-for="(blk, bi) in ei.blocks" :key="bi">
+                    <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
+                    <embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>
+                  </template>
+                  <table v-else-if="a.embedLayout(ei) === 'table'" style="width:100%; font-size:0.75rem; border-collapse:collapse">
+                    <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:2px 6px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ a.t('field.' + ec) || ec }}</th></tr></thead>
+                    <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:2px 6px">{{ a.displayValue(ec, er[ec]) }}</td></tr></tbody>
+                  </table>
+                  <div v-else-if="a.embedLayout(ei) === 'card'" style="display:grid; gap:6px">
+                    <div v-for="er in ei.rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in ei.columns" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ a.t('field.' + ec) || ec }}: </span>{{ a.displayValue(ec, er[ec]) }}</span></div>
+                  </div>
+                  <div v-else class="d-flex align-center flex-wrap ga-1">
+                    <v-chip v-for="er in ei.rows" :key="er.id" size="small" variant="tonal" label>
+                      <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
+                    </v-chip>
+                  </div>
+                </td>
+              </tr>
+              </template>
+              </template>
+            </tbody>
+            </template>
+          </v-table>
+          <v-btn v-if="a.canMutateRows && !a.mobile" variant="text" prepend-icon="mdi-plus" @click="a.addRow" class="ma-2">{{ a.t('btn.add') }} {{ a.t((a.currentConfig.sources ? 'view.' : 'tab.') + a.currentTable) }}</v-btn>
+          <!-- Text entries and embedded rows -->
+          <template v-for="(ei, eidx) in a.embedItems" :key="'bemb'+eidx">
+          <div v-if="!ei.config.afterColumn && (ei.isDoc ? ei.show : ei.rows.length)" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
+            <template v-if="ei.isDoc" v-for="(blk, bi) in ei.blocks" :key="bi">
+              <div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>
+              <embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>
+            </template>
+            <div v-else style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ a.t('tab.' + ei.config.table) || ei.config.table }} ({{ ei.rows.length }})</div>
+            <table v-if="!ei.isDoc && a.embedLayout(ei) === 'table'" style="width:100%; font-size:0.8rem; border-collapse:collapse">
+              <thead><tr><th v-for="ec in ei.columns" :key="ec" style="text-align:left; padding:3px 8px; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">{{ a.t('field.' + ec) || ec }}</th></tr></thead>
+              <tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" style="padding:3px 8px">{{ a.displayValue(ec, er[ec]) }}</td></tr></tbody>
+            </table>
+            <div v-else-if="!ei.isDoc && a.embedLayout(ei) === 'card'" style="display:grid; gap:6px">
+              <div v-for="er in ei.rows" :key="er.id" style="font-size:0.8rem; padding:4px 8px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in ei.columns" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ a.t('field.' + ec) || ec }}: </span>{{ a.displayValue(ec, er[ec]) }}</span></div>
+            </div>
+            <div v-else-if="!ei.isDoc" class="d-flex align-center flex-wrap ga-1">
+              <v-chip v-for="er in ei.rows" :key="er.id" size="small" variant="tonal" label>
+                <span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span>
+              </v-chip>
+            </div>
+          </div>
+          </template>
+        </v-card>
+</template>
