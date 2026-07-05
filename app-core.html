@@ -2887,7 +2887,7 @@ function createVueApp() {
 
   // Top-level view-kind registry: kind -> the component that renders that whole view. Kinds absent
   // here (page, data) fall through to their inline cards in ui.html until they're componentized too.
-  window.VIEW_KINDS = { calendar: 'calendar-view', rotation: 'rotation-view' };
+  window.VIEW_KINDS = { calendar: 'calendar-view', rotation: 'rotation-view', page: 'page-view' };
 
   app.component('cal-event-row', {
     props: { ev: { type: Object, required: true }, compact: { type: Boolean, default: false } },
@@ -3112,6 +3112,22 @@ function createVueApp() {
       + '<v-btn v-if="a.canPrintView" icon="mdi-printer" size="small" variant="text" @click="a.printView()"></v-btn></div>'
       + '<v-divider></v-divider>'
       + '<component :is="a.rotationBodyComponent" :cols="a.rotationViewCols" :slot-cols="a.rotationSlotCols" :rows="a.rotationViewRows"></component>'
+      + '</v-card>'
+  });
+
+  app.component('page-view', {
+    computed: { a: function() { return appInstance; } },
+    template: ''
+      + '<v-card variant="outlined" class="pa-4">'
+      + '<div class="d-flex align-center mb-2"><v-spacer></v-spacer>'
+      + '<v-btn size="small" variant="text" :prepend-icon="a.pageEditing ? \'mdi-eye\' : \'mdi-pencil\'" @click="a.togglePageEdit()">{{ a.pageEditing ? \'Preview\' : \'Edit\' }}</v-btn>'
+      + '<v-btn v-if="a.pageEditing" size="small" color="primary" prepend-icon="mdi-content-save" @click="a.savePage()" class="ml-2">Save</v-btn></div>'
+      + '<v-textarea v-if="a.pageEditing" :model-value="a.pageEditText" @update:model-value="a.pageEditText = $event" auto-grow variant="outlined" density="compact" placeholder="# Markdown — embed views with {{view:name}} or {{table:name}}"></v-textarea>'
+      + '<template v-else v-for="(blk, bi) in a.pageBlocks" :key="bi">'
+      + '<div v-if="blk.html" v-html="blk.html"></div>'
+      + '<calendar-embed v-else-if="blk.embedType === \'view\' && a.isCalendarName(blk.embedName)" :name="blk.embedName"></calendar-embed>'
+      + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>'
+      + '</template>'
       + '</v-card>'
   });
 
