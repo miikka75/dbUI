@@ -29,114 +29,20 @@ function getTableMirrorSource(tables, tableName) {
   return null;
 }
 
-// --- Permission "features": collapse helper tables under primary features so the access UI stays
-//     short, while grants still MATERIALIZE to literal table names (Firestore rules + reads operate
-//     on table names, not features). A grant chip = a primary table or a sourceless rotation view;
-//     selecting it stores that feature's full table closure. ---
-
-// Helper tables a view needs beyond its own `sources`: rotation rosters + computed rotationTable / occurrenceSource.
-// Rotation-view rosters (rv.rosters) — each is independently grantable (its own chip), so different
-// people can manage different rosters of the same rotation view (e.g. siivous_a vs siivous_b).
-function viewRosters(v) { return (v && v.rotation && Array.isArray(v.rotation.rosters)) ? v.rotation.rosters.slice() : []; }
-// Computed helper tables (rotationTable / occurrenceSource on data-view columns, + legacy rotation
-// `columns` rotationTable). These stay satellites — folded into the view-chip that uses them.
-function viewComputedHelpers(v) {
-  var out = [];
-  if (v && v.rotation && Array.isArray(v.rotation.columns)) v.rotation.columns.forEach(function(c) { if (c && c.rotationTable) out.push(c.rotationTable); });
-  ((v && v.columns) || []).forEach(function(c) {
-    if (c && typeof c === 'object' && c.computed) {
-      if (c.computed.rotationTable) out.push(c.computed.rotationTable);
-      if (c.computed.occurrenceSource) out.push(c.computed.occurrenceSource);
-    }
-  });
-  return out;
-}
-// All helper tables a view needs beyond its `sources`: rosters + computed helpers (closure / preload).
-function viewHelperTables(v) { return viewRosters(v).concat(viewComputedHelpers(v)); }
-// Every table a view reads from (its sources + helper tables).
-function viewTables(v) { return ((v && v.sources) || []).concat(viewHelperTables(v)); }
-
-// A "pure mirror" has only synced columns (+ implicit id) and no content of its own — e.g. ovimiehet_vuorot
-// (just pvm<-kokoukset). It rides with its master. A mirror table that ALSO has its own data columns
-// (e.g. musiikki: songs/accompanist/leader) is a real feature and gets its own grant chip.
-function isPureMirror(t) {
-  var cols = (SCHEMA[t] && SCHEMA[t].columns) || {};
-  var hasMirror = false, hasOwn = false;
-  Object.keys(cols).forEach(function(c) {
-    if (c === 'id') return;
-    var d = cols[c];
-    if (d && typeof d === 'object' && d.syncFrom) hasMirror = true;
-    else hasOwn = true;
-  });
-  return hasMirror && !hasOwn;
-}
-
-// "Satellite" tables are never granted directly and are hidden from the chips:
-//   - computed helpers: rotationTable / occurrenceSource targets (exist only to feed a view), and
-//   - PURE mirror tables (only synced columns, no own content, e.g. ovimiehet_vuorot).
-// They are pulled in automatically by the closure of whatever feature uses them.
-// NOTE: rotation-view rosters (rv.rosters) are NOT satellites — each is its own chip (per-roster grants).
-function satelliteTables() {
-  var sat = {};
-  Object.keys(VIEWS).forEach(function(n) { viewComputedHelpers(VIEWS[n]).forEach(function(t) { sat[t] = true; }); });
-  Object.keys(SCHEMA).forEach(function(t) { if (isPureMirror(t)) sat[t] = true; });
-  return sat;
-}
-
-// Grantable features (chips):
-//   - primary tables (non-satellite) — now includes rotation rosters like siivous_a / siivous_b, AND
-//   - data views with NO primary source (sourced only by satellites, e.g. ovimiehet).
-// A rotation view WITH rosters is NOT a chip — its rosters are the chips (per-roster grants), and the
-// view is unlocked by having any of them (see canAccess). Views backed by a primary table (kokous,
-// ohjelma, ...) are reached via that table's chip; markdown info pages are ungated and never chips.
-function grantFeatures() {
-  var sat = satelliteTables(), feats = [];
-  Object.keys(SCHEMA).forEach(function(t) { if (!sat[t]) feats.push({ id: t, view: false }); });
-  Object.keys(VIEWS).forEach(function(n) {
-    var v = VIEWS[n], srcs = v.sources || [];
-    if (v.rotation && viewRosters(v).length) return;   // per-roster grants: rosters are the chips, not the view
-    var hasPrimarySource = srcs.some(function(s) { return !sat[s]; });
-    if (srcs.length && !hasPrimarySource) feats.push({ id: n, view: true });
-  });
-  return feats;
-}
-
-// Full table closure granted by selecting a feature (materialized into userData().tables).
-// Pulls the feature's own tables, then the helper tables of any view fully covered by the set
-// (fixpoint). Satellite tables (pure mirrors, rosters, occurrence sources) are pulled via the
-// views that use them — NOT via a syncFrom master — so granting kokoukset does not drag the
-// doormen/music tables along.
-function featureClosure(featureId) {
-  var S = {};
-  if (VIEWS[featureId]) viewTables(VIEWS[featureId]).forEach(function(t) { S[t] = true; });
-  else S[featureId] = true;
-  var changed = true;
-  while (changed) {
-    changed = false;
-    Object.keys(VIEWS).forEach(function(n) {                        // a fully-covered view pulls its helpers
-      var v = VIEWS[n], src = v.sources || [];
-      if (!src.length) return;                                      // sourceless rotation views are their own feature
-      if (!src.every(function(s) { return S[s]; })) return;
-      viewHelperTables(v).forEach(function(t) { if (!S[t]) { S[t] = true; changed = true; } });
-    });
-  }
-  return Object.keys(S);
-}
-
-// Selected feature ids -> the literal table list to store (union of closures).
-function expandFeatureGrants(featureIds) {
-  var S = {};
-  (featureIds || []).forEach(function(f) { featureClosure(f).forEach(function(t) { S[t] = true; }); });
-  return Object.keys(S);
-}
-
-// Reverse: which features are fully covered by a stored table list (for chip selection state).
-function selectedFeatures(tableList) {
-  var have = {}; (tableList || []).forEach(function(t) { have[t] = true; });
-  return grantFeatures().filter(function(f) {
-    return featureClosure(f.id).every(function(t) { return have[t]; });
-  }).map(function(f) { return f.id; });
-}
+// --- Permission "features" model: extracted to /access-features.js (AccessFeatures.*), a pure module
+//     over (schema, views) shared with the unit tests. These thin wrappers bind the app's global
+//     SCHEMA/VIEWS so every existing call site (grantFeatureChips, selectedFeatures, canAccess, ...)
+//     stays unchanged. See access-features.js for the full rationale. ---
+function viewRosters(v) { return AccessFeatures.viewRosters(v); }
+function viewComputedHelpers(v) { return AccessFeatures.viewComputedHelpers(v); }
+function viewHelperTables(v) { return AccessFeatures.viewHelperTables(v); }
+function viewTables(v) { return AccessFeatures.viewTables(v); }
+function isPureMirror(t) { return AccessFeatures.isPureMirror(t, SCHEMA); }
+function satelliteTables() { return AccessFeatures.satelliteTables(SCHEMA, VIEWS); }
+function grantFeatures() { return AccessFeatures.grantFeatures(SCHEMA, VIEWS); }
+function featureClosure(featureId) { return AccessFeatures.featureClosure(featureId, SCHEMA, VIEWS); }
+function expandFeatureGrants(featureIds) { return AccessFeatures.expandFeatureGrants(featureIds, SCHEMA, VIEWS); }
+function selectedFeatures(tableList) { return AccessFeatures.selectedFeatures(tableList, SCHEMA, VIEWS); }
 
 // --- Folder-config (appConfig) export/import round-trip ---
 // Folder config is exported/imported generically: EVERYTHING is round-tripped EXCEPT the keys in
