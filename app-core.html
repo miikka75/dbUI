@@ -2970,7 +2970,8 @@ function createVueApp() {
   // to place a different body, register another component under VIEW_PARTS.calendar[<mode>].
   window.VIEW_PARTS = {
     calendar: { month: 'cal-month', week: 'cal-week', list: 'cal-agenda' },
-    rotation: { table: 'rotation-table', card: 'rotation-cards', list: 'rotation-list' }
+    rotation: { table: 'rotation-table', card: 'rotation-cards', list: 'rotation-list' },
+    data: { list: 'data-list' }   // read-only list layout; card/table editing grids remain inline (deeper refactor)
   };
   window.viewPartFor = function(kind, mode) { return ((window.VIEW_PARTS[kind]) || {})[mode] || null; };
 
@@ -3073,6 +3074,39 @@ function createVueApp() {
       + '<span style="font-weight:600; margin-right:8px">{{ toDateStr(row._period) }}</span>'
       + '<span v-for="(col, i) in slotCols" :key="col"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, row[col]) }}<span v-if="i < slotCols.length - 1" style="opacity:0.3"> · </span></span>'
       + '</div></div>'
+  });
+
+  // --- Data view: read-only list layout part ----------------------------------------------------
+  // The compact single-line-per-row layout (currentConfig.layout === 'list'). Display-only, so it
+  // extracts cleanly with a small surface: rows/cols as props, action buttons proxied to appInstance.
+  // The card/table layouts stay inline for now — they carry full inline editing + interleaved embeds,
+  // which need a shared column-helper module before they can be split out without regressions.
+  app.component('data-list', {
+    props: { rows: Array, cols: Array },
+    computed: {
+      canPrintCard: function() { return appInstance.canPrintCard; },
+      canMutateRows: function() { return appInstance.canMutateRows; },
+      hasArchive: function() { return appInstance.hasArchive; }
+    },
+    methods: {
+      displayValue: function(c, v) { return appInstance.displayValue(c, v); },
+      isArmed: function(k) { return appInstance.isArmed(k); },
+      printCard: function(it) { return appInstance.printCard(it); },
+      archiveRow: function(it) { return appInstance.archiveRow(it); },
+      deleteRow: function(it) { return appInstance.deleteRow(it); }
+    },
+    template: ''
+      + '<v-list density="compact">'
+      + '<v-list-item v-for="item in rows" :key="item.id" class="px-2">'
+      + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" style="font-size:0.85rem">{{ displayValue(col, item[col]) }}<span v-if="i < cols.length - 1" style="opacity:0.3; margin:0 6px">·</span></span></template>'
+      + '<template v-slot:append>'
+      + '<v-btn v-if="canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>'
+      + '<template v-if="canMutateRows">'
+      + '<v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archiveRow(item)"></v-btn>'
+      + '<v-btn :icon="isArmed(\'row:\'+item.id) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(\'row:\'+item.id) ? \'error\' : \'\'" @click="deleteRow(item)"></v-btn>'
+      + '</template>'
+      + '</template>'
+      + '</v-list-item></v-list>'
   });
 
   // Compact calendar embed — used by markdown pages via {{view:calendarName}}. Holds its own
