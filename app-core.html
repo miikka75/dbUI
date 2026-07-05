@@ -328,6 +328,8 @@ function createVueApp() {
         var p = a.split('-'); return new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, 1));
       },
       calSelectedEvents: function() { return this.calEvents[this.calSelectedDay] || []; },
+      // Registry-selected body element for the full calendar view (mirrors the embed's `body`).
+      calBodyComponent: function() { return (window.viewPartFor && window.viewPartFor('calendar', this.calDisplayMode)) || 'cal-agenda'; },
       calSelectedLabel: function() { if (!this.calSelectedDay) return ''; var p = this.calSelectedDay.split('-'); return new Intl.DateTimeFormat(this.calLocale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, +p[2])); },
       calListDays: function() {
         var self = this, ev = this.calEvents;
@@ -2957,9 +2959,80 @@ function createVueApp() {
       + '</div>'
   });
 
+  // --- Composable calendar elements (registry-driven parts) -------------------------------------
+  // The calendar body is no longer a monolithic block: month grid / week strip / agenda are separate
+  // elements sharing ONE prop contract { cells, dowNames, days, undated, selected } so they are
+  // interchangeable via VIEW_PARTS. The day panel and event row are standalone elements too. Both the
+  // full calendar view (ui.html) and the compact {{view:cal}} embed compose these same parts — one
+  // source of truth per element. This is the element-level seam behind "views are parts that combine":
+  // to place a different body, register another component under VIEW_PARTS.calendar[<mode>].
+  window.VIEW_PARTS = { calendar: { month: 'cal-month', week: 'cal-week', list: 'cal-agenda' } };
+  window.viewPartFor = function(kind, mode) { return ((window.VIEW_PARTS[kind]) || {})[mode] || null; };
+
+  app.component('cal-event-row', {
+    props: { ev: { type: Object, required: true }, compact: { type: Boolean, default: false } },
+    template: ''
+      + '<div :style="(compact ? \'padding:3px 0;font-size:0.9rem\' : \'padding:5px 12px;font-size:0.88rem;border-bottom:1px solid rgb(var(--v-theme-outline),0.06)\') + \';display:flex;align-items:center;gap:8px\'">'
+      + '<span :style="{ width:\'9px\', height:\'9px\', borderRadius:\'50%\', background: ev.color, flex:\'0 0 auto\' }"></span>'
+      + '<b style="opacity:0.8">{{ ev.label }}</b> <span style="opacity:0.85">{{ ev.title }}</span>'
+      + '<span v-if="ev.readOnly" style="opacity:0.5;font-size:0.7rem">(read-only)</span>'
+      + '</div>'
+  });
+
+  // Shared prop contract for the swappable calendar body parts.
+  var CAL_BODY_PROPS = { cells: Array, dowNames: Array, days: Array, undated: Array, selected: String };
+
+  app.component('cal-month', {
+    props: CAL_BODY_PROPS, emits: ['select'],
+    template: ''
+      + '<div style="padding:8px">'
+      + '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:0.62rem;opacity:0.55;text-transform:uppercase;margin-bottom:3px"><div v-for="d in dowNames" :key="d" style="text-align:center">{{ d }}</div></div>'
+      + '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">'
+      + '<div v-for="c in cells" :key="c.date" :style="{ position:\'relative\', height:\'34px\', display:\'flex\', alignItems:\'center\', justifyContent:\'center\', borderRadius:\'6px\', fontSize:\'0.82rem\', opacity: c.inMonth?1:0.3, cursor: c.count?\'pointer\':\'default\', background: (c.date===selected?\'rgba(var(--v-theme-primary),0.22)\':(c.count?\'rgba(var(--v-theme-on-surface),0.04)\':\'transparent\')), outline: (c.date===selected?\'1px solid rgb(var(--v-theme-primary))\':\'none\') }" @click="c.count?$emit(\'select\',c.date):null">'
+      + '<span :style="c.isToday?\'background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-weight:600\':\'\'">{{ c.day }}</span>'
+      + '<span v-if="c.count" style="position:absolute;top:1px;right:3px;background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));font-size:0.6rem;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center">{{ c.count }}</span>'
+      + '</div></div></div>'
+  });
+
+  app.component('cal-week', {
+    props: CAL_BODY_PROPS, emits: ['select'],
+    template: ''
+      + '<div style="padding:8px"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">'
+      + '<div v-for="(c,wi) in cells" :key="c.date" :style="{ position:\'relative\', height:\'52px\', display:\'flex\', flexDirection:\'column\', alignItems:\'center\', justifyContent:\'center\', borderRadius:\'6px\', cursor: c.count?\'pointer\':\'default\', background: (c.date===selected?\'rgba(var(--v-theme-primary),0.22)\':(c.count?\'rgba(var(--v-theme-on-surface),0.04)\':\'transparent\')), outline: (c.date===selected?\'1px solid rgb(var(--v-theme-primary))\':\'none\') }" @click="c.count?$emit(\'select\',c.date):null">'
+      + '<span style="font-size:0.6rem;opacity:0.55">{{ dowNames[wi] }}</span>'
+      + '<span :style="c.isToday?\'background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-weight:600\':\'font-weight:600\'">{{ c.day }}</span>'
+      + '<span v-if="c.count" style="position:absolute;top:2px;right:4px;background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));font-size:0.58rem;font-weight:700;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center">{{ c.count }}</span>'
+      + '</div></div></div>'
+  });
+
+  app.component('cal-agenda', {
+    props: CAL_BODY_PROPS,
+    methods: { tOr: function(k, f) { return appInstance ? appInstance.tOr(k, f) : f; } },
+    template: ''
+      + '<div><template v-for="d in days" :key="d.date">'
+      + '<div style="background:rgb(var(--v-theme-on-surface),0.06);padding:4px 12px;font-size:0.72rem;font-weight:600;opacity:0.85">{{ d.label }} · {{ d.events.length }}</div>'
+      + '<cal-event-row v-for="ev in d.events" :key="ev.id" :ev="ev"></cal-event-row>'
+      + '</template>'
+      + '<template v-if="undated && undated.length"><div style="background:rgb(var(--v-theme-on-surface),0.06);padding:4px 12px;font-size:0.72rem;font-weight:600;opacity:0.55">{{ tOr(\'cal.undated\',\'Undated\') }} · {{ undated.length }}</div>'
+      + '<cal-event-row v-for="ev in undated" :key="ev.id" :ev="ev"></cal-event-row></template>'
+      + '<div v-if="!days.length && !(undated && undated.length)" style="padding:12px;opacity:0.6;font-size:0.85rem">{{ tOr(\'cal.no_events\',\'No events\') }}</div>'
+      + '</div>'
+  });
+
+  app.component('cal-day-panel', {
+    props: { label: String, events: { type: Array, default: function() { return []; } } },
+    methods: { tOr: function(k, f) { return appInstance ? appInstance.tOr(k, f) : f; } },
+    template: ''
+      + '<div><v-divider></v-divider><div style="padding:10px 12px">'
+      + '<div style="font-weight:600;margin-bottom:6px">{{ label }} <span style="opacity:0.5;font-weight:400">· {{ events.length }} {{ tOr(\'cal.items\',\'items\') }}</span></div>'
+      + '<div v-if="!events.length" style="opacity:0.6;font-size:0.85rem">{{ tOr(\'cal.no_events\',\'No events\') }}</div>'
+      + '<cal-event-row v-for="ev in events" :key="ev.id" :ev="ev" :compact="true"></cal-event-row>'
+      + '</div></div>'
+  });
+
   // Compact calendar embed — used by markdown pages via {{view:calendarName}}. Holds its own
   // month/anchor/selected-day state; reuses appInstance calendar helpers (calEventsFor, cell
-  // builders, i18n). Source tables are already in dataCache (boot preload / calendar view load).
+  // builders, i18n) and composes the shared parts above. Sources are already in dataCache.
   app.component('calendar-embed', {
     props: { name: { type: String, required: true } },
     data: function() {
@@ -2978,7 +3051,8 @@ function createVueApp() {
       selEvents: function() { return this.events[this.sel] || []; },
       selLabel: function() { if (!this.sel) return ''; var p = this.sel.split('-'); return new Intl.DateTimeFormat(appInstance.calLocale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, +p[2])); },
       listDays: function() { var ev = this.events; return Object.keys(ev).filter(function(k) { return k !== '__undated__'; }).sort().map(function(k) { var p = k.split('-'); return { date: k, label: new Intl.DateTimeFormat(appInstance.calLocale(), { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: ev[k] }; }); },
-      undated: function() { return this.events['__undated__'] || []; }
+      undated: function() { return this.events['__undated__'] || []; },
+      body: function() { return window.viewPartFor('calendar', this.displayMode) || 'cal-agenda'; }
     },
     methods: {
       tOr: function(k, f) { return appInstance ? appInstance.tOr(k, f) : f; },
@@ -3000,32 +3074,8 @@ function createVueApp() {
       + '<v-btn value="week" size="small">{{ tOr(\'cal.week\',\'Week\') }}</v-btn>'
       + '<v-btn value="list" size="small">{{ tOr(\'cal.list\',\'List\') }}</v-btn></v-btn-toggle></div>'
       + '<v-divider></v-divider>'
-      // month
-      + '<div v-if="displayMode===\'month\'" style="padding:8px">'
-      + '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:0.62rem;opacity:0.55;text-transform:uppercase;margin-bottom:3px"><div v-for="d in dowNames" :key="d" style="text-align:center">{{ d }}</div></div>'
-      + '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">'
-      + '<div v-for="c in monthCells" :key="c.date" :style="{ position:\'relative\', height:\'34px\', display:\'flex\', alignItems:\'center\', justifyContent:\'center\', borderRadius:\'6px\', fontSize:\'0.82rem\', opacity: c.inMonth?1:0.3, cursor: c.count?\'pointer\':\'default\', background: (c.date===sel?\'rgba(var(--v-theme-primary),0.22)\':(c.count?\'rgba(var(--v-theme-on-surface),0.04)\':\'transparent\')), outline: (c.date===sel?\'1px solid rgb(var(--v-theme-primary))\':\'none\') }" @click="c.count?selectDay(c.date):null">'
-      + '<span :style="c.isToday?\'background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-weight:600\':\'\'">{{ c.day }}</span>'
-      + '<span v-if="c.count" style="position:absolute;top:1px;right:3px;background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));font-size:0.6rem;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center">{{ c.count }}</span>'
-      + '</div></div></div>'
-      // week
-      + '<div v-else-if="displayMode===\'week\'" style="padding:8px"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">'
-      + '<div v-for="(c,wi) in weekCells" :key="c.date" :style="{ position:\'relative\', height:\'52px\', display:\'flex\', flexDirection:\'column\', alignItems:\'center\', justifyContent:\'center\', borderRadius:\'6px\', cursor: c.count?\'pointer\':\'default\', background: (c.date===sel?\'rgba(var(--v-theme-primary),0.22)\':(c.count?\'rgba(var(--v-theme-on-surface),0.04)\':\'transparent\')), outline: (c.date===sel?\'1px solid rgb(var(--v-theme-primary))\':\'none\') }" @click="c.count?selectDay(c.date):null">'
-      + '<span style="font-size:0.6rem;opacity:0.55">{{ dowNames[wi] }}</span>'
-      + '<span :style="c.isToday?\'background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-weight:600\':\'font-weight:600\'">{{ c.day }}</span>'
-      + '<span v-if="c.count" style="position:absolute;top:2px;right:4px;background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));font-size:0.58rem;font-weight:700;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center">{{ c.count }}</span>'
-      + '</div></div></div>'
-      // list
-      + '<div v-else><template v-for="d in listDays" :key="d.date">'
-      + '<div style="background:rgb(var(--v-theme-on-surface),0.06);padding:4px 12px;font-size:0.72rem;font-weight:600;opacity:0.85">{{ d.label }} · {{ d.events.length }}</div>'
-      + '<div v-for="ev in d.events" :key="ev.id" style="display:flex;align-items:center;gap:8px;padding:5px 12px;font-size:0.88rem;border-bottom:1px solid rgb(var(--v-theme-outline),0.06)"><span :style="{ width:\'9px\', height:\'9px\', borderRadius:\'50%\', background: ev.color, flex:\'0 0 auto\' }"></span><b style="opacity:0.8">{{ ev.label }}</b> <span style="opacity:0.85">{{ ev.title }}</span><span v-if="ev.readOnly" style="opacity:0.5;font-size:0.7rem">(read-only)</span></div>'
-      + '</template><div v-if="!listDays.length" style="padding:12px;opacity:0.6;font-size:0.85rem">{{ tOr(\'cal.no_events\',\'No events\') }}</div></div>'
-      // selected-day panel (month/week)
-      + '<template v-if="displayMode!==\'list\'"><v-divider></v-divider><div style="padding:10px 12px">'
-      + '<div style="font-weight:600;margin-bottom:6px">{{ selLabel }} <span style="opacity:0.5;font-weight:400">· {{ selEvents.length }} {{ tOr(\'cal.items\',\'items\') }}</span></div>'
-      + '<div v-if="!selEvents.length" style="opacity:0.6;font-size:0.85rem">{{ tOr(\'cal.no_events\',\'No events\') }}</div>'
-      + '<div v-for="ev in selEvents" :key="ev.id" style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:0.9rem"><span :style="{ width:\'9px\', height:\'9px\', borderRadius:\'50%\', background: ev.color, flex:\'0 0 auto\' }"></span><b style="opacity:0.8">{{ ev.label }}</b> <span style="opacity:0.85">{{ ev.title }}</span><span v-if="ev.readOnly" style="opacity:0.5;font-size:0.7rem">(read-only)</span></div>'
-      + '</div></template>'
+      + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
+      + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents"></cal-day-panel>'
       + '</div>'
   });
   appInstance = app.mount('#vue-app');
