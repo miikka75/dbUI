@@ -197,6 +197,16 @@ function createVueApp() {
       },
       isRotationView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rotation); },
       isCalendarView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.calendar); },
+      // Single classifier for the current view's kind + the top-level component registry dispatch.
+      // Kinds not in VIEW_KINDS (page, data) return null -> their cards still render inline in ui.html.
+      viewKind: function() {
+        if (this.isCalendarView) return 'calendar';
+        if (this.isRotationView) return 'rotation';
+        if (this.currentPage) return 'page';
+        if (this.isDataView) return 'data';
+        return null;
+      },
+      viewComponent: function() { return (window.VIEW_KINDS || {})[this.viewKind] || null; },
       // --- Calendar view (compact month/week/list; single-source in phase 1) ---
       calWeekStart: function() { var v = VIEWS[this.currentTable]; return (v && v.calendar && v.calendar.weekStart != null) ? Number(v.calendar.weekStart) : 1; },
       calEvents: function() { return this.isCalendarView ? this.calEventsFor(this.currentTable, this._calWindowFor(this.calAnchor || this._calToday(), this.calMode, this.calWeekStart)) : {}; },
@@ -2875,6 +2885,10 @@ function createVueApp() {
   };
   window.viewPartFor = function(kind, mode) { return ((window.VIEW_PARTS[kind]) || {})[mode] || null; };
 
+  // Top-level view-kind registry: kind -> the component that renders that whole view. Kinds absent
+  // here (page, data) fall through to their inline cards in ui.html until they're componentized too.
+  window.VIEW_KINDS = { calendar: 'calendar-view', rotation: 'rotation-view' };
+
   app.component('cal-event-row', {
     props: { ev: { type: Object, required: true }, compact: { type: Boolean, default: false } },
     template: ''
@@ -3057,6 +3071,50 @@ function createVueApp() {
       + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents"></cal-day-panel>'
       + '</div>'
   });
+
+  // --- Top-level view-kind components (registry-dispatched) --------------------------------------
+  // Each whole-view card as a component so the top-level render is a registry lookup (VIEW_KINDS via
+  // viewComponent) instead of a v-if chain. They read the root model through one `a` (appInstance)
+  // proxy — state stays on the root (tests + toolbars unchanged), the template just relocates here.
+  app.component('calendar-view', {
+    computed: { a: function() { return appInstance; } },
+    template: ''
+      + '<v-card variant="outlined" data-testid="cal-view">'
+      + '<div class="d-flex align-center flex-wrap pa-2" style="gap:8px">'
+      + '<v-btn icon="mdi-chevron-left" size="small" variant="text" @click="a.calPrev()"></v-btn>'
+      + '<v-btn icon="mdi-chevron-right" size="small" variant="text" @click="a.calNext()"></v-btn>'
+      + '<v-btn size="small" variant="text" @click="a.calGoToday()">{{ a.tOr(\'cal.today\',\'Today\') }}</v-btn>'
+      + '<span style="font-weight:600;min-width:150px">{{ a.calTitle }}</span><v-spacer></v-spacer>'
+      + '<v-btn-toggle :model-value="a.calMode" density="compact" variant="outlined" divided mandatory @update:model-value="a.calSetMode($event)">'
+      + '<v-btn value="month" size="small">{{ a.tOr(\'cal.month\',\'Month\') }}</v-btn>'
+      + '<v-btn value="week" size="small">{{ a.tOr(\'cal.week\',\'Week\') }}</v-btn>'
+      + '<v-btn value="list" size="small">{{ a.tOr(\'cal.list\',\'List\') }}</v-btn></v-btn-toggle></div>'
+      + '<v-divider></v-divider>'
+      + '<component :is="a.calBodyComponent" :cells="a.calDisplayMode===\'week\'?a.calWeekCells:a.calMonthCells" :dow-names="a.calDowNames" :days="a.calListDays" :undated="a.calUndated" :selected="a.calSelectedDay" @select="a.calSelectDay"></component>'
+      + '<cal-day-panel v-if="a.calDisplayMode!==\'list\'" :label="a.calSelectedLabel" :events="a.calSelectedEvents"></cal-day-panel>'
+      + '</v-card>'
+  });
+
+  app.component('rotation-view', {
+    computed: { a: function() { return appInstance; } },
+    template: ''
+      + '<v-card variant="outlined">'
+      + '<div class="d-flex align-center flex-wrap pa-2" style="gap:10px 12px">'
+      + '<v-text-field :model-value="a.rotationAnchorForView" name="rotation-anchor" type="date" :label="a.t(\'settings.rotation_anchor\')" density="compact" variant="outlined" hide-details style="max-width:175px" :disabled="!a.canMutateCurrent" @update:model-value="a.saveRotationAnchor(a.currentTable, $event)" data-testid="rotation-anchor"></v-text-field>'
+      + '<div class="d-flex align-center" style="gap:2px">'
+      + '<v-text-field :model-value="(a.rotationRangeForView.from && a.rotationRangeForView.from !== \'today\') ? a.rotationRangeForView.from : \'\'" name="rotation-from" type="date" :label="a.t(\'settings.rotation_from\')" density="compact" variant="outlined" hide-details style="max-width:165px" :disabled="!a.canMutateCurrent" @update:model-value="a.saveRotationRange(a.currentTable, { from: $event || \'today\' })" data-testid="rotation-from"></v-text-field>'
+      + '<v-btn icon="mdi-calendar-today" size="small" variant="text" :disabled="!a.canMutateCurrent" @click="a.saveRotationRange(a.currentTable, { from: \'today\' })" :title="a.t(\'btn.today\')"></v-btn></div>'
+      + '<v-text-field :model-value="a.rotationRangeForView.periods" name="rotation-periods" type="number" :label="a.t(\'settings.rotation_periods\')" density="compact" variant="outlined" hide-details style="max-width:115px" :disabled="!a.canMutateCurrent" @update:model-value="a.saveRotationRange(a.currentTable, { periods: $event === \'\' ? \'\' : Number($event) })" data-testid="rotation-periods"></v-text-field>'
+      + '<v-text-field :model-value="a.rotationEveryForView" name="rotation-every" type="number" min="0" :label="a.t(\'settings.rotation_every\')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!a.canMutateCurrent" @update:model-value="a.saveRotationRotateEvery(a.currentTable, { every: $event === \'\' ? 0 : Number($event), cycle: a.rotationCycleForView })" data-testid="rotation-every"></v-text-field>'
+      + '<v-switch :model-value="a.rotationCycleForView" @update:model-value="v => a.saveRotationRotateEvery(a.currentTable, { every: a.rotationEveryForView, cycle: v })" color="primary" density="compact" hide-details :label="a.t(\'settings.rotation_cycle\')" :disabled="!a.canMutateCurrent" data-testid="rotation-cycle"></v-switch>'
+      + '<v-btn v-if="a.rotationRotateEveryOverridden" icon="mdi-restore" size="small" variant="text" :disabled="!a.canMutateCurrent" @click="a.saveRotationRotateEvery(a.currentTable, null)" :title="a.t(\'btn.reset\')" data-testid="rotation-every-reset"></v-btn>'
+      + '<v-spacer></v-spacer>'
+      + '<v-btn v-if="a.canPrintView" icon="mdi-printer" size="small" variant="text" @click="a.printView()"></v-btn></div>'
+      + '<v-divider></v-divider>'
+      + '<component :is="a.rotationBodyComponent" :cols="a.rotationViewCols" :slot-cols="a.rotationSlotCols" :rows="a.rotationViewRows"></component>'
+      + '</v-card>'
+  });
+
   appInstance = app.mount('#vue-app');
 }
 

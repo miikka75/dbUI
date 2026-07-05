@@ -205,53 +205,9 @@
           </template>
         </v-card>
 
-        <!-- Rotation view (generated periods; read-only) -->
-        <v-card v-if="isRotationView" variant="outlined">
-          <div class="d-flex align-center flex-wrap pa-2" style="gap:10px 12px">
-            <v-text-field :model-value="rotationAnchorForView" name="rotation-anchor" type="date" :label="t('settings.rotation_anchor')" density="compact" variant="outlined" hide-details style="max-width:175px" :disabled="!canMutateCurrent" @update:model-value="saveRotationAnchor(currentTable, $event)" data-testid="rotation-anchor"></v-text-field>
-            <div class="d-flex align-center" style="gap:2px">
-              <v-text-field :model-value="(rotationRangeForView.from && rotationRangeForView.from !== 'today') ? rotationRangeForView.from : ''" name="rotation-from" type="date" :label="t('settings.rotation_from')" density="compact" variant="outlined" hide-details style="max-width:165px" :disabled="!canMutateCurrent" @update:model-value="saveRotationRange(currentTable, { from: $event || 'today' })" data-testid="rotation-from"></v-text-field>
-              <v-btn icon="mdi-calendar-today" size="small" variant="text" :disabled="!canMutateCurrent" @click="saveRotationRange(currentTable, { from: 'today' })" :title="t('btn.today')"></v-btn>
-            </div>
-            <v-text-field :model-value="rotationRangeForView.periods" name="rotation-periods" type="number" :label="t('settings.rotation_periods')" density="compact" variant="outlined" hide-details style="max-width:115px" :disabled="!canMutateCurrent" @update:model-value="saveRotationRange(currentTable, { periods: $event === '' ? '' : Number($event) })" data-testid="rotation-periods"></v-text-field>
-            <v-text-field :model-value="rotationEveryForView" name="rotation-every" type="number" min="0" :label="t('settings.rotation_every')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!canMutateCurrent" @update:model-value="saveRotationRotateEvery(currentTable, { every: $event === '' ? 0 : Number($event), cycle: rotationCycleForView })" data-testid="rotation-every"></v-text-field>
-            <v-switch :model-value="rotationCycleForView" @update:model-value="v => saveRotationRotateEvery(currentTable, { every: rotationEveryForView, cycle: v })" color="primary" density="compact" hide-details :label="t('settings.rotation_cycle')" :disabled="!canMutateCurrent" data-testid="rotation-cycle"></v-switch>
-            <v-btn v-if="rotationRotateEveryOverridden" icon="mdi-restore" size="small" variant="text" :disabled="!canMutateCurrent" @click="saveRotationRotateEvery(currentTable, null)" :title="t('btn.reset')" data-testid="rotation-every-reset"></v-btn>
-            <v-spacer></v-spacer>
-            <v-btn v-if="canPrintView" icon="mdi-printer" size="small" variant="text" @click="printView()"></v-btn>
-          </div>
-          <v-divider></v-divider>
-          <!-- Body element chosen from the rotation-parts registry (table / cards / list). -->
-          <component :is="rotationBodyComponent" :cols="rotationViewCols" :slot-cols="rotationSlotCols" :rows="rotationViewRows"></component>
-        </v-card>
-
-        <!-- Calendar view (compact month/week/list + selected-day panel) -->
-        <v-card v-if="isCalendarView" variant="outlined" data-testid="cal-view">
-          <div class="d-flex align-center flex-wrap pa-2" style="gap:8px">
-            <v-btn icon="mdi-chevron-left" size="small" variant="text" @click="calPrev()"></v-btn>
-            <v-btn icon="mdi-chevron-right" size="small" variant="text" @click="calNext()"></v-btn>
-            <v-btn size="small" variant="text" @click="calGoToday()">{{ tOr('cal.today','Today') }}</v-btn>
-            <span style="font-weight:600;min-width:150px">{{ calTitle }}</span>
-            <v-spacer></v-spacer>
-            <v-btn-toggle :model-value="calMode" density="compact" variant="outlined" divided mandatory @update:model-value="calSetMode($event)">
-              <v-btn value="month" size="small">{{ tOr('cal.month','Month') }}</v-btn>
-              <v-btn value="week" size="small">{{ tOr('cal.week','Week') }}</v-btn>
-              <v-btn value="list" size="small">{{ tOr('cal.list','List') }}</v-btn>
-            </v-btn-toggle>
-          </div>
-          <v-divider></v-divider>
-
-          <!-- Body element chosen from the calendar-parts registry (month grid / week strip / agenda),
-               fed by the root calendar model; selected-day panel composed alongside for month/week. -->
-          <component :is="calBodyComponent"
-                     :cells="calDisplayMode === 'week' ? calWeekCells : calMonthCells"
-                     :dow-names="calDowNames"
-                     :days="calListDays"
-                     :undated="calUndated"
-                     :selected="calSelectedDay"
-                     @select="calSelectDay"></component>
-          <cal-day-panel v-if="calDisplayMode !== 'list'" :label="calSelectedLabel" :events="calSelectedEvents"></cal-day-panel>
-        </v-card>
+        <!-- Rotation + calendar views render via the top-level kind registry (VIEW_KINDS -> component).
+             Page + data views are not registered yet, so their cards below still render inline. -->
+        <component v-if="viewComponent" :is="viewComponent"></component>
 
         <!-- Data Table -->
         <v-card v-if="isDataView" variant="outlined">
