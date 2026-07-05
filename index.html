@@ -118,7 +118,8 @@
       }
       bootMark('sdkLoaded');
 
-      // Pure permission-features model (AccessFeatures.*) — needed by the access UI for every backend.
+      // Pure domain modules used by the app for every backend: column typing + permission-features.
+      await loadScript('/columns.js');
       await loadScript('/access-features.js');
       execScript(await (await fetch('/schema-loader.html')).text());
       execScript(await coreResp.text());

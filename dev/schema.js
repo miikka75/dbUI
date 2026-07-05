@@ -45,20 +45,12 @@ for (var _t in SCHEMA) {
   if (SCHEMA[_t].columns && !SCHEMA[_t].columns.id) { SCHEMA[_t].columns.id = 'text'; if (_columnOrders[_t] && _columnOrders[_t].indexOf('id') === -1) _columnOrders[_t].unshift('id'); }
 }
 
+// Column typing primitives come from the shared /columns.js module (also used by the browser app),
+// bound here to this module's SCHEMA. getColumns is order-dependent (_columnOrders) so it stays local.
+var Columns = require('../columns');
 function getColumns(table) { return _columnOrders[table] || Object.keys((SCHEMA[table] && SCHEMA[table].columns) || {}); }
-function getColumnType(table, col) {
-  var def = SCHEMA[table] && SCHEMA[table].columns[col];
-  if (!def) return 'text';
-  if (typeof def === 'string') return def;
-  return def.type || 'text';
-}
-function getColumnList(table, col) {
-  var def = SCHEMA[table] && SCHEMA[table].columns[col];
-  return (def && typeof def === 'object') ? def.list : null;
-}
-function getColumnRef(table, col) {
-  var def = SCHEMA[table] && SCHEMA[table].columns[col];
-  return (def && typeof def === 'object' && def.type === 'ref') ? def : null;
-}
+function getColumnType(table, col) { return Columns.columnType(SCHEMA, table, col); }
+function getColumnList(table, col) { return Columns.columnList(SCHEMA, table, col); }
+function getColumnRef(table, col) { return Columns.columnRef(SCHEMA, table, col); }
 
 if (typeof module !== 'undefined') module.exports = { SCHEMA, VIEWS, DEFAULT_LANGUAGE, getColumns, getColumnType, getColumnList, getColumnRef, _viewsNav };
