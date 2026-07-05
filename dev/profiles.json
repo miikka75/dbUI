@@ -1,18 +1,1 @@
-{
-  "local@dev": {
-    "name": "Ann",
-    "shared": true
-  },
-  "bob@dev": {
-    "name": "Bob",
-    "shared": true
-  },
-  "cara@dev": {
-    "name": "Cara",
-    "shared": true
-  },
-  "dan@dev": {
-    "name": "Dan",
-    "shared": false
-  }
-}
+{}
