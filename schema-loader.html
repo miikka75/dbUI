@@ -503,9 +503,8 @@ function condMatches(item, cond) {
   }
   return true;
 }
-// Canonical local YYYY-MM-DD formatter for a Date. Single source for every date-string the app emits
-// (toDateStr, addIntervals, period math, and the app's calendar/rotation helpers all route through it).
-function fmtDate(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+// fmtDate() (canonical local YYYY-MM-DD formatter) is provided globally by calendar.js, which loads
+// before this fragment; toDateStr/addIntervals/_withinPeriod call it bare.
 function toDateStr(v) { if (!v) return ''; var s = String(v); if (s.length === 10) return s; return fmtDate(new Date(s)); }
 function parseTableResult(r) { if (!r) return { headers: [], rows: [] }; if (typeof r === 'string') return JSON.parse(r); return r; }
 function validateSchema() {

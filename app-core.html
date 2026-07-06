@@ -870,19 +870,8 @@ function createVueApp() {
       },
       // --- Calendar helpers (used by the calendar view + calendar embeds) ---
       _calToday: function() { return fmtDate(new Date()); },
-      _calFmtDate: function(dt) { return fmtDate(dt); },
-      _calCellsMonth: function(anchor, weekStart) {
-        var p = (anchor || this._calToday()).split('-'), y = +p[0], m = +p[1] - 1;
-        var first = new Date(y, m, 1), off = ((first.getDay() - weekStart) + 7) % 7, start = new Date(y, m, 1 - off), today = this._calToday(), cells = [];
-        for (var i = 0; i < 42; i++) { var dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i), key = this._calFmtDate(dt); cells.push({ date: key, day: dt.getDate(), inMonth: dt.getMonth() === m, isToday: key === today }); }
-        return cells;
-      },
-      _calCellsWeek: function(anchor, weekStart) {
-        var p = (anchor || this._calToday()).split('-'), dt0 = new Date(+p[0], +p[1] - 1, +p[2]);
-        var off = ((dt0.getDay() - weekStart) + 7) % 7, start = new Date(dt0.getFullYear(), dt0.getMonth(), dt0.getDate() - off), today = this._calToday(), cells = [];
-        for (var i = 0; i < 7; i++) { var dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i), key = this._calFmtDate(dt); cells.push({ date: key, day: dt.getDate(), isToday: key === today }); }
-        return cells;
-      },
+      _calCellsMonth: function(anchor, weekStart) { return Calendar.cellsMonth(anchor, weekStart, this._calToday()); },
+      _calCellsWeek: function(anchor, weekStart) { return Calendar.cellsWeek(anchor, weekStart, this._calToday()); },
       // BCP-47 locale for Intl date names: language.locale, then a name/code guess, then browser/'en'.
       calLocale: function() {
         var code = this.currentLang, lang = (this.languages || []).find(function(l) { return l.code === code; });
@@ -890,26 +879,13 @@ function createVueApp() {
         var guess = { Suomi: 'fi', Finnish: 'fi', English: 'en', Swedish: 'sv', Ruotsi: 'sv' };
         return (lang && guess[lang.name]) || guess[code] || (typeof navigator !== 'undefined' && navigator.language) || 'en';
       },
-      hashColor: function(key) {
-        var pal = ['#5b8def', '#26a69a', '#ab47bc', '#ef6c00', '#66bb6a', '#ec407a', '#8d6e63', '#c62828', '#00897b', '#7e57c2'];
-        var s = String(key || ''), h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-        return pal[h % pal.length];
-      },
-      // Resolve a calendar view's source specs (single-source `source` sugar -> one-element list).
-      calSources: function(name) {
-        var v = VIEWS[name]; if (!v || !v.calendar) return [];
-        var c = v.calendar;
-        return c.sources || [{ table: c.source, dateColumn: c.dateColumn, titleColumns: c.titleColumns, filter: c.filter, label: c.label }];
-      },
-      // Rotation views overlaid on a calendar as generated read-only duty events.
-      calRotationSources: function(name) { var v = VIEWS[name]; return (v && v.calendar && v.calendar.rotationSources) || []; },
+      hashColor: function(key) { return Calendar.hashColor(key); },
+      // Resolve a calendar view's source specs / rotation overlays (pure over VIEWS -> calendar.js).
+      calSources: function(name) { return Calendar.sources(VIEWS, name); },
+      calRotationSources: function(name) { return Calendar.rotationSources(VIEWS, name); },
       // Visible grid window {from, toExclusive} for a calendar's anchor+mode (month/list -> month grid,
       // week -> week strip). Bounds rotation generation to what's actually on screen.
-      _calWindowFor: function(anchor, mode, weekStart) {
-        var cells = (mode === 'week') ? this._calCellsWeek(anchor || this._calToday(), weekStart) : this._calCellsMonth(anchor || this._calToday(), weekStart);
-        var last = cells[cells.length - 1].date.split('-');
-        return { from: cells[0].date, toExclusive: this._calFmtDate(new Date(+last[0], +last[1] - 1, +last[2] + 1)) };
-      },
+      _calWindowFor: function(anchor, mode, weekStart) { return Calendar.windowFor(anchor, mode, weekStart, this._calToday()); },
       // Periods to generate from `fromStr` (the rotation view's OWN start) to reach `toExclusive`. We
       // start from the rotation's own `from` — not the grid start — so the numeric slot-swap phase
       // (floor(i/n)) matches the rotation view exactly (single source of truth); events are then
