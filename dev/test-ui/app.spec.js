@@ -2973,6 +2973,26 @@ test.describe('rotationView embedding in data views', () => {
     expect(r.name).toBe('cal_de');
     expect(r.visible).toBe(true);   // calendar always shows; the component handles its own emptiness
   });
+
+  test('resolveEmbed tags each config kind (doc/calendar/rotation/data) for the unified renderer', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // resolveEmbed is the single normalizer feeding embed-view's kind dispatch; assert every branch.
+      window.VIEWS.re_cal = { name: 're_cal', calendar: { source: 'tasks', dateColumn: 'date' } };
+      window.VIEWS.re_rot = { name: 're_rot', rotation: { slots: ['a'], rosters: ['RLa'], interval: 'weekly', range: { from: '2026-01-01', periods: 1 } } };
+      window.VIEWS.re_data = { name: 're_data', sources: ['tasks'], columns: ['title'] };
+      app.dataCache['RLa'] = [{ position: 1, people: ['A'] }];
+      var k = function(cfg) { return app.resolveEmbed(cfg).kind; };
+      return {
+        cal: k(Object.assign({ view: 're_cal' }, window.VIEWS.re_cal)),
+        rot: k(Object.assign({ view: 're_rot' }, window.VIEWS.re_rot)),
+        data: k(Object.assign({ view: 're_data' }, window.VIEWS.re_data)),
+        doc: k({ name: 're_doc', markdown: '# hi' })
+      };
+    });
+    expect(r).toEqual({ cal: 'calendar', rot: 'rotation', data: 'data', doc: 'doc' });
+  });
 });
 
 test.describe('rotationView filter / hideEmpty / layout', () => {
