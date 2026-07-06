@@ -869,8 +869,8 @@ function createVueApp() {
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
       // --- Calendar helpers (used by the calendar view + calendar embeds) ---
-      _calToday: function() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); },
-      _calFmtDate: function(dt) { return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0'); },
+      _calToday: function() { return fmtDate(new Date()); },
+      _calFmtDate: function(dt) { return fmtDate(dt); },
       _calCellsMonth: function(anchor, weekStart) {
         var p = (anchor || this._calToday()).split('-'), y = +p[0], m = +p[1] - 1;
         var first = new Date(y, m, 1), off = ((first.getDay() - weekStart) + 7) % 7, start = new Date(y, m, 1 - off), today = this._calToday(), cells = [];
@@ -1139,8 +1139,7 @@ function createVueApp() {
           }
           // rotationView (third view kind): generate rows from range; no sources to read.
           if (view.rotation) {
-            var td = new Date();
-            var todayStr = td.getFullYear() + '-' + String(td.getMonth() + 1).padStart(2, '0') + '-' + String(td.getDate()).padStart(2, '0');
+            var todayStr = fmtDate(new Date());
             var allowedRv = self.userAllowedTables;
             var regen = function() {
               var rows = buildRotationViewRows(view, self.dataCache, todayStr, self.anchorForView(self.currentTable), self.rangeForView(self.currentTable), self.rotateEveryForView(self.currentTable));
