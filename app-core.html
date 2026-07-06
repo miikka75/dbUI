@@ -2588,11 +2588,8 @@ function createVueApp() {
         var self = this, pe = this._pe;
         var title = this.t((VIEWS[this.currentTable] ? 'view.' : 'tab.') + this.currentTable) || this.currentTable;
         if (this.isRotationView) {
-          var rcols = this.rotationViewCols, rrows = this.rotationViewRows, rb = '<h2>' + pe(title) + '</h2><table><thead><tr>';
-          rcols.forEach(function(c) { rb += '<th>' + pe(c === '_period' ? self.t('field.period') : (self.t('field.' + c) || c)) + '</th>'; });
-          rb += '</tr></thead><tbody>';
-          rrows.forEach(function(row) { rb += '<tr>'; rcols.forEach(function(c) { rb += '<td>' + pe(c === '_period' ? self.toDateStr(row[c]) : self.displayValue(c, row[c])) + '</td>'; }); rb += '</tr>'; });
-          rb += '</tbody></table>'; this._printOpen(title, rb); return;
+          this._printOpen(title, '<h2>' + pe(title) + '</h2>' + this._printTable(this.rotationViewCols, this.rotationViewRows));
+          return;
         }
         var cols = this.visibleCols;
         var body = '<h2>' + title + '</h2>';
@@ -2604,27 +2601,28 @@ function createVueApp() {
           var colIdx = afterCol ? cols.indexOf(afterCol) : -1;
           var colsBefore = colIdx >= 0 ? cols.slice(0, colIdx + 1) : cols;
           var colsAfter = colIdx >= 0 ? cols.slice(colIdx + 1) : [];
-          body += '<table><thead><tr>';
-          colsBefore.forEach(function(c) { body += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
-          body += '</tr></thead><tbody>';
-          self.sortedData.forEach(function(row) { body += '<tr>'; colsBefore.forEach(function(c) { body += '<td>' + pe(self._printCell(c, row[c])) + '</td>'; }); body += '</tr>'; });
-          body += '</tbody></table>';
+          body += this._printTable(colsBefore, this.sortedData);
           self.embedItems.forEach(function(ei) { if (ei.config.afterColumn && self._printable(ei)) body += self._printEmbed(ei); });
-          if (colsAfter.length) {
-            body += '<table><thead><tr>';
-            colsAfter.forEach(function(c) { body += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
-            body += '</tr></thead><tbody>';
-            self.sortedData.forEach(function(row) { body += '<tr>'; colsAfter.forEach(function(c) { body += '<td>' + pe(self._printCell(c, row[c])) + '</td>'; }); body += '</tr>'; });
-            body += '</tbody></table>';
-          }
+          if (colsAfter.length) body += this._printTable(colsAfter, this.sortedData);
           self.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && self._printable(ei)) body += self._printEmbed(ei); });
         }
         this._printOpen(title, body);
       },
 
       _printable: function(ei, item) { if (!this.embedWhenOk(ei, item)) return false; if (ei.kind === 'doc') return !!ei.show; var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows; return !!(rows && rows.length); },
-      // Format a print cell to match the web grid: dates -> toDateStr, list/groupBy values -> displayValue.
-      _printCell: function(c, v) { return this.colIsDate(c) ? this.toDateStr(v) : this.displayValue(c, v); },
+      // Format a print cell to match the web grid: dates (and the rotation _period) -> toDateStr,
+      // list/groupBy values -> displayValue.
+      _printCell: function(c, v) { return (c === '_period' || this.colIsDate(c)) ? this.toDateStr(v) : this.displayValue(c, v); },
+      // Build one print <table> for cols/rows (the only table shape the print path emits — was inlined
+      // ~6x across printView + _printEmbed). Header: field.* label (period gets its own key); cells: _printCell.
+      _printTable: function(cols, rows) {
+        var self = this, pe = this._pe;
+        var h = '<table><thead><tr>';
+        cols.forEach(function(c) { h += '<th>' + pe(c === '_period' ? self.t('field.period') : (self.t('field.' + c) || c)) + '</th>'; });
+        h += '</tr></thead><tbody>';
+        rows.forEach(function(r) { h += '<tr>'; cols.forEach(function(c) { h += '<td>' + pe(self._printCell(c, r[c])) + '</td>'; }); h += '</tr>'; });
+        return h + '</tbody></table>';
+      },
       _printEmbed: function(ei, item) {
         var self = this, pe = this._pe;
         var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows;
@@ -2633,12 +2631,7 @@ function createVueApp() {
           (ei.blocks || []).forEach(function(b) {
             if (b.html) { dh += b.html; return; }
             var cols = self.embedCols(b.embedType, b.embedName), rows = self.embedRows(b.embedType, b.embedName, b.embedPart);
-            if (!rows.length) return;
-            dh += '<table><thead><tr>';
-            cols.forEach(function(c) { dh += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
-            dh += '</tr></thead><tbody>';
-            rows.forEach(function(r) { dh += '<tr>'; cols.forEach(function(c) { dh += '<td>' + pe(self._printCell(c, r[c])) + '</td>'; }); dh += '</tr>'; });
-            dh += '</tbody></table>';
+            if (rows.length) dh += self._printTable(cols, rows);
           });
           return dh + '</div>';
         }
@@ -2646,20 +2639,10 @@ function createVueApp() {
         if (ei.inlineBlocks) {
           ei.inlineBlocks.forEach(function(blk) {
             if (blk.html) { html += blk.html; return; }
-            if (blk.self) {
-              html += '<table><thead><tr>';
-              ei.columns.forEach(function(c) { html += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
-              html += '</tr></thead><tbody>';
-              rows.forEach(function(r) { html += '<tr>'; ei.columns.forEach(function(c) { html += '<td>' + pe(self._printCell(c, r[c])) + '</td>'; }); html += '</tr>'; });
-              html += '</tbody></table>';
-            }
+            if (blk.self) html += self._printTable(ei.columns, rows);
           });
         } else {
-          html += '<table><thead><tr>';
-          ei.columns.forEach(function(c) { html += '<th>' + pe(self.t('field.' + c) || c) + '</th>'; });
-          html += '</tr></thead><tbody>';
-          rows.forEach(function(r) { html += '<tr>'; ei.columns.forEach(function(c) { html += '<td>' + pe(self._printCell(c, r[c])) + '</td>'; }); html += '</tr>'; });
-          html += '</tbody></table>';
+          html += this._printTable(ei.columns, rows);
         }
         html += '</div>';
         return html;
