@@ -124,6 +124,7 @@
       await loadScript('/columns.js');
       await loadScript('/access-features.js');
       await loadScript('/calendar.js');
+      await loadScript('/rotation.js');
       execScript(await (await fetch('/schema-loader.html')).text());
       execScript(await coreResp.text());
       createVueApp();

@@ -1,15 +1,9 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
 
-// Load the pure rotation helpers from schema-loader.html into a sandbox.
-const code = fs.readFileSync(path.join(__dirname, '..', '..', 'schema-loader.html'), 'utf8')
-  .match(/<script[^>]*>([\s\S]*?)<\/script>/i)[1];
-const sb = {}; sb.window = sb; vm.createContext(sb);
-vm.runInContext(code + '\nthis.sortRosterRows = sortRosterRows;', sb);
-const sortRosterRows = sb.sortRosterRows;
+// The rotation helpers now live in the requireable /rotation.js module (extracted from schema-loader.html),
+// so this no longer needs to scrape the <script> block out of the HTML fragment via a vm sandbox.
+const { sortRosterRows } = require('../../rotation');
 
 const names = rows => sortRosterRows(rows).map(r => r.people[0]).join(',');
 
