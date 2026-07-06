@@ -1,6 +1,7 @@
 // backend-local.js — Local SQLite backend implementing same interface as Code.gs
 const Database = require('better-sqlite3');
 const H = require('../backend-helpers');
+const LA = require('../list-access');
 
 function createLocalBackend(dbPath) {
   const db = new Database(dbPath || ':memory:');
@@ -28,19 +29,13 @@ function createLocalBackend(dbPath) {
     } catch (e) { return {}; }
   }
 
-  // Owning tables of a list = tables with a column referencing it (list or listSwitch.list).
-  // Mirrors listOwningTables in schema-loader.html; used to stamp each per-list row.
+  // Owning tables of a list, read from the stored schema; used to stamp each per-list row.
+  // The scan itself is the shared list-access module (no more copied logic).
   function _listOwning(listName) {
     try {
       var row = db.prepare('SELECT value FROM _schema WHERE key = ?').get('schema');
       var tables = row ? (JSON.parse(row.value).tables || {}) : {};
-      var out = [];
-      Object.keys(tables).forEach(function(t) {
-        var cols = (tables[t] && tables[t].columns) || {};
-        var defs = Array.isArray(cols) ? cols : Object.keys(cols).map(function(k) { return cols[k]; });
-        if (defs.some(function(d) { return d && typeof d === 'object' && (d.list === listName || (d.listSwitch && d.listSwitch.list === listName)); })) out.push(t);
-      });
-      return out;
+      return LA.listOwningTables(tables, listName);
     } catch (e) { return []; }
   }
   // Per-list storage: one row per list { name PRIMARY KEY, items JSON, tables JSON } — shape parity

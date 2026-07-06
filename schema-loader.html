@@ -88,31 +88,9 @@ function withMirrors(base) {
 // sortByCol, buildRows, aggregateRows, resolveComputed) lives in /rows.js, loaded before this
 // fragment; _normalizeSchema (convertViewFilters) and app-core call those as globals from that module.
 
-// --- Per-list access (Phase 1: Firebase + local) ---
-// Owning tables of a list = every table with a column that references the list, via `list` or the
-// dual-list `listSwitch.list`. Shape-agnostic: handles columns as an object map (runtime/normalized)
-// or an array of {name,...} (stored/exported). Used to (a) stamp each per-list storage unit with its
-// owning tables so server rules can gate reads, and (b) filter which lists a restricted user receives.
-function listOwningTables(schemaTables, listName) {
-  var out = [];
-  Object.keys(schemaTables || {}).forEach(function(t) {
-    var cols = (schemaTables[t] && schemaTables[t].columns) || {};
-    var defs = Array.isArray(cols) ? cols : Object.keys(cols).map(function(k) { return cols[k]; });
-    var hit = defs.some(function(d) {
-      return d && typeof d === 'object' && (d.list === listName || (d.listSwitch && d.listSwitch.list === listName));
-    });
-    if (hit) out.push(t);
-  });
-  return out;
-}
-// Filter list names to those a user may access. allowedTables===null => unrestricted (admin) => all.
-// A list with no owning table (orphan) is admin-only (hidden from restricted users).
-function accessibleListNames(schemaTables, allowedTables, allListNames) {
-  if (!allowedTables) return (allListNames || []).slice();
-  return (allListNames || []).filter(function(name) {
-    return listOwningTables(schemaTables, name).some(function(t) { return allowedTables.indexOf(t) >= 0; });
-  });
-}
+// The per-list access model (listOwningTables/accessibleListNames/filterLists) lives in /list-access.js,
+// loaded before this fragment; backend-firebase.html calls listOwningTables as a global from it.
+
 // Tiny markdown -> HTML for pages (headings, bold/italic, lists, links, paragraphs). Embed tokens are split out before this runs.
 function mdToHtml(md) {
   var esc = function(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };

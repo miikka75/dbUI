@@ -4,20 +4,8 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const defaultSchema = require('./schema.json');
-const SCHEMA = defaultSchema.tables;
-
-// Owning tables of a list = tables with a column referencing it (list or listSwitch.list).
-// Mirrors listOwningTables in schema-loader.html (shape-agnostic: object-map or array columns).
-function listOwningTables(schemaTables, listName) {
-  const out = [];
-  Object.keys(schemaTables || {}).forEach(t => {
-    const cols = (schemaTables[t] && schemaTables[t].columns) || {};
-    const defs = Array.isArray(cols) ? cols : Object.keys(cols).map(k => cols[k]);
-    if (defs.some(d => d && typeof d === 'object' && (d.list === listName || (d.listSwitch && d.listSwitch.list === listName)))) out.push(t);
-  });
-  return out;
-}
+// Per-list access model — shared module (also loaded by the browser app + backend-local), no more copies.
+const { listOwningTables, filterLists } = require('../list-access');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const USE_FS = process.argv.includes('--fs');
@@ -119,12 +107,7 @@ const server = http.createServer(async (req, res) => {
         const tableMapB = backend.initSchema('local', tablesB);
         const languagesB = backend.getAvailableLanguages('local');
         const allowedB = getAllowedTables(); // null => unrestricted (admin / no users)
-        let listsB = backend.getLists('local');
-        if (allowedB) {
-          const f = {};
-          Object.keys(listsB).forEach(name => { if (listOwningTables(tablesB, name).some(t => allowedB.indexOf(t) >= 0)) f[name] = listsB[name]; });
-          listsB = f;
-        }
+        const listsB = filterLists(backend.getLists('local'), tablesB, allowedB);
         const dataB = {};
         Object.keys(tableMapB).forEach(name => {
           if (allowedB && allowedB.indexOf(name) < 0) return; // skip tables the user can't access
@@ -148,17 +131,10 @@ const server = http.createServer(async (req, res) => {
       case 'renameLanguage': backend.renameLanguage(body.folderId || 'local', body.code, body.name); return json(res, { ok: true });
       case 'getFileModifiedTime': return json(res, { time: backend.getFileModifiedTime(body.fileId) });
       case 'getLists': {
-        const all = backend.getLists('local');
+        // Per-list access: return only lists owned by a table the user can access (admin: all).
         const allowed = getAllowedTables();          // null => unrestricted (admin/no users)
-        if (!allowed) return json(res, all);
-        // Per-list access: return only lists owned by a table the user can access.
         const schemaTables = (backend.getSchema('local') || {}).tables || {};
-        const filtered = {};
-        Object.keys(all).forEach(name => {
-          const owners = listOwningTables(schemaTables, name);
-          if (owners.some(t => allowed.indexOf(t) >= 0)) filtered[name] = all[name];
-        });
-        return json(res, filtered);
+        return json(res, filterLists(backend.getLists('local'), schemaTables, allowed));
       }
       case 'saveLists': {
         const allowedW = getAllowedTables();
