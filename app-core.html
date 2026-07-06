@@ -210,17 +210,7 @@ function createVueApp() {
       viewComponent: function() { return (window.VIEW_KINDS || {})[this.viewKind] || null; },
       // Calendar rendering state (mode/anchor/selection + derived cells) lives in the calendar-view
       // component now; the root keeps only the pure model helpers (calEventsFor, _calCells*, _calWindowFor).
-      rotationViewCols: function() {
-        var v = VIEWS[this.currentTable];
-        if (!v || !v.rotation) return [];
-        var rv = v.rotation;
-        var names = rv.slots ? rv.slots.slice() : (rv.columns || []).map(function(c) { return c.name; });
-        if (v.hideEmpty) { // drop slot columns that are empty in every period
-          var rows = this.currentData || [];
-          names = names.filter(function(n) { return rows.some(function(r) { var val = r[n]; return Array.isArray(val) ? val.length : !!val; }); });
-        }
-        return ['_period'].concat(names);
-      },
+      rotationViewCols: function() { return this.rotationColsFor(this.currentTable, this.currentData || []); },
       rotationSlotCols: function() { return this.rotationViewCols.filter(function(c) { return c !== '_period'; }); },
       // Registry-selected body element for the rotation view (unknown/`list` layout -> the list part).
       rotationBodyComponent: function() { return (window.viewPartFor && window.viewPartFor('rotation', this.rotationDisplayLayout)) || 'rotation-list'; },
@@ -412,12 +402,9 @@ function createVueApp() {
             return { config: cfg, isDoc: true, blocks: self.mdBlocks(cfg.markdown, cfg.name), show: self.docHasData(cfg.markdown, cfg.name) };
           }
           if (cfg.rotation) { // rotationView embed (a {view:x} where x is a rotationView) -> generate period rows
-            var rv = cfg.rotation;
-            var td = new Date();
-            var todayStr = td.getFullYear() + '-' + String(td.getMonth() + 1).padStart(2, '0') + '-' + String(td.getDate()).padStart(2, '0');
             var anchorName = cfg.view || cfg.name || self.currentTable;
-            var rrows = buildRotationViewRows({ rotation: rv }, self.dataCache, todayStr, self.anchorForView(anchorName), self.rangeForView(anchorName), self.rotateEveryForView(anchorName));
-            var slotNames = rv.slots ? rv.slots.slice() : (rv.columns || []).map(function(c) { return c.name; });
+            var rrows = self.rotationRowsFor(anchorName, cfg.rotation);
+            var slotNames = cfg.rotation.slots ? cfg.rotation.slots.slice() : (cfg.rotation.columns || []).map(function(c) { return c.name; });
             return { config: cfg, isRotation: true, columns: ['_period'].concat(slotNames), rows: rrows };
           }
           var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
@@ -1006,6 +993,7 @@ function createVueApp() {
         return out;
       },
       isCalendarName: function(name) { return !!(VIEWS[name] && VIEWS[name].calendar); },
+      isRotationName: function(name) { return !!(VIEWS[name] && VIEWS[name].rotation); },
       // Doc-view bodies live in a server-side "_pages" collection (not in schema.json).
       // Falls back to the view's schema-defined `markdown` (seed), then caches it.
       loadPage: function(name) {
@@ -1902,6 +1890,27 @@ function createVueApp() {
         var raw = (ov !== undefined) ? ov : ((VIEWS[name] && VIEWS[name].rotation && VIEWS[name].rotation.rotateEvery));
         if (raw == null) return [];
         return Array.isArray(raw) ? raw.slice() : [raw];
+      },
+      // Name-parameterized rotation model helper (mirrors calEventsFor): generates the period rows for a
+      // named rotationView from the current config/dataCache. Shared by the embed path (embedItems) and
+      // rotation-view's embed mode, so a rotation renders identically inline and top-level.
+      rotationRowsFor: function(name, rotationDef) {
+        var rv = rotationDef || (VIEWS[name] && VIEWS[name].rotation);
+        if (!rv) return [];
+        return buildRotationViewRows({ rotation: rv }, this.dataCache, this._calToday(),
+          this.anchorForView(name), this.rangeForView(name), this.rotateEveryForView(name));
+      },
+      // Slot columns for a named rotationView (['_period', ...slots]); drops all-empty slots when hideEmpty.
+      rotationColsFor: function(name, rows) {
+        var v = VIEWS[name];
+        if (!v || !v.rotation) return [];
+        var rv = v.rotation;
+        var names = rv.slots ? rv.slots.slice() : (rv.columns || []).map(function(c) { return c.name; });
+        if (v.hideEmpty) {
+          var rs = rows || [];
+          names = names.filter(function(n) { return rs.some(function(r) { var val = r[n]; return Array.isArray(val) ? val.length : !!val; }); });
+        }
+        return ['_period'].concat(names);
       },
       // Save the rotateEvery override. opts = { every: n, cycle: bool } -> composed into a summed
       // array (n>0 contributes a per-period swap, cycle contributes the per-cycle swap). opts === null
@@ -3097,10 +3106,25 @@ function createVueApp() {
   // Each whole-view card as a component so the top-level render is a registry lookup (VIEW_KINDS via
   // viewComponent) instead of a v-if chain. They read the root model through one `a` (appInstance)
   // proxy — state stays on the root (tests + toolbars unchanged), the template just relocates here.
+  // Rotation view — name/embed parameterized like calendar-view. Top-level (embed=false) shows the
+  // anchor/range/rotateEvery config toolbar and reads the already-generated currentData; an embed
+  // (embed=true, from a page/markdown) is toolbar-less and generates its rows via rotationRowsFor, so
+  // a rotation renders identically inline and top-level (the old empty embed-view path is retired).
   app.component('rotation-view', {
-    computed: { a: function() { return appInstance; } },
+    props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    computed: {
+      a: function() { return appInstance; },
+      viewName: function() { return this.name || appInstance.currentTable; },
+      rows: function() { return this.embed ? appInstance.rotationRowsFor(this.viewName) : (appInstance.isRotationView ? appInstance.currentData : []); },
+      cols: function() { return appInstance.rotationColsFor(this.viewName, this.rows); },
+      slotCols: function() { return this.cols.filter(function(c) { return c !== '_period'; }); },
+      layout: function() { var v = VIEWS[this.viewName]; return (v && (v.layout || (v.rotation && v.rotation.layout))) || 'table'; },
+      displayLayout: function() { return (appInstance.mobile && this.layout === 'table') ? 'card' : this.layout; },
+      bodyComponent: function() { return (window.viewPartFor && window.viewPartFor('rotation', this.displayLayout)) || 'rotation-list'; }
+    },
     template: ''
-      + '<v-card variant="outlined">'
+      + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'">'
+      + '<template v-if="!embed">'
       + '<div class="d-flex align-center flex-wrap pa-2" style="gap:10px 12px">'
       + '<v-text-field :model-value="a.rotationAnchorForView" name="rotation-anchor" type="date" :label="a.t(\'settings.rotation_anchor\')" density="compact" variant="outlined" hide-details style="max-width:175px" :disabled="!a.canMutateCurrent" @update:model-value="a.saveRotationAnchor(a.currentTable, $event)" data-testid="rotation-anchor"></v-text-field>'
       + '<div class="d-flex align-center" style="gap:2px">'
@@ -3113,8 +3137,9 @@ function createVueApp() {
       + '<v-spacer></v-spacer>'
       + '<v-btn v-if="a.canPrintView" icon="mdi-printer" size="small" variant="text" @click="a.printView()"></v-btn></div>'
       + '<v-divider></v-divider>'
-      + '<component :is="a.rotationBodyComponent" :cols="a.rotationViewCols" :slot-cols="a.rotationSlotCols" :rows="a.rotationViewRows"></component>'
-      + '</v-card>'
+      + '</template>'
+      + '<component :is="bodyComponent" :cols="cols" :slot-cols="slotCols" :rows="rows"></component>'
+      + '</component>'
   });
 
   app.component('page-view', {
@@ -3128,6 +3153,7 @@ function createVueApp() {
       + '<template v-else v-for="(blk, bi) in a.pageBlocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html"></div>'
       + '<calendar-view v-else-if="blk.embedType === \'view\' && a.isCalendarName(blk.embedName)" :name="blk.embedName" :embed="true"></calendar-view>'
+      + '<rotation-view v-else-if="blk.embedType === \'view\' && a.isRotationName(blk.embedName)" :name="blk.embedName" :embed="true"></rotation-view>'
       + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>'
       + '</template>'
       + '</v-card>'
