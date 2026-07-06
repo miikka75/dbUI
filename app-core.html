@@ -200,6 +200,10 @@ function createVueApp() {
       // Single classifier for the current view's kind + the top-level component registry dispatch.
       // Kinds not in VIEW_KINDS (page, data) return null -> their cards still render inline in ui.html.
       viewKind: function() {
+        var ct = this.currentTable;
+        if (ct === '__languages') return 'languages';
+        if (ct === '__lookup') return 'lookup';
+        if (ct === '__settings') return 'settings';
         if (this.isCalendarView) return 'calendar';
         if (this.isRotationView) return 'rotation';
         if (this.currentPage) return 'page';
@@ -2935,7 +2939,10 @@ function createVueApp() {
 
   // Top-level view-kind registry: kind -> the component that renders that whole view. Kinds absent
   // here (page, data) fall through to their inline cards in ui.html until they're componentized too.
-  window.VIEW_KINDS = { calendar: 'calendar-view', rotation: 'rotation-view', page: 'page-view', data: 'data-view' };
+  window.VIEW_KINDS = {
+    calendar: 'calendar-view', rotation: 'rotation-view', page: 'page-view', data: 'data-view',
+    languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view'   // system screens
+  };
 
   app.component('cal-event-row', {
     props: { ev: { type: Object, required: true }, compact: { type: Boolean, default: false } },
@@ -3184,6 +3191,12 @@ function createVueApp() {
   // string; the `a` computed returns the root instance so those refs resolve against it. Reads must go
   // through the computed (not setup-return, which can't see the root's data props via Vue's hasOwn).
   app.component('data-view', { computed: { a: function() { return appInstance; } }, template: '#data-view-tpl' });
+
+  // System screens (languages / lists+ref-data / settings). Same registry dispatch + `a` proxy + in-DOM
+  // template as data-view, so the top-level render is fully uniform (no more currentTable === '__x').
+  app.component('languages-view', { computed: { a: function() { return appInstance; } }, template: '#languages-view-tpl' });
+  app.component('lookup-view', { computed: { a: function() { return appInstance; } }, template: '#lookup-view-tpl' });
+  app.component('settings-view', { computed: { a: function() { return appInstance; } }, template: '#settings-view-tpl' });
 
   appInstance = app.mount('#vue-app');
 }

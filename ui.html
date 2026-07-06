@@ -197,199 +197,13 @@
         <!-- Data view dispatches via VIEW_KINDS.data (<component :is="viewComponent"> above);
              markup lives in the #data-view-tpl template at the end of this file. -->
 
-        <!-- Languages Tab -->
-        <v-card v-if="currentTable === '__languages'" variant="outlined">
-          <v-card-title class="d-flex align-center">{{ t('tab.languages') }}</v-card-title>
-          <v-list>
-            <v-list-group v-for="lang in languages" :key="lang.code" :value="lang.code">
-              <template v-slot:activator="{ props }">
-                <v-list-item v-bind="props" @click="openLangEditor(lang)">
-                  <v-text-field :model-value="lang.name"
-                    :data-lang-code="lang.code" data-testid="lang-name"
-                    density="compact" variant="outlined" hide-details style="max-width:260px"
-                    @click.stop @change="renameLang(lang, $event.target.value)"></v-text-field>
-                  <template v-slot:append>
-                    <v-btn :icon="isArmed('lang:'+lang.code) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="isArmed('lang:'+lang.code) ? 'error' : ''" @click.stop="deleteLang(lang)" class="mr-2"></v-btn>
-                    <v-icon>mdi-chevron-down</v-icon>
-                  </template>
-                </v-list-item>
-              </template>
-              <v-table v-if="editingLang && editingLang.code === lang.code" density="compact">
-                <template v-slot:default>
-                <tbody>
-                  <tr @click="settings._collapseApp = !settings._collapseApp" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseApp ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ t('lang.app') }}</td></tr>
-                  <tr v-for="key in staticTranslationKeys" :key="key" v-show="!settings._collapseApp">
-                    <td colspan="2"><v-textarea :model-value="currentTranslations[key] || ''" @update:model-value="saveTranslation(key, $event)" :label="key" auto-grow rows="1" density="compact" variant="outlined" hide-details></v-textarea></td>
-                  </tr>
-                  <tr @click="settings._collapseSchema = !settings._collapseSchema" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ settings._collapseSchema ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ t('lang.schema') }}</td></tr>
-                  <tr v-for="key in schemaTranslationKeys" :key="key" v-show="!settings._collapseSchema">
-                    <td colspan="2"><v-textarea :model-value="currentTranslations[key] || ''" @update:model-value="saveTranslation(key, $event)" :label="key" auto-grow rows="1" density="compact" variant="outlined" hide-details></v-textarea></td>
-                  </tr>
-                </tbody>
-                </template>
-              </v-table>
-            </v-list-group>
-          </v-list>
-          <v-btn variant="text" prepend-icon="mdi-plus" @click="addLanguage" class="ma-2">{{ t('btn.add') }} {{ t('tab.languages') }}</v-btn>
-        </v-card>
+        <!-- __languages dispatches via VIEW_KINDS (#languages-view-tpl at end of file) -->
 
-        <!-- Lists Tab -->
-        <v-card v-if="currentTable === '__lookup'" variant="outlined">
-          <v-card-title>{{ t('tab.lists') }}</v-card-title>
-          <v-list>
-            <v-list-group v-for="(items, name) in visibleLists" :key="name" :value="name">
-              <template v-slot:activator="{ props }">
-                <v-list-item v-bind="props" prepend-icon="mdi-format-list-bulleted">
-                  <span>{{ name }}</span>
-                </v-list-item>
-              </template>
-              <v-list-item v-for="(val, i) in items" :key="i">
-                <span v-if="!canEditLists || isLockedValue(name, val)" style="opacity:0.7">{{ t('list.' + name + '.' + val) !== ('list.' + name + '.' + val) ? t('list.' + name + '.' + val) : val }} <v-icon v-if="isLockedValue(name, val)" size="x-small" style="opacity:0.4">mdi-lock-outline</v-icon></span>
-                <span v-else class="editable-cell" contenteditable @blur="updateListItem2(name, i, $event.target.textContent)" @keydown.enter.prevent="focusNextListItem($event)" @keydown.home.stop @keydown.end.stop>{{ val }}</span>
-                <template v-if="canEditLists" v-slot:append>
-                  <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="i === 0" @click="moveListItem(name, i, -1)"></v-btn>
-                  <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="i === items.length - 1" @click="moveListItem(name, i, 1)"></v-btn>
-                  <v-btn v-if="!isLockedValue(name, val)" :icon="isArmed('list_' + name + '_' + i) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('list_' + name + '_' + i) ? 'error' : ''" @click="removeListItem2(name, i)"></v-btn>
-                  <div v-else style="width:36px"></div>
-                </template>
-              </v-list-item>
-              <v-list-item v-if="canEditLists">
-                <v-btn variant="text" size="small" prepend-icon="mdi-plus" @click="addListItem2(name)">{{ t('btn.add') }} {{ name }}</v-btn>
-              </v-list-item>
-            </v-list-group>
-          </v-list>
-          <v-divider class="my-4"></v-divider>
-          <v-card-title>{{ t('tab.ref_data') }}</v-card-title>
-          <v-list>
-            <v-list-group v-for="rt in refTables" :key="rt" :value="rt">
-              <template v-slot:activator="{ props }">
-                <v-list-item v-bind="props" :prepend-icon="'mdi-database-outline'" @click="currentRefTable = rt">
-                  <span>{{ rt }}</span>
-                </v-list-item>
-              </template>
-            <!-- Hierarchical mode (2 data columns) -->
-            <template v-if="currentRefTable === rt && isHierarchicalRef">
-            <div class="ref-hierarchy">
-              <v-list>
-                <v-list-group v-for="(children, parent) in refGroupedData" :key="parent" :value="parent">
-                  <template v-slot:activator="{ props }">
-                    <v-list-item v-bind="props">
-                      <span class="editable-cell" contenteditable @click.stop @blur="renameRefParent(parent, $event.target.textContent)">{{ parent }}</span>
-                      <template v-slot:append>
-                        <v-btn :icon="isArmed('refp:'+parent) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="isArmed('refp:'+parent) ? 'error' : ''" @click.stop="deleteRefParent(parent)" class="mr-2"></v-btn>
-                        <v-icon>mdi-chevron-down</v-icon>
-                      </template>
-                    </v-list-item>
-                  </template>
-                  <v-list-item v-for="item in children" :key="item.id">
-                    <span class="editable-cell ref-child" contenteditable @blur="saveRefField(item, refChildCol, $event.target.textContent)">{{ item[refChildCol] || '' }}</span>
-                    <template v-slot:append>
-                      <v-btn :icon="isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('ref:'+item.id) ? 'error' : ''" @click="deleteRefRow(item)"></v-btn>
-                    </template>
-                  </v-list-item>
-                  <v-list-item>
-                    <v-btn variant="text" size="small" prepend-icon="mdi-plus" @click="addRefChild(parent)">{{ t('btn.add') }} {{ refChildCol }}</v-btn>
-                  </v-list-item>
-                </v-list-group>
-              </v-list>
-              <v-btn variant="text" prepend-icon="mdi-plus" @click="addRefParent()" class="ma-2">{{ t('btn.add') }} {{ refParentCol }}</v-btn>
-            </div>
-            </template>
-            <!-- Flat mode when not this table -->
-            <template v-if="currentRefTable === rt && !isHierarchicalRef">
-            <div>
-              <v-table density="compact" hover>
-                <template v-slot:default>
-                <thead><tr>
-                  <th v-for="col in refTableCols" :key="col">{{ t('field.' + col) || col }}</th>
-                  <th></th>
-                </tr></thead>
-                <tbody>
-                  <tr v-for="item in refTableData" :key="item.id">
-                    <td v-for="col in refTableCols" :key="col">
-                      <span class="editable-cell" contenteditable @blur="saveRefField(item, col, $event.target.textContent)">{{ item[col] || '' }}</span>
-                    </td>
-                    <td><v-btn :icon="isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('ref:'+item.id) ? 'error' : ''" @click="deleteRefRow(item)"></v-btn></td>
-                  </tr>
-                </tbody>
-                </template>
-              </v-table>
-              <v-btn variant="text" prepend-icon="mdi-plus" @click="addRefRow" class="ma-2">{{ t('btn.add') }} {{ t('tab.' + currentTable) }}</v-btn>
-            </div>
-            </template>
-            </v-list-group>
-          </v-list>
-        </v-card>
+        <!-- __lookup dispatches via VIEW_KINDS (#lookup-view-tpl at end of file) -->
 
-        <!-- Settings Tab -->
-        <v-card v-if="currentTable === '__settings'" variant="outlined">
-          <v-card-title>{{ t('tab.settings') }}</v-card-title>
-          <v-card-text>
-            <div class="mb-4">
-            <v-switch :model-value="navLayout === 'tabs'" @update:model-value="v => setNavLayout(v ? 'tabs' : 'drawer')" color="primary" density="compact" hide-details :label="t('settings.tabs_nav')" data-testid="nav-layout-toggle"></v-switch>
-            <template v-if="isAdmin">
-            <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2">{{ t('settings.import_export') }}</p>
-            <v-btn variant="outlined" prepend-icon="mdi-download" @click="exportData" class="mr-2 mb-2">{{ t('settings.export') }}</v-btn>
-            <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()" class="mb-2">{{ t('settings.import') }}</v-btn>
-            <input ref="importFile" type="file" accept=".json" hidden @change="importData($event)">
-            <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2">{{ t('settings.share') }}</p>
-            <v-text-field :model-value="shareLink" name="share-link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="copyText(shareLink)"></v-text-field>
-            </template>
-            <v-divider class="my-4"></v-divider>
-            <v-btn variant="outlined" :color="isArmed('reset') ? 'error' : 'warning'" :prepend-icon="isArmed('reset') ? 'mdi-check-circle' : 'mdi-refresh'" @click="isArmed('reset') ? resetApp() : armDelete('reset')">{{ isArmed('reset') ? t('settings.confirm_reset') : t('settings.reset') }}</v-btn>
-            <template v-if="usersLoaded && !isUnregisteredUser">
-            <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-1 font-weight-bold mb-2">{{ t('profile.title') }}</p>
-            <div class="d-flex align-center flex-wrap" style="gap:12px">
-              <v-text-field :model-value="currentUserEmail" :label="t('profile.email')" density="compact" hide-details variant="outlined" readonly style="max-width:240px"></v-text-field>
-              <v-text-field v-model="myProfile.name" :label="t('profile.your_name')" density="compact" hide-details variant="outlined" style="max-width:240px" @blur="saveMyProfile" @keydown.enter="$event.target.blur()" @keydown.home.stop @keydown.end.stop></v-text-field>
-              <v-switch v-if="userBackedLists().length" :model-value="myProfile.shared" @update:model-value="v => { myProfile.shared = v; saveMyProfile(); }" :label="t('profile.share_name')" density="compact" hide-details color="primary"></v-switch>
-            </div>
-            </template>
-            <template v-if="usersLoaded && userList.length && isAdmin">
-            <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-1 font-weight-bold mb-2">{{ t('settings.user_access_title') }}</p>
-            <p class="text-subtitle-2 mb-2">{{ t('settings.user_access') }}</p>
-            <template v-if="accessRequests.length">
-              <p class="text-subtitle-2 mb-1">{{ t('access.pending_requests') }}</p>
-              <v-table density="compact" class="mb-3">
-                <template v-slot:default>
-                <tbody>
-                  <tr v-for="req in accessRequests" :key="req.email">
-                    <td>{{ req.email }}</td>
-                    <td>{{ req.name }}</td>
-                    <td class="text-medium-emphasis">{{ req.note }}</td>
-                    <td style="white-space:nowrap">
-                      <v-btn size="x-small" color="success" variant="text" prepend-icon="mdi-check" @click="approveRequest(req)">{{ t('access.approve') }}</v-btn>
-                      <v-btn size="x-small" color="error" variant="text" prepend-icon="mdi-close" @click="denyRequest(req)">{{ t('access.deny') }}</v-btn>
-                    </td>
-                  </tr>
-                </tbody>
-                </template>
-              </v-table>
-            </template>
-            <v-table v-if="userList.length" density="compact">
-              <template v-slot:default>
-              <thead><tr><th>{{ t('settings.user_id') }}</th><th>{{ t('settings.name') }}</th><th>{{ t('settings.role') }}</th><th>{{ t('settings.tables') }}</th><th></th></tr></thead>
-              <tbody>
-                <tr v-for="u in sortedUserList" :key="u.key">
-                  <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="renameUser(u, $event.target.textContent.trim())">{{ u.key.indexOf('_new_') === 0 ? '' : u.key }}</span></td>
-                  <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="renameUserProfile(u, $event.target.textContent)">{{ userDisplayName(u) }}</span></td>
-                  <td><v-select :model-value="u.role" :name="'role-' + u.key" :items="roleItems" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>
-                  <td><v-select :model-value="userFeatures(u)" :items="grantFeatureChips" item-title="label" item-value="id" multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:180px;max-width:320px" @update:model-value="updateUserTables(u, $event)"></v-select></td>
-                  <td><v-btn :icon="isArmed('user:'+u.key) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="isArmed('user:'+u.key) ? 'error' : ''" @click="isArmed('user:'+u.key) ? removeUser(u.key) : armDelete('user:'+u.key)"></v-btn></td>
-                </tr>
-              </tbody>
-              </template>
-            </v-table>
-            <v-btn variant="text" prepend-icon="mdi-plus" @click="addUser()" class="ma-2">{{ t('settings.add_user') }}</v-btn>
-            </template>
-            </div>
-          </v-card-text>
-        </v-card>
-      </v-container>
+        <!-- __settings dispatches via VIEW_KINDS (#settings-view-tpl at end of file) -->
+
+        </v-container>
     </v-main>
 
     <!-- FAB: floating add button on mobile -->
@@ -504,5 +318,199 @@
             <embed-block :ei="ei" font-size="0.8rem" cell-pad="3px 8px" :header="true"></embed-block>
           </div>
           </template>
+        </v-card>
+</template>
+
+<template id="languages-view-tpl">
+  <v-card variant="outlined">
+          <v-card-title class="d-flex align-center">{{ a.t('tab.languages') }}</v-card-title>
+          <v-list>
+            <v-list-group v-for="lang in a.languages" :key="lang.code" :value="lang.code">
+              <template v-slot:activator="{ props }">
+                <v-list-item v-bind="props" @click="a.openLangEditor(lang)">
+                  <v-text-field :model-value="lang.name"
+                    :data-lang-code="lang.code" data-testid="lang-name"
+                    density="compact" variant="outlined" hide-details style="max-width:260px"
+                    @click.stop @change="a.renameLang(lang, $event.target.value)"></v-text-field>
+                  <template v-slot:append>
+                    <v-btn :icon="a.isArmed('lang:'+lang.code) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed('lang:'+lang.code) ? 'error' : ''" @click.stop="a.deleteLang(lang)" class="mr-2"></v-btn>
+                    <v-icon>mdi-chevron-down</v-icon>
+                  </template>
+                </v-list-item>
+              </template>
+              <v-table v-if="a.editingLang && a.editingLang.code === lang.code" density="compact">
+                <template v-slot:default>
+                <tbody>
+                  <tr @click="a.settings._collapseApp = !a.settings._collapseApp" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ a.settings._collapseApp ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ a.t('lang.app') }}</td></tr>
+                  <tr v-for="key in a.staticTranslationKeys" :key="key" v-show="!a.settings._collapseApp">
+                    <td colspan="2"><v-textarea :model-value="a.currentTranslations[key] || ''" @update:model-value="a.saveTranslation(key, $event)" :label="key" auto-grow rows="1" density="compact" variant="outlined" hide-details></v-textarea></td>
+                  </tr>
+                  <tr @click="a.settings._collapseSchema = !a.settings._collapseSchema" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ a.settings._collapseSchema ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ a.t('lang.schema') }}</td></tr>
+                  <tr v-for="key in a.schemaTranslationKeys" :key="key" v-show="!a.settings._collapseSchema">
+                    <td colspan="2"><v-textarea :model-value="a.currentTranslations[key] || ''" @update:model-value="a.saveTranslation(key, $event)" :label="key" auto-grow rows="1" density="compact" variant="outlined" hide-details></v-textarea></td>
+                  </tr>
+                </tbody>
+                </template>
+              </v-table>
+            </v-list-group>
+          </v-list>
+          <v-btn variant="text" prepend-icon="mdi-plus" @click="a.addLanguage" class="ma-2">{{ a.t('btn.add') }} {{ a.t('tab.languages') }}</v-btn>
+        </v-card>
+</template>
+<template id="lookup-view-tpl">
+  <v-card variant="outlined">
+          <v-card-title>{{ a.t('tab.lists') }}</v-card-title>
+          <v-list>
+            <v-list-group v-for="(items, name) in a.visibleLists" :key="name" :value="name">
+              <template v-slot:activator="{ props }">
+                <v-list-item v-bind="props" prepend-icon="mdi-format-list-bulleted">
+                  <span>{{ name }}</span>
+                </v-list-item>
+              </template>
+              <v-list-item v-for="(val, i) in items" :key="i">
+                <span v-if="!a.canEditLists || a.isLockedValue(name, val)" style="opacity:0.7">{{ a.t('list.' + name + '.' + val) !== ('list.' + name + '.' + val) ? a.t('list.' + name + '.' + val) : val }} <v-icon v-if="a.isLockedValue(name, val)" size="x-small" style="opacity:0.4">mdi-lock-outline</v-icon></span>
+                <span v-else class="editable-cell" contenteditable @blur="a.updateListItem2(name, i, $event.target.textContent)" @keydown.enter.prevent="a.focusNextListItem($event)" @keydown.home.stop @keydown.end.stop>{{ val }}</span>
+                <template v-if="a.canEditLists" v-slot:append>
+                  <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="i === 0" @click="a.moveListItem(name, i, -1)"></v-btn>
+                  <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="i === items.length - 1" @click="a.moveListItem(name, i, 1)"></v-btn>
+                  <v-btn v-if="!a.isLockedValue(name, val)" :icon="a.isArmed('list_' + name + '_' + i) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('list_' + name + '_' + i) ? 'error' : ''" @click="a.removeListItem2(name, i)"></v-btn>
+                  <div v-else style="width:36px"></div>
+                </template>
+              </v-list-item>
+              <v-list-item v-if="a.canEditLists">
+                <v-btn variant="text" size="small" prepend-icon="mdi-plus" @click="a.addListItem2(name)">{{ a.t('btn.add') }} {{ name }}</v-btn>
+              </v-list-item>
+            </v-list-group>
+          </v-list>
+          <v-divider class="my-4"></v-divider>
+          <v-card-title>{{ a.t('tab.ref_data') }}</v-card-title>
+          <v-list>
+            <v-list-group v-for="rt in a.refTables" :key="rt" :value="rt">
+              <template v-slot:activator="{ props }">
+                <v-list-item v-bind="props" :prepend-icon="'mdi-database-outline'" @click="a.currentRefTable = rt">
+                  <span>{{ rt }}</span>
+                </v-list-item>
+              </template>
+            <!-- Hierarchical mode (2 data columns) -->
+            <template v-if="a.currentRefTable === rt && a.isHierarchicalRef">
+            <div class="ref-hierarchy">
+              <v-list>
+                <v-list-group v-for="(children, parent) in a.refGroupedData" :key="parent" :value="parent">
+                  <template v-slot:activator="{ props }">
+                    <v-list-item v-bind="props">
+                      <span class="editable-cell" contenteditable @click.stop @blur="a.renameRefParent(parent, $event.target.textContent)">{{ parent }}</span>
+                      <template v-slot:append>
+                        <v-btn :icon="a.isArmed('refp:'+parent) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed('refp:'+parent) ? 'error' : ''" @click.stop="a.deleteRefParent(parent)" class="mr-2"></v-btn>
+                        <v-icon>mdi-chevron-down</v-icon>
+                      </template>
+                    </v-list-item>
+                  </template>
+                  <v-list-item v-for="item in children" :key="item.id">
+                    <span class="editable-cell ref-child" contenteditable @blur="a.saveRefField(item, a.refChildCol, $event.target.textContent)">{{ item[a.refChildCol] || '' }}</span>
+                    <template v-slot:append>
+                      <v-btn :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn>
+                    </template>
+                  </v-list-item>
+                  <v-list-item>
+                    <v-btn variant="text" size="small" prepend-icon="mdi-plus" @click="a.addRefChild(parent)">{{ a.t('btn.add') }} {{ a.refChildCol }}</v-btn>
+                  </v-list-item>
+                </v-list-group>
+              </v-list>
+              <v-btn variant="text" prepend-icon="mdi-plus" @click="a.addRefParent()" class="ma-2">{{ a.t('btn.add') }} {{ a.refParentCol }}</v-btn>
+            </div>
+            </template>
+            <!-- Flat mode when not this table -->
+            <template v-if="a.currentRefTable === rt && !a.isHierarchicalRef">
+            <div>
+              <v-table density="compact" hover>
+                <template v-slot:default>
+                <thead><tr>
+                  <th v-for="col in a.refTableCols" :key="col">{{ a.t('field.' + col) || col }}</th>
+                  <th></th>
+                </tr></thead>
+                <tbody>
+                  <tr v-for="item in a.refTableData" :key="item.id">
+                    <td v-for="col in a.refTableCols" :key="col">
+                      <span class="editable-cell" contenteditable @blur="a.saveRefField(item, col, $event.target.textContent)">{{ item[col] || '' }}</span>
+                    </td>
+                    <td><v-btn :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn></td>
+                  </tr>
+                </tbody>
+                </template>
+              </v-table>
+              <v-btn variant="text" prepend-icon="mdi-plus" @click="a.addRefRow" class="ma-2">{{ a.t('btn.add') }} {{ a.t('tab.' + a.currentTable) }}</v-btn>
+            </div>
+            </template>
+            </v-list-group>
+          </v-list>
+        </v-card>
+</template>
+<template id="settings-view-tpl">
+  <v-card variant="outlined">
+          <v-card-title>{{ a.t('tab.settings') }}</v-card-title>
+          <v-card-text>
+            <div class="mb-4">
+            <v-switch :model-value="a.navLayout === 'tabs'" @update:model-value="v => a.setNavLayout(v ? 'tabs' : 'drawer')" color="primary" density="compact" hide-details :label="a.t('settings.tabs_nav')" data-testid="nav-layout-toggle"></v-switch>
+            <template v-if="a.isAdmin">
+            <v-divider class="my-4"></v-divider>
+            <p class="text-subtitle-2 mb-2">{{ a.t('settings.import_export') }}</p>
+            <v-btn variant="outlined" prepend-icon="mdi-download" @click="a.exportData" class="mr-2 mb-2">{{ a.t('settings.export') }}</v-btn>
+            <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()" class="mb-2">{{ a.t('settings.import') }}</v-btn>
+            <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
+            <v-divider class="my-4"></v-divider>
+            <p class="text-subtitle-2 mb-2">{{ a.t('settings.share') }}</p>
+            <v-text-field :model-value="a.shareLink" name="share-link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="a.copyText(a.shareLink)"></v-text-field>
+            </template>
+            <v-divider class="my-4"></v-divider>
+            <v-btn variant="outlined" :color="a.isArmed('reset') ? 'error' : 'warning'" :prepend-icon="a.isArmed('reset') ? 'mdi-check-circle' : 'mdi-refresh'" @click="a.isArmed('reset') ? a.resetApp() : a.armDelete('reset')">{{ a.isArmed('reset') ? a.t('settings.confirm_reset') : a.t('settings.reset') }}</v-btn>
+            <template v-if="a.usersLoaded && !a.isUnregisteredUser">
+            <v-divider class="my-4"></v-divider>
+            <p class="text-subtitle-1 font-weight-bold mb-2">{{ a.t('profile.title') }}</p>
+            <div class="d-flex align-center flex-wrap" style="gap:12px">
+              <v-text-field :model-value="a.currentUserEmail" :label="a.t('profile.email')" density="compact" hide-details variant="outlined" readonly style="max-width:240px"></v-text-field>
+              <v-text-field v-model="a.myProfile.name" :label="a.t('profile.your_name')" density="compact" hide-details variant="outlined" style="max-width:240px" @blur="a.saveMyProfile" @keydown.enter="$event.target.blur()" @keydown.home.stop @keydown.end.stop></v-text-field>
+              <v-switch v-if="a.userBackedLists().length" :model-value="a.myProfile.shared" @update:model-value="v => { a.myProfile.shared = v; a.saveMyProfile(); }" :label="a.t('profile.share_name')" density="compact" hide-details color="primary"></v-switch>
+            </div>
+            </template>
+            <template v-if="a.usersLoaded && a.userList.length && a.isAdmin">
+            <v-divider class="my-4"></v-divider>
+            <p class="text-subtitle-1 font-weight-bold mb-2">{{ a.t('settings.user_access_title') }}</p>
+            <p class="text-subtitle-2 mb-2">{{ a.t('settings.user_access') }}</p>
+            <template v-if="a.accessRequests.length">
+              <p class="text-subtitle-2 mb-1">{{ a.t('access.pending_requests') }}</p>
+              <v-table density="compact" class="mb-3">
+                <template v-slot:default>
+                <tbody>
+                  <tr v-for="req in a.accessRequests" :key="req.email">
+                    <td>{{ req.email }}</td>
+                    <td>{{ req.name }}</td>
+                    <td class="text-medium-emphasis">{{ req.note }}</td>
+                    <td style="white-space:nowrap">
+                      <v-btn size="x-small" color="success" variant="text" prepend-icon="mdi-check" @click="a.approveRequest(req)">{{ a.t('access.approve') }}</v-btn>
+                      <v-btn size="x-small" color="error" variant="text" prepend-icon="mdi-close" @click="a.denyRequest(req)">{{ a.t('access.deny') }}</v-btn>
+                    </td>
+                  </tr>
+                </tbody>
+                </template>
+              </v-table>
+            </template>
+            <v-table v-if="a.userList.length" density="compact">
+              <template v-slot:default>
+              <thead><tr><th>{{ a.t('settings.user_id') }}</th><th>{{ a.t('settings.name') }}</th><th>{{ a.t('settings.role') }}</th><th>{{ a.t('settings.tables') }}</th><th></th></tr></thead>
+              <tbody>
+                <tr v-for="u in a.sortedUserList" :key="u.key">
+                  <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="a.renameUser(u, $event.target.textContent.trim())">{{ u.key.indexOf('_new_') === 0 ? '' : u.key }}</span></td>
+                  <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="a.renameUserProfile(u, $event.target.textContent)">{{ a.userDisplayName(u) }}</span></td>
+                  <td><v-select :model-value="u.role" :name="'role-' + u.key" :items="a.roleItems" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="a.setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>
+                  <td><v-select :model-value="a.userFeatures(u)" :items="a.grantFeatureChips" item-title="label" item-value="id" multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:180px;max-width:320px" @update:model-value="a.updateUserTables(u, $event)"></v-select></td>
+                  <td><v-btn :icon="a.isArmed('user:'+u.key) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('user:'+u.key) ? 'error' : ''" @click="a.isArmed('user:'+u.key) ? a.removeUser(u.key) : a.armDelete('user:'+u.key)"></v-btn></td>
+                </tr>
+              </tbody>
+              </template>
+            </v-table>
+            <v-btn variant="text" prepend-icon="mdi-plus" @click="a.addUser()" class="ma-2">{{ a.t('settings.add_user') }}</v-btn>
+            </template>
+            </div>
+          </v-card-text>
         </v-card>
 </template>
