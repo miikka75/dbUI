@@ -2928,6 +2928,32 @@ test.describe('rotationView embedding in data views', () => {
     expect(r.rows[0]).toEqual({ p: '2026-01-01', a: ['A0'], b: ['B0'] });
     expect(r.rows[1]).toEqual({ p: '2026-01-08', a: ['B0'], b: ['A0'] }); // rotateEvery:1 swap
   });
+
+  test('rotationRowsFor/rotationColsFor + isRotationName drive the name-based (page embed) rendering', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // page-view routes a {{view:x}} embed to <rotation-view :name :embed> when isRotationName(x);
+      // the component generates its rows/cols via these name-parameterized helpers (no currentTable).
+      window.VIEWS.rota_n = { name: 'rota_n', rotation: { slots: ['area_a', 'area_b'], rosters: ['NL_a', 'NL_b'], advanceBy: 'calendar', interval: 'weekly', rotateEvery: 1, range: { from: '2026-01-01', periods: 2 } } };
+      app.dataCache['NL_a'] = [{ position: 1, people: ['A0'] }];
+      app.dataCache['NL_b'] = [{ position: 1, people: ['B0'] }];
+      app.appConfig = Object.assign({}, app.appConfig, { rotationAnchors: { rota_n: '2026-01-01' } });
+      app.currentTable = 'tasks';                    // NOT the rotation -> proves name-parameterization
+      var rows = app.rotationRowsFor('rota_n');
+      return {
+        isRot: app.isRotationName('rota_n') === true,
+        notRot: app.isRotationName('tasks') === false,
+        cols: app.rotationColsFor('rota_n', rows),
+        rows: rows.map(function(x) { return { p: x._period, a: x.area_a, b: x.area_b }; })
+      };
+    });
+    expect(r.isRot).toBe(true);                                // routed to rotation-view (not empty embed-view)
+    expect(r.notRot).toBe(true);
+    expect(r.cols).toEqual(['_period', 'area_a', 'area_b']);   // slot columns even though currentTable=tasks
+    expect(r.rows[0]).toEqual({ p: '2026-01-01', a: ['A0'], b: ['B0'] });
+    expect(r.rows[1]).toEqual({ p: '2026-01-08', a: ['B0'], b: ['A0'] });
+  });
 });
 
 test.describe('rotationView filter / hideEmpty / layout', () => {
