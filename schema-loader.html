@@ -376,7 +376,7 @@ function addIntervals(dateStr, n, interval) {
   if (p.unit === 'm') { d.setMonth(d.getMonth() + step); }
   else if (p.unit === 'w') { d.setDate(d.getDate() + step * 7); }
   else { d.setDate(d.getDate() + step); } // 'd'
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return fmtDate(d);
 }
 
 // rotation: the third view kind. Generates `range.periods` rows from `range.from` (calendar mode
@@ -477,9 +477,8 @@ function _withinPeriod(dateVal, token) {
   else if (unit === 'week') { var dow = (now.getDay() + 6) % 7; start = new Date(now); start.setDate(now.getDate() - dow - back * 7); end = new Date(start); end.setDate(start.getDate() + 7); }
   else if (unit === 'month') { start = new Date(now.getFullYear(), now.getMonth() - back, 1); end = new Date(start.getFullYear(), start.getMonth() + 1, 1); }
   else { start = new Date(now.getFullYear() - back, 0, 1); end = new Date(start.getFullYear() + 1, 0, 1); }
-  var fmt = function(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
   var ds = String(dateVal).slice(0, 10);
-  return ds >= fmt(start) && ds < fmt(end);
+  return ds >= fmtDate(start) && ds < fmtDate(end);
 }
 function condMatches(item, cond) {
   if (!cond || typeof cond !== 'object') return true;
@@ -504,7 +503,10 @@ function condMatches(item, cond) {
   }
   return true;
 }
-function toDateStr(v) { if (!v) return ''; var s = String(v); if (s.length === 10) return s; var d = new Date(s); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+// Canonical local YYYY-MM-DD formatter for a Date. Single source for every date-string the app emits
+// (toDateStr, addIntervals, period math, and the app's calendar/rotation helpers all route through it).
+function fmtDate(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function toDateStr(v) { if (!v) return ''; var s = String(v); if (s.length === 10) return s; return fmtDate(new Date(s)); }
 function parseTableResult(r) { if (!r) return { headers: [], rows: [] }; if (typeof r === 'string') return JSON.parse(r); return r; }
 function validateSchema() {
   var errors = [];
