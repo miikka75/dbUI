@@ -1009,6 +1009,9 @@ function createVueApp() {
         if (typeof cfg.markdown === 'string' && !cfg.filterBy && cfg.name) { // named doc-view embed (no filterBy: global show/hide)
           return { config: cfg, kind: 'doc', blocks: self.mdBlocks(cfg.markdown, cfg.name), show: self.docHasData(cfg.markdown, cfg.name) };
         }
+        if (cfg.calendar) { // calendarView embed -> delegate to the calendar-view component (embed mode)
+          return { config: cfg, kind: 'calendar', name: cfg.view || cfg.name || self.currentTable };
+        }
         if (cfg.rotation) { // rotationView embed (a {view:x} where x is a rotationView) -> generate period rows
           var anchorName = cfg.view || cfg.name || self.currentTable;
           var rrows = self.rotationRowsFor(anchorName, cfg.rotation);
@@ -1065,6 +1068,15 @@ function createVueApp() {
       // as columns/row-filters) to show a prose/data block only on cards whose row matches — e.g.
       // a markdown block above a column shown only when a computed value is present.
       embedWhenOk: function(ei, item) { return !ei.config.when || condMatches(item || {}, ei.config.when); },
+      // Whether an embed has content to show at all (drives the wrapper v-if in every position). doc ->
+      // its own show flag; calendar -> always (the component handles its own emptiness); otherwise the
+      // relevant rows (per-row filterBy slice when an `item` context is given) must be non-empty.
+      embedVisible: function(ei, item) {
+        if (ei.kind === 'doc') return !!ei.show;
+        if (ei.kind === 'calendar') return true;
+        var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows;
+        return !!(rows && rows.length);
+      },
       // Embed row controls — operate on the active partition across the mirror cluster (dataCache is reactive)
       embedSources: function(type, name) { return type === 'view' && VIEWS[name] ? (VIEWS[name].sources || []) : [name]; },
       canMutateEmbed: function(type, name) {
@@ -2885,6 +2897,7 @@ function createVueApp() {
       + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in ei.columns" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
       + '<tbody><tr v-for="er in rowsFor(ei)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" :style="tdStyle">{{ displayValue(ec, er[ec]) }}</td></tr></tbody></table>'
       + '</template>'
+      + '<template v-else-if="ei.kind === \'calendar\'"><calendar-view :name="ei.name" :embed="true"></calendar-view></template>'
       + '<template v-else-if="ei.kind === \'rotation\'"><table :style="tblStyle"><thead><tr><th v-for="ec in ei.columns" :key="ec" :style="thStyle">{{ ec === \'_period\' ? t(\'field.period\') : (t(\'field.\' + ec) || ec) }}</th></tr></thead>'
       + '<tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" :style="tdStyle">{{ ec === \'_period\' ? toDateStr(er[ec]) : displayValue(ec, er[ec]) }}</td></tr></tbody></table></template>'
       + '<template v-else-if="ei.kind === \'data\'">'

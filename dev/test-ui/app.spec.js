@@ -2954,6 +2954,25 @@ test.describe('rotationView embedding in data views', () => {
     expect(r.rows[0]).toEqual({ p: '2026-01-01', a: ['A0'], b: ['B0'] });
     expect(r.rows[1]).toEqual({ p: '2026-01-08', a: ['B0'], b: ['A0'] });
   });
+
+  test('a {view:cal} embed in a data view resolves to a calendar spec (kind=calendar, was empty)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // Previously a calendar embedded in a data view fell through embed-view (no calendar handling)
+      // and rendered empty; resolveEmbed now tags it kind='calendar' -> <calendar-view :embed>.
+      window.VIEWS.cal_de = { name: 'cal_de', calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'], defaultView: 'month' } };
+      window.VIEWS.host_cd = { name: 'host_cd', sources: ['tasks'], columns: ['title', { view: 'cal_de' }] };
+      app.dataCache['tasks'] = [{ id: 'a', date: '2026-07-08', title: 'Alpha' }];
+      app.userList = []; app.usersLoaded = true;
+      app.currentTable = 'host_cd';
+      const cal = app.embedItems.find(function(e) { return e.kind === 'calendar'; });
+      return cal ? { name: cal.name, visible: app.embedVisible(cal) } : null;
+    });
+    expect(r).not.toBeNull();       // calendar embed recognized in a data view (the closed gap)
+    expect(r.name).toBe('cal_de');
+    expect(r.visible).toBe(true);   // calendar always shows; the component handles its own emptiness
+  });
 });
 
 test.describe('rotationView filter / hideEmpty / layout', () => {
