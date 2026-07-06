@@ -2737,6 +2737,19 @@ function createVueApp() {
   });
 
   app.use(vuetify);
+
+  // Shared call-throughs to the root instance. Vue resolves template refs on the component instance, so
+  // leaf components must re-expose the root methods their templates call; spread this object into their
+  // `methods` (Object.assign) instead of re-declaring identical proxies. Opt-in per component on purpose
+  // — a global app.mixin would leak these names (e.g. `t`) into every Vuetify component.
+  var ROOT_PROXY = {
+    t: function(k) { return appInstance ? appInstance.t(k) : k; },
+    tOr: function(k, f) { return appInstance ? appInstance.tOr(k, f) : f; },
+    displayValue: function(c, v) { return appInstance ? appInstance.displayValue(c, v) : v; },
+    colIsDate: function(c) { return appInstance ? appInstance.colIsDate(c) : false; },
+    toDateStr: toDateStr
+  };
+
   // The single embed renderer for every envelope (page-view, doc-view blocks, data-view). It dispatches
   // by kind: calendar/rotation delegate to their unified :embed components; 'doc' renders markdown blocks
   // (recursing into embed-view for nested embeds); 'data' renders a view/table's rows. Two input modes:
@@ -2775,16 +2788,12 @@ function createVueApp() {
       thStyle: function() { return 'text-align:left; padding:' + this.cellPad + '; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)'; },
       tdStyle: function() { return 'padding:' + this.cellPad; }
     },
-    methods: {
-      t: function(k) { return appInstance ? appInstance.t(k) : k; },
-      colIsDate: function(c) { return appInstance && appInstance.colIsDate(c); },
-      displayValue: function(c, v) { return appInstance ? appInstance.displayValue(c, v) : v; },
-      toDateStr: toDateStr,
+    methods: Object.assign({}, ROOT_PROXY, {
       isArmed: function(item) { return appInstance.isArmed('erow:' + item.id); },
       addRow: function() { return appInstance.embedAddRow(this.type, this.name); },
       delRow: function(item) { return appInstance.embedDeleteRow(this.type, this.name, item); },
       archRow: function(item) { return appInstance.embedArchiveRow(this.type, this.name, item); }
-    },
+    }),
     template: ''
       + '<calendar-view v-if="kind===\'calendar\'" :name="calName" :embed="true"></calendar-view>'
       + '<rotation-view v-else-if="kind===\'rotation\'" :name="calName" :embed="true"></rotation-view>'
@@ -2849,14 +2858,13 @@ function createVueApp() {
       readonly: { type: Boolean, default: false },
       embed: { type: Boolean, default: false }
     },
-    methods: {
+    methods: Object.assign({}, ROOT_PROXY, {
       cellRO: function(item, col) { return this.readonly || appInstance.cellReadonly(item, col, this.owner); },
       colIsMirrorForTable: function(col) { return appInstance.colIsMirrorForTable(col); },
       colIsMultiselect: function(col) { return appInstance.colIsMultiselect(col); },
       colAllowNew: function(col) { return appInstance.colAllowNew(col); },
       colIsList: function(col) { return appInstance.colIsList(col); },
       colIsRef: function(col) { return appInstance.colIsRef(col); },
-      colIsDate: function(col) { return appInstance.colIsDate(col); },
       colListSwitch: function(col) { return appInstance.colListSwitch(col); },
       getListOptions: function(col) { return appInstance.getListOptions(col); },
       // single-select options: the primary honors the listSwitch alt list; the embed uses the plain list.
@@ -2868,11 +2876,9 @@ function createVueApp() {
       getRefOptions: function(col, item) { return appInstance.getRefOptions(col, item); },
       isAltList: function(col, item) { return appInstance.isAltList(col, item); },
       toggleListSwitch: function(col, item) { return appInstance.toggleListSwitch(col, item); },
-      displayValue: function(col, v) { return appInstance.displayValue(col, v); },
-      toDateStr: toDateStr,
       save: function(item, col, val) { return appInstance.saveField(item, col, val, this.owner); },
       addToListOnBlur: function(item, col) { return appInstance.addToListOnBlur(item, col); }
-    },
+    }),
     template: ''
       + '<span v-if="cellRO(item, col)" :style="{ opacity: embed ? 0.4 : 0.75 }">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
       + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
@@ -2948,7 +2954,7 @@ function createVueApp() {
 
   app.component('cal-agenda', {
     props: CAL_BODY_PROPS,
-    methods: { tOr: function(k, f) { return appInstance ? appInstance.tOr(k, f) : f; } },
+    methods: ROOT_PROXY,
     template: ''
       + '<div><template v-for="d in days" :key="d.date">'
       + '<div style="background:rgb(var(--v-theme-on-surface),0.06);padding:4px 12px;font-size:0.72rem;font-weight:600;opacity:0.85">{{ d.label }} · {{ d.events.length }}</div>'
@@ -2962,7 +2968,7 @@ function createVueApp() {
 
   app.component('cal-day-panel', {
     props: { label: String, events: { type: Array, default: function() { return []; } } },
-    methods: { tOr: function(k, f) { return appInstance ? appInstance.tOr(k, f) : f; } },
+    methods: ROOT_PROXY,
     template: ''
       + '<div><v-divider></v-divider><div style="padding:10px 12px">'
       + '<div style="font-weight:600;margin-bottom:6px">{{ label }} <span style="opacity:0.5;font-weight:400">· {{ events.length }} {{ tOr(\'cal.items\',\'items\') }}</span></div>'
@@ -2975,15 +2981,10 @@ function createVueApp() {
   // Same registry-selected pattern as the calendar body: table / cards / list share one prop contract
   // { cols, slotCols, rows } and are swapped via VIEW_PARTS.rotation[rotationDisplayLayout].
   var ROT_BODY_PROPS = { cols: Array, slotCols: Array, rows: Array };
-  var ROT_BODY_METHODS = {
-    t: function(k) { return appInstance ? appInstance.t(k) : k; },
-    displayValue: function(c, v) { return appInstance ? appInstance.displayValue(c, v) : v; },
-    toDateStr: toDateStr
-  };
 
   app.component('rotation-table', {
     props: ROT_BODY_PROPS,
-    methods: Object.assign({ head: function(col) { return col === '_period' ? this.t('field.period') : (this.t('field.' + col) || col); } }, ROT_BODY_METHODS),
+    methods: Object.assign({ head: function(col) { return col === '_period' ? this.t('field.period') : (this.t('field.' + col) || col); } }, ROOT_PROXY),
     template: ''
       + '<v-table density="compact"><template v-slot:default>'
       + '<thead><tr><th v-for="col in cols" :key="col">{{ head(col) }}</th></tr></thead>'
@@ -2992,7 +2993,7 @@ function createVueApp() {
   });
 
   app.component('rotation-cards', {
-    props: ROT_BODY_PROPS, methods: ROT_BODY_METHODS,
+    props: ROT_BODY_PROPS, methods: ROOT_PROXY,
     template: ''
       + '<div style="display:grid; gap:8px; padding:8px">'
       + '<div v-for="row in rows" :key="row.id" style="padding:8px 12px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:8px">'
@@ -3002,7 +3003,7 @@ function createVueApp() {
   });
 
   app.component('rotation-list', {
-    props: ROT_BODY_PROPS, methods: ROT_BODY_METHODS,
+    props: ROT_BODY_PROPS, methods: ROOT_PROXY,
     template: ''
       + '<div style="padding:4px 0">'
       + '<div v-for="row in rows" :key="row.id" style="padding:4px 12px; border-bottom:1px solid rgb(var(--v-theme-outline),0.08); font-size:0.9rem">'
@@ -3023,13 +3024,12 @@ function createVueApp() {
       canMutateRows: function() { return appInstance.canMutateRows; },
       hasArchive: function() { return appInstance.hasArchive; }
     },
-    methods: {
-      displayValue: function(c, v) { return appInstance.displayValue(c, v); },
+    methods: Object.assign({}, ROOT_PROXY, {
       isArmed: function(k) { return appInstance.isArmed(k); },
       printCard: function(it) { return appInstance.printCard(it); },
       archiveRow: function(it) { return appInstance.archiveRow(it); },
       deleteRow: function(it) { return appInstance.deleteRow(it); }
-    },
+    }),
     template: ''
       + '<v-list density="compact">'
       + '<v-list-item v-for="item in rows" :key="item.id" class="px-2">'
@@ -3071,14 +3071,13 @@ function createVueApp() {
       undated: function() { return this.events['__undated__'] || []; },
       body: function() { return window.viewPartFor('calendar', this.displayMode) || 'cal-agenda'; }
     },
-    methods: {
-      tOr: function(k, f) { return appInstance ? appInstance.tOr(k, f) : f; },
+    methods: Object.assign({}, ROOT_PROXY, {
       prev: function() { this.anchor = addIntervals(this.anchor, -1, this.mode === 'week' ? 'weekly' : 'monthly'); },
       next: function() { this.anchor = addIntervals(this.anchor, 1, this.mode === 'week' ? 'weekly' : 'monthly'); },
       goToday: function() { this.anchor = this.sel = appInstance._calToday(); },
       setMode: function(m) { this.mode = m; },
       selectDay: function(d) { this.sel = d; }
-    },
+    }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" :style="embed ? \'border:1px solid rgb(var(--v-theme-outline),0.2);border-radius:8px\' : \'\'" :data-testid="embed ? undefined : \'cal-view\'">'
       + '<div class="d-flex align-center flex-wrap pa-2" style="gap:8px">'
