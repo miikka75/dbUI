@@ -2757,11 +2757,15 @@ function createVueApp() {
   });
 
   app.use(vuetify);
-  // Self-computing, interactive embed-view: resolves its own cols/rows from the root and
-  // delegates editing to the root's ownerId-parameterized methods (saveField/cellReadonly).
+  // Self-computing, interactive embed-view: the single entry point for a {{view/table:x}} embed. It
+  // dispatches by kind — calendar/rotation delegate to their unified :embed components; otherwise it
+  // resolves its own cols/rows from the root and delegates editing to the root's ownerId-parameterized
+  // methods (saveField/cellReadonly). Callers (page-view, doc-view blocks) no longer branch on kind.
   app.component('embed-view', {
     props: { type: { type: String, default: 'view' }, name: { type: String, required: true }, part: { type: String, default: null } },
     computed: {
+      isCal: function() { return this.type === 'view' && !!(appInstance && appInstance.isCalendarName(this.name)); },
+      isRot: function() { return this.type === 'view' && !!(appInstance && appInstance.isRotationName(this.name)); },
       cols: function() { if (!appInstance) return []; var cols = appInstance.embedCols(this.type, this.name); if (appInstance.embedHideEmpty(this.type, this.name)) { var rows = this.rows; cols = cols.filter(function(c) { return rows.some(function(r) { return r[c]; }); }); } return cols; },
       rows: function() { return appInstance ? appInstance.embedRows(this.type, this.name, this.part) : []; },
       canMutate: function() { return !this.part && appInstance && appInstance.canMutateEmbed(this.type, this.name); },
@@ -2778,7 +2782,10 @@ function createVueApp() {
       delRow: function(item) { return appInstance.embedDeleteRow(this.type, this.name, item); },
       archRow: function(item) { return appInstance.embedArchiveRow(this.type, this.name, item); }
     },
-    template: '<div>'
+    template: ''
+      + '<calendar-view v-if="isCal" :name="name" :embed="true"></calendar-view>'
+      + '<rotation-view v-else-if="isRot" :name="name" :embed="true"></rotation-view>'
+      + '<div v-else>'
       + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
       + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
       + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" style="font-size:0.85rem">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}<span v-if="i < cols.length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
@@ -3165,8 +3172,6 @@ function createVueApp() {
       + '<v-textarea v-if="a.pageEditing" :model-value="a.pageEditText" @update:model-value="a.pageEditText = $event" auto-grow variant="outlined" density="compact" placeholder="# Markdown — embed views with {{view:name}} or {{table:name}}"></v-textarea>'
       + '<template v-else v-for="(blk, bi) in a.pageBlocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html"></div>'
-      + '<calendar-view v-else-if="blk.embedType === \'view\' && a.isCalendarName(blk.embedName)" :name="blk.embedName" :embed="true"></calendar-view>'
-      + '<rotation-view v-else-if="blk.embedType === \'view\' && a.isRotationName(blk.embedName)" :name="blk.embedName" :embed="true"></rotation-view>'
       + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>'
       + '</template>'
       + '</v-card>'
