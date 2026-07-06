@@ -2782,17 +2782,8 @@ function createVueApp() {
     methods: {
       t: function(k) { return appInstance ? appInstance.t(k) : k; },
       colIsDate: function(c) { return appInstance && appInstance.colIsDate(c); },
-      colIsList: function(c) { return appInstance && appInstance.colIsList(c); },
-      colIsMultiselect: function(c) { return appInstance && appInstance.colIsMultiselect(c); },
-      colAllowNew: function(c) { return appInstance && appInstance.colAllowNew(c); },
-      colIsRef: function(c) { return appInstance && appInstance.colIsRef(c); },
-      getListOptions: function(c) { return appInstance ? appInstance.getListOptions(c) : []; },
-      getRefOptions: function(c, item) { return appInstance ? appInstance.getRefOptions(c, item) : []; },
       displayValue: function(c, v) { return appInstance ? appInstance.displayValue(c, v) : v; },
       toDateStr: toDateStr,
-      cellRO: function(item, col) { return !!this.part || appInstance.cellReadonly(item, col, this.name); },
-      save: function(item, col, val) { return appInstance.saveField(item, col, val, this.name); },
-      addToListOnBlur: function(item, col) { return appInstance.addToListOnBlur(item, col); },
       isArmed: function(item) { return appInstance.isArmed('erow:' + item.id); },
       addRow: function() { return appInstance.embedAddRow(this.type, this.name); },
       delRow: function(item) { return appInstance.embedDeleteRow(this.type, this.name, item); },
@@ -2812,14 +2803,7 @@ function createVueApp() {
       + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
       + '<thead><tr><th v-for="c in cols" :key="c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
       + '<tbody><tr v-for="(item, ri) in rows" :key="item.id || ri"><td v-for="col in cols" :key="col">'
-      + '<span v-if="cellRO(item, col)" style="opacity:0.4">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
-      + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)"></v-combobox>'
-      + '<v-autocomplete v-else-if="colIsMultiselect(col)" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details @update:model-value="save(item, col, $event)"></v-autocomplete>'
-      + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :model-value="item[col] || \'\'" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)"></v-combobox>'
-      + '<v-autocomplete v-else-if="colIsList(col)" :model-value="item[col] || \'\'" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="save(item, col, $event)"></v-autocomplete>'
-      + '<v-autocomplete v-else-if="colIsRef(col)" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line @update:model-value="save(item, col, $event)"></v-autocomplete>'
-      + '<input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="save(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">'
-      + '<span v-else class="editable-cell" contenteditable @blur="save(item, col, $event.target.textContent)">{{ item[col] || \'\' }}</span>'
+      + '<data-cell :item="item" :col="col" :owner="name" :readonly="!!part" :embed="true"></data-cell>'
       + '</td><td v-if="canMutate" style="white-space:nowrap">'
       + '<v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn>'
       + '<v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn>'
@@ -2829,16 +2813,25 @@ function createVueApp() {
       + '</div>'
   });
 
-  // --- Data view: one editable cell, shared by the card + table layouts ------------------------
+  // --- Data view: one editable cell, shared by the primary card/table layouts AND embed-view -----
   // The ~13-branch column editor (readonly / mirror / multiselect / list w/ listSwitch / ref / date /
-  // contenteditable) was written twice in ui.html. Now one component: typing/options/save proxy to
-  // appInstance (ownerId defaults to currentTable). Styled with flex:1 (grows inside the flex card-field;
-  // inert in a table td) + min-width:auto, so it renders identically in both layouts. The lighter
-  // embed-view has its own simpler cell (no mirror/listSwitch) and is intentionally left separate.
+  // contenteditable). Typing/options/save proxy to appInstance. Props parameterize the two callers:
+  //   owner    - ownerId for save + cellReadonly (undefined -> currentTable for the primary view;
+  //              the embed passes its table/view name so edits route to the right table).
+  //   readonly - force read-only (an embed with a `part` is non-editable).
+  //   embed    - embed variant: no mirror branch (mirror-ness is relative to currentTable, not the
+  //              embed's table), no listSwitch swap, dimmer read-only. flex:1 / :name / keydown guards
+  //              are harmless in both, so they stay unconditional and the markup renders identically.
   app.component('data-cell', {
-    props: { item: { type: Object, required: true }, col: { type: String, required: true } },
+    props: {
+      item: { type: Object, required: true },
+      col: { type: String, required: true },
+      owner: { type: String, default: undefined },
+      readonly: { type: Boolean, default: false },
+      embed: { type: Boolean, default: false }
+    },
     methods: {
-      cellReadonly: function(item, col) { return appInstance.cellReadonly(item, col); },
+      cellRO: function(item, col) { return this.readonly || appInstance.cellReadonly(item, col, this.owner); },
       colIsMirrorForTable: function(col) { return appInstance.colIsMirrorForTable(col); },
       colIsMultiselect: function(col) { return appInstance.colIsMultiselect(col); },
       colAllowNew: function(col) { return appInstance.colAllowNew(col); },
@@ -2846,29 +2839,35 @@ function createVueApp() {
       colIsRef: function(col) { return appInstance.colIsRef(col); },
       colIsDate: function(col) { return appInstance.colIsDate(col); },
       colListSwitch: function(col) { return appInstance.colListSwitch(col); },
-      getListOptions: function(col, alt) { return appInstance.getListOptions(col, alt); },
+      getListOptions: function(col) { return appInstance.getListOptions(col); },
+      // single-select options: the primary honors the listSwitch alt list; the embed uses the plain list.
+      listItems: function(col, item) {
+        if (this.embed) return appInstance.getListOptions(col);
+        var sw = appInstance.colListSwitch(col);
+        return appInstance.getListOptions(col, (sw && appInstance.isAltList(col, item)) ? sw.list : null);
+      },
       getRefOptions: function(col, item) { return appInstance.getRefOptions(col, item); },
       isAltList: function(col, item) { return appInstance.isAltList(col, item); },
       toggleListSwitch: function(col, item) { return appInstance.toggleListSwitch(col, item); },
       displayValue: function(col, v) { return appInstance.displayValue(col, v); },
       toDateStr: toDateStr,
-      saveField: function(item, col, val) { return appInstance.saveField(item, col, val); },
+      save: function(item, col, val) { return appInstance.saveField(item, col, val, this.owner); },
       addToListOnBlur: function(item, col) { return appInstance.addToListOnBlur(item, col); }
     },
     template: ''
-      + '<span v-if="cellReadonly(item, col)" style="opacity:0.75">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
-      + '<span v-else-if="colIsMirrorForTable(col)" style="opacity:0.82">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
-      + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>'
-      + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
-      + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || \'\'" :items="getListOptions(col, isAltList(col, item) ? colListSwitch(col).list : null)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>'
-      + '<template v-if="colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || \'Switch list\'">mdi-swap-horizontal</v-icon></template>'
+      + '<span v-if="cellRO(item, col)" :style="{ opacity: embed ? 0.4 : 0.75 }">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
+      + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
+      + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop></v-combobox>'
+      + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
+      + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>'
+      + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || \'Switch list\'">mdi-swap-horizontal</v-icon></template>'
       + '</v-combobox>'
-      + '<v-autocomplete v-else-if="colIsList(col)" :name="col" :model-value="item[col] || \'\'" :items="getListOptions(col, isAltList(col, item) ? colListSwitch(col) && colListSwitch(col).list : null)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop>'
-      + '<template v-if="colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || \'Switch list\'">mdi-swap-horizontal</v-icon></template>'
+      + '<v-autocomplete v-else-if="colIsList(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop>'
+      + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || \'Switch list\'">mdi-swap-horizontal</v-icon></template>'
       + '</v-autocomplete>'
-      + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="saveField(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
-      + '<input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="saveField(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">'
-      + '<span v-else class="editable-cell" contenteditable @blur="saveField(item, col, $event.target.textContent)" style="min-width:auto">{{ item[col] || \'\' }}</span>'
+      + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
+      + '<input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="save(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">'
+      + '<span v-else class="editable-cell" contenteditable @blur="save(item, col, $event.target.textContent)" style="min-width:auto">{{ item[col] || \'\' }}</span>'
   });
 
   // --- Composable calendar elements (registry-driven parts) -------------------------------------
