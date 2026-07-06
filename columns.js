@@ -47,12 +47,21 @@
   function colAllowNew(schema, col) { return scanProp(schema, col, function(d) { return !!d.allowNew; }); }
   function colIsSorted(schema, col) { return scanProp(schema, col, function(d) { return !!d.sorted; }); }
 
+  // View column-entry shape predicates (a view's `columns` array mixes plain names, {name,...} defs,
+  // inline embeds, named-view embeds and legacy text blocks). Moved here from schema-loader.html so the
+  // embed/row modules can require them; the browser also gets them as bare globals (see export below).
+  function colName(c) { return c && typeof c === 'object' ? (c.name || Object.keys(c)[0]) : c; }
+  function isEmbed(c) { return typeof c === 'object' && c.sources && !c.name; }
+  function isViewEmbed(c) { return typeof c === 'object' && typeof c.view === 'string'; } // {view:name,filter?,hideEmpty?} -> embed a named view
+  function isText(c) { return typeof c === 'object' && c.text && !c.name && !c.sources; }
+
   var C = {
     columnType: columnType, columnList: columnList, columnRef: columnRef,
     isMirror: isMirror, tableMirrorSource: tableMirrorSource,
     colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate,
-    colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted
+    colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted,
+    colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
-  else root.Columns = C;
+  else { root.Columns = C; root.colName = colName; root.isEmbed = isEmbed; root.isViewEmbed = isViewEmbed; root.isText = isText; } // shape predicates as bare globals (schema-loader + app-core call them unqualified)
 })(typeof self !== 'undefined' ? self : this);

@@ -947,112 +947,30 @@ function createVueApp() {
           self.pageCache[name] = row ? row.markdown : ((VIEWS[name] && VIEWS[name].markdown) || '');
         }).catch(function() {});
       },
-      // v3 pages: a {{view:x}}/{{table:x}} embed block — self-computing component resolves cols/rows
-      buildEmbedBlock: function(type, name, part) {
-        if ((type === 'view' && VIEWS[name]) || (type === 'table' && SCHEMA[name])) return { embedType: type, embedName: name, embedPart: part || null };
-        return { html: '<em>Unknown embed: ' + type + ':' + name + '</em>' };
-      },
-      // Parse markdown into render blocks: {html} or {embedType,embedName,embedPart}. `?` hides empty embeds.
-      mdBlocks: function(markdown, selfName) {
+      // Embed resolution lives in /embeds.js (pure over this ctx). The root keeps same-named thin
+      // wrappers so components/templates/tests are unchanged; only root-state reads cross this seam.
+      _embedCtx: function() {
         var self = this;
-        var md = String(markdown || '').replace(/\{\{\s*self\s*\}\}/g, selfName ? '{{view:' + selfName + '}}' : '').replace(/\{\{\s*t\s*:\s*([^\s{}:]+)\s*\}\}/g, function(_, k) { return self.t(k) || ''; });
-        var parts = md.split(/\{\{\s*(view|table)\s*:\s*([^\s@?{}:]+(?:@[^\s?{}:]+)?\??)\s*\}\}/);
-        var blocks = [], i = 0;
-        while (i < parts.length) {
-          if (parts[i]) blocks.push({ html: mdToHtml(parts[i]) });
-          if (i + 2 < parts.length) {
-            var type = parts[i + 1], raw = parts[i + 2];
-            var optional = raw.charAt(raw.length - 1) === '?'; if (optional) raw = raw.slice(0, -1);
-            var at = raw.indexOf('@'), part = at >= 0 ? raw.slice(at + 1) : null, name = at >= 0 ? raw.slice(0, at) : raw;
-            if (!(optional && self.embedRows(type, name, part).length === 0)) blocks.push(self.buildEmbedBlock(type, name, part)); // hide-when-empty
-            i += 3;
-          } else break;
-        }
-        return blocks;
+        return {
+          views: VIEWS, schema: SCHEMA, getColumns: getColumns,
+          dataCache: this.dataCache, currentTable: this.currentTable,
+          t: function(k) { return self.t(k); },
+          viewWithMe: function(v) { return self._viewWithMe(v); },
+          anchorForView: function(n) { return self.anchorForView(n); },
+          rotationRowsFor: function(n, rv) { return self.rotationRowsFor(n, rv); }
+        };
       },
-      // For an embedded doc-view: false only if it has data embeds and ALL of them are empty (hide whole doc-view).
-      docHasData: function(markdown, selfName) {
-        var md = String(markdown || '').replace(/\{\{\s*self\s*\}\}/g, selfName ? '{{view:' + selfName + '}}' : '');
-        var re = /\{\{\s*(view|table)\s*:\s*([^\s@?{}:]+)(@[^\s?{}:]+)?\??\s*\}\}/g, m, any = false;
-        while ((m = re.exec(md))) { any = true; if (this.embedRows(m[1], m[2], m[3] ? m[3].slice(1) : null).length) return true; }
-        return !any;
-      },
-      // Normalize one embed config into a render `spec` for the unified embed renderer. The `kind` field
-      // drives dispatch: 'doc' (markdown blocks), 'rotation' (generated periods), 'data' (a view/table's
-      // rows). Shared by embedItems (data-view) and the page/doc paths so every envelope embeds uniformly.
-      resolveEmbed: function(cfg) {
-        var self = this;
-        if (typeof cfg.markdown === 'string' && !cfg.filterBy && cfg.name) { // named doc-view embed (no filterBy: global show/hide)
-          return { config: cfg, kind: 'doc', blocks: self.mdBlocks(cfg.markdown, cfg.name), show: self.docHasData(cfg.markdown, cfg.name) };
-        }
-        if (cfg.calendar) { // calendarView embed -> delegate to the calendar-view component (embed mode)
-          return { config: cfg, kind: 'calendar', name: cfg.view || cfg.name || self.currentTable };
-        }
-        if (cfg.rotation) { // rotationView embed (a {view:x} where x is a rotationView) -> generate period rows
-          var anchorName = cfg.view || cfg.name || self.currentTable;
-          var rrows = self.rotationRowsFor(anchorName, cfg.rotation);
-          var slotNames = cfg.rotation.slots ? cfg.rotation.slots.slice() : (cfg.rotation.columns || []).map(function(c) { return c.name; });
-          return { config: cfg, kind: 'rotation', name: anchorName, columns: ['_period'].concat(slotNames), rows: rrows };
-        }
-        var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
-        var columns = raw.map(function(c) { return colName(c); });
-        var rows = buildRows(self._viewWithMe(cfg), self.dataCache);
-        resolveComputed(rows, cfg.columns || [], { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
-        if (cfg.defaultSort) { rows = sortByCol(rows, cfg.defaultSort); }
-        if (cfg.hideEmpty) { columns = columns.filter(function(col) { return rows.some(function(r) { return r[col]; }); }); }
-        // Inline embed markdown: build blocks (prose + {{self}} markers for own table)
-        var inlineBlocks = null;
-        if (typeof cfg.markdown === 'string') {
-          var md = String(cfg.markdown).replace(/\{\{\s*t\s*:\s*([^\s{}:]+)\s*\}\}/g, function(_, k) { return self.t(k) || ''; });
-          var blockParts = md.split(/\{\{\s*self\s*\}\}/);
-          inlineBlocks = [];
-          blockParts.forEach(function(part, i) {
-            if (part.trim()) inlineBlocks.push({ html: mdToHtml(part.trim()) });
-            if (i < blockParts.length - 1) inlineBlocks.push({ self: true }); // marker: render own table here
-          });
-        }
-        return { config: cfg, kind: 'data', columns: columns, rows: rows, inlineBlocks: inlineBlocks };
-      },
-      embedCols: function(type, name) {
-        if (type === 'view' && VIEWS[name]) return (VIEWS[name].columns || []).filter(function(c) { return !isEmbed(c) && !isViewEmbed(c); }).map(colName);
-        if (type === 'table' && SCHEMA[name]) return getColumns(name).filter(function(c) { var d = SCHEMA[name].columns[c]; return c !== 'id' && !(d && typeof d === 'object' && d.hidden); });
-        return [];
-      },
-      embedRows: function(type, name, part) {
-        if (type === 'view' && VIEWS[name]) {
-          var v = VIEWS[name], cache = this.dataCache;
-          if (part) { cache = {}; var dc = this.dataCache; (v.sources || []).forEach(function(s) { cache[s] = dc[s + '__' + part] || []; }); }
-          var vMe = this._viewWithMe(v);
-          var esrc = buildRows(vMe, cache);
-          if (v.compute) esrc = resolveComputed(esrc, v.compute, { dataCache: this.dataCache, rotationAnchor: this.anchorForView(v.name) });
-          return sortByCol(resolveComputed(aggregateRows(vMe, esrc), v.columns, { dataCache: this.dataCache, rotationAnchor: this.anchorForView(v.name) }), v.defaultSort, v);
-        }
-        if (type === 'table' && SCHEMA[name]) return sortByCol(this.dataCache[part ? name + '__' + part : name] || [], SCHEMA[name].defaultSort);
-        return [];
-      },
+      buildEmbedBlock: function(type, name, part) { return Embeds.buildEmbedBlock(type, name, part, this._embedCtx()); },
+      mdBlocks: function(markdown, selfName) { return Embeds.mdBlocks(markdown, selfName, this._embedCtx()); },
+      docHasData: function(markdown, selfName) { return Embeds.docHasData(markdown, selfName, this._embedCtx()); },
+      resolveEmbed: function(cfg) { return Embeds.resolveEmbed(cfg, this._embedCtx()); },
+      embedCols: function(type, name) { return Embeds.embedCols(type, name, this._embedCtx()); },
+      embedRows: function(type, name, part) { return Embeds.embedRows(type, name, part, this._embedCtx()); },
       embedHideEmpty: function(type, name) { var c = type === 'view' ? VIEWS[name] : SCHEMA[name]; return !!(c && c.hideEmpty); },
       embedViewLayout: function(type, name) { var c = type === 'view' ? VIEWS[name] : SCHEMA[name]; return (c && c.layout) || 'table'; },
-      embedRowsForItem: function(ei, item) {
-        if (!ei.config.filterBy || !item) return ei.rows;
-        var fb = ei.config.filterBy; // { embedCol: cardCol } or { embedCol: { matchList: "listName" } }
-        return ei.rows.filter(function(r) {
-          for (var k in fb) { var v = fb[k]; if (v && typeof v === 'object' && v.matchList) { var _L = window._listsCache && window._listsCache[v.matchList]; var _rv = r[k]; var _ok = _L && (Array.isArray(_rv) ? _rv.some(function(x){ return _L.indexOf(x) >= 0; }) : _L.indexOf(_rv) >= 0); if (!_ok) return false; } else if (r[k] !== item[v]) return false; }
-          return true;
-        });
-      },
-      // Per-row embed visibility: an embed entry may carry a `when` filter (same condMatches engine
-      // as columns/row-filters) to show a prose/data block only on cards whose row matches — e.g.
-      // a markdown block above a column shown only when a computed value is present.
-      embedWhenOk: function(ei, item) { return !ei.config.when || condMatches(item || {}, ei.config.when); },
-      // Whether an embed has content to show at all (drives the wrapper v-if in every position). doc ->
-      // its own show flag; calendar -> always (the component handles its own emptiness); otherwise the
-      // relevant rows (per-row filterBy slice when an `item` context is given) must be non-empty.
-      embedVisible: function(ei, item) {
-        if (ei.kind === 'doc') return !!ei.show;
-        if (ei.kind === 'calendar') return true;
-        var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows;
-        return !!(rows && rows.length);
-      },
+      embedRowsForItem: function(ei, item) { return Embeds.embedRowsForItem(ei, item); },
+      embedWhenOk: function(ei, item) { return Embeds.embedWhenOk(ei, item); },
+      embedVisible: function(ei, item) { return Embeds.embedVisible(ei, item); },
       // Embed row controls — operate on the active partition across the mirror cluster (dataCache is reactive)
       embedSources: function(type, name) { return type === 'view' && VIEWS[name] ? (VIEWS[name].sources || []) : [name]; },
       canMutateEmbed: function(type, name) {

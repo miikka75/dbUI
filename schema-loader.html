@@ -40,7 +40,7 @@ function _normalizeSchema(parsed) {
   });
   ensureImplicitId(SCHEMA, window._columnOrders);
 }
-function colName(c) { return c && typeof c === 'object' ? (c.name || Object.keys(c)[0]) : c; }
+// colName/isEmbed/isViewEmbed/isText (view column-entry shape predicates) are globals from columns.js.
 // Shared list-value seeding: ensure filter-referenced values exist in listsCache. Returns true if anything was added.
 function _seedListValues(listsCache) {
   var seeded = false;
@@ -64,9 +64,6 @@ function _seedListValues(listsCache) {
   }
   return seeded;
 }
-function isEmbed(c) { return typeof c === 'object' && c.sources && !c.name; }
-function isViewEmbed(c) { return typeof c === 'object' && typeof c.view === 'string'; } // {view:name,filter?,hideEmpty?} -> embed a named view
-function isText(c) { return typeof c === 'object' && c.text && !c.name && !c.sources; }
 // dataCache/export key for a table's archive partition (fixed 'archive')
 function aKey(table) { return table + '__archive'; }
 // Full mirror cluster: all tables sharing a logical row via syncFrom, both directions, transitively
@@ -91,21 +88,7 @@ function withMirrors(base) {
 // The per-list access model (listOwningTables/accessibleListNames/filterLists) lives in /list-access.js,
 // loaded before this fragment; backend-firebase.html calls listOwningTables as a global from it.
 
-// Tiny markdown -> HTML for pages (headings, bold/italic, lists, links, paragraphs). Embed tokens are split out before this runs.
-function mdToHtml(md) {
-  var esc = function(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
-  var safeUrl = function(u) { try { var p = new URL(u, location.href); return /^https?:$/.test(p.protocol) ? esc(u) : ''; } catch(e) { return esc(u); } };
-  var inline = function(t) { return esc(t).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\*([^*]+)\*/g, '<em>$1</em>').replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) { return '<a href="' + safeUrl(url) + '" target="_blank">' + text + '</a>'; }); };
-  var lines = String(md || '').split('\n'), out = [], i = 0;
-  while (i < lines.length) {
-    var l = lines[i], h = /^(#{1,4})\s+(.*)/.exec(l);
-    if (h) { out.push('<h' + h[1].length + '>' + inline(h[2]) + '</h' + h[1].length + '>'); i++; continue; }
-    if (/^\s*[-*]\s+/.test(l)) { var items = []; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push('<li>' + inline(lines[i].replace(/^\s*[-*]\s+/, '')) + '</li>'); i++; } out.push('<ul>' + items.join('') + '</ul>'); continue; }
-    if (l.trim() === '') { i++; continue; }
-    out.push('<p>' + inline(l) + '</p>'); i++;
-  }
-  return out.join('');
-}
+// mdToHtml (tiny markdown -> HTML for pages) lives in /embeds.js, exposed as a global from there.
 
 // The rotation engine (interval math + resolvers + buildRotationViewRows) lives in /rotation.js;
 // validateSchema (below) calls isValidInterval as a global from that module. fmtDate() (canonical
