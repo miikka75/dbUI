@@ -2157,16 +2157,18 @@ test.describe('calendar view', () => {
       ];
       app.userList = []; app.usersLoaded = true;        // admin / unrestricted
       app.currentTable = 'cal_test';
-      app.calMode = 'month'; app.calAnchor = '2026-07-15'; app.calSelectedDay = '2026-07-08';
-      var ev = app.calEvents;
+      // Model helpers the calendar-view component reads: window + events + month cells (anchor 07-15).
+      var ev = app.calEventsFor('cal_test', app._calWindowFor('2026-07-15', 'month', 1));
+      var cells = app._calCellsMonth('2026-07-15', 1).map(function(c) { c.count = (ev[c.date] || []).length; return c; });
+      var selDay = '2026-07-08';
       return {
         d8: (ev['2026-07-08'] || []).map(function(e) { return e.title; }),
         d20: (ev['2026-07-20'] || []).length,
         undated: (ev['__undated__'] || []).length,
-        cells: app.calMonthCells.length,
-        cnt8: app.calMonthCells.find(function(c) { return c.date === '2026-07-08'; }).count,
-        selCount: app.calSelectedEvents.length,
-        listDays: app.calListDays.map(function(d) { return d.date; })
+        cells: cells.length,
+        cnt8: cells.find(function(c) { return c.date === '2026-07-08'; }).count,
+        selCount: (ev[selDay] || []).length,
+        listDays: Object.keys(ev).filter(function(k) { return k !== '__undated__'; }).sort()
       };
     });
     expect(r.d8).toEqual(['Alpha', 'Beta']);   // two events on the 8th, sorted
@@ -2178,16 +2180,16 @@ test.describe('calendar view', () => {
     expect(r.listDays).toEqual(['2026-07-08', '2026-07-20']); // agenda excludes undated, sorted
   });
 
-  test('navigation: prev/next/today move the anchor (month + week steps)', async ({ page }) => {
+  test('navigation: prev/next step the anchor by month/week (addIntervals)', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
       const app = window.appInstance;
-      window.VIEWS.cal_nav = { name: 'cal_nav', calendar: { source: 'tasks', dateColumn: 'date' } };
-      app.currentTable = 'cal_nav'; app.calMode = 'month'; app.calAnchor = '2026-07-15';
-      app.calNext(); var n = app.calAnchor;
-      app.calPrev(); app.calPrev(); var p = app.calAnchor;
-      app.calGoToday(); var isToday = app.calAnchor === app._calToday();
-      app.calMode = 'week'; app.calAnchor = '2026-07-15'; app.calNext(); var wk = app.calAnchor;
+      // The calendar-view component's prev/next/goToday delegate to addIntervals(anchor, ±1, ...)
+      // and _calToday(); exercise that same underlying logic here.
+      var n = window.addIntervals('2026-07-15', 1, 'monthly');            // next (month)
+      var p = window.addIntervals(window.addIntervals(n, -1, 'monthly'), -1, 'monthly'); // prev, prev
+      var wk = window.addIntervals('2026-07-15', 1, 'weekly');           // next (week)
+      var isToday = /^\d{4}-\d{2}-\d{2}$/.test(app._calToday());          // goToday resets to today
       return { n: n, p: p, isToday: isToday, wk: wk };
     });
     expect(r.n).toBe('2026-08-15');   // +1 month
@@ -2217,7 +2219,7 @@ test.describe('calendar view', () => {
       window.VIEWS.cal_md = { name: 'cal_md', calendar: { source: 'tasks', dateColumn: 'date' } };
       return { isCal: app.isCalendarName('cal_md') === true, notCal: app.isCalendarName('tasks') === false };
     });
-    expect(r.isCal).toBe(true);    // markdown embed routes calendar views to <calendar-embed>
+    expect(r.isCal).toBe(true);    // markdown embed routes calendar views to <calendar-view :embed>
     expect(r.notCal).toBe(true);
   });
 
@@ -2225,11 +2227,13 @@ test.describe('calendar view', () => {
     await ensureAppReady(page);
     await page.evaluate(() => {
       const app = window.appInstance;
+      // Seed on today so the component's default anchor/selection (both today) land on the events —
+      // keeps the DOM assertions date-independent now that anchor/sel live in the component.
+      var today = app._calToday();
       window.VIEWS.cal_dom = { name: 'cal_dom', calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'], defaultView: 'month' } };
-      app.dataCache['tasks'] = [{ id: 'a', date: '2026-07-08', title: 'Alpha' }, { id: 'b', date: '2026-07-08', title: 'Beta' }];
+      app.dataCache['tasks'] = [{ id: 'a', date: today, title: 'Alpha' }, { id: 'b', date: today, title: 'Beta' }];
       app.userList = []; app.usersLoaded = true;
       app.selectTab('cal_dom');
-      app.calAnchor = '2026-07-15'; app.calSelectedDay = '2026-07-08';
     });
     await page.waitForTimeout(200);
     const card = page.locator('[data-testid="cal-view"]');
@@ -2254,11 +2258,12 @@ test.describe('calendar view', () => {
       app.dataCache['notes'] = [{ id: 'n1', date: '2026-07-08', title: 'Memo', author: 'Alice' }];
       app.userList = []; app.usersLoaded = true;   // admin
       app.currentTable = 'cal_multi';
-      var evAdmin = app.calEvents['2026-07-08'] || [];
+      var win = app._calWindowFor('2026-07-15', 'month', 1);
+      var evAdmin = (app.calEventsFor('cal_multi', win))['2026-07-08'] || [];
       // now restrict to only 'tasks' -> notes sources drop out (fail closed)
       app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: ['tasks'] }];
       app.currentUserEmail = 'u@x.com';
-      var evRestricted = (app.calEvents['2026-07-08'] || []).map(function(e) { return e.label; });
+      var evRestricted = ((app.calEventsFor('cal_multi', win))['2026-07-08'] || []).map(function(e) { return e.label; });
       return {
         adminLabels: evAdmin.map(function(e) { return e.label; }).sort(),
         adminCount: evAdmin.length,
@@ -2282,34 +2287,34 @@ test.describe('calendar view', () => {
       app.dataCache['L_b'] = [{ id: 'b1', position: 1, people: ['Bob'] }];
       app.userList = []; app.usersLoaded = true;               // admin / unrestricted
       app.currentTable = 'cal_rot';
-      app.calMode = 'month'; app.calAnchor = '2026-07-15'; app.calSelectedDay = '2026-07-15';
+      // Events for the month grid around a given anchor (the calendar-view component's `events`).
+      var evAt = function(anchor) { return app.calEventsFor('cal_rot', app._calWindowFor(anchor, 'month', 1)); };
 
-      var d15 = app.calEvents['2026-07-15'] || [];
+      var jul = evAt('2026-07-15');
+      var d15 = jul['2026-07-15'] || [];
       var win = app._calWindowFor('2026-07-15', 'month', 1);
       var out = {
         d15titles: d15.map(function(e) { return e.title; }).sort(),
         d15readonly: d15.every(function(e) { return e.readOnly === true && e.table === null; }),
         d15label: d15.map(function(e) { return e.label; }).sort(),
         // period on the true duty date (07-29 is a rotation period), one per populated slot
-        d29: (app.calEvents['2026-07-29'] || []).length,
+        d29: (jul['2026-07-29'] || []).length,
         // a grid cell BEFORE the rotation starts (06-29 is in the July grid) has no duties
-        preStart: (app.calEvents['2026-06-29'] || []).length,
+        preStart: (jul['2026-06-29'] || []).length,
         winFrom: win.from
       };
 
-      // Navigate to a month entirely before the rotation begins -> no rotation events generated.
-      app.calAnchor = '2026-01-15';
-      out.farPast = Object.keys(app.calEvents).length;
+      // A month entirely before the rotation begins -> no rotation events generated.
+      out.farPast = Object.keys(evAt('2026-01-15')).length;
 
       // Per-roster fail-closed: user who can read neither roster sees no duties.
-      app.calAnchor = '2026-07-15';
       app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: ['tasks'] }];
       app.currentUserEmail = 'u@x.com';
-      out.restricted = Object.keys(app.calEvents).length;
+      out.restricted = Object.keys(evAt('2026-07-15')).length;
 
       // User who can read at least one roster still sees the duties.
       app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: ['L_a'] }];
-      out.oneRoster = (app.calEvents['2026-07-15'] || []).length;
+      out.oneRoster = (evAt('2026-07-15')['2026-07-15'] || []).length;
       return out;
     });
     expect(r.d15titles).toEqual(['area_a: Alice', 'area_b: Bob']); // one event per populated slot

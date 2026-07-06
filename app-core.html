@@ -146,9 +146,6 @@ function createVueApp() {
       pageCache: {},
       expandedCard: null,
       listSwitchOverrides: {}, // {itemId_col: true} — tracks which cells are toggled to alt list
-      calMode: null,        // calendar view: 'month'|'week'|'list' (from calendar.defaultView on open)
-      calAnchor: null,      // 'YYYY-MM-DD' — the visible month/week contains this date (defaults today)
-      calSelectedDay: null, // 'YYYY-MM-DD' — day whose events show in the panel below (defaults today)
     }; },
 
     computed: {
@@ -198,7 +195,7 @@ function createVueApp() {
       isRotationView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rotation); },
       isCalendarView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.calendar); },
       // Single classifier for the current view's kind + the top-level component registry dispatch.
-      // Kinds not in VIEW_KINDS (page, data) return null -> their cards still render inline in ui.html.
+      // Every kind maps to a component in VIEW_KINDS; an unclassified view returns null (nothing renders).
       viewKind: function() {
         var ct = this.currentTable;
         if (ct === '__languages') return 'languages';
@@ -211,33 +208,8 @@ function createVueApp() {
         return null;
       },
       viewComponent: function() { return (window.VIEW_KINDS || {})[this.viewKind] || null; },
-      // --- Calendar view (compact month/week/list; single-source in phase 1) ---
-      calWeekStart: function() { var v = VIEWS[this.currentTable]; return (v && v.calendar && v.calendar.weekStart != null) ? Number(v.calendar.weekStart) : 1; },
-      calEvents: function() { return this.isCalendarView ? this.calEventsFor(this.currentTable, this._calWindowFor(this.calAnchor || this._calToday(), this.calMode, this.calWeekStart)) : {}; },
-      calDisplayMode: function() { return (this.mobile && this.calMode === 'month') ? 'list' : (this.calMode || 'month'); },
-      calMonthCells: function() { var self = this, ev = this.calEvents; return this._calCellsMonth(this.calAnchor || this._calToday(), this.calWeekStart).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
-      calWeekCells: function() { var self = this, ev = this.calEvents; return this._calCellsWeek(this.calAnchor || this._calToday(), this.calWeekStart).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
-      calDowNames: function() { var loc = this.calLocale(), ws = this.calWeekStart, fmt = new Intl.DateTimeFormat(loc, { weekday: 'short' }), out = []; for (var i = 0; i < 7; i++) { out.push(fmt.format(new Date(2023, 0, 1 + ((ws + i) % 7)))); } return out; },
-      calTitle: function() {
-        var loc = this.calLocale(), a = this.calAnchor || this._calToday();
-        if (this.calMode === 'week') {
-          var cells = this._calCellsWeek(a, this.calWeekStart), f = cells[0].date.split('-'), l = cells[6].date.split('-');
-          return new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' }).format(new Date(+f[0], +f[1] - 1, +f[2])) + ' – ' + new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(+l[0], +l[1] - 1, +l[2]));
-        }
-        var p = a.split('-'); return new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, 1));
-      },
-      calSelectedEvents: function() { return this.calEvents[this.calSelectedDay] || []; },
-      // Registry-selected body element for the full calendar view (mirrors the embed's `body`).
-      calBodyComponent: function() { return (window.viewPartFor && window.viewPartFor('calendar', this.calDisplayMode)) || 'cal-agenda'; },
-      calSelectedLabel: function() { if (!this.calSelectedDay) return ''; var p = this.calSelectedDay.split('-'); return new Intl.DateTimeFormat(this.calLocale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, +p[2])); },
-      calListDays: function() {
-        var self = this, ev = this.calEvents;
-        return Object.keys(ev).filter(function(k) { return k !== '__undated__'; }).sort().map(function(k) {
-          var p = k.split('-');
-          return { date: k, label: new Intl.DateTimeFormat(self.calLocale(), { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: ev[k] };
-        });
-      },
-      calUndated: function() { return this.calEvents['__undated__'] || []; },
+      // Calendar rendering state (mode/anchor/selection + derived cells) lives in the calendar-view
+      // component now; the root keeps only the pure model helpers (calEventsFor, _calCells*, _calWindowFor).
       rotationViewCols: function() {
         var v = VIEWS[this.currentTable];
         if (!v || !v.rotation) return [];
@@ -937,11 +909,7 @@ function createVueApp() {
         var cfg = VIEWS[id] || SCHEMA[id] || {};
         this.sortCol = cfg.defaultSort || null;
         this.sortAsc = true;
-        if (this.isCalendarView) {
-          this.calMode = (VIEWS[id].calendar.defaultView) || 'month';
-          this.calAnchor = this.calSelectedDay = this._calToday();
-          this.loadTableData();
-        }
+        if (this.isCalendarView) { this.loadTableData(); }
         else if (this.isDataView || this.isRotationView) { this.periodOffset = 0; this.loadTableData(); }
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
@@ -1037,11 +1005,6 @@ function createVueApp() {
         Object.keys(out).forEach(function(k) { out[k].sort(function(a, b) { return (a.label + a.title).localeCompare(b.label + b.title); }); });
         return out;
       },
-      calPrev: function() { this.calAnchor = addIntervals(this.calAnchor || this._calToday(), -1, this.calMode === 'week' ? 'weekly' : 'monthly'); },
-      calNext: function() { this.calAnchor = addIntervals(this.calAnchor || this._calToday(), 1, this.calMode === 'week' ? 'weekly' : 'monthly'); },
-      calGoToday: function() { this.calAnchor = this.calSelectedDay = this._calToday(); },
-      calSetMode: function(m) { this.calMode = m; },
-      calSelectDay: function(d) { this.calSelectedDay = d; },
       isCalendarName: function(name) { return !!(VIEWS[name] && VIEWS[name].calendar); },
       // Doc-view bodies live in a server-side "_pages" collection (not in schema.json).
       // Falls back to the view's schema-defined `markdown` (seed), then caches it.
@@ -3078,19 +3041,22 @@ function createVueApp() {
       + '</v-list-item></v-list>'
   });
 
-  // Compact calendar embed — used by markdown pages via {{view:calendarName}}. Holds its own
-  // month/anchor/selected-day state; reuses appInstance calendar helpers (calEventsFor, cell
-  // builders, i18n) and composes the shared parts above. Sources are already in dataCache.
-  app.component('calendar-embed', {
-    props: { name: { type: String, required: true } },
+  // Calendar view: ONE component for both the top-level screen and the {{view:cal}} embed. Holds its
+  // own month/anchor/selected-day state — `name` defaults to the current view (top-level); embeds pass
+  // an explicit name. Composes the shared cal-* parts + calendar model helpers (calEventsFor, cell
+  // builders, i18n). The `embed` flag swaps the outlined-card chrome for a lighter bordered box.
+  app.component('calendar-view', {
+    props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
     data: function() {
-      var cfg = (window.VIEWS[this.name] && window.VIEWS[this.name].calendar) || {};
+      var nm = this.name || (appInstance && appInstance.currentTable);
+      var cfg = (window.VIEWS[nm] && window.VIEWS[nm].calendar) || {};
       var today = appInstance ? appInstance._calToday() : '';
       return { mode: cfg.defaultView || 'month', anchor: today, sel: today };
     },
     computed: {
-      weekStart: function() { var v = window.VIEWS[this.name]; return (v && v.calendar && v.calendar.weekStart != null) ? Number(v.calendar.weekStart) : 1; },
-      events: function() { return appInstance ? appInstance.calEventsFor(this.name, appInstance._calWindowFor(this.anchor, this.mode, this.weekStart)) : {}; },
+      viewName: function() { return this.name || appInstance.currentTable; },
+      weekStart: function() { var v = window.VIEWS[this.viewName]; return (v && v.calendar && v.calendar.weekStart != null) ? Number(v.calendar.weekStart) : 1; },
+      events: function() { return appInstance ? appInstance.calEventsFor(this.viewName, appInstance._calWindowFor(this.anchor, this.mode, this.weekStart)) : {}; },
       displayMode: function() { return (appInstance && appInstance.mobile && this.mode === 'month') ? 'list' : (this.mode || 'month'); },
       monthCells: function() { var ev = this.events; return appInstance._calCellsMonth(this.anchor, this.weekStart).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
       weekCells: function() { var ev = this.events; return appInstance._calCellsWeek(this.anchor, this.weekStart).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
@@ -3111,7 +3077,7 @@ function createVueApp() {
       selectDay: function(d) { this.sel = d; }
     },
     template: ''
-      + '<div class="my-2" style="border:1px solid rgb(var(--v-theme-outline),0.2);border-radius:8px">'
+      + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" :style="embed ? \'border:1px solid rgb(var(--v-theme-outline),0.2);border-radius:8px\' : \'\'" :data-testid="embed ? undefined : \'cal-view\'">'
       + '<div class="d-flex align-center flex-wrap pa-2" style="gap:8px">'
       + '<v-btn icon="mdi-chevron-left" size="small" variant="text" @click="prev()"></v-btn>'
       + '<v-btn icon="mdi-chevron-right" size="small" variant="text" @click="next()"></v-btn>'
@@ -3124,32 +3090,13 @@ function createVueApp() {
       + '<v-divider></v-divider>'
       + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
       + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents"></cal-day-panel>'
-      + '</div>'
+      + '</component>'
   });
 
   // --- Top-level view-kind components (registry-dispatched) --------------------------------------
   // Each whole-view card as a component so the top-level render is a registry lookup (VIEW_KINDS via
   // viewComponent) instead of a v-if chain. They read the root model through one `a` (appInstance)
   // proxy — state stays on the root (tests + toolbars unchanged), the template just relocates here.
-  app.component('calendar-view', {
-    computed: { a: function() { return appInstance; } },
-    template: ''
-      + '<v-card variant="outlined" data-testid="cal-view">'
-      + '<div class="d-flex align-center flex-wrap pa-2" style="gap:8px">'
-      + '<v-btn icon="mdi-chevron-left" size="small" variant="text" @click="a.calPrev()"></v-btn>'
-      + '<v-btn icon="mdi-chevron-right" size="small" variant="text" @click="a.calNext()"></v-btn>'
-      + '<v-btn size="small" variant="text" @click="a.calGoToday()">{{ a.tOr(\'cal.today\',\'Today\') }}</v-btn>'
-      + '<span style="font-weight:600;min-width:150px">{{ a.calTitle }}</span><v-spacer></v-spacer>'
-      + '<v-btn-toggle :model-value="a.calMode" density="compact" variant="outlined" divided mandatory @update:model-value="a.calSetMode($event)">'
-      + '<v-btn value="month" size="small">{{ a.tOr(\'cal.month\',\'Month\') }}</v-btn>'
-      + '<v-btn value="week" size="small">{{ a.tOr(\'cal.week\',\'Week\') }}</v-btn>'
-      + '<v-btn value="list" size="small">{{ a.tOr(\'cal.list\',\'List\') }}</v-btn></v-btn-toggle></div>'
-      + '<v-divider></v-divider>'
-      + '<component :is="a.calBodyComponent" :cells="a.calDisplayMode===\'week\'?a.calWeekCells:a.calMonthCells" :dow-names="a.calDowNames" :days="a.calListDays" :undated="a.calUndated" :selected="a.calSelectedDay" @select="a.calSelectDay"></component>'
-      + '<cal-day-panel v-if="a.calDisplayMode!==\'list\'" :label="a.calSelectedLabel" :events="a.calSelectedEvents"></cal-day-panel>'
-      + '</v-card>'
-  });
-
   app.component('rotation-view', {
     computed: { a: function() { return appInstance; } },
     template: ''
@@ -3180,7 +3127,7 @@ function createVueApp() {
       + '<v-textarea v-if="a.pageEditing" :model-value="a.pageEditText" @update:model-value="a.pageEditText = $event" auto-grow variant="outlined" density="compact" placeholder="# Markdown — embed views with {{view:name}} or {{table:name}}"></v-textarea>'
       + '<template v-else v-for="(blk, bi) in a.pageBlocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html"></div>'
-      + '<calendar-embed v-else-if="blk.embedType === \'view\' && a.isCalendarName(blk.embedName)" :name="blk.embedName"></calendar-embed>'
+      + '<calendar-view v-else-if="blk.embedType === \'view\' && a.isCalendarName(blk.embedName)" :name="blk.embedName" :embed="true"></calendar-view>'
       + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>'
       + '</template>'
       + '</v-card>'

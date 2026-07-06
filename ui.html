@@ -190,9 +190,9 @@
           <v-btn size="small" variant="text" :disabled="periodOffset === 0" @click="periodToday()">{{ tOr('period.current','Current') }}</v-btn>
         </div>
 
-        <!-- Page + rotation + calendar views render via the top-level kind registry (VIEW_KINDS ->
-             component). The data view is not registered yet, so its card below still renders inline. -->
-        <component v-if="viewComponent" :is="viewComponent"></component>
+        <!-- Every screen renders through the top-level kind registry (VIEW_KINDS -> component). :key
+             remounts on view change so self-stated components (calendar) re-init their local state. -->
+        <component v-if="viewComponent" :is="viewComponent" :key="currentTable"></component>
 
         <!-- Data view dispatches via VIEW_KINDS.data (<component :is="viewComponent"> above);
              markup lives in the #data-view-tpl template at the end of this file. -->
