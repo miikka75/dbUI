@@ -395,39 +395,7 @@ function createVueApp() {
         }
         return embeds;
       },
-      embedItems: function() {
-        var self = this;
-        return this.embedConfigs.map(function(cfg) {
-          if (typeof cfg.markdown === 'string' && !cfg.filterBy && cfg.name) { // named doc-view embed (no filterBy: global show/hide)
-            return { config: cfg, isDoc: true, blocks: self.mdBlocks(cfg.markdown, cfg.name), show: self.docHasData(cfg.markdown, cfg.name) };
-          }
-          if (cfg.rotation) { // rotationView embed (a {view:x} where x is a rotationView) -> generate period rows
-            var anchorName = cfg.view || cfg.name || self.currentTable;
-            var rrows = self.rotationRowsFor(anchorName, cfg.rotation);
-            var slotNames = cfg.rotation.slots ? cfg.rotation.slots.slice() : (cfg.rotation.columns || []).map(function(c) { return c.name; });
-            return { config: cfg, isRotation: true, columns: ['_period'].concat(slotNames), rows: rrows };
-          }
-          var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
-          var columns = raw.map(function(c) { return colName(c); });
-          var rows = buildRows(self._viewWithMe(cfg), self.dataCache);
-          resolveComputed(rows, cfg.columns || [], { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
-          if (cfg.defaultSort) { rows = sortByCol(rows, cfg.defaultSort); }
-          if (cfg.hideEmpty) { columns = columns.filter(function(col) { return rows.some(function(r) { return r[col]; }); }); }
-          // markdown on a filterBy/inline embed: store as header HTML (rendered per-card by the template)
-          // Inline embed markdown: build blocks (prose + {{self}} markers for own table)
-          var inlineBlocks = null;
-          if (typeof cfg.markdown === 'string') {
-            var md = String(cfg.markdown).replace(/\{\{\s*t\s*:\s*([^\s{}:]+)\s*\}\}/g, function(_, k) { return self.t(k) || ''; });
-            var blockParts = md.split(/\{\{\s*self\s*\}\}/);
-            inlineBlocks = [];
-            blockParts.forEach(function(part, i) {
-              if (part.trim()) inlineBlocks.push({ html: mdToHtml(part.trim()) });
-              if (i < blockParts.length - 1) inlineBlocks.push({ self: true }); // marker: render own table here
-            });
-          }
-          return { config: cfg, columns: columns, rows: rows, inlineBlocks: inlineBlocks };
-        });
-      },
+      embedItems: function() { var self = this; return this.embedConfigs.map(function(cfg) { return self.resolveEmbed(cfg); }); },
       hasMaster: function() {
         var table = this.currentTable;
         if (VIEWS[table]) return false;
@@ -1032,6 +1000,39 @@ function createVueApp() {
         var re = /\{\{\s*(view|table)\s*:\s*([^\s@?{}:]+)(@[^\s?{}:]+)?\??\s*\}\}/g, m, any = false;
         while ((m = re.exec(md))) { any = true; if (this.embedRows(m[1], m[2], m[3] ? m[3].slice(1) : null).length) return true; }
         return !any;
+      },
+      // Normalize one embed config into a render `spec` for the unified embed renderer. The `kind` field
+      // drives dispatch: 'doc' (markdown blocks), 'rotation' (generated periods), 'data' (a view/table's
+      // rows). Shared by embedItems (data-view) and the page/doc paths so every envelope embeds uniformly.
+      resolveEmbed: function(cfg) {
+        var self = this;
+        if (typeof cfg.markdown === 'string' && !cfg.filterBy && cfg.name) { // named doc-view embed (no filterBy: global show/hide)
+          return { config: cfg, kind: 'doc', blocks: self.mdBlocks(cfg.markdown, cfg.name), show: self.docHasData(cfg.markdown, cfg.name) };
+        }
+        if (cfg.rotation) { // rotationView embed (a {view:x} where x is a rotationView) -> generate period rows
+          var anchorName = cfg.view || cfg.name || self.currentTable;
+          var rrows = self.rotationRowsFor(anchorName, cfg.rotation);
+          var slotNames = cfg.rotation.slots ? cfg.rotation.slots.slice() : (cfg.rotation.columns || []).map(function(c) { return c.name; });
+          return { config: cfg, kind: 'rotation', name: anchorName, columns: ['_period'].concat(slotNames), rows: rrows };
+        }
+        var raw = cfg.columns || (cfg.view && VIEWS[cfg.view] ? VIEWS[cfg.view].columns : []);
+        var columns = raw.map(function(c) { return colName(c); });
+        var rows = buildRows(self._viewWithMe(cfg), self.dataCache);
+        resolveComputed(rows, cfg.columns || [], { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
+        if (cfg.defaultSort) { rows = sortByCol(rows, cfg.defaultSort); }
+        if (cfg.hideEmpty) { columns = columns.filter(function(col) { return rows.some(function(r) { return r[col]; }); }); }
+        // Inline embed markdown: build blocks (prose + {{self}} markers for own table)
+        var inlineBlocks = null;
+        if (typeof cfg.markdown === 'string') {
+          var md = String(cfg.markdown).replace(/\{\{\s*t\s*:\s*([^\s{}:]+)\s*\}\}/g, function(_, k) { return self.t(k) || ''; });
+          var blockParts = md.split(/\{\{\s*self\s*\}\}/);
+          inlineBlocks = [];
+          blockParts.forEach(function(part, i) {
+            if (part.trim()) inlineBlocks.push({ html: mdToHtml(part.trim()) });
+            if (i < blockParts.length - 1) inlineBlocks.push({ self: true }); // marker: render own table here
+          });
+        }
+        return { config: cfg, kind: 'data', columns: columns, rows: rows, inlineBlocks: inlineBlocks };
       },
       embedCols: function(type, name) {
         if (type === 'view' && VIEWS[name]) return (VIEWS[name].columns || []).filter(function(c) { return !isEmbed(c) && !isViewEmbed(c); }).map(colName);
@@ -2612,13 +2613,13 @@ function createVueApp() {
 
       embedLayout: function(ei) { return ei.config.layout || 'table'; },
 
-      _printable: function(ei, item) { if (!this.embedWhenOk(ei, item)) return false; if (ei.isDoc) return !!ei.show; var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows; return !!(rows && rows.length); },
+      _printable: function(ei, item) { if (!this.embedWhenOk(ei, item)) return false; if (ei.kind === 'doc') return !!ei.show; var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows; return !!(rows && rows.length); },
       // Format a print cell to match the web grid: dates -> toDateStr, list/groupBy values -> displayValue.
       _printCell: function(c, v) { return this.colIsDate(c) ? this.toDateStr(v) : this.displayValue(c, v); },
       _printEmbed: function(ei, item) {
         var self = this, pe = this._pe;
         var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows;
-        if (ei.isDoc) {
+        if (ei.kind === 'doc') {
           var dh = ei.config.bare ? '<div>' : '<div class="embed">';
           (ei.blocks || []).forEach(function(b) {
             if (b.html) { dh += b.html; return; }
@@ -2875,7 +2876,7 @@ function createVueApp() {
       rowsFor: function(ei) { return (ei.config.filterBy && this.item) ? appInstance.embedRowsForItem(ei, this.item) : ei.rows; }
     },
     template: ''
-      + '<template v-if="ei.isDoc" v-for="(blk, bi) in ei.blocks" :key="bi">'
+      + '<template v-if="ei.kind === \'doc\'" v-for="(blk, bi) in ei.blocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
       + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>'
       + '</template>'
@@ -2884,9 +2885,9 @@ function createVueApp() {
       + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in ei.columns" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
       + '<tbody><tr v-for="er in rowsFor(ei)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" :style="tdStyle">{{ displayValue(ec, er[ec]) }}</td></tr></tbody></table>'
       + '</template>'
-      + '<template v-else-if="ei.isRotation"><table :style="tblStyle"><thead><tr><th v-for="ec in ei.columns" :key="ec" :style="thStyle">{{ ec === \'_period\' ? t(\'field.period\') : (t(\'field.\' + ec) || ec) }}</th></tr></thead>'
+      + '<template v-else-if="ei.kind === \'rotation\'"><table :style="tblStyle"><thead><tr><th v-for="ec in ei.columns" :key="ec" :style="thStyle">{{ ec === \'_period\' ? t(\'field.period\') : (t(\'field.\' + ec) || ec) }}</th></tr></thead>'
       + '<tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" :style="tdStyle">{{ ec === \'_period\' ? toDateStr(er[ec]) : displayValue(ec, er[ec]) }}</td></tr></tbody></table></template>'
-      + '<template v-else-if="!ei.isDoc">'
+      + '<template v-else-if="ei.kind === \'data\'">'
       + '<div v-if="header" style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t(\'tab.\' + ei.config.table) || ei.config.table }} ({{ ei.rows.length }})</div>'
       + '<table v-if="embedLayout(ei) === \'table\'" :style="tblStyle"><thead><tr><th v-for="ec in ei.columns" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
       + '<tbody><tr v-for="er in rowsFor(ei)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" :style="tdStyle">{{ displayValue(ec, er[ec]) }}</td></tr></tbody></table>'
@@ -2909,8 +2910,8 @@ function createVueApp() {
   };
   window.viewPartFor = function(kind, mode) { return ((window.VIEW_PARTS[kind]) || {})[mode] || null; };
 
-  // Top-level view-kind registry: kind -> the component that renders that whole view. Kinds absent
-  // here (page, data) fall through to their inline cards in ui.html until they're componentized too.
+  // Top-level view-kind registry: kind -> the component that renders that whole view. Every kind is
+  // componentized; the top-level dispatch is a single <component :is="viewComponent"> lookup in ui.html.
   window.VIEW_KINDS = {
     calendar: 'calendar-view', rotation: 'rotation-view', page: 'page-view', data: 'data-view',
     languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view'   // system screens

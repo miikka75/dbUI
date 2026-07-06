@@ -253,7 +253,7 @@
               <div v-show="!a.currentConfig.collapsed || a.expandedCard === item.id">
               <!-- Embeds positioned after the first/title column (rendered here since a.visibleCols.slice(1) skips it) -->
               <template v-for="(ei, eidx) in a.embedItems" :key="'emb0'+eidx">
-              <div v-if="ei.config.afterColumn === a.visibleCols[0] && a.embedWhenOk(ei, item) && (ei.isDoc ? ei.show : (ei.config.filterBy ? a.embedRowsForItem(ei, item).length : ei.rows.length))" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
+              <div v-if="ei.config.afterColumn === a.visibleCols[0] && a.embedWhenOk(ei, item) && (ei.kind === 'doc' ? ei.show : (ei.config.filterBy ? a.embedRowsForItem(ei, item).length : ei.rows.length))" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
                 <embed-block :ei="ei" :item="item"></embed-block>
               </div>
               </template>
@@ -264,7 +264,7 @@
               </div>
               <!-- Inline text/embed after this column -->
               <template v-for="(ei, eidx) in a.embedItems" :key="'emb'+col+eidx">
-              <div v-if="ei.config.afterColumn === col && a.embedWhenOk(ei, item) && (ei.isDoc ? ei.show : (ei.config.filterBy ? a.embedRowsForItem(ei, item).length : ei.rows.length))" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
+              <div v-if="ei.config.afterColumn === col && a.embedWhenOk(ei, item) && (ei.kind === 'doc' ? ei.show : (ei.config.filterBy ? a.embedRowsForItem(ei, item).length : ei.rows.length))" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
                 <embed-block :ei="ei" :item="item"></embed-block>
               </div>
               </template>
@@ -301,7 +301,7 @@
                 </td>
               </tr>
               <template v-if="a.sortedData.indexOf(item) === a.sortedData.length - 1" v-for="(ei, eidx) in a.embedItems" :key="'temb'+eidx">
-              <tr v-if="ei.config.afterColumn && (ei.isDoc ? ei.show : ei.rows.length)">
+              <tr v-if="ei.config.afterColumn && (ei.kind === 'doc' ? ei.show : ei.rows.length)">
                 <td :colspan="a.visibleCols.length + 2" style="padding:6px 12px; background: rgb(var(--v-theme-surface-variant), 0.1)">
                   <embed-block :ei="ei"></embed-block>
                 </td>
@@ -314,7 +314,7 @@
           <v-btn v-if="a.canMutateRows && !a.mobile" variant="text" prepend-icon="mdi-plus" @click="a.addRow" class="ma-2">{{ a.t('btn.add') }} {{ a.t((a.currentConfig.sources ? 'view.' : 'tab.') + a.currentTable) }}</v-btn>
           <!-- Text entries and embedded rows -->
           <template v-for="(ei, eidx) in a.embedItems" :key="'bemb'+eidx">
-          <div v-if="!ei.config.afterColumn && (ei.isDoc ? ei.show : ei.rows.length)" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
+          <div v-if="!ei.config.afterColumn && (ei.kind === 'doc' ? ei.show : ei.rows.length)" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
             <embed-block :ei="ei" font-size="0.8rem" cell-pad="3px 8px" :header="true"></embed-block>
           </div>
           </template>

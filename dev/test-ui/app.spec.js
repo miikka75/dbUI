@@ -2920,7 +2920,7 @@ test.describe('rotationView embedding in data views', () => {
       app.dataCache['RL_b'] = [{ position: 1, people: ['B0'] }];
       app.appConfig = Object.assign({}, app.appConfig, { rotationAnchors: { rota_e: '2026-01-01' } });
       app.currentTable = 'host_e';
-      const rot = app.embedItems.find(function(e) { return e.isRotation; });
+      const rot = app.embedItems.find(function(e) { return e.kind === 'rotation'; });
       return rot ? { cols: rot.columns, rows: rot.rows.map(function(x) { return { p: x._period, a: x.area_a, b: x.area_b }; }) } : null;
     });
     expect(r).not.toBeNull();                                   // the rotationView embed is recognized
