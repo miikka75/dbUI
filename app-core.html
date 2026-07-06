@@ -2870,6 +2870,55 @@ function createVueApp() {
       + '<span v-else class="editable-cell" contenteditable @blur="save(item, col, $event.target.textContent)" style="min-width:auto">{{ item[col] || \'\' }}</span>'
   });
 
+  // --- Data view: one embed block (the read-only content of an inline/bottom embed) --------------
+  // Renders an embed item `ei` in its layout: a doc-view (markdown blocks + nested embed-view), a
+  // self grid (inlineBlocks), a rotation table, or the table/card/chip layout (embedLayout). Was
+  // written ~4x across the card/table/bottom positions with only styling + row-source differences.
+  //   item     - the card row, for per-row filterBy embeds (null -> use ei.rows).
+  //   fontSize / cellPad - table sizing (card/table positions are compact; the bottom section larger).
+  //   header   - show the "table (count)" caption (bottom section only).
+  app.component('embed-block', {
+    props: {
+      ei: { type: Object, required: true },
+      item: { type: Object, default: null },
+      fontSize: { type: String, default: '0.75rem' },
+      cellPad: { type: String, default: '2px 6px' },
+      header: { type: Boolean, default: false }
+    },
+    computed: {
+      tblStyle: function() { return 'width:100%; font-size:' + this.fontSize + '; border-collapse:collapse'; },
+      thStyle: function() { return 'text-align:left; padding:' + this.cellPad + '; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)'; },
+      tdStyle: function() { return 'padding:' + this.cellPad; }
+    },
+    methods: {
+      t: function(k) { return appInstance.t(k); },
+      displayValue: function(c, v) { return appInstance.displayValue(c, v); },
+      toDateStr: toDateStr,
+      embedLayout: function(ei) { return appInstance.embedLayout(ei); },
+      // filterBy embeds slice per card row; otherwise the embed's own rows.
+      rowsFor: function(ei) { return (ei.config.filterBy && this.item) ? appInstance.embedRowsForItem(ei, this.item) : ei.rows; }
+    },
+    template: ''
+      + '<template v-if="ei.isDoc" v-for="(blk, bi) in ei.blocks" :key="bi">'
+      + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
+      + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>'
+      + '</template>'
+      + '<template v-if="ei.inlineBlocks" v-for="(blk, bi) in ei.inlineBlocks" :key="\'ib\'+bi">'
+      + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
+      + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in ei.columns" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
+      + '<tbody><tr v-for="er in rowsFor(ei)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" :style="tdStyle">{{ displayValue(ec, er[ec]) }}</td></tr></tbody></table>'
+      + '</template>'
+      + '<template v-else-if="ei.isRotation"><table :style="tblStyle"><thead><tr><th v-for="ec in ei.columns" :key="ec" :style="thStyle">{{ ec === \'_period\' ? t(\'field.period\') : (t(\'field.\' + ec) || ec) }}</th></tr></thead>'
+      + '<tbody><tr v-for="er in ei.rows" :key="er.id"><td v-for="ec in ei.columns" :key="ec" :style="tdStyle">{{ ec === \'_period\' ? toDateStr(er[ec]) : displayValue(ec, er[ec]) }}</td></tr></tbody></table></template>'
+      + '<template v-else-if="!ei.isDoc">'
+      + '<div v-if="header" style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t(\'tab.\' + ei.config.table) || ei.config.table }} ({{ ei.rows.length }})</div>'
+      + '<table v-if="embedLayout(ei) === \'table\'" :style="tblStyle"><thead><tr><th v-for="ec in ei.columns" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
+      + '<tbody><tr v-for="er in rowsFor(ei)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" :style="tdStyle">{{ displayValue(ec, er[ec]) }}</td></tr></tbody></table>'
+      + '<div v-else-if="embedLayout(ei) === \'card\'" style="display:grid; gap:6px"><div v-for="er in rowsFor(ei)" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in ei.columns" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span>{{ displayValue(ec, er[ec]) }}</span></div></div>'
+      + '<div v-else class="d-flex align-center flex-wrap ga-1"><v-chip v-for="er in rowsFor(ei)" :key="er.id" size="small" variant="tonal" label><span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span></v-chip></div>'
+      + '</template>'
+  });
+
   // --- Composable calendar elements (registry-driven parts) -------------------------------------
   // The calendar body is no longer a monolithic block: month grid / week strip / agenda are separate
   // elements sharing ONE prop contract { cells, dowNames, days, undated, selected } so they are
