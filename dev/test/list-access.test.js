@@ -1,31 +1,9 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-// Pure copies of the per-list access helpers (schema-loader.html / server.js). Per-list access:
-// each list is owned by the tables whose columns reference it (list or listSwitch.list); a restricted
-// user may read only the lists owned by a table they can access.
-function listOwningTables(schemaTables, listName) {
-  const out = [];
-  Object.keys(schemaTables || {}).forEach(t => {
-    const cols = (schemaTables[t] && schemaTables[t].columns) || {};
-    const defs = Array.isArray(cols) ? cols : Object.keys(cols).map(k => cols[k]);
-    if (defs.some(d => d && typeof d === 'object' && (d.list === listName || (d.listSwitch && d.listSwitch.list === listName)))) out.push(t);
-  });
-  return out;
-}
-function accessibleListNames(schemaTables, allowedTables, allListNames) {
-  if (!allowedTables) return (allListNames || []).slice();
-  return (allListNames || []).filter(name => listOwningTables(schemaTables, name).some(t => allowedTables.indexOf(t) >= 0));
-}
-// Mirrors server.js getLists filtering (object-map input).
-function filterLists(allLists, schemaTables, allowedTables) {
-  if (!allowedTables) return allLists;
-  const out = {};
-  Object.keys(allLists).forEach(name => {
-    if (listOwningTables(schemaTables, name).some(t => allowedTables.indexOf(t) >= 0)) out[name] = allLists[name];
-  });
-  return out;
-}
+// The real per-list access model from /list-access.js — the module the browser app, dev server and
+// backend-local now share (this file previously tested hand-copies of it).
+const { listOwningTables, accessibleListNames, filterLists } = require('../../list-access');
 
 describe('Per-list access (owning tables + filtering)', () => {
   // Church-shaped: team_a uses staff, team_b uses cleaners; meetings speech columns
