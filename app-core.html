@@ -2623,8 +2623,6 @@ function createVueApp() {
         this._printOpen(title, body);
       },
 
-      embedLayout: function(ei) { return ei.config.layout || 'table'; },
-
       _printable: function(ei, item) { if (!this.embedWhenOk(ei, item)) return false; if (ei.kind === 'doc') return !!ei.show; var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows; return !!(rows && rows.length); },
       // Format a print cell to match the web grid: dates -> toDateStr, list/groupBy values -> displayValue.
       _printCell: function(c, v) { return this.colIsDate(c) ? this.toDateStr(v) : this.displayValue(c, v); },
@@ -2757,20 +2755,43 @@ function createVueApp() {
   });
 
   app.use(vuetify);
-  // Self-computing, interactive embed-view: the single entry point for a {{view/table:x}} embed. It
-  // dispatches by kind — calendar/rotation delegate to their unified :embed components; otherwise it
-  // resolves its own cols/rows from the root and delegates editing to the root's ownerId-parameterized
-  // methods (saveField/cellReadonly). Callers (page-view, doc-view blocks) no longer branch on kind.
+  // The single embed renderer for every envelope (page-view, doc-view blocks, data-view). It dispatches
+  // by kind: calendar/rotation delegate to their unified :embed components; 'doc' renders markdown blocks
+  // (recursing into embed-view for nested embeds); 'data' renders a view/table's rows. Two input modes:
+  //   - self-resolving (page/doc leaf): {type,name,part}, editable (data-cell + add/del/archive).
+  //   - precomputed spec (data-view): a resolveEmbed() spec + optional master `row` for per-row filterBy,
+  //     read-only + compact (fontSize/cellPad), with the inline-{{self}} and header variants.
+  // Editability tracks the input mode (self path editable; spec path read-only) — the pre-existing
+  // per-envelope behavior, now expressed as one component instead of two (embed-view + embed-block).
   app.component('embed-view', {
-    props: { type: { type: String, default: 'view' }, name: { type: String, required: true }, part: { type: String, default: null } },
+    props: {
+      type: { type: String, default: 'view' }, name: { type: String, default: null }, part: { type: String, default: null },
+      spec: { type: Object, default: null }, row: { type: Object, default: null },
+      fontSize: { type: String, default: '0.75rem' }, cellPad: { type: String, default: '2px 6px' }, header: { type: Boolean, default: false }
+    },
     computed: {
       isCal: function() { return this.type === 'view' && !!(appInstance && appInstance.isCalendarName(this.name)); },
       isRot: function() { return this.type === 'view' && !!(appInstance && appInstance.isRotationName(this.name)); },
-      cols: function() { if (!appInstance) return []; var cols = appInstance.embedCols(this.type, this.name); if (appInstance.embedHideEmpty(this.type, this.name)) { var rows = this.rows; cols = cols.filter(function(c) { return rows.some(function(r) { return r[c]; }); }); } return cols; },
-      rows: function() { return appInstance ? appInstance.embedRows(this.type, this.name, this.part) : []; },
+      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : 'data'); },
+      calName: function() { return this.spec ? this.spec.name : this.name; },
+      cols: function() {
+        if (this.spec) return this.spec.columns;
+        if (!appInstance) return [];
+        var cols = appInstance.embedCols(this.type, this.name);
+        if (appInstance.embedHideEmpty(this.type, this.name)) { var rows = this.rows; cols = cols.filter(function(c) { return rows.some(function(r) { return r[c]; }); }); }
+        return cols;
+      },
+      rows: function() {
+        if (this.spec) return (this.spec.config.filterBy && this.row) ? appInstance.embedRowsForItem(this.spec, this.row) : this.spec.rows;
+        return appInstance ? appInstance.embedRows(this.type, this.name, this.part) : [];
+      },
       canMutate: function() { return !this.part && appInstance && appInstance.canMutateEmbed(this.type, this.name); },
       hasArchive: function() { return !this.part && appInstance && appInstance.embedHasArchive(this.type, this.name); },
-      layout: function() { return appInstance ? appInstance.embedViewLayout(this.type, this.name) : 'table'; }
+      layout: function() { return appInstance ? appInstance.embedViewLayout(this.type, this.name) : 'table'; },
+      roLayout: function() { return (this.spec && this.spec.config.layout) || 'table'; },
+      tblStyle: function() { return 'width:100%; font-size:' + this.fontSize + '; border-collapse:collapse'; },
+      thStyle: function() { return 'text-align:left; padding:' + this.cellPad + '; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)'; },
+      tdStyle: function() { return 'padding:' + this.cellPad; }
     },
     methods: {
       t: function(k) { return appInstance ? appInstance.t(k) : k; },
@@ -2783,8 +2804,28 @@ function createVueApp() {
       archRow: function(item) { return appInstance.embedArchiveRow(this.type, this.name, item); }
     },
     template: ''
-      + '<calendar-view v-if="isCal" :name="name" :embed="true"></calendar-view>'
-      + '<rotation-view v-else-if="isRot" :name="name" :embed="true"></rotation-view>'
+      + '<calendar-view v-if="kind===\'calendar\'" :name="calName" :embed="true"></calendar-view>'
+      + '<rotation-view v-else-if="kind===\'rotation\'" :name="calName" :embed="true"></rotation-view>'
+      + '<template v-else-if="kind===\'doc\'" v-for="(blk, bi) in spec.blocks" :key="bi">'
+      + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
+      + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>'
+      + '</template>'
+      // --- read-only data (data-view spec path): inline {{self}} blocks, or table/card/chip + header ---
+      + '<template v-else-if="spec">'
+      + '<template v-if="spec.inlineBlocks" v-for="(blk, bi) in spec.inlineBlocks" :key="\'ib\'+bi">'
+      + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
+      + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
+      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle">{{ displayValue(ec, er[ec]) }}</td></tr></tbody></table>'
+      + '</template>'
+      + '<template v-else>'
+      + '<div v-if="header" style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t(\'tab.\' + spec.config.table) || spec.config.table }} ({{ rows.length }})</div>'
+      + '<table v-if="roLayout===\'table\'" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
+      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle">{{ displayValue(ec, er[ec]) }}</td></tr></tbody></table>'
+      + '<div v-else-if="roLayout===\'card\'" style="display:grid; gap:6px"><div v-for="er in rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in cols" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span>{{ displayValue(ec, er[ec]) }}</span></div></div>'
+      + '<div v-else class="d-flex align-center flex-wrap ga-1"><v-chip v-for="er in rows" :key="er.id" size="small" variant="tonal" label><span v-for="(ec, i) in cols" :key="ec">{{ er[ec] }}<span v-if="i < cols.length - 1" style="opacity:0.4"> · </span></span></v-chip></div>'
+      + '</template>'
+      + '</template>'
+      // --- editable data (page / doc-leaf self path): list/card/table with data-cell + row controls ---
       + '<div v-else>'
       + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
       + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
@@ -2864,55 +2905,6 @@ function createVueApp() {
       + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
       + '<input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="save(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">'
       + '<span v-else class="editable-cell" contenteditable @blur="save(item, col, $event.target.textContent)" style="min-width:auto">{{ item[col] || \'\' }}</span>'
-  });
-
-  // --- Data view: one embed block (the read-only content of an inline/bottom embed) --------------
-  // Renders an embed item `ei` in its layout: a doc-view (markdown blocks + nested embed-view), a
-  // self grid (inlineBlocks), a rotation table, or the table/card/chip layout (embedLayout). Was
-  // written ~4x across the card/table/bottom positions with only styling + row-source differences.
-  //   item     - the card row, for per-row filterBy embeds (null -> use ei.rows).
-  //   fontSize / cellPad - table sizing (card/table positions are compact; the bottom section larger).
-  //   header   - show the "table (count)" caption (bottom section only).
-  app.component('embed-block', {
-    props: {
-      ei: { type: Object, required: true },
-      item: { type: Object, default: null },
-      fontSize: { type: String, default: '0.75rem' },
-      cellPad: { type: String, default: '2px 6px' },
-      header: { type: Boolean, default: false }
-    },
-    computed: {
-      tblStyle: function() { return 'width:100%; font-size:' + this.fontSize + '; border-collapse:collapse'; },
-      thStyle: function() { return 'text-align:left; padding:' + this.cellPad + '; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)'; },
-      tdStyle: function() { return 'padding:' + this.cellPad; }
-    },
-    methods: {
-      t: function(k) { return appInstance.t(k); },
-      displayValue: function(c, v) { return appInstance.displayValue(c, v); },
-      toDateStr: toDateStr,
-      embedLayout: function(ei) { return appInstance.embedLayout(ei); },
-      // filterBy embeds slice per card row; otherwise the embed's own rows.
-      rowsFor: function(ei) { return (ei.config.filterBy && this.item) ? appInstance.embedRowsForItem(ei, this.item) : ei.rows; }
-    },
-    template: ''
-      + '<template v-if="ei.kind === \'doc\'" v-for="(blk, bi) in ei.blocks" :key="bi">'
-      + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
-      + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>'
-      + '</template>'
-      + '<template v-if="ei.inlineBlocks" v-for="(blk, bi) in ei.inlineBlocks" :key="\'ib\'+bi">'
-      + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
-      + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in ei.columns" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rowsFor(ei)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" :style="tdStyle">{{ displayValue(ec, er[ec]) }}</td></tr></tbody></table>'
-      + '</template>'
-      + '<template v-else-if="ei.kind === \'calendar\'"><calendar-view :name="ei.name" :embed="true"></calendar-view></template>'
-      + '<template v-else-if="ei.kind === \'rotation\'"><rotation-view :name="ei.name" :embed="true"></rotation-view></template>'
-      + '<template v-else-if="ei.kind === \'data\'">'
-      + '<div v-if="header" style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t(\'tab.\' + ei.config.table) || ei.config.table }} ({{ ei.rows.length }})</div>'
-      + '<table v-if="embedLayout(ei) === \'table\'" :style="tblStyle"><thead><tr><th v-for="ec in ei.columns" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rowsFor(ei)" :key="er.id"><td v-for="ec in ei.columns" :key="ec" :style="tdStyle">{{ displayValue(ec, er[ec]) }}</td></tr></tbody></table>'
-      + '<div v-else-if="embedLayout(ei) === \'card\'" style="display:grid; gap:6px"><div v-for="er in rowsFor(ei)" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in ei.columns" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span>{{ displayValue(ec, er[ec]) }}</span></div></div>'
-      + '<div v-else class="d-flex align-center flex-wrap ga-1"><v-chip v-for="er in rowsFor(ei)" :key="er.id" size="small" variant="tonal" label><span v-for="(ec, i) in ei.columns" :key="ec">{{ er[ec] }}<span v-if="i < ei.columns.length - 1" style="opacity:0.4"> · </span></span></v-chip></div>'
-      + '</template>'
   });
 
   // --- Composable calendar elements (registry-driven parts) -------------------------------------
