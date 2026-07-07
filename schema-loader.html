@@ -8,7 +8,7 @@ var defaultSchema = {"tables":{},"views":[]};
 // Active schema — initially from defaultSchema, overwritten from Drive on boot
 var SCHEMA = defaultSchema.tables;
 var _viewsNav = Array.isArray(defaultSchema.views) ? defaultSchema.views : [];var VIEWS = {};
-function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string' || v.rotation)) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
+function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string' || v.rotation || v.calendar)) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
 // (Legacy `pages` map / {page:} nav and `text` entries are removed features — migrate-schema.js
 //  upgrades any legacy schema: text -> markdown {{t:}} doc-views, pages -> markdown views.)
 _flattenViews(_viewsNav);
