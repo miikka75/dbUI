@@ -87,10 +87,11 @@
         }
       }
 
-      var [styleResp, uiResp, coreResp, backendResp] = await Promise.all([
+      var [styleResp, uiResp, coreResp, schemaLoaderResp, backendResp] = await Promise.all([
         fetch('/style.html'),
         fetch('/ui.html'),
         fetch('/app-core.html'),
+        fetch('/schema-loader.html'),
         fetch(backendFile)
       ]);
       bootMark('fragmentsFetched');
@@ -98,6 +99,15 @@
       document.head.insertAdjacentHTML('beforeend', await styleResp.text());
       document.getElementById('app-root').innerHTML = await uiResp.text();
       bootMark('fragmentsApplied');
+
+      // Pure domain modules for every backend (column typing, permission-features, per-list access,
+      // calendar geometry + fmtDate, rotation engine, view row pipeline, embed resolution, print). They
+      // don't depend on Vue/Vuetify/the SDK, so start downloading them NOW (in parallel, ordered exec)
+      // and await just before the schema-loader fragment — they overlap the vue/vuetify/sdk loads for free.
+      var appModulesReady = loadScriptsOrdered([
+        '/columns.js', '/access-features.js', '/list-access.js', '/calendar.js',
+        '/rotation.js', '/rows.js', '/embeds.js', '/print.js'
+      ]);
 
       await loadScript('/vendor/vue.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vue@3.5.34/dist/vue.global.prod.js'); });
       await loadScript('/vendor/vuetify.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vuetify@4.0.7/dist/vuetify.min.js'); });
@@ -118,18 +128,10 @@
       }
       bootMark('sdkLoaded');
 
-      // Pure domain modules used by the app for every backend: column typing + permission-features +
-      // calendar geometry. calendar.js also provides the global fmtDate() that schema-loader.html uses,
-      // so it must load before the schema-loader fragment.
-      await loadScript('/columns.js');
-      await loadScript('/access-features.js');
-      await loadScript('/list-access.js');
-      await loadScript('/calendar.js');
-      await loadScript('/rotation.js');
-      await loadScript('/rows.js');
-      await loadScript('/embeds.js');
-      await loadScript('/print.js');
-      execScript(await (await fetch('/schema-loader.html')).text());
+      // The domain modules (kicked off right after fragmentsApplied) must be executed before the
+      // schema-loader fragment + app-core, which call them as globals.
+      await appModulesReady;
+      execScript(await schemaLoaderResp.text());
       execScript(await coreResp.text());
       createVueApp();
       bootMark('vueMounted');
@@ -184,6 +186,21 @@
         s.src = src; s.onload = resolve; s.onerror = reject;
         document.body.appendChild(s);
       });
+    }
+
+    // Load several same-origin scripts: download in PARALLEL, execute in the given order. async=false on
+    // a dynamically-inserted script keeps insertion-order execution while allowing concurrent download —
+    // ordering matters (rotation.js/rows.js capture calendar.js's fmtDate global at load time). Used to
+    // fetch the pure domain modules concurrently instead of as a serial await chain.
+    function loadScriptsOrdered(srcs) {
+      return Promise.all(srcs.map(function(src) {
+        return new Promise(function(resolve, reject) {
+          var s = document.createElement('script');
+          s.src = src; s.async = false;
+          s.onload = resolve; s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      }));
     }
 
     function execScript(html) {
