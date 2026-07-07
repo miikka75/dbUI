@@ -73,7 +73,11 @@ const server = http.createServer(async (req, res) => {
     const body = req.method === 'POST' ? await parseBody(req) : {};
     const route = url.pathname.slice(5);
 
-    // Access control: resolve user's allowed tables
+    // DEV-ONLY access scoping. Identity comes from the client-supplied X-User header — it is TRUSTED,
+    // NOT AUTHENTICATED (any client can claim any email). This is acceptable only because the server
+    // binds to 127.0.0.1 (see server.listen below), so it is unreachable off the local machine. This is
+    // NOT the production access model — that is Firestore security rules (firestore.rules), which key on
+    // the real, unspoofable request.auth.token.email. Never expose this server to a network.
     const userEmail = req.headers['x-user'] || 'local@dev';
     function getAllowedTables() {
       if (!backend._users) return null; // no users = no restrictions
@@ -99,8 +103,9 @@ const server = http.createServer(async (req, res) => {
       case 'setFolderConfig': backend.setFolderConfig('local', body.config); return json(res, { ok: true });
       case 'initSchema': if (!body.schema) return json(res, {}); return json(res, backend.initSchema('local', body.schema));
       case 'bootData': {
-        // One-round-trip boot: schema + tableMap + languages + lists + all accessible table data,
-        // read in-process (SQLite). Access-filtered server-side (per-table + per-list) by X-User.
+        // One-round-trip boot: schema + tableMap + languages + lists + all accessible table data, read
+        // in-process (SQLite). Scoped per-table + per-list by X-User — a DEV convenience (trusted header,
+        // localhost-only), not authenticated access control; see getAllowedTables above.
         const schemaB = backend.getSchema('local');
         if (!schemaB) return json(res, { schema: null }); // first boot: client saves the default schema
         const tablesB = schemaB.tables || {};
@@ -214,7 +219,17 @@ const server = http.createServer(async (req, res) => {
   res.end(fs.readFileSync(filePath));
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log('Local dev server: http://127.0.0.1:' + PORT);
+// The loopback bind is load-bearing security: identity is a trusted (unauthenticated) X-User header, so
+// this server must never be reachable off the local machine. HOST is overridable for special dev setups,
+// but a non-loopback bind requires ALLOW_INSECURE_HOST=1 to acknowledge it exposes an unauthenticated server.
+const HOST = process.env.HOST || '127.0.0.1';
+const _loopback = HOST === '127.0.0.1' || HOST === '::1' || HOST === 'localhost';
+if (!_loopback && process.env.ALLOW_INSECURE_HOST !== '1') {
+  console.error('Refusing to bind ' + HOST + ': this dev server has NO authentication (it trusts the X-User header)');
+  console.error('and is safe only on loopback. To bind a non-loopback host anyway, set ALLOW_INSECURE_HOST=1.');
+  process.exit(1);
+}
+server.listen(PORT, HOST, () => {
+  console.log('Local dev server: http://' + HOST + ':' + PORT + (_loopback ? '' : '  [INSECURE: unauthenticated, exposed off-host]'));
   console.log('Storage backend: ' + (USE_FS ? 'JSON files (dev/data/)' : 'SQLite (dev/local.db)'));
 });
