@@ -59,13 +59,17 @@ service cloud.firestore {
     }
 
     // Per-list storage: each list is its own doc carrying its owning `tables`. Read/write gated on
-    // whether the user has access to any owning table (admins/bootstrap unrestricted).
+    // whether the user has access to any owning table (admins/bootstrap unrestricted). An editor may
+    // change a list's ITEMS but not its `tables` ownership label — that determines who can see the list,
+    // so re-stamping it stays an admin action (listAllowed() reads resource, so the editor branch is
+    // update-only anyway; the equality just pins the field). Admins/bootstrap set `tables` freely.
     match /_lists/{listName} {
       allow read: if request.auth != null && isRegistered() && (
         noUsers() || role() == 'admin' || listAllowed()
       );
       allow write: if request.auth != null && isRegistered() && (
-        noUsers() || role() == 'admin' || (role() == 'editor' && listAllowed())
+        noUsers() || role() == 'admin' ||
+        (role() == 'editor' && listAllowed() && request.resource.data.tables == resource.data.tables)
       );
     }
 
