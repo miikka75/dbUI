@@ -367,7 +367,7 @@
     },
     {
       "name": "showcase",
-      "markdown": "# Showcase\n\nA single markdown page-view that embeds **every** kind of element — data view, table, calendar, rotation, aggregate, a nested doc-view, and an archive partition — to demonstrate that any view can be composed into one.\n\n## Data view (union + inline embeds)\n\n{{view:combined}}\n\n## Table\n\n{{table:notes}}\n\n## Calendar\n\n{{view:chore_calendar}}\n\n## Rotation\n\n{{view:crewrota}}\n\n## Aggregate (leaderboard)\n\n{{view:leaderboard}}\n\n## Nested doc-view\n\n{{view:task_doc}}\n\n## Archived tasks (hidden when empty)\n\n{{table:tasks@archive?}}"
+      "markdown": "# Showcase\n\nA single markdown page-view that embeds **every** kind of element — data view, table, calendar, rotation, pivot, aggregate, a nested doc-view, and an archive partition — to demonstrate that any view can be composed into one.\n\n## Data view (union + inline embeds)\n\n{{view:combined}}\n\n## Table\n\n{{table:notes}}\n\n## Calendar\n\n{{view:chore_calendar}}\n\n## Rotation\n\n{{view:crewrota}}\n\n## Pivot (chore heatmap)\n\n{{view:chore_heatmap}}\n\n## Aggregate (leaderboard)\n\n{{view:leaderboard}}\n\n## Nested doc-view\n\n{{view:task_doc}}\n\n## Archived tasks (hidden when empty)\n\n{{table:tasks@archive?}}"
     },
     {
       "name": "in_progress_block",
@@ -438,6 +438,16 @@
           "person"
         ],
         "defaultView": "month"
+      }
+    },
+    {
+      "name": "chore_heatmap",
+      "pivot": {
+        "source": "chore_log",
+        "row": "person",
+        "column": "chore",
+        "aggregate": "count",
+        "totals": "count"
       }
     },
     {
@@ -625,6 +635,10 @@
       {
         "view": "chore_calendar",
         "icon": "mdi-calendar-check"
+      },
+      {
+        "view": "chore_heatmap",
+        "icon": "mdi-grid"
       },
       {
         "table": "chore_log"

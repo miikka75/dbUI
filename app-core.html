@@ -190,10 +190,11 @@ function createVueApp() {
       bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
       isDataView: function() {
         var v = VIEWS[this.currentTable];
-        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation || v.calendar)) && (v || SCHEMA[this.currentTable]);
+        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot)) && (v || SCHEMA[this.currentTable]);
       },
       isRotationView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rotation); },
       isCalendarView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.calendar); },
+      isPivotView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.pivot); },
       // Single classifier for the current view's kind + the top-level component registry dispatch.
       // Every kind maps to a component in VIEW_KINDS; an unclassified view returns null (nothing renders).
       viewKind: function() {
@@ -203,6 +204,7 @@ function createVueApp() {
         if (ct === '__settings') return 'settings';
         if (this.isCalendarView) return 'calendar';
         if (this.isRotationView) return 'rotation';
+        if (this.isPivotView) return 'pivot';
         if (this.currentPage) return 'page';
         if (this.isDataView) return 'data';
         return null;
@@ -900,7 +902,7 @@ function createVueApp() {
         var cfg = VIEWS[id] || SCHEMA[id] || {};
         this.sortCol = cfg.defaultSort || null;
         this.sortAsc = true;
-        if (this.isCalendarView) { this.loadTableData(); }
+        if (this.isCalendarView || this.isPivotView) { this.loadTableData(); }
         else if (this.isDataView || this.isRotationView) { this.periodOffset = 0; this.loadTableData(); }
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
@@ -974,6 +976,16 @@ function createVueApp() {
       },
       isCalendarName: function(name) { return !!(VIEWS[name] && VIEWS[name].calendar); },
       isRotationName: function(name) { return !!(VIEWS[name] && VIEWS[name].rotation); },
+      isPivotName: function(name) { return !!(VIEWS[name] && VIEWS[name].pivot); },
+      // Build a pivot view's grid: resolve its source (a table or view) through the embed row pipeline
+      // (so filters/aggregates/computed columns apply), then Pivot.build cross-tabs it. Pure module +
+      // thin root wrapper, like calEventsFor / rotationRowsFor.
+      pivotFor: function(name) {
+        var v = VIEWS[name]; if (!v || !v.pivot) return { columns: [], rows: [] };
+        var p = v.pivot, src = p.source;
+        var rows = VIEWS[src] ? this.embedRows('view', src) : (this.dataCache[src] || []);
+        return Pivot.build(rows, p);
+      },
       // Doc-view bodies live in a server-side "_pages" collection (not in schema.json).
       // Falls back to the view's schema-defined `markdown` (seed), then caches it.
       loadPage: function(name) {
@@ -1083,6 +1095,19 @@ function createVueApp() {
               if (!tbl || (allowedRv && allowedRv.indexOf(tbl) < 0) || self.dataCache[tbl]) return;
               backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
                 self.dataCache[tbl] = parseTableResult(result).rows; regen();
+              }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
+            });
+            return;
+          }
+          // Pivot view: cross-tab of a source table/view. Load the source's table(s) into the reactive
+          // dataCache; pivotFor() (read by the component) then builds the grid and re-derives on load.
+          if (view.pivot) {
+            var allowedPv = self.userAllowedTables;
+            var pvTables = VIEWS[view.pivot.source] ? (VIEWS[view.pivot.source].sources || []) : [view.pivot.source];
+            pvTables.forEach(function(tbl) {
+              if (!tbl || self.dataCache[tbl] || (allowedPv && allowedPv.indexOf(tbl) < 0)) return;
+              backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
+                self.dataCache[tbl] = parseTableResult(result).rows;
               }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
             });
             return;
@@ -2631,7 +2656,8 @@ function createVueApp() {
     computed: {
       isCal: function() { return this.type === 'view' && !!(appInstance && appInstance.isCalendarName(this.name)); },
       isRot: function() { return this.type === 'view' && !!(appInstance && appInstance.isRotationName(this.name)); },
-      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : 'data'); },
+      isPiv: function() { return this.type === 'view' && !!(appInstance && appInstance.isPivotName(this.name)); },
+      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : 'data'); },
       calName: function() { return this.spec ? this.spec.name : this.name; },
       cols: function() {
         if (this.spec) return this.spec.columns;
@@ -2661,6 +2687,7 @@ function createVueApp() {
     template: ''
       + '<calendar-view v-if="kind===\'calendar\'" :name="calName" :embed="true"></calendar-view>'
       + '<rotation-view v-else-if="kind===\'rotation\'" :name="calName" :embed="true"></rotation-view>'
+      + '<pivot-view v-else-if="kind===\'pivot\'" :name="calName" :embed="true"></pivot-view>'
       + '<template v-else-if="kind===\'doc\'" v-for="(blk, bi) in spec.blocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
       + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>'
@@ -2776,7 +2803,7 @@ function createVueApp() {
   // Top-level view-kind registry: kind -> the component that renders that whole view. Every kind is
   // componentized; the top-level dispatch is a single <component :is="viewComponent"> lookup in ui.html.
   window.VIEW_KINDS = {
-    calendar: 'calendar-view', rotation: 'rotation-view', page: 'page-view', data: 'data-view',
+    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', page: 'page-view', data: 'data-view',
     languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view'   // system screens
   };
 
@@ -2996,6 +3023,49 @@ function createVueApp() {
       + '<v-divider></v-divider>'
       + '</template>'
       + '<component :is="bodyComponent" :cols="cols" :slot-cols="slotCols" :rows="rows"></component>'
+      + '</component>'
+  });
+
+  // Pivot (cross-tab) view — name/embed parameterized like calendar/rotation. Reads the pure Pivot.build
+  // grid via the root pivotFor() helper; renders a sticky-header table with optional row/column/grand
+  // totals. Row/column keys and value cells are formatted with displayValue (so list values -> labels).
+  app.component('pivot-view', {
+    props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    computed: {
+      a: function() { return appInstance; },
+      viewName: function() { return this.name || appInstance.currentTable; },
+      cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].pivot) || {}; },
+      grid: function() { return appInstance.pivotFor(this.viewName); },
+      hasTotals: function() { return !!this.grid.columnTotals; }
+    },
+    methods: {
+      head: function(col) { return appInstance.tOr('field.' + col, col); },
+      colLabel: function(k) { return appInstance.displayValue(this.cfg.column, k); },
+      rowLabel: function(k) { return appInstance.displayValue(this.cfg.row, k); },
+      cellFmt: function(v) { return (v === '' || v == null) ? '' : (this.cfg.cell ? appInstance.displayValue(this.cfg.cell, v) : v); }
+    },
+    template: ''
+      + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="pivot-view">'
+      + '<v-table density="compact" class="my-1"><template v-slot:default>'
+      + '<thead><tr>'
+      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface))">{{ head(cfg.row) }}</th>'
+      + '<th v-for="c in grid.columns" :key="c" style="text-align:center">{{ colLabel(c) }}</th>'
+      + '<th v-if="hasTotals" style="text-align:center;font-weight:700">{{ a.tOr(\'pivot.total\', \'Total\') }}</th>'
+      + '</tr></thead>'
+      + '<tbody>'
+      + '<tr v-for="r in grid.rows" :key="r.key">'
+      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:600">{{ rowLabel(r.key) }}</th>'
+      + '<td v-for="(v, ci) in r.cells" :key="ci" style="text-align:center">{{ cellFmt(v) }}</td>'
+      + '<td v-if="hasTotals" style="text-align:center;font-weight:700">{{ r.total }}</td>'
+      + '</tr>'
+      + '<tr v-if="!grid.rows.length"><td :colspan="(grid.columns.length || 1) + 1" style="opacity:0.6;padding:12px">{{ a.tOr(\'pivot.empty\', \'No data\') }}</td></tr>'
+      + '</tbody>'
+      + '<tfoot v-if="hasTotals"><tr>'
+      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:700">{{ a.tOr(\'pivot.total\', \'Total\') }}</th>'
+      + '<td v-for="(t, ci) in grid.columnTotals" :key="ci" style="text-align:center;font-weight:700">{{ t }}</td>'
+      + '<td style="text-align:center;font-weight:800">{{ grid.grandTotal }}</td>'
+      + '</tr></tfoot>'
+      + '</template></v-table>'
       + '</component>'
   });
 

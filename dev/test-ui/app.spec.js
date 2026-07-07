@@ -2400,10 +2400,40 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
       };
     });
     expect(r.kind).toBe('page');
-    // data view + table + calendar + rotation + aggregate view + nested doc-view + archive-partition table
-    expect(r.embeds).toEqual(['combined', 'notes', 'chore_calendar', 'crewrota', 'leaderboard', 'task_doc', 'tasks']);
+    // data view + table + calendar + rotation + pivot + aggregate view + nested doc-view + archive-partition table
+    expect(r.embeds).toEqual(['combined', 'notes', 'chore_calendar', 'crewrota', 'chore_heatmap', 'leaderboard', 'task_doc', 'tasks']);
     expect(r.cal).toBe(true);
     expect(r.rot).toBe(true);
+  });
+
+  test('pivot view (chore_heatmap): person x chore counts + row/col/grand totals', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    // Ann: dishes x2 + trash; Bob: trash. Grid is person x chore -> count.
+    for (const [id, person, chore] of [['a', 'Ann', 'dishes'], ['b', 'Ann', 'dishes'], ['c', 'Ann', 'trash'], ['d', 'Bob', 'trash']]) {
+      await page.request.post('/api/putRow', { data: { tableId: 'chore_log', data: { id, person, chore, done_on: '2026-07-01' }, tab: 'active' } });
+    }
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.selectTab('chore_heatmap');
+      const g = app.pivotFor('chore_heatmap');
+      return { kind: app.viewKind, columns: g.columns, rows: g.rows.map(x => ({ k: x.key, c: x.cells, t: x.total })), colTot: g.columnTotals, grand: g.grandTotal };
+    });
+    expect(r.kind).toBe('pivot');                                  // routed to pivot-view via VIEW_KINDS
+    expect(r.columns).toEqual(['dishes', 'trash']);                // sorted distinct chores
+    expect(r.rows).toEqual([
+      { k: 'Ann', c: [2, 1], t: 3 },                               // dishes x2, trash x1
+      { k: 'Bob', c: ['', 1], t: 1 }                               // no dishes, trash x1
+    ]);
+    expect(r.colTot).toEqual([2, 2]);                              // dishes total 2, trash total 2
+    expect(r.grand).toBe(4);
+    await expect(page.locator('[data-testid="pivot-view"]')).toBeVisible();  // renders in the DOM
   });
 });
 
