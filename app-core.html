@@ -2464,88 +2464,54 @@ function createVueApp() {
         } catch (e) {}
       },
       // (PRINT_CSS is a module-level var defined above createVueApp)
-      _pe: function(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); },
+      _pe: function(s) { return Print.escape(s); },
       _printOpen: function(title, bodyHtml) { var w = window.open('', '_blank'); w.document.write('<html><head><title>' + title + '</title><style>' + PRINT_CSS + '</style></head><body>' + bodyHtml + '</body></html>'); w.document.close(); w.print(); },
-      _printCardHtml: function(cols, item) {
-        var self = this, pe = this._pe, html = '<div class="card"><dl>';
-        cols.forEach(function(c) {
-          if (!self.isColumnHidden(c, item) && (item[c] || !self.colHideEmpty(c))) html += '<dt>' + pe(self.t('field.' + c) || c) + '</dt><dd>' + pe(self._printCell(c, item[c])) + '</dd>';
-          self.embedItems.forEach(function(ei) { if (ei.config.afterColumn === c && self._printable(ei, item)) html += '</dl>' + self._printEmbed(ei, item) + '<dl>'; });
-        });
-        html += '</dl>';
-        self.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && self._printable(ei, item)) html += self._printEmbed(ei, item); });
-        html = html.replace(/<dl><\/dl>/g, ''); // remove empty dl pairs left by embed splits
-        return html + '</div>';
+      // The print-HTML builders live in /print.js (pure over this ctx). Orchestration (window.open +
+      // PRINT_CSS in _printOpen, and the printView/printCard entry points) stays here.
+      _printCtx: function() {
+        var self = this;
+        return {
+          t: function(k) { return self.t(k); },
+          colIsDate: function(c) { return self.colIsDate(c); },
+          toDateStr: function(v) { return self.toDateStr(v); },
+          displayValue: function(c, v) { return self.displayValue(c, v); },
+          isColumnHidden: function(c, item) { return self.isColumnHidden(c, item); },
+          colHideEmpty: function(c) { return self.colHideEmpty(c); },
+          embedItems: self.embedItems,
+          embedWhenOk: function(ei, item) { return self.embedWhenOk(ei, item); },
+          embedRowsForItem: function(ei, item) { return self.embedRowsForItem(ei, item); },
+          embedCols: function(t, n) { return self.embedCols(t, n); },
+          embedRows: function(t, n, p) { return self.embedRows(t, n, p); }
+        };
       },
-
       printView: function() {
-        var self = this, pe = this._pe;
+        var self = this, ctx = this._printCtx();
         var title = this.t((VIEWS[this.currentTable] ? 'view.' : 'tab.') + this.currentTable) || this.currentTable;
         if (this.isRotationView) {
-          this._printOpen(title, '<h2>' + pe(title) + '</h2>' + this._printTable(this.rotationViewCols, this.rotationViewRows));
+          this._printOpen(title, '<h2>' + Print.escape(title) + '</h2>' + Print.table(this.rotationViewCols, this.rotationViewRows, ctx));
           return;
         }
         var cols = this.visibleCols;
         var body = '<h2>' + title + '</h2>';
         if (this.useCardLayout) {
-          this.sortedData.forEach(function(row) { body += self._printCardHtml(cols, row); });
+          this.sortedData.forEach(function(row) { body += Print.cardHtml(cols, row, ctx); });
         } else {
           var afterCol = null;
-          self.embedItems.forEach(function(ei) { if (ei.config.afterColumn) afterCol = ei.config.afterColumn; });
+          this.embedItems.forEach(function(ei) { if (ei.config.afterColumn) afterCol = ei.config.afterColumn; });
           var colIdx = afterCol ? cols.indexOf(afterCol) : -1;
           var colsBefore = colIdx >= 0 ? cols.slice(0, colIdx + 1) : cols;
           var colsAfter = colIdx >= 0 ? cols.slice(colIdx + 1) : [];
-          body += this._printTable(colsBefore, this.sortedData);
-          self.embedItems.forEach(function(ei) { if (ei.config.afterColumn && self._printable(ei)) body += self._printEmbed(ei); });
-          if (colsAfter.length) body += this._printTable(colsAfter, this.sortedData);
-          self.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && self._printable(ei)) body += self._printEmbed(ei); });
+          body += Print.table(colsBefore, this.sortedData, ctx);
+          this.embedItems.forEach(function(ei) { if (ei.config.afterColumn && Print.printable(ei, undefined, ctx)) body += Print.embed(ei, undefined, ctx); });
+          if (colsAfter.length) body += Print.table(colsAfter, this.sortedData, ctx);
+          this.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && Print.printable(ei, undefined, ctx)) body += Print.embed(ei, undefined, ctx); });
         }
         this._printOpen(title, body);
       },
-
-      _printable: function(ei, item) { if (!this.embedWhenOk(ei, item)) return false; if (ei.kind === 'doc') return !!ei.show; var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows; return !!(rows && rows.length); },
-      // Format a print cell to match the web grid: dates (and the rotation _period) -> toDateStr,
-      // list/groupBy values -> displayValue.
-      _printCell: function(c, v) { return (c === '_period' || this.colIsDate(c)) ? this.toDateStr(v) : this.displayValue(c, v); },
-      // Build one print <table> for cols/rows (the only table shape the print path emits — was inlined
-      // ~6x across printView + _printEmbed). Header: field.* label (period gets its own key); cells: _printCell.
-      _printTable: function(cols, rows) {
-        var self = this, pe = this._pe;
-        var h = '<table><thead><tr>';
-        cols.forEach(function(c) { h += '<th>' + pe(c === '_period' ? self.t('field.period') : (self.t('field.' + c) || c)) + '</th>'; });
-        h += '</tr></thead><tbody>';
-        rows.forEach(function(r) { h += '<tr>'; cols.forEach(function(c) { h += '<td>' + pe(self._printCell(c, r[c])) + '</td>'; }); h += '</tr>'; });
-        return h + '</tbody></table>';
-      },
-      _printEmbed: function(ei, item) {
-        var self = this, pe = this._pe;
-        var rows = (ei.config.filterBy && item) ? this.embedRowsForItem(ei, item) : ei.rows;
-        if (ei.kind === 'doc') {
-          var dh = ei.config.bare ? '<div>' : '<div class="embed">';
-          (ei.blocks || []).forEach(function(b) {
-            if (b.html) { dh += b.html; return; }
-            var cols = self.embedCols(b.embedType, b.embedName), rows = self.embedRows(b.embedType, b.embedName, b.embedPart);
-            if (rows.length) dh += self._printTable(cols, rows);
-          });
-          return dh + '</div>';
-        }
-        var html = ei.config.bare ? '<div>' : '<div class="embed">';
-        if (ei.inlineBlocks) {
-          ei.inlineBlocks.forEach(function(blk) {
-            if (blk.html) { html += blk.html; return; }
-            if (blk.self) html += self._printTable(ei.columns, rows);
-          });
-        } else {
-          html += this._printTable(ei.columns, rows);
-        }
-        html += '</div>';
-        return html;
-      },
-
       printCard: function(item) {
         var cols = this.visibleCols;
-        var title = this._pe(this.displayValue(cols[0], item[cols[0]]) || item.id);
-        this._printOpen(title, this._printCardHtml(cols, item));
+        var title = Print.escape(this.displayValue(cols[0], item[cols[0]]) || item.id);
+        this._printOpen(title, Print.cardHtml(cols, item, this._printCtx()));
       }
     },
 
