@@ -106,7 +106,7 @@
       // and await just before the schema-loader fragment — they overlap the vue/vuetify/sdk loads for free.
       var appModulesReady = loadScriptsOrdered([
         '/columns.js', '/access-features.js', '/list-access.js', '/calendar.js',
-        '/rotation.js', '/rows.js', '/embeds.js', '/print.js'
+        '/rotation.js', '/rows.js', '/embeds.js', '/print.js', '/pivot.js'
       ]);
 
       await loadScript('/vendor/vue.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vue@3.5.34/dist/vue.global.prod.js'); });

@@ -75,6 +75,9 @@
     if (cfg.calendar) { // calendarView embed -> delegate to the calendar-view component (embed mode)
       return { config: cfg, kind: 'calendar', name: cfg.view || cfg.name || ctx.currentTable };
     }
+    if (cfg.pivot) { // pivotView embed -> delegate to the pivot-view component (embed mode)
+      return { config: cfg, kind: 'pivot', name: cfg.view || cfg.name || ctx.currentTable };
+    }
     if (cfg.rotation) { // rotationView embed (a {view:x} where x is a rotationView) -> generate period rows
       var anchorName = cfg.view || cfg.name || ctx.currentTable;
       var rrows = ctx.rotationRowsFor(anchorName, cfg.rotation);
@@ -142,7 +145,7 @@
   // relevant rows (per-row filterBy slice when an `item` context is given) must be non-empty.
   function embedVisible(ei, item) {
     if (ei.kind === 'doc') return !!ei.show;
-    if (ei.kind === 'calendar') return true;
+    if (ei.kind === 'calendar' || ei.kind === 'pivot') return true;
     var rows = (ei.config.filterBy && item) ? embedRowsForItem(ei, item) : ei.rows;
     return !!(rows && rows.length);
   }
