@@ -1372,7 +1372,10 @@ test.describe('XSS prevention (safeUrl + print escape)', () => {
   test('javascript: URLs in markdown are neutralized; HTML in field values is escaped in print', async ({ page }) => {
     test.setTimeout(20000);
     await page.goto('/');
-    await page.waitForFunction(() => typeof mdToHtml === 'function');
+    // Wait for BOTH globals this test reads: mdToHtml (embeds.js, loaded early) AND appInstance (mounted
+    // later by createVueApp). mdToHtml now appears well before the Vue app mounts, so waiting on it alone
+    // would race appInstance._pe.
+    await page.waitForFunction(() => typeof mdToHtml === 'function' && window.appInstance && typeof appInstance._pe === 'function');
     const results = await page.evaluate(() => {
       // Test 1: safeUrl blocks javascript: protocol
       var html = mdToHtml('[click](javascript:alert(1))');
