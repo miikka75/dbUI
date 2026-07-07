@@ -2377,6 +2377,34 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     });
     expect(layouts).toEqual({ all_items: 'table', summary_cards: 'card', quick_list: 'list' });
   });
+
+  test('the showcase page embeds every element kind (data/table/calendar/rotation/aggregate/doc)', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 'zz', title: 'Archived', status: 'done' }, tab: 'archive' } }); // so {{table:tasks@archive?}} resolves
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.selectTab('showcase');
+      const embeds = app.pageBlocks.filter(b => b.embedName).map(b => b.embedName);
+      return {
+        kind: app.viewKind,
+        embeds,
+        cal: app.isCalendarName('chore_calendar'),   // page-view routes this to <calendar-view :embed>
+        rot: app.isRotationName('crewrota')           // ...and this to <rotation-view :embed>
+      };
+    });
+    expect(r.kind).toBe('page');
+    // data view + table + calendar + rotation + aggregate view + nested doc-view + archive-partition table
+    expect(r.embeds).toEqual(['combined', 'notes', 'chore_calendar', 'crewrota', 'leaderboard', 'task_doc', 'tasks']);
+    expect(r.cal).toBe(true);
+    expect(r.rot).toBe(true);
+  });
 });
 
 test.describe('Export/import includes edited page bodies', () => {
