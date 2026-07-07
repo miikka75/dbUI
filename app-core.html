@@ -504,7 +504,7 @@ function createVueApp() {
           for (var c2 in cols2) { var d = cols2[c2]; if (d && typeof d === 'object' && d.list) referencedLists[d.list] = true; }
         }
         var lists = this.listsCache || {};
-        var lockedVals = this.lockedListValues();
+        var lockedVals = this.lockedListValues;
         for (var ln in lockedVals) {
           for (var lv in lockedVals[ln]) { keys.push('list.' + ln + '.' + lv); }
         }
@@ -573,6 +573,42 @@ function createVueApp() {
       },
       refParentCol: function() { return this.refTableCols[0]; },
       refChildCol: function() { return this.refTableCols[1]; },
+      // Values a schema filter/conditional depends on — locked (can't be deleted/renamed) in the Lookup
+      // editor. A CACHED computed (was a method): isLockedValue is called ~3x per list item, and this
+      // rebuild is O(views x columns x tables) — recomputing it per call made the Lookup view crawl on
+      // large schemas. Recomputes only when schemaData changes (the reactive dep + VIEWS rebuild).
+      lockedListValues: function() {
+        var locked = {};
+        var _dep = this.schemaData; // reactive dependency trigger
+        for (var vn in VIEWS) {
+          var view = VIEWS[vn];
+          if (view.filter) {
+            for (var col in view.filter) {
+              var ln = null;
+              for (var t in SCHEMA) { var d = SCHEMA[t].columns[col]; if (d && typeof d === 'object' && d.list) { ln = d.list; break; } }
+              if (ln) { if (!locked[ln]) locked[ln] = {}; (Array.isArray(view.filter[col]) ? view.filter[col] : [view.filter[col]]).forEach(function(v) { locked[ln][v] = true; }); }
+            }
+          }
+          (view.columns || []).forEach(function(c) {
+            if (typeof c === 'object' && c.sources && c.filter) {
+              // Inline embed with filter
+              for (var ek in c.filter) {
+                var eln = null;
+                for (var et in SCHEMA) { var ed = SCHEMA[et].columns[ek]; if (ed && typeof ed === 'object' && ed.list) { eln = ed.list; break; } }
+                if (eln) { if (!locked[eln]) locked[eln] = {}; (Array.isArray(c.filter[ek]) ? c.filter[ek] : [c.filter[ek]]).forEach(function(v) { if (typeof v === 'string') locked[eln][v] = true; }); }
+              }
+            } else if (typeof c === 'object' && !c.sources && !c.name) {
+              var cond = c[Object.keys(c)[0]];
+              if (cond) for (var ck in cond) {
+                var ln2 = null;
+                for (var t2 in SCHEMA) { var d2 = SCHEMA[t2].columns[ck]; if (d2 && typeof d2 === 'object' && d2.list) { ln2 = d2.list; break; } }
+                if (ln2) { if (!locked[ln2]) locked[ln2] = {}; locked[ln2][cond[ck]] = true; }
+              }
+            }
+          });
+        }
+        return locked;
+      },
       refGroupedData: function() {
         if (!this.isHierarchicalRef) return {};
         var parentCol = this.refParentCol;
@@ -1320,41 +1356,8 @@ function createVueApp() {
         if (v.rotation) { var rv = v.rotation; var areas = rv.slots || (rv.columns || []).map(function(c) { return c.name; }); return areas.indexOf(col) >= 0; }
         return !!this.colIsList(col) || this.colIsMultiselect(col);
       },
-      lockedListValues: function() {
-        // Extract values that schema filters/conditionals require — cannot be deleted/renamed
-        var locked = {};
-        var _dep = this.schemaData; // reactive dependency trigger
-        for (var vn in VIEWS) {
-          var view = VIEWS[vn];
-          if (view.filter) {
-            for (var col in view.filter) {
-              var ln = null;
-              for (var t in SCHEMA) { var d = SCHEMA[t].columns[col]; if (d && typeof d === 'object' && d.list) { ln = d.list; break; } }
-              if (ln) { if (!locked[ln]) locked[ln] = {}; (Array.isArray(view.filter[col]) ? view.filter[col] : [view.filter[col]]).forEach(function(v) { locked[ln][v] = true; }); }
-            }
-          }
-          (view.columns || []).forEach(function(c) {
-            if (typeof c === 'object' && c.sources && c.filter) {
-              // Inline embed with filter
-              for (var ek in c.filter) {
-                var eln = null;
-                for (var et in SCHEMA) { var ed = SCHEMA[et].columns[ek]; if (ed && typeof ed === 'object' && ed.list) { eln = ed.list; break; } }
-                if (eln) { if (!locked[eln]) locked[eln] = {}; (Array.isArray(c.filter[ek]) ? c.filter[ek] : [c.filter[ek]]).forEach(function(v) { if (typeof v === 'string') locked[eln][v] = true; }); }
-              }
-            } else if (typeof c === 'object' && !c.sources && !c.name) {
-              var cond = c[Object.keys(c)[0]];
-              if (cond) for (var ck in cond) {
-                var ln2 = null;
-                for (var t2 in SCHEMA) { var d2 = SCHEMA[t2].columns[ck]; if (d2 && typeof d2 === 'object' && d2.list) { ln2 = d2.list; break; } }
-                if (ln2) { if (!locked[ln2]) locked[ln2] = {}; locked[ln2][cond[ck]] = true; }
-              }
-            }
-          });
-        }
-        return locked;
-      },
       isLockedValue: function(listName, val) {
-        var lv = this.lockedListValues();
+        var lv = this.lockedListValues;
         return !!(lv[listName] && lv[listName][val]);
       },
       colAllowNew: function(col) { return Columns.colAllowNew(SCHEMA, col); },
@@ -2245,6 +2248,7 @@ function createVueApp() {
                 return backend.saveSchema(self.folderId, imported.schema);
               }).then(function() {
                 _normalizeSchema(imported.schema);
+                self.schemaData = Object.freeze(imported.schema); // mirror boot: refresh the reactive schema (invalidates lockedListValues et al.)
                 return backend.initSchema(self.folderId, SCHEMA);
               }).then(function(tableMap) {
                 if (tableMap) self.tableMap = tableMap;
@@ -2302,7 +2306,7 @@ function createVueApp() {
               });
             }
             chain.then(function() {
-              var locked = self.lockedListValues();
+              var locked = self.lockedListValues;
               var needSave = false;
               for (var ln in locked) {
                 if (!self.listsCache[ln]) { self.listsCache[ln] = []; needSave = true; }
