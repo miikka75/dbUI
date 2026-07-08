@@ -33,6 +33,14 @@
     for (var c in cols) { var def = cols[c]; if (def && typeof def === 'object' && def.syncFrom) return def.syncFrom; }
     return null;
   }
+  // Name of a table's `owner` column (type:'owner' — auto-stamped with the current user's email,
+  // read-only, immutable; drives per-row self-service access), or null.
+  function tableOwnerCol(schema, table) {
+    var cols = schema[table] && schema[table].columns;
+    if (!cols) return null;
+    for (var c in cols) { if (columnType(schema, table, c) === 'owner') return c; }
+    return null;
+  }
 
   // Any-table scanners: a column name is typed the same wherever it appears (mirror clusters share
   // names), so "does column `col` have property X in ANY table?" is schema-static. These were O(tables)
@@ -85,7 +93,7 @@
 
   var C = {
     columnType: columnType, columnList: columnList, columnRef: columnRef,
-    isMirror: isMirror, tableMirrorSource: tableMirrorSource,
+    isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol,
     colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate,
     colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted,
     colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText

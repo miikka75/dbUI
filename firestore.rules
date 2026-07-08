@@ -73,13 +73,29 @@ service cloud.firestore {
       );
     }
 
-    // Data tables (never _meta or _lists). Read needs table access; write additionally requires a writable role (viewers are read-only).
+    // Data tables (never _meta or _lists). Read needs table access. Writes split into create/update/delete
+    // so OWNER-SCOPED self-service rows work: a registered member may create/edit/delete ONLY their own
+    // row (one carrying `owner == their email`), no table-editor grant required — this backs the RSVP /
+    // sign-up pattern. Rows without an `owner` field keep the plain per-table editor gate. Admins write all.
+    function base(coll) { return request.auth != null && isRegistered() && coll != '_meta' && coll != '_lists'; }
     match /{collection}/{doc} {
-      allow read: if request.auth != null && isRegistered() && collection != '_meta' && collection != '_lists' && (
+      allow read: if base(collection) && (
         noUsers() || role() == 'admin' || hasTableAccess(collection)
       );
-      allow write: if request.auth != null && isRegistered() && collection != '_meta' && collection != '_lists' && (
-        noUsers() || role() == 'admin' || (role() == 'editor' && hasTableAccess(collection))
+      allow create: if base(collection) && (
+        noUsers() || role() == 'admin' ||
+        request.resource.data.owner == myEmail() ||                      // self-service: create my own owned row
+        (role() == 'editor' && hasTableAccess(collection))
+      );
+      allow update: if base(collection) && (
+        noUsers() || role() == 'admin' ||
+        (resource.data.owner == myEmail() && request.resource.data.owner == myEmail()) || // edit my own; can't reassign owner
+        (role() == 'editor' && hasTableAccess(collection))
+      );
+      allow delete: if base(collection) && (
+        noUsers() || role() == 'admin' ||
+        resource.data.owner == myEmail() ||                              // delete my own owned row
+        (role() == 'editor' && hasTableAccess(collection))
       );
     }
   }
