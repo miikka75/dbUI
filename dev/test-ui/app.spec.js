@@ -2378,7 +2378,7 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(layouts).toEqual({ all_items: 'table', summary_cards: 'card', quick_list: 'list' });
   });
 
-  test('the showcase page embeds every element kind (data/table/calendar/rotation/aggregate/doc)', async ({ page }) => {
+  test('the showcase page embeds every element kind (data/table/calendar/rotation/pivot/rsvp/aggregate/doc)', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');
@@ -2396,14 +2396,18 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
         kind: app.viewKind,
         embeds,
         cal: app.isCalendarName('chore_calendar'),   // page-view routes this to <calendar-view :embed>
-        rot: app.isRotationName('crewrota')           // ...and this to <rotation-view :embed>
+        rot: app.isRotationName('crewrota'),          // ...and this to <rotation-view :embed>
+        piv: app.isPivotName('chore_heatmap'),
+        rsvp: app.isRsvpName('my_rsvp')               // ...and {{view:my_rsvp}} to <rsvp-view :embed>
       };
     });
     expect(r.kind).toBe('page');
-    // data view + table + calendar + rotation + pivot + aggregate view + nested doc-view + archive-partition table
-    expect(r.embeds).toEqual(['combined', 'notes', 'chore_calendar', 'crewrota', 'chore_heatmap', 'leaderboard', 'task_doc', 'tasks']);
+    // data view + table + calendar + rotation + pivot + rsvp + aggregate view + nested doc-view + archive-partition table
+    expect(r.embeds).toEqual(['combined', 'notes', 'chore_calendar', 'crewrota', 'chore_heatmap', 'my_rsvp', 'leaderboard', 'task_doc', 'tasks']);
     expect(r.cal).toBe(true);
     expect(r.rot).toBe(true);
+    expect(r.piv).toBe(true);
+    expect(r.rsvp).toBe(true);
   });
 
   test('pivot view (chore_heatmap): person x chore counts + row/col/grand totals', async ({ page }) => {
