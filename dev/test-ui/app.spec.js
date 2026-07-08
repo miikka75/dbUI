@@ -2522,6 +2522,25 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(r.lightSurfaceUntouched).toBe('#ffffff');  // partial override — unspecified colors keep defaults
     expect(r.cssVar).toBe('0,105,92');                // Vuetify regenerated --v-theme-primary (RGB of #00695c)
   });
+
+  test('pre-Vue splash caches the brand color and applies it on the next boot', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('app_theme', 'light'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    // First boot stashed the brand palette (both modes) for the pre-Vue splash.
+    const cache = await page.evaluate(() => JSON.parse(localStorage.getItem('brand_splash') || 'null'));
+    expect(cache.light.p).toBe('#00695c');   // brand primary cached (light)
+    expect(cache.dark.p).toBe('#4db6ac');
+    // Next boot: the <head> script reads the cache and paints the splash spinner in-brand BEFORE Vue loads.
+    await page.reload();
+    const accent = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--splash-accent').trim());
+    expect(accent).toBe('#00695c');          // splash spinner brand-colored from the cache
+  });
 });
 
 test.describe('Export/import includes edited page bodies', () => {
