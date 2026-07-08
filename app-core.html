@@ -7,6 +7,7 @@ function getColumnList(table, col) { return Columns.columnList(SCHEMA, table, co
 function getColumnRef(table, col) { return Columns.columnRef(SCHEMA, table, col); }
 function colIsMirror(tables, col, tableName) { return Columns.isMirror(tables, tableName, col); }
 function getTableMirrorSource(tables, tableName) { return Columns.tableMirrorSource(tables, tableName); }
+function getOwnerCol(table) { return Columns.tableOwnerCol(SCHEMA, table); } // table's type:'owner' column name, or null
 
 // --- Permission "features" model: extracted to /access-features.js (AccessFeatures.*), a pure module
 //     over (schema, views) shared with the unit tests. These thin wrappers bind the app's global
@@ -190,11 +191,12 @@ function createVueApp() {
       bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
       isDataView: function() {
         var v = VIEWS[this.currentTable];
-        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot)) && (v || SCHEMA[this.currentTable]);
+        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp)) && (v || SCHEMA[this.currentTable]);
       },
       isRotationView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rotation); },
       isCalendarView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.calendar); },
       isPivotView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.pivot); },
+      isRsvpView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rsvp); },
       // Single classifier for the current view's kind + the top-level component registry dispatch.
       // Every kind maps to a component in VIEW_KINDS; an unclassified view returns null (nothing renders).
       viewKind: function() {
@@ -205,6 +207,7 @@ function createVueApp() {
         if (this.isCalendarView) return 'calendar';
         if (this.isRotationView) return 'rotation';
         if (this.isPivotView) return 'pivot';
+        if (this.isRsvpView) return 'rsvp';
         if (this.currentPage) return 'page';
         if (this.isDataView) return 'data';
         return null;
@@ -902,7 +905,7 @@ function createVueApp() {
         var cfg = VIEWS[id] || SCHEMA[id] || {};
         this.sortCol = cfg.defaultSort || null;
         this.sortAsc = true;
-        if (this.isCalendarView || this.isPivotView) { this.loadTableData(); }
+        if (this.isCalendarView || this.isPivotView || this.isRsvpView) { this.loadTableData(); }
         else if (this.isDataView || this.isRotationView) { this.periodOffset = 0; this.loadTableData(); }
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
@@ -986,6 +989,39 @@ function createVueApp() {
         var rows = VIEWS[src] ? this.embedRows('view', src) : (this.dataCache[src] || []);
         return Pivot.build(rows, p);
       },
+      isRsvpName: function(name) { return !!(VIEWS[name] && VIEWS[name].rsvp); },
+      // Build the self-service RSVP list (upcoming events + the current user's own response per event +
+      // tallies), via the pure Rsvp module. Owner identity = the auth email (matches the firestore rules).
+      rsvpFor: function(name) {
+        var v = VIEWS[name]; if (!v || !v.rsvp) return { events: [], statuses: [] };
+        var cfg = v.rsvp;
+        var events = VIEWS[cfg.events] ? this.embedRows('view', cfg.events) : (this.dataCache[cfg.events] || []);
+        var responses = this.dataCache[cfg.responses] || [];
+        return Rsvp.build(events, responses, Object.assign({
+          me: this.currentUserEmail || '', ownerCol: getOwnerCol(cfg.responses) || 'owner', today: fmtDate(new Date())
+        }, cfg));
+      },
+      // Upsert the current user's response for one event: update my existing owned row, else create one
+      // stamped with owner = my email. Self-service — not gated by role (firestore rules enforce ownership).
+      setRsvp: function(name, eventKey, status) {
+        var v = VIEWS[name]; if (!v || !v.rsvp) return;
+        var cfg = v.rsvp, table = cfg.responses, ownerCol = getOwnerCol(table) || 'owner';
+        var me = this.currentUserEmail || '';
+        if (!me) { this.notify('Sign in to respond'); return; }
+        if (!this.dataCache[table]) this.dataCache[table] = [];
+        var rows = this.dataCache[table];
+        var mine = rows.find(function(r) { return r[cfg.linkColumn] === eventKey && r[ownerCol] === me; });
+        if (mine) {
+          mine[cfg.statusColumn] = status; mine.updated_at = new Date().toISOString();
+          backend.putRow(this.tableMap[table], mine, 'active');
+        } else {
+          var row = { id: this.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+          getColumns(table).forEach(function(c) { if (!(c in row)) row[c] = ''; });
+          row[ownerCol] = me; row[cfg.linkColumn] = eventKey; row[cfg.statusColumn] = status;
+          rows.push(row);
+          backend.putRow(this.tableMap[table], row, 'active');
+        }
+      },
       // Doc-view bodies live in a server-side "_pages" collection (not in schema.json).
       // Falls back to the view's schema-defined `markdown` (seed), then caches it.
       loadPage: function(name) {
@@ -1033,6 +1069,7 @@ function createVueApp() {
         withMirrors([this.embedSources(type, name)[0]]).forEach(function(src) {
           var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           getColumns(src).forEach(function(c) { if (!row[c]) row[c] = ''; });
+          var _oc = getOwnerCol(src); if (_oc) row[_oc] = self.currentUserEmail || ''; // stamp owner on create
           if (!self.dataCache[src]) self.dataCache[src] = [];
           self.dataCache[src].push(row);
           backend.putRow(self.tableMap[src], row, 'active');
@@ -1106,6 +1143,20 @@ function createVueApp() {
             var pvTables = VIEWS[view.pivot.source] ? (VIEWS[view.pivot.source].sources || []) : [view.pivot.source];
             pvTables.forEach(function(tbl) {
               if (!tbl || self.dataCache[tbl] || (allowedPv && allowedPv.indexOf(tbl) < 0)) return;
+              backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
+                self.dataCache[tbl] = parseTableResult(result).rows;
+              }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
+            });
+            return;
+          }
+          // RSVP view: load the events + responses tables; rsvpFor() builds the list, re-derives on load.
+          if (view.rsvp) {
+            var allowedRs = self.userAllowedTables;
+            var rsTables = [];
+            (VIEWS[view.rsvp.events] ? (VIEWS[view.rsvp.events].sources || []) : [view.rsvp.events]).forEach(function(t) { if (t) rsTables.push(t); });
+            if (view.rsvp.responses) rsTables.push(view.rsvp.responses);
+            rsTables.forEach(function(tbl) {
+              if (!tbl || self.dataCache[tbl] || (allowedRs && allowedRs.indexOf(tbl) < 0)) return;
               backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
                 self.dataCache[tbl] = parseTableResult(result).rows;
               }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
@@ -1272,6 +1323,7 @@ function createVueApp() {
         sources.forEach(function(src) {
           var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           getColumns(src).forEach(function(c) { if (!row[c]) row[c] = ''; });
+          var _oc = getOwnerCol(src); if (_oc) row[_oc] = self.currentUserEmail || ''; // stamp owner on create
           var cacheKey = self.viewingArchive ? aKey(src) : src;
           if (!self.dataCache[cacheKey]) self.dataCache[cacheKey] = [];
           // Reorderable tables order by `position`; seed the next number so new rows append in order
@@ -1414,6 +1466,8 @@ function createVueApp() {
         var table = (view && view.mode === 'union' && item._source) ? item._source : ownerId;
         // syncFrom (mirror) columns are synced from a master -> read-only in the detail table
         if (table && SCHEMA[table] && colIsMirror(SCHEMA, col, table)) return true;
+        // owner columns are auto-stamped with the current user's email and immutable
+        if (table && getColumnType(table, col) === 'owner') return true;
         // In union views, grey out columns that don't belong to the row's source table
         if (!view || view.mode !== 'union' || !item._source) return false;
         return !(SCHEMA[item._source] && SCHEMA[item._source].columns && SCHEMA[item._source].columns[col]);
@@ -2657,7 +2711,8 @@ function createVueApp() {
       isCal: function() { return this.type === 'view' && !!(appInstance && appInstance.isCalendarName(this.name)); },
       isRot: function() { return this.type === 'view' && !!(appInstance && appInstance.isRotationName(this.name)); },
       isPiv: function() { return this.type === 'view' && !!(appInstance && appInstance.isPivotName(this.name)); },
-      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : 'data'); },
+      isRsvp: function() { return this.type === 'view' && !!(appInstance && appInstance.isRsvpName(this.name)); },
+      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : this.isRsvp ? 'rsvp' : 'data'); },
       calName: function() { return this.spec ? this.spec.name : this.name; },
       cols: function() {
         if (this.spec) return this.spec.columns;
@@ -2688,6 +2743,7 @@ function createVueApp() {
       + '<calendar-view v-if="kind===\'calendar\'" :name="calName" :embed="true"></calendar-view>'
       + '<rotation-view v-else-if="kind===\'rotation\'" :name="calName" :embed="true"></rotation-view>'
       + '<pivot-view v-else-if="kind===\'pivot\'" :name="calName" :embed="true"></pivot-view>'
+      + '<rsvp-view v-else-if="kind===\'rsvp\'" :name="calName" :embed="true"></rsvp-view>'
       + '<template v-else-if="kind===\'doc\'" v-for="(blk, bi) in spec.blocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
       + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>'
@@ -2803,7 +2859,7 @@ function createVueApp() {
   // Top-level view-kind registry: kind -> the component that renders that whole view. Every kind is
   // componentized; the top-level dispatch is a single <component :is="viewComponent"> lookup in ui.html.
   window.VIEW_KINDS = {
-    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', page: 'page-view', data: 'data-view',
+    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', page: 'page-view', data: 'data-view',
     languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view'   // system screens
   };
 
@@ -3066,6 +3122,46 @@ function createVueApp() {
       + '<td style="text-align:center;font-weight:800">{{ grid.grandTotal }}</td>'
       + '</tr></tfoot>'
       + '</template></v-table>'
+      + '</component>'
+  });
+
+  // RSVP / signup view — name/embed parameterized. Lists upcoming events (from rsvpFor) each with the
+  // current user's own status toggle (setRsvp upserts their owner-stamped response row) and an optional
+  // tally. Self-service: works for any signed-in member regardless of role; firestore rules enforce that
+  // a member can only write their OWN response row.
+  app.component('rsvp-view', {
+    props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    computed: {
+      a: function() { return appInstance; },
+      viewName: function() { return this.name || appInstance.currentTable; },
+      cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].rsvp) || {}; },
+      data: function() { return appInstance.rsvpFor(this.viewName); },
+      options: function() {
+        var self = this;
+        if (this.cfg.statuses) return this.cfg.statuses.map(function(v) { return { value: v, title: appInstance.displayValue(self.cfg.statusColumn, v) }; });
+        return appInstance.getListOptions(this.cfg.statusColumn) || [];
+      }
+    },
+    methods: {
+      set: function(key, status) { appInstance.setRsvp(this.viewName, key, status || ''); },
+      toDateStr: toDateStr,
+      tallyText: function(ev) { var self = this; return Object.keys(ev.tally).sort().map(function(s) { return appInstance.displayValue(self.cfg.statusColumn, s) + ': ' + ev.tally[s]; }).join('  ·  '); }
+    },
+    template: ''
+      + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="rsvp-view">'
+      + '<v-list density="compact">'
+      + '<v-list-item v-for="ev in data.events" :key="ev.id" class="px-3 py-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.1)">'
+      + '<div class="d-flex align-center flex-wrap" style="gap:10px 14px">'
+      + '<div style="min-width:150px"><div style="font-weight:600">{{ toDateStr(ev.date) }}</div><div v-if="ev.title" style="font-size:0.85rem;opacity:0.7">{{ ev.title }}</div></div>'
+      + '<v-btn-toggle :model-value="ev.myStatus" density="compact" variant="outlined" divided @update:model-value="set(ev.key, $event)" data-testid="rsvp-toggle">'
+      + '<v-btn v-for="o in options" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
+      + '</v-btn-toggle>'
+      + '<v-spacer></v-spacer>'
+      + '<div v-if="cfg.showTally && ev.total" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
+      + '</div>'
+      + '</v-list-item>'
+      + '<v-list-item v-if="!data.events.length"><span style="opacity:0.6">{{ a.tOr(\'rsvp.none\', \'No upcoming events\') }}</span></v-list-item>'
+      + '</v-list>'
       + '</component>'
   });
 

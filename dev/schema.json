@@ -161,6 +161,23 @@
           "type": "number"
         }
       ]
+    },
+    "practices": {
+      "archivable": true,
+      "defaultSort": "date",
+      "columns": [
+        { "name": "date", "type": "date" },
+        { "name": "title", "type": "text" },
+        { "name": "opponent", "type": "text" }
+      ]
+    },
+    "rsvps": {
+      "columns": [
+        { "name": "owner", "type": "owner" },
+        { "name": "practice", "type": "text" },
+        { "name": "status", "type": "text" },
+        { "name": "note", "type": "text" }
+      ]
     }
   },
   "views": [
@@ -451,6 +468,20 @@
       }
     },
     {
+      "name": "my_rsvp",
+      "rsvp": {
+        "events": "practices",
+        "dateColumn": "date",
+        "eventKey": "date",
+        "titleColumns": ["title", "opponent"],
+        "responses": "rsvps",
+        "linkColumn": "practice",
+        "statusColumn": "status",
+        "statuses": ["coming", "maybe", "out"],
+        "showTally": true
+      }
+    },
+    {
       "name": "leaderboard",
       "sources": [
         "chore_log"
@@ -639,6 +670,14 @@
       {
         "view": "chore_heatmap",
         "icon": "mdi-grid"
+      },
+      {
+        "view": "my_rsvp",
+        "icon": "mdi-account-check"
+      },
+      {
+        "table": "practices",
+        "icon": "mdi-whistle"
       },
       {
         "table": "chore_log"

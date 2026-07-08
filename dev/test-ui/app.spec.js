@@ -2435,6 +2435,54 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(r.grand).toBe(4);
     await expect(page.locator('[data-testid="pivot-view"]')).toBeVisible();  // renders in the DOM
   });
+
+  test('rsvp view (my_rsvp): self-service response upserts an owner-stamped row + tallies', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.currentUserEmail = 'me@x.com';   // the owner identity
+      const d = (n) => { const x = new Date(); x.setDate(x.getDate() + n); return window.fmtDate(x); };
+      app.dataCache['practices'] = [
+        { id: 'p1', date: d(3), title: 'Practice', opponent: '' },
+        { id: 'p2', date: d(10), title: 'Match', opponent: 'Reds' }
+      ];
+      app.dataCache['rsvps'] = [{ id: 'other', owner: 'you@x.com', practice: d(3), status: 'maybe' }]; // someone else's
+      app.selectTab('my_rsvp');
+      const before = app.rsvpFor('my_rsvp').events.map(e => e.myStatus);   // I haven't responded
+      app.setRsvp('my_rsvp', d(3), 'coming');                              // respond to the first practice
+      const after = app.rsvpFor('my_rsvp');
+      const myRow = app.dataCache['rsvps'].find(x => x.owner === 'me@x.com');
+      app.setRsvp('my_rsvp', d(3), 'out');                                // change my mind -> UPSERT (no dup row)
+      return {
+        kind: app.viewKind,
+        before,
+        myStatusAfter: after.events[0].myStatus,
+        tally: after.events[0].tally,
+        ownerStamped: myRow.owner,
+        linkVal: myRow.practice,
+        upsertedStatus: app.dataCache['rsvps'].find(x => x.owner === 'me@x.com').status,
+        myRowCount: app.dataCache['rsvps'].filter(x => x.owner === 'me@x.com').length,
+        ownerReadonly: app.cellReadonly({}, 'owner', 'rsvps')
+      };
+    });
+    expect(r.kind).toBe('rsvp');                                 // routed to rsvp-view via VIEW_KINDS
+    expect(r.before).toEqual(['', '']);                          // no response from me yet
+    expect(r.myStatusAfter).toBe('coming');                      // my response recorded
+    expect(r.tally).toEqual({ coming: 1, maybe: 1 });            // me coming + the other's maybe
+    expect(r.ownerStamped).toBe('me@x.com');                     // row stamped with MY email, not editable
+    expect(r.linkVal).toBeTruthy();                              // linked to the practice
+    expect(r.upsertedStatus).toBe('out');                        // second response updated, not duplicated
+    expect(r.myRowCount).toBe(1);                                // still one row for me
+    expect(r.ownerReadonly).toBe(true);                          // owner column is read-only
+    await expect(page.locator('[data-testid="rsvp-view"]')).toBeVisible();
+  });
 });
 
 test.describe('Export/import includes edited page bodies', () => {
