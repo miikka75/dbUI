@@ -478,7 +478,8 @@
         "linkColumn": "practice",
         "statusColumn": "status",
         "statuses": ["coming", "maybe", "out"],
-        "showTally": true
+        "showTally": true,
+        "roster": "all"
       }
     },
     {

@@ -2459,15 +2459,19 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
       app.setRsvp('my_rsvp', d(3), 'coming');                              // respond to the first practice
       const after = app.rsvpFor('my_rsvp');
       const myRow = app.dataCache['rsvps'].find(x => x.owner === 'me@x.com');
+      const roster = after.events[0].participants;                       // who registered (public roster)
       app.setRsvp('my_rsvp', d(3), 'out');                                // change my mind -> UPSERT (no dup row)
+      const myRow2 = app.dataCache['rsvps'].find(x => x.owner === 'me@x.com');
       return {
         kind: app.viewKind,
         before,
         myStatusAfter: after.events[0].myStatus,
         tally: after.events[0].tally,
+        roster,
+        rosterPublic: myRow2.rosterPublic,
         ownerStamped: myRow.owner,
         linkVal: myRow.practice,
-        upsertedStatus: app.dataCache['rsvps'].find(x => x.owner === 'me@x.com').status,
+        upsertedStatus: myRow2.status,
         myRowCount: app.dataCache['rsvps'].filter(x => x.owner === 'me@x.com').length,
         ownerReadonly: app.cellReadonly({}, 'owner', 'rsvps')
       };
@@ -2476,12 +2480,18 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(r.before).toEqual(['', '']);                          // no response from me yet
     expect(r.myStatusAfter).toBe('coming');                      // my response recorded
     expect(r.tally).toEqual({ coming: 1, maybe: 1 });            // me coming + the other's maybe
+    expect(r.roster).toEqual([                                   // public roster shows WHO (sorted by status)
+      { owner: 'me@x.com', status: 'coming' },
+      { owner: 'you@x.com', status: 'maybe' }
+    ]);
+    expect(r.rosterPublic).toBe(true);                           // stamped from the (public) table policy
     expect(r.ownerStamped).toBe('me@x.com');                     // row stamped with MY email, not editable
     expect(r.linkVal).toBeTruthy();                              // linked to the practice
     expect(r.upsertedStatus).toBe('out');                        // second response updated, not duplicated
     expect(r.myRowCount).toBe(1);                                // still one row for me
     expect(r.ownerReadonly).toBe(true);                          // owner column is read-only
     await expect(page.locator('[data-testid="rsvp-view"]')).toBeVisible();
+    await expect(page.locator('[data-testid="rsvp-roster"]').first()).toContainText('you@x.com'); // roster names render
   });
 });
 
