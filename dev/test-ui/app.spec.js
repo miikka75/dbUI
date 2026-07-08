@@ -2497,6 +2497,31 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await expect(page.locator('[data-testid="rsvp-view"]')).toBeVisible();
     await expect(page.locator('[data-testid="rsvp-roster"]').first()).toContainText('you@x.com'); // roster names render
   });
+
+  test('schema.theme brands the live Vuetify palette + regenerates the CSS variables', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('app_theme', 'light'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      const themes = app.$vuetify.theme.themes.value || app.$vuetify.theme.themes;
+      return {
+        lightPrimary: themes.light.colors.primary,                  // from schema.theme.light
+        darkPrimary: themes.dark.colors.primary,
+        lightSurfaceUntouched: themes.light.colors.surface,          // NOT in schema -> keeps built-in default
+        cssVar: getComputedStyle(document.documentElement).getPropertyValue('--v-theme-primary').replace(/\s/g, '')
+      };
+    });
+    expect(r.lightPrimary).toBe('#00695c');           // schema-driven brand color applied
+    expect(r.darkPrimary).toBe('#4db6ac');
+    expect(r.lightSurfaceUntouched).toBe('#ffffff');  // partial override — unspecified colors keep defaults
+    expect(r.cssVar).toBe('0,105,92');                // Vuetify regenerated --v-theme-primary (RGB of #00695c)
+  });
 });
 
 test.describe('Export/import includes edited page bodies', () => {

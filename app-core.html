@@ -2513,6 +2513,22 @@ function createVueApp() {
         if (apple) apple.setAttribute('href', sIcons.appleTouch || './icon-512.png');
       },
 
+      // Apply per-database brand colors from schema.theme onto the live Vuetify theme — a PARTIAL override
+      // of the built-in light/dark palettes, so a deployment brands itself via the schema (no code edit),
+      // like icons/nav/languages. Reassigns the colors object so Vuetify regenerates its --v-theme-* CSS
+      // variables reactively; the dynamic theme-color meta (in _updateManifest) then follows. Shape:
+      //   "theme": { "light": { "primary": "#..", "surface": "#.." }, "dark": { "primary": "#.." } }
+      _applyTheme: function(theme) {
+        if (!theme || !this.$vuetify || !this.$vuetify.theme) return;
+        var themes = this.$vuetify.theme.themes;
+        themes = (themes && themes.value) ? themes.value : themes; // reactive ref (runtime) vs plain object
+        ['light', 'dark'].forEach(function(name) {
+          var overrides = theme[name];
+          if (!overrides || !themes[name] || !themes[name].colors) return;
+          themes[name].colors = Object.assign({}, themes[name].colors, overrides);
+        });
+      },
+
       _updateManifest: function() {
         try {
           var title = this.appTitle || 'App';
@@ -2617,6 +2633,7 @@ function createVueApp() {
         }
       },
       schemaData: { immediate: true, handler: function(s) {
+        this._applyTheme(s && s.theme); // per-database brand palette (before manifest so theme-color follows)
         // Per-database icons: favicon + apple-touch from schema.icons (or static defaults); the
         // runtime manifest carries the per-database name, theme color, and install icons.
         this._applyIconLinks();
