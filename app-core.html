@@ -2528,6 +2528,16 @@ function createVueApp() {
           themes[name].colors = Object.assign({}, themes[name].colors, overrides);
         });
       },
+      // Cache the resolved brand colors (both modes) so the NEXT boot's pre-Vue splash (index.html) can
+      // paint in-brand — the splash renders before Vuetify exists, so it reads this localStorage instead.
+      _cacheSplashBrand: function() {
+        try {
+          if (!this.$vuetify || !this.$vuetify.theme) return;
+          var themes = this.$vuetify.theme.themes; themes = (themes && themes.value) ? themes.value : themes;
+          var pick = function(name, fp, fb) { var c = (themes[name] && themes[name].colors) || {}; return { p: c.primary || fp, bg: c.background || c.surface || fb }; };
+          localStorage.setItem('brand_splash', JSON.stringify({ light: pick('light', '#1976d2', '#ffffff'), dark: pick('dark', '#90caf9', '#121212') }));
+        } catch (e) {}
+      },
 
       _updateManifest: function() {
         try {
@@ -2634,6 +2644,7 @@ function createVueApp() {
       },
       schemaData: { immediate: true, handler: function(s) {
         this._applyTheme(s && s.theme); // per-database brand palette (before manifest so theme-color follows)
+        this._cacheSplashBrand();       // stash brand colors for the next boot's pre-Vue splash
         // Per-database icons: favicon + apple-touch from schema.icons (or static defaults); the
         // runtime manifest carries the per-database name, theme color, and install icons.
         this._applyIconLinks();

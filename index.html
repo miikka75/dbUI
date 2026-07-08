@@ -12,17 +12,33 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <!-- Pre-Vue brand splash: the splash paints before Vuetify exists, so read the brand colors the last
+       loaded session cached (per-database schema.theme) from localStorage and drive the splash CSS vars.
+       Runs in <head> before the splash markup renders, so no fallback-color flash. Falls back to the
+       built-in colors on the first-ever load (no cache yet). -->
+  <script>
+    (function () {
+      try {
+        var c = JSON.parse(localStorage.getItem('brand_splash') || 'null'); if (!c) return;
+        var mode = localStorage.getItem('app_theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        var b = c[mode] || c.light; if (!b) return;
+        var r = document.documentElement.style;
+        if (b.p) r.setProperty('--splash-accent', b.p);
+        if (b.bg) r.setProperty('--splash-bg', b.bg);
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <!-- Instant splash: pure HTML/CSS, painted before any JS runs, so the screen isn't blank during
        the ~1.6s boot (auth + data fetch dominate). Removed when the app's `loading` flips false. -->
-  <div id="app-splash" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#ffffff;z-index:9999;transition:opacity .25s ease">
+  <div id="app-splash" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--splash-bg,#ffffff);z-index:9999;transition:opacity .25s ease">
     <div class="app-splash-spinner"></div>
   </div>
   <style>
     @keyframes app-splash-spin { to { transform: rotate(360deg); } }
-    .app-splash-spinner { width:44px;height:44px;border:4px solid rgba(0,0,0,.12);border-top-color:#1976d2;border-radius:50%;animation:app-splash-spin .8s linear infinite; }
-    @media (prefers-color-scheme: dark) { #app-splash { background:#121212 !important; } .app-splash-spinner { border-color:rgba(255,255,255,.16);border-top-color:#90caf9; } }
+    .app-splash-spinner { width:44px;height:44px;border:4px solid rgba(0,0,0,.12);border-top-color:var(--splash-accent,#1976d2);border-radius:50%;animation:app-splash-spin .8s linear infinite; }
+    @media (prefers-color-scheme: dark) { #app-splash { background:var(--splash-bg,#121212) !important; } .app-splash-spinner { border-color:rgba(255,255,255,.16);border-top-color:var(--splash-accent,#90caf9); } }
   </style>
   <div id="app-root"></div>
   <script>
