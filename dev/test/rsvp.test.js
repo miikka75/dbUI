@@ -50,6 +50,18 @@ describe('rsvp.js — build', () => {
     assert.deepEqual(r.statuses, ['coming', 'maybe', 'out']);       // distinct, sorted
   });
 
+  it('exposes the per-event roster (participants sorted by status, then owner)', () => {
+    const r = Rsvp.build(events, responses, opts);
+    assert.deepEqual(r.events[0].participants, [
+      { owner: 'me@x', status: 'coming' },
+      { owner: 'you@x', status: 'maybe' }
+    ]);
+    // the caller only ever gets the responses the backend returned -> owner-scoped reads naturally
+    // shrink this list to just the viewer's own row.
+    const scoped = Rsvp.build(events, responses.filter(x => x.owner === 'me@x'), opts);
+    assert.deepEqual(scoped.events[0].participants, [{ owner: 'me@x', status: 'coming' }]);
+  });
+
   it('upcoming:false includes past events; limit caps the count', () => {
     assert.equal(Rsvp.build(events, responses, Object.assign({}, opts, { upcoming: false })).events.length, 3);
     assert.equal(Rsvp.build(events, responses, Object.assign({}, opts, { limit: 1 })).events.length, 1);

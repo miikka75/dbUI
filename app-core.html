@@ -1008,16 +1008,19 @@ function createVueApp() {
         var cfg = v.rsvp, table = cfg.responses, ownerCol = getOwnerCol(table) || 'owner';
         var me = this.currentUserEmail || '';
         if (!me) { this.notify('Sign in to respond'); return; }
+        // Denormalize the table's roster policy onto the row so the (schema-blind) firestore read rule can
+        // enforce it: public tables -> readable by all; privateRoster tables -> only owner + organizers.
+        var pub = !(SCHEMA[table] && SCHEMA[table].privateRoster);
         if (!this.dataCache[table]) this.dataCache[table] = [];
         var rows = this.dataCache[table];
         var mine = rows.find(function(r) { return r[cfg.linkColumn] === eventKey && r[ownerCol] === me; });
         if (mine) {
-          mine[cfg.statusColumn] = status; mine.updated_at = new Date().toISOString();
+          mine[cfg.statusColumn] = status; mine.rosterPublic = pub; mine.updated_at = new Date().toISOString();
           backend.putRow(this.tableMap[table], mine, 'active');
         } else {
           var row = { id: this.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           getColumns(table).forEach(function(c) { if (!(c in row)) row[c] = ''; });
-          row[ownerCol] = me; row[cfg.linkColumn] = eventKey; row[cfg.statusColumn] = status;
+          row[ownerCol] = me; row[cfg.linkColumn] = eventKey; row[cfg.statusColumn] = status; row.rosterPublic = pub;
           rows.push(row);
           backend.putRow(this.tableMap[table], row, 'active');
         }
@@ -3140,12 +3143,24 @@ function createVueApp() {
         var self = this;
         if (this.cfg.statuses) return this.cfg.statuses.map(function(v) { return { value: v, title: appInstance.displayValue(self.cfg.statusColumn, v) }; });
         return appInstance.getListOptions(this.cfg.statusColumn) || [];
-      }
+      },
+      // Whether to show WHO registered (names), per the view's `roster` setting: 'all' -> everyone,
+      // 'admins' -> only admins (pair with an owner-scoped-read table so it's actually private), else
+      // just counts. Note the data is already access-filtered server-side; this is the display gate.
+      showRoster: function() { return this.cfg.roster === 'all' || (this.cfg.roster === 'admins' && appInstance.isAdmin); }
     },
     methods: {
       set: function(key, status) { appInstance.setRsvp(this.viewName, key, status || ''); },
       toDateStr: toDateStr,
-      tallyText: function(ev) { var self = this; return Object.keys(ev.tally).sort().map(function(s) { return appInstance.displayValue(self.cfg.statusColumn, s) + ': ' + ev.tally[s]; }).join('  ·  '); }
+      tallyText: function(ev) { var self = this; return Object.keys(ev.tally).sort().map(function(s) { return appInstance.displayValue(self.cfg.statusColumn, s) + ': ' + ev.tally[s]; }).join('  ·  '); },
+      ownerName: function(email) { return ((appInstance.profilesByEmail || {})[(email || '').toLowerCase()] || {}).name || email; },
+      // Participants grouped by status: [{ status, label, names:[...] }], in the configured status order.
+      rosterGroups: function(ev) {
+        var self = this, order = this.options.map(function(o) { return o.value; }), groups = {};
+        ev.participants.forEach(function(p) { (groups[p.status] || (groups[p.status] = [])).push(self.ownerName(p.owner)); });
+        var keys = Object.keys(groups).sort(function(a, b) { var ia = order.indexOf(a), ib = order.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
+        return keys.map(function(s) { return { status: s, label: appInstance.displayValue(self.cfg.statusColumn, s), names: groups[s] }; });
+      }
     },
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="rsvp-view">'
@@ -3159,6 +3174,10 @@ function createVueApp() {
       + '<v-spacer></v-spacer>'
       + '<div v-if="cfg.showTally && ev.total" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
       + '</div>'
+      + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster">'
+      + '<div v-for="g in rosterGroups(ev)" :key="g.status" class="d-flex" style="gap:6px">'
+      + '<span style="min-width:70px;opacity:0.6">{{ g.label }}:</span><span>{{ g.names.join(", ") }}</span>'
+      + '</div></div>'
       + '</v-list-item>'
       + '<v-list-item v-if="!data.events.length"><span style="opacity:0.6">{{ a.tOr(\'rsvp.none\', \'No upcoming events\') }}</span></v-list-item>'
       + '</v-list>'

@@ -43,6 +43,11 @@
       for (var i = 0; i < group.length; i++) { if (group[i][ownerCol] === opts.me) { mine = group[i]; break; } }
       var tally = {};
       group.forEach(function(r) { var s = r[statusCol]; if (s != null && s !== '') tally[s] = (tally[s] || 0) + 1; });
+      // The roster: who responded, and how. The caller only receives the responses the backend returned —
+      // so with owner-scoped reads a non-organizer sees just their own row here; with a public roster,
+      // everyone's. (Access is enforced server-side; this is only the display.)
+      var participants = group.map(function(r) { return { owner: r[ownerCol], status: r[statusCol] }; })
+        .sort(function(a, b) { return String(a.status).localeCompare(String(b.status)) || String(a.owner).localeCompare(String(b.owner)); });
       return {
         id: e.id,
         key: k,
@@ -51,7 +56,8 @@
         myStatus: mine ? mine[statusCol] : '',
         myRowId: mine ? mine.id : null,
         tally: tally,
-        total: group.length
+        total: group.length,
+        participants: participants
       };
     });
 

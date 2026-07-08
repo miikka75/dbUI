@@ -79,8 +79,15 @@ service cloud.firestore {
     // sign-up pattern. Rows without an `owner` field keep the plain per-table editor gate. Admins write all.
     function base(coll) { return request.auth != null && isRegistered() && coll != '_meta' && coll != '_lists'; }
     match /{collection}/{doc} {
+      // Read: owner-stamped rows are private to their owner UNLESS marked rosterPublic (a per-table policy
+      // denormalized onto each row) — members self-serve without a table grant and read only their own,
+      // while a public roster is readable by all and organizers (table grant) / admins read every row.
+      // Non-owner rows keep the plain per-table gate.
       allow read: if base(collection) && (
-        noUsers() || role() == 'admin' || hasTableAccess(collection)
+        noUsers() || role() == 'admin' ||
+        (('owner' in resource.data)
+          ? (resource.data.owner == myEmail() || resource.data.rosterPublic == true || hasTableAccess(collection))
+          : hasTableAccess(collection))
       );
       allow create: if base(collection) && (
         noUsers() || role() == 'admin' ||
