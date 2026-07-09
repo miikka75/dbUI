@@ -2586,6 +2586,32 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await expect(page.locator('[data-testid="theme-light-primary"]')).toBeVisible();
     await expect(page.locator('[data-testid="theme-txt-light-primary"]')).toBeVisible();
   });
+
+  test('theme editor: paste-a-palette maps colors to roles by luminance + chroma', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('app_theme', 'light'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      const parsed = app._parsePalette('["#ccd5ae","#e9edc9","#fefae0"]').length;   // extract # hexes from the array literal
+      app.applyPalette('["#ccd5ae","#e9edc9","#fefae0","#faedcd","#d4a373"]');       // coolors export -> current (light) mode
+      const t = app.schemaData.theme.light;
+      return { parsed, bg: t.background, surface: t.surface, text: t['on-surface'], primary: t.primary, secondary: t.secondary };
+    });
+    expect(r.parsed).toBe(3);            // parses hex codes out of the array
+    expect(r.bg).toBe('#fefae0');        // lightest -> background
+    expect(r.surface).toBe('#faedcd');   // 2nd lightest -> surface
+    expect(r.text).toBe('#d4a373');      // darkest -> text (on-surface)
+    expect(r.primary).toBe('#d4a373');   // most saturated -> primary
+    expect(r.secondary).toBe('#faedcd'); // next most saturated -> secondary
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await expect(page.locator('[data-testid="theme-palette"]')).toBeVisible();
+  });
 });
 
 test.describe('Export/import includes edited page bodies', () => {
