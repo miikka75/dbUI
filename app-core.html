@@ -2589,14 +2589,23 @@ function createVueApp() {
         if (!el) { el = document.createElement('style'); el.id = 'brand-preview'; document.head.appendChild(el); }
         el.textContent = css;
       },
-      saveTheme: function() {
+      _normHex: function(v) {
+        var m = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec((v || '').trim()); if (!m) return null;
+        var h = m[1]; if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+        return '#' + h.toLowerCase();
+      },
+      // Commit a color (from the text field or the picker's final `change`): validate, live-preview, and
+      // auto-persist to schema.theme — no Save button. Invalid input is ignored (the field re-syncs to the
+      // stored value on next render).
+      commitTheme: function(mode, token, value) {
+        var hex = this._normHex(value);
+        if (!hex) { this.notify('Invalid color'); return; }
+        this.setThemeColor(mode, token, hex);
         var base = (this.schemaData && this.schemaData.theme) || {};
         var theme = { light: Object.assign({}, base.light, this.themeEdit.light), dark: Object.assign({}, base.dark, this.themeEdit.dark) };
         var newSchema = Object.assign({}, this.schemaData, { theme: theme });
         this.schemaData = Object.freeze(newSchema);
         if (backend.saveSchema) backend.saveSchema(this.folderId, newSchema);
-        this.themeEdit = {};
-        this.notify('Palette saved');
       },
       resetTheme: function() {
         var newSchema = Object.assign({}, this.schemaData); delete newSchema.theme;

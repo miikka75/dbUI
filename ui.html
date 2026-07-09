@@ -459,17 +459,19 @@
             <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.theme') }}</p>
-            <div v-for="mode in ['light', 'dark']" :key="mode" class="mb-2" data-testid="theme-editor">
-              <div class="text-caption mb-1" style="opacity:0.6; text-transform:capitalize">{{ mode }}</div>
-              <div class="d-flex flex-wrap" style="gap:14px">
-                <div v-for="tk in a.themeTokens" :key="tk.key" class="d-flex flex-column align-center" style="width:64px">
-                  <input type="color" :value="a.themeColor(mode, tk.key)" @input="a.setThemeColor(mode, tk.key, $event.target.value)" :title="tk.key" :data-testid="'theme-' + mode + '-' + tk.key" style="width:38px; height:30px; padding:0; border:1px solid rgb(var(--v-theme-outline),0.3); border-radius:6px; background:none; cursor:pointer">
-                  <span class="text-caption" style="font-size:0.62rem; opacity:0.7">{{ tk.label }}</span>
+            <div v-for="m in [{ k: 'light', icon: 'mdi-weather-sunny' }, { k: 'dark', icon: 'mdi-weather-night' }]" :key="m.k" class="mb-2" data-testid="theme-editor">
+              <div class="d-flex flex-wrap align-center" style="gap:8px 16px">
+                <v-icon size="small" style="opacity:0.55">{{ m.icon }}</v-icon>
+                <div v-for="tk in a.themeTokens" :key="tk.key" class="d-flex flex-column" style="width:112px">
+                  <span class="text-caption" style="font-size:0.6rem; opacity:0.7">{{ tk.label }}</span>
+                  <div class="d-flex align-center" style="gap:4px">
+                    <input type="color" :value="a.themeColor(m.k, tk.key)" @input="a.setThemeColor(m.k, tk.key, $event.target.value)" @change="a.commitTheme(m.k, tk.key, $event.target.value)" :title="tk.key" :data-testid="'theme-' + m.k + '-' + tk.key" style="width:30px; height:28px; padding:0; border:1px solid rgb(var(--v-theme-outline),0.3); border-radius:6px; background:none; cursor:pointer">
+                    <input type="text" :value="a.themeColor(m.k, tk.key)" @change="a.commitTheme(m.k, tk.key, $event.target.value)" @keydown.enter="a.commitTheme(m.k, tk.key, $event.target.value)" spellcheck="false" :data-testid="'theme-txt-' + m.k + '-' + tk.key" style="width:74px; font-size:0.72rem; font-family:monospace; padding:2px 4px; border:1px solid rgb(var(--v-theme-outline),0.25); border-radius:4px; background:transparent; color:inherit">
+                  </div>
                 </div>
               </div>
             </div>
-            <v-btn size="small" color="primary" prepend-icon="mdi-content-save" @click="a.saveTheme()" class="mr-2 mt-1" data-testid="theme-save">{{ a.t('settings.theme_save') }}</v-btn>
-            <v-btn size="small" variant="text" @click="a.resetTheme()" class="mt-1">{{ a.t('settings.theme_reset') }}</v-btn>
+            <v-btn size="small" variant="text" prepend-icon="mdi-restore" @click="a.resetTheme()" class="mt-1">{{ a.t('settings.theme_reset') }}</v-btn>
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.share') }}</p>
             <v-text-field :model-value="a.shareLink" name="share-link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="a.copyText(a.shareLink)"></v-text-field>
