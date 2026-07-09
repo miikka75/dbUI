@@ -141,6 +141,7 @@ function createVueApp() {
       pendingDelete: null,
       pendingDeleteTimer: null,
       currentRefTable: null,
+      themeEdit: {},   // admin palette editor: pending {mode: {token: hex}} overrides (applied live, saved to schema.theme)
       schemaData: null,
       pageEditing: false,
       pageEditText: '',
@@ -197,6 +198,14 @@ function createVueApp() {
       isCalendarView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.calendar); },
       isPivotView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.pivot); },
       isRsvpView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rsvp); },
+      // Curated palette tokens exposed in the admin theme editor (Vuetify color names + friendly labels).
+      themeTokens: function() {
+        return [
+          { key: 'primary', label: 'Primary' }, { key: 'secondary', label: 'Secondary' },
+          { key: 'surface', label: 'Surface' }, { key: 'background', label: 'Background' },
+          { key: 'on-surface', label: 'Text' }, { key: 'error', label: 'Error' }, { key: 'success', label: 'Success' }
+        ];
+      },
       // Single classifier for the current view's kind + the top-level component registry dispatch.
       // Every kind maps to a component in VIEW_KINDS; an unclassified view returns null (nothing renders).
       viewKind: function() {
@@ -2525,7 +2534,9 @@ function createVueApp() {
         ['light', 'dark'].forEach(function(name) {
           var overrides = theme[name];
           if (!overrides || !themes[name] || !themes[name].colors) return;
-          themes[name].colors = Object.assign({}, themes[name].colors, overrides);
+          // Mutate individual keys (NOT reassign the colors object): Vuetify's stylesheet computed holds
+          // a ref to this object, so per-key mutation is what makes it regenerate --v-theme-* at runtime.
+          Object.keys(overrides).forEach(function(k) { themes[name].colors[k] = overrides[k]; });
         });
       },
       // Cache the resolved brand colors (both modes) so the NEXT boot's pre-Vue splash (index.html) can
@@ -2537,6 +2548,62 @@ function createVueApp() {
           var pick = function(name, fp, fb) { var c = (themes[name] && themes[name].colors) || {}; return { p: c.primary || fp, bg: c.background || c.surface || fb }; };
           localStorage.setItem('brand_splash', JSON.stringify({ light: pick('light', '#1976d2', '#ffffff'), dark: pick('dark', '#90caf9', '#121212') }));
         } catch (e) {}
+      },
+
+      // --- Admin brand-palette editor (Settings). Edits schema.theme -> the deployment brand for everyone.
+      // Live-previews via _applyTheme; persists by replacing the frozen schemaData + saveSchema (same
+      // pattern as the default-language change). `themeColor` reads the live theme, normalized to #rrggbb
+      // for <input type=color>; unspecified colors fall back to Vuetify's contrast default.
+      themeColor: function(mode, token) {
+        var t = this.$vuetify && this.$vuetify.theme, themes = t && t.themes;
+        themes = (themes && themes.value) ? themes.value : themes;
+        var c = (themes && themes[mode] && themes[mode].colors && themes[mode].colors[token]) || '';
+        if (/^#[0-9a-fA-F]{6}$/.test(c)) return c;
+        if (/^#[0-9a-fA-F]{3}$/.test(c)) return '#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
+        return mode === 'dark' ? '#ffffff' : '#000000';
+      },
+      setThemeColor: function(mode, token, value) {
+        if (!this.themeEdit[mode]) this.themeEdit[mode] = {};
+        this.themeEdit[mode][token] = value;
+        var o = {}; o[mode] = {}; o[mode][token] = value;
+        this._applyTheme(o);          // update theme data (so current.colors + save read correctly)
+        this._previewBrandVar(mode, token, value); // live preview: patch the CSS var (see below)
+        this._cacheSplashBrand();     // keep the pre-Vue splash cache in step with the preview
+      },
+      // Live preview for runtime edits. In Vuetify 4 (options API) mutating $vuetify.theme.themes does NOT
+      // regenerate the --v-theme-* CSS variables after first paint, so drive them via a small dynamic
+      // <style> scoped per theme (.v-theme--light/dark), overriding Vuetify's injected vars. Transient —
+      // persistence is schema.theme applied on the next load (which DOES generate them correctly).
+      _previewBrandVar: function(mode, token, hex) {
+        var m = /^#?([0-9a-fA-F]{6})$/.exec(hex) || /^#?([0-9a-fA-F]{3})$/.exec(hex); if (!m) return;
+        var h = m[1]; if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+        var rgb = parseInt(h.slice(0, 2), 16) + ',' + parseInt(h.slice(2, 4), 16) + ',' + parseInt(h.slice(4, 6), 16);
+        if (!this._brandPreview) this._brandPreview = { light: {}, dark: {} };
+        this._brandPreview[mode][token] = rgb;
+        var self = this;
+        var css = ['light', 'dark'].map(function(mo) {
+          var v = self._brandPreview[mo], body = Object.keys(v).map(function(k) { return '--v-theme-' + k + ':' + v[k]; }).join(';');
+          return body ? '.v-theme--' + mo + '{' + body + '}' : '';
+        }).join('');
+        var el = document.getElementById('brand-preview');
+        if (!el) { el = document.createElement('style'); el.id = 'brand-preview'; document.head.appendChild(el); }
+        el.textContent = css;
+      },
+      saveTheme: function() {
+        var base = (this.schemaData && this.schemaData.theme) || {};
+        var theme = { light: Object.assign({}, base.light, this.themeEdit.light), dark: Object.assign({}, base.dark, this.themeEdit.dark) };
+        var newSchema = Object.assign({}, this.schemaData, { theme: theme });
+        this.schemaData = Object.freeze(newSchema);
+        if (backend.saveSchema) backend.saveSchema(this.folderId, newSchema);
+        this.themeEdit = {};
+        this.notify('Palette saved');
+      },
+      resetTheme: function() {
+        var newSchema = Object.assign({}, this.schemaData); delete newSchema.theme;
+        this.schemaData = Object.freeze(newSchema);
+        if (backend.saveSchema) backend.saveSchema(this.folderId, newSchema);
+        try { localStorage.removeItem('brand_splash'); } catch (e) {}
+        location.reload(); // rebuild Vuetify with the built-in defaults (cleanly drops the override)
       },
 
       _updateManifest: function() {

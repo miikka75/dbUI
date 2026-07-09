@@ -2541,6 +2541,46 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     const accent = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--splash-accent').trim());
     expect(accent).toBe('#00695c');          // splash spinner brand-colored from the cache
   });
+
+  test('admin theme editor: live-previews a color + persists it to schema.theme', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('app_theme', 'light'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      const before = app.themeColor('light', 'primary');           // demo brand teal
+      app.setThemeColor('light', 'primary', '#ff0000');            // edit -> live preview
+      const themes = app.$vuetify.theme.themes.value || app.$vuetify.theme.themes;
+      const live = themes.light.colors.primary;
+      const el = document.querySelector('.v-theme--light') || document.querySelector('.v-application');
+      const cssVar = getComputedStyle(el).getPropertyValue('--v-theme-primary').replace(/\s/g, '');
+      app.setThemeColor('dark', 'surface', '#101010');
+      app.saveTheme();                                             // persist to schema.theme
+      return {
+        before, live, cssVar,
+        savedLightPrimary: app.schemaData.theme.light.primary,
+        savedDarkSurface: app.schemaData.theme.dark.surface,
+        pending: JSON.stringify(app.themeEdit),
+        readBack: app.themeColor('light', 'primary')
+      };
+    });
+    expect(r.before).toBe('#00695c');            // starts from the schema brand
+    expect(r.live).toBe('#ff0000');              // setThemeColor applied to the live Vuetify theme
+    expect(r.cssVar).toBe('255,0,0');            // --v-theme-primary regenerated (live preview reaches CSS)
+    expect(r.savedLightPrimary).toBe('#ff0000'); // saveTheme wrote it into schema.theme (persisted brand)
+    expect(r.savedDarkSurface).toBe('#101010');  // both modes editable
+    expect(r.pending).toBe('{}');                // pending edits cleared after save
+    expect(r.readBack).toBe('#ff0000');          // editor reads the new value back
+    // the editor renders (admin) with a color input per curated token
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await expect(page.locator('[data-testid="theme-light-primary"]')).toBeVisible();
+    await expect(page.locator('[data-testid="theme-save"]')).toBeVisible();
+  });
 });
 
 test.describe('Export/import includes edited page bodies', () => {
