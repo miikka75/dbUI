@@ -161,6 +161,25 @@ test.describe('Select dropdowns', () => {
   });
 });
 
+test.describe('Secondary-colored chips', () => {
+  test('multiselect values render as secondary chips', async ({ page }) => {
+    await ensureAppReady(page);
+    // crew_rotation has a `people` multiselect (allowNew -> v-combobox with the chip slot)
+    await page.evaluate(() => window.appInstance.selectTab('crew_rotation'));
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(150);
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      app.saveField(app.currentData[0], 'people', ['Alice']);
+    });
+    const chip = page.locator('.v-table .v-chip:has-text("Alice")').first();
+    await expect(chip).toBeVisible();               // slot renders the value title
+    expect(await chip.getAttribute('class')).toMatch(/secondary/); // ...tinted secondary
+    await expect(chip.locator('.v-chip__close')).toHaveCount(1); // still closable
+  });
+});
+
 test.describe('Two-press delete', () => {
   test('first click arms, second click deletes', async ({ page }) => {
     await ensureAppReady(page);

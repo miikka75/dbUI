@@ -291,7 +291,7 @@
               <template v-for="item in a.sortedData" :key="item.id">
               <tr>
                 <td v-for="col in a.visibleCols" :key="col"><data-cell :item="item" :col="col"></data-cell></td>
-                <td v-if="a.isUnionView"><v-chip size="x-small" variant="tonal">{{ item._source }}</v-chip></td>
+                <td v-if="a.isUnionView"><v-chip size="x-small" variant="tonal" color="secondary">{{ item._source }}</v-chip></td>
                 <td style="white-space:nowrap">
                   <v-btn v-if="a.isReorderable" icon="mdi-arrow-up" size="small" variant="text" :disabled="a.sortedData.indexOf(item) === 0" @click="a.moveRowPosition(item, -1)"></v-btn>
                   <v-btn v-if="a.isReorderable" icon="mdi-arrow-down" size="small" variant="text" :disabled="a.sortedData.indexOf(item) === a.sortedData.length - 1" @click="a.moveRowPosition(item, 1)"></v-btn>
