@@ -1,13 +1,15 @@
 # Schema Reference — views + nav/layout
 
-A schema has three layers. Views are the unit of presentation: a view is one of three kinds — a
-**data view** (sources/columns), a **document** (a view with a `markdown` field), or a
-**rotationView** (a view with a `rotation` field — a generated rotating-duty-roster table,
-see below).
+A schema has three layers. Views are the unit of presentation: each view is one **kind**, selected by
+which field it carries — a **data view** (sources/columns), a **document** (`markdown`), a
+**rotationView** (`rotation` — a generated rotating-duty-roster table), a **calendar** (`calendar`),
+a **pivot** (`pivot` — a cross-tab grid), or an **rsvp** (`rsvp` — a self-service signup sheet).
+All of these are documented below.
 
 ```
 icon    ← optional favicon (data URI, relative path, or URL — cached as base64 on first load)
 title   ← optional document/tab title
+theme   ← optional brand palette (light/dark colors — see ## theme)
 views   ← flat, named components: data views, or views with markdown (documents)
 tables  ← raw data + partitions
 nav     ← navigation tree + layout, references views/tables by name
@@ -44,10 +46,12 @@ nav     ← navigation tree + layout, references views/tables by name
 | Type | Description |
 |------|-------------|
 | `text` | Plain text (default) |
+| `number` | Numeric value (used e.g. as a `rotation`/`reorderable` position, and by pivot `sum`) |
 | `date` | Date picker, stored as `YYYY-MM-DD` |
 | `select` | Dropdown from a named list |
 | `multiselect` | Multiple values from a named list (chip input); stored as an **array** of strings |
 | `ref` | Reference to a lookup-table column |
+| `owner` | Per-row access primitive — **auto-stamped** with the current user's email on create, **read-only** thereafter. Backs the `rsvp` view and owner-scoped Firestore rules (a member may write only their own owner-stamped rows). See `## rsvp`. |
 
 ### column properties
 | Property | Description |
@@ -734,6 +738,70 @@ A view is still one kind at top level; the document *hosts* the calendar via the
 - Rows with an empty `dateColumn` go to the **Undated** list bucket (not lost).
 - Data-view `{view:cal}` inline embeds are deferred (use a markdown-page `{{view:cal}}` embed).
 
+## pivot (fifth view kind)
+
+A view with a `pivot` field renders a **cross-tab grid**: rows = distinct values of one column,
+columns = distinct values of a second, each cell = an aggregate of a third. It's the two-dimensional
+counterpart to an aggregate view (attendance grids, duty rosters, chore heatmaps). Like calendar, it
+has **no stored rows of its own** — it's a live presentation of a source table (engine: `pivot.js`).
+
+```json
+{ "name": "chore_heatmap",
+  "pivot": {
+    "source": "chore_log",   // REQUIRED — the table to cross-tabulate
+    "row": "person",          // REQUIRED — column whose distinct values become grid ROWS
+    "column": "chore",        // REQUIRED — column whose distinct values become grid COLUMNS
+    "cell": "minutes",        // OPTIONAL — column that fills each cell (omit for a pure count grid)
+    "aggregate": "count",     // OPTIONAL — how to combine rows in one cell (see below)
+    "totals": "count"         // OPTIONAL — marginal totals (per-row, per-column, grand). null = none
+  }
+}
+```
+- **`aggregate`**: `"count"` (default when no `cell`) · `"sum"` (numeric `cell`) · `"first"` (default
+  *with* a `cell` — first non-empty value) · `"list"` (distinct values joined with `, `).
+- **`totals`**: `"count"` (source rows) · `"sum"` (numeric `cell`) · `{ "eq": <value> }` (count of cells
+  equal to a value, e.g. `{ "eq": "coming" }`). Renders a totals row/column + grand total.
+- **`colOrder`** (string[], optional): explicit column order; keys not present in the data still render
+  as empty columns (e.g. a fixed roster). Otherwise columns/rows are sorted — override with
+  **`colSort`** / **`rowSort`** (`"asc"` default | `"desc"`).
+- **Array-valued cells** (from a `multiselect` row/column) are **expanded**: a value of `["a","b"]`
+  contributes to both the `a` and `b` buckets. Blank row/column keys are skipped.
+
+## rsvp (sixth view kind)
+
+A view with an `rsvp` field renders a **self-service signup / attendance sheet**: each upcoming event
+gets an inline status toggle bound to the current user's **own** response row. Unlike the presentation
+views, rsvp is **read-write** — but a participant writes only their own `owner`-stamped row (enforced by
+`firestore.rules`; the `owner` column type is the primitive). Engine: `rsvp.js`.
+
+The events live in one table; responses in another table that has an **`owner` column** (auto-stamped)
+plus a link column and a status column:
+```json
+{ "name": "my_rsvp",
+  "rsvp": {
+    "events": "practices",          // REQUIRED — the events table
+    "dateColumn": "date",            // REQUIRED — event date column (YYYY-MM-DD): upcoming filter + sort
+    "eventKey": "date",              // OPTIONAL — event column responses link by (default = dateColumn)
+    "titleColumns": ["title", "opponent"], // OPTIONAL — joined with " — " for the event title
+    "responses": "rsvps",           // REQUIRED — the response table (must have an `owner` column)
+    "linkColumn": "practice",        // REQUIRED — response column holding the event key
+    "statusColumn": "status",        // REQUIRED — response column holding the status value
+    "statuses": ["coming", "maybe", "out"], // OPTIONAL — offered options (else inferred from data)
+    "showTally": true,               // OPTIONAL — show a per-event count of each response
+    "roster": "all"                  // OPTIONAL — who sees the participant roster (see below)
+  }
+}
+```
+- **`roster`** (UI gate): `"all"` (everyone sees who responded) · `"admins"` (only organizers/admins) ·
+  `"counts"` (tally only, no names). This is **only the display gate** — the real read control is the
+  Firestore rule.
+- **Roster visibility is denormalized per response table**: set `"privateRoster": true` on the
+  *responses* table to make each response readable only by its owner + organizers; otherwise the app
+  stamps `rosterPublic: true` on each row so everyone can read it. Rules are schema-blind, so this flag
+  must be carried on the rows — the `roster` view option alone does not restrict reads.
+- With owner-scoped reads a non-organizer receives only their own response from the backend, so the
+  rendered tally/roster reflects exactly what that user is permitted to see.
+
 ## user profiles, user-backed lists & membership (Firebase)
 
 These features are Firebase-backed (the local/dev backend mirrors them for tests). They build on the
@@ -786,6 +854,35 @@ from the authenticated session — never asked for.
   navigation bar, in this order. More than 5 → the first 4 plus a "⋯ More" button that opens the
   drawer. Omit to auto-pick the first 5 flattened nav items. Ids must match `items` entries
   (including nested group children); unresolved ids are silently dropped.
+
+## theme (brand palette)
+
+An optional top-level `theme` **partially overrides** the built-in Vuetify light/dark palettes, so the
+brand is schema-driven (like `icon`/`title`/`nav`). Only the keys you set change; the rest keep
+Vuetify's defaults.
+```json
+"theme": {
+  "light": { "primary": "#00695c", "secondary": "#26a69a" },
+  "dark":  { "primary": "#4db6ac", "secondary": "#26a69a" }
+}
+```
+- **Editable roles** (surfaced in the admin editor): `primary`, `secondary`, `surface`, `background`,
+  `on-surface` (labelled "Text"), `error`, `success`. Any Vuetify theme color key works, but these are
+  the curated set. Colors are `#rrggbb` (or `#rgb`).
+- **Where each role shows**: `primary` drives every interactive accent (buttons, active nav, links,
+  switches, focus/selected states) and is the default for Vuetify components; `secondary` tints the
+  metadata/tag chips (multiselect values, union-view source, read-only data chips); `surface`/
+  `background`/`on-surface` are the page/card/text base; `error`/`success` are status colors.
+- **Admin editor**: **Settings → Theme** (admin only) edits `theme` live and auto-saves — a per-role
+  color picker + hex field for each mode, plus **paste-a-palette** (paste a coolors/colorhunt array like
+  `["#ccd5ae",…]`; the colors are sorted by luminance/chroma and mapped to roles). Sets the deployment
+  brand for everyone, not per-user.
+- **Ceiling (no build step)**: only the **runtime** theme API is reachable — colors, `variables`, and
+  component `defaults`. SASS-level tokens (type scale, spacing, border-radius, component shape) need a
+  build and can't be themed here.
+- **Splash / meta**: the pre-Vue splash + static `<meta theme-color>` can't read the schema yet, so the
+  splash reads a `brand_splash` `localStorage` cache (written on load from the live theme) and follows
+  the brand after one warm load; a dynamic `theme-color` meta tracks the in-app light/dark toggle.
 
 ## `text` entries (removed)
 The `{ "text": "<key>" }` column entry (free-form text interleaved in a view's columns)

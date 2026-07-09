@@ -8,9 +8,11 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 - **Six backends**: Google Sheets (Apps Script), OAuth REST API, Browser + CRDT Sync (Google Drive), Browser + CRDT Sync (Local Server), Firebase (Firestore), Dev Server (SQLite)
 - **Unified CRDT**: one offline-first engine; Drive and local server differ only in the transport
 - **i18n**: multi-language with auto-generated translation keys from schema
-- **Views**: flat union, join, and aggregate views, plus **rotationView** (a generated rotating-roster table); columns can embed named views/inline tables
+- **Views**: flat union, join, and aggregate views, plus **rotationView** (generated rotating roster), **calendar** (month/week/list), **pivot** (cross-tab grid), and **rsvp** (self-service signup sheet); columns can embed named views/inline tables
 - **Rotating rosters**: `multiselect` columns hold a group of people; rotation tables cycle a group per occurrence (tied to another table's rows) or per calendar interval (`daily/weekly/monthly/yearly` or `<n><unit>` like `3w`), with the anchor stored as editable data
+- **Self-service RSVP**: an `rsvp` view is a read-write signup sheet where each member toggles their own attendance; backed by the `owner` column type (auto-stamped current-user email, read-only) + per-row Firestore rules, so a participant writes only their own row without a table grant
 - **Documents**: a view with `markdown` is an editable document with interactive embeds (`{{view:x}}`, `{{self}}` for its own grid, `{{view:x?}}` hides when empty) — bodies stored on the server, not in the schema
+- **Theming**: an optional `schema.theme` sets a brand palette (light/dark colors); an admin **Settings → Theme** editor tweaks it live (per-role pickers + paste-a-palette) and auto-saves, driving all Vuetify accents + the PWA/splash colors
 - **Nav**: explicit sidebar tree with drawer/tabs layout and nested groups
 - **Print**: layout-aware printing (table or card mode), per-card print, embeds included
 - **Responsive**: auto-switches between table and card layout based on column count; mobile gets a bottom navigation bar (`nav.bottomNav`) + floating add button
@@ -263,25 +265,27 @@ dev/                           ← Local development (dev-server-only files live
 ## Schema Reference (`schema.json`)
 
 The complete schema reference is maintained in **[`dev/SCHEMA.md`](dev/SCHEMA.md)** — the single
-source of truth. It covers: `icon`/title, tables (column types incl. `multiselect` & properties), views
-(data, document & rotationView), embeds (inline / named-view / `filterBy`), filters
-(`$or`/`$and`/`matchList`), aggregate views (`groupBy`/`collect`/`collectWith`), computed columns
-(incl. rotation columns — occurrence/calendar), markdown documents and
-their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens, `nav` (layout, groups, `bottomNav`),
-lists & translations, and `migrate-schema.js`.
+source of truth. It covers: `icon`/title, `theme` (brand palette), tables (column types incl.
+`multiselect`, `owner` & properties), views (data, document, rotationView, calendar, pivot & rsvp),
+embeds (inline / named-view / `filterBy`), filters (`$or`/`$and`/`matchList`), aggregate views
+(`groupBy`/`collect`/`collectWith`), computed columns (incl. rotation columns — occurrence/calendar),
+markdown documents and their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens, `nav` (layout, groups,
+`bottomNav`), lists & translations, and `migrate-schema.js`.
 
 ```json
 {
-  "icon": "data: URI | path | URL (favicon + PWA icon)",
+  "icon":  "data: URI | path | URL (favicon + PWA icon)",
+  "theme": { "light": { "primary": "#..." }, "dark": { "primary": "#..." } },
   "tables": { "...": { "columns": [ ... ], "archivable": true } },
   "views":  [ { "name": "...", "sources": [ ... ], "columns": [ ... ] } ],
   "nav":    { "layout": "drawer", "items": [ ... ], "bottomNav": [ ... ] }
 }
 ```
 
-> `nav` is **required**; `views` are flat (hierarchy lives in `nav`). A view is one of three kinds: a
-> **data view** (`sources`/`columns`), a **document** (a view with a `markdown` field), or a
-> **rotationView** (a generated rotating-roster table).
+> `nav` is **required**; `views` are flat (hierarchy lives in `nav`). Each view is one **kind**, chosen
+> by which field it carries: a **data view** (`sources`/`columns`), a **document** (`markdown`), a
+> **rotationView** (`rotation`), a **calendar** (`calendar`), a **pivot** (`pivot`), or an **rsvp**
+> (`rsvp`).
 
 ---
 
