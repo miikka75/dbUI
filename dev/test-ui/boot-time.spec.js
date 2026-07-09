@@ -5,7 +5,7 @@ const SCHEMA = require('./fixture-schema.json');
 // quantified rather than guessed. All numbers are ms-since-navigation (performance.now()).
 //
 // TARGET: defaults to the local dev server ('/'). Override to point at any deployment:
-//   BOOT_URL='https://piispakunta.ddns.net/?mode=firebase&k=...&p=...' npx playwright test test-ui/boot-time.spec.js
+//   BOOT_URL='https://myapp.example.com/?mode=firebase&k=...&p=...' npx playwright test test-ui/boot-time.spec.js
 //
 // Two data sources, used together:
 //  (a) window.__bootPhases / window.__bootMs  — only present if the target runs the

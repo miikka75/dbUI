@@ -164,7 +164,7 @@ function createVueApp() {
             var v = VIEWS[id];
             if (!(v.sources || []).every(function(s) { return allowedTables.indexOf(s) >= 0; })) return false;
             // sourceless rotation views are unlocked by ANY of their rosters — a roster you lack
-            // simply renders blank (per-roster access, e.g. siivous_b coordinator sees siivous_a empty).
+            // simply renders blank (per-roster access, e.g. team_b coordinator sees team_a empty).
             if (!(v.sources && v.sources.length)) {
               var rosters = viewRosters(v);
               if (rosters.length) return rosters.some(function(t) { return allowedTables.indexOf(t) >= 0; });
@@ -926,7 +926,7 @@ function createVueApp() {
       calLocale: function() {
         var code = this.currentLang, lang = (this.languages || []).find(function(l) { return l.code === code; });
         if (lang && lang.locale) return lang.locale;
-        var guess = { Suomi: 'fi', Finnish: 'fi', English: 'en', Swedish: 'sv', Ruotsi: 'sv' };
+        var guess = { English: 'en', Finnish: 'fi', Swedish: 'sv', German: 'de', French: 'fr', Spanish: 'es' };
         return (lang && guess[lang.name]) || guess[code] || (typeof navigator !== 'undefined' && navigator.language) || 'en';
       },
       hashColor: function(key) { return Calendar.hashColor(key); },
@@ -1798,8 +1798,8 @@ function createVueApp() {
               tcs.forEach(function(tc) {
                 var v = row[tc.col];
                 // listSwitch guard: if oldVal is still a valid option via this column's alt list,
-                // it isn't an orphan of `listName` (e.g. the name was added to `vieraat` before being
-                // removed from `seurakuntalaiset`) — leave the row untouched so the move is lossless.
+                // it isn't an orphan of `listName` (e.g. the name was added to `guests` before being
+                // removed from `members`) — leave the row untouched so the move is lossless.
                 if (tc.altList && self.listsCache[tc.altList] && self.listsCache[tc.altList].indexOf(oldVal) >= 0) return;
                 if (tc.multi) {
                   if (Array.isArray(v) && v.indexOf(oldVal) >= 0) {
