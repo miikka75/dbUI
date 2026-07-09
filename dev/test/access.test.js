@@ -221,11 +221,11 @@ describe('Permission features (primary chips + materialized closure)', () => {
     return true;
   }
 
-  // Church-shaped fixture: meetings master; music mirrors it but has OWN song columns (-> own feature);
+  // Mirror-shaped fixture: meetings master; music mirrors its date but has its OWN columns (-> own feature);
   // ushers_turns is a pure mirror (only date) -> satellite; rosters feed rotation/occurrence.
   const schema = {
     meetings: { columns: { date: 'date', chair: { type: 'select', list: 'p' } } },
-    music: { columns: { date: { syncFrom: 'meetings' }, laulu: { type: 'select', list: 'songs' } } },
+    music: { columns: { date: { syncFrom: 'meetings' }, song: { type: 'select', list: 'songs' } } },
     ushers_turns: { columns: { date: { syncFrom: 'meetings' } } },
     ushers_list: { columns: { people: { type: 'multiselect', list: 's' } } },
     team_a: { columns: { people: { type: 'multiselect', list: 's' } } },
