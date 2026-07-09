@@ -1825,26 +1825,26 @@ test.describe('access control: user matching + fail-closed', () => {
       const setUsers = (list, email) => { app.usersLoaded = true; app.userList = list; app.currentUserEmail = email; };
       const snap = () => ({ allowed: app.userAllowedTables, unreg: app.isUnregisteredUser, admin: app.isAdmin, role: app.currentUserRole });
       // 1. matched by KEY (login email), editor restricted to one table
-      setUsers([{ key: 'a@x.com', addr: '', role: 'editor', tables: ['musiikki'] }], 'a@x.com');
+      setUsers([{ key: 'a@x.com', addr: '', role: 'editor', tables: ['reports'] }], 'a@x.com');
       const byKey = snap();
       // 2. case-insensitive key match (Firestore key was stored with different casing)
-      setUsers([{ key: 'A@X.com', addr: '', role: 'editor', tables: ['musiikki'] }], 'a@x.com');
+      setUsers([{ key: 'A@X.com', addr: '', role: 'editor', tables: ['reports'] }], 'a@x.com');
       const caseIns = snap();
       // 3. legacy match by addr (user field) when key is a placeholder
-      setUsers([{ key: '_new_1', addr: 'b@x.com', role: 'editor', tables: ['siivous_a'] }], 'b@x.com');
+      setUsers([{ key: '_new_1', addr: 'b@x.com', role: 'editor', tables: ['team_a'] }], 'b@x.com');
       const byAddr = snap();
       // 4. registered users exist but the signed-in user matches none -> FAIL CLOSED
-      setUsers([{ key: 'a@x.com', addr: 'a@x.com', role: 'editor', tables: ['musiikki'] }], 'ghost@x.com');
+      setUsers([{ key: 'a@x.com', addr: 'a@x.com', role: 'editor', tables: ['reports'] }], 'ghost@x.com');
       const unmatched = snap();
       // 5. admin -> unrestricted
       setUsers([{ key: 'a@x.com', addr: 'a@x.com', role: 'admin', tables: 'all' }], 'a@x.com');
       const admin = snap();
       return { byKey, caseIns, byAddr, unmatched, admin };
     });
-    expect(r.byKey).toEqual({ allowed: ['musiikki'], unreg: false, admin: false, role: 'editor' });
-    expect(r.caseIns.allowed).toEqual(['musiikki']);          // case-insensitive key match
+    expect(r.byKey).toEqual({ allowed: ['reports'], unreg: false, admin: false, role: 'editor' });
+    expect(r.caseIns.allowed).toEqual(['reports']);          // case-insensitive key match
     expect(r.caseIns.unreg).toBe(false);
-    expect(r.byAddr.allowed).toEqual(['siivous_a']);          // legacy addr fallback still works
+    expect(r.byAddr.allowed).toEqual(['team_a']);          // legacy addr fallback still works
     expect(r.unmatched).toEqual({ allowed: [], unreg: true, admin: false, role: null }); // fail closed + notice
     expect(r.admin).toEqual({ allowed: null, unreg: false, admin: true, role: 'admin' }); // unrestricted
   });
@@ -1864,14 +1864,14 @@ test.describe('access control: user matching + fail-closed', () => {
       const unregistered = snap();
       // Restricted non-admin with ONLY their own entry visible (the Firebase per-user-doc case).
       app.selfUnregistered = false;
-      app.userList = [{ key: 'm@x.com', addr: 'm@x.com', role: 'editor', tables: ['musiikki', 'siivous_a'] }];
+      app.userList = [{ key: 'm@x.com', addr: 'm@x.com', role: 'editor', tables: ['reports', 'team_a'] }];
       app.currentUserEmail = 'm@x.com';
       const selfOnly = snap();
       return { bootstrap, unregistered, selfOnly };
     });
     expect(r.bootstrap).toEqual({ allowed: null, unreg: false, admin: true, role: 'admin' });
     expect(r.unregistered).toEqual({ allowed: [], unreg: true, admin: false, role: null });   // NOT bootstrap
-    expect(r.selfOnly).toEqual({ allowed: ['musiikki', 'siivous_a'], unreg: false, admin: false, role: 'editor' });
+    expect(r.selfOnly).toEqual({ allowed: ['reports', 'team_a'], unreg: false, admin: false, role: 'editor' });
   });
 
   test('membership request -> admin approve registers the user and clears the request', async ({ page }) => {
@@ -2133,7 +2133,7 @@ test.describe('access control: user matching + fail-closed', () => {
         setUserRole: function (uid, role, user, tables) { if (!captured) captured = { uid: uid, user: user }; return Promise.resolve(); },
         getUsers: function () { return Promise.resolve({}); }
       };
-      app.renameUser({ key: '_new_1', addr: '', role: 'editor', tables: ['musiikki'] }, '  Foo@X.COM ');
+      app.renameUser({ key: '_new_1', addr: '', role: 'editor', tables: ['reports'] }, '  Foo@X.COM ');
       await new Promise(function (res) { setTimeout(res, 50); });
       return captured;
     });
@@ -2929,7 +2929,7 @@ test.describe('conditional computed columns (when)', () => {
         noWhen:  a.embedWhenOk(mk(null), { guests: '' }),                 // no when -> always show
         match:   a.embedWhenOk(mk({ guests: { notEmpty: true } }), { guests: 'Alice' }),
         noMatch: a.embedWhenOk(mk({ guests: { notEmpty: true } }), { guests: '' }),
-        orMatch: a.embedWhenOk(mk({ $or: [ { tila: 'x' }, { guests: { notEmpty: true } } ] }), { tila: '', guests: 'M' })
+        orMatch: a.embedWhenOk(mk({ $or: [ { status: 'x' }, { guests: { notEmpty: true } } ] }), { status: '', guests: 'M' })
       };
     });
     expect(r).toEqual({ noWhen: true, match: true, noMatch: false, orMatch: true });
@@ -3568,7 +3568,7 @@ test.describe('list-item delete/rename cascade into table data', () => {
       const puts = [];
       window.backend.putRow = (t, row, part) => { puts.push(row.id + ':' + part); };
       app.tableMap = Object.assign({}, app.tableMap, { tasks: 'tasks' });
-      // status column gets a listSwitch alt list 'guests' (mirrors meetings puhe* : staff + guests)
+      // status column gets a listSwitch alt list 'guests' (primary list + an alternate: staff + guests)
       SCHEMA.tasks.columns.status.listSwitch = { list: 'guests', label: 'Guest' };
       app.listsCache = { status: ['done'], guests: ['Alice'] }; // 'Alice' moved: added to guests, removed from status
       app.dataCache['tasks'] = [

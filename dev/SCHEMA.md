@@ -152,12 +152,12 @@ A `filter` (on a view, an inline/named-view embed, or a conditional column) matc
 - **Array value** = IN — **retired.** `{ "status": ["open","in_progress"] }` is **auto-upgraded to
   `$or` at load** (`convertViewFilters`) and on export; the matcher itself no longer accepts raw
   arrays. **Use `$or`** in new schemas (legacy arrays keep working via the load-time upgrade).
-- **`matchList` (dynamic)** = value must be in a named list: `{ "speaker": { "matchList": "guests" } }`.
+- **`matchList` (dynamic)** = value must be in a named list: `{ "assignee": { "matchList": "leads" } }`.
   The list is resolved at runtime from the Lookup tab — adding/removing items in the list
   immediately changes which rows pass the filter. Use for filters that should stay in sync
   with user-editable lists.
 - **`notMatchList` (dynamic)** = value must **not** be in a named list:
-  `{ "attendee": { "notMatchList": "guests" } }`. Same dynamic resolution as `matchList`, negated.
+  `{ "attendee": { "notMatchList": "leads" } }`. Same dynamic resolution as `matchList`, negated.
 - **`$or` / `$and`** = explicit logical groups, nestable:
   `{ "$and": [ { "city": "X" }, { "$or": [ {"status":"open"}, {"status":"in_progress"} ] } ] }`.
 - **Value operators** (also usable in column `when` / conditional columns — same engine):
@@ -177,15 +177,15 @@ A `filter` (on a view, an inline/named-view embed, or a conditional column) matc
 ### aggregate views (groupBy + collect)
 A view with `groupBy` + `collect` groups rows by person/key and collects a column's values:
 ```json
-{ "name": "talks", "sources": ["sessions"], "mode": "union",
-  "groupBy": { "column": "person", "from": ["talk1","talk2","talk3"] },
+{ "name": "presenters", "sources": ["events"], "mode": "union",
+  "groupBy": { "column": "person", "from": ["slot1","slot2","slot3"] },
   "collect": "date", "columns": ["person", "latest", "second", "third"] }
 ```
 - `groupBy.column`: output key column; `groupBy.from`: source columns to scan for keys.
 - `collect`: source column whose values are gathered per group (sorted descending).
 - Output columns after `groupBy.column` receive the Nth collected value (most recent first).
 - **`collectWith`** (optional): when set, collected values include the source column name:
-  `"collectWith": "role"` → values render as `"2026-06-01 (talk1)"` instead of just `"2026-06-01"`.
+  `"collectWith": "role"` → values render as `"2026-06-01 (slot1)"` instead of just `"2026-06-01"`.
   Useful for cross-table aggregates where you need to see *which role* produced each entry.
 
 #### Leaderboard totals (`aggregate` count/sum)
@@ -248,20 +248,20 @@ A `{view}` column embed with `filterBy` dynamically filters embed rows per card:
 - Each card shows only rows where `task.owner === card_row.name`.
 - Only works in `card`/`list` layout (one card per row hosts the per-row embed).
 - Combine with `hideEmpty: true` to hide the embed when a card has no matching rows.
-- **`matchList` in filterBy**: `{ "speaker": { "matchList": "guests" } }` — show embed rows
-  where `speaker` value is in the named list (same syntax as in `filter`).
+- **`matchList` in filterBy**: `{ "assignee": { "matchList": "leads" } }` — show embed rows
+  where `assignee` value is in the named list (same syntax as in `filter`).
 
 ### computed columns
 A column with `computed` derives its value from other columns at render time (not stored):
 ```json
-{ "name": "visitors", "computed": { "fromColumns": ["talk1","talk2","talk3"], "matchList": "guests" } }
+{ "name": "flagged", "computed": { "fromColumns": ["slot1","slot2","slot3"], "matchList": "leads" } }
 ```
 - **Collect from list** (`matchList` as string): gathers values from `fromColumns` that exist
   in the named list, joins with ", ". Output is empty if no matches.
 - **Categorize by list** (`matchList` as object): checks which list contains the `fromColumn`
   value, outputs the mapped label:
   ```json
-  { "name": "type", "computed": { "fromColumn": "person", "matchList": { "members": "Internal", "guests": "External" } } }
+  { "name": "type", "computed": { "fromColumn": "person", "matchList": { "members": "Internal", "leads": "External" } } }
   ```
 - **Lookup a field** (`lookup`): denormalize one field from another (keyed / `ref`) table into the row.
   Matches this row's `lookup.match` column against the target table's `lookup.on` column (defaults to the
@@ -279,8 +279,8 @@ Any **named or computed** column may carry a `when` clause that gates its **per-
 (card/list: hides the field on that card; table: blanks the cell). Because computed values are
 resolved into the row before visibility is evaluated, a `when` can be driven by a computed column:
 ```json
-{ "name": "guests", "computed": { "fromColumns": ["talk1","talk2"], "matchList": "guests" },
-  "when": { "guests": { "notEmpty": true } } }
+{ "name": "flagged", "computed": { "fromColumns": ["slot1","slot2"], "matchList": "leads" },
+  "when": { "flagged": { "notEmpty": true } } }
 ```
 Conditions (used by `when`, row `filter`s, and embed `when` — all the same engine) match a
 row when **every** field matches. Each field accepts a scalar (equality) or an operator object:
@@ -301,7 +301,7 @@ on **computed** values, so you can show a column only when a computed result is 
 A `when` clause also works on an **embed** (inline, named-view, or markdown prose block) in a
 view's `columns`: the embed renders per-card only when the card's row matches — e.g. a markdown
 prose block placed above a column, shown only when a computed value is present:
-`{ "view": "guests_heading", "bare": true, "when": { "guests": { "notEmpty": true } } }`.
+`{ "view": "flagged_heading", "bare": true, "when": { "flagged": { "notEmpty": true } } }`.
 
 ### rotation columns (rotating duty rosters)
 
@@ -373,7 +373,7 @@ multiselect column (the group for that slot — variable size, not capped):
 - **Calendar anchor (per-view, DB-backed)**: the anchor is the date of slot position 0 for *this view*.
   It is stored **per view** in synced folder config under `rotationAnchors[<viewName>]` and edited
   **inline on the rotation view itself** (a "Start date" field at the top) — so different rotation
-  views (e.g. `siivous` vs `doormen`) can have different anchors. It is *not* a schema literal and
+  views (e.g. `duty_rotation` vs `support_rotation`) can have different anchors. It is *not* a schema literal and
   *not* a per-row column. A literal `anchorDate` on a column overrides the per-view value (handy for a
   fixed/printable one-off); if neither is set, calendar columns resolve to empty. Occurrence mode
   ignores the anchor.
@@ -465,10 +465,10 @@ tables), with one shared `interval`/`advanceBy` and a `rotateEvery`:
 
 ```json
 {
-  "name": "siivous",
+  "name": "duty_rotation",
   "rotation": {
-    "slots": ["alue_a", "alue_b"],
-    "rosters": ["siivous_a", "siivous_b"],
+    "slots": ["zone_a", "zone_b"],
+    "rosters": ["team_a", "team_b"],
     "advanceBy": "calendar",
     "interval": "weekly",
     "rotateEvery": 1,
@@ -478,7 +478,7 @@ tables), with one shared `interval`/`advanceBy` and a `rotateEvery`:
 }
 ```
 
-> Naming: a **slot** is an output assignment column (a cleaning area, doorman post, shift, etc.); a
+> Naming: a **slot** is an output assignment column (a zone, post, shift, etc.); a
 > **roster** is an ordered pool/table whose members take turns. (These replace the older `areas`/`lists`
 > keys — there is no back-compat alias, schemas must use `slots`/`rosters`.)
 
@@ -530,8 +530,8 @@ stays **locked** to one. For a person at position `p` in a roster of length **`L
   the swap cycle don't share a common factor that pins them. They stay **locked to one slot** iff `L`
   divides evenly into the swap rhythm.
 
-For the common `siivous` case (**`N=2`, `R=1`**, swap period = 2):
-- **Odd `L`** → period parity flips on each return → **alternates slots every turn** (everyone cleans
+For the common two-team case (**`N=2`, `R=1`**, swap period = 2):
+- **Odd `L`** → period parity flips on each return → **alternates slots every turn** (everyone serves
   both slots; back to the start slot every 2nd turn). ✅
 - **Even `L`** → period parity is constant on each return → **locked**: even positions always slot 0,
   odd positions always slot 1. ⚠️
@@ -687,9 +687,9 @@ appointment date and an expiry date):
 ```json
 "calendar": {
   "sources": [
-    { "table": "kokoukset",   "dateColumn": "pvm",        "titleColumns": ["aihe"],   "label": "Kokous" },
-    { "table": "keskustelut", "dateColumn": "tapaaminen", "titleColumns": ["person"], "label": "Keskustelu" },
-    { "table": "keskustelut", "dateColumn": "päättyy",    "titleColumns": ["person"], "label": "Suositus päättyy" }
+    { "table": "meetings",     "dateColumn": "date",   "titleColumns": ["topic"],  "label": "Meeting" },
+    { "table": "appointments", "dateColumn": "starts", "titleColumns": ["person"], "label": "Appointment" },
+    { "table": "appointments", "dateColumn": "ends",   "titleColumns": ["person"], "label": "Expiry" }
   ],
   "defaultView": "month"
 }
@@ -698,18 +698,18 @@ Per-source fields: `table` (req), `dateColumn` (req), `titleColumns` (opt), `fil
 grammar), `label` (opt — the type tag + colour key; defaults to the table's translated `tab.<table>`).
 
 ### Rotation duties (`rotationSources`)
-Overlay a **rotation view's** generated duties (e.g. `siivous` cleaning turns) onto the calendar as
+Overlay a **rotation view's** generated duties (e.g. `duty_rotation` turns) onto the calendar as
 **read-only** events. Rotation rows aren't stored — they're generated per date from the rosters +
 anchor — so the calendar generates them on demand for the visible window and drops any outside it.
 ```json
 "calendar": {
-  "sources": [ { "table": "kokoukset", "dateColumn": "pvm", "titleColumns": ["aihe"], "label": "Kokous" } ],
-  "rotationSources": [ { "view": "siivous", "label": "Siivous" } ],
+  "sources": [ { "table": "meetings", "dateColumn": "date", "titleColumns": ["topic"], "label": "Meeting" } ],
+  "rotationSources": [ { "view": "duty_rotation", "label": "Duty" } ],
   "defaultView": "month"
 }
 ```
 - `view` (req) — names an existing **rotation** view (`v.rotation`); each populated slot on a
-  generated period becomes one event titled `<slotLabel>: <people>` (e.g. `"Alakerta: Kati, Jaana"`).
+  generated period becomes one event titled `<slotLabel>: <people>` (e.g. `"Zone A: Alex, Sam"`).
 - `label` (opt) — the type tag + dot colour key (defaults to the rotation view's `tab.<view>` name).
 - **Single source of truth**: generation reuses the rotation view's own **anchor**, **range start**,
   and **rotateEvery**, so the calendar shows the *same* assignments as the rotation view. Duties land
@@ -910,7 +910,7 @@ otherwise the entries would surface as phantom columns. Do not author new `text`
 
 ## Lists and translations
 - **List values** are stored as stable keys (e.g. `"in_progress"`, not "In Progress").
-- **Display** uses translations: `list.status.in_progress` → "Käynnissä" / "In Progress".
+- **Display** uses translations: `list.status.in_progress` → "In Progress" (localized per active language).
 - **Locked values**: list values referenced in schema filters are auto-seeded and non-deletable.
 - **Translation keys** are auto-generated: `tab.*`, `view.*`, `field.*`, `list.*.*`,
   `nav.<group>` (group labels), and `{{t:<key>}}` tokens in markdown views — all collected

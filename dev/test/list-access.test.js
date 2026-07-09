@@ -6,22 +6,22 @@ const assert = require('node:assert/strict');
 const { listOwningTables, accessibleListNames, filterLists } = require('../../list-access');
 
 describe('Per-list access (owning tables + filtering)', () => {
-  // Church-shaped: team_a uses staff, team_b uses cleaners; meetings speech columns
-  // use staff primary + guests via listSwitch; music uses its own song lists.
+  // Mixed shapes: team_a uses staff, team_b uses cleaners; an events table's
+  // assignment column uses staff primary + leads via listSwitch; projects uses its own lists.
   const schemaTables = {
     team_a: { columns: { people: { type: 'multiselect', list: 'staff' } } },
     team_b: { columns: { people: { type: 'multiselect', list: 'cleaners' } } },
     ushers_list: { columns: { people: { type: 'multiselect', list: 'staff' } } },
-    meetings: { columns: { speaker1: { type: 'select', list: 'staff', listSwitch: { list: 'guests' } } } },
-    music: { columns: [{ name: 'laulu', list: 'songs' }, { name: 'saestaja', list: 'accompanists' }] } // array-form columns
+    events: { columns: { host1: { type: 'select', list: 'staff', listSwitch: { list: 'leads' } } } },
+    projects: { columns: [{ name: 'category', list: 'categories' }, { name: 'label', list: 'labels' }] } // array-form columns
   };
-  const allLists = { staff: ['A'], cleaners: ['B'], guests: ['C'], songs: ['D'], accompanists: ['E'], orphan: ['Z'] };
+  const allLists = { staff: ['A'], cleaners: ['B'], leads: ['C'], categories: ['D'], labels: ['E'], orphan: ['Z'] };
 
   it('derives owning tables (object- and array-form columns; listSwitch counts)', () => {
     assert.deepEqual(listOwningTables(schemaTables, 'cleaners'), ['team_b']);
-    assert.deepEqual(listOwningTables(schemaTables, 'staff').sort(), ['meetings', 'team_a', 'ushers_list']);
-    assert.deepEqual(listOwningTables(schemaTables, 'guests'), ['meetings']);   // via listSwitch
-    assert.deepEqual(listOwningTables(schemaTables, 'songs'), ['music']);     // array-form
+    assert.deepEqual(listOwningTables(schemaTables, 'staff').sort(), ['events', 'team_a', 'ushers_list']);
+    assert.deepEqual(listOwningTables(schemaTables, 'leads'), ['events']);   // via listSwitch
+    assert.deepEqual(listOwningTables(schemaTables, 'categories'), ['projects']);     // array-form
     assert.deepEqual(listOwningTables(schemaTables, 'orphan'), []);               // no owner
   });
 
@@ -37,9 +37,9 @@ describe('Per-list access (owning tables + filtering)', () => {
     assert.equal(got.indexOf('cleaners'), -1);
   });
 
-  it('meetings grant exposes both the primary and the listSwitch alt list', () => {
-    const got = accessibleListNames(schemaTables, ['meetings'], Object.keys(allLists)).sort();
-    assert.deepEqual(got, ['guests', 'staff']);
+  it('events grant exposes both the primary and the listSwitch alt list', () => {
+    const got = accessibleListNames(schemaTables, ['events'], Object.keys(allLists)).sort();
+    assert.deepEqual(got, ['leads', 'staff']);
   });
 
   it('admin (null allowedTables) sees every list incl. orphans', () => {
@@ -57,7 +57,7 @@ describe('Per-list access (owning tables + filtering)', () => {
     assert.equal('staff' in filtered, false);   // team_a people never sent to team_b user
   });
 
-  it('music coordinator gets only the song lists', () => {
-    assert.deepEqual(accessibleListNames(schemaTables, ['music'], Object.keys(allLists)).sort(), ['accompanists', 'songs']);
+  it('projects coordinator gets only its own lists', () => {
+    assert.deepEqual(accessibleListNames(schemaTables, ['projects'], Object.keys(allLists)).sort(), ['categories', 'labels']);
   });
 });
