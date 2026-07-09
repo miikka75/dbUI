@@ -459,18 +459,15 @@
             <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.theme') }}</p>
-            <div class="d-flex align-center mb-2" style="gap:8px; max-width:420px">
-              <input type="text" :placeholder="a.t('settings.theme_palette')" @change="a.applyPalette($event.target.value)" @keydown.enter="a.applyPalette($event.target.value)" data-testid="theme-palette" spellcheck="false" style="flex:1; font-size:0.75rem; font-family:monospace; padding:4px 8px; border:1px solid rgb(var(--v-theme-outline),0.3); border-radius:4px; background:transparent; color:inherit">
-              <v-icon size="small" style="opacity:0.5" :title="a.t('settings.theme_palette_hint')">mdi-palette</v-icon>
-            </div>
+            <v-text-field :label="a.t('settings.theme_palette')" @change="a.applyPalette($event.target.value)" @keydown.enter="a.applyPalette($event.target.value)" data-testid="theme-palette" spellcheck="false" density="compact" hide-details variant="outlined" style="max-width:320px" class="mb-3 font-monospace"></v-text-field>
             <div v-for="m in [{ k: 'light', icon: 'mdi-weather-sunny' }, { k: 'dark', icon: 'mdi-weather-night' }]" :key="m.k" class="mb-2" data-testid="theme-editor">
-              <div class="d-flex flex-wrap align-center" style="gap:8px 16px">
+              <div class="d-flex flex-wrap align-center" style="gap:6px 10px">
                 <v-icon size="small" style="opacity:0.55">{{ m.icon }}</v-icon>
-                <div v-for="tk in a.themeTokens" :key="tk.key" class="d-flex flex-column" style="width:112px">
-                  <span class="text-caption" style="font-size:0.6rem; opacity:0.7">{{ tk.label }}</span>
-                  <div class="d-flex align-center" style="gap:4px">
-                    <input type="color" :value="a.themeColor(m.k, tk.key)" @input="a.setThemeColor(m.k, tk.key, $event.target.value)" @change="a.commitTheme(m.k, tk.key, $event.target.value)" :title="tk.key" :data-testid="'theme-' + m.k + '-' + tk.key" style="width:30px; height:28px; padding:0; border:1px solid rgb(var(--v-theme-outline),0.3); border-radius:6px; background:none; cursor:pointer">
-                    <input type="text" :value="a.themeColor(m.k, tk.key)" @change="a.commitTheme(m.k, tk.key, $event.target.value)" @keydown.enter="a.commitTheme(m.k, tk.key, $event.target.value)" spellcheck="false" :data-testid="'theme-txt-' + m.k + '-' + tk.key" style="width:74px; font-size:0.72rem; font-family:monospace; padding:2px 4px; border:1px solid rgb(var(--v-theme-outline),0.25); border-radius:4px; background:transparent; color:inherit">
+                <div v-for="tk in a.themeTokens" :key="tk.key" class="d-flex flex-column" style="width:84px">
+                  <span class="text-caption" style="font-size:0.58rem; opacity:0.7; line-height:1.1">{{ tk.label }}</span>
+                  <div class="d-flex align-center" style="gap:3px">
+                    <input type="color" :value="a.themeColor(m.k, tk.key)" @input="a.setThemeColor(m.k, tk.key, $event.target.value)" @change="a.commitTheme(m.k, tk.key, $event.target.value)" :title="tk.key" :data-testid="'theme-' + m.k + '-' + tk.key" style="width:26px; height:24px; padding:0; border:1px solid rgb(var(--v-theme-outline),0.3); border-radius:5px; background:none; cursor:pointer">
+                    <input type="text" :value="a.themeColor(m.k, tk.key)" @change="a.commitTheme(m.k, tk.key, $event.target.value)" @keydown.enter="a.commitTheme(m.k, tk.key, $event.target.value)" spellcheck="false" :data-testid="'theme-txt-' + m.k + '-' + tk.key" style="width:52px; font-size:0.68rem; font-family:monospace; padding:2px 3px; border:1px solid rgb(var(--v-theme-outline),0.25); border-radius:4px; background:transparent; color:inherit">
                   </div>
                 </div>
               </div>

@@ -2611,6 +2611,14 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(r.secondary).toBe('#faedcd'); // next most saturated -> secondary
     await page.evaluate(() => window.appInstance.selectTab('__settings'));
     await expect(page.locator('[data-testid="theme-palette"]')).toBeVisible();
+    // Reactivity: the per-token fields must refresh to the pasted palette (themeColor reads the
+    // reactive themeEdit/schema.theme, not the non-reactive $vuetify.theme.themes).
+    await expect(page.locator('[data-testid="theme-txt-light-primary"]')).toHaveValue('#d4a373');
+    await expect(page.locator('[data-testid="theme-light-background"]')).toHaveValue('#fefae0');
+    // The paste field is a v-text-field (styled like profile.email): typing + Enter applies the palette.
+    await page.locator('[data-testid="theme-palette"] input').fill('#111111 #eeeeee #888888');
+    await page.locator('[data-testid="theme-palette"] input').press('Enter');
+    await expect(page.locator('[data-testid="theme-txt-light-background"]')).toHaveValue('#eeeeee');
   });
 });
 
