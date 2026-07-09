@@ -2594,6 +2594,13 @@ function createVueApp() {
         var h = m[1]; if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
         return '#' + h.toLowerCase();
       },
+      _persistTheme: function() { // merge the session's edits into schema.theme + save (frozen-replace pattern)
+        var base = (this.schemaData && this.schemaData.theme) || {};
+        var theme = { light: Object.assign({}, base.light, this.themeEdit.light), dark: Object.assign({}, base.dark, this.themeEdit.dark) };
+        var newSchema = Object.assign({}, this.schemaData, { theme: theme });
+        this.schemaData = Object.freeze(newSchema);
+        if (backend.saveSchema) backend.saveSchema(this.folderId, newSchema);
+      },
       // Commit a color (from the text field or the picker's final `change`): validate, live-preview, and
       // auto-persist to schema.theme — no Save button. Invalid input is ignored (the field re-syncs to the
       // stored value on next render).
@@ -2601,11 +2608,36 @@ function createVueApp() {
         var hex = this._normHex(value);
         if (!hex) { this.notify('Invalid color'); return; }
         this.setThemeColor(mode, token, hex);
-        var base = (this.schemaData && this.schemaData.theme) || {};
-        var theme = { light: Object.assign({}, base.light, this.themeEdit.light), dark: Object.assign({}, base.dark, this.themeEdit.dark) };
-        var newSchema = Object.assign({}, this.schemaData, { theme: theme });
-        this.schemaData = Object.freeze(newSchema);
-        if (backend.saveSchema) backend.saveSchema(this.folderId, newSchema);
+        this._persistTheme();
+      },
+      // Bulk-apply a pasted palette (e.g. coolors: ["#ccd5ae","#e9edc9",...]) to the CURRENTLY-active mode.
+      // Parses the #hex codes, sorts by luminance + chroma, and maps roles: lightest->background,
+      // 2nd-lightest->surface, darkest->text(on-surface), most-saturated->primary, next->secondary.
+      // (Inverted bg/text for dark mode.) One save for the whole set.
+      _rgb: function(hex) { var h = hex.replace('#', ''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; },
+      _luminance: function(hex) { var c = this._rgb(hex); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; },
+      _chroma: function(hex) { var c = this._rgb(hex); return Math.max(c[0], c[1], c[2]) - Math.min(c[0], c[1], c[2]); },
+      _parsePalette: function(str) {
+        var out = [], re = /#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})/g, m;
+        while ((m = re.exec(str || ''))) { var h = m[1]; if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]; out.push('#' + h.toLowerCase()); }
+        return out;
+      },
+      applyPalette: function(str) {
+        var self = this, hex = this._parsePalette(str);
+        if (hex.length < 2) { this.notify('Paste 2+ #hex colors'); return; }
+        var mode = (this.theme === 'dark') ? 'dark' : 'light';
+        var arr = hex.map(function(h) { return { h: h, l: self._luminance(h), c: self._chroma(h) }; });
+        var byL = arr.slice().sort(function(a, b) { return a.l - b.l; });   // dark -> light
+        var byC = arr.slice().sort(function(a, b) { return b.c - a.c; });   // vivid -> dull
+        var n = byL.length, lightest = byL[n - 1].h, darkest = byL[0].h;
+        var secondL = byL[n - 2 >= 0 ? n - 2 : n - 1].h, secondD = byL[1 < n ? 1 : 0].h;
+        var primary = byC[0].h, secondary = byC[1 < byC.length ? 1 : 0].h;
+        var map = (mode === 'dark')
+          ? { background: darkest, surface: secondD, 'on-surface': lightest, primary: primary, secondary: secondary }
+          : { background: lightest, surface: secondL, 'on-surface': darkest, primary: primary, secondary: secondary };
+        Object.keys(map).forEach(function(t) { self.setThemeColor(mode, t, map[t]); });
+        this._persistTheme();
+        this.notify('Palette applied (' + mode + ')');
       },
       resetTheme: function() {
         var newSchema = Object.assign({}, this.schemaData); delete newSchema.theme;

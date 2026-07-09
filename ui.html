@@ -459,6 +459,10 @@
             <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.theme') }}</p>
+            <div class="d-flex align-center mb-2" style="gap:8px; max-width:420px">
+              <input type="text" :placeholder="a.t('settings.theme_palette')" @change="a.applyPalette($event.target.value)" @keydown.enter="a.applyPalette($event.target.value)" data-testid="theme-palette" spellcheck="false" style="flex:1; font-size:0.75rem; font-family:monospace; padding:4px 8px; border:1px solid rgb(var(--v-theme-outline),0.3); border-radius:4px; background:transparent; color:inherit">
+              <v-icon size="small" style="opacity:0.5" :title="a.t('settings.theme_palette_hint')">mdi-palette</v-icon>
+            </div>
             <div v-for="m in [{ k: 'light', icon: 'mdi-weather-sunny' }, { k: 'dark', icon: 'mdi-weather-night' }]" :key="m.k" class="mb-2" data-testid="theme-editor">
               <div class="d-flex flex-wrap align-center" style="gap:8px 16px">
                 <v-icon size="small" style="opacity:0.55">{{ m.icon }}</v-icon>
