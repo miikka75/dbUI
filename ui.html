@@ -460,9 +460,9 @@
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.theme') }}</p>
             <v-text-field :label="a.t('settings.theme_palette')" @change="a.applyPalette($event.target.value)" @keydown.enter="a.applyPalette($event.target.value)" data-testid="theme-palette" spellcheck="false" density="compact" hide-details variant="outlined" style="max-width:320px" class="mb-3 font-monospace"></v-text-field>
-            <div v-for="m in [{ k: 'light', icon: 'mdi-weather-sunny' }, { k: 'dark', icon: 'mdi-weather-night' }]" :key="m.k" class="mb-2" data-testid="theme-editor">
-              <div class="d-flex flex-wrap align-center" style="gap:6px 10px">
-                <v-icon size="small" style="opacity:0.55">{{ m.icon }}</v-icon>
+            <div v-for="m in [{ k: 'light', icon: 'mdi-weather-sunny' }, { k: 'dark', icon: 'mdi-weather-night' }]" :key="m.k" class="d-flex align-center mb-2" style="gap:8px" data-testid="theme-editor">
+              <v-icon size="small" style="opacity:0.55; flex:0 0 auto">{{ m.icon }}</v-icon>
+              <div class="d-flex flex-wrap" style="gap:6px 10px; flex:1 1 0; min-width:0">
                 <div v-for="tk in a.themeTokens" :key="tk.key" class="d-flex flex-column" style="width:84px">
                   <span class="text-caption" style="font-size:0.58rem; opacity:0.7; line-height:1.1">{{ tk.label }}</span>
                   <div class="d-flex align-center" style="gap:3px">
