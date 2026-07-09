@@ -2555,9 +2555,15 @@ function createVueApp() {
       // pattern as the default-language change). `themeColor` reads the live theme, normalized to #rrggbb
       // for <input type=color>; unspecified colors fall back to Vuetify's contrast default.
       themeColor: function(mode, token) {
-        var t = this.$vuetify && this.$vuetify.theme, themes = t && t.themes;
-        themes = (themes && themes.value) ? themes.value : themes;
-        var c = (themes && themes[mode] && themes[mode].colors && themes[mode].colors[token]) || '';
+        // Read REACTIVE sources first (session edits, then saved schema.theme) so the pickers/fields
+        // refresh after setThemeColor/applyPalette — $vuetify.theme.themes is not reactive (Vuetify 4).
+        var c = (this.themeEdit[mode] && this.themeEdit[mode][token])
+          || (this.schemaData && this.schemaData.theme && this.schemaData.theme[mode] && this.schemaData.theme[mode][token]);
+        if (!c) { // fall back to Vuetify's default (defaults don't change at runtime -> non-reactive is fine)
+          var t = this.$vuetify && this.$vuetify.theme, themes = t && t.themes;
+          themes = (themes && themes.value) ? themes.value : themes;
+          c = (themes && themes[mode] && themes[mode].colors && themes[mode].colors[token]) || '';
+        }
         if (/^#[0-9a-fA-F]{6}$/.test(c)) return c;
         if (/^#[0-9a-fA-F]{3}$/.test(c)) return '#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
         return mode === 'dark' ? '#ffffff' : '#000000';
