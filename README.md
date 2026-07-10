@@ -41,7 +41,10 @@ npx playwright test  # run E2E tests
 ```
 
 Browser: click "Create Local Database" → app loads with schema from `schema.json`.
-Optionally run `npm run seed` (with the server running) to populate the demo's markdown prose translations.
+Optionally run `npm run seed:import` (with the server running) to layer the demo data — rows, lists,
+translations, rotation config, plus example users/profiles — on top of the schema. The importable data
+lives in `dev/demo-bundle.json` (the same bundle shape as Settings → Import); regenerate its
+date-relative rows with `node seed-import.js --regen`.
 
 **Reset**: delete `dev/local.db` + browser `localStorage.clear(); location.reload()`
 

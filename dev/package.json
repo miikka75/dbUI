@@ -5,8 +5,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "seed": "node seed-translations.js",
-    "seed:demo": "node seed-demo.js",
+    "seed:import": "node seed-import.js",
     "test": "node --test test/*.test.js",
     "test:ui": "npx playwright test --config=playwright.config.js"
   },
