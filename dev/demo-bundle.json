@@ -1,0 +1,220 @@
+{
+  "tables": {
+    "cities": [
+      {
+        "id": "seed-cities-1",
+        "state": "IL",
+        "city": "Springfield"
+      },
+      {
+        "id": "seed-cities-2",
+        "state": "IL",
+        "city": "Chicago"
+      },
+      {
+        "id": "seed-cities-3",
+        "state": "CA",
+        "city": "Fresno"
+      }
+    ],
+    "chores": [
+      {
+        "id": "seed-chores-1",
+        "chore": "Dishes",
+        "points": 2
+      },
+      {
+        "id": "seed-chores-2",
+        "chore": "Vacuum",
+        "points": 3
+      },
+      {
+        "id": "seed-chores-3",
+        "chore": "Mow lawn",
+        "points": 5
+      },
+      {
+        "id": "seed-chores-4",
+        "chore": "Trash",
+        "points": 1
+      },
+      {
+        "id": "seed-chores-5",
+        "chore": "Laundry",
+        "points": 4
+      }
+    ],
+    "chore_log": [
+      {
+        "id": "seed-chore_log-1",
+        "chore": "Dishes",
+        "person": "Ann",
+        "done_on": "2026-07-10"
+      },
+      {
+        "id": "seed-chore_log-2",
+        "chore": "Mow lawn",
+        "person": "Cara",
+        "done_on": "2026-07-10"
+      },
+      {
+        "id": "seed-chore_log-3",
+        "chore": "Vacuum",
+        "person": "Bob",
+        "done_on": "2026-07-09"
+      },
+      {
+        "id": "seed-chore_log-4",
+        "chore": "Mow lawn",
+        "person": "Ann",
+        "done_on": "2026-07-02"
+      },
+      {
+        "id": "seed-chore_log-5",
+        "chore": "Trash",
+        "person": "Bob",
+        "done_on": "2026-07-02"
+      },
+      {
+        "id": "seed-chore_log-6",
+        "chore": "Laundry",
+        "person": "Ann",
+        "done_on": "2026-06-10"
+      },
+      {
+        "id": "seed-chore_log-7",
+        "chore": "Dishes",
+        "person": "Ann",
+        "done_on": "2026-06-20"
+      },
+      {
+        "id": "seed-chore_log-8",
+        "chore": "Dishes",
+        "person": "Bob",
+        "done_on": "2026-06-10"
+      },
+      {
+        "id": "seed-chore_log-9",
+        "chore": "Vacuum",
+        "person": "Cara",
+        "done_on": "2026-06-20"
+      }
+    ],
+    "crew_rotation": [
+      {
+        "id": "seed-crew_rotation-1",
+        "position": 0,
+        "people": [
+          "Ann",
+          "Bob"
+        ]
+      },
+      {
+        "id": "seed-crew_rotation-2",
+        "position": 1,
+        "people": [
+          "Cara",
+          "Dan"
+        ]
+      }
+    ],
+    "tasks": [
+      {
+        "id": "seed-tasks-1",
+        "date": "2026-07-10",
+        "title": "Fix roof",
+        "status": "open",
+        "assigned_to": "Ann",
+        "city": "Springfield"
+      },
+      {
+        "id": "seed-tasks-2",
+        "date": "2026-07-09",
+        "title": "Paint fence",
+        "status": "in_progress",
+        "assigned_to": "Bob",
+        "city": "Chicago"
+      }
+    ],
+    "notes": [
+      {
+        "id": "seed-notes-1",
+        "date": "2026-07-10",
+        "title": "Weekly sync",
+        "content": "Discussed the roster and open tasks.",
+        "author": "Cara",
+        "link": "https://example.com/weekly-sync"
+      }
+    ],
+    "tasks__archive": [
+      {
+        "id": "seed-tasks-arch-1",
+        "date": "2026-06-10",
+        "title": "Old audit",
+        "status": "done",
+        "assigned_to": "Cara",
+        "city": "Fresno"
+      }
+    ],
+    "chore_log__archive": [
+      {
+        "id": "seed-chore_log-arch-1",
+        "chore": "Trash",
+        "person": "Cara",
+        "done_on": "2026-06-10"
+      }
+    ]
+  },
+  "lists": {
+    "members": [
+      "Ann",
+      "Bob",
+      "Cara"
+    ],
+    "crew": [
+      "Ann",
+      "Bob",
+      "Cara",
+      "Dan"
+    ],
+    "status": [
+      "open",
+      "in_progress",
+      "done"
+    ],
+    "assigned_to": [
+      "Ann",
+      "Bob",
+      "Cara"
+    ]
+  },
+  "languages": [
+    {
+      "code": "en",
+      "name": "English"
+    }
+  ],
+  "translations": {
+    "en": {
+      "view.combined.header": "# Tasks & Notes",
+      "view.combined.footer": "_Tasks are synced from notes._",
+      "view.progress_report.header": "# Progress Report",
+      "embed.open.title": "Open",
+      "embed.ip.title": "In Progress",
+      "embed.ip.attention": "_Items above need attention._",
+      "view.progress_report.footer": "_End of report._"
+    }
+  },
+  "config": {
+    "rotationAnchors": {
+      "crewrota": "2026-07-06"
+    },
+    "rotationRanges": {
+      "crewrota": {
+        "from": "2026-06-22",
+        "periods": 8
+      }
+    }
+  },
+  "generatedAt": "2026-07-10T20:34:55.860Z"
+}
