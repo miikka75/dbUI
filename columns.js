@@ -54,10 +54,12 @@
     for (var t in schema) {
       var cols = (schema[t] && schema[t].columns) || {};
       for (var c in cols) {
-        var e = info[c] || (info[c] = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false });
+        var e = info[c] || (info[c] = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false, image: false, url: false });
         var typ = columnType(schema, t, c), d = cols[c];
         if (typ === 'multiselect') e.multiselect = true;
         if (typ === 'date') e.date = true;
+        if (typ === 'image') e.image = true;
+        if (typ === 'url') e.url = true;
         if (d && typeof d === 'object') {
           if (d.type === 'ref') e.ref = true;   // object-only, matching columnRef (a bare 'ref' string is not a ref)
           if (e.list == null && d.list) e.list = d.list;
@@ -69,7 +71,7 @@
     }
     return info;
   }
-  var _EMPTY = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false };
+  var _EMPTY = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false, image: false, url: false };
   function colInfo(schema, col) {
     var m = _scanCache && _scanCache.get(schema);
     if (!m) { m = scanSchema(schema); if (_scanCache) _scanCache.set(schema, m); }
@@ -82,6 +84,8 @@
   function colListSwitch(schema, col) { return colInfo(schema, col).listSwitch; }
   function colAllowNew(schema, col) { return colInfo(schema, col).allowNew; }
   function colIsSorted(schema, col) { return colInfo(schema, col).sorted; }
+  function colIsImage(schema, col) { return colInfo(schema, col).image; }
+  function colIsUrl(schema, col) { return colInfo(schema, col).url; }
 
   // View column-entry shape predicates (a view's `columns` array mixes plain names, {name,...} defs,
   // inline embeds, named-view embeds and legacy text blocks). Moved here from schema-loader.html so the
@@ -96,6 +100,7 @@
     isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol,
     colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate,
     colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted,
+    colIsImage: colIsImage, colIsUrl: colIsUrl,
     colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = C;

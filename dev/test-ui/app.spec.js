@@ -180,6 +180,50 @@ test.describe('Secondary-colored chips', () => {
   });
 });
 
+test.describe('image/url column types', () => {
+  test('url renders a link; image w/o an uploader falls back to a URL field + thumbnail', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const schema = {
+      defaultLanguage: 'en',
+      tables: { gallery: { columns: [ { name: 'title', type: 'text' }, { name: 'photo', type: 'image' }, { name: 'link', type: 'url' } ] } },
+      views: [ { name: 'all', sources: ['gallery'], mode: 'union', columns: ['title'] } ],
+      nav: { items: [ { table: 'gallery' } ] }
+    };
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => window.appInstance.selectTab('gallery'));
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(150);
+
+    // The local backend has no uploadFile -> the image cell degrades to a paste-a-URL field, no upload btn.
+    await expect(page.locator('.mdi-camera-plus, .mdi-image-edit')).toHaveCount(0);
+    await expect(page.locator('input[placeholder="Image URL"]')).toBeVisible();
+    await expect(page.locator('input[placeholder^="https"]')).toBeVisible();      // the url column's input
+
+    // Store values on the row, then assert the render: <img> thumbnail for image, open-link icon for url.
+    const img1x1 = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+    await page.evaluate((src) => {
+      const a = window.appInstance, row = a.currentData[0];
+      a.saveField(row, 'photo', src);
+      a.saveField(row, 'link', 'https://example.com/x');
+    }, img1x1);
+    await expect(page.locator('img.cell-thumb')).toBeVisible();
+    expect(await page.locator('img.cell-thumb').getAttribute('src')).toBe(img1x1);
+    await expect(page.locator('.mdi-open-in-new')).toBeVisible();
+
+    // Editing wiring: typing a URL into the url cell + change writes it onto the row.
+    await page.locator('input[placeholder^="https"]').evaluate((el) => {
+      el.value = 'https://example.com/y'; el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(await page.evaluate(() => window.appInstance.currentData[0].link)).toBe('https://example.com/y');
+  });
+});
+
 test.describe('Two-press delete', () => {
   test('first click arms, second click deletes', async ({ page }) => {
     await ensureAppReady(page);

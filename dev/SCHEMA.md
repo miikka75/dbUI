@@ -51,6 +51,8 @@ nav     ← navigation tree + layout, references views/tables by name
 | `select` | Dropdown from a named list |
 | `multiselect` | Multiple values from a named list (chip input); stored as an **array** of strings |
 | `ref` | Reference to a lookup-table column |
+| `url` | A link — stored as a URL **string**; the cell shows an editable field + an open-in-new-tab icon, and a clickable link in read-only views |
+| `image` | An image — stored as a URL **string** (never the bytes). On a backend with file storage (Firebase Storage) the cell is an **upload** button that puts the file in the blob store and saves the returned download URL; on other backends it degrades to a paste-a-URL field. Read-only views show a thumbnail linking to the full image |
 | `owner` | Per-row access primitive — **auto-stamped** with the current user's email on create, **read-only** thereafter. Backs the `rsvp` view and owner-scoped Firestore rules (a member may write only their own owner-stamped rows). See `## rsvp`. |
 
 ### column properties

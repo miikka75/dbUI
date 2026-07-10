@@ -1,0 +1,19 @@
+rules_version = '2';
+
+// Firebase Storage rules for the image column uploader (backend-firebase uploadFile).
+// Files live under uploads/<lowercased-user-email>/<ts>_<name>. A user may write only their OWN
+// folder (image/* under 10 MB); any signed-in user may read. Note: the download URL the app stores
+// carries an access token that lets <img> load the file even independent of these read rules.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /uploads/{userEmail}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.auth.token.email.lower() == userEmail
+                   && request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null
+                    && request.auth.token.email.lower() == userEmail;
+    }
+  }
+}
