@@ -181,54 +181,78 @@ test.describe('Secondary-colored chips', () => {
 });
 
 test.describe('image/url column types', () => {
-  test('url renders a link; image w/o an uploader falls back to a URL field + thumbnail', async ({ page }) => {
-    test.setTimeout(20000);
+  const GALLERY = {
+    defaultLanguage: 'en',
+    tables: { gallery: { columns: [ { name: 'title', type: 'text' }, { name: 'photo', type: 'image' }, { name: 'link', type: 'url' } ] } },
+    views: [ { name: 'all', sources: ['gallery'], mode: 'union', columns: ['title'] } ],
+    nav: { items: [ { table: 'gallery' } ] }
+  };
+  async function openGallery(page, { dropUploader } = {}) {
     await page.setViewportSize({ width: 1280, height: 800 });
-    const schema = {
-      defaultLanguage: 'en',
-      tables: { gallery: { columns: [ { name: 'title', type: 'text' }, { name: 'photo', type: 'image' }, { name: 'link', type: 'url' } ] } },
-      views: [ { name: 'all', sources: ['gallery'], mode: 'union', columns: ['title'] } ],
-      nav: { items: [ { table: 'gallery' } ] }
-    };
     await page.request.post('/api/resetData');
-    await page.request.post('/api/saveSchema', { data: { schema } });
+    await page.request.post('/api/saveSchema', { data: { schema: GALLERY } });
     await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.goto('/');
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    if (dropUploader) await page.evaluate(() => { delete window.backend.uploadFile; }); // simulate a backend w/o file storage
     await page.evaluate(() => window.appInstance.selectTab('gallery'));
     await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
     await page.waitForTimeout(150);
+  }
 
-    // The local backend has no uploadFile -> the image cell degrades to a paste-a-URL field, no upload btn.
+  test('image column uploads a file to the local dev store + persists + serves the URL', async ({ page }) => {
+    test.setTimeout(20000);
+    await openGallery(page);
+
+    // The local dev backend exposes uploadFile -> the image cell shows an upload button, not a URL field.
+    await expect(page.locator('.mdi-camera-plus')).toBeVisible();
+    await expect(page.locator('input[placeholder="Image URL"]')).toHaveCount(0);
+
+    // Pick a real PNG -> uploadFile POSTs it to the dev server, which stores it and returns a URL.
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    await page.locator('input[type=file]').setInputFiles({ name: 'pic.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+
+    // The cell now shows a thumbnail whose src is the dev-store URL.
+    const thumb = page.locator('img.cell-thumb');
+    await expect(thumb).toBeVisible({ timeout: 5000 });
+    const src = await thumb.getAttribute('src');
+    expect(src).toMatch(/\/uploads\/.+\.png$/);
+
+    // The dev server actually serves the stored file (200 + image content-type).
+    const resp = await page.request.get(src);
+    expect(resp.status()).toBe(200);
+    expect(resp.headers()['content-type']).toContain('image/png');
+
+    // The URL (not the bytes) is persisted on the row (server round-trip; putRow is fire-and-forget).
+    await expect.poll(async () => {
+      const s = await (await page.request.post('/api/getTableData', { data: { tableId: 'gallery', tab: 'active' } })).json();
+      return (s.rows[0] || {}).photo;
+    }, { timeout: 4000 }).toBe(src);
+  });
+
+  test('image degrades to a paste-a-URL field on a backend without uploadFile; url renders a link', async ({ page }) => {
+    test.setTimeout(20000);
+    await openGallery(page, { dropUploader: true });
+
+    // No uploadFile -> image cell is a URL field (no upload button); url column has its own input.
     await expect(page.locator('.mdi-camera-plus, .mdi-image-edit')).toHaveCount(0);
     await expect(page.locator('input[placeholder="Image URL"]')).toBeVisible();
-    await expect(page.locator('input[placeholder^="https"]')).toBeVisible();      // the url column's input
+    await expect(page.locator('input[placeholder^="https"]')).toBeVisible();
 
-    // Store values on the row, then assert the render: <img> thumbnail for image, open-link icon for url.
+    // Store values, then assert the render: <img> thumbnail for image, open-link icon for url.
     const img1x1 = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
-    await page.evaluate((src) => {
-      const a = window.appInstance, row = a.currentData[0];
-      a.saveField(row, 'photo', src);
-      a.saveField(row, 'link', 'https://example.com/x');
-    }, img1x1);
+    await page.evaluate((s) => { const a = window.appInstance, r = a.currentData[0]; a.saveField(r, 'photo', s); a.saveField(r, 'link', 'https://example.com/x'); }, img1x1);
     await expect(page.locator('img.cell-thumb')).toBeVisible();
     expect(await page.locator('img.cell-thumb').getAttribute('src')).toBe(img1x1);
     await expect(page.locator('.mdi-open-in-new')).toBeVisible();
 
-    // Editing wiring: typing a URL into the url cell + change writes it onto the row.
-    await page.locator('input[placeholder^="https"]').evaluate((el) => {
-      el.value = 'https://example.com/y'; el.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    expect(await page.evaluate(() => window.appInstance.currentData[0].link)).toBe('https://example.com/y');
-
-    // The local server + DB persist image/url values (they're plain strings — no type gating server-side).
-    // putRow is fire-and-forget, so poll until the last write (link) flushes, then assert both fields.
-    const read = async () => (await page.request.post('/api/getTableData', { data: { tableId: 'gallery', tab: 'active' } })).json();
-    await expect.poll(async () => { const s = await read(); return (s.rows[0] || {}).link; }, { timeout: 4000 }).toBe('https://example.com/y');
-    const row = (await read()).rows[0];
-    expect(row.photo).toBe(img1x1);          // image URL persisted server-side
-    expect(row.link).toBe('https://example.com/y');
+    // Editing wiring: typing a URL into the url cell + change writes it onto the row and persists.
+    await page.locator('input[placeholder^="https"]').evaluate((el) => { el.value = 'https://example.com/y'; el.dispatchEvent(new Event('change', { bubbles: true })); });
+    await expect.poll(async () => {
+      const s = await (await page.request.post('/api/getTableData', { data: { tableId: 'gallery', tab: 'active' } })).json();
+      return (s.rows[0] || {}).link;
+    }, { timeout: 4000 }).toBe('https://example.com/y');
   });
 });
 

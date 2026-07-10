@@ -4,6 +4,7 @@
      storage-idb.html, transport-local.html, crdt-backend.html. -->
 <script>
 Transport = TransportLocal;
+if (typeof _devUploadFile === 'function' && typeof backend !== 'undefined') backend.uploadFile = _devUploadFile; // image-column upload (dev store)
 
 // Open IDB + init engine, then boot the app. initSchema also awaits _crdtReady.
 window._crdtReady = StorageIDB.open().then(function() {

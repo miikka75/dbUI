@@ -128,6 +128,19 @@ const server = http.createServer(async (req, res) => {
       case 'getAvailableLanguages': return json(res, backend.getAvailableLanguages('local'));
       case 'getTableData': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } return json(res, backend.getTableData(body.tableId, body.tab));
       case 'putRow': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
+      case 'uploadFile': {
+        // Dev-only file store for the image column (the local counterpart of Firebase Storage): write the
+        // base64 body to dev/uploads/ and return a same-origin URL. The row stores only that URL, not bytes.
+        const uName = String(body.name || 'file').replace(/[^\w.\-]+/g, '_');
+        const b64 = String(body.base64 || '');
+        if (!b64) { res.writeHead(400); return res.end(JSON.stringify({ error: 'no file data' })); }
+        const upDir = path.join(__dirname, 'uploads');
+        if (!fs.existsSync(upDir)) fs.mkdirSync(upDir, { recursive: true });
+        const fname = Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '_' + uName;
+        fs.writeFileSync(path.join(upDir, fname), Buffer.from(b64, 'base64'));
+        const host = req.headers.host || (HOST + ':' + PORT);
+        return json(res, { url: 'http://' + host + '/uploads/' + fname });
+      }
       case 'deleteRow': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
       case 'getTranslations': return json(res, backend.getTranslations(body.folderId || 'local', body.langCode));
       case 'updateTranslations': backend.updateTranslations(body.folderId || 'local', body.langCode, body.updates); return json(res, { ok: true });
@@ -214,7 +227,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (!fs.existsSync(filePath)) { res.writeHead(404); return res.end('Not found'); }
   const ext = path.extname(filePath);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
+  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
   res.writeHead(200, { 'Content-Type': types[ext] || 'text/plain' });
   res.end(fs.readFileSync(filePath));
 });
