@@ -221,6 +221,14 @@ test.describe('image/url column types', () => {
       el.value = 'https://example.com/y'; el.dispatchEvent(new Event('change', { bubbles: true }));
     });
     expect(await page.evaluate(() => window.appInstance.currentData[0].link)).toBe('https://example.com/y');
+
+    // The local server + DB persist image/url values (they're plain strings — no type gating server-side).
+    // putRow is fire-and-forget, so poll until the last write (link) flushes, then assert both fields.
+    const read = async () => (await page.request.post('/api/getTableData', { data: { tableId: 'gallery', tab: 'active' } })).json();
+    await expect.poll(async () => { const s = await read(); return (s.rows[0] || {}).link; }, { timeout: 4000 }).toBe('https://example.com/y');
+    const row = (await read()).rows[0];
+    expect(row.photo).toBe(img1x1);          // image URL persisted server-side
+    expect(row.link).toBe('https://example.com/y');
   });
 });
 
