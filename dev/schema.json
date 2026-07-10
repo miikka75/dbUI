@@ -80,6 +80,14 @@
           "allowNew": true
         },
         {
+          "name": "photo",
+          "type": "image"
+        },
+        {
+          "name": "link",
+          "type": "url"
+        },
+        {
           "name": "created_at",
           "type": "text",
           "hidden": true
