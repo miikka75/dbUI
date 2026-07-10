@@ -10,6 +10,24 @@ function _post(route, body) {
   }).then(function(r) { if (!r.ok) return r.json().then(function(e) { return Promise.reject(e); }); return r.json(); });
 }
 
+// Image-column upload for the dev backends: read the file as base64 and POST it to the dev server, which
+// stores it under dev/uploads/ and returns a same-origin URL (saved on the row). The dev backend entry
+// files attach this as `backend.uploadFile` (this helper loads before `backend` exists). Its presence is
+// what turns on the in-cell upload button; backends without it fall back to a paste-a-URL field.
+function _devUploadFile(file, opts) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onerror = function() { reject(new Error('Could not read file')); };
+    reader.onload = function() {
+      var b64 = String(reader.result || '').split(',')[1] || '';
+      _post('uploadFile', { name: file.name, contentType: file.type, base64: b64 })
+        .then(function(r) { r && r.url ? resolve(r.url) : reject(new Error((r && r.error) || 'Upload failed')); })
+        .catch(function(e) { reject(new Error((e && e.error) || (e && e.message) || 'Upload failed')); });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 var backend_users = {
   getUsers: function() { return _post('getUsers', {}); },
   getMyAccess: function() { return _post('getMyAccess', {}); },

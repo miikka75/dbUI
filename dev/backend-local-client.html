@@ -26,6 +26,7 @@ backend = {
   saveChangesets: (folderId, siteId, json) => _post('saveChangesets', { folderId, siteId, json }),
   loadChangesets: (folderId, excludeSiteId) => _post('loadChangesets', { folderId, excludeSiteId })
 };
+if (typeof _devUploadFile === 'function') backend.uploadFile = _devUploadFile; // image-column upload (dev store)
 
 init();
 </script>

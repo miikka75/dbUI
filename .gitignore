@@ -10,6 +10,7 @@ dev/users.json
 dev/access-requests.json
 dev/profiles.json
 dev/data/
+dev/uploads/
 
 # throwaway seed / test databases (see seed-demo.js)
 dev/seed-test-*.db

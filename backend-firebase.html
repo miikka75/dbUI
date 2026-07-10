@@ -246,11 +246,29 @@ function initFirebase() {
   }).catch(function() { appInstance.showSetup = true; appInstance.setupStep = 'firebase'; appInstance.loading = false; });
 }
 
+// Opt-in local-emulator mode for development: enabled only when localStorage.firebase_emulators==='1'
+// AND the app is served from a loopback host (so a real deployment can never accidentally use emulators).
+// Ports mirror firebase.json's `emulators` block. Set the flag in devtools, then reload.
+function _useEmulators() {
+  try {
+    if (localStorage.getItem('firebase_emulators') !== '1') return false;
+    var h = location.hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h === '';
+  } catch (e) { return false; }
+}
+
 function _startFirebase(config) {
   firebase.initializeApp(config);
   _db = firebase.firestore();
   _auth = firebase.auth();
   if (firebase.storage) { try { _storage = firebase.storage(); } catch (e) { _storage = null; } }
+  if (_useEmulators()) {
+    // Compat SDK emulator wiring — must run before any read/write (and before enablePersistence).
+    try { _auth.useEmulator('http://127.0.0.1:9099', { disableWarnings: true }); } catch (e) {}
+    try { _db.useEmulator('127.0.0.1', 8080); } catch (e) {}
+    try { if (_storage) _storage.useEmulator('127.0.0.1', 9199); } catch (e) {}
+    console.info('[firebase] using local emulators — auth:9099 firestore:8080 storage:9199');
+  }
   _db.enablePersistence().catch(function() {});
   _auth.onAuthStateChanged(function(user) {
     if (typeof window !== 'undefined' && window.bootMark) window.bootMark('authReady'); // auth RTT resolved
