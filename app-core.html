@@ -1396,7 +1396,18 @@ function createVueApp() {
 
       // Column helpers
       colIsDate: function(col) { return Columns.colIsDate(SCHEMA, col); },
+      colIsImage: function(col) { return Columns.colIsImage(SCHEMA, col); },
+      colIsUrl: function(col) { return Columns.colIsUrl(SCHEMA, col); },
       toDateStr: function(v) { return toDateStr(v); },
+      // Whether the active backend can store an uploaded file (Firebase Storage). Other backends lack it,
+      // so an `image` column degrades to a paste-a-URL text input. See uploadFile.
+      canUploadFiles: function() { return !!(typeof backend !== 'undefined' && backend && backend.uploadFile); },
+      // Upload a File/Blob to the backend's blob store; resolves to a stored URL (kept in the row, not the
+      // bytes — see the image/url column type). Rejects on backends without file storage.
+      uploadFile: function(file, opts) {
+        if (!this.canUploadFiles()) return Promise.reject(new Error('This backend has no file storage'));
+        return backend.uploadFile(file, opts || {});
+      },
       colIsList: function(col) { return Columns.colIsList(SCHEMA, col); },
       colIsMultiselect: function(col) { return Columns.colIsMultiselect(SCHEMA, col); },
       getListOptions: function(col, altList) {
@@ -2835,6 +2846,8 @@ function createVueApp() {
     tOr: function(k, f) { return appInstance ? appInstance.tOr(k, f) : f; },
     displayValue: function(c, v) { return appInstance ? appInstance.displayValue(c, v) : v; },
     colIsDate: function(c) { return appInstance ? appInstance.colIsDate(c) : false; },
+    colIsImage: function(c) { return appInstance ? appInstance.colIsImage(c) : false; },
+    colIsUrl: function(c) { return appInstance ? appInstance.colIsUrl(c) : false; },
     toDateStr: toDateStr
   };
 
@@ -2969,10 +2982,29 @@ function createVueApp() {
       isAltList: function(col, item) { return appInstance.isAltList(col, item); },
       toggleListSwitch: function(col, item) { return appInstance.toggleListSwitch(col, item); },
       save: function(item, col, val) { return appInstance.saveField(item, col, val, this.owner); },
-      addToListOnBlur: function(item, col) { return appInstance.addToListOnBlur(item, col); }
+      addToListOnBlur: function(item, col) { return appInstance.addToListOnBlur(item, col); },
+      // image column: upload the picked file to the backend blob store (Firebase Storage), then save the
+      // returned URL onto the row (the row holds the URL, never the bytes). Transient per-cell status.
+      uploadImage: function(item, col, ev) {
+        var self = this, file = ev.target.files && ev.target.files[0];
+        ev.target.value = '';                 // reset so re-picking the same file fires change again
+        if (!file) return;
+        this.uploadErr = ''; this.uploading = true;
+        appInstance.uploadFile(file, { table: this.owner || appInstance.currentTable, col: col, rowId: item.id }).then(function(url) {
+          self.uploading = false; self.save(item, col, url);
+        }).catch(function(e) {
+          self.uploading = false; self.uploadErr = (e && e.message) || 'Upload failed';
+        });
+      }
     }),
+    data: function() { return { uploading: false, uploadErr: '' }; },
+    computed: { canUpload: function() { return appInstance.canUploadFiles(); } },
     template: ''
-      + '<span v-if="cellRO(item, col)" :style="{ opacity: embed ? 0.4 : 0.75 }">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
+      + '<span v-if="cellRO(item, col)" :style="{ opacity: embed ? 0.4 : 0.75 }">'
+      +   '<a v-if="colIsImage(col) && item[col]" :href="item[col]" target="_blank" @click.stop><img :src="item[col]" class="cell-thumb" alt=""></a>'
+      +   '<a v-else-if="colIsUrl(col) && item[col]" :href="item[col]" target="_blank" @click.stop>{{ item[col] }}</a>'
+      +   '<template v-else>{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</template>'
+      + '</span>'
       + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
       + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
       + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
@@ -2983,6 +3015,20 @@ function createVueApp() {
       + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || \'Switch list\'">mdi-swap-horizontal</v-icon></template>'
       + '</v-autocomplete>'
       + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
+      + '<div v-else-if="colIsImage(col)" class="d-flex align-center" style="gap:6px;min-width:0">'
+      +   '<a v-if="item[col]" :href="item[col]" target="_blank" @click.stop><img :src="item[col]" class="cell-thumb" alt=""></a>'
+      +   '<template v-if="canUpload">'
+      +     '<input type="file" accept="image/*" ref="imgInput" style="display:none" @change="uploadImage(item, col, $event)">'
+      +     '<v-btn size="x-small" variant="text" :loading="uploading" :icon="item[col] ? \'mdi-image-edit\' : \'mdi-camera-plus\'" :title="item[col] ? \'Replace image\' : \'Upload image\'" @click="$refs.imgInput.click()"></v-btn>'
+      +     '<v-btn v-if="item[col]" size="x-small" variant="text" icon="mdi-close" title="Remove" @click="save(item, col, \'\')"></v-btn>'
+      +   '</template>'
+      +   '<input v-else type="url" :value="item[col] || \'\'" @change="save(item, col, $event.target.value)" placeholder="Image URL" spellcheck="false" style="border:none;background:transparent;color:inherit;font:inherit;flex:1;min-width:60px">'
+      +   '<v-icon v-if="uploadErr" size="x-small" color="error" :title="uploadErr">mdi-alert-circle</v-icon>'
+      + '</div>'
+      + '<div v-else-if="colIsUrl(col)" class="d-flex align-center" style="gap:4px;min-width:0">'
+      +   '<input type="url" :value="item[col] || \'\'" @change="save(item, col, $event.target.value)" placeholder="https://…" spellcheck="false" style="border:none;background:transparent;color:inherit;font:inherit;flex:1;min-width:60px">'
+      +   '<a v-if="item[col]" :href="item[col]" target="_blank" @click.stop><v-icon size="x-small">mdi-open-in-new</v-icon></a>'
+      + '</div>'
       + '<input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="save(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">'
       + '<span v-else class="editable-cell" contenteditable @blur="save(item, col, $event.target.textContent)" style="min-width:auto">{{ item[col] || \'\' }}</span>'
   });

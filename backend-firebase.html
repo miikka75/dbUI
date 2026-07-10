@@ -3,6 +3,7 @@
 <script>
 var _db = null;
 var _auth = null;
+var _storage = null;
 
 function _storeName(table, tab) { return BackendHelpers.storeName(table, tab); }
 
@@ -220,7 +221,18 @@ backend = {
     });
   },
   saveChangesets: function() { return Promise.resolve(); },
-  loadChangesets: function() { return Promise.resolve(); }
+  loadChangesets: function() { return Promise.resolve(); },
+  // Upload a file to Firebase Storage under uploads/<user-email>/<ts>_<name>, resolving to its download
+  // URL (stored in the row by the image column). The download URL carries an access token, so the <img>
+  // renders regardless of Storage read rules. Presence of this method is what enables the image uploader;
+  // backends without it fall back to a paste-a-URL input.
+  uploadFile: function(file, opts) {
+    if (!_storage) return Promise.reject(new Error('Firebase Storage not initialized'));
+    var email = ((appInstance && appInstance.currentUserEmail) || 'anon').toLowerCase();
+    var safe = String((file && file.name) || 'file').replace(/[^\w.\-]+/g, '_');
+    var path = 'uploads/' + email + '/' + Date.now() + '_' + safe;
+    return _storage.ref().child(path).put(file).then(function(snap) { return snap.ref.getDownloadURL(); });
+  }
 };
 
 function initFirebase() {
@@ -238,6 +250,7 @@ function _startFirebase(config) {
   firebase.initializeApp(config);
   _db = firebase.firestore();
   _auth = firebase.auth();
+  if (firebase.storage) { try { _storage = firebase.storage(); } catch (e) { _storage = null; } }
   _db.enablePersistence().catch(function() {});
   _auth.onAuthStateChanged(function(user) {
     if (typeof window !== 'undefined' && window.bootMark) window.bootMark('authReady'); // auth RTT resolved
