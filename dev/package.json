@@ -8,10 +8,13 @@
     "seed": "node seed-translations.js",
     "seed:demo": "node seed-demo.js",
     "test": "node --test test/*.test.js",
-    "test:ui": "npx playwright test --config=playwright.config.js"
+    "test:ui": "npx playwright test --config=playwright.config.js",
+    "test:storage-rules": "cd .. && firebase emulators:exec --only storage --project demo-image \"node dev/test-emulator/storage-rules.mjs\""
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@playwright/test": "^1.60.0",
-    "better-sqlite3": "^12.11.1"
+    "better-sqlite3": "^12.11.1",
+    "firebase": "^12.16.0"
   }
 }
