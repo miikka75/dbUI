@@ -2650,6 +2650,38 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await expect(page.locator('[data-testid="rsvp-roster"]').first()).toContainText('you@x.com'); // roster names render
   });
 
+  test('rsvp: status labels translate (statusList) + picker type is configurable', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const schema = {
+      defaultLanguage: 'en',
+      tables: {
+        practices: { columns: [{ name: 'date', type: 'date' }, { name: 'title', type: 'text' }], archivable: true },
+        rsvps: { columns: [{ name: 'owner', type: 'owner' }, { name: 'practice', type: 'text' }, { name: 'status', type: 'text' }] }
+      },
+      views: [{ name: 'signup', rsvp: { events: 'practices', dateColumn: 'date', eventKey: 'date', titleColumns: ['title'], responses: 'rsvps', linkColumn: 'practice', statusColumn: 'status', statuses: ['coming', 'maybe', 'out'], statusList: 'rsvp_status', picker: 'chips', roster: 'all', showTally: true } }],
+      nav: { items: [{ view: 'signup' }] }
+    };
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      const d = (n) => { const x = new Date(); x.setDate(x.getDate() + n); return window.fmtDate(x); };
+      app.dataCache['practices'] = [{ id: 'p1', date: d(3), title: 'Match' }];
+      app.dataCache['rsvps'] = [];
+      app.strings['list.rsvp_status.coming'] = 'Tulossa';   // translate one status label
+      app.selectTab('signup');
+    });
+    await page.waitForTimeout(150);
+    // picker: "chips" -> renders a chip group (not the default v-btn-toggle)
+    await expect(page.locator('[data-testid="rsvp-toggle"].v-chip-group')).toBeVisible();
+    // and the option label is translated via list.<statusList>.<value>
+    await expect(page.locator('[data-testid="rsvp-toggle"]')).toContainText('Tulossa');
+  });
+
   test('schema.theme brands the live Vuetify palette + regenerates the CSS variables', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });

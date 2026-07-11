@@ -336,7 +336,10 @@
       "cal.items": "items",
       "period.this_week": "This week",
       "period.weeks_ago": "weeks ago",
-      "period.current": "Current"
+      "period.current": "Current",
+      "list.rsvp_status.coming": "Coming",
+      "list.rsvp_status.maybe": "Maybe",
+      "list.rsvp_status.out": "Out"
     },
     "es": {
       "app.title": "Demo de Equipo",
@@ -389,7 +392,10 @@
       "cal.items": "elementos",
       "period.this_week": "Esta semana",
       "period.weeks_ago": "semanas atrás",
-      "period.current": "Actual"
+      "period.current": "Actual",
+      "list.rsvp_status.coming": "Voy",
+      "list.rsvp_status.maybe": "Quizás",
+      "list.rsvp_status.out": "No voy"
     },
     "sv": {
       "app.title": "Team-demo",
@@ -442,7 +448,10 @@
       "cal.items": "poster",
       "period.this_week": "Denna vecka",
       "period.weeks_ago": "veckor sedan",
-      "period.current": "Nuvarande"
+      "period.current": "Nuvarande",
+      "list.rsvp_status.coming": "Kommer",
+      "list.rsvp_status.maybe": "Kanske",
+      "list.rsvp_status.out": "Kommer inte"
     }
   },
   "config": {
@@ -456,5 +465,5 @@
       }
     }
   },
-  "generatedAt": "2026-07-11T12:59:58.062Z"
+  "generatedAt": "2026-07-11T18:38:03.001Z"
 }
