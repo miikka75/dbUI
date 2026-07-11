@@ -791,12 +791,23 @@ plus a link column and a status column:
     "responses": "rsvps",           // REQUIRED — the response table (must have an `owner` column)
     "linkColumn": "practice",        // REQUIRED — response column holding the event key
     "statusColumn": "status",        // REQUIRED — response column holding the status value
-    "statuses": ["coming", "maybe", "out"], // OPTIONAL — offered options (else inferred from data)
+    "statuses": ["coming", "maybe", "out"], // OPTIONAL — offered options (else the statusColumn's list)
+    "statusList": "rsvp_status",     // OPTIONAL — translation namespace for the option labels (see below)
+    "picker": "toggle",              // OPTIONAL — status control: "toggle" (default) | "chips" | "dropdown"
     "showTally": true,               // OPTIONAL — show a per-event count of each response
     "roster": "all"                  // OPTIONAL — who sees the participant roster (see below)
   }
 }
 ```
+- **`statuses`** vs a **list**: give an inline `statuses` array, or omit it and make `statusColumn` a
+  `select` so the options come from its list. Either way the option/tally/roster labels are **translated**
+  via `list.<statusList||statusColumn>.<value>` (falling back to the raw value). Use **`statusList`** when
+  the response column's name (e.g. `status`) collides with another table's list under the per-column-name
+  resolver — it names a distinct translation namespace (e.g. `list.rsvp_status.coming`). The values also
+  double as the response-row status stored on the row.
+- **`picker`** — the status control's UI element: `"toggle"` (segmented buttons, default; best for a few
+  single-choice options) · `"chips"` (selectable chips) · `"dropdown"` (`v-select`, for larger sets).
+  Deselecting the current choice removes the vote in every variant.
 - **`roster`** (UI gate): `"all"` (everyone sees who responded) · `"admins"` (only organizers/admins) ·
   `"counts"` (tally only, no names). This is **only the display gate** — the real read control is the
   Firestore rule.

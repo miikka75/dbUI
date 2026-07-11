@@ -87,7 +87,10 @@ function buildBundle() {
     'cal.items':     ['items', 'elementos', 'poster'],
     'period.this_week': ['This week', 'Esta semana', 'Denna vecka'],
     'period.weeks_ago': ['weeks ago', 'semanas atrás', 'veckor sedan'],
-    'period.current':   ['Current', 'Actual', 'Nuvarande']
+    'period.current':   ['Current', 'Actual', 'Nuvarande'],
+    'list.rsvp_status.coming': ['Coming', 'Voy', 'Kommer'],
+    'list.rsvp_status.maybe':  ['Maybe', 'Quizás', 'Kanske'],
+    'list.rsvp_status.out':    ['Out', 'No voy', 'Kommer inte']
   };
   const LANGS = [{ code: 'en', name: 'English' }, { code: 'es', name: 'Español' }, { code: 'sv', name: 'Svenska' }];
   const translations = {};

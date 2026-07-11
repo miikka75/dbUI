@@ -3366,11 +3366,15 @@ function createVueApp() {
       viewName: function() { return this.name || appInstance.currentTable; },
       cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].rsvp) || {}; },
       data: function() { return appInstance.rsvpFor(this.viewName); },
+      // Status choices as { value, title } — from the view's inline `statuses`, else the status column's
+      // list. Titles are translated (see statusLabel).
       options: function() {
         var self = this;
-        if (this.cfg.statuses) return this.cfg.statuses.map(function(v) { return { value: v, title: appInstance.displayValue(self.cfg.statusColumn, v) }; });
-        return appInstance.getListOptions(this.cfg.statusColumn) || [];
+        var vals = this.cfg.statuses || (appInstance.getListOptions(this.cfg.statusColumn) || []).map(function(o) { return o.value; });
+        return vals.map(function(v) { return { value: v, title: self.statusLabel(v) }; });
       },
+      // UI element for choosing a status: 'toggle' (segmented buttons, default) | 'chips' | 'dropdown'.
+      picker: function() { return this.cfg.picker || 'toggle'; },
       // Whether to show WHO registered (names), per the view's `roster` setting: 'all' -> everyone,
       // 'admins' -> only admins (pair with an owner-scoped-read table so it's actually private), else
       // just counts. Note the data is already access-filtered server-side; this is the display gate.
@@ -3379,14 +3383,18 @@ function createVueApp() {
     methods: {
       set: function(key, status) { appInstance.setRsvp(this.viewName, key, status || ''); },
       toDateStr: toDateStr,
-      tallyText: function(ev) { var self = this; return Object.keys(ev.tally).sort().map(function(s) { return appInstance.displayValue(self.cfg.statusColumn, s) + ': ' + ev.tally[s]; }).join('  ·  '); },
+      // Translated label for a status VALUE, keyed by `list.<statusList||statusColumn>.<value>` (falls back
+      // to the raw value). `statusList` lets the view name a translation namespace distinct from the column
+      // — whose name may resolve to another table's list under the per-column-name list resolver.
+      statusLabel: function(v) { return appInstance.tOr('list.' + (this.cfg.statusList || this.cfg.statusColumn) + '.' + v, v); },
+      tallyText: function(ev) { var self = this; return Object.keys(ev.tally).sort().map(function(s) { return self.statusLabel(s) + ': ' + ev.tally[s]; }).join('  ·  '); },
       ownerName: function(email) { return ((appInstance.profilesByEmail || {})[(email || '').toLowerCase()] || {}).name || email; },
       // Participants grouped by status: [{ status, label, names:[...] }], in the configured status order.
       rosterGroups: function(ev) {
         var self = this, order = this.options.map(function(o) { return o.value; }), groups = {};
         ev.participants.forEach(function(p) { (groups[p.status] || (groups[p.status] = [])).push(self.ownerName(p.owner)); });
         var keys = Object.keys(groups).sort(function(a, b) { var ia = order.indexOf(a), ib = order.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
-        return keys.map(function(s) { return { status: s, label: appInstance.displayValue(self.cfg.statusColumn, s), names: groups[s] }; });
+        return keys.map(function(s) { return { status: s, label: self.statusLabel(s), names: groups[s] }; });
       }
     },
     template: ''
@@ -3395,9 +3403,13 @@ function createVueApp() {
       + '<v-list-item v-for="ev in data.events" :key="ev.id" class="px-3 py-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.1)">'
       + '<div class="d-flex align-center flex-wrap" style="gap:10px 14px">'
       + '<div style="min-width:150px"><div style="font-weight:600">{{ toDateStr(ev.date) }}</div><div v-if="ev.title" style="font-size:0.85rem;opacity:0.7">{{ ev.title }}</div></div>'
-      + '<v-btn-toggle :model-value="ev.myStatus" density="compact" variant="outlined" divided @update:model-value="set(ev.key, $event)" data-testid="rsvp-toggle">'
+      + '<v-btn-toggle v-if="picker===\'toggle\'" :model-value="ev.myStatus" density="compact" variant="outlined" divided @update:model-value="set(ev.key, $event)" data-testid="rsvp-toggle">'
       + '<v-btn v-for="o in options" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
       + '</v-btn-toggle>'
+      + '<v-chip-group v-else-if="picker===\'chips\'" :model-value="ev.myStatus" @update:model-value="set(ev.key, $event)" data-testid="rsvp-toggle">'
+      + '<v-chip v-for="o in options" :key="o.value" :value="o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
+      + '</v-chip-group>'
+      + '<v-select v-else :model-value="ev.myStatus" :items="options" item-title="title" item-value="value" density="compact" variant="outlined" hide-details clearable style="max-width:150px" :placeholder="a.tOr(\'rsvp.choose\',\'…\')" @update:model-value="set(ev.key, $event)" data-testid="rsvp-toggle"></v-select>'
       + '<v-spacer></v-spacer>'
       + '<div v-if="cfg.showTally && ev.total" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
       + '</div>'

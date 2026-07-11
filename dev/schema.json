@@ -490,6 +490,8 @@
         "linkColumn": "practice",
         "statusColumn": "status",
         "statuses": ["coming", "maybe", "out"],
+        "statusList": "rsvp_status",
+        "picker": "toggle",
         "showTally": true,
         "roster": "all"
       }
