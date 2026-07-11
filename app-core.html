@@ -922,12 +922,14 @@ function createVueApp() {
       _calToday: function() { return fmtDate(new Date()); },
       _calCellsMonth: function(anchor, weekStart) { return Calendar.cellsMonth(anchor, weekStart, this._calToday()); },
       _calCellsWeek: function(anchor, weekStart) { return Calendar.cellsWeek(anchor, weekStart, this._calToday()); },
-      // BCP-47 locale for Intl date names: language.locale, then a name/code guess, then browser/'en'.
+      // BCP-47 locale for Intl date names: an explicit `language.locale`, else the language CODE itself
+      // (a standard code like `en`/`es`/`sv` IS a valid BCP-47 tag — so the calendar follows the SELECTED
+      // app language, not the browser). The browser locale is only a last resort when the code is unusable.
       calLocale: function() {
         var code = this.currentLang, lang = (this.languages || []).find(function(l) { return l.code === code; });
-        if (lang && lang.locale) return lang.locale;
-        var guess = { English: 'en', Finnish: 'fi', Swedish: 'sv', German: 'de', French: 'fr', Spanish: 'es' };
-        return (lang && guess[lang.name]) || guess[code] || (typeof navigator !== 'undefined' && navigator.language) || 'en';
+        var loc = (lang && lang.locale) || code;
+        try { if (loc) { Intl.DateTimeFormat(loc); return loc; } } catch (e) {}   // fall through if `loc` isn't a usable locale
+        return (typeof navigator !== 'undefined' && navigator.language) || 'en';
       },
       hashColor: function(key) { return Calendar.hashColor(key); },
       // Resolve a calendar view's source specs / rotation overlays (pure over VIEWS -> calendar.js).
