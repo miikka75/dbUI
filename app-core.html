@@ -1,4 +1,24 @@
 <script>
+// BCP-47 languages offered by the "add language" picker (Languages tab). The `code` doubles as the Intl
+// locale (see calLocale), so every entry is a valid BCP-47 tag; `name` is the endonym (renamable after).
+var BCP47_LANGS = [
+  { code: 'en', name: 'English' }, { code: 'es', name: 'Español' }, { code: 'fr', name: 'Français' },
+  { code: 'de', name: 'Deutsch' }, { code: 'it', name: 'Italiano' }, { code: 'pt', name: 'Português' },
+  { code: 'pt-BR', name: 'Português (Brasil)' }, { code: 'nl', name: 'Nederlands' }, { code: 'sv', name: 'Svenska' },
+  { code: 'nb', name: 'Norsk bokmål' }, { code: 'da', name: 'Dansk' }, { code: 'fi', name: 'Suomi' },
+  { code: 'is', name: 'Íslenska' }, { code: 'pl', name: 'Polski' }, { code: 'cs', name: 'Čeština' },
+  { code: 'sk', name: 'Slovenčina' }, { code: 'sl', name: 'Slovenščina' }, { code: 'hu', name: 'Magyar' },
+  { code: 'ro', name: 'Română' }, { code: 'hr', name: 'Hrvatski' }, { code: 'sr', name: 'Српски' },
+  { code: 'bg', name: 'Български' }, { code: 'el', name: 'Ελληνικά' }, { code: 'ru', name: 'Русский' },
+  { code: 'uk', name: 'Українська' }, { code: 'tr', name: 'Türkçe' }, { code: 'et', name: 'Eesti' },
+  { code: 'lv', name: 'Latviešu' }, { code: 'lt', name: 'Lietuvių' }, { code: 'ca', name: 'Català' },
+  { code: 'eu', name: 'Euskara' }, { code: 'gl', name: 'Galego' }, { code: 'ar', name: 'العربية' },
+  { code: 'he', name: 'עברית' }, { code: 'fa', name: 'فارسی' }, { code: 'hi', name: 'हिन्दी' },
+  { code: 'bn', name: 'বাংলা' }, { code: 'th', name: 'ไทย' }, { code: 'vi', name: 'Tiếng Việt' },
+  { code: 'id', name: 'Bahasa Indonesia' }, { code: 'ms', name: 'Bahasa Melayu' }, { code: 'ja', name: '日本語' },
+  { code: 'ko', name: '한국어' }, { code: 'zh', name: '中文 (简体)' }, { code: 'zh-Hant', name: '中文 (繁體)' }
+];
+
 // Column typing primitives — extracted to /columns.js (Columns.*), pure over the schema map and
 // shared with dev/schema.js + unit tests. These thin globals bind the app's SCHEMA and preserve the
 // existing signatures (incl. getColumnList(null, col) scanning every table) so all call sites stand.
@@ -1673,15 +1693,26 @@ function createVueApp() {
           self.notify('Translation saved');
         }, 500);
       },
-      addLanguage: function() {
+      // BCP-47 language options for the add-language picker, minus those already added. The `code` IS the
+      // Intl locale (see calLocale) — picking from a fixed BCP-47 list guarantees a valid, usable code, so
+      // no separate `locale` field is needed. The `name` (endonym) becomes the display name (renamable).
+      bcp47Options: function() {
+        var have = {}; (this.languages || []).forEach(function(l) { have[l.code] = 1; });
+        return BCP47_LANGS.filter(function(x) { return !have[x.code]; })
+          .map(function(x) { return { title: x.name + ' — ' + x.code, code: x.code, name: x.name }; });
+      },
+      addLanguage: function(code, name) {
         var self = this;
-        var name = 'lang-' + Date.now().toString(36);
-        backend.createLanguage(this.folderId, name, name, this.translationKeys).then(function() {
-          var newLang = { code: name, name: name };
+        code = (code || '').trim();
+        if (!code) return;
+        if ((this.languages || []).some(function(l) { return l.code === code; })) { this.notify('Language already added'); return; }
+        name = (name || code).trim();
+        backend.createLanguage(this.folderId, code, name, this.translationKeys).then(function() {
+          var newLang = { code: code, name: name };
           self.languages.push(newLang);
           self.openLangEditor(newLang);
           self.notify('Language added');
-          self.$nextTick(function() { var el = document.querySelector('[data-lang-code="' + name + '"] input'); if (el) el.focus(); });
+          self.$nextTick(function() { var el = document.querySelector('[data-lang-code="' + code + '"] input'); if (el) el.focus(); });
         });
       },
       renameLang: function(lang, newName) {
