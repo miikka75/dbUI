@@ -278,6 +278,27 @@ test.describe('Calendar locale follows the selected language', () => {
     expect(r.svLoc).toBe('sv');
     expect(r.overrideLoc).toBe('de');                 // an explicit `language.locale` still wins
   });
+
+  test('add-language picker adds a BCP-47 language whose code drives the calendar locale', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => window.appInstance.selectTab('__languages'));
+    await expect(page.locator('[data-testid="add-language"]')).toBeVisible();   // the picker replaces the old auto-code button
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      const optHasFi = app.bcp47Options().some(o => o.code === 'fi');   // Finnish offered before it's added
+      app.addLanguage('fi', 'Suomi');                                    // simulate picking it
+      return { optHasFi, added: app.languages.some(l => l.code === 'fi') };
+    });
+    expect(r.optHasFi).toBe(true);
+    await expect.poll(async () => page.evaluate(() => window.appInstance.languages.some(l => l.code === 'fi'))).toBe(true);
+    const after = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.currentLang = 'fi';
+      return { calLoc: app.calLocale(), optStillHasFi: app.bcp47Options().some(o => o.code === 'fi') };
+    });
+    expect(after.calLoc).toBe('fi');            // the real code IS the Intl locale -> Finnish date names
+    expect(after.optStillHasFi).toBe(false);    // already-added languages drop out of the picker
+  });
 });
 
 test.describe('Two-press delete', () => {

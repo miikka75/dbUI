@@ -354,7 +354,10 @@
               </v-table>
             </v-list-group>
           </v-list>
-          <v-btn variant="text" prepend-icon="mdi-plus" @click="a.addLanguage" class="ma-2">{{ a.t('btn.add') }} {{ a.t('tab.languages') }}</v-btn>
+          <v-autocomplete :items="a.bcp47Options()" item-title="title" return-object :model-value="null"
+            density="compact" variant="outlined" hide-details style="max-width:320px" class="ma-2"
+            prepend-inner-icon="mdi-plus" :label="a.t('btn.add') + ' ' + a.t('tab.languages')"
+            @update:model-value="v => v && a.addLanguage(v.code, v.name)" data-testid="add-language"></v-autocomplete>
         </v-card>
 </template>
 <template id="lookup-view-tpl">
