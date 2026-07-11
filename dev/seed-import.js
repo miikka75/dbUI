@@ -76,7 +76,18 @@ function buildBundle() {
     'field.total':       ['Total', 'Total', 'Totalt'],
     'list.status.open':        ['Open', 'Abierto', 'Öppen'],
     'list.status.in_progress': ['In Progress', 'En Progreso', 'Pågår'],
-    'list.status.done':        ['Done', 'Hecho', 'Klar']
+    'list.status.done':        ['Done', 'Hecho', 'Klar'],
+    // Calendar chrome + period navigation (translation keys; untranslated languages show the key).
+    'cal.today':     ['Today', 'Hoy', 'Idag'],
+    'cal.month':     ['Month', 'Mes', 'Månad'],
+    'cal.week':      ['Week', 'Semana', 'Vecka'],
+    'cal.list':      ['List', 'Lista', 'Lista'],
+    'cal.undated':   ['Undated', 'Sin fecha', 'Utan datum'],
+    'cal.no_events': ['No events', 'Sin eventos', 'Inga händelser'],
+    'cal.items':     ['items', 'elementos', 'poster'],
+    'period.this_week': ['This week', 'Esta semana', 'Denna vecka'],
+    'period.weeks_ago': ['weeks ago', 'semanas atrás', 'veckor sedan'],
+    'period.current':   ['Current', 'Actual', 'Nuvarande']
   };
   const LANGS = [{ code: 'en', name: 'English' }, { code: 'es', name: 'Español' }, { code: 'sv', name: 'Svenska' }];
   const translations = {};

@@ -726,9 +726,12 @@ anchor — so the calendar generates them on demand for the visible window and d
 - **Fail-closed per source**: a source whose table the signed-in user cannot read contributes no
   events. A restricted user sees only the event types they're permitted.
 - **Labels**: chrome uses `cal.*` translation keys (`cal.today`/`cal.month`/`cal.week`/`cal.list`/
-  `cal.undated`/`cal.no_events`/`cal.items`) with built-in English fallbacks; event tags default to
-  `tab.<table>`; titles use `field.*` + list-value translations. Weekday/month names come from
-  `Intl` using an optional per-language `locale` (e.g. `"fi"`), falling back to a name guess / `"en"`.
+  `cal.undated`/`cal.no_events`/`cal.items`), and period navigation uses `period.*` — like every other
+  string these show the **key** until translated (no built-in English), so define them per language (the
+  demo bundle does). Event tags default to `tab.<table>`; titles use `field.*` + list-value translations.
+  **Weekday/month names** come from `Intl` using the active language's **`code`** as the BCP-47 locale
+  (e.g. selecting a language with code `"fi"` yields Finnish names automatically), overridable with an
+  explicit per-language `locale`; the browser locale is only a last resort for an unusable code.
 
 ### Embedding
 A calendar can be **embedded in a markdown/document page** via `{{view:calendarName}}` (renders as a
