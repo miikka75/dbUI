@@ -1045,6 +1045,12 @@ function createVueApp() {
         if (!this.dataCache[table]) this.dataCache[table] = [];
         var rows = this.dataCache[table];
         var mine = rows.find(function(r) { return r[cfg.linkColumn] === eventKey && r[ownerCol] === me; });
+        // Removing the vote (toggled off -> empty status): delete my response row rather than leave an
+        // empty-status orphan that would show as a blank line in the roster.
+        if (!status) {
+          if (mine) { var mi = rows.indexOf(mine); if (mi >= 0) rows.splice(mi, 1); backend.deleteRow(this.tableMap[table], mine.id, 'active'); }
+          return;
+        }
         if (mine) {
           mine[cfg.statusColumn] = status; mine.rosterPublic = pub; mine.updated_at = new Date().toISOString();
           backend.putRow(this.tableMap[table], mine, 'active');

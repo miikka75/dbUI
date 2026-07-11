@@ -2606,6 +2606,9 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
       const roster = after.events[0].participants;                       // who registered (public roster)
       app.setRsvp('my_rsvp', d(3), 'out');                                // change my mind -> UPSERT (no dup row)
       const myRow2 = app.dataCache['rsvps'].find(x => x.owner === 'me@x.com');
+      const myRowCountBeforeRemove = app.dataCache['rsvps'].filter(x => x.owner === 'me@x.com').length;
+      app.setRsvp('my_rsvp', d(3), '');                                   // REMOVE my vote (toggle off)
+      const removed = app.rsvpFor('my_rsvp');
       return {
         kind: app.viewKind,
         before,
@@ -2616,8 +2619,12 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
         ownerStamped: myRow.owner,
         linkVal: myRow.practice,
         upsertedStatus: myRow2.status,
-        myRowCount: app.dataCache['rsvps'].filter(x => x.owner === 'me@x.com').length,
-        ownerReadonly: app.cellReadonly({}, 'owner', 'rsvps')
+        myRowCount: myRowCountBeforeRemove,
+        ownerReadonly: app.cellReadonly({}, 'owner', 'rsvps'),
+        afterRemoveMyStatus: removed.events[0].myStatus,
+        afterRemoveRoster: removed.events[0].participants,
+        afterRemoveTally: removed.events[0].tally,
+        myRowCountAfterRemove: app.dataCache['rsvps'].filter(x => x.owner === 'me@x.com').length
       };
     });
     expect(r.kind).toBe('rsvp');                                 // routed to rsvp-view via VIEW_KINDS
@@ -2634,6 +2641,11 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(r.upsertedStatus).toBe('out');                        // second response updated, not duplicated
     expect(r.myRowCount).toBe(1);                                // still one row for me
     expect(r.ownerReadonly).toBe(true);                          // owner column is read-only
+    // Removing my vote deletes my row (no empty-status orphan) -> I disappear from the roster/tally.
+    expect(r.afterRemoveMyStatus).toBe('');
+    expect(r.myRowCountAfterRemove).toBe(0);                     // row deleted, not left blank
+    expect(r.afterRemoveRoster).toEqual([{ owner: 'you@x.com', status: 'maybe' }]); // no blank "me@x.com" line
+    expect(r.afterRemoveTally).toEqual({ maybe: 1 });
     await expect(page.locator('[data-testid="rsvp-view"]')).toBeVisible();
     await expect(page.locator('[data-testid="rsvp-roster"]').first()).toContainText('you@x.com'); // roster names render
   });

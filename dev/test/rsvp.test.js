@@ -62,6 +62,18 @@ describe('rsvp.js — build', () => {
     assert.deepEqual(scoped.events[0].participants, [{ owner: 'me@x', status: 'coming' }]);
   });
 
+  it('an empty-status response is excluded from tally/total/roster (no blank line)', () => {
+    const withEmpty = responses.concat([{ id: 'r4', owner: 'ann@x', practice: '2026-07-01', status: '' }]);
+    const r = Rsvp.build(events, withEmpty, opts);
+    assert.equal(r.events[0].total, 2);                            // the empty one doesn't count
+    assert.deepEqual(r.events[0].tally, { coming: 1, maybe: 1 });
+    assert.ok(!r.events[0].participants.some(p => p.owner === 'ann@x')); // and never shows in the roster
+    // but if the empty row is MINE, my status still reads blank (toggle shows nothing selected)
+    const mineEmpty = Rsvp.build(events, [{ id: 'rx', owner: 'me@x', practice: '2026-07-01', status: '' }], opts);
+    assert.equal(mineEmpty.events[0].myStatus, '');
+    assert.equal(mineEmpty.events[0].total, 0);
+  });
+
   it('upcoming:false includes past events; limit caps the count', () => {
     assert.equal(Rsvp.build(events, responses, Object.assign({}, opts, { upcoming: false })).events.length, 3);
     assert.equal(Rsvp.build(events, responses, Object.assign({}, opts, { limit: 1 })).events.length, 1);
