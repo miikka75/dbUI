@@ -2201,7 +2201,7 @@ function createVueApp() {
         var unit = this.periodUnit(), off = this.periodOffset, now = new Date(), loc = this.calLocale();
         if (unit === 'month') { return new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(new Date(now.getFullYear(), now.getMonth() - off, 1)); }
         if (unit === 'year') { return String(now.getFullYear() - off); }
-        if (unit === 'week') { return off === 0 ? this.tOr('period.this_week', 'This week') : (off + ' ' + this.tOr('period.weeks_ago', 'weeks ago')); }
+        if (unit === 'week') { return off === 0 ? this.t('period.this_week') : (off + ' ' + this.t('period.weeks_ago')); }
         var dd = new Date(now); dd.setDate(dd.getDate() - off); return new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', year: 'numeric' }).format(dd);
       },
       periodPrev: function() { this.periodOffset++; this.loadTableData(); },                 // older
@@ -3100,9 +3100,9 @@ function createVueApp() {
       + '<div style="background:rgb(var(--v-theme-on-surface),0.06);padding:4px 12px;font-size:0.72rem;font-weight:600;opacity:0.85">{{ d.label }} · {{ d.events.length }}</div>'
       + '<cal-event-row v-for="ev in d.events" :key="ev.id" :ev="ev"></cal-event-row>'
       + '</template>'
-      + '<template v-if="undated && undated.length"><div style="background:rgb(var(--v-theme-on-surface),0.06);padding:4px 12px;font-size:0.72rem;font-weight:600;opacity:0.55">{{ tOr(\'cal.undated\',\'Undated\') }} · {{ undated.length }}</div>'
+      + '<template v-if="undated && undated.length"><div style="background:rgb(var(--v-theme-on-surface),0.06);padding:4px 12px;font-size:0.72rem;font-weight:600;opacity:0.55">{{ t(\'cal.undated\') }} · {{ undated.length }}</div>'
       + '<cal-event-row v-for="ev in undated" :key="ev.id" :ev="ev"></cal-event-row></template>'
-      + '<div v-if="!days.length && !(undated && undated.length)" style="padding:12px;opacity:0.6;font-size:0.85rem">{{ tOr(\'cal.no_events\',\'No events\') }}</div>'
+      + '<div v-if="!days.length && !(undated && undated.length)" style="padding:12px;opacity:0.6;font-size:0.85rem">{{ t(\'cal.no_events\') }}</div>'
       + '</div>'
   });
 
@@ -3111,8 +3111,8 @@ function createVueApp() {
     methods: ROOT_PROXY,
     template: ''
       + '<div><v-divider></v-divider><div style="padding:10px 12px">'
-      + '<div style="font-weight:600;margin-bottom:6px">{{ label }} <span style="opacity:0.5;font-weight:400">· {{ events.length }} {{ tOr(\'cal.items\',\'items\') }}</span></div>'
-      + '<div v-if="!events.length" style="opacity:0.6;font-size:0.85rem">{{ tOr(\'cal.no_events\',\'No events\') }}</div>'
+      + '<div style="font-weight:600;margin-bottom:6px">{{ label }} <span style="opacity:0.5;font-weight:400">· {{ events.length }} {{ t(\'cal.items\') }}</span></div>'
+      + '<div v-if="!events.length" style="opacity:0.6;font-size:0.85rem">{{ t(\'cal.no_events\') }}</div>'
       + '<cal-event-row v-for="ev in events" :key="ev.id" :ev="ev" :compact="true"></cal-event-row>'
       + '</div></div>'
   });
@@ -3223,12 +3223,12 @@ function createVueApp() {
       + '<div class="d-flex align-center flex-wrap pa-2" style="gap:8px">'
       + '<v-btn icon="mdi-chevron-left" size="small" variant="text" @click="prev()"></v-btn>'
       + '<v-btn icon="mdi-chevron-right" size="small" variant="text" @click="next()"></v-btn>'
-      + '<v-btn size="small" variant="text" @click="goToday()">{{ tOr(\'cal.today\',\'Today\') }}</v-btn>'
+      + '<v-btn size="small" variant="text" @click="goToday()">{{ t(\'cal.today\') }}</v-btn>'
       + '<span style="font-weight:600;min-width:150px">{{ title }}</span><v-spacer></v-spacer>'
       + '<v-btn-toggle :model-value="mode" density="compact" variant="outlined" divided mandatory @update:model-value="setMode($event)">'
-      + '<v-btn value="month" size="small">{{ tOr(\'cal.month\',\'Month\') }}</v-btn>'
-      + '<v-btn value="week" size="small">{{ tOr(\'cal.week\',\'Week\') }}</v-btn>'
-      + '<v-btn value="list" size="small">{{ tOr(\'cal.list\',\'List\') }}</v-btn></v-btn-toggle></div>'
+      + '<v-btn value="month" size="small">{{ t(\'cal.month\') }}</v-btn>'
+      + '<v-btn value="week" size="small">{{ t(\'cal.week\') }}</v-btn>'
+      + '<v-btn value="list" size="small">{{ t(\'cal.list\') }}</v-btn></v-btn-toggle></div>'
       + '<v-divider></v-divider>'
       + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
       + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents"></cal-day-panel>'

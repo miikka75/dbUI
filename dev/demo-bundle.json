@@ -326,7 +326,17 @@
       "field.total": "Total",
       "list.status.open": "Open",
       "list.status.in_progress": "In Progress",
-      "list.status.done": "Done"
+      "list.status.done": "Done",
+      "cal.today": "Today",
+      "cal.month": "Month",
+      "cal.week": "Week",
+      "cal.list": "List",
+      "cal.undated": "Undated",
+      "cal.no_events": "No events",
+      "cal.items": "items",
+      "period.this_week": "This week",
+      "period.weeks_ago": "weeks ago",
+      "period.current": "Current"
     },
     "es": {
       "app.title": "Demo de Equipo",
@@ -369,7 +379,17 @@
       "field.total": "Total",
       "list.status.open": "Abierto",
       "list.status.in_progress": "En Progreso",
-      "list.status.done": "Hecho"
+      "list.status.done": "Hecho",
+      "cal.today": "Hoy",
+      "cal.month": "Mes",
+      "cal.week": "Semana",
+      "cal.list": "Lista",
+      "cal.undated": "Sin fecha",
+      "cal.no_events": "Sin eventos",
+      "cal.items": "elementos",
+      "period.this_week": "Esta semana",
+      "period.weeks_ago": "semanas atrás",
+      "period.current": "Actual"
     },
     "sv": {
       "app.title": "Team-demo",
@@ -412,7 +432,17 @@
       "field.total": "Totalt",
       "list.status.open": "Öppen",
       "list.status.in_progress": "Pågår",
-      "list.status.done": "Klar"
+      "list.status.done": "Klar",
+      "cal.today": "Idag",
+      "cal.month": "Månad",
+      "cal.week": "Vecka",
+      "cal.list": "Lista",
+      "cal.undated": "Utan datum",
+      "cal.no_events": "Inga händelser",
+      "cal.items": "poster",
+      "period.this_week": "Denna vecka",
+      "period.weeks_ago": "veckor sedan",
+      "period.current": "Nuvarande"
     }
   },
   "config": {
@@ -426,5 +456,5 @@
       }
     }
   },
-  "generatedAt": "2026-07-11T07:56:17.647Z"
+  "generatedAt": "2026-07-11T12:59:58.062Z"
 }

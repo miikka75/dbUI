@@ -187,7 +187,7 @@
           <v-btn icon="mdi-chevron-left" size="small" variant="text" @click="periodPrev()" data-testid="period-prev"></v-btn>
           <div style="font-weight:600;min-width:150px;text-align:center" data-testid="period-label">{{ periodLabel() }}</div>
           <v-btn icon="mdi-chevron-right" size="small" variant="text" :disabled="periodOffset === 0" @click="periodNext()" data-testid="period-next"></v-btn>
-          <v-btn size="small" variant="text" :disabled="periodOffset === 0" @click="periodToday()">{{ tOr('period.current','Current') }}</v-btn>
+          <v-btn size="small" variant="text" :disabled="periodOffset === 0" @click="periodToday()">{{ t('period.current') }}</v-btn>
         </div>
 
         <!-- Every screen renders through the top-level kind registry (VIEW_KINDS -> component). :key
