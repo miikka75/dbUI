@@ -256,6 +256,30 @@ test.describe('image/url column types', () => {
   });
 });
 
+test.describe('Calendar locale follows the selected language', () => {
+  test('calLocale uses the language code (not the browser locale); explicit locale wins', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.languages = [{ code: 'es', name: 'Español' }, { code: 'en', name: 'English' }];
+      app.currentLang = 'es';
+      const esLoc = app.calLocale();
+      const esMonth = new Intl.DateTimeFormat(esLoc, { month: 'long' }).format(new Date(2026, 6, 1));
+      app.languages = [{ code: 'sv', name: 'Svenska' }];
+      app.currentLang = 'sv';
+      const svLoc = app.calLocale();
+      app.languages = [{ code: 'xx', name: 'Custom', locale: 'de' }];  // explicit locale override
+      app.currentLang = 'xx';
+      const overrideLoc = app.calLocale();
+      return { esLoc, esMonth, svLoc, overrideLoc };
+    });
+    expect(r.esLoc).toBe('es');                       // the code itself is the locale — not navigator.language
+    expect(r.esMonth.toLowerCase()).toBe('julio');    // -> Spanish month names in the calendar
+    expect(r.svLoc).toBe('sv');
+    expect(r.overrideLoc).toBe('de');                 // an explicit `language.locale` still wins
+  });
+});
+
 test.describe('Two-press delete', () => {
   test('first click arms, second click deletes', async ({ page }) => {
     await ensureAppReady(page);
