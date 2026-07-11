@@ -10,7 +10,12 @@ const schema = {
     link:  { type: 'url' },
     when:  { type: 'date' }
   } },
-  other: { columns: { tags: { type: 'multiselect', list: 'tags' } } }
+  other: { columns: { tags: { type: 'multiselect', list: 'tags' } } },
+  tasks: { columns: {
+    status: { type: 'select', list: 'status', picker: 'chips' },
+    prio:   { type: 'select', list: 'prio', picker: 'toggle' },
+    owner:  { type: 'select', list: 'people' }   // no picker -> dropdown
+  } }
 };
 
 describe('columns.js — image/url column scanners', () => {
@@ -27,6 +32,13 @@ describe('columns.js — image/url column scanners', () => {
     assert.equal(Columns.colIsDate(schema, 'when'), true);
     assert.equal(Columns.colIsMultiselect(schema, 'tags'), true);
     assert.equal(Columns.colIsImage(schema, 'tags'), false);
+  });
+
+  it('colPicker returns a select column\'s widget choice (chips/toggle), else null', () => {
+    assert.equal(Columns.colPicker(schema, 'status'), 'chips');
+    assert.equal(Columns.colPicker(schema, 'prio'), 'toggle');
+    assert.equal(Columns.colPicker(schema, 'owner'), null);   // default dropdown
+    assert.equal(Columns.colPicker(schema, 'nope'), null);
   });
 
   it('unknown column falls through to the empty info (no throw)', () => {
