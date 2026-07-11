@@ -159,6 +159,39 @@ test.describe('Select dropdowns', () => {
     const count = await selects.count();
     expect(count).toBeGreaterThan(0);
   });
+
+  test('select column `picker` renders chips / toggle instead of a dropdown; selecting saves', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const schema = {
+      defaultLanguage: 'en',
+      tables: { items: { columns: [
+        { name: 'title', type: 'text' },
+        { name: 'status', type: 'select', list: 'status', picker: 'chips' },
+        { name: 'prio', type: 'select', list: 'prio', picker: 'toggle' }
+      ] } },
+      views: [{ name: 'all', sources: ['items'], mode: 'union', columns: ['title'] }],
+      nav: { items: [{ table: 'items' }] }
+    };
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => { window.appInstance.listsCache = { status: ['open', 'done'], prio: ['low', 'high'] }; window.appInstance.selectTab('items'); });
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(150);
+
+    // picker:"chips" -> chip group; picker:"toggle" -> button toggle; NOT the default autocomplete
+    await expect(page.locator('.v-table .v-chip-group')).toBeVisible();
+    await expect(page.locator('.v-table .v-btn-toggle')).toBeVisible();
+    await expect(page.locator('.v-table .v-autocomplete, .v-table .v-combobox')).toHaveCount(0);
+
+    // choosing a chip saves the value onto the row
+    await page.locator('.v-table .v-chip-group .v-chip', { hasText: 'open' }).first().click();
+    await expect.poll(async () => page.evaluate(() => window.appInstance.currentData[0].status)).toBe('open');
+  });
 });
 
 test.describe('Secondary-colored chips', () => {

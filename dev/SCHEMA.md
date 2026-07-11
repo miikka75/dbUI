@@ -64,6 +64,7 @@ nav     ← navigation tree + layout, references views/tables by name
 | `list` | List name for `select` type |
 | `allowNew` | Allow adding new list values (combobox) |
 | `sorted` | Sort dropdown items alphabetically |
+| `picker` | Input widget for a single `select` column: `"chips"` (selectable chips) or `"toggle"` (segmented buttons); omit for the default dropdown. Applies wherever the column is edited (any view). Deselecting the current value clears the cell. Ignored with `allowNew` (which needs free-text entry) and for `multiselect` (already chips). Same widget vocabulary as the `rsvp` view's `picker`. |
 | `syncFrom` | Mirror this column's value from another table |
 | `table` | Reference table name (for `ref`) |
 | `valueCol` | Column used as value (for `ref`) |

@@ -1426,6 +1426,7 @@ function createVueApp() {
       colIsDate: function(col) { return Columns.colIsDate(SCHEMA, col); },
       colIsImage: function(col) { return Columns.colIsImage(SCHEMA, col); },
       colIsUrl: function(col) { return Columns.colIsUrl(SCHEMA, col); },
+      colPicker: function(col) { return Columns.colPicker(SCHEMA, col); },
       toDateStr: function(v) { return toDateStr(v); },
       // Whether the active backend can store an uploaded file (Firebase Storage). Other backends lack it,
       // so an `image` column degrades to a paste-a-URL text input. See uploadFile.
@@ -3009,6 +3010,7 @@ function createVueApp() {
       colAllowNew: function(col) { return appInstance.colAllowNew(col); },
       colIsList: function(col) { return appInstance.colIsList(col); },
       colIsRef: function(col) { return appInstance.colIsRef(col); },
+      colPicker: function(col) { return appInstance.colPicker(col); },
       colListSwitch: function(col) { return appInstance.colListSwitch(col); },
       getListOptions: function(col) { return appInstance.getListOptions(col); },
       // single-select options: the primary honors the listSwitch alt list; the embed uses the plain list.
@@ -3047,6 +3049,12 @@ function createVueApp() {
       + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
       + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
       + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
+      + '<v-btn-toggle v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'toggle\'" :name="col" :model-value="item[col] || \'\'" density="compact" variant="outlined" divided @update:model-value="save(item, col, $event || \'\')">'
+      + '<v-btn v-for="o in getListOptions(col)" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
+      + '</v-btn-toggle>'
+      + '<v-chip-group v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'chips\'" :name="col" :model-value="item[col] || \'\'" @update:model-value="save(item, col, $event || \'\')">'
+      + '<v-chip v-for="o in getListOptions(col)" :key="o.value" :value="o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
+      + '</v-chip-group>'
       + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>'
       + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || \'Switch list\'">mdi-swap-horizontal</v-icon></template>'
       + '</v-combobox>'

@@ -54,7 +54,7 @@
     for (var t in schema) {
       var cols = (schema[t] && schema[t].columns) || {};
       for (var c in cols) {
-        var e = info[c] || (info[c] = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false, image: false, url: false });
+        var e = info[c] || (info[c] = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false, image: false, url: false, picker: null });
         var typ = columnType(schema, t, c), d = cols[c];
         if (typ === 'multiselect') e.multiselect = true;
         if (typ === 'date') e.date = true;
@@ -66,12 +66,13 @@
           if (e.listSwitch == null && d.listSwitch) e.listSwitch = d.listSwitch;
           if (d.allowNew) e.allowNew = true;
           if (d.sorted) e.sorted = true;
+          if (e.picker == null && d.picker) e.picker = d.picker;   // select input widget: 'chips' | 'toggle' (else dropdown)
         }
       }
     }
     return info;
   }
-  var _EMPTY = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false, image: false, url: false };
+  var _EMPTY = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false, image: false, url: false, picker: null };
   function colInfo(schema, col) {
     var m = _scanCache && _scanCache.get(schema);
     if (!m) { m = scanSchema(schema); if (_scanCache) _scanCache.set(schema, m); }
@@ -86,6 +87,7 @@
   function colIsSorted(schema, col) { return colInfo(schema, col).sorted; }
   function colIsImage(schema, col) { return colInfo(schema, col).image; }
   function colIsUrl(schema, col) { return colInfo(schema, col).url; }
+  function colPicker(schema, col) { return colInfo(schema, col).picker; }   // 'chips' | 'toggle' | null (dropdown)
 
   // View column-entry shape predicates (a view's `columns` array mixes plain names, {name,...} defs,
   // inline embeds, named-view embeds and legacy text blocks). Moved here from schema-loader.html so the
@@ -100,7 +102,7 @@
     isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol,
     colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate,
     colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted,
-    colIsImage: colIsImage, colIsUrl: colIsUrl,
+    colIsImage: colIsImage, colIsUrl: colIsUrl, colPicker: colPicker,
     colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
