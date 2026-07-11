@@ -41,12 +41,15 @@
       var group = byEvent[k] || [];
       var mine = null;
       for (var i = 0; i < group.length; i++) { if (group[i][ownerCol] === opts.me) { mine = group[i]; break; } }
+      // Only actual responses count — a row with an empty status (e.g. a vote in the middle of being
+      // removed) is neither tallied nor shown in the roster.
+      var responded = group.filter(function(r) { var s = r[statusCol]; return s != null && s !== ''; });
       var tally = {};
-      group.forEach(function(r) { var s = r[statusCol]; if (s != null && s !== '') tally[s] = (tally[s] || 0) + 1; });
+      responded.forEach(function(r) { tally[r[statusCol]] = (tally[r[statusCol]] || 0) + 1; });
       // The roster: who responded, and how. The caller only receives the responses the backend returned —
       // so with owner-scoped reads a non-organizer sees just their own row here; with a public roster,
       // everyone's. (Access is enforced server-side; this is only the display.)
-      var participants = group.map(function(r) { return { owner: r[ownerCol], status: r[statusCol] }; })
+      var participants = responded.map(function(r) { return { owner: r[ownerCol], status: r[statusCol] }; })
         .sort(function(a, b) { return String(a.status).localeCompare(String(b.status)) || String(a.owner).localeCompare(String(b.owner)); });
       return {
         id: e.id,
@@ -56,7 +59,7 @@
         myStatus: mine ? mine[statusCol] : '',
         myRowId: mine ? mine.id : null,
         tally: tally,
-        total: group.length,
+        total: responded.length,
         participants: participants
       };
     });
