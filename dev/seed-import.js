@@ -30,22 +30,65 @@ function buildBundle() {
     lastMonthA:     iso(new Date(now.getFullYear(), now.getMonth() - 1, 10)),
     lastMonthB:     iso(new Date(now.getFullYear(), now.getMonth() - 1, 20))
   };
+  const plus = n => iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() + n)); // n days from today
+  const P = { p1: plus(3), p2: plus(7), p3: plus(12) };                                   // upcoming practices
   const LISTS = { members: ['Ann', 'Bob', 'Cara'], crew: ['Ann', 'Bob', 'Cara', 'Dan'], status: ['open', 'in_progress', 'done'], assigned_to: ['Ann', 'Bob', 'Cara'] };
-  const T = {
-    'view.combined.header': '# Tasks & Notes',
-    'view.combined.footer': '_Tasks are synced from notes._',
-    'view.progress_report.header': '# Progress Report',
-    'embed.open.title': 'Open',
-    'embed.ip.title': 'In Progress',
-    'embed.ip.attention': '_Items above need attention._',
-    'view.progress_report.footer': '_End of report._'
+  // Translations: en + two more languages, with UI keys (tab.*/view.*/field.*/list.*) and the demo's
+  // {{t:}} page-prose. `en` is the default/base; switching language in the Languages tab shows es/sv.
+  const TR = {
+    'app.title':                    ['Team Demo', 'Demo de Equipo', 'Team-demo'],
+    'view.combined.header':         ['# Tasks & Notes', '# Tareas y Notas', '# Uppgifter & Anteckningar'],
+    'view.combined.footer':         ['_Tasks are synced from notes._', '_Las tareas se sincronizan desde las notas._', '_Uppgifter synkas från anteckningar._'],
+    'view.progress_report.header':  ['# Progress Report', '# Informe de Progreso', '# Lägesrapport'],
+    'view.progress_report.footer':  ['_End of report._', '_Fin del informe._', '_Slut på rapport._'],
+    'embed.open.title':             ['Open', 'Abierto', 'Öppen'],
+    'embed.ip.title':               ['In Progress', 'En Progreso', 'Pågår'],
+    'embed.ip.attention':           ['_Items above need attention._', '_Los elementos anteriores necesitan atención._', '_Objekten ovan behöver uppmärksamhet._'],
+    'tab.tasks':      ['Tasks', 'Tareas', 'Uppgifter'],
+    'tab.notes':      ['Notes', 'Notas', 'Anteckningar'],
+    'tab.practices':  ['Practices', 'Entrenamientos', 'Träningar'],
+    'tab.chore_log':  ['Chore Log', 'Registro de Tareas', 'Sysslologg'],
+    'tab.chores':     ['Chores', 'Tareas Domésticas', 'Sysslor'],
+    'tab.cities':     ['Cities', 'Ciudades', 'Städer'],
+    'view.combined':          ['Tasks & Notes', 'Tareas y Notas', 'Uppgifter & Anteckningar'],
+    'view.attendance':        ['Attendance', 'Asistencia', 'Närvaro'],
+    'view.my_rsvp':           ['My RSVP', 'Mi Confirmación', 'Min Anmälan'],
+    'view.my_chores':         ['My Chores', 'Mis Tareas', 'Mina Sysslor'],
+    'view.leaderboard':       ['Leaderboard (Month)', 'Clasificación (Mes)', 'Topplista (Månad)'],
+    'view.leaderboard_week':  ['Leaderboard (Week)', 'Clasificación (Semana)', 'Topplista (Vecka)'],
+    'view.chores_last_month': ['Last Month', 'Mes Pasado', 'Förra Månaden'],
+    'view.chore_calendar':    ['Chore Calendar', 'Calendario de Tareas', 'Sysslokalender'],
+    'view.chore_heatmap':     ['Chore Heatmap', 'Mapa de Calor', 'Värmekarta'],
+    'field.date':        ['Date', 'Fecha', 'Datum'],
+    'field.title':       ['Title', 'Título', 'Titel'],
+    'field.status':      ['Status', 'Estado', 'Status'],
+    'field.assigned_to': ['Assigned To', 'Asignado A', 'Tilldelad'],
+    'field.city':        ['City', 'Ciudad', 'Stad'],
+    'field.content':     ['Content', 'Contenido', 'Innehåll'],
+    'field.author':      ['Author', 'Autor', 'Författare'],
+    'field.chore':       ['Chore', 'Tarea', 'Syssla'],
+    'field.person':      ['Person', 'Persona', 'Person'],
+    'field.done_on':     ['Done On', 'Hecho El', 'Utförd'],
+    'field.points':      ['Points', 'Puntos', 'Poäng'],
+    'field.opponent':    ['Opponent', 'Oponente', 'Motståndare'],
+    'field.people':      ['People', 'Personas', 'Personer'],
+    'field.note':        ['Note', 'Nota', 'Anteckning'],
+    'field.total':       ['Total', 'Total', 'Totalt'],
+    'list.status.open':        ['Open', 'Abierto', 'Öppen'],
+    'list.status.in_progress': ['In Progress', 'En Progreso', 'Pågår'],
+    'list.status.done':        ['Done', 'Hecho', 'Klar']
   };
+  const LANGS = [{ code: 'en', name: 'English' }, { code: 'es', name: 'Español' }, { code: 'sv', name: 'Svenska' }];
+  const translations = {};
+  LANGS.forEach((l, i) => { translations[l.code] = {}; for (const k in TR) translations[l.code][k] = TR[k][i]; });
   const ROWS = {
     cities: [ { state: 'IL', city: 'Springfield' }, { state: 'IL', city: 'Chicago' }, { state: 'CA', city: 'Fresno' } ],
     chores: [ { chore: 'Dishes', points: 2 }, { chore: 'Vacuum', points: 3 }, { chore: 'Mow lawn', points: 5 }, { chore: 'Trash', points: 1 }, { chore: 'Laundry', points: 4 } ],
     chore_log: [
       { chore: 'Dishes',   person: 'Ann',  done_on: D.today },
+      { chore: 'Vacuum',   person: 'Ann',  done_on: D.today },          // Ann, this week -> richer "My chores"
       { chore: 'Mow lawn', person: 'Cara', done_on: D.today },
+      { chore: 'Trash',    person: 'Ann',  done_on: D.yesterday },      // Ann, this week
       { chore: 'Vacuum',   person: 'Bob',  done_on: D.yesterday },
       { chore: 'Mow lawn', person: 'Ann',  done_on: D.thisMonthEarly },
       { chore: 'Trash',    person: 'Bob',  done_on: D.thisMonthEarly },
@@ -59,7 +102,23 @@ function buildBundle() {
       { date: D.today,     title: 'Fix roof',    status: 'open',        assigned_to: 'Ann', city: 'Springfield' },
       { date: D.yesterday, title: 'Paint fence', status: 'in_progress', assigned_to: 'Bob', city: 'Chicago' }
     ],
-    notes: [ { date: D.today, title: 'Weekly sync', content: 'Discussed the roster and open tasks.', author: 'Cara', link: 'https://example.com/weekly-sync' } ]
+    notes: [ { date: D.today, title: 'Weekly sync', content: 'Discussed the roster and open tasks.', author: 'Cara', link: 'https://example.com/weekly-sync' } ],
+    // RSVP demo: upcoming events (practices) + everyone's owner-stamped responses (rsvps). The current
+    // user (local@dev) has responded to p1/p2 but not p3 -> the my_rsvp view offers to set a status there.
+    // rosterPublic marks each response readable by all (the roster:"all" gate; ignored by the dev server).
+    practices: [
+      { date: P.p1, title: 'League match', opponent: 'Riverside' },
+      { date: P.p2, title: 'Home game',    opponent: 'Lakeside' },
+      { date: P.p3, title: 'Cup fixture',  opponent: 'Hillcrest' }
+    ],
+    rsvps: [
+      { owner: 'local@dev', practice: P.p1, status: 'coming', note: 'Bringing water', rosterPublic: true },
+      { owner: 'bob@dev',   practice: P.p1, status: 'coming', note: '', rosterPublic: true },
+      { owner: 'cara@dev',  practice: P.p1, status: 'maybe',  note: 'Depends on work', rosterPublic: true },
+      { owner: 'local@dev', practice: P.p2, status: 'maybe',  note: '', rosterPublic: true },
+      { owner: 'dan@dev',   practice: P.p2, status: 'out',    note: 'Away', rosterPublic: true },
+      { owner: 'bob@dev',   practice: P.p3, status: 'coming', note: '', rosterPublic: true }
+    ]
   };
   const ARCHIVED = {
     tasks:     [ { date: D.lastMonthA, title: 'Old audit', status: 'done', assigned_to: 'Cara', city: 'Fresno' } ],
@@ -73,8 +132,8 @@ function buildBundle() {
   return {
     tables: Object.assign({}, withIds(ROWS, false), withIds(ARCHIVED, true)),
     lists: LISTS,
-    languages: [{ code: 'en', name: 'English' }],
-    translations: { en: T },
+    languages: LANGS,
+    translations: translations,
     config: { rotationAnchors: { crewrota: iso(monday) }, rotationRanges: { crewrota: { from: iso(rangeFrom), periods: 8 } } },
     generatedAt: new Date().toISOString()
   };

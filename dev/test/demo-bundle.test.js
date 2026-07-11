@@ -48,4 +48,28 @@ describe('demo-bundle.json', () => {
       for (const [k, v] of Object.entries(map)) { assert.ok(k.length, 'empty key'); assert.equal(typeof v, 'string'); }
     }
   });
+
+  it('every declared language has a translation map with the same key set', () => {
+    const codes = bundle.languages.map(l => l.code);
+    assert.ok(codes.length >= 2, 'demo should ship more than one language');
+    const enKeys = Object.keys(bundle.translations.en).sort().join(',');
+    for (const code of codes) {
+      assert.ok(bundle.translations[code], 'no translations for declared language ' + code);
+      assert.equal(Object.keys(bundle.translations[code]).sort().join(','), enKeys, code + ' key set differs from en');
+    }
+  });
+
+  it('RSVP data links responses to events (rsvps.practice -> a practices.date)', () => {
+    const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const eventKeys = new Set(bundle.tables.practices.map(p => p.date));
+    for (const p of bundle.tables.practices) assert.ok(isDate(p.date), 'bad practice date: ' + p.date);
+    const statuses = new Set(['coming', 'maybe', 'out']);
+    for (const r of bundle.tables.rsvps) {
+      assert.ok(eventKeys.has(r.practice), 'rsvp links to a non-existent practice: ' + r.practice);
+      assert.ok(r.owner, 'rsvp missing owner');
+      assert.ok(statuses.has(r.status), 'unexpected rsvp status: ' + r.status);
+    }
+    // the demo's current user (local@dev) has at least one response so "my status" is populated
+    assert.ok(bundle.tables.rsvps.some(r => r.owner === 'local@dev'), 'no response for the demo current user');
+  });
 });

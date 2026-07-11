@@ -49,52 +49,64 @@
         "id": "seed-chore_log-1",
         "chore": "Dishes",
         "person": "Ann",
-        "done_on": "2026-07-10"
+        "done_on": "2026-07-11"
       },
       {
         "id": "seed-chore_log-2",
-        "chore": "Mow lawn",
-        "person": "Cara",
-        "done_on": "2026-07-10"
+        "chore": "Vacuum",
+        "person": "Ann",
+        "done_on": "2026-07-11"
       },
       {
         "id": "seed-chore_log-3",
-        "chore": "Vacuum",
-        "person": "Bob",
-        "done_on": "2026-07-09"
+        "chore": "Mow lawn",
+        "person": "Cara",
+        "done_on": "2026-07-11"
       },
       {
         "id": "seed-chore_log-4",
+        "chore": "Trash",
+        "person": "Ann",
+        "done_on": "2026-07-10"
+      },
+      {
+        "id": "seed-chore_log-5",
+        "chore": "Vacuum",
+        "person": "Bob",
+        "done_on": "2026-07-10"
+      },
+      {
+        "id": "seed-chore_log-6",
         "chore": "Mow lawn",
         "person": "Ann",
         "done_on": "2026-07-02"
       },
       {
-        "id": "seed-chore_log-5",
+        "id": "seed-chore_log-7",
         "chore": "Trash",
         "person": "Bob",
         "done_on": "2026-07-02"
       },
       {
-        "id": "seed-chore_log-6",
+        "id": "seed-chore_log-8",
         "chore": "Laundry",
         "person": "Ann",
         "done_on": "2026-06-10"
       },
       {
-        "id": "seed-chore_log-7",
+        "id": "seed-chore_log-9",
         "chore": "Dishes",
         "person": "Ann",
         "done_on": "2026-06-20"
       },
       {
-        "id": "seed-chore_log-8",
+        "id": "seed-chore_log-10",
         "chore": "Dishes",
         "person": "Bob",
         "done_on": "2026-06-10"
       },
       {
-        "id": "seed-chore_log-9",
+        "id": "seed-chore_log-11",
         "chore": "Vacuum",
         "person": "Cara",
         "done_on": "2026-06-20"
@@ -121,7 +133,7 @@
     "tasks": [
       {
         "id": "seed-tasks-1",
-        "date": "2026-07-10",
+        "date": "2026-07-11",
         "title": "Fix roof",
         "status": "open",
         "assigned_to": "Ann",
@@ -129,7 +141,7 @@
       },
       {
         "id": "seed-tasks-2",
-        "date": "2026-07-09",
+        "date": "2026-07-10",
         "title": "Paint fence",
         "status": "in_progress",
         "assigned_to": "Bob",
@@ -139,11 +151,81 @@
     "notes": [
       {
         "id": "seed-notes-1",
-        "date": "2026-07-10",
+        "date": "2026-07-11",
         "title": "Weekly sync",
         "content": "Discussed the roster and open tasks.",
         "author": "Cara",
         "link": "https://example.com/weekly-sync"
+      }
+    ],
+    "practices": [
+      {
+        "id": "seed-practices-1",
+        "date": "2026-07-14",
+        "title": "League match",
+        "opponent": "Riverside"
+      },
+      {
+        "id": "seed-practices-2",
+        "date": "2026-07-18",
+        "title": "Home game",
+        "opponent": "Lakeside"
+      },
+      {
+        "id": "seed-practices-3",
+        "date": "2026-07-23",
+        "title": "Cup fixture",
+        "opponent": "Hillcrest"
+      }
+    ],
+    "rsvps": [
+      {
+        "id": "seed-rsvps-1",
+        "owner": "local@dev",
+        "practice": "2026-07-14",
+        "status": "coming",
+        "note": "Bringing water",
+        "rosterPublic": true
+      },
+      {
+        "id": "seed-rsvps-2",
+        "owner": "bob@dev",
+        "practice": "2026-07-14",
+        "status": "coming",
+        "note": "",
+        "rosterPublic": true
+      },
+      {
+        "id": "seed-rsvps-3",
+        "owner": "cara@dev",
+        "practice": "2026-07-14",
+        "status": "maybe",
+        "note": "Depends on work",
+        "rosterPublic": true
+      },
+      {
+        "id": "seed-rsvps-4",
+        "owner": "local@dev",
+        "practice": "2026-07-18",
+        "status": "maybe",
+        "note": "",
+        "rosterPublic": true
+      },
+      {
+        "id": "seed-rsvps-5",
+        "owner": "dan@dev",
+        "practice": "2026-07-18",
+        "status": "out",
+        "note": "Away",
+        "rosterPublic": true
+      },
+      {
+        "id": "seed-rsvps-6",
+        "owner": "bob@dev",
+        "practice": "2026-07-23",
+        "status": "coming",
+        "note": "",
+        "rosterPublic": true
       }
     ],
     "tasks__archive": [
@@ -192,17 +274,145 @@
     {
       "code": "en",
       "name": "English"
+    },
+    {
+      "code": "es",
+      "name": "Español"
+    },
+    {
+      "code": "sv",
+      "name": "Svenska"
     }
   ],
   "translations": {
     "en": {
+      "app.title": "Team Demo",
       "view.combined.header": "# Tasks & Notes",
       "view.combined.footer": "_Tasks are synced from notes._",
       "view.progress_report.header": "# Progress Report",
+      "view.progress_report.footer": "_End of report._",
       "embed.open.title": "Open",
       "embed.ip.title": "In Progress",
       "embed.ip.attention": "_Items above need attention._",
-      "view.progress_report.footer": "_End of report._"
+      "tab.tasks": "Tasks",
+      "tab.notes": "Notes",
+      "tab.practices": "Practices",
+      "tab.chore_log": "Chore Log",
+      "tab.chores": "Chores",
+      "tab.cities": "Cities",
+      "view.combined": "Tasks & Notes",
+      "view.attendance": "Attendance",
+      "view.my_rsvp": "My RSVP",
+      "view.my_chores": "My Chores",
+      "view.leaderboard": "Leaderboard (Month)",
+      "view.leaderboard_week": "Leaderboard (Week)",
+      "view.chores_last_month": "Last Month",
+      "view.chore_calendar": "Chore Calendar",
+      "view.chore_heatmap": "Chore Heatmap",
+      "field.date": "Date",
+      "field.title": "Title",
+      "field.status": "Status",
+      "field.assigned_to": "Assigned To",
+      "field.city": "City",
+      "field.content": "Content",
+      "field.author": "Author",
+      "field.chore": "Chore",
+      "field.person": "Person",
+      "field.done_on": "Done On",
+      "field.points": "Points",
+      "field.opponent": "Opponent",
+      "field.people": "People",
+      "field.note": "Note",
+      "field.total": "Total",
+      "list.status.open": "Open",
+      "list.status.in_progress": "In Progress",
+      "list.status.done": "Done"
+    },
+    "es": {
+      "app.title": "Demo de Equipo",
+      "view.combined.header": "# Tareas y Notas",
+      "view.combined.footer": "_Las tareas se sincronizan desde las notas._",
+      "view.progress_report.header": "# Informe de Progreso",
+      "view.progress_report.footer": "_Fin del informe._",
+      "embed.open.title": "Abierto",
+      "embed.ip.title": "En Progreso",
+      "embed.ip.attention": "_Los elementos anteriores necesitan atención._",
+      "tab.tasks": "Tareas",
+      "tab.notes": "Notas",
+      "tab.practices": "Entrenamientos",
+      "tab.chore_log": "Registro de Tareas",
+      "tab.chores": "Tareas Domésticas",
+      "tab.cities": "Ciudades",
+      "view.combined": "Tareas y Notas",
+      "view.attendance": "Asistencia",
+      "view.my_rsvp": "Mi Confirmación",
+      "view.my_chores": "Mis Tareas",
+      "view.leaderboard": "Clasificación (Mes)",
+      "view.leaderboard_week": "Clasificación (Semana)",
+      "view.chores_last_month": "Mes Pasado",
+      "view.chore_calendar": "Calendario de Tareas",
+      "view.chore_heatmap": "Mapa de Calor",
+      "field.date": "Fecha",
+      "field.title": "Título",
+      "field.status": "Estado",
+      "field.assigned_to": "Asignado A",
+      "field.city": "Ciudad",
+      "field.content": "Contenido",
+      "field.author": "Autor",
+      "field.chore": "Tarea",
+      "field.person": "Persona",
+      "field.done_on": "Hecho El",
+      "field.points": "Puntos",
+      "field.opponent": "Oponente",
+      "field.people": "Personas",
+      "field.note": "Nota",
+      "field.total": "Total",
+      "list.status.open": "Abierto",
+      "list.status.in_progress": "En Progreso",
+      "list.status.done": "Hecho"
+    },
+    "sv": {
+      "app.title": "Team-demo",
+      "view.combined.header": "# Uppgifter & Anteckningar",
+      "view.combined.footer": "_Uppgifter synkas från anteckningar._",
+      "view.progress_report.header": "# Lägesrapport",
+      "view.progress_report.footer": "_Slut på rapport._",
+      "embed.open.title": "Öppen",
+      "embed.ip.title": "Pågår",
+      "embed.ip.attention": "_Objekten ovan behöver uppmärksamhet._",
+      "tab.tasks": "Uppgifter",
+      "tab.notes": "Anteckningar",
+      "tab.practices": "Träningar",
+      "tab.chore_log": "Sysslologg",
+      "tab.chores": "Sysslor",
+      "tab.cities": "Städer",
+      "view.combined": "Uppgifter & Anteckningar",
+      "view.attendance": "Närvaro",
+      "view.my_rsvp": "Min Anmälan",
+      "view.my_chores": "Mina Sysslor",
+      "view.leaderboard": "Topplista (Månad)",
+      "view.leaderboard_week": "Topplista (Vecka)",
+      "view.chores_last_month": "Förra Månaden",
+      "view.chore_calendar": "Sysslokalender",
+      "view.chore_heatmap": "Värmekarta",
+      "field.date": "Datum",
+      "field.title": "Titel",
+      "field.status": "Status",
+      "field.assigned_to": "Tilldelad",
+      "field.city": "Stad",
+      "field.content": "Innehåll",
+      "field.author": "Författare",
+      "field.chore": "Syssla",
+      "field.person": "Person",
+      "field.done_on": "Utförd",
+      "field.points": "Poäng",
+      "field.opponent": "Motståndare",
+      "field.people": "Personer",
+      "field.note": "Anteckning",
+      "field.total": "Totalt",
+      "list.status.open": "Öppen",
+      "list.status.in_progress": "Pågår",
+      "list.status.done": "Klar"
     }
   },
   "config": {
@@ -216,5 +426,5 @@
       }
     }
   },
-  "generatedAt": "2026-07-10T20:34:55.860Z"
+  "generatedAt": "2026-07-11T07:56:17.647Z"
 }
