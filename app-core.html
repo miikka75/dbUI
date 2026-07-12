@@ -3386,7 +3386,7 @@ function createVueApp() {
       // Whether to show WHO registered (names), per the view's `roster` setting: 'all' -> everyone,
       // 'admins' -> only admins (pair with an owner-scoped-read table so it's actually private), else
       // just counts. Note the data is already access-filtered server-side; this is the display gate.
-      showRoster: function() { return this.cfg.roster === 'all' || (this.cfg.roster === 'admins' && appInstance.isAdmin); }
+      showRoster: function() { return this.cfg.rosterVisibility === 'all' || (this.cfg.rosterVisibility === 'admins' && appInstance.isAdmin); }
     },
     methods: {
       set: function(key, status) { appInstance.setRsvp(this.viewName, key, status || ''); },
@@ -3419,7 +3419,7 @@ function createVueApp() {
       + '</v-chip-group>'
       + '<v-select v-else :model-value="ev.myStatus" :items="options" item-title="title" item-value="value" density="compact" variant="outlined" hide-details clearable style="max-width:150px" :placeholder="a.tOr(\'rsvp.choose\',\'…\')" @update:model-value="set(ev.key, $event)" data-testid="rsvp-toggle"></v-select>'
       + '<v-spacer></v-spacer>'
-      + '<div v-if="cfg.showTally && ev.total" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
+      + '<div v-if="cfg.showCounts && ev.total" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
       + '</div>'
       + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster">'
       + '<div v-for="g in rosterGroups(ev)" :key="g.status" class="d-flex" style="gap:6px">'

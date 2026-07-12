@@ -795,8 +795,8 @@ plus a link column and a status column:
     "statuses": ["coming", "maybe", "out"], // OPTIONAL — inline options; omit to use the statusColumn's list
     "statusList": "rsvp_status",     // OPTIONAL — label translation namespace override (see below)
     "picker": "toggle",              // OPTIONAL — status control: "dropdown" (default) | "toggle" | "chips"
-    "showTally": true,               // OPTIONAL — show a per-event count of each response
-    "roster": "all"                  // OPTIONAL — who sees the participant roster (see below)
+    "showCounts": true,              // OPTIONAL — show a per-event count of each response
+    "rosterVisibility": "all"        // OPTIONAL — who sees the participant roster (see below)
   }
 }
 ```
@@ -812,13 +812,13 @@ plus a link column and a status column:
 - **`picker`** — the status control's UI element: `"dropdown"` (`v-select`, **default** — same default as
   the column-level `picker`) · `"toggle"` (segmented buttons, best for a few single-choice options) ·
   `"chips"` (selectable chips). Deselecting the current choice removes the vote in every variant.
-- **`roster`** (UI gate): `"all"` (everyone sees who responded) · `"admins"` (only organizers/admins) ·
-  `"counts"` (tally only, no names). This is **only the display gate** — the real read control is the
-  Firestore rule.
+- **`rosterVisibility`** (UI gate): `"all"` (everyone sees who responded) · `"admins"` (only organizers/
+  admins) · `"counts"` (counts only, no names). This is **only the display gate** — the real read control
+  is the Firestore rule.
 - **Roster visibility is denormalized per response table**: set `"privateRoster": true` on the
   *responses* table to make each response readable only by its owner + organizers; otherwise the app
   stamps `rosterPublic: true` on each row so everyone can read it. Rules are schema-blind, so this flag
-  must be carried on the rows — the `roster` view option alone does not restrict reads.
+  must be carried on the rows — the `rosterVisibility` view option alone does not restrict reads.
 - With owner-scoped reads a non-organizer receives only their own response from the backend, so the
   rendered tally/roster reflects exactly what that user is permitted to see.
 
