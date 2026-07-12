@@ -32,7 +32,7 @@ function buildBundle() {
   };
   const plus = n => iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() + n)); // n days from today
   const P = { p1: plus(3), p2: plus(7), p3: plus(12) };                                   // upcoming practices
-  const LISTS = { members: ['Ann', 'Bob', 'Cara'], crew: ['Ann', 'Bob', 'Cara', 'Dan'], status: ['open', 'in_progress', 'done'], assigned_to: ['Ann', 'Bob', 'Cara'] };
+  const LISTS = { members: ['Ann', 'Bob', 'Cara'], crew: ['Ann', 'Bob', 'Cara', 'Dan'], status: ['open', 'in_progress', 'done'], assigned_to: ['Ann', 'Bob', 'Cara'], rsvp_status: ['coming', 'maybe', 'out'] };
   // Translations: en + two more languages, with UI keys (tab.*/view.*/field.*/list.*) and the demo's
   // {{t:}} page-prose. `en` is the default/base; switching language in the Languages tab shows es/sv.
   const TR = {
@@ -126,12 +126,12 @@ function buildBundle() {
       { date: P.p3, title: 'Cup fixture',  opponent: 'Hillcrest' }
     ],
     rsvps: [
-      { owner: 'local@dev', practice: P.p1, status: 'coming', note: 'Bringing water', rosterPublic: true },
-      { owner: 'bob@dev',   practice: P.p1, status: 'coming', note: '', rosterPublic: true },
-      { owner: 'cara@dev',  practice: P.p1, status: 'maybe',  note: 'Depends on work', rosterPublic: true },
-      { owner: 'local@dev', practice: P.p2, status: 'maybe',  note: '', rosterPublic: true },
-      { owner: 'dan@dev',   practice: P.p2, status: 'out',    note: 'Away', rosterPublic: true },
-      { owner: 'bob@dev',   practice: P.p3, status: 'coming', note: '', rosterPublic: true }
+      { owner: 'local@dev', practice: P.p1, response: 'coming', note: 'Bringing water', rosterPublic: true },
+      { owner: 'bob@dev',   practice: P.p1, response: 'coming', note: '', rosterPublic: true },
+      { owner: 'cara@dev',  practice: P.p1, response: 'maybe',  note: 'Depends on work', rosterPublic: true },
+      { owner: 'local@dev', practice: P.p2, response: 'maybe',  note: '', rosterPublic: true },
+      { owner: 'dan@dev',   practice: P.p2, response: 'out',    note: 'Away', rosterPublic: true },
+      { owner: 'bob@dev',   practice: P.p3, response: 'coming', note: '', rosterPublic: true }
     ]
   };
   const ARCHIVED = {

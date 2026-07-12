@@ -187,7 +187,7 @@
       "columns": [
         { "name": "owner", "type": "owner" },
         { "name": "practice", "type": "text" },
-        { "name": "status", "type": "text" },
+        { "name": "response", "type": "select", "list": "rsvp_status" },
         { "name": "note", "type": "text" }
       ]
     }
@@ -488,9 +488,7 @@
         "titleColumns": ["title", "opponent"],
         "responses": "rsvps",
         "linkColumn": "practice",
-        "statusColumn": "status",
-        "statuses": ["coming", "maybe", "out"],
-        "statusList": "rsvp_status",
+        "statusColumn": "response",
         "picker": "toggle",
         "showTally": true,
         "roster": "all"

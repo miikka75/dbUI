@@ -67,7 +67,7 @@ describe('demo-bundle.json', () => {
     for (const r of bundle.tables.rsvps) {
       assert.ok(eventKeys.has(r.practice), 'rsvp links to a non-existent practice: ' + r.practice);
       assert.ok(r.owner, 'rsvp missing owner');
-      assert.ok(statuses.has(r.status), 'unexpected rsvp status: ' + r.status);
+      assert.ok(statuses.has(r.response), 'unexpected rsvp response: ' + r.response);
     }
     // the demo's current user (local@dev) has at least one response so "my status" is populated
     assert.ok(bundle.tables.rsvps.some(r => r.owner === 'local@dev'), 'no response for the demo current user');

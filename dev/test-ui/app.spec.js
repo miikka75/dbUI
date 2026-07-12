@@ -2630,7 +2630,9 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
         { id: 'p1', date: d(3), title: 'Practice', opponent: '' },
         { id: 'p2', date: d(10), title: 'Match', opponent: 'Reds' }
       ];
-      app.dataCache['rsvps'] = [{ id: 'other', owner: 'you@x.com', practice: d(3), status: 'maybe' }]; // someone else's
+      app.dataCache['rsvps'] = [{ id: 'other', owner: 'you@x.com', practice: d(3), response: 'maybe' }]; // someone else's
+      app.listsCache = Object.assign({}, app.listsCache, { rsvp_status: ['coming', 'maybe', 'out'] }); // Lookup-editable list
+      const optionVals = app.getListOptions('response').map(o => o.value);   // options come FROM the list, not inline
       app.selectTab('my_rsvp');
       const before = app.rsvpFor('my_rsvp').events.map(e => e.myStatus);   // I haven't responded
       app.setRsvp('my_rsvp', d(3), 'coming');                              // respond to the first practice
@@ -2651,7 +2653,8 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
         rosterPublic: myRow2.rosterPublic,
         ownerStamped: myRow.owner,
         linkVal: myRow.practice,
-        upsertedStatus: myRow2.status,
+        upsertedStatus: myRow2.response,
+        optionVals,
         myRowCount: myRowCountBeforeRemove,
         ownerReadonly: app.cellReadonly({}, 'owner', 'rsvps'),
         afterRemoveMyStatus: removed.events[0].myStatus,
@@ -2672,6 +2675,7 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(r.ownerStamped).toBe('me@x.com');                     // row stamped with MY email, not editable
     expect(r.linkVal).toBeTruthy();                              // linked to the practice
     expect(r.upsertedStatus).toBe('out');                        // second response updated, not duplicated
+    expect(r.optionVals).toEqual(['coming', 'maybe', 'out']);    // options come from the rsvp_status list (real, Lookup-editable)
     expect(r.myRowCount).toBe(1);                                // still one row for me
     expect(r.ownerReadonly).toBe(true);                          // owner column is read-only
     // Removing my vote deletes my row (no empty-status orphan) -> I disappear from the roster/tally.
