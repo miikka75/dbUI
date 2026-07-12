@@ -794,7 +794,7 @@ plus a link column and a status column:
     "statusColumn": "response",      // REQUIRED — response column holding the status value
     "statuses": ["coming", "maybe", "out"], // OPTIONAL — inline options; omit to use the statusColumn's list
     "statusList": "rsvp_status",     // OPTIONAL — label translation namespace override (see below)
-    "picker": "toggle",              // OPTIONAL — status control: "toggle" (default) | "chips" | "dropdown"
+    "picker": "toggle",              // OPTIONAL — status control: "dropdown" (default) | "toggle" | "chips"
     "showTally": true,               // OPTIONAL — show a per-event count of each response
     "roster": "all"                  // OPTIONAL — who sees the participant roster (see below)
   }
@@ -809,9 +809,9 @@ plus a link column and a status column:
   `statusList` needed. Set **`statusList`** only when the response column's *name* would resolve to
   another table's list under the per-column-name resolver (e.g. a column literally named `status`), to
   point the labels at a distinct namespace.
-- **`picker`** — the status control's UI element: `"toggle"` (segmented buttons, default; best for a few
-  single-choice options) · `"chips"` (selectable chips) · `"dropdown"` (`v-select`, for larger sets).
-  Deselecting the current choice removes the vote in every variant.
+- **`picker`** — the status control's UI element: `"dropdown"` (`v-select`, **default** — same default as
+  the column-level `picker`) · `"toggle"` (segmented buttons, best for a few single-choice options) ·
+  `"chips"` (selectable chips). Deselecting the current choice removes the vote in every variant.
 - **`roster`** (UI gate): `"all"` (everyone sees who responded) · `"admins"` (only organizers/admins) ·
   `"counts"` (tally only, no names). This is **only the display gate** — the real read control is the
   Firestore rule.

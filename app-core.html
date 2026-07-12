@@ -3382,7 +3382,7 @@ function createVueApp() {
         return vals.map(function(v) { return { value: v, title: self.statusLabel(v) }; });
       },
       // UI element for choosing a status: 'toggle' (segmented buttons, default) | 'chips' | 'dropdown'.
-      picker: function() { return this.cfg.picker || 'toggle'; },
+      picker: function() { return this.cfg.picker || 'dropdown'; },
       // Whether to show WHO registered (names), per the view's `roster` setting: 'all' -> everyone,
       // 'admins' -> only admins (pair with an owner-scoped-read table so it's actually private), else
       // just counts. Note the data is already access-filtered server-side; this is the display gate.
