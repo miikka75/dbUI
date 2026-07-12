@@ -41,6 +41,16 @@ describe('columns.js — image/url column scanners', () => {
     assert.equal(Columns.colPicker(schema, 'nope'), null);
   });
 
+  it('tableRefCol finds a table\'s ref column pointing at a target table', () => {
+    const s = {
+      events: { columns: { date: { type: 'date' } } },
+      resp:   { columns: { owner: { type: 'owner' }, link: { type: 'ref', table: 'events', valueCol: 'date' }, note: { type: 'text' } } }
+    };
+    assert.deepEqual(Columns.tableRefCol(s, 'resp', 'events'), { name: 'link', valueCol: 'date' });
+    assert.equal(Columns.tableRefCol(s, 'resp', 'nope'), null);   // no ref to that table
+    assert.equal(Columns.tableRefCol(s, 'events', 'resp'), null); // events has no ref column
+  });
+
   it('unknown column falls through to the empty info (no throw)', () => {
     assert.equal(Columns.colIsImage(schema, 'nope'), false);
     assert.equal(Columns.colIsUrl(schema, 'nope'), false);

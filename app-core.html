@@ -1023,6 +1023,13 @@ function createVueApp() {
       isRsvpName: function(name) { return !!(VIEWS[name] && VIEWS[name].rsvp); },
       // Build the self-service RSVP list (upcoming events + the current user's own response per event +
       // tallies), via the pure Rsvp module. Owner identity = the auth email (matches the firestore rules).
+      // The response<->event link is derived (not configured): the responses table's `ref` column pointing
+      // at the events table IS the link — its name is the linkColumn, its valueCol the eventKey (default:
+      // dateColumn). So no linkColumn/eventKey in the schema.
+      rsvpLink: function(cfg) {
+        var r = Columns.tableRefCol(SCHEMA, cfg.responses, cfg.events);
+        return { linkColumn: r && r.name, eventKey: (r && r.valueCol) || cfg.dateColumn };
+      },
       rsvpFor: function(name) {
         var v = VIEWS[name]; if (!v || !v.rsvp) return { events: [], statuses: [] };
         var cfg = v.rsvp;
@@ -1030,13 +1037,14 @@ function createVueApp() {
         var responses = this.dataCache[cfg.responses] || [];
         return Rsvp.build(events, responses, Object.assign({
           me: this.currentUserEmail || '', ownerCol: getOwnerCol(cfg.responses) || 'owner', today: fmtDate(new Date())
-        }, cfg));
+        }, cfg, this.rsvpLink(cfg)));
       },
       // Upsert the current user's response for one event: update my existing owned row, else create one
       // stamped with owner = my email. Self-service — not gated by role (firestore rules enforce ownership).
       setRsvp: function(name, eventKey, status) {
         var v = VIEWS[name]; if (!v || !v.rsvp) return;
         var cfg = v.rsvp, table = cfg.responses, ownerCol = getOwnerCol(table) || 'owner';
+        var linkColumn = this.rsvpLink(cfg).linkColumn;
         var me = this.currentUserEmail || '';
         if (!me) { this.notify('Sign in to respond'); return; }
         // Denormalize the table's roster policy onto the row so the (schema-blind) firestore read rule can
@@ -1044,7 +1052,7 @@ function createVueApp() {
         var pub = !(SCHEMA[table] && SCHEMA[table].privateRoster);
         if (!this.dataCache[table]) this.dataCache[table] = [];
         var rows = this.dataCache[table];
-        var mine = rows.find(function(r) { return r[cfg.linkColumn] === eventKey && r[ownerCol] === me; });
+        var mine = rows.find(function(r) { return r[linkColumn] === eventKey && r[ownerCol] === me; });
         // Removing the vote (toggled off -> empty status): delete my response row rather than leave an
         // empty-status orphan that would show as a blank line in the roster.
         if (!status) {
@@ -1057,7 +1065,7 @@ function createVueApp() {
         } else {
           var row = { id: this.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           getColumns(table).forEach(function(c) { if (!(c in row)) row[c] = ''; });
-          row[ownerCol] = me; row[cfg.linkColumn] = eventKey; row[cfg.statusColumn] = status; row.rosterPublic = pub;
+          row[ownerCol] = me; row[linkColumn] = eventKey; row[cfg.statusColumn] = status; row.rosterPublic = pub;
           rows.push(row);
           backend.putRow(this.tableMap[table], row, 'active');
         }

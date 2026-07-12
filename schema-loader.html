@@ -163,6 +163,18 @@ function validateSchema() {
       });
       (cvv.rotationSources || []).forEach(function(rs) { if (!rs || !rs.view) errors.push('calendar "' + v + '": each rotationSources entry needs a view'); });
     }
+    // RSVP view: the response<->event link is a REQUIRED `ref` column on the responses table pointing at
+    // the events table (its valueCol is the event key). There is no linkColumn/eventKey config.
+    if (view.rsvp) {
+      var rvp = view.rsvp;
+      if (!rvp.events || !SCHEMA[rvp.events]) errors.push('rsvp "' + v + '" references non-existent events table "' + rvp.events + '"');
+      if (!rvp.responses || !SCHEMA[rvp.responses]) errors.push('rsvp "' + v + '" references non-existent responses table "' + rvp.responses + '"');
+      else if (rvp.events && SCHEMA[rvp.events]) {
+        var rcols = SCHEMA[rvp.responses].columns || {}, hasLink = false;
+        for (var rc in rcols) { var rd = rcols[rc]; if (rd && typeof rd === 'object' && rd.type === 'ref' && rd.table === rvp.events) { hasLink = true; break; } }
+        if (!hasLink) errors.push('rsvp "' + v + '": responses table "' + rvp.responses + '" needs a `ref` column pointing at the events table "' + rvp.events + '" (it is the response↔event link — replaces linkColumn/eventKey)');
+      }
+    }
   }
   // Check list references
   for (var t2 in SCHEMA) { for (var c2 in SCHEMA[t2].columns) {

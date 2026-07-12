@@ -186,7 +186,7 @@
     "rsvps": {
       "columns": [
         { "name": "owner", "type": "owner" },
-        { "name": "practice", "type": "text" },
+        { "name": "practice", "type": "ref", "table": "practices", "valueCol": "date" },
         { "name": "response", "type": "select", "list": "rsvp_status" },
         { "name": "note", "type": "text" }
       ]
@@ -486,7 +486,6 @@
         "dateColumn": "date",
         "titleColumns": ["title", "opponent"],
         "responses": "rsvps",
-        "linkColumn": "practice",
         "statusColumn": "response",
         "picker": "toggle",
         "showCounts": true,
