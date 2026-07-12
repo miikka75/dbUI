@@ -780,17 +780,15 @@ gets an inline status toggle bound to the current user's **own** response row. U
 views, rsvp is **read-write** — but a participant writes only their own `owner`-stamped row (enforced by
 `firestore.rules`; the `owner` column type is the primitive). Engine: `rsvp.js`.
 
-The events live in one table; responses in another table that has an **`owner` column** (auto-stamped)
-plus a link column and a status column:
+The events live in one table; responses in another that has an **`owner` column** (auto-stamped), a
+**`ref` column pointing at the events table** (the response↔event link), and a status column:
 ```json
 { "name": "my_rsvp",
   "rsvp": {
     "events": "practices",          // REQUIRED — the events table
     "dateColumn": "date",            // REQUIRED — event date column (YYYY-MM-DD): upcoming filter + sort
-    "eventKey": "date",              // OPTIONAL — event column responses link by (default = dateColumn)
     "titleColumns": ["title", "opponent"], // OPTIONAL — joined with " — " for the event title
-    "responses": "rsvps",           // REQUIRED — the response table (must have an `owner` column)
-    "linkColumn": "practice",        // REQUIRED — response column holding the event key
+    "responses": "rsvps",           // REQUIRED — response table: needs an `owner` column + a `ref` to `events`
     "statusColumn": "response",      // REQUIRED — response column holding the status value
     "statuses": ["coming", "maybe", "out"], // OPTIONAL — inline options; omit to use the statusColumn's list
     "statusList": "rsvp_status",     // OPTIONAL — label translation namespace override (see below)
@@ -800,6 +798,12 @@ plus a link column and a status column:
   }
 }
 ```
+- **The response↔event link is a `ref` column (required, not configured):** the responses table must
+  have a `ref` column pointing at the `events` table — e.g. `rsvps.practice`:
+  `{ "type": "ref", "table": "practices", "valueCol": "date" }`. The view uses that column as the link
+  and its `valueCol` as the key each response matches (default `dateColumn`). So there is **no
+  `linkColumn`/`eventKey`** — and you get a validated relationship plus a ref-picker when editing responses.
+  (Load-time validation errors if the responses table has no such ref.)
 - **`statuses`** vs a **real list** (recommended): the cleanest setup is to make `statusColumn` a
   `select` with its own `list` (e.g. a `response` column `{ "type": "select", "list": "rsvp_status" }`)
   and **omit `statuses`** — the options then come from that list, which is **editable in the Lookup tab**.

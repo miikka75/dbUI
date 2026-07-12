@@ -2388,6 +2388,19 @@ test.describe('calendar view', () => {
     expect(joined).toContain('non-existent table');
   });
 
+  test('validateSchema requires the rsvp responses table to have a ref to the events table', async ({ page }) => {
+    await ensureAppReady(page);
+    const joined = await page.evaluate(() => {
+      // `notes` has no ref column pointing at `tasks` -> the required response<->event link is missing
+      window.VIEWS.rsvp_bad = { name: 'rsvp_bad', rsvp: { events: 'tasks', dateColumn: 'date', responses: 'notes', statusColumn: 'title' } };
+      var errs = window.validateSchema();
+      delete window.VIEWS.rsvp_bad;
+      return errs.join(' | ');
+    });
+    expect(joined).toContain('rsvp_bad');
+    expect(joined).toContain('ref');   // "needs a `ref` column pointing at the events table"
+  });
+
   test('calendar renders in a markdown page embed ({{view:cal}})', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
@@ -2694,9 +2707,9 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
       defaultLanguage: 'en',
       tables: {
         practices: { columns: [{ name: 'date', type: 'date' }, { name: 'title', type: 'text' }], archivable: true },
-        rsvps: { columns: [{ name: 'owner', type: 'owner' }, { name: 'practice', type: 'text' }, { name: 'status', type: 'text' }] }
+        rsvps: { columns: [{ name: 'owner', type: 'owner' }, { name: 'practice', type: 'ref', table: 'practices', valueCol: 'date' }, { name: 'status', type: 'text' }] }
       },
-      views: [{ name: 'signup', rsvp: { events: 'practices', dateColumn: 'date', eventKey: 'date', titleColumns: ['title'], responses: 'rsvps', linkColumn: 'practice', statusColumn: 'status', statuses: ['coming', 'maybe', 'out'], statusList: 'rsvp_status', picker: 'chips', rosterVisibility: 'all', showCounts: true } }],
+      views: [{ name: 'signup', rsvp: { events: 'practices', dateColumn: 'date', titleColumns: ['title'], responses: 'rsvps', statusColumn: 'status', statuses: ['coming', 'maybe', 'out'], statusList: 'rsvp_status', picker: 'chips', rosterVisibility: 'all', showCounts: true } }],
       nav: { items: [{ view: 'signup' }] }
     };
     await page.request.post('/api/resetData');
@@ -2726,9 +2739,9 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
       defaultLanguage: 'en',
       tables: {
         practices: { columns: [{ name: 'date', type: 'date' }, { name: 'title', type: 'text' }], archivable: true },
-        rsvps: { columns: [{ name: 'owner', type: 'owner' }, { name: 'practice', type: 'text' }, { name: 'response', type: 'select', list: 'rsvp_status' }] }
+        rsvps: { columns: [{ name: 'owner', type: 'owner' }, { name: 'practice', type: 'ref', table: 'practices', valueCol: 'date' }, { name: 'response', type: 'select', list: 'rsvp_status' }] }
       },
-      views: [{ name: 'signup', rsvp: { events: 'practices', dateColumn: 'date', titleColumns: ['title'], responses: 'rsvps', linkColumn: 'practice', statusColumn: 'response', rosterVisibility: 'all' } }],  // no `picker`
+      views: [{ name: 'signup', rsvp: { events: 'practices', dateColumn: 'date', titleColumns: ['title'], responses: 'rsvps', statusColumn: 'response', rosterVisibility: 'all' } }],  // no `picker`
       nav: { items: [{ view: 'signup' }] }
     };
     await page.request.post('/api/resetData');

@@ -41,6 +41,14 @@
     for (var c in cols) { if (columnType(schema, table, c) === 'owner') return c; }
     return null;
   }
+  // A table's `ref` column pointing at `targetTable` -> { name, valueCol }, else null. Used by the rsvp
+  // view to derive the response<->event link (linkColumn = name, eventKey = valueCol) from a ref column.
+  function tableRefCol(schema, table, targetTable) {
+    var cols = schema[table] && schema[table].columns;
+    if (!cols) return null;
+    for (var c in cols) { var d = cols[c]; if (d && typeof d === 'object' && d.type === 'ref' && d.table === targetTable) return { name: c, valueCol: d.valueCol }; }
+    return null;
+  }
 
   // Any-table scanners: a column name is typed the same wherever it appears (mirror clusters share
   // names), so "does column `col` have property X in ANY table?" is schema-static. These were O(tables)
@@ -99,7 +107,7 @@
 
   var C = {
     columnType: columnType, columnList: columnList, columnRef: columnRef,
-    isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol,
+    isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol, tableRefCol: tableRefCol,
     colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate,
     colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted,
     colIsImage: colIsImage, colIsUrl: colIsUrl, colPicker: colPicker,
