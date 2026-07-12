@@ -489,8 +489,8 @@
         "linkColumn": "practice",
         "statusColumn": "response",
         "picker": "toggle",
-        "showTally": true,
-        "roster": "all"
+        "showCounts": true,
+        "rosterVisibility": "all"
       }
     },
     {

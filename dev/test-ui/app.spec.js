@@ -2696,7 +2696,7 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
         practices: { columns: [{ name: 'date', type: 'date' }, { name: 'title', type: 'text' }], archivable: true },
         rsvps: { columns: [{ name: 'owner', type: 'owner' }, { name: 'practice', type: 'text' }, { name: 'status', type: 'text' }] }
       },
-      views: [{ name: 'signup', rsvp: { events: 'practices', dateColumn: 'date', eventKey: 'date', titleColumns: ['title'], responses: 'rsvps', linkColumn: 'practice', statusColumn: 'status', statuses: ['coming', 'maybe', 'out'], statusList: 'rsvp_status', picker: 'chips', roster: 'all', showTally: true } }],
+      views: [{ name: 'signup', rsvp: { events: 'practices', dateColumn: 'date', eventKey: 'date', titleColumns: ['title'], responses: 'rsvps', linkColumn: 'practice', statusColumn: 'status', statuses: ['coming', 'maybe', 'out'], statusList: 'rsvp_status', picker: 'chips', rosterVisibility: 'all', showCounts: true } }],
       nav: { items: [{ view: 'signup' }] }
     };
     await page.request.post('/api/resetData');
@@ -2728,7 +2728,7 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
         practices: { columns: [{ name: 'date', type: 'date' }, { name: 'title', type: 'text' }], archivable: true },
         rsvps: { columns: [{ name: 'owner', type: 'owner' }, { name: 'practice', type: 'text' }, { name: 'response', type: 'select', list: 'rsvp_status' }] }
       },
-      views: [{ name: 'signup', rsvp: { events: 'practices', dateColumn: 'date', titleColumns: ['title'], responses: 'rsvps', linkColumn: 'practice', statusColumn: 'response', roster: 'all' } }],  // no `picker`
+      views: [{ name: 'signup', rsvp: { events: 'practices', dateColumn: 'date', titleColumns: ['title'], responses: 'rsvps', linkColumn: 'practice', statusColumn: 'response', rosterVisibility: 'all' } }],  // no `picker`
       nav: { items: [{ view: 'signup' }] }
     };
     await page.request.post('/api/resetData');
