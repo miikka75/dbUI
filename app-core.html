@@ -3371,10 +3371,25 @@ function createVueApp() {
       + '</component>'
   });
 
+  // The current user's status control for one event — the 3 picker variants share this so the rsvp table
+  // and card layouts render the same widget. Emits 'set' with the chosen value ('' when deselected).
+  app.component('rsvp-picker', {
+    props: { options: { type: Array, default: function() { return []; } }, picker: { type: String, default: 'dropdown' }, value: { default: '' } },
+    emits: ['set'],
+    template: ''
+      + '<v-btn-toggle v-if="picker===\'toggle\'" :model-value="value" density="compact" variant="outlined" divided @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle">'
+      + '<v-btn v-for="o in options" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
+      + '</v-btn-toggle>'
+      + '<v-chip-group v-else-if="picker===\'chips\'" :model-value="value" @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle">'
+      + '<v-chip v-for="o in options" :key="o.value" :value="o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
+      + '</v-chip-group>'
+      + '<v-select v-else :model-value="value" :items="options" item-title="title" item-value="value" density="compact" variant="outlined" hide-details clearable placeholder="…" style="min-width:130px;max-width:170px" @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle"></v-select>'
+  });
+
   // RSVP / signup view — name/embed parameterized. Lists upcoming events (from rsvpFor) each with the
   // current user's own status toggle (setRsvp upserts their owner-stamped response row) and an optional
-  // tally. Self-service: works for any signed-in member regardless of role; firestore rules enforce that
-  // a member can only write their OWN response row.
+  // tally. Renders a one-row-per-event table on desktop and stacked cards on mobile. Self-service: works
+  // for any signed-in member regardless of role; firestore rules enforce a member writes only their OWN row.
   app.component('rsvp-view', {
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
     computed: {
@@ -3415,27 +3430,35 @@ function createVueApp() {
     },
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="rsvp-view">'
-      + '<v-list density="compact">'
-      + '<v-list-item v-for="ev in data.events" :key="ev.id" class="px-3 py-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.1)">'
-      + '<div class="d-flex align-center flex-wrap" style="gap:10px 14px">'
-      + '<div style="min-width:150px"><div style="font-weight:600">{{ toDateStr(ev.date) }}</div><div v-if="ev.title" style="font-size:0.85rem;opacity:0.7">{{ ev.title }}</div></div>'
-      + '<v-btn-toggle v-if="picker===\'toggle\'" :model-value="ev.myStatus" density="compact" variant="outlined" divided @update:model-value="set(ev.key, $event)" data-testid="rsvp-toggle">'
-      + '<v-btn v-for="o in options" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
-      + '</v-btn-toggle>'
-      + '<v-chip-group v-else-if="picker===\'chips\'" :model-value="ev.myStatus" @update:model-value="set(ev.key, $event)" data-testid="rsvp-toggle">'
-      + '<v-chip v-for="o in options" :key="o.value" :value="o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
-      + '</v-chip-group>'
-      + '<v-select v-else :model-value="ev.myStatus" :items="options" item-title="title" item-value="value" density="compact" variant="outlined" hide-details clearable style="max-width:150px" :placeholder="a.tOr(\'rsvp.choose\',\'…\')" @update:model-value="set(ev.key, $event)" data-testid="rsvp-toggle"></v-select>'
-      + '<v-spacer></v-spacer>'
-      + '<div v-if="cfg.showCounts && ev.total" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
+      + '<v-table v-if="!a.mobile" density="compact">'
+      + '<thead><tr>'
+      + '<th class="text-left">{{ a.tOr(\'rsvp.date\', \'Date\') }}</th>'
+      + '<th class="text-left">{{ a.tOr(\'rsvp.event\', \'Event\') }}</th>'
+      + '<th class="text-left">{{ a.tOr(\'rsvp.your_response\', \'Your response\') }}</th>'
+      + '<th v-if="cfg.showCounts" class="text-left">{{ a.tOr(\'rsvp.responses\', \'Responses\') }}</th>'
+      + '<th v-if="showRoster" class="text-left">{{ a.tOr(\'rsvp.who\', \'Who\') }}</th>'
+      + '</tr></thead>'
+      + '<tbody>'
+      + '<tr v-for="ev in data.events" :key="ev.id">'
+      + '<td style="white-space:nowrap;font-weight:600">{{ toDateStr(ev.date) }}</td>'
+      + '<td>{{ ev.title }}</td>'
+      + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker></td>'
+      + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
+      + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status"><span style="opacity:0.6">{{ g.label }}:</span> {{ g.names.join(", ") }}</div></td>'
+      + '</tr>'
+      + '<tr v-if="!data.events.length"><td colspan="5" style="opacity:0.6">{{ a.tOr(\'rsvp.none\', \'No upcoming events\') }}</td></tr>'
+      + '</tbody>'
+      + '</v-table>'
+      + '<div v-else class="pa-1">'
+      + '<v-card v-for="ev in data.events" :key="ev.id" variant="tonal" class="mb-2 pa-3">'
+      + '<div style="font-weight:600">{{ toDateStr(ev.date) }}</div>'
+      + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}</div>'
+      + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker>'
+      + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
+      + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status"><span style="opacity:0.6">{{ g.label }}:</span> {{ g.names.join(", ") }}</div></div>'
+      + '</v-card>'
+      + '<div v-if="!data.events.length" class="pa-2" style="opacity:0.6">{{ a.tOr(\'rsvp.none\', \'No upcoming events\') }}</div>'
       + '</div>'
-      + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster">'
-      + '<div v-for="g in rosterGroups(ev)" :key="g.status" class="d-flex" style="gap:6px">'
-      + '<span style="min-width:70px;opacity:0.6">{{ g.label }}:</span><span>{{ g.names.join(", ") }}</span>'
-      + '</div></div>'
-      + '</v-list-item>'
-      + '<v-list-item v-if="!data.events.length"><span style="opacity:0.6">{{ a.tOr(\'rsvp.none\', \'No upcoming events\') }}</span></v-list-item>'
-      + '</v-list>'
       + '</component>'
   });
 

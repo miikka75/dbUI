@@ -2762,6 +2762,43 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await expect(page.locator('[data-testid="rsvp-toggle"].v-chip-group, [data-testid="rsvp-toggle"].v-btn-toggle')).toHaveCount(0);
   });
 
+  test('rsvp renders a one-row-per-event table on desktop, stacked cards on mobile', async ({ page }) => {
+    test.setTimeout(20000);
+    const schema = {
+      defaultLanguage: 'en',
+      tables: {
+        practices: { columns: [{ name: 'date', type: 'date' }, { name: 'title', type: 'text' }], archivable: true },
+        rsvps: { columns: [{ name: 'owner', type: 'owner' }, { name: 'practice', type: 'ref', table: 'practices', valueCol: 'date' }, { name: 'response', type: 'select', list: 'rsvp_status' }] }
+      },
+      views: [{ name: 'signup', rsvp: { events: 'practices', dateColumn: 'date', titleColumns: ['title'], responses: 'rsvps', statusColumn: 'response', showCounts: true, rosterVisibility: 'all' } }],
+      nav: { items: [{ view: 'signup' }] }
+    };
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      const d = (n) => { const x = new Date(); x.setDate(x.getDate() + n); return window.fmtDate(x); };
+      app.dataCache['practices'] = [{ id: 'p1', date: d(3), title: 'Match' }];
+      app.dataCache['rsvps'] = [{ id: 'r1', owner: 'you@x.com', practice: d(3), response: 'coming' }];
+      app.listsCache = Object.assign({}, app.listsCache, { rsvp_status: ['coming', 'maybe', 'out'] });
+      app.selectTab('signup');
+    });
+    await page.waitForTimeout(150);
+    // desktop -> a real table with a header row + one row per event
+    await expect(page.locator('[data-testid="rsvp-view"] table thead')).toBeVisible();
+    await expect(page.locator('[data-testid="rsvp-view"] tbody tr')).toHaveCount(1);
+    await expect(page.locator('[data-testid="rsvp-view"] .v-card')).toHaveCount(0);
+    // mobile -> stacked cards, no table
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.waitForTimeout(250);
+    await expect(page.locator('[data-testid="rsvp-view"] table')).toHaveCount(0);
+    await expect(page.locator('[data-testid="rsvp-view"] .v-card')).toHaveCount(1);
+  });
+
   test('schema.theme brands the live Vuetify palette + regenerates the CSS variables', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
