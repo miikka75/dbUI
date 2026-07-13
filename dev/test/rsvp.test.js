@@ -85,4 +85,30 @@ describe('rsvp.js — build', () => {
     assert.equal(r.events[0].myRowId, 'r2');
     assert.equal(r.events[1].myStatus, '');   // you@x didn't respond to p2
   });
+
+  it('two events on the same date stay separate when linked by id (not date)', () => {
+    const evs = [
+      { id: 'e1', date: '2026-07-01', title: 'Morning', opponent: '' },
+      { id: 'e2', date: '2026-07-01', title: 'Evening', opponent: '' }
+    ];
+    const byId = { me: 'me@x', dateColumn: 'date', eventKey: 'id', linkColumn: 'practice', statusColumn: 'status', titleColumns: ['title'], today: '2026-07-01' };
+    const rById = Rsvp.build(evs, [
+      { id: 'r1', owner: 'me@x',  practice: 'e1', status: 'coming' },
+      { id: 'r2', owner: 'you@x', practice: 'e2', status: 'out' }
+    ], byId);
+    const e1 = rById.events.find(e => e.id === 'e1'), e2 = rById.events.find(e => e.id === 'e2');
+    assert.deepEqual(e1.tally, { coming: 1 });   // each event keeps only its own response
+    assert.deepEqual(e2.tally, { out: 1 });
+    assert.equal(e1.myStatus, 'coming');
+    assert.equal(e2.myStatus, '');               // I didn't respond to e2
+
+    // Contrast — keying by the (non-unique) date merges the two events' responses. This is the bug the
+    // id link fixes: both responses store the same "2026-07-01" and land on BOTH events.
+    const rByDate = Rsvp.build(evs, [
+      { id: 'r1', owner: 'me@x',  practice: '2026-07-01', status: 'coming' },
+      { id: 'r2', owner: 'you@x', practice: '2026-07-01', status: 'out' }
+    ], Object.assign({}, byId, { eventKey: 'date' }));
+    assert.deepEqual(rByDate.events.find(e => e.id === 'e1').tally, { coming: 1, out: 1 });
+    assert.deepEqual(rByDate.events.find(e => e.id === 'e2').tally, { coming: 1, out: 1 });
+  });
 });

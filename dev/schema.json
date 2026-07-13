@@ -186,7 +186,7 @@
     "rsvps": {
       "columns": [
         { "name": "owner", "type": "owner" },
-        { "name": "practice", "type": "ref", "table": "practices", "valueCol": "date" },
+        { "name": "practice", "type": "ref", "table": "practices", "valueCol": "id" },
         { "name": "response", "type": "select", "list": "rsvp_status" },
         { "name": "note", "type": "text" }
       ]

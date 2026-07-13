@@ -2643,19 +2643,19 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
         { id: 'p1', date: d(3), title: 'Practice', opponent: '' },
         { id: 'p2', date: d(10), title: 'Match', opponent: 'Reds' }
       ];
-      app.dataCache['rsvps'] = [{ id: 'other', owner: 'you@x.com', practice: d(3), response: 'maybe' }]; // someone else's
+      app.dataCache['rsvps'] = [{ id: 'other', owner: 'you@x.com', practice: 'p1', response: 'maybe' }]; // someone else's — links by event id
       app.listsCache = Object.assign({}, app.listsCache, { rsvp_status: ['coming', 'maybe', 'out'] }); // Lookup-editable list
       const optionVals = app.getListOptions('response').map(o => o.value);   // options come FROM the list, not inline
       app.selectTab('my_rsvp');
       const before = app.rsvpFor('my_rsvp').events.map(e => e.myStatus);   // I haven't responded
-      app.setRsvp('my_rsvp', d(3), 'coming');                              // respond to the first practice
+      app.setRsvp('my_rsvp', 'p1', 'coming');                              // respond to the first practice (by id)
       const after = app.rsvpFor('my_rsvp');
       const myRow = app.dataCache['rsvps'].find(x => x.owner === 'me@x.com');
       const roster = after.events[0].participants;                       // who registered (public roster)
-      app.setRsvp('my_rsvp', d(3), 'out');                                // change my mind -> UPSERT (no dup row)
+      app.setRsvp('my_rsvp', 'p1', 'out');                                // change my mind -> UPSERT (no dup row)
       const myRow2 = app.dataCache['rsvps'].find(x => x.owner === 'me@x.com');
       const myRowCountBeforeRemove = app.dataCache['rsvps'].filter(x => x.owner === 'me@x.com').length;
-      app.setRsvp('my_rsvp', d(3), '');                                   // REMOVE my vote (toggle off)
+      app.setRsvp('my_rsvp', 'p1', '');                                   // REMOVE my vote (toggle off)
       const removed = app.rsvpFor('my_rsvp');
       return {
         kind: app.viewKind,
@@ -2707,7 +2707,7 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
       defaultLanguage: 'en',
       tables: {
         practices: { columns: [{ name: 'date', type: 'date' }, { name: 'title', type: 'text' }], archivable: true },
-        rsvps: { columns: [{ name: 'owner', type: 'owner' }, { name: 'practice', type: 'ref', table: 'practices', valueCol: 'date' }, { name: 'status', type: 'text' }] }
+        rsvps: { columns: [{ name: 'owner', type: 'owner' }, { name: 'practice', type: 'ref', table: 'practices', valueCol: 'id' }, { name: 'status', type: 'text' }] }
       },
       views: [{ name: 'signup', rsvp: { events: 'practices', dateColumn: 'date', titleColumns: ['title'], responses: 'rsvps', statusColumn: 'status', statuses: ['coming', 'maybe', 'out'], statusList: 'rsvp_status', picker: 'chips', rosterVisibility: 'all', showCounts: true } }],
       nav: { items: [{ view: 'signup' }] }
@@ -2739,7 +2739,7 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
       defaultLanguage: 'en',
       tables: {
         practices: { columns: [{ name: 'date', type: 'date' }, { name: 'title', type: 'text' }], archivable: true },
-        rsvps: { columns: [{ name: 'owner', type: 'owner' }, { name: 'practice', type: 'ref', table: 'practices', valueCol: 'date' }, { name: 'response', type: 'select', list: 'rsvp_status' }] }
+        rsvps: { columns: [{ name: 'owner', type: 'owner' }, { name: 'practice', type: 'ref', table: 'practices', valueCol: 'id' }, { name: 'response', type: 'select', list: 'rsvp_status' }] }
       },
       views: [{ name: 'signup', rsvp: { events: 'practices', dateColumn: 'date', titleColumns: ['title'], responses: 'rsvps', statusColumn: 'response', rosterVisibility: 'all' } }],  // no `picker`
       nav: { items: [{ view: 'signup' }] }
