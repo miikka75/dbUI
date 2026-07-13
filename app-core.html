@@ -1024,11 +1024,12 @@ function createVueApp() {
       // Build the self-service RSVP list (upcoming events + the current user's own response per event +
       // tallies), via the pure Rsvp module. Owner identity = the auth email (matches the firestore rules).
       // The response<->event link is derived (not configured): the responses table's `ref` column pointing
-      // at the events table IS the link — its name is the linkColumn, its valueCol the eventKey (default:
-      // dateColumn). So no linkColumn/eventKey in the schema.
+      // at the events table IS the link — its name is the linkColumn, its valueCol the eventKey. Point the
+      // ref at the events' `id` (unique) so distinct events on the same date don't collide; `id` is also the
+      // fallback. `dateColumn` is only for the upcoming filter + sort, not the link. No linkColumn/eventKey.
       rsvpLink: function(cfg) {
         var r = Columns.tableRefCol(SCHEMA, cfg.responses, cfg.events);
-        return { linkColumn: r && r.name, eventKey: (r && r.valueCol) || cfg.dateColumn };
+        return { linkColumn: r && r.name, eventKey: (r && r.valueCol) || 'id' };
       },
       rsvpFor: function(name) {
         var v = VIEWS[name]; if (!v || !v.rsvp) return { events: [], statuses: [] };

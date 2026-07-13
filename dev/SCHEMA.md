@@ -799,11 +799,13 @@ The events live in one table; responses in another that has an **`owner` column*
 }
 ```
 - **The response↔event link is a `ref` column (required, not configured):** the responses table must
-  have a `ref` column pointing at the `events` table — e.g. `rsvps.practice`:
-  `{ "type": "ref", "table": "practices", "valueCol": "date" }`. The view uses that column as the link
-  and its `valueCol` as the key each response matches (default `dateColumn`). So there is **no
-  `linkColumn`/`eventKey`** — and you get a validated relationship plus a ref-picker when editing responses.
-  (Load-time validation errors if the responses table has no such ref.)
+  have a `ref` column pointing at the `events` table, targeting its **`id`** — e.g. `rsvps.practice`:
+  `{ "type": "ref", "table": "practices", "valueCol": "id" }`. The view uses that column as the link and
+  its `valueCol` as the key each response matches (default `id`). **Link by `id`, not a data column like
+  `date`** — `id` is the only unique key, so two events on the same date stay separate (a `date` link would
+  merge their responses). `dateColumn` is only for the upcoming filter + sort, never the link. So there is
+  **no `linkColumn`/`eventKey`** — you get a validated, collision-free relationship plus a ref-picker when
+  editing responses. (Load-time validation errors if the responses table has no such ref.)
 - **`statuses`** vs a **real list** (recommended): the cleanest setup is to make `statusColumn` a
   `select` with its own `list` (e.g. a `response` column `{ "type": "select", "list": "rsvp_status" }`)
   and **omit `statuses`** — the options then come from that list, which is **editable in the Lookup tab**.

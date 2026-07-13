@@ -49,31 +49,31 @@
         "id": "seed-chore_log-1",
         "chore": "Dishes",
         "person": "Ann",
-        "done_on": "2026-07-12"
+        "done_on": "2026-07-13"
       },
       {
         "id": "seed-chore_log-2",
         "chore": "Vacuum",
         "person": "Ann",
-        "done_on": "2026-07-12"
+        "done_on": "2026-07-13"
       },
       {
         "id": "seed-chore_log-3",
         "chore": "Mow lawn",
         "person": "Cara",
-        "done_on": "2026-07-12"
+        "done_on": "2026-07-13"
       },
       {
         "id": "seed-chore_log-4",
         "chore": "Trash",
         "person": "Ann",
-        "done_on": "2026-07-11"
+        "done_on": "2026-07-12"
       },
       {
         "id": "seed-chore_log-5",
         "chore": "Vacuum",
         "person": "Bob",
-        "done_on": "2026-07-11"
+        "done_on": "2026-07-12"
       },
       {
         "id": "seed-chore_log-6",
@@ -133,7 +133,7 @@
     "tasks": [
       {
         "id": "seed-tasks-1",
-        "date": "2026-07-12",
+        "date": "2026-07-13",
         "title": "Fix roof",
         "status": "open",
         "assigned_to": "Ann",
@@ -141,7 +141,7 @@
       },
       {
         "id": "seed-tasks-2",
-        "date": "2026-07-11",
+        "date": "2026-07-12",
         "title": "Paint fence",
         "status": "in_progress",
         "assigned_to": "Bob",
@@ -151,7 +151,7 @@
     "notes": [
       {
         "id": "seed-notes-1",
-        "date": "2026-07-12",
+        "date": "2026-07-13",
         "title": "Weekly sync",
         "content": "Discussed the roster and open tasks.",
         "author": "Cara",
@@ -161,19 +161,19 @@
     "practices": [
       {
         "id": "seed-practices-1",
-        "date": "2026-07-15",
+        "date": "2026-07-16",
         "title": "League match",
         "opponent": "Riverside"
       },
       {
         "id": "seed-practices-2",
-        "date": "2026-07-19",
+        "date": "2026-07-20",
         "title": "Home game",
         "opponent": "Lakeside"
       },
       {
         "id": "seed-practices-3",
-        "date": "2026-07-24",
+        "date": "2026-07-25",
         "title": "Cup fixture",
         "opponent": "Hillcrest"
       }
@@ -182,7 +182,7 @@
       {
         "id": "seed-rsvps-1",
         "owner": "local@dev",
-        "practice": "2026-07-15",
+        "practice": "seed-practices-1",
         "response": "coming",
         "note": "Bringing water",
         "rosterPublic": true
@@ -190,7 +190,7 @@
       {
         "id": "seed-rsvps-2",
         "owner": "bob@dev",
-        "practice": "2026-07-15",
+        "practice": "seed-practices-1",
         "response": "coming",
         "note": "",
         "rosterPublic": true
@@ -198,7 +198,7 @@
       {
         "id": "seed-rsvps-3",
         "owner": "cara@dev",
-        "practice": "2026-07-15",
+        "practice": "seed-practices-1",
         "response": "maybe",
         "note": "Depends on work",
         "rosterPublic": true
@@ -206,7 +206,7 @@
       {
         "id": "seed-rsvps-4",
         "owner": "local@dev",
-        "practice": "2026-07-19",
+        "practice": "seed-practices-2",
         "response": "maybe",
         "note": "",
         "rosterPublic": true
@@ -214,7 +214,7 @@
       {
         "id": "seed-rsvps-5",
         "owner": "dan@dev",
-        "practice": "2026-07-19",
+        "practice": "seed-practices-2",
         "response": "out",
         "note": "Away",
         "rosterPublic": true
@@ -222,7 +222,7 @@
       {
         "id": "seed-rsvps-6",
         "owner": "bob@dev",
-        "practice": "2026-07-24",
+        "practice": "seed-practices-3",
         "response": "coming",
         "note": "",
         "rosterPublic": true
@@ -461,14 +461,14 @@
   },
   "config": {
     "rotationAnchors": {
-      "crewrota": "2026-07-06"
+      "crewrota": "2026-07-13"
     },
     "rotationRanges": {
       "crewrota": {
-        "from": "2026-06-22",
+        "from": "2026-06-29",
         "periods": 8
       }
     }
   },
-  "generatedAt": "2026-07-12T12:35:58.794Z"
+  "generatedAt": "2026-07-13T05:10:34.386Z"
 }

@@ -59,13 +59,13 @@ describe('demo-bundle.json', () => {
     }
   });
 
-  it('RSVP data links responses to events (rsvps.practice -> a practices.date)', () => {
+  it('RSVP data links responses to events by id (rsvps.practice -> a practices.id)', () => {
     const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s);
-    const eventKeys = new Set(bundle.tables.practices.map(p => p.date));
+    const eventIds = new Set(bundle.tables.practices.map(p => p.id));
     for (const p of bundle.tables.practices) assert.ok(isDate(p.date), 'bad practice date: ' + p.date);
     const statuses = new Set(['coming', 'maybe', 'out']);
     for (const r of bundle.tables.rsvps) {
-      assert.ok(eventKeys.has(r.practice), 'rsvp links to a non-existent practice: ' + r.practice);
+      assert.ok(eventIds.has(r.practice), 'rsvp links to a non-existent practice id: ' + r.practice); // link by id, not date
       assert.ok(r.owner, 'rsvp missing owner');
       assert.ok(statuses.has(r.response), 'unexpected rsvp response: ' + r.response);
     }
