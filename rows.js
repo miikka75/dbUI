@@ -251,10 +251,17 @@
     return rows;
   }
 
+  // A filter value that is a per-user TOKEN, not a literal value. '@me' is rewritten to the signed-in
+  // user's profile display name at filter time (resolveMeTokens in app-core), so it must never be
+  // seeded into a list or locked: doing so offers it in a select picker, lets it be stored as data
+  // (a phantom "@me" person that no @me filter can ever match), and mints a list.<list>.@me
+  // translation key. Add any future token here so both seeding and locking skip it.
+  function isFilterToken(v) { return v === '@me'; }
+
   var M = {
     condMatches: condMatches, _withinPeriod: _withinPeriod, filterRows: filterRows, filterToOr: filterToOr,
     convertViewFilters: convertViewFilters, sortByCol: sortByCol, buildRows: buildRows,
-    aggregateRows: aggregateRows, resolveComputed: resolveComputed
+    aggregateRows: aggregateRows, resolveComputed: resolveComputed, isFilterToken: isFilterToken
   };
   if (isNode) module.exports = M;
   else { root.Rows = M; for (var k in M) root[k] = M[k]; } // also expose each as a global for bare callers

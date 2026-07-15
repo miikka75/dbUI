@@ -156,3 +156,16 @@ describe('rows.js — resolveComputed', () => {
     assert.equal(rows[0].kind, 'kid');    // Cara categorized via the kids list
   });
 });
+
+describe('rows.js — isFilterToken', () => {
+  it('@me is a token, not a literal list value', () => {
+    assert.equal(Rows.isFilterToken('@me'), true);
+  });
+  it('ordinary values (including other @-strings) are literal', () => {
+    // Deliberately narrow: only tokens the resolver actually rewrites. A list value that merely
+    // starts with '@' (a handle, say) is real data and must still seed/lock.
+    for (const v of ['Ann', '', 'me', '@meeting', '@ann', '@Me', 'open']) {
+      assert.equal(Rows.isFilterToken(v), false, JSON.stringify(v) + ' should be literal');
+    }
+  });
+});
