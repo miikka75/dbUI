@@ -251,7 +251,8 @@ apps-script/                   ← Apps Script deployment files (GAS-only)
 dev/                           ← Local development (dev-server-only files live here)
   schema.json                  ← schema definition (tables, views, settings)
   schema.js                    ← test helper (parses schema.json)
-  migrate-schema.js            ← schema migration/normalization tool (handles export bundles)
+  demo-bundle.json             ← portable demo DATA (rows/lists/translations), imported over schema.json
+  seed-import.js               ← applies demo-bundle.json to the dev server (--regen rebuilds it)
   package.json                 ← dependencies + scripts (npm start/test)
   server.js                    ← HTTP server (port 3000; --fs for JSON-file storage)
   backend-local.js             ← SQLite backend (better-sqlite3)
@@ -273,7 +274,7 @@ source of truth. It covers: `icon`/title, `theme` (brand palette), tables (colum
 embeds (inline / named-view / `filterBy`), filters (`$or`/`$and`/`matchList`), aggregate views
 (`groupBy`/`collect`/`collectWith`), computed columns (incl. rotation columns — occurrence/calendar),
 markdown documents and their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens, `nav` (layout, groups,
-`bottomNav`), lists & translations, and `migrate-schema.js`.
+`bottomNav`), and lists & translations.
 
 ```json
 {
