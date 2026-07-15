@@ -277,6 +277,17 @@
         }
       },
       "layout": "table"
+    },
+    {
+      "name": "cal_fx",
+      "calendar": {
+        "source": "tasks",
+        "dateColumn": "date",
+        "titleColumns": [
+          "title"
+        ],
+        "defaultView": "month"
+      }
     }
   ],
   "nav": {

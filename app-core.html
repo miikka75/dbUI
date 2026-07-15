@@ -960,6 +960,37 @@ function createVueApp() {
       hashColor: function(key) { return Calendar.hashColor(key); },
       // Resolve a calendar view's source specs / rotation overlays (pure over VIEWS -> calendar.js).
       calSources: function(name) { return Calendar.sources(VIEWS, name); },
+      // Day-add is only offered when the calendar has exactly ONE source carrying a date column: a
+      // multi-source calendar has no unambiguous table to add the row to. Write access is checked
+      // across the whole mirror cluster, as addRow writes to all of it.
+      canCalendarAdd: function(name) {
+        var srcs = this.calSources(name);
+        if (srcs.length !== 1) return false;
+        var s = srcs[0];
+        if (!s || !s.table || !s.dateColumn || !SCHEMA[s.table]) return false;
+        if (this.viewReadonly(name)) return false;
+        var allowed = this.userAllowedTables;
+        if (!allowed) return true;
+        return withMirrors([s.table]).every(function(t) { return allowed.indexOf(t) >= 0; });
+      },
+      // Create a row on `date` in that single source, then land on the source table. The calendar's
+      // day panel is read-only (cal-event-row renders, never edits), so adding in place would strand
+      // a blank row the user cannot fill in; the table is where it becomes editable.
+      calendarAddOnDay: function(name, date) {
+        if (!date || !this.canCalendarAdd(name)) return;
+        var self = this, s = this.calSources(name)[0], primary = s.table, id = this.generateId();
+        withMirrors([primary]).forEach(function(src) {
+          var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+          getColumns(src).forEach(function(c) { if (!row[c]) row[c] = ''; });
+          var oc = getOwnerCol(src); if (oc) row[oc] = self.currentUserEmail || '';   // stamp owner on create
+          if (getColumns(src).indexOf(s.dateColumn) >= 0) row[s.dateColumn] = date;   // the point: prefill the clicked day
+          if (!self.dataCache[src]) self.dataCache[src] = [];
+          self.dataCache[src].push(row);
+          backend.putRow(self.tableMap[src], row, 'active');
+        });
+        this.selectTab(primary);
+        this.notify('Row added');
+      },
       calRotationSources: function(name) { return Calendar.rotationSources(VIEWS, name); },
       // Visible grid window {from, toExclusive} for a calendar's anchor+mode (month/list -> month grid,
       // week -> week strip). Bounds rotation generation to what's actually on screen.
@@ -3135,7 +3166,7 @@ function createVueApp() {
       + '<div style="padding:8px">'
       + '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:0.62rem;opacity:0.55;text-transform:uppercase;margin-bottom:3px"><div v-for="d in dowNames" :key="d" style="text-align:center">{{ d }}</div></div>'
       + '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">'
-      + '<div v-for="c in cells" :key="c.date" :style="{ position:\'relative\', height:\'34px\', display:\'flex\', alignItems:\'center\', justifyContent:\'center\', borderRadius:\'6px\', fontSize:\'0.82rem\', opacity: c.inMonth?1:0.3, cursor: c.count?\'pointer\':\'default\', background: (c.date===selected?\'rgba(var(--v-theme-primary),0.22)\':(c.count?\'rgba(var(--v-theme-on-surface),0.04)\':\'transparent\')), outline: (c.date===selected?\'1px solid rgb(var(--v-theme-primary))\':\'none\') }" @click="c.count?$emit(\'select\',c.date):null">'
+      + '<div v-for="c in cells" :key="c.date" :data-testid="\'cal-cell-\' + c.date" :style="{ position:\'relative\', height:\'34px\', display:\'flex\', alignItems:\'center\', justifyContent:\'center\', borderRadius:\'6px\', fontSize:\'0.82rem\', opacity: c.inMonth?1:0.3, cursor:\'pointer\', background: (c.date===selected?\'rgba(var(--v-theme-primary),0.22)\':(c.count?\'rgba(var(--v-theme-on-surface),0.04)\':\'transparent\')), outline: (c.date===selected?\'1px solid rgb(var(--v-theme-primary))\':\'none\') }" @click="$emit(\'select\',c.date)">'
       + '<span :style="c.isToday?\'background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-weight:600\':\'\'">{{ c.day }}</span>'
       + '<span v-if="c.count" style="position:absolute;top:1px;right:3px;background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));font-size:0.6rem;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center">{{ c.count }}</span>'
       + '</div></div></div>'
@@ -3145,7 +3176,7 @@ function createVueApp() {
     props: CAL_BODY_PROPS, emits: ['select'],
     template: ''
       + '<div style="padding:8px"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">'
-      + '<div v-for="(c,wi) in cells" :key="c.date" :style="{ position:\'relative\', height:\'52px\', display:\'flex\', flexDirection:\'column\', alignItems:\'center\', justifyContent:\'center\', borderRadius:\'6px\', cursor: c.count?\'pointer\':\'default\', background: (c.date===selected?\'rgba(var(--v-theme-primary),0.22)\':(c.count?\'rgba(var(--v-theme-on-surface),0.04)\':\'transparent\')), outline: (c.date===selected?\'1px solid rgb(var(--v-theme-primary))\':\'none\') }" @click="c.count?$emit(\'select\',c.date):null">'
+      + '<div v-for="(c,wi) in cells" :key="c.date" :style="{ position:\'relative\', height:\'52px\', display:\'flex\', flexDirection:\'column\', alignItems:\'center\', justifyContent:\'center\', borderRadius:\'6px\', cursor:\'pointer\', background: (c.date===selected?\'rgba(var(--v-theme-primary),0.22)\':(c.count?\'rgba(var(--v-theme-on-surface),0.04)\':\'transparent\')), outline: (c.date===selected?\'1px solid rgb(var(--v-theme-primary))\':\'none\') }" @click="$emit(\'select\',c.date)">'
       + '<span style="font-size:0.6rem;opacity:0.55">{{ dowNames[wi] }}</span>'
       + '<span :style="c.isToday?\'background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-weight:600\':\'font-weight:600\'">{{ c.day }}</span>'
       + '<span v-if="c.count" style="position:absolute;top:2px;right:4px;background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));font-size:0.58rem;font-weight:700;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center">{{ c.count }}</span>'
@@ -3167,13 +3198,15 @@ function createVueApp() {
   });
 
   app.component('cal-day-panel', {
-    props: { label: String, events: { type: Array, default: function() { return []; } } },
+    props: { label: String, events: { type: Array, default: function() { return []; } }, canAdd: { type: Boolean, default: false } },
+    emits: ['add'],
     methods: ROOT_PROXY,
     template: ''
       + '<div><v-divider></v-divider><div style="padding:10px 12px">'
       + '<div style="font-weight:600;margin-bottom:6px">{{ label }} <span style="opacity:0.5;font-weight:400">· {{ events.length }} {{ t(\'cal.items\') }}</span></div>'
       + '<div v-if="!events.length" style="opacity:0.6;font-size:0.85rem">{{ t(\'cal.no_events\') }}</div>'
       + '<cal-event-row v-for="ev in events" :key="ev.id" :ev="ev" :compact="true"></cal-event-row>'
+      + '<v-btn v-if="canAdd" variant="text" size="small" prepend-icon="mdi-plus" class="mt-1" @click="$emit(\'add\')" data-testid="cal-add-on-day">{{ t(\'cal.add_on_day\') }}</v-btn>'
       + '</div></div>'
   });
 
@@ -3269,6 +3302,7 @@ function createVueApp() {
       selLabel: function() { if (!this.sel) return ''; var p = this.sel.split('-'); return new Intl.DateTimeFormat(appInstance.calLocale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, +p[2])); },
       listDays: function() { var ev = this.events; return Object.keys(ev).filter(function(k) { return k !== '__undated__'; }).sort().map(function(k) { var p = k.split('-'); return { date: k, label: new Intl.DateTimeFormat(appInstance.calLocale(), { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: ev[k] }; }); },
       undated: function() { return this.events['__undated__'] || []; },
+      canAdd: function() { return appInstance.canCalendarAdd(this.viewName); },
       body: function() { return window.viewPartFor('calendar', this.displayMode) || 'cal-agenda'; }
     },
     methods: Object.assign({}, ROOT_PROXY, {
@@ -3276,6 +3310,7 @@ function createVueApp() {
       next: function() { this.anchor = addIntervals(this.anchor, 1, this.mode === 'week' ? 'weekly' : 'monthly'); },
       goToday: function() { this.anchor = this.sel = appInstance._calToday(); },
       setMode: function(m) { this.mode = m; },
+      addOnDay: function() { appInstance.calendarAddOnDay(this.viewName, this.sel); },
       selectDay: function(d) { this.sel = d; }
     }),
     template: ''
@@ -3291,7 +3326,7 @@ function createVueApp() {
       + '<v-btn value="list" size="small">{{ t(\'cal.list\') }}</v-btn></v-btn-toggle></div>'
       + '<v-divider></v-divider>'
       + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
-      + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents"></cal-day-panel>'
+      + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents" :can-add="canAdd" @add="addOnDay"></cal-day-panel>'
       + '</component>'
   });
 

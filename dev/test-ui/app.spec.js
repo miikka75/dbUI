@@ -2320,6 +2320,49 @@ test.describe('access control: user matching + fail-closed', () => {
 });
 
 test.describe('calendar view', () => {
+  test('add-on-day: prefills the clicked date, lands on the table; gated to one writable source', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.cal_add   = { name: 'cal_add', calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] } };
+      window.VIEWS.cal_multi = { name: 'cal_multi', calendar: { sources: [{ table: 'tasks', dateColumn: 'date' }, { table: 'notes', dateColumn: 'date' }] } };
+      window.VIEWS.cal_ro    = { name: 'cal_ro', readonly: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+      app.dataCache['tasks'] = [];
+      app.userList = []; app.usersLoaded = true;                 // admin / unrestricted
+      const gates = {
+        single: app.canCalendarAdd('cal_add'),
+        multi: app.canCalendarAdd('cal_multi'),                  // ambiguous target -> no add offered
+        readonly: app.canCalendarAdd('cal_ro')
+      };
+      app.calendarAddOnDay('cal_add', '2026-07-09');             // a day with NO events
+      const rows = app.dataCache['tasks'];
+      return { gates, added: rows.length, date: rows[0] && rows[0].date, title: rows[0] && rows[0].title, landedOn: app.currentTable };
+    });
+    expect(r.gates).toEqual({ single: true, multi: false, readonly: false });
+    expect(r.added).toBe(1);
+    expect(r.date).toBe('2026-07-09');                           // the clicked day, prefilled
+    expect(r.title).toBe('');                                    // rest blank, to be filled in on the table
+    expect(r.landedOn).toBe('tasks');                            // where the new row is editable
+  });
+
+  test('a day with no items is selectable (empty day panel, not an inert cell)', async ({ page }) => {
+    await ensureAppReady(page);
+    const anchor = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.dataCache['tasks'] = [{ id: 'x', date: app._calToday(), title: 'Today thing' }];
+      app.userList = []; app.usersLoaded = true;
+      app.selectTab('cal_fx');                                    // selectTab drives the render; assigning currentTable does not
+      return app._calToday();
+    });
+    const cal = page.locator('[data-testid="cal-view"]');
+    await expect(cal).toBeVisible();
+    // Same month as the anchor, but a day that carries no rows. Pick one that isn't today.
+    const [y, m] = anchor.split('-');
+    const emptyDay = anchor.endsWith('-09') ? `${y}-${m}-10` : `${y}-${m}-09`;
+    await cal.locator(`[data-testid="cal-cell-${emptyDay}"]`).click();
+    await expect(cal).toContainText('cal.no_events');             // the panel followed the click to an empty day
+  });
+
   test('calEventsFor buckets rows by date (+ undated), month cells + counts + selected day', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
