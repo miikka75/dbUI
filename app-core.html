@@ -515,6 +515,7 @@ function createVueApp() {
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset',
          'cal.today', 'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
+         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name',
          'period.this_week', 'period.weeks_ago', 'period.current',
@@ -552,6 +553,11 @@ function createVueApp() {
                 (v.rotation.slots || []).forEach(function(a) { keys.push('field.' + a); });
                 (v.rotation.columns || []).forEach(function(c) { keys.push('field.' + colName(c)); });
               }
+              if (v.pivot) {                                                         // pivot: axis headers come from row/column, not v.columns
+                if (v.pivot.row) keys.push('field.' + v.pivot.row);
+                if (v.pivot.column) keys.push('field.' + v.pivot.column);
+              }
+              if (v.groupBy && v.groupBy.column) keys.push('field.' + v.groupBy.column);  // aggregate/leaderboard group column
               (v.columns || []).forEach(function(c) {
                 if (typeof c !== 'object') { keys.push('field.' + c); return; }          // plain column name
                 if (c.sources && c.columns) {                                            // inline embed
@@ -3432,32 +3438,32 @@ function createVueApp() {
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="rsvp-view">'
       + '<v-table v-if="!a.mobile" density="compact">'
       + '<thead><tr>'
-      + '<th class="text-left">{{ a.tOr(\'rsvp.date\', \'Date\') }}</th>'
-      + '<th class="text-left">{{ a.tOr(\'rsvp.event\', \'Event\') }}</th>'
-      + '<th class="text-left">{{ a.tOr(\'rsvp.your_response\', \'Your response\') }}</th>'
-      + '<th v-if="cfg.showCounts" class="text-left">{{ a.tOr(\'rsvp.responses\', \'Responses\') }}</th>'
-      + '<th v-if="showRoster" class="text-left">{{ a.tOr(\'rsvp.who\', \'Who\') }}</th>'
+      + '<th class="text-left">{{ a.t(\'rsvp.date\') }}</th>'
+      + '<th class="text-left">{{ a.t(\'rsvp.title\') }}</th>'
+      + '<th class="text-left">{{ a.t(\'rsvp.your_response\') }}</th>'
+      + '<th v-if="cfg.showCounts" class="text-left">{{ a.t(\'rsvp.responses\') }}</th>'
+      + '<th v-if="showRoster" class="text-left">{{ a.t(\'rsvp.who\') }}</th>'
       + '</tr></thead>'
       + '<tbody>'
       + '<tr v-for="ev in data.events" :key="ev.id">'
-      + '<td style="white-space:nowrap;font-weight:600">{{ toDateStr(ev.date) }}</td>'
+      + '<td style="white-space:nowrap">{{ toDateStr(ev.date) }}</td>'
       + '<td>{{ ev.title }}</td>'
       + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker></td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
       + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status"><span style="opacity:0.6">{{ g.label }}:</span> {{ g.names.join(", ") }}</div></td>'
       + '</tr>'
-      + '<tr v-if="!data.events.length"><td colspan="5" style="opacity:0.6">{{ a.tOr(\'rsvp.none\', \'No upcoming events\') }}</td></tr>'
+      + '<tr v-if="!data.events.length"><td colspan="5" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</td></tr>'
       + '</tbody>'
       + '</v-table>'
       + '<div v-else class="pa-1">'
       + '<v-card v-for="ev in data.events" :key="ev.id" variant="tonal" class="mb-2 pa-3">'
-      + '<div style="font-weight:600">{{ toDateStr(ev.date) }}</div>'
+      + '<div>{{ toDateStr(ev.date) }}</div>'
       + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}</div>'
       + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
       + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status"><span style="opacity:0.6">{{ g.label }}:</span> {{ g.names.join(", ") }}</div></div>'
       + '</v-card>'
-      + '<div v-if="!data.events.length" class="pa-2" style="opacity:0.6">{{ a.tOr(\'rsvp.none\', \'No upcoming events\') }}</div>'
+      + '<div v-if="!data.events.length" class="pa-2" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</div>'
       + '</div>'
       + '</component>'
   });

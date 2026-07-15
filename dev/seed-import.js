@@ -74,6 +74,13 @@ function buildBundle() {
     'field.people':      ['People', 'Personas', 'Personer'],
     'field.note':        ['Note', 'Nota', 'Anteckning'],
     'field.total':       ['Total', 'Total', 'Totalt'],
+    // RSVP view chrome (table headers). rsvp.date/title reuse the wording of the field.* keys.
+    'rsvp.date':          ['Date', 'Fecha', 'Datum'],
+    'rsvp.title':         ['Title', 'Título', 'Titel'],
+    'rsvp.your_response': ['Your response', 'Tu respuesta', 'Ditt svar'],
+    'rsvp.responses':     ['Responses', 'Respuestas', 'Svar'],
+    'rsvp.who':           ['Who', 'Quién', 'Vilka'],
+    'rsvp.none':          ['No upcoming events', 'No hay eventos próximos', 'Inga kommande händelser'],
     'list.status.open':        ['Open', 'Abierto', 'Öppen'],
     'list.status.in_progress': ['In Progress', 'En Progreso', 'Pågår'],
     'list.status.done':        ['Done', 'Hecho', 'Klar'],
