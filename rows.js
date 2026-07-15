@@ -116,23 +116,47 @@
     });
   }
 
-  // Sort rows by a column: list-backed columns follow the list's authored order (via root.getColumnList
-  // + root._listsCache, both runtime-bound); otherwise locale compare with blanks last.
-  function sortByCol(rows, col, view) {
-    if (!col) return rows;
-    var listOrder = null;
+  // THE comparator for every sortable surface (the data grid, embed defaultSort, rsvp, pivot). Views
+  // that aren't a data grid address their values differently -- pivot by cell index, rsvp by an event
+  // field -- so the reusable unit is a value comparator, not a row/column one.
+  //   asc===false  -> descending. Blanks always sort LAST, in both directions.
+  //   listOrder    -> optional {value: index}; list-backed values follow the list's authored order.
+  function compareValues(va, vb, asc, listOrder) {
+    if (listOrder) {
+      var ia = listOrder[va] !== undefined ? listOrder[va] : 9999;
+      var ib = listOrder[vb] !== undefined ? listOrder[vb] : 9999;
+      return asc === false ? ib - ia : ia - ib;
+    }
+    var ea = (va == null || va === ''), eb = (vb == null || vb === '');
+    if (ea && eb) return 0;
+    if (ea) return 1; if (eb) return -1;                       // blanks last regardless of direction
+    // Real numbers (an aggregate's count/sum, a pivot cell) compare numerically; anything else is
+    // coerced before localeCompare, which only exists on strings. numeric:true keeps string-stored
+    // numbers ("2" before "10") ordering correctly, so both storage shapes agree.
+    if (typeof va === 'number' && typeof vb === 'number') return asc === false ? vb - va : va - vb;
+    var sa = String(va), sb = String(vb);
+    return asc === false ? sb.localeCompare(sa, undefined, { numeric: true })
+                         : sa.localeCompare(sb, undefined, { numeric: true });
+  }
+
+  // Resolve a column's list order, if it is list-backed (via root.getColumnList + root._listsCache,
+  // both runtime-bound). `view` lets an aggregate's groupBy column inherit its source column's list.
+  function listOrderFor(col, view) {
     var gcl = root.getColumnList;
     var ln = gcl ? gcl(null, col) : null;
     if (!ln && gcl && view && view.groupBy && typeof view.groupBy === 'object' && view.groupBy.column === col && view.groupBy.from) {
       for (var i = 0; i < view.groupBy.from.length && !ln; i++) ln = gcl(null, view.groupBy.from[i]);
     }
-    if (ln && root._listsCache && root._listsCache[ln]) { listOrder = {}; root._listsCache[ln].forEach(function(v, i) { listOrder[v] = i; }); }
-    return rows.slice().sort(function(a, b) {
-      if (listOrder) { var ia = listOrder[a[col]] !== undefined ? listOrder[a[col]] : 9999, ib = listOrder[b[col]] !== undefined ? listOrder[b[col]] : 9999; return ia - ib; }
-      var va = String(a[col] || ''), vb = String(b[col] || '');
-      if (!va && vb) return 1; if (va && !vb) return -1;
-      return va.localeCompare(vb);
-    });
+    if (!ln || !root._listsCache || !root._listsCache[ln]) return null;
+    var order = {}; root._listsCache[ln].forEach(function(v, i) { order[v] = i; });
+    return order;
+  }
+
+  // Sort rows by a column name. `asc` defaults to true (embed defaultSort has no direction control).
+  function sortByCol(rows, col, view, asc) {
+    if (!col) return rows;
+    var listOrder = listOrderFor(col, view);
+    return rows.slice().sort(function(a, b) { return compareValues(a[col], b[col], asc !== false, listOrder); });
   }
 
   // Merge a view's source tables into one row list (union tags _source; join merges by id), then filter.
@@ -261,7 +285,8 @@
   var M = {
     condMatches: condMatches, _withinPeriod: _withinPeriod, filterRows: filterRows, filterToOr: filterToOr,
     convertViewFilters: convertViewFilters, sortByCol: sortByCol, buildRows: buildRows,
-    aggregateRows: aggregateRows, resolveComputed: resolveComputed, isFilterToken: isFilterToken
+    aggregateRows: aggregateRows, resolveComputed: resolveComputed, isFilterToken: isFilterToken,
+    compareValues: compareValues, listOrderFor: listOrderFor
   };
   if (isNode) module.exports = M;
   else { root.Rows = M; for (var k in M) root[k] = M[k]; } // also expose each as a global for bare callers

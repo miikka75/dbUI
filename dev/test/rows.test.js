@@ -169,3 +169,38 @@ describe('rows.js — isFilterToken', () => {
     }
   });
 });
+
+describe('rows.js — compareValues (the one comparator: grid, embeds, rsvp, pivot)', () => {
+  const sort = (vals, asc, lo) => vals.slice().sort((a, b) => Rows.compareValues(a, b, asc, lo));
+
+  it('numbers compare numerically, both directions', () => {
+    assert.deepEqual(sort([11, 4, 5], true), [4, 5, 11]);
+    assert.deepEqual(sort([11, 4, 5], false), [11, 5, 4]);
+  });
+  it('string-stored numbers order numerically too, so both storage shapes agree', () => {
+    assert.deepEqual(sort(['10', '2', '9'], true), ['2', '9', '10']);   // not lexicographic
+    assert.deepEqual(sort(['10', '2', '9'], false), ['10', '9', '2']);
+  });
+  it('blanks sort last in BOTH directions', () => {
+    assert.deepEqual(sort(['b', '', 'a'], true), ['a', 'b', '']);
+    assert.deepEqual(sort(['b', '', 'a'], false), ['b', 'a', '']);
+    assert.deepEqual(sort([2, null, 1], false), [2, 1, null]);
+  });
+  it('a non-string never throws (it is coerced, not .localeCompare-d)', () => {
+    assert.doesNotThrow(() => sort([1, 'a', true, 2], true));
+  });
+  it('listOrder follows the list\'s authored order, and reverses', () => {
+    const lo = { open: 0, in_progress: 1, done: 2 };
+    assert.deepEqual(sort(['done', 'open', 'in_progress'], true, lo), ['open', 'in_progress', 'done']);
+    assert.deepEqual(sort(['done', 'open', 'in_progress'], false, lo), ['done', 'in_progress', 'open']);
+  });
+});
+
+describe('rows.js — sortByCol direction', () => {
+  it('defaults to ascending (embed defaultSort passes no direction) and honours asc=false', () => {
+    const rows = [{ n: 'b' }, { n: 'a' }, { n: 'c' }];
+    assert.deepEqual(Rows.sortByCol(rows, 'n').map(r => r.n), ['a', 'b', 'c']);
+    assert.deepEqual(Rows.sortByCol(rows, 'n', null, true).map(r => r.n), ['a', 'b', 'c']);
+    assert.deepEqual(Rows.sortByCol(rows, 'n', null, false).map(r => r.n), ['c', 'b', 'a']);
+  });
+});
