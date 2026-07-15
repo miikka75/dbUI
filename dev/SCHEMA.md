@@ -915,24 +915,23 @@ The `{ "text": "<key>" }` column entry (free-form text interleaved in a view's c
 is **fully removed** — there is no longer any runtime handling for it (the old `_stripTextEntries`
 load-time stripper was deleted). Author prose with a `markdown` view instead (a filtered view +
 markdown + another view replaces text-between-columns). **Legacy schemas with `text` entries must be
-upgraded with `migrate-schema.js`** (which converts `text` → `markdown` doc-views) before deploying —
-otherwise the entries would surface as phantom columns. Do not author new `text` entries.
+hand-upgraded to `markdown` doc-views** (see [Removed shapes](#removed-shapes-hand-migrate)) before
+deploying — otherwise the entries would surface as phantom columns. Do not author new `text` entries.
 
-## Migration
-`migrate-schema.js <schema-or-export>.json` normalizes a schema:
-- Flattens nested `views` → top-level entries; rebuilds the hierarchy in `nav.items`.
-- Adds the formerly-implicit admin tables; excludes lookups.
-- Converts `text` entries to a `markdown` view: splits the view at **every** text boundary
-  into sub-views (`name`, `name_2`, …) and interleaves `{{t:key}}` tokens with one
-  `{{view:subview}}` embed per run of real columns; points nav at the markdown view.
-- Converts a legacy `pages` map into `markdown` views and rewrites `{page:x}` nav → `{view:x}`.
-  (The runtime no longer auto-folds `pages` at load — older schemas **must** be re-migrated
-  with this tool before loading.)
-- Converts a legacy table `header`/`footer` into a `markdown` doc-view that embeds the table
-  (`<table>_doc` with `{{table:<name>}}`); the old behavior emitted now-removed `text` entries.
-- **Export bundles**: if the input has a `.schema` key (an exported JSON with `tables` data,
-  `lists`, `translations`), only `schema` is migrated in place; data/lists/translations are
-  preserved, so the result re-imports cleanly.
+## Removed shapes (hand-migrate)
+These shapes are **not supported at load** — the runtime has no handling for them, so a legacy schema
+must be edited by hand before it will render correctly. There is no migration tool.
+- **`text` entries** (`{ "text": "<key>" }` in a view's `columns`) — see above; they surface as
+  phantom columns. Replace with a `markdown` doc-view: split the view at each text boundary into
+  sub-views and interleave `{{t:key}}` tokens with one `{{view:subview}}` embed per run of real columns,
+  then point `nav` at the markdown view.
+- **`pages` map** (top-level `pages` + `{ "page": "x" }` nav entries) — the runtime no longer folds
+  `pages` in at load. Author each page as a `markdown` view and use `{ "view": "x" }` in `nav.items`.
+- **Table `header`/`footer`** — replace with a `markdown` doc-view that embeds the table
+  (e.g. a `<table>_doc` view whose markdown is prose around `{{table:<name>}}`). The old behavior
+  emitted `text` entries, which are themselves removed.
+- **Nested `views`** are still supported and flattened at load (`_flattenViews`); the hierarchy is
+  expressed in `nav.items`.
 
 ## Lists and translations
 - **List values** are stored as stable keys (e.g. `"in_progress"`, not "In Progress").
