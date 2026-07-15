@@ -17,9 +17,19 @@
       return null;
     },
 
-    // Append {code,name} to a languages list (non-mutating)
+    // Upsert {code,name} into a languages list (non-mutating). `code` is the identity: re-adding an
+    // existing code refreshes its name in place rather than appending a duplicate — re-importing a
+    // bundle calls createLanguage for every language it carries, and the SQLite backend already
+    // upserts (INSERT OR REPLACE on a `code` PRIMARY KEY), so appending here diverged from it.
     addLanguage: function(list, code, name) {
-      return (list || []).concat([{ code: code, name: name }]);
+      var out = [], seen = {};
+      (list || []).forEach(function(l) {
+        if (!l || seen[l.code]) return;                  // collapse any duplicate codes already stored
+        seen[l.code] = true;
+        out.push(l.code === code ? { code: code, name: name } : l);
+      });
+      if (!seen[code]) out.push({ code: code, name: name });
+      return out;
     },
 
     // Remove a language by code (non-mutating)

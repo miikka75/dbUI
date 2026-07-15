@@ -33,7 +33,7 @@ describe('backend-helpers - unwrapSchemaDoc', () => {
 });
 
 describe('backend-helpers - addLanguage / removeLanguage', () => {
-  it('addLanguage appends without mutating', () => {
+  it('addLanguage appends a new code without mutating', () => {
     const list = [{ code: 'xx', name: 'TestLang' }];
     const out = H.addLanguage(list, 'en', 'English');
     assert.deepEqual(out, [{ code: 'xx', name: 'TestLang' }, { code: 'en', name: 'English' }]);
@@ -41,6 +41,24 @@ describe('backend-helpers - addLanguage / removeLanguage', () => {
   });
   it('addLanguage handles null list', () => {
     assert.deepEqual(H.addLanguage(null, 'xx', 'TestLang'), [{ code: 'xx', name: 'TestLang' }]);
+  });
+  it('addLanguage upserts by code -- re-adding never duplicates (re-importing a bundle calls it per language)', () => {
+    const list = [{ code: 'en', name: 'English' }, { code: 'es', name: 'Español' }];
+    let out = H.addLanguage(list, 'en', 'English');
+    assert.deepEqual(out, list);                       // same set, no second 'en'
+    out = H.addLanguage(H.addLanguage(out, 'en', 'English'), 'en', 'English');
+    assert.equal(out.filter(l => l.code === 'en').length, 1);
+    assert.equal(list.length, 2);                      // original untouched
+  });
+  it('addLanguage heals a list already corrupted by the old append behaviour', () => {
+    const dupes = [{ code: 'en', name: 'English' }, { code: 'es', name: 'Español' },
+                   { code: 'en', name: 'English' }, { code: 'es', name: 'Español' }];
+    const out = H.addLanguage(dupes, 'en', 'English');
+    assert.deepEqual(out, [{ code: 'en', name: 'English' }, { code: 'es', name: 'Español' }]);
+  });
+  it('addLanguage refreshes the display name of an existing code, in place', () => {
+    const out = H.addLanguage([{ code: 'en', name: 'English' }, { code: 'es', name: 'Español' }], 'en', 'English (US)');
+    assert.deepEqual(out, [{ code: 'en', name: 'English (US)' }, { code: 'es', name: 'Español' }]);
   });
   it('removeLanguage filters by code without mutating', () => {
     const list = [{ code: 'xx', name: 'TestLang' }, { code: 'en', name: 'English' }];
