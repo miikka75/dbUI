@@ -2356,6 +2356,46 @@ test.describe('access control: user matching + fail-closed', () => {
   });
 });
 
+test.describe('sorting', () => {
+  test('a view sorts by a numeric column (real numbers and string-stored) instead of throwing', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // A VIEW: currentTable is a view name, which has no SCHEMA entry -- the case that used to skip
+      // the numeric branch and then throw on Number.localeCompare.
+      window.VIEWS.sort_fx = { name: 'sort_fx', sources: ['tasks'], columns: ['title', 'position'] };
+      app.currentTable = 'sort_fx';
+      const out = {};
+
+      // 1. Aggregate-style REAL numbers (count/sum results belong to no table).
+      app.dataCache['tasks'] = [];
+      app.currentData = [{ id: 'a', title: 'A', total: 11 }, { id: 'b', title: 'B', total: 5 }, { id: 'c', title: 'C', total: 4 }];
+      app.sortCol = 'total'; app.sortAsc = true;
+      try { out.numAsc = app.sortedData.map(r => r.total); } catch (e) { out.numAsc = 'THREW: ' + e.message; }
+      app.sortAsc = false;
+      try { out.numDesc = app.sortedData.map(r => r.total); } catch (e) { out.numDesc = 'THREW: ' + e.message; }
+
+      // 2. String-stored numbers on a `number` column -> numeric, not lexicographic ("10" after "2").
+      app.currentData = [{ id: 'a', position: '10' }, { id: 'b', position: '2' }, { id: 'c', position: '9' }];
+      app.sortCol = 'position'; app.sortAsc = true;
+      try { out.strNumAsc = app.sortedData.map(r => r.position); } catch (e) { out.strNumAsc = 'THREW: ' + e.message; }
+
+      // 3. Blanks sort last regardless of direction; text still sorts as text.
+      app.currentData = [{ id: 'a', title: 'Beta' }, { id: 'b', title: '' }, { id: 'c', title: 'Alpha' }];
+      app.sortCol = 'title'; app.sortAsc = true;
+      try { out.textAsc = app.sortedData.map(r => r.title); } catch (e) { out.textAsc = 'THREW: ' + e.message; }
+      app.sortAsc = false;
+      try { out.textDesc = app.sortedData.map(r => r.title); } catch (e) { out.textDesc = 'THREW: ' + e.message; }
+      return out;
+    });
+    expect(r.numAsc).toEqual([4, 5, 11]);              // used to throw: va.localeCompare is not a function
+    expect(r.numDesc).toEqual([11, 5, 4]);
+    expect(r.strNumAsc).toEqual(['2', '9', '10']);     // numeric, not lexicographic
+    expect(r.textAsc).toEqual(['Alpha', 'Beta', '']);  // blanks last
+    expect(r.textDesc).toEqual(['Beta', 'Alpha', '']); // blanks last in both directions
+  });
+});
+
 test.describe('calendar view', () => {
   test('add-on-day: prefills the clicked date, lands on the table; gated to one writable source', async ({ page }) => {
     await ensureAppReady(page);

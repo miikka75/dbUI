@@ -488,7 +488,10 @@ function createVueApp() {
           if (ln && this.listsCache[ln]) { lo = {}; this.listsCache[ln].forEach(function(v, i) { lo[v] = i; }); }
           // Number columns (e.g. reorderable `position`, stored as strings) must sort numerically,
           // not lexicographically — else "10" sorts before "2" and the table shuffles past 9 rows.
-          var numericCol = !lo && SCHEMA[this.currentTable] && getColumnType(this.currentTable, col) === 'number';
+          // Resolved by column NAME across the schema (like colIsList above): `currentTable` is a view
+          // name for a view, which has no SCHEMA entry, so keying off SCHEMA[currentTable] skipped this
+          // branch for every view.
+          var numericCol = !lo && this.colIsNumber(col);
           data.sort(function(a, b) {
             if (lo) { var ia = lo[a[col]] !== undefined ? lo[a[col]] : 9999, ib = lo[b[col]] !== undefined ? lo[b[col]] : 9999; return asc ? ia - ib : ib - ia; }
             if (numericCol) {
@@ -498,8 +501,16 @@ function createVueApp() {
               if (na === nb) return 0;
               return asc ? na - nb : nb - na;
             }
-            var va = a[col] || '', vb = b[col] || '';
-            if (!va && vb) return 1; if (va && !vb) return -1;
+            var va = a[col], vb = b[col];
+            var ea = (va == null || va === ''), eb = (vb == null || vb === '');
+            if (ea && eb) return 0;
+            if (ea) return 1; if (eb) return -1;                     // empties last, either direction
+            // An aggregate's computed column (count/sum) is a real number but belongs to no table, so
+            // numericCol can't see it -- compare numerically here rather than stringifying it.
+            if (typeof va === 'number' && typeof vb === 'number') return asc ? va - vb : vb - va;
+            // Coerce: a non-string (number/bool) would throw on .localeCompare. numeric:true keeps
+            // string-stored numbers ("2" before "10") ordering correctly.
+            va = String(va); vb = String(vb);
             return asc ? va.localeCompare(vb, undefined, { numeric: true }) : vb.localeCompare(va, undefined, { numeric: true });
           });
         }
@@ -1470,6 +1481,7 @@ function createVueApp() {
 
       // Column helpers
       colIsDate: function(col) { return Columns.colIsDate(SCHEMA, col); },
+      colIsNumber: function(col) { return Columns.colIsNumber(SCHEMA, col); },
       colIsImage: function(col) { return Columns.colIsImage(SCHEMA, col); },
       colIsUrl: function(col) { return Columns.colIsUrl(SCHEMA, col); },
       colPicker: function(col) { return Columns.colPicker(SCHEMA, col); },
