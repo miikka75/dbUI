@@ -52,7 +52,8 @@ function _seedListValues(listsCache) {
       for (var t in SCHEMA) { var d = SCHEMA[t].columns[col]; if (d && typeof d === 'object' && d.list) { ln = d.list; break; } }
       if (!ln || !listsCache[ln]) continue;
       var vals = Array.isArray(filter[col]) ? filter[col] : [filter[col]];
-      vals.forEach(function(val) { if (typeof val === 'string' && listsCache[ln].indexOf(val) < 0) { listsCache[ln].push(val); seeded = true; } });
+      // isFilterToken (rows.js): '@me' resolves per-user at filter time and is never a literal value.
+      vals.forEach(function(val) { if (typeof val === 'string' && !isFilterToken(val) && listsCache[ln].indexOf(val) < 0) { listsCache[ln].push(val); seeded = true; } });
     }
   }
   for (var vn in VIEWS) {

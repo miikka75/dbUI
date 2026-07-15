@@ -2356,6 +2356,39 @@ test.describe('access control: user matching + fail-closed', () => {
   });
 });
 
+test.describe('@me filter token', () => {
+  test('is never seeded, locked, or offered as a list value (it resolves per-user at filter time)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // A view filtering a list-backed column by the token, plus a real value to prove the
+      // seeding/locking still works for genuine values.
+      window.VIEWS.me_fx  = { name: 'me_fx', sources: ['tasks'], columns: ['title'], filter: { assigned_to: '@me' } };
+      window.VIEWS.real_fx = { name: 'real_fx', sources: ['tasks'], columns: ['title'], filter: { status: 'done' } };
+      app.schemaData = Object.freeze(Object.assign({}, app.schemaData, { _bump: Date.now() }));  // invalidate lockedListValues
+      const listsCache = { assigned_to: ['Ann'], status: ['open'] };
+      const seeded = window._seedListValues(listsCache);
+      const locked = app.lockedListValues;
+      return {
+        seededAssigned: listsCache.assigned_to,          // '@me' must NOT be here
+        seededStatus: listsCache.status,                 // 'done' SHOULD be seeded
+        seededFlag: seeded,
+        lockedAssigned: Object.keys(locked.assigned_to || {}),
+        lockedStatus: Object.keys(locked.status || {}),
+        tokenTranslationKeys: app.translationKeys.filter(k => k.indexOf('@me') >= 0)
+      };
+    });
+    // The fixture's own views also filter these columns, so assert on the token rather than exact
+    // list contents: '@me' must be absent, real filter values must still seed/lock as before.
+    expect(r.seededAssigned).not.toContain('@me');       // token not seeded into the picker's list
+    expect(r.seededAssigned).toContain('Ann');           // pre-existing value untouched
+    expect(r.seededStatus).toContain('done');            // real filter values still seed
+    expect(r.lockedAssigned).not.toContain('@me');       // token not locked (would be undeletable)
+    expect(r.lockedStatus).toContain('done');            // real values still lock
+    expect(r.tokenTranslationKeys).toEqual([]);          // no list.<list>.@me key
+  });
+});
+
 test.describe('sorting', () => {
   test('a view sorts by a numeric column (real numbers and string-stored) instead of throwing', async ({ page }) => {
     await ensureAppReady(page);
