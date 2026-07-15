@@ -480,41 +480,12 @@ function createVueApp() {
         hdrs.push({ title: '', key: '_actions', sortable: false, width: '100px' });
         return hdrs;
       },
+      // Delegates to Rows.sortByCol -> Rows.compareValues, the one comparator shared with embed
+      // defaultSort and the rsvp/pivot views, so every sortable surface orders identically.
       sortedData: function() {
-        var data = this.currentData.slice();
-        if (this.sortCol) {
-          var col = this.sortCol, asc = this.sortAsc, lo = null, ln = this.colIsList(col);
-          if (!ln) { var v = VIEWS[this.currentTable]; if (v && v.groupBy && typeof v.groupBy === 'object' && v.groupBy.column === col && v.groupBy.from) { for (var i = 0; i < v.groupBy.from.length && !ln; i++) ln = this.colIsList(v.groupBy.from[i]); } }
-          if (ln && this.listsCache[ln]) { lo = {}; this.listsCache[ln].forEach(function(v, i) { lo[v] = i; }); }
-          // Number columns (e.g. reorderable `position`, stored as strings) must sort numerically,
-          // not lexicographically — else "10" sorts before "2" and the table shuffles past 9 rows.
-          // Resolved by column NAME across the schema (like colIsList above): `currentTable` is a view
-          // name for a view, which has no SCHEMA entry, so keying off SCHEMA[currentTable] skipped this
-          // branch for every view.
-          var numericCol = !lo && this.colIsNumber(col);
-          data.sort(function(a, b) {
-            if (lo) { var ia = lo[a[col]] !== undefined ? lo[a[col]] : 9999, ib = lo[b[col]] !== undefined ? lo[b[col]] : 9999; return asc ? ia - ib : ib - ia; }
-            if (numericCol) {
-              var na = (a[col] === '' || a[col] == null) ? Infinity : Number(a[col]);
-              var nb = (b[col] === '' || b[col] == null) ? Infinity : Number(b[col]);
-              if (isNaN(na)) na = Infinity; if (isNaN(nb)) nb = Infinity;
-              if (na === nb) return 0;
-              return asc ? na - nb : nb - na;
-            }
-            var va = a[col], vb = b[col];
-            var ea = (va == null || va === ''), eb = (vb == null || vb === '');
-            if (ea && eb) return 0;
-            if (ea) return 1; if (eb) return -1;                     // empties last, either direction
-            // An aggregate's computed column (count/sum) is a real number but belongs to no table, so
-            // numericCol can't see it -- compare numerically here rather than stringifying it.
-            if (typeof va === 'number' && typeof vb === 'number') return asc ? va - vb : vb - va;
-            // Coerce: a non-string (number/bool) would throw on .localeCompare. numeric:true keeps
-            // string-stored numbers ("2" before "10") ordering correctly.
-            va = String(va); vb = String(vb);
-            return asc ? va.localeCompare(vb, undefined, { numeric: true }) : vb.localeCompare(va, undefined, { numeric: true });
-          });
-        }
-        return data;
+        if (!this.sortCol) return this.currentData.slice();
+        var _dep = this.listsCache;   // list-backed order is read through the runtime-bound cache
+        return sortByCol(this.currentData, this.sortCol, VIEWS[this.currentTable], this.sortAsc);
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
@@ -3403,34 +3374,53 @@ function createVueApp() {
   // totals. Row/column keys and value cells are formatted with displayValue (so list values -> labels).
   app.component('pivot-view', {
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    // Local sort state, like rsvp-view: a pivot renders a 2-D grid from pivotFor(), not the root's
+    // currentData. sortCol is '__row__' (the row-axis label), '__total__', or a COLUMN INDEX -- a pivot
+    // addresses values positionally (r.cells[i]), which is why the shared unit is compareValues rather
+    // than sortByCol (that one takes a column name off a row object).
+    data: function() { return { sortCol: null, sortAsc: true }; },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
       cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].pivot) || {}; },
       grid: function() { return appInstance.pivotFor(this.viewName); },
-      hasTotals: function() { return !!this.grid.columnTotals; }
+      hasTotals: function() { return !!this.grid.columnTotals; },
+      // Row order: the grid's own key order until a header is clicked. Cells are counts/sums (real
+      // numbers), which compareValues orders numerically; blanks (an empty cell) sort last either way.
+      rows: function() {
+        var rows = this.grid.rows || [];
+        if (this.sortCol === null) return rows;
+        var self = this, c = this.sortCol, asc = this.sortAsc;
+        var val = function(r) { return c === '__row__' ? self.rowLabel(r.key) : (c === '__total__' ? r.total : r.cells[c]); };
+        return rows.slice().sort(function(a, b) { return compareValues(val(a), val(b), asc); });
+      }
     },
     methods: {
       head: function(col) { return appInstance.tOr('field.' + col, col); },
       colLabel: function(k) { return appInstance.displayValue(this.cfg.column, k); },
       rowLabel: function(k) { return appInstance.displayValue(this.cfg.row, k); },
-      cellFmt: function(v) { return (v === '' || v == null) ? '' : (this.cfg.cell ? appInstance.displayValue(this.cfg.cell, v) : v); }
+      cellFmt: function(v) { return (v === '' || v == null) ? '' : (this.cfg.cell ? appInstance.displayValue(this.cfg.cell, v) : v); },
+      toggleSort: function(col) {
+        if (this.sortCol === col) this.sortAsc = !this.sortAsc;
+        else { this.sortCol = col; this.sortAsc = true; }
+      },
+      sortIcon: function(col) { return this.sortCol !== col ? '' : (this.sortAsc ? ' ▲' : ' ▼'); }
     },
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="pivot-view">'
       + '<v-table density="compact" class="my-1"><template v-slot:default>'
       + '<thead><tr>'
-      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface))">{{ head(cfg.row) }}</th>'
-      + '<th v-for="c in grid.columns" :key="c" style="text-align:center">{{ colLabel(c) }}</th>'
-      + '<th v-if="hasTotals" style="text-align:center;font-weight:700">{{ a.tOr(\'pivot.total\', \'Total\') }}</th>'
+      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));cursor:pointer" @click="toggleSort(\'__row__\')" data-testid="pivot-sort-row">{{ head(cfg.row) }}{{ sortIcon(\'__row__\') }}</th>'
+      + '<th v-for="(c, ci) in grid.columns" :key="c" style="text-align:center;cursor:pointer" @click="toggleSort(ci)">{{ colLabel(c) }}{{ sortIcon(ci) }}</th>'
+      + '<th v-if="hasTotals" style="text-align:center;font-weight:700;cursor:pointer" @click="toggleSort(\'__total__\')">{{ a.tOr(\'pivot.total\', \'Total\') }}{{ sortIcon(\'__total__\') }}</th>'
       + '</tr></thead>'
       + '<tbody>'
-      + '<tr v-for="r in grid.rows" :key="r.key">'
+      + '<tr v-for="r in rows" :key="r.key">'
       + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:600">{{ rowLabel(r.key) }}</th>'
       + '<td v-for="(v, ci) in r.cells" :key="ci" style="text-align:center">{{ cellFmt(v) }}</td>'
       + '<td v-if="hasTotals" style="text-align:center;font-weight:700">{{ r.total }}</td>'
       + '</tr>'
-      + '<tr v-if="!grid.rows.length"><td :colspan="(grid.columns.length || 1) + 1" style="opacity:0.6;padding:12px">{{ a.tOr(\'pivot.empty\', \'No data\') }}</td></tr>'
+      + '<tr v-if="!rows.length"><td :colspan="(grid.columns.length || 1) + 1" style="opacity:0.6;padding:12px">{{ a.tOr(\'pivot.empty\', \'No data\') }}</td></tr>'
       + '</tbody>'
       + '<tfoot v-if="hasTotals"><tr>'
       + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:700">{{ a.tOr(\'pivot.total\', \'Total\') }}</th>'
@@ -3462,11 +3452,27 @@ function createVueApp() {
   // for any signed-in member regardless of role; firestore rules enforce a member writes only their OWN row.
   app.component('rsvp-view', {
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    // Sort is component-local: rsvp renders its own event list (from the rsvp.js engine), not the root's
+    // currentData, so the root sortCol/sortAsc the data grid uses would sort a list nobody displays.
+    // null = the engine's own order (chronological, upcoming first) -- the view's natural default.
+    data: function() { return { sortCol: null, sortAsc: true }; },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
       cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].rsvp) || {}; },
       data: function() { return appInstance.rsvpFor(this.viewName); },
+      // The rendered rows: engine order until a header is clicked, then Rows.compareValues -- the same
+      // comparator the data grid and embeds use, so blanks-last/numeric ordering all agree.
+      events: function() {
+        var evs = (this.data && this.data.events) || [];
+        if (!this.sortCol) return evs;
+        var col = this.sortCol, asc = this.sortAsc;
+        // "Your response" is a status value: order it by the configured status order, not alphabetically
+        // (the same way a list-backed column follows its list's authored order in the grid).
+        var lo = null;
+        if (col === 'myStatus') { lo = {}; this.options.forEach(function(o, i) { lo[o.value] = i; }); }
+        return evs.slice().sort(function(a, b) { return compareValues(a[col], b[col], asc, lo); });
+      },
       // Status choices as { value, title } — from the view's inline `statuses`, else the status column's
       // list. Titles are translated (see statusLabel).
       options: function() {
@@ -3484,6 +3490,13 @@ function createVueApp() {
     methods: {
       set: function(key, status) { appInstance.setRsvp(this.viewName, key, status || ''); },
       toDateStr: toDateStr,
+      // Same click-to-toggle contract as the data grid's toggleSort: first click ascending, click the
+      // same column again to flip. Kept local (see `data` above).
+      toggleSort: function(col) {
+        if (this.sortCol === col) this.sortAsc = !this.sortAsc;
+        else { this.sortCol = col; this.sortAsc = true; }
+      },
+      sortIcon: function(col) { return this.sortCol !== col ? '' : (this.sortAsc ? ' ▲' : ' ▼'); },
       // Translated label for a status VALUE, keyed by `list.<statusList||statusColumn>.<value>` (falls back
       // to the raw value). `statusList` lets the view name a translation namespace distinct from the column
       // — whose name may resolve to another table's list under the per-column-name list resolver.
@@ -3502,32 +3515,33 @@ function createVueApp() {
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="rsvp-view">'
       + '<v-table v-if="!a.mobile" density="compact">'
       + '<thead><tr>'
-      + '<th class="text-left">{{ a.t(\'rsvp.date\') }}</th>'
-      + '<th class="text-left">{{ a.t(\'rsvp.title\') }}</th>'
-      + '<th class="text-left">{{ a.t(\'rsvp.your_response\') }}</th>'
-      + '<th v-if="cfg.showCounts" class="text-left">{{ a.t(\'rsvp.responses\') }}</th>'
+      + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'date\')" data-testid="rsvp-sort-date">{{ a.t(\'rsvp.date\') }}{{ sortIcon(\'date\') }}</th>'
+      + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'title\')">{{ a.t(\'rsvp.title\') }}{{ sortIcon(\'title\') }}</th>'
+      + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'myStatus\')">{{ a.t(\'rsvp.your_response\') }}{{ sortIcon(\'myStatus\') }}</th>'
+      + '<th v-if="cfg.showCounts" class="text-left" style="cursor:pointer" @click="toggleSort(\'total\')">{{ a.t(\'rsvp.responses\') }}{{ sortIcon(\'total\') }}</th>'
+      // "Who" is a status-grouped name roster, not a single value -- nothing coherent to order by.
       + '<th v-if="showRoster" class="text-left">{{ a.t(\'rsvp.who\') }}</th>'
       + '</tr></thead>'
       + '<tbody>'
-      + '<tr v-for="ev in data.events" :key="ev.id">'
+      + '<tr v-for="ev in events" :key="ev.id">'
       + '<td style="white-space:nowrap">{{ toDateStr(ev.date) }}</td>'
       + '<td>{{ ev.title }}</td>'
       + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker></td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
       + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status"><span style="opacity:0.6">{{ g.label }}:</span> {{ g.names.join(", ") }}</div></td>'
       + '</tr>'
-      + '<tr v-if="!data.events.length"><td colspan="5" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</td></tr>'
+      + '<tr v-if="!events.length"><td colspan="5" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</td></tr>'
       + '</tbody>'
       + '</v-table>'
       + '<div v-else class="pa-1">'
-      + '<v-card v-for="ev in data.events" :key="ev.id" variant="tonal" class="mb-2 pa-3">'
+      + '<v-card v-for="ev in events" :key="ev.id" variant="tonal" class="mb-2 pa-3">'
       + '<div>{{ toDateStr(ev.date) }}</div>'
       + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}</div>'
       + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
       + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status"><span style="opacity:0.6">{{ g.label }}:</span> {{ g.names.join(", ") }}</div></div>'
       + '</v-card>'
-      + '<div v-if="!data.events.length" class="pa-2" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</div>'
+      + '<div v-if="!events.length" class="pa-2" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</div>'
       + '</div>'
       + '</component>'
   });

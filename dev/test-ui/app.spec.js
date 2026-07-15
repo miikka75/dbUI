@@ -2389,6 +2389,66 @@ test.describe('@me filter token', () => {
   });
 });
 
+test.describe('rsvp + pivot sorting', () => {
+  test('rsvp: headers sort by date/title/response/count, default stays chronological', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      const vm = { sortCol: null, sortAsc: true,
+        options: [{ value: 'coming' }, { value: 'maybe' }, { value: 'out' }],
+        data: { events: [
+          { id: 'a', date: '2026-07-10', title: 'Beta',  myStatus: 'out',    total: 5 },
+          { id: 'b', date: '2026-07-02', title: 'Alpha', myStatus: 'coming', total: 11 },
+          { id: 'c', date: '2026-07-20', title: '',      myStatus: '',       total: 4 }
+        ] } };
+      // Drive the component's own computed/methods against the fixture above.
+      const C = app.$.appContext.components['rsvp-view'];
+      const events = C.computed.events.call(vm);
+      const out = { engineOrder: events.map(e => e.id) };
+      const run = (col, asc) => { vm.sortCol = col; vm.sortAsc = asc; return C.computed.events.call(vm).map(e => e.id); };
+      out.dateAsc = run('date', true);
+      out.dateDesc = run('date', false);
+      out.titleAsc = run('title', true);        // blank title must sort last
+      out.statusAsc = run('myStatus', true);    // configured status order, blank last
+      out.totalDesc = run('total', false);      // numeric, not lexicographic
+      return out;
+    });
+    expect(r.engineOrder).toEqual(['a', 'b', 'c']);   // untouched: the rsvp.js engine's own order
+    expect(r.dateAsc).toEqual(['b', 'a', 'c']);
+    expect(r.dateDesc).toEqual(['c', 'a', 'b']);
+    expect(r.titleAsc).toEqual(['b', 'a', 'c']);      // Alpha, Beta, then the blank
+    expect(r.statusAsc).toEqual(['b', 'a', 'c']);     // coming, out, then blank (list order, not A-Z)
+    expect(r.totalDesc).toEqual(['b', 'a', 'c']);     // 11, 5, 4
+  });
+
+  test('pivot: row-axis, a column\'s cells, and totals all sort; default is grid order', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      const vm = { sortCol: null, sortAsc: true,
+        rowLabel: k => k,
+        grid: { columns: ['Dishes', 'Mow'], rows: [
+          { key: 'Cara', cells: [1, 9], total: 10 },
+          { key: 'Ann',  cells: [7, 2], total: 9 },
+          { key: 'Bob',  cells: [3, '' ], total: 3 }
+        ] } };
+      const C = app.$.appContext.components['pivot-view'];
+      const out = { gridOrder: C.computed.rows.call(vm).map(r => r.key) };
+      const run = (col, asc) => { vm.sortCol = col; vm.sortAsc = asc; return C.computed.rows.call(vm).map(r => r.key); };
+      out.byRowLabel = run('__row__', true);
+      out.byFirstCol = run(0, false);       // Dishes desc: 7, 3, 1
+      out.bySecondCol = run(1, true);       // Mow asc: 2, 9, then the blank cell last
+      out.byTotalDesc = run('__total__', false);
+      return out;
+    });
+    expect(r.gridOrder).toEqual(['Cara', 'Ann', 'Bob']);   // untouched grid key order
+    expect(r.byRowLabel).toEqual(['Ann', 'Bob', 'Cara']);
+    expect(r.byFirstCol).toEqual(['Ann', 'Bob', 'Cara']);  // 7, 3, 1
+    expect(r.bySecondCol).toEqual(['Ann', 'Cara', 'Bob']); // 2, 9, blank last
+    expect(r.byTotalDesc).toEqual(['Cara', 'Ann', 'Bob']); // 10, 9, 3
+  });
+});
+
 test.describe('sorting', () => {
   test('a view sorts by a numeric column (real numbers and string-stored) instead of throwing', async ({ page }) => {
     await ensureAppReady(page);
