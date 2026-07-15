@@ -344,7 +344,13 @@
       "period.current": "Current",
       "list.rsvp_status.coming": "Coming",
       "list.rsvp_status.maybe": "Maybe",
-      "list.rsvp_status.out": "Out"
+      "list.rsvp_status.out": "Out",
+      "rsvp.date": "Date",
+      "rsvp.title": "Title",
+      "rsvp.your_response": "Your response",
+      "rsvp.responses": "Responses",
+      "rsvp.who": "Who",
+      "rsvp.none": "No upcoming events"
     },
     "es": {
       "app.title": "Demo de Equipo",
@@ -400,7 +406,13 @@
       "period.current": "Actual",
       "list.rsvp_status.coming": "Voy",
       "list.rsvp_status.maybe": "Quizás",
-      "list.rsvp_status.out": "No voy"
+      "list.rsvp_status.out": "No voy",
+      "rsvp.date": "Fecha",
+      "rsvp.title": "Título",
+      "rsvp.your_response": "Tu respuesta",
+      "rsvp.responses": "Respuestas",
+      "rsvp.who": "Quién",
+      "rsvp.none": "No hay eventos próximos"
     },
     "sv": {
       "app.title": "Team-demo",
@@ -456,7 +468,13 @@
       "period.current": "Nuvarande",
       "list.rsvp_status.coming": "Kommer",
       "list.rsvp_status.maybe": "Kanske",
-      "list.rsvp_status.out": "Kommer inte"
+      "list.rsvp_status.out": "Kommer inte",
+      "rsvp.date": "Datum",
+      "rsvp.title": "Titel",
+      "rsvp.your_response": "Ditt svar",
+      "rsvp.responses": "Svar",
+      "rsvp.who": "Vilka",
+      "rsvp.none": "Inga kommande händelser"
     }
   },
   "config": {
