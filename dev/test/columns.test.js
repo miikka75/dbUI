@@ -10,7 +10,7 @@ const schema = {
     link:  { type: 'url' },
     when:  { type: 'date' }
   } },
-  other: { columns: { tags: { type: 'multiselect', list: 'tags' } } },
+  other: { columns: { tags: { type: 'multiselect', list: 'tags' }, points: { type: 'number' } } },
   tasks: { columns: {
     status: { type: 'select', list: 'status', picker: 'chips' },
     prio:   { type: 'select', list: 'prio', picker: 'toggle' },
@@ -32,6 +32,13 @@ describe('columns.js — image/url column scanners', () => {
     assert.equal(Columns.colIsDate(schema, 'when'), true);
     assert.equal(Columns.colIsMultiselect(schema, 'tags'), true);
     assert.equal(Columns.colIsImage(schema, 'tags'), false);
+  });
+
+  it('colIsNumber detects `number` by column name across tables (a view has no schema entry of its own)', () => {
+    assert.equal(Columns.colIsNumber(schema, 'points'), true);
+    assert.equal(Columns.colIsNumber(schema, 'title'), false);
+    assert.equal(Columns.colIsNumber(schema, 'when'), false);
+    assert.equal(Columns.colIsNumber(schema, 'nope'), false);   // unknown column -> false, no throw
   });
 
   it('colPicker returns a select column\'s widget choice (chips/toggle), else null', () => {

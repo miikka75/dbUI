@@ -62,12 +62,13 @@
     for (var t in schema) {
       var cols = (schema[t] && schema[t].columns) || {};
       for (var c in cols) {
-        var e = info[c] || (info[c] = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false, image: false, url: false, picker: null });
+        var e = info[c] || (info[c] = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null });
         var typ = columnType(schema, t, c), d = cols[c];
         if (typ === 'multiselect') e.multiselect = true;
         if (typ === 'date') e.date = true;
         if (typ === 'image') e.image = true;
         if (typ === 'url') e.url = true;
+        if (typ === 'number') e.number = true;
         if (d && typeof d === 'object') {
           if (d.type === 'ref') e.ref = true;   // object-only, matching columnRef (a bare 'ref' string is not a ref)
           if (e.list == null && d.list) e.list = d.list;
@@ -80,7 +81,7 @@
     }
     return info;
   }
-  var _EMPTY = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false, image: false, url: false, picker: null };
+  var _EMPTY = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null };
   function colInfo(schema, col) {
     var m = _scanCache && _scanCache.get(schema);
     if (!m) { m = scanSchema(schema); if (_scanCache) _scanCache.set(schema, m); }
@@ -89,6 +90,7 @@
   function colIsList(schema, col) { return colInfo(schema, col).list; }                    // list name or null
   function colIsMultiselect(schema, col) { return colInfo(schema, col).multiselect; }
   function colIsDate(schema, col) { return colInfo(schema, col).date; }
+  function colIsNumber(schema, col) { return colInfo(schema, col).number; }                // any table declaring it `number` -> sort numerically (views have no SCHEMA entry)
   function colIsRef(schema, col) { return colInfo(schema, col).ref; }
   function colListSwitch(schema, col) { return colInfo(schema, col).listSwitch; }
   function colAllowNew(schema, col) { return colInfo(schema, col).allowNew; }
@@ -108,7 +110,7 @@
   var C = {
     columnType: columnType, columnList: columnList, columnRef: columnRef,
     isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol, tableRefCol: tableRefCol,
-    colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate,
+    colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate, colIsNumber: colIsNumber,
     colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted,
     colIsImage: colIsImage, colIsUrl: colIsUrl, colPicker: colPicker,
     colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText
