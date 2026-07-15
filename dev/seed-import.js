@@ -93,6 +93,7 @@ function buildBundle() {
     'cal.undated':   ['Undated', 'Sin fecha', 'Utan datum'],
     'cal.no_events': ['No events', 'Sin eventos', 'Inga händelser'],
     'cal.items':     ['items', 'elementos', 'poster'],
+    'cal.add_on_day': ['Add on this day', 'Añadir en este día', 'Lägg till denna dag'],
     'period.this_week': ['This week', 'Esta semana', 'Denna vecka'],
     'period.weeks_ago': ['weeks ago', 'semanas atrás', 'veckor sedan'],
     'period.current':   ['Current', 'Actual', 'Nuvarande'],
