@@ -844,13 +844,18 @@ Each user has an optional profile `{ name, shared }`, editable only by themselve
   intersection query, which Firestore cannot prove-authorize).
 
 ### `listSources: { "<listName>": "users" }` — a name list fed by profiles
-A top-level schema map marking a list as user-backed. On boot the app overlays that list's values with
-the opted-in shared display names, so `select`/`multiselect` columns and rotation `rosters` referencing
-it become **assignable to registered users** — no manual list upkeep. Example:
+A top-level schema map marking a list as user-backed. On boot the app **merges** the opted-in shared
+display names on top of that list's own values, so `select`/`multiselect` columns and rotation `rosters`
+referencing it become **assignable to registered users** — no manual list upkeep. Example:
 ```json
 "listSources": { "members": "users" },
 "tables": { "chore_log": { "columns": { "person": { "type": "select", "list": "members" } } } }
 ```
+- The list's stored values are **kept**: a user-backed list still works before anyone opts in (a fresh
+  deployment), and a curated value is never removed by the overlay. Only names the overlay itself
+  injected are withdrawn when a user opts out.
+- Opting in is per-user (**Profile → share name**), so on a new deployment this list contains only its
+  stored values until users share. Seed it if the column must be usable immediately.
 
 ### Membership requests (self-service, admin-approved)
 An unregistered (but signed-in) user submits a request from the "not registered" banner: a **required**

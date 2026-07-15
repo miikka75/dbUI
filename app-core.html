@@ -2163,14 +2163,28 @@ function createVueApp() {
         var ls = (this.schemaData && this.schemaData.listSources) || {};
         return Object.keys(ls).filter(function(n) { return ls[n] === 'users'; });
       },
+      // Merge the opted-in shared names ON TOP of the list's curated values rather than replacing them:
+      // replacing meant a list emptied itself whenever nobody had opted in yet (a fresh deployment, or
+      // a getSharedNames failure), leaving the column unusable with no hint why.
+      // `_injectedUserNames` records what THIS overlay added last time, so a re-run (see the profile
+      // save below, which exists to reflect a *removed* shared name) strips them before re-merging —
+      // merging blindly into the previous result would make an un-shared name impossible to remove.
       _overlayUserLists: function() {
         var self = this, names = this.userBackedLists();
         if (!names.length || typeof backend_users === 'undefined' || !backend_users.getSharedNames) return Promise.resolve();
         return backend_users.getSharedNames().then(function(shared) {
-          var patch = {}; names.forEach(function(n) { patch[n] = (shared || []).slice(); });
+          var injected = self._injectedUserNames || (self._injectedUserNames = {}), patch = {};
+          names.forEach(function(n) {
+            var prev = injected[n] || [];
+            var curated = (self.listsCache[n] || []).filter(function(v) { return prev.indexOf(v) < 0; });
+            var out = curated.slice();
+            (shared || []).forEach(function(nm) { if (out.indexOf(nm) < 0) out.push(nm); });
+            injected[n] = (shared || []).filter(function(nm) { return curated.indexOf(nm) < 0; });
+            patch[n] = out;
+          });
           self.listsCache = Object.assign({}, self.listsCache, patch);
           window._listsCache = self.listsCache;
-        }).catch(function() {});
+        }).catch(function() {});   // a rejection leaves the curated list intact -- see backend-firebase getSharedNames
       },
       loadMyProfile: function() {
         var self = this;
