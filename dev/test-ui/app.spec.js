@@ -2103,6 +2103,43 @@ test.describe('access control: user matching + fail-closed', () => {
     expect(r.listed).toEqual(['Ann', 'Cara']);   // the user-backed list is filled from shared names
   });
 
+  test('user-backed list: shared names merge over curated values; un-sharing removes only the injected name', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.schemaData = Object.freeze(Object.assign({}, app.schemaData, { listSources: { members: 'users' } }));
+      app.listsCache = Object.assign({}, app.listsCache, { members: ['Curated', 'Ann'] });  // seeded/admin-curated values
+      const snap = {};
+
+      // Nobody has opted in yet -> the curated list must survive (this used to empty it).
+      await app._overlayUserLists();
+      snap.noneShared = (app.listsCache['members'] || []).slice();
+
+      localStorage.setItem('test_user', 'zoe@x.com'); await backend_users.setMyProfile('Zoe', true);
+      localStorage.setItem('test_user', 'local@dev');
+      await app._overlayUserLists();
+      snap.zoeShared = (app.listsCache['members'] || []).slice();
+
+      // Zoe un-shares -> only the injected name goes; curated values stay put.
+      localStorage.setItem('test_user', 'zoe@x.com'); await backend_users.setMyProfile('Zoe', false);
+      localStorage.setItem('test_user', 'local@dev');
+      await app._overlayUserLists();
+      snap.zoeRemoved = (app.listsCache['members'] || []).slice();
+
+      // A backend failure must not wipe the list either (the caller's catch leaves it alone).
+      const real = backend_users.getSharedNames;
+      backend_users.getSharedNames = () => Promise.reject(new Error('permission-denied'));
+      await app._overlayUserLists();
+      snap.onReject = (app.listsCache['members'] || []).slice();
+      backend_users.getSharedNames = real;
+      return snap;
+    });
+    expect(r.noneShared).toEqual(['Curated', 'Ann']);          // curated values preserved
+    expect(r.zoeShared).toEqual(['Curated', 'Ann', 'Zoe']);    // shared name merged on top
+    expect(r.zoeRemoved).toEqual(['Curated', 'Ann']);          // 'Ann' is curated -> never stripped
+    expect(r.onReject).toEqual(['Curated', 'Ann']);            // rejection != "nobody opted in"
+  });
+
   test('admin can view and rename another user\'s profile name from the Users table', async ({ page }) => {
     await ensureAppReady(page);
     await page.evaluate(() => { appInstance.setUserRole('bob@x.com', 'editor', 'bob@x.com', ['tasks']); });
