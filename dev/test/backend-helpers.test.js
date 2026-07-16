@@ -80,3 +80,23 @@ describe('backend-helpers - emptyTranslations', () => {
     assert.deepEqual(H.emptyTranslations(null), {});
   });
 });
+
+describe('backend-helpers - ownerTablesOf (self-service table set)', () => {
+  it('lists tables with an owner column, sorted; both column shapes', () => {
+    const schema = { tables: {
+      rsvps:  { columns: [{ name: 'owner', type: 'owner' }, { name: 'status', type: 'select' }] }, // array shape
+      signups:{ columns: { who: { type: 'owner' }, item: 'text' } },                                // map shape
+      tasks:  { columns: { title: 'text', status: { type: 'select' } } },                           // no owner -> excluded
+      notes:  { columns: [{ name: 'body', type: 'text' }] }                                         // no owner -> excluded
+    } };
+    assert.deepEqual(H.ownerTablesOf(schema), ['rsvps', 'signups']);
+  });
+  it('a bare-string column def is never an owner', () => {
+    assert.deepEqual(H.ownerTablesOf({ tables: { t: { columns: { owner: 'text' } } } }), []);
+  });
+  it('empty / missing schema -> []', () => {
+    assert.deepEqual(H.ownerTablesOf(null), []);
+    assert.deepEqual(H.ownerTablesOf({}), []);
+    assert.deepEqual(H.ownerTablesOf({ tables: {} }), []);
+  });
+});

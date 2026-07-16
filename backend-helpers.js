@@ -46,6 +46,25 @@
     // Build an empty-string translation map from keys
     emptyTranslations: function(keys) {
       var t = {}; if (keys) keys.forEach(function(k) { t[k] = ''; }); return t;
+    },
+
+    // Table names whose schema declares an `owner`-typed column -- the SELF-SERVICE set. An owner column
+    // means each row belongs to a member (auto-stamped, read-only), so those are exactly the tables where
+    // a member may create/edit/delete THEIR OWN row without a table grant (the RSVP/sign-up pattern,
+    // generalized). Firestore rules are schema-blind, so saveSchema mirrors this to _meta/ownerTables and
+    // the rules gate owner-create on membership in it -- turning "owner-create allowed on any table" into
+    // "only on tables meant for it". Sorted; handles both column shapes (array [{name,type}] and map
+    // {name: 'text' | {type}}). A bare-string column def can't be `owner`, so only object defs count.
+    ownerTablesOf: function(schema) {
+      var tables = (schema && schema.tables) || {}, out = [];
+      var isOwner = function(def) { return !!(def && typeof def === 'object' && def.type === 'owner'); };
+      for (var t in tables) {
+        var cols = tables[t] && tables[t].columns, has = false;
+        if (Array.isArray(cols)) has = cols.some(isOwner);
+        else if (cols) { for (var c in cols) { if (isOwner(cols[c])) { has = true; break; } } }
+        if (has) out.push(t);
+      }
+      return out.sort();
     }
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = H;

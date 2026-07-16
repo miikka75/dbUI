@@ -85,6 +85,15 @@ service cloud.firestore {
     // here by default and must get its own block), EXCEPT _pages — the doc-view body store is genuine
     // user data written via putRow('_pages', …) -> the _pages__active/_pages__archive collections.
     function base(coll) { return request.auth != null && isRegistered() && (!coll.matches('^_.*') || coll.matches('^_pages__.*')); }
+    // Self-service is bounded to tables that DECLARE an owner column -- mirrored to _meta/ownerTables by
+    // saveSchema (BackendHelpers.ownerTablesOf). Without this, owner-create was allowed on ANY table, so a
+    // registered member could inject owner-stamped junk rows into tables never meant for self-service.
+    // Migration: if the doc doesn't exist yet (rules deployed before the schema was re-saved), fall back to
+    // permissive so existing sign-up flows don't break -- enforcement activates on the next schema save.
+    function selfServiceTable(coll) {
+      return !exists(/databases/$(database)/documents/_meta/ownerTables)
+        || (coll.split('__')[0] in get(/databases/$(database)/documents/_meta/ownerTables).data.tables);
+    }
     match /{collection}/{doc} {
       // Read: owner-stamped rows are private to their owner UNLESS marked rosterPublic (a per-table policy
       // denormalized onto each row) — members self-serve without a table grant and read only their own,
@@ -98,7 +107,7 @@ service cloud.firestore {
       );
       allow create: if base(collection) && (
         noUsers() || role() == 'admin' ||
-        request.resource.data.owner == myEmail() ||                      // self-service: create my own owned row
+        (request.resource.data.owner == myEmail() && selfServiceTable(collection)) || // self-service: my own row, only on an owner-column table
         (role() == 'editor' && hasTableAccess(collection))
       );
       allow update: if base(collection) && (
