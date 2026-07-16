@@ -42,27 +42,43 @@ function _normalizeSchema(parsed) {
 }
 // colName/isEmbed/isViewEmbed/isText (view column-entry shape predicates) are globals from columns.js.
 // Shared list-value seeding: ensure filter-referenced values exist in listsCache. Returns true if anything was added.
-function _seedListValues(listsCache) {
-  var seeded = false;
-  function seed(filter) {
-    if (!filter) return;
-    if (filter.$or || filter.$and) { (filter.$or || filter.$and).forEach(seed); return; }
-    for (var col in filter) { if (col[0] === '$') continue;
-      var ln = null;
-      for (var t in SCHEMA) { var d = SCHEMA[t].columns[col]; if (d && typeof d === 'object' && d.list) { ln = d.list; break; } }
-      if (!ln || !listsCache[ln]) continue;
+// THE walk over every list-backed filter VALUE a schema declares — view filters, inline-embed filters,
+// and legacy shorthand conditional columns — calling cb(listName, value). Two consumers used to
+// duplicate this traversal with different payloads: _seedListValues (adds them to the list) and
+// app-core's lockedListValues (marks them undeletable + mints their translation key). SCHEMA.md pairs
+// the two ("auto-seeded and non-deletable"), so they must see exactly the same values.
+// They had drifted: only the seeder recursed into $or/$and, so a grouped filter's values were seeded
+// but never locked — and convertViewFilters rewrites every legacy array-IN filter to $or at load, so
+// that covered any `{col: [a, b]}`. Walking once removes the possibility.
+// Tokens ('@me' — isFilterToken, rows.js) are skipped here once, for both callers.
+function forEachFilterListValue(cb) {
+  function walk(filter) {
+    if (!filter || typeof filter !== 'object') return;
+    if (filter.$or || filter.$and) { (filter.$or || filter.$and).forEach(walk); return; }
+    for (var col in filter) {
+      if (col[0] === '$') continue;
+      var ln = Columns.colIsList(SCHEMA, col);   // memoized any-table scan; was hand-rolled in 4 places
+      if (!ln) continue;
       var vals = Array.isArray(filter[col]) ? filter[col] : [filter[col]];
-      // isFilterToken (rows.js): '@me' resolves per-user at filter time and is never a literal value.
-      vals.forEach(function(val) { if (typeof val === 'string' && !isFilterToken(val) && listsCache[ln].indexOf(val) < 0) { listsCache[ln].push(val); seeded = true; } });
+      vals.forEach(function(val) { if (typeof val === 'string' && !isFilterToken(val)) cb(ln, val); });
     }
   }
   for (var vn in VIEWS) {
-    seed(VIEWS[vn].filter);
-    (VIEWS[vn].columns || []).forEach(function(c) {
-      if (typeof c === 'object' && c.sources && c.filter) seed(c.filter);
-      else if (typeof c === 'object' && !c.sources && !c.name && !c.view) { var cond = c[Object.keys(c)[0]]; if (cond && typeof cond === 'object') seed(cond); }
+    var view = VIEWS[vn];
+    walk(view.filter);
+    (view.columns || []).forEach(function(c) {
+      if (!c || typeof c !== 'object') return;
+      if (c.sources && c.filter) walk(c.filter);                                                    // inline embed
+      else if (!c.sources && !c.name && !c.view) { var cond = c[Object.keys(c)[0]]; if (cond && typeof cond === 'object') walk(cond); }
     });
   }
+}
+function _seedListValues(listsCache) {
+  var seeded = false;
+  forEachFilterListValue(function(ln, val) {
+    if (!listsCache[ln] || listsCache[ln].indexOf(val) >= 0) return;
+    listsCache[ln].push(val); seeded = true;
+  });
   return seeded;
 }
 // dataCache/export key for a table's archive partition (fixed 'archive')

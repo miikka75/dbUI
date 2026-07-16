@@ -612,38 +612,13 @@ function createVueApp() {
       // editor. A CACHED computed (was a method): isLockedValue is called ~3x per list item, and this
       // rebuild is O(views x columns x tables) — recomputing it per call made the Lookup view crawl on
       // large schemas. Recomputes only when schemaData changes (the reactive dep + VIEWS rebuild).
+      // Values a schema filter pins: non-deletable in the Lists UI, and each gets a list.<list>.<value>
+      // translation key. Shares forEachFilterListValue (schema-loader) with _seedListValues, so the
+      // set that gets seeded is exactly the set that gets locked -- SCHEMA.md pairs the two.
       lockedListValues: function() {
         var locked = {};
         var _dep = this.schemaData; // reactive dependency trigger
-        for (var vn in VIEWS) {
-          var view = VIEWS[vn];
-          if (view.filter) {
-            for (var col in view.filter) {
-              var ln = null;
-              for (var t in SCHEMA) { var d = SCHEMA[t].columns[col]; if (d && typeof d === 'object' && d.list) { ln = d.list; break; } }
-              // isFilterToken (rows.js): '@me' resolves per-user at filter time -- locking it would make
-              // the token a permanent, undeletable list value (and a list.<list>.@me translation key).
-              if (ln) { if (!locked[ln]) locked[ln] = {}; (Array.isArray(view.filter[col]) ? view.filter[col] : [view.filter[col]]).forEach(function(v) { if (!isFilterToken(v)) locked[ln][v] = true; }); }
-            }
-          }
-          (view.columns || []).forEach(function(c) {
-            if (typeof c === 'object' && c.sources && c.filter) {
-              // Inline embed with filter
-              for (var ek in c.filter) {
-                var eln = null;
-                for (var et in SCHEMA) { var ed = SCHEMA[et].columns[ek]; if (ed && typeof ed === 'object' && ed.list) { eln = ed.list; break; } }
-                if (eln) { if (!locked[eln]) locked[eln] = {}; (Array.isArray(c.filter[ek]) ? c.filter[ek] : [c.filter[ek]]).forEach(function(v) { if (typeof v === 'string' && !isFilterToken(v)) locked[eln][v] = true; }); }
-              }
-            } else if (typeof c === 'object' && !c.sources && !c.name) {
-              var cond = c[Object.keys(c)[0]];
-              if (cond) for (var ck in cond) {
-                var ln2 = null;
-                for (var t2 in SCHEMA) { var d2 = SCHEMA[t2].columns[ck]; if (d2 && typeof d2 === 'object' && d2.list) { ln2 = d2.list; break; } }
-                if (ln2 && !isFilterToken(cond[ck])) { if (!locked[ln2]) locked[ln2] = {}; locked[ln2][cond[ck]] = true; }
-              }
-            }
-          });
-        }
+        forEachFilterListValue(function(ln, val) { (locked[ln] || (locked[ln] = {}))[val] = true; });
         return locked;
       },
       refGroupedData: function() {
