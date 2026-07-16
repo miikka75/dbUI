@@ -962,17 +962,10 @@ function createVueApp() {
       // a blank row the user cannot fill in; the table is where it becomes editable.
       calendarAddOnDay: function(name, date) {
         if (!date || !this.canCalendarAdd(name)) return;
-        var self = this, s = this.calSources(name)[0], primary = s.table, id = this.generateId();
-        withMirrors([primary]).forEach(function(src) {
-          var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-          getColumns(src).forEach(function(c) { if (!row[c]) row[c] = ''; });
-          var oc = getOwnerCol(src); if (oc) row[oc] = self.currentUserEmail || '';   // stamp owner on create
-          if (getColumns(src).indexOf(s.dateColumn) >= 0) row[s.dateColumn] = date;   // the point: prefill the clicked day
-          if (!self.dataCache[src]) self.dataCache[src] = [];
-          self.dataCache[src].push(row);
-          backend.putRow(self.tableMap[src], row, 'active');
-        });
-        this.selectTab(primary);
+        var s = this.calSources(name)[0], prefill = {};
+        prefill[s.dateColumn] = date;                   // the point: prefill the clicked day
+        this._createBlankRow(s.table, { prefill: prefill });
+        this.selectTab(s.table);
         this.notify('Row added');
       },
       calRotationSources: function(name) { return Calendar.rotationSources(VIEWS, name); },
@@ -1135,15 +1128,7 @@ function createVueApp() {
       },
       embedHasArchive: function(type, name) { return this.embedSources(type, name).some(function(s) { return SCHEMA[s] && SCHEMA[s].archivable; }); },
       embedAddRow: function(type, name) {
-        var self = this, id = this.generateId();
-        withMirrors([this.embedSources(type, name)[0]]).forEach(function(src) {
-          var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-          getColumns(src).forEach(function(c) { if (!row[c]) row[c] = ''; });
-          var _oc = getOwnerCol(src); if (_oc) row[_oc] = self.currentUserEmail || ''; // stamp owner on create
-          if (!self.dataCache[src]) self.dataCache[src] = [];
-          self.dataCache[src].push(row);
-          backend.putRow(self.tableMap[src], row, 'active');
-        });
+        this._createBlankRow(this.embedSources(type, name)[0]);
         this.notify('Row added');
       },
       embedDeleteRow: function(type, name, item) {
@@ -1382,32 +1367,44 @@ function createVueApp() {
         }, 300);
       },
 
+      // THE blank-row factory: every add path (the grid's addRow, embedAddRow, the calendar's
+      // add-on-day) goes through here. Creates the row across the whole mirror cluster under one id
+      // (consistent with archive/delete), stamps the owner, seeds `position` on a reorderable table,
+      // writes through to the backend, and returns the PRIMARY row.
+      // Previously each caller hand-rolled this, and they drifted: only addRow seeded `position`, so a
+      // row added to a reorderable table from an embed or the calendar sorted after every placed row.
+      // opts: { tab: 'active'|'archive' (default active), prefill: { col: value } }
+      _createBlankRow: function(primary, opts) {
+        var self = this, o = opts || {}, tab = o.tab || 'active', prefill = o.prefill || {};
+        var id = this.generateId(), primaryRow = null;
+        withMirrors([primary]).forEach(function(src) {
+          var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+          var cols = getColumns(src);
+          cols.forEach(function(c) { if (!row[c]) row[c] = ''; });
+          var oc = getOwnerCol(src); if (oc) row[oc] = self.currentUserEmail || '';   // stamp owner on create
+          for (var pc in prefill) { if (cols.indexOf(pc) >= 0) row[pc] = prefill[pc]; }  // only columns the mirror actually has
+          var cacheKey = tab === 'archive' ? aKey(src) : src;
+          if (!self.dataCache[cacheKey]) self.dataCache[cacheKey] = [];
+          // Reorderable tables order by `position`; seed the next number so new rows append in order
+          // (otherwise they get an empty position and the hardened sort floats them after positioned rows).
+          if (SCHEMA[src] && SCHEMA[src].reorderable) {
+            var mp = 0;
+            self.dataCache[cacheKey].forEach(function(r) { var n = Number(r.position); if (!isNaN(n) && n > mp) mp = n; });
+            row.position = String(mp + 1);
+          }
+          self.dataCache[cacheKey].push(row);
+          backend.putRow(self.tableMap[src], row, tab);
+          if (src === primary) primaryRow = row;
+        });
+        return primaryRow;
+      },
+
       // Add row
       addRow: function() {
         var self = this;
         var view = VIEWS[this.currentTable];
         var primary = view ? view.sources[0] : this.currentTable;
-        var id = self.generateId();
-        // Create an empty row with the same id across the whole mirror cluster (consistent with archive/delete)
-        var sources = withMirrors([primary]), primaryRow = null;
-        sources.forEach(function(src) {
-          var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-          getColumns(src).forEach(function(c) { if (!row[c]) row[c] = ''; });
-          var _oc = getOwnerCol(src); if (_oc) row[_oc] = self.currentUserEmail || ''; // stamp owner on create
-          var cacheKey = self.viewingArchive ? aKey(src) : src;
-          if (!self.dataCache[cacheKey]) self.dataCache[cacheKey] = [];
-          // Reorderable tables order by `position`; seed the next number so new rows append in order
-          // (otherwise they get an empty position and the hardened sort floats them after positioned rows).
-          if (SCHEMA[src] && SCHEMA[src].reorderable) {
-            var _mp = 0;
-            self.dataCache[cacheKey].forEach(function(r) { var n = Number(r.position); if (!isNaN(n) && n > _mp) _mp = n; });
-            row.position = String(_mp + 1);
-          }
-          self.dataCache[cacheKey].push(row);
-          var tab = self.viewingArchive ? 'archive' : 'active';
-          backend.putRow(self.tableMap[src], row, tab);
-          if (src === primary) primaryRow = row;
-        });
+        var primaryRow = this._createBlankRow(primary, { tab: this.viewingArchive ? 'archive' : 'active' });
         if (view) {
           var viewRow = Object.assign({}, primaryRow);
           if (view.mode === 'union') viewRow._source = primary;

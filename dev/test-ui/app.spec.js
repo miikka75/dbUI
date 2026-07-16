@@ -2449,6 +2449,42 @@ test.describe('rsvp + pivot sorting', () => {
   });
 });
 
+test.describe('blank-row creation (shared by grid / embed / calendar add)', () => {
+  test('every add path seeds `position` on a reorderable table, stamps owner, and prefills', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.dataCache['crew_rotation'] = [{ id: 'p1', position: '1', people: [] }, { id: 'p2', position: '2', people: [] }];
+      const out = {};
+
+      // 1. The grid path (already correct before the extraction) -> next position.
+      app.currentTable = 'crew_rotation';
+      app.addRow();
+      out.gridPosition = app.dataCache['crew_rotation'].slice(-1)[0].position;
+
+      // 2. The EMBED path -- this used to leave position blank, so the row sorted after every
+      //    placed row. window.VIEWS embed spec resolved via embedSources.
+      window.VIEWS.rot_embed = { name: 'rot_embed', sources: ['crew_rotation'], columns: ['position', 'people'] };
+      app.embedAddRow('view', 'rot_embed');
+      out.embedPosition = app.dataCache['crew_rotation'].slice(-1)[0].position;
+
+      // 3. The CALENDAR path -- same gap, plus it must prefill the clicked date.
+      app.dataCache['tasks'] = [];
+      window.VIEWS.cal_add2 = { name: 'cal_add2', calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] } };
+      app.calendarAddOnDay('cal_add2', '2026-07-09');
+      const t = app.dataCache['tasks'].slice(-1)[0];
+      out.calPrefilledDate = t.date;
+      out.calBlankTitle = t.title;
+      return out;
+    });
+    expect(r.gridPosition).toBe('3');     // unchanged behaviour
+    expect(r.embedPosition).toBe('4');    // was '' before: the fix
+    expect(r.calPrefilledDate).toBe('2026-07-09');
+    expect(r.calBlankTitle).toBe('');
+  });
+});
+
 test.describe('sorting', () => {
   test('a view sorts by a numeric column (real numbers and string-stored) instead of throwing', async ({ page }) => {
     await ensureAppReady(page);
