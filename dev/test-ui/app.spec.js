@@ -4197,3 +4197,44 @@ test.describe('shared-link firebase config safety', () => {
     expect(r.url).toBe('');                             // params stripped regardless (no re-apply on refresh)
   });
 });
+
+test.describe('self-service tables (owner column) in the plain grid', () => {
+  test('a no-grant member sees the table, adds their own row, edits/deletes only their own', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // A viewer granted only 'notes' -> no grant on 'signups' (which has an owner column in the fixture).
+      app.usersLoaded = true;
+      app.userList = [{ key: 'mel@x.com', role: 'viewer', tables: ['notes'] }];
+      app.currentUserEmail = 'mel@x.com';
+      app.dataCache['signups'] = [
+        { id: 's1', owner: 'mel@x.com', dish: 'Pie' },     // mine
+        { id: 's2', owner: 'ann@x.com', dish: 'Salad' }    // someone else's (a public/roster row I can see)
+      ];
+      const mine = app.dataCache['signups'][0], theirs = app.dataCache['signups'][1];
+      const out = {
+        canSee: app.sidebarTabs.some(t => t.id === 'signups' || (t.children || []).some(c => c.id === 'signups')),
+        canSeeNotes: !!app.userAllowedTables && app.userAllowedTables.indexOf('notes') >= 0
+      };
+      app.selectTab('signups');
+      out.currentSelfService = app.currentSelfService;
+      out.canMutateRows = app.canMutateRows;                 // add button gate
+      out.canMutateMine = app.canMutateRow(mine);
+      out.canMutateTheirs = app.canMutateRow(theirs);
+      out.cellMineRO = app.cellReadonly(mine, 'dish');
+      out.cellTheirsRO = app.cellReadonly(theirs, 'dish');
+      out.ownerColRO = app.cellReadonly(mine, 'owner');
+      out.tasksVisible = app.sidebarTabs.some(t => t.id === 'tasks');
+      return out;
+    });
+    expect(r.canSee).toBe(true);            // self-service table shows in nav without a grant
+    expect(r.currentSelfService).toBe(true);
+    expect(r.canMutateRows).toBe(true);     // add button available
+    expect(r.canMutateMine).toBe(true);     // can delete/archive my row
+    expect(r.canMutateTheirs).toBe(false);  // not someone else's
+    expect(r.cellMineRO).toBe(false);       // my cell editable despite viewer role
+    expect(r.cellTheirsRO).toBe(true);      // their cell read-only
+    expect(r.ownerColRO).toBe(true);        // owner column immutable
+    expect(r.tasksVisible).toBe(false);     // control: an ungranted non-owner table stays hidden
+  });
+});

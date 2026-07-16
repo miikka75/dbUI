@@ -271,7 +271,7 @@
               </template>
               <div class="mt-2">
                 <v-btn v-if="a.canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="a.printCard(item)"></v-btn>
-                <template v-if="a.canMutateRows">
+                <template v-if="a.canMutateRows && a.canMutateRow(item)">
                 <v-btn v-if="a.hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="a.archiveRow(item)"></v-btn>
                 <v-btn :icon="a.isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed('row:'+item.id) ? 'error' : ''" @click="a.deleteRow(item)"></v-btn>
                 </template>
@@ -295,9 +295,9 @@
                 <td style="white-space:nowrap">
                   <v-btn v-if="a.isReorderable" icon="mdi-arrow-up" size="small" variant="text" :disabled="a.sortedData.indexOf(item) === 0" @click="a.moveRowPosition(item, -1)"></v-btn>
                   <v-btn v-if="a.isReorderable" icon="mdi-arrow-down" size="small" variant="text" :disabled="a.sortedData.indexOf(item) === a.sortedData.length - 1" @click="a.moveRowPosition(item, 1)"></v-btn>
-                  <v-btn v-if="!a.viewingArchive && a.hasArchive && a.canMutateRows" icon="mdi-archive-outline" size="small" variant="text" class="mr-2" @click="a.archiveRow(item)"></v-btn>
-                  <v-btn v-if="a.viewingArchive && a.canMutateRows" icon="mdi-archive-arrow-up-outline" size="small" variant="text" class="mr-2" @click="a.restoreRow(item)"></v-btn>
-                  <v-btn v-if="a.canMutateRows" :icon="a.isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('row:'+item.id) ? 'error' : ''" @click="a.deleteRow(item)"></v-btn>
+                  <v-btn v-if="!a.viewingArchive && a.hasArchive && a.canMutateRows && a.canMutateRow(item)" icon="mdi-archive-outline" size="small" variant="text" class="mr-2" @click="a.archiveRow(item)"></v-btn>
+                  <v-btn v-if="a.viewingArchive && a.canMutateRows && a.canMutateRow(item)" icon="mdi-archive-arrow-up-outline" size="small" variant="text" class="mr-2" @click="a.restoreRow(item)"></v-btn>
+                  <v-btn v-if="a.canMutateRows && a.canMutateRow(item)" :icon="a.isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('row:'+item.id) ? 'error' : ''" @click="a.deleteRow(item)"></v-btn>
                 </td>
               </tr>
               <template v-if="a.sortedData.indexOf(item) === a.sortedData.length - 1" v-for="(ei, eidx) in a.embedItems" :key="'temb'+eidx">

@@ -195,7 +195,9 @@ function createVueApp() {
           if (!allowedTables) return true;
           if (VIEWS[id]) {
             var v = VIEWS[id];
-            if (!(v.sources || []).every(function(s) { return allowedTables.indexOf(s) >= 0; })) return false;
+            // A source is reachable if granted OR self-serviceable (owner-column table): a member sees a
+            // self-service table/view in nav without a table grant, scoped to their own rows by the rules.
+            if (!(v.sources || []).every(function(s) { return allowedTables.indexOf(s) >= 0 || self.canSelfServe(s); })) return false;
             // sourceless rotation views are unlocked by ANY of their rosters — a roster you lack
             // simply renders blank (per-roster access, e.g. team_b coordinator sees team_a empty).
             if (!(v.sources && v.sources.length)) {
@@ -204,7 +206,7 @@ function createVueApp() {
             }
             return true;
           }
-          if (SCHEMA[id]) return allowedTables.indexOf(id) >= 0;
+          if (SCHEMA[id]) return allowedTables.indexOf(id) >= 0 || self.canSelfServe(id);
           return true;
         }
         var navCfg = self.navConfig;
@@ -417,7 +419,7 @@ function createVueApp() {
         return needed > (this.windowWidth - 72);
       },
       useListLayout: function() { return this.currentConfig.layout === 'list'; },
-      isReadonlyView: function() { return this.viewReadonly(this.currentTable); },
+      isReadonlyView: function() { return !this.currentSelfService && this.viewReadonly(this.currentTable); },
       embedConfigs: function() {
         var self = this;
         var cfg = this.currentConfig;
@@ -462,8 +464,22 @@ function createVueApp() {
         var cluster = withMirrors(base); // full mirror cluster (both directions)
         return cluster.every(function(t) { return allowed.indexOf(t) >= 0; });
       },
-      // Shared gate for all row-level mutation controls (add/delete/archive/restore)
-      canMutateRows: function() { return !this.hasMaster && !this.isReadonlyView && this.canMutateCurrent; },
+      // Shared gate for all row-level mutation controls (add/delete/archive/restore). A self-service
+      // table (owner column, no grant) is add-enabled for a member; per-row edit/delete is then gated on
+      // ownership by canMutateRow / cellReadonly (this only opens the ADD button + row-control column).
+      canMutateRows: function() { return !this.hasMaster && !this.isReadonlyView && (this.canMutateCurrent || this.currentSelfService); },
+      // --- Self-service (owner-column tables): a registered member without a table grant may add their
+      // own rows and edit/delete ONLY those. Mirrors the RSVP permission model into the plain data grid;
+      // Firestore rules are the real enforcement (see _meta/ownerTables), this is the matching UI. ---
+      myEmailLc: function() { return (this.currentUserEmail || '').toLowerCase(); },
+      // The underlying owner table for the current view/table (a self-service view has one source).
+      selfServeTable: function() { var v = VIEWS[this.currentTable]; return v ? (v.sources || [])[0] : this.currentTable; },
+      // Is the current table/view self-serviceable by me right now?
+      currentSelfService: function() {
+        var v = VIEWS[this.currentTable];
+        if (v) { var s = v.sources || []; return s.length === 1 && this.canSelfServe(s[0]); }
+        return this.canSelfServe(this.currentTable);
+      },
       // List values are editable only by recognized writable roles (admin/editor); visibleLists already scopes WHICH lists
       canEditLists: function() { return this.isAdmin || this.currentUserRole === 'editor'; },
       visibleCols: function() {
@@ -1540,8 +1556,34 @@ function createVueApp() {
       },
       // Is a view/table read-only as a whole (config flag, viewer role, or aggregate)
       viewReadonly: function(id) { var v = VIEWS[id], cfg = VIEWS[id] || SCHEMA[id] || {}; return !!cfg.readonly || this.currentUserRole === 'viewer' || !!(v && v.groupBy && v.collect); },
-      // Shared gate for whether a data cell renders read-only (ownerId defaults to currentTable)
-      cellReadonly: function(item, col, ownerId) { return this.viewReadonly(ownerId || this.currentTable) || this.isReadonlyCell(item, col, ownerId); },
+      // Shared gate for whether a data cell renders read-only (ownerId defaults to currentTable).
+      // On a self-service table the viewer-role blanket-readonly yields to per-row ownership: I may edit
+      // MY rows, others stay read-only (owner/mirror/union-foreign columns are always read-only).
+      cellReadonly: function(item, col, ownerId) {
+        if (this.isReadonlyCell(item, col, ownerId)) return true;
+        if (this.currentSelfService && (!ownerId || ownerId === this.currentTable)) return !this.rowOwnedByMe(item, this.selfServeTable);
+        return this.viewReadonly(ownerId || this.currentTable);
+      },
+      // A table a restricted member may self-serve: it has an owner column, they have no grant on it, and
+      // it isn't part of a mirror cluster (adds fan out across the cluster -> keep self-service to simple
+      // single-table owned rows). Admin/unrestricted (allowed == null) use full access, not self-service.
+      canSelfServe: function(table) {
+        var allowed = this.userAllowedTables;
+        // Must be a REGISTERED member with an identity. userAllowedTables is [] for both "registered, no
+        // grants" and "not a member (fail closed)" -- isUnregisteredUser separates them so self-service
+        // never opens a table to a non-member.
+        if (!allowed || !this.currentUserEmail || this.isUnregisteredUser) return false;
+        if (!table || !getOwnerCol(table) || allowed.indexOf(table) >= 0) return false;
+        return withMirrors([table]).length === 1;
+      },
+      // Row belongs to the current user (its owner column equals my email, case-insensitive).
+      rowOwnedByMe: function(item, table) {
+        var oc = getOwnerCol(table);
+        return !!oc && String((item && item[oc]) || '').toLowerCase() === this.myEmailLc;
+      },
+      // Per-row mutate gate for the row-control column: normal tables defer to canMutateRows (table-level);
+      // a self-service table restricts delete/archive to my own rows.
+      canMutateRow: function(item) { return !this.currentSelfService || this.rowOwnedByMe(item, this.selfServeTable); },
       getRefOptions: function(col, item) {
         var ref = null;
         for (var t in SCHEMA) { ref = getColumnRef(t, col); if (ref) break; }

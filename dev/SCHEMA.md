@@ -837,6 +837,10 @@ table — the `rsvp` view is one presentation of it; a plain data grid over an o
 `leave_requests`, `expenses`, or `shifts` table) is another. Read visibility is the separate `owner` /
 `rosterPublic` axis (private to the owner + organizers, or public) described under **rsvp**.
 
+- **In the UI**: a self-service table shows in the nav for such a member and its **Add** button is
+  available; per-row edit/delete is gated on ownership (their own rows are editable, others render
+  read-only, the `owner` column is always read-only). Admins/editors with a grant manage all rows as
+  before.
 - **How the rules know**: Firestore rules are schema-blind, so `saveSchema` mirrors the set of
   owner-column tables to `_meta/ownerTables` (`BackendHelpers.ownerTablesOf`). The data rules allow
   owner-create **only** on a table in that set — otherwise a member could inject owner-stamped rows into
@@ -844,8 +848,10 @@ table — the `rsvp` view is one presentation of it; a plain data grid over an o
 - **Migration**: if `_meta/ownerTables` doesn't exist yet (rules deployed before the schema was next
   saved), owner-create falls back to permissive so existing sign-up flows keep working; enforcement
   activates on the next schema save.
-- The local/dev server is unauthenticated (loopback only) and does not enforce this — it is a
-  Firestore-rules mechanism.
+- **Enforcement** is the Firestore rules. The local/dev server (unauthenticated, loopback only) is not a
+  security boundary, but **mirrors** owner-scoped reads/writes for a self-service table so the local demo
+  behaves like Firebase: a non-granted member reads their own rows (+ `rosterPublic`) and may create /
+  edit / delete only their own owned rows.
 
 ## user profiles, user-backed lists & membership (Firebase)
 

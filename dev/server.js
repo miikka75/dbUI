@@ -93,6 +93,22 @@ const server = http.createServer(async (req, res) => {
       const base = tableId ? tableId.split('__')[0] : '';
       return allowed.indexOf(base) >= 0;
     }
+    // Self-service (mirrors firestore.rules on the unauthenticated dev backend so the local demo behaves
+    // like Firebase): a member with NO grant on a table that declares an `owner` column may still read
+    // their own rows (+ rosterPublic) and create/update/delete their own owned rows. Returns that table's
+    // owner column name, or null if the caller is granted/unrestricted or the table has no owner column.
+    function selfServiceOwnerCol(tableId) {
+      const base = tableId ? tableId.split('__')[0] : '';
+      const allowed = getAllowedTables();
+      if (!allowed || allowed.indexOf(base) >= 0) return null;      // unrestricted or granted -> normal path
+      const cols = (((backend.getSchema('local') || {}).tables || {})[base] || {}).columns;
+      if (!cols) return null;
+      if (Array.isArray(cols)) { const o = cols.find(c => c && c.type === 'owner'); return o ? o.name : null; }
+      for (const n in cols) { const d = cols[n]; if (d && typeof d === 'object' && d.type === 'owner') return n; }
+      return null;
+    }
+    const _mine = (v) => String(v == null ? '' : v).toLowerCase() === String(userEmail || '').toLowerCase();
+    const _rowById = (tableId, tab, id) => ((backend.getTableData(tableId, tab) || {}).rows || []).find(r => r.id === id);
 
     try {
     switch (route) {
@@ -126,8 +142,21 @@ const server = http.createServer(async (req, res) => {
       case 'getAvailableTables': return json(res, backend.getAvailableTables('local'));
       case 'serverInfo': return json(res, { storage: USE_FS ? 'fs' : 'sqlite' });
       case 'getAvailableLanguages': return json(res, backend.getAvailableLanguages('local'));
-      case 'getTableData': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } return json(res, backend.getTableData(body.tableId, body.tab));
-      case 'putRow': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
+      case 'getTableData': {
+        if (checkTableAccess(body.tableId)) return json(res, backend.getTableData(body.tableId, body.tab));
+        const oc = selfServiceOwnerCol(body.tableId);                 // self-service: own rows + public roster only
+        if (!oc) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
+        const data = backend.getTableData(body.tableId, body.tab) || { headers: [], rows: [] };
+        return json(res, Object.assign({}, data, { rows: (data.rows || []).filter(r => _mine(r[oc]) || r.rosterPublic === true) }));
+      }
+      case 'putRow': {
+        if (checkTableAccess(body.tableId)) { backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true }); }
+        const oc = selfServiceOwnerCol(body.tableId);
+        const existing = oc ? _rowById(body.tableId, body.tab, body.data && body.data.id) : null;
+        // Must stamp myself as owner AND (on update) not overwrite a row owned by someone else.
+        if (!oc || !_mine(body.data && body.data[oc]) || (existing && !_mine(existing[oc]))) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
+        backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
+      }
       case 'uploadFile': {
         // Dev-only file store for the image column (the local counterpart of Firebase Storage): write the
         // base64 body to dev/uploads/ and return a same-origin URL. The row stores only that URL, not bytes.
@@ -141,7 +170,13 @@ const server = http.createServer(async (req, res) => {
         const host = req.headers.host || (HOST + ':' + PORT);
         return json(res, { url: 'http://' + host + '/uploads/' + fname });
       }
-      case 'deleteRow': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
+      case 'deleteRow': {
+        if (checkTableAccess(body.tableId)) return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
+        const oc = selfServiceOwnerCol(body.tableId);
+        const existing = oc ? _rowById(body.tableId, body.tab, body.id) : null;   // may delete only my own owned row
+        if (!oc || !existing || !_mine(existing[oc])) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
+        return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
+      }
       case 'getTranslations': return json(res, backend.getTranslations(body.folderId || 'local', body.langCode));
       case 'updateTranslations': backend.updateTranslations(body.folderId || 'local', body.langCode, body.updates); return json(res, { ok: true });
       case 'createLanguage': return json(res, { id: backend.createLanguage(body.folderId || 'local', body.code, body.name, body.keys) });
