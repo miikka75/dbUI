@@ -69,16 +69,29 @@
         var qp = new URLSearchParams(location.search);
         var urlMode = qp.get('mode');
         if (urlMode) {
-          localStorage.setItem('app_mode', urlMode);
           if (urlMode === 'firebase') {
-            if (qp.get('config')) {
-              try { localStorage.setItem('firebase_config', atob(qp.get('config'))); } catch(e) {}
-            } else if (qp.get('k') && qp.get('p')) {
+            // A firebase config from a link points the app at a whole Firestore project. A crafted link
+            // could silently connect a victim to an ATTACKER's project (their schema, their DB collecting
+            // whatever the victim then enters). So parse the incoming config and CONFIRM the projectId
+            // before trusting it — unless it matches a project already stored (returning user, no reprompt).
+            var incoming = null;
+            if (qp.get('config')) { try { incoming = JSON.parse(atob(qp.get('config'))); } catch(e) {} }
+            else if (qp.get('k') && qp.get('p')) {
               // d= (authDomain) is optional: defaults to <projectId>.firebaseapp.com (the standard
               // Firebase auth domain). Only needed when a custom/non-default authDomain is used.
-              localStorage.setItem('firebase_config', JSON.stringify({ apiKey: qp.get('k'), authDomain: qp.get('d') || (qp.get('p') + '.firebaseapp.com'), projectId: qp.get('p') }));
+              incoming = { apiKey: qp.get('k'), authDomain: qp.get('d') || (qp.get('p') + '.firebaseapp.com'), projectId: qp.get('p') };
+            }
+            if (incoming && incoming.projectId) {
+              var trusted = null; try { trusted = JSON.parse(localStorage.getItem('firebase_config') || 'null'); } catch(e) {}
+              var known = trusted && trusted.projectId === incoming.projectId;
+              if (known || confirm('Connect this app to Firebase project "' + incoming.projectId + '"?\n\nOnly continue if you recognize this project — a shared link can point the app at someone else’s database.')) {
+                localStorage.setItem('firebase_config', JSON.stringify(incoming));
+                localStorage.setItem('app_mode', 'firebase');
+              }
+              // Declined -> nothing persisted; app_mode stays whatever it already was (setup screen on a fresh visit).
             }
           } else {
+            localStorage.setItem('app_mode', urlMode);
             if (qp.get('folder')) localStorage.setItem('app_folder', qp.get('folder'));
             if (qp.get('clientId')) localStorage.setItem('oauth_client_id', qp.get('clientId'));
           }

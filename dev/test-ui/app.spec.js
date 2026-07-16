@@ -3283,6 +3283,7 @@ test.describe('Shared-link URL params', () => {
   // SDK scripts are stubbed empty so the param-restoration contract can be
   // asserted without a real firebase boot (which can't run in the test env).
   test('firebase k/d/p link restores firebase_config and strips the URL', async ({ page }) => {
+    page.on('dialog', d => d.accept());   // user confirms the projectId connect prompt (the onboarding path)
     await page.route(/gstatic\.com|\/backend-firebase\.html|\/storage-firestore\.html/, r =>
       r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
     await page.goto('/?mode=firebase&k=API_KEY_1&d=app.example.com&p=proj-123');
@@ -3298,6 +3299,7 @@ test.describe('Shared-link URL params', () => {
 
   // Firebase branch with d= omitted: authDomain must default to <projectId>.firebaseapp.com.
   test('firebase k/p link without d= derives authDomain from projectId', async ({ page }) => {
+    page.on('dialog', d => d.accept());   // user confirms the projectId connect prompt (the onboarding path)
     await page.route(/gstatic\.com|\/backend-firebase\.html|\/storage-firestore\.html/, r =>
       r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
     await page.goto('/?mode=firebase&k=API_KEY_9&p=proj-999');
@@ -3307,6 +3309,7 @@ test.describe('Shared-link URL params', () => {
     expect(cfg).toEqual({ apiKey: 'API_KEY_9', authDomain: 'proj-999.firebaseapp.com', projectId: 'proj-999' });
   });
   test('firebase base64 config link restores firebase_config', async ({ page }) => {
+    page.on('dialog', d => d.accept());   // user confirms the projectId connect prompt (the onboarding path)
     await page.route(/gstatic\.com|\/backend-firebase\.html|\/storage-firestore\.html/, r =>
       r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
     const config = { apiKey: 'AK2', authDomain: 'b.example.com', projectId: 'p2' };
@@ -4166,5 +4169,31 @@ test.describe('list-item delete/rename cascade into table data', () => {
     expect(r.t1).toBe('Alice');   // spared: still valid via the alt list (the "move" is lossless)
     expect(r.t2).toBe('');        // scrubbed: genuine orphan, not in any list
     expect(r.puts).toEqual(['t2:active']); // only the orphan row was persisted
+  });
+});
+
+test.describe('shared-link firebase config safety', () => {
+  test('a firebase config link is NOT applied until the user confirms the projectId', async ({ page }) => {
+    // Simulate a crafted link pointing the victim at an attacker's Firestore project. The user declines.
+    let confirmMsg = null;
+    await page.addInitScript(() => {
+      // Fresh visitor: no prior mode/config. Decline the connect prompt and record what it said.
+      window.localStorage.clear();
+      window.__confirmMsg = null;
+      window.confirm = (m) => { window.__confirmMsg = m; return false; };
+    });
+    await page.goto('/?mode=firebase&k=AIza-fake&p=attacker-project');
+    await page.waitForLoadState('domcontentloaded');
+    const r = await page.evaluate(() => ({
+      msg: window.__confirmMsg,
+      config: window.localStorage.getItem('firebase_config'),
+      mode: window.localStorage.getItem('app_mode'),
+      url: location.search
+    }));
+    confirmMsg = r.msg;
+    expect(confirmMsg).toContain('attacker-project');   // the prompt names the project so the user can catch it
+    expect(r.config).toBeNull();                        // declined -> attacker config never persisted
+    expect(r.mode).not.toBe('firebase');                // and the app didn't switch into firebase mode
+    expect(r.url).toBe('');                             // params stripped regardless (no re-apply on refresh)
   });
 });
