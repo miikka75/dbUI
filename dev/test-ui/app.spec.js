@@ -2356,6 +2356,36 @@ test.describe('access control: user matching + fail-closed', () => {
   });
 });
 
+test.describe('filter list values: seeded and locked agree', () => {
+  test('$or/$and filter values are BOTH seeded and locked (one shared walk)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // convertViewFilters rewrites every legacy `{col:[a,b]}` to $or at load, so grouped filters are
+      // the common case -- and the locker used to iterate the key '$or', match no column, lock nothing.
+      window.VIEWS.or_fx = { name: 'or_fx', sources: ['tasks'], columns: ['title'],
+        filter: { $or: [{ status: 'open' }, { status: 'done' }] } };
+      window.VIEWS.and_fx = { name: 'and_fx', sources: ['tasks'], columns: ['title'],
+        filter: { $and: [{ assigned_to: 'Zoe' }] } };
+      app.schemaData = Object.freeze(Object.assign({}, app.schemaData, { _bump: Date.now() }));  // invalidate the computed
+      const listsCache = { status: [], assigned_to: [] };
+      window._seedListValues(listsCache);
+      const locked = app.lockedListValues;
+      return {
+        seededStatus: listsCache.status.slice(),
+        lockedStatus: Object.keys(locked.status || {}),
+        seededAssigned: listsCache.assigned_to.slice(),
+        lockedAssigned: Object.keys(locked.assigned_to || {})
+      };
+    });
+    // Seeding always recursed into $or; locking is what was missing.
+    expect(r.seededStatus).toEqual(expect.arrayContaining(['open', 'done']));
+    expect(r.lockedStatus).toEqual(expect.arrayContaining(['open', 'done']));   // was [] for $or
+    expect(r.seededAssigned).toContain('Zoe');
+    expect(r.lockedAssigned).toContain('Zoe');                                  // was [] for $and
+  });
+});
+
 test.describe('@me filter token', () => {
   test('is never seeded, locked, or offered as a list value (it resolves per-user at filter time)', async ({ page }) => {
     await ensureAppReady(page);
