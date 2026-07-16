@@ -287,6 +287,25 @@ test.describe('image/url column types', () => {
       return (s.rows[0] || {}).link;
     }, { timeout: 4000 }).toBe('https://example.com/y');
   });
+
+  test('a stored javascript:/data:text/html cell value renders an EMPTY href, not the payload', async ({ page }) => {
+    test.setTimeout(20000);
+    await openGallery(page, { dropUploader: true });
+    // A malicious value reaches the cell the same way any url does -- a writer stores it (on a shared-write
+    // table, writer != the victim who clicks). The rendered href must be neutralized.
+    await page.evaluate(() => {
+      const a = window.appInstance, r = a.currentData[0];
+      a.saveField(r, 'link', 'javascript:alert(document.domain)');
+      a.saveField(r, 'photo', 'data:text/html,<script>alert(1)</script>');
+    });
+    await expect(page.locator('.mdi-open-in-new')).toBeVisible();               // the url cell still renders a link element
+    const hrefs = await page.locator('a[target="_blank"]').evaluateAll(els => els.map(e => e.getAttribute('href')));
+    expect(hrefs.some(h => (h || '').startsWith('javascript:'))).toBe(false);   // no javascript: href survives
+    expect(hrefs).toContain('');                                                // the unsafe value became an empty href
+    // The data:text/html image value is not a raster data image -> src drops to empty too.
+    const srcs = await page.locator('img.cell-thumb').evaluateAll(els => els.map(e => e.getAttribute('src')));
+    expect(srcs.every(s => !/^data:text\/html/.test(s || ''))).toBe(true);
+  });
 });
 
 test.describe('Calendar locale follows the selected language', () => {

@@ -15,12 +15,36 @@
   var Rows = isNode ? require('./rows') : root;         // buildRows/resolveComputed/aggregateRows/sortByCol/condMatches
   var Cols = isNode ? require('./columns') : root;      // colName/isEmbed/isViewEmbed shape predicates
 
+  // A URL safe to place in an href/src attribute: http(s) only. Relative URLs are allowed when they
+  // resolve against the page onto http/https. Everything else -- javascript:, data:, vbscript:, file:,
+  // or malformed -- returns '' so the attribute renders empty instead of executing. Returns the URL
+  // UNESCAPED; a caller building a raw HTML string must esc() the result, while a Vue :href/:src binding
+  // escapes automatically. Used by mdToHtml (markdown links) AND the url/image data cells, which store a
+  // user-supplied string -- an unchecked `javascript:...` in a url cell runs on click, writer != victim
+  // on a shared-write (rsvp) table.
+  function safeUrl(u) {
+    if (!u) return '';
+    var base = (typeof location !== 'undefined') ? location.href : 'http://localhost/';
+    try { return /^https?:$/.test(new URL(String(u), base).protocol) ? String(u) : ''; } catch (e) { return ''; }
+  }
+
+  // Safe value for an <img src>: http(s), OR an inline RASTER data image. A raster data: URI can't
+  // execute script in an <img>, so it's allowed (the paste-a-URL image fallback). data:image/svg+xml is
+  // deliberately NOT allowed -- an SVG can carry scripts, and while <img> won't run them, the same value
+  // also lands in the wrapping <a href> where navigating to it would. href uses the stricter safeUrl.
+  function safeImgSrc(u) {
+    if (!u) return '';
+    var s = String(u);
+    if (/^data:image\/(png|jpe?g|gif|webp|avif|bmp);/i.test(s)) return s;
+    return safeUrl(s);
+  }
+
   // Tiny markdown -> HTML for pages (headings, bold/italic, lists, links, paragraphs). Embed tokens are
   // split out before this runs. (Moved from schema-loader.html; location is browser-only, so guard.)
   function mdToHtml(md) {
     var esc = function(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
-    var base = (typeof location !== 'undefined') ? location.href : 'http://localhost/';
-    var safeUrl = function(u) { try { var p = new URL(u, base); return /^https?:$/.test(p.protocol) ? esc(u) : ''; } catch(e) { return esc(u); } };
+    // `url` here is already HTML-escaped (esc ran on the whole line first), so safeUrl's result is used
+    // as-is -- re-escaping would double-encode & in query strings. safeUrl still drops unsafe schemes.
     var inline = function(t) { return esc(t).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\*([^*]+)\*/g, '<em>$1</em>').replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) { return '<a href="' + safeUrl(url) + '" target="_blank">' + text + '</a>'; }); };
     var lines = String(md || '').split('\n'), out = [], i = 0;
     while (i < lines.length) {
@@ -156,8 +180,8 @@
   var M = {
     mdToHtml: mdToHtml, buildEmbedBlock: buildEmbedBlock, mdBlocks: mdBlocks, docHasData: docHasData,
     resolveEmbed: resolveEmbed, embedCols: embedCols, embedRows: embedRows,
-    embedRowsForItem: embedRowsForItem, embedWhenOk: embedWhenOk, embedVisible: embedVisible
+    embedRowsForItem: embedRowsForItem, embedWhenOk: embedWhenOk, embedVisible: embedVisible, safeUrl: safeUrl, safeImgSrc: safeImgSrc
   };
   if (isNode) module.exports = M;
-  else { root.Embeds = M; root.mdToHtml = mdToHtml; } // mdToHtml stays a bare global (pageBlocks-era callers + tests)
+  else { root.Embeds = M; root.mdToHtml = mdToHtml; root.safeUrl = safeUrl; root.safeImgSrc = safeImgSrc; } // bare globals: mdToHtml (pageBlocks-era + tests), safeUrl/safeImgSrc (ROOT_PROXY)
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));
