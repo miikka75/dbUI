@@ -77,7 +77,14 @@ service cloud.firestore {
     // so OWNER-SCOPED self-service rows work: a registered member may create/edit/delete ONLY their own
     // row (one carrying `owner == their email`), no table-editor grant required — this backs the RSVP /
     // sign-up pattern. Rows without an `owner` field keep the plain per-table editor gate. Admins write all.
-    function base(coll) { return request.auth != null && isRegistered() && coll != '_meta' && coll != '_lists'; }
+    // The data catch-all must NOT also match a system collection, or its permissive owner-create branch
+    // (`request.resource.data.owner == myEmail()`) lets ANY registered user mint e.g. an _users doc with
+    // role:'admin' — a privilege escalation, since role() reads that doc. Firestore ORs overlapping match
+    // blocks, so naming only _meta/_lists here left _users/_profiles/_access_requests reachable through
+    // this rule. Exclude the whole underscore namespace (fail-safe: a future system collection is denied
+    // here by default and must get its own block), EXCEPT _pages — the doc-view body store is genuine
+    // user data written via putRow('_pages', …) -> the _pages__active/_pages__archive collections.
+    function base(coll) { return request.auth != null && isRegistered() && (!coll.matches('^_.*') || coll.matches('^_pages__.*')); }
     match /{collection}/{doc} {
       // Read: owner-stamped rows are private to their owner UNLESS marked rosterPublic (a per-table policy
       // denormalized onto each row) — members self-serve without a table grant and read only their own,
