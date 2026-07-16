@@ -83,6 +83,19 @@ function obscureName(s) {
 }
 
 var PRINT_CSS = 'body{font-family:system-ui;margin:20px;font-size:13px}.card{border:1px solid #ddd;padding:12px;margin-bottom:12px;border-radius:6px;page-break-inside:avoid}dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0}dt{font-weight:bold;font-size:13px;opacity:0.7}dd{margin:0;font-size:13px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:4px 8px;text-align:left;font-size:13px}th{background:#f5f5f5}.embed{margin:8px 0;padding:8px;background:#f9f9f9;border-radius:4px}.embed h4{margin:0 0 4px;font-size:13px;opacity:0.7}h1,h2,h3,h4,h5,h6{font-size:13px;margin:6px 0}@media print{button{display:none}}';
+// Click-to-sort header behaviour, shared by every surface that sorts: the root (the data grid, via
+// its own sortCol/sortAsc) and the components that keep their own sort state because they render
+// their own lists rather than currentData (rsvp, pivot). Mix into `methods` with Object.assign, like
+// ROOT_PROXY. The contract lives here once: first click ascending, clicking the same column flips.
+// `this` supplies sortCol/sortAsc, so it works for the root instance and a component alike.
+var SORT_UI = {
+  toggleSort: function(col) {
+    if (this.sortCol === col) this.sortAsc = !this.sortAsc;
+    else { this.sortCol = col; this.sortAsc = true; }
+  },
+  sortIcon: function(col) { return this.sortCol !== col ? '' : (this.sortAsc ? ' ▲' : ' ▼'); }
+};
+
 function createVueApp() {
   var vuetify = Vuetify.createVuetify({
     theme: {
@@ -1326,10 +1339,8 @@ function createVueApp() {
         return false;
       },
 
-      toggleSort: function(col) {
-        if (this.sortCol === col) this.sortAsc = !this.sortAsc;
-        else { this.sortCol = col; this.sortAsc = true; }
-      },
+      // The grid's header click — same contract as rsvp/pivot, so it comes from the same place (SORT_UI).
+      toggleSort: SORT_UI.toggleSort,
 
       // Cell editing
       saveField: function(item, col, value, ownerId) {
@@ -2936,6 +2947,7 @@ function createVueApp() {
     toDateStr: toDateStr
   };
 
+
   // The single embed renderer for every envelope (page-view, doc-view blocks, data-view). It dispatches
   // by kind: calendar/rotation delegate to their unified :embed components; 'doc' renders markdown blocks
   // (recursing into embed-view for nested embeds); 'data' renders a view/table's rows. Two input modes:
@@ -3395,17 +3407,12 @@ function createVueApp() {
         return rows.slice().sort(function(a, b) { return compareValues(val(a), val(b), asc); });
       }
     },
-    methods: {
+    methods: Object.assign({}, SORT_UI, {
       head: function(col) { return appInstance.tOr('field.' + col, col); },
       colLabel: function(k) { return appInstance.displayValue(this.cfg.column, k); },
       rowLabel: function(k) { return appInstance.displayValue(this.cfg.row, k); },
-      cellFmt: function(v) { return (v === '' || v == null) ? '' : (this.cfg.cell ? appInstance.displayValue(this.cfg.cell, v) : v); },
-      toggleSort: function(col) {
-        if (this.sortCol === col) this.sortAsc = !this.sortAsc;
-        else { this.sortCol = col; this.sortAsc = true; }
-      },
-      sortIcon: function(col) { return this.sortCol !== col ? '' : (this.sortAsc ? ' ▲' : ' ▼'); }
-    },
+      cellFmt: function(v) { return (v === '' || v == null) ? '' : (this.cfg.cell ? appInstance.displayValue(this.cfg.cell, v) : v); }
+    }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="pivot-view">'
       + '<v-table density="compact" class="my-1"><template v-slot:default>'
@@ -3487,16 +3494,9 @@ function createVueApp() {
       // just counts. Note the data is already access-filtered server-side; this is the display gate.
       showRoster: function() { return this.cfg.rosterVisibility === 'all' || (this.cfg.rosterVisibility === 'admins' && appInstance.isAdmin); }
     },
-    methods: {
+    methods: Object.assign({}, SORT_UI, {
       set: function(key, status) { appInstance.setRsvp(this.viewName, key, status || ''); },
       toDateStr: toDateStr,
-      // Same click-to-toggle contract as the data grid's toggleSort: first click ascending, click the
-      // same column again to flip. Kept local (see `data` above).
-      toggleSort: function(col) {
-        if (this.sortCol === col) this.sortAsc = !this.sortAsc;
-        else { this.sortCol = col; this.sortAsc = true; }
-      },
-      sortIcon: function(col) { return this.sortCol !== col ? '' : (this.sortAsc ? ' ▲' : ' ▼'); },
       // Translated label for a status VALUE, keyed by `list.<statusList||statusColumn>.<value>` (falls back
       // to the raw value). `statusList` lets the view name a translation namespace distinct from the column
       // — whose name may resolve to another table's list under the per-column-name list resolver.
@@ -3510,7 +3510,7 @@ function createVueApp() {
         var keys = Object.keys(groups).sort(function(a, b) { var ia = order.indexOf(a), ib = order.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
         return keys.map(function(s) { return { status: s, label: self.statusLabel(s), names: groups[s] }; });
       }
-    },
+    }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="rsvp-view">'
       + '<v-table v-if="!a.mobile" density="compact">'
