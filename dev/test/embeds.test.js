@@ -140,3 +140,52 @@ describe('embeds.js — per-row slicing + visibility', () => {
     assert.equal(Embeds.embedWhenOk({ config: {} }, { status: 'done' }), true);  // no when -> ok
   });
 });
+
+describe('embeds.js — safeUrl (url/image cell + markdown-link sanitizer)', () => {
+  it('allows http(s) URLs unchanged', () => {
+    assert.equal(Embeds.safeUrl('https://example.com/a?b=1&c=2'), 'https://example.com/a?b=1&c=2');
+    assert.equal(Embeds.safeUrl('http://localhost:3000/uploads/x.png'), 'http://localhost:3000/uploads/x.png');
+  });
+  it('allows a relative URL (resolves onto the page origin at runtime)', () => {
+    // In Node there is no `location`, so the fallback base is http://localhost/ -> http scheme -> kept.
+    assert.equal(Embeds.safeUrl('/uploads/pic.png'), '/uploads/pic.png');
+  });
+  it('blocks javascript:, data:, vbscript:, file: -> empty (the XSS cases)', () => {
+    assert.equal(Embeds.safeUrl('javascript:alert(1)'), '');
+    assert.equal(Embeds.safeUrl('JavaScript:alert(1)'), '');           // scheme is case-insensitive
+    assert.equal(Embeds.safeUrl('  javascript:alert(1)'), '');         // leading space doesn't smuggle it
+    assert.equal(Embeds.safeUrl('data:text/html,<script>alert(1)</script>'), '');
+    assert.equal(Embeds.safeUrl('vbscript:msgbox(1)'), '');
+    assert.equal(Embeds.safeUrl('file:///etc/passwd'), '');
+  });
+  it('empty / nullish -> empty string', () => {
+    for (const v of ['', null, undefined]) assert.equal(Embeds.safeUrl(v), '');
+  });
+  it('mdToHtml uses it: a javascript: link renders an empty href, not the payload', () => {
+    const html = Embeds.mdToHtml('[click](javascript:alert(1))');
+    assert.ok(html.includes('href=""'), 'unsafe scheme dropped: ' + html);
+    assert.ok(!html.includes('javascript:'), 'no javascript: in output: ' + html);
+  });
+  it('mdToHtml keeps a safe link and escapes its & in the href attribute', () => {
+    const html = Embeds.mdToHtml('[x](https://e.com/a?b=1&c=2)');
+    assert.ok(html.includes('href="https://e.com/a?b=1&amp;c=2"'), html);
+  });
+});
+
+describe('embeds.js — safeImgSrc (img src: http(s) + raster data image)', () => {
+  it('allows a raster data:image (the paste-a-URL image fallback)', () => {
+    const png = 'data:image/png;base64,iVBORw0KGgo=';
+    assert.equal(Embeds.safeImgSrc(png), png);
+    assert.equal(Embeds.safeImgSrc('data:image/gif;base64,R0lGOD=='), 'data:image/gif;base64,R0lGOD==');
+  });
+  it('allows http(s) image URLs', () => {
+    assert.equal(Embeds.safeImgSrc('https://cdn.example.com/a.png'), 'https://cdn.example.com/a.png');
+  });
+  it('blocks data:image/svg+xml (an SVG can carry script)', () => {
+    assert.equal(Embeds.safeImgSrc('data:image/svg+xml,<svg onload=alert(1)>'), '');
+  });
+  it('blocks data:text/html and javascript: (same as href)', () => {
+    assert.equal(Embeds.safeImgSrc('data:text/html,<script>alert(1)</script>'), '');
+    assert.equal(Embeds.safeImgSrc('javascript:alert(1)'), '');
+  });
+});
