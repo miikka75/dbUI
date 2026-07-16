@@ -54,5 +54,16 @@ await ok('viewer CANNOT create a data row owned by someone else',
 await ok('admin CAN still write a _pages__active doc (doc-view body store)',
   assertSucceeds(setDoc(doc(admin, '_pages__active/home'), { id: 'home', markdown: '# Home' })));
 
+// --- Self-service is bounded to owner-column tables (via _meta/ownerTables). ---
+// The checks above ran with no ownerTables doc -> permissive fallback (owner-create allowed anywhere),
+// which is the pre-migration behaviour. Now publish the set and assert enforcement.
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), '_meta/ownerTables'), { tables: ['rsvps'] });   // saveSchema derives this
+});
+await ok('viewer CAN create their own row in a self-service (owner-column) table',
+  assertSucceeds(setDoc(doc(viewer, 'rsvps__active/mine'), { id: 'mine', owner: 'viewer@x.com', status: 'coming' })));
+await ok('viewer CANNOT owner-inject into a non-self-service table (the #3 fix)',
+  assertFails(setDoc(doc(viewer, 'tasks__active/spam'), { id: 'spam', owner: 'viewer@x.com', title: 'junk' })));
+
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);

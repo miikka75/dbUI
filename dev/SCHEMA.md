@@ -53,7 +53,7 @@ nav     ← navigation tree + layout, references views/tables by name
 | `ref` | Reference to a lookup-table column |
 | `url` | A link — stored as a URL **string**; the cell shows an editable field + an open-in-new-tab icon, and a clickable link in read-only views |
 | `image` | An image — stored as a URL **string** (never the bytes). On a backend with file storage (**Firebase Storage** in prod, or the **local dev server** in development) the cell is an **upload** button that stores the file and saves the returned URL; backends without an uploader degrade to a paste-a-URL field. Read-only views show a thumbnail linking to the full image |
-| `owner` | Per-row access primitive — **auto-stamped** with the current user's email on create, **read-only** thereafter. Backs the `rsvp` view and owner-scoped Firestore rules (a member may write only their own owner-stamped rows). See `## rsvp`. |
+| `owner` | Per-row access primitive — **auto-stamped** with the current user's email on create, **read-only** thereafter. Backs the `rsvp` view and owner-scoped Firestore rules (a member may write only their own owner-stamped rows). See `## rsvp` and **Self-service tables** below. |
 
 ### column properties
 | Property | Description |
@@ -827,6 +827,25 @@ The events live in one table; responses in another that has an **`owner` column*
   must be carried on the rows — the `rosterVisibility` view option alone does not restrict reads.
 - With owner-scoped reads a non-organizer receives only their own response from the backend, so the
   rendered tally/roster reflects exactly what that user is permitted to see.
+
+## Self-service tables (Firebase)
+
+Any table that declares an **`owner` column** is a **self-service** table: a registered member may
+create / edit / delete **their own** owner-stamped rows there **without a table grant**, while an editor
+(table grant) or admin manages all rows. This is the RSVP/sign-up permission model, available to any
+table — the `rsvp` view is one presentation of it; a plain data grid over an owner-column table (e.g. a
+`leave_requests`, `expenses`, or `shifts` table) is another. Read visibility is the separate `owner` /
+`rosterPublic` axis (private to the owner + organizers, or public) described under **rsvp**.
+
+- **How the rules know**: Firestore rules are schema-blind, so `saveSchema` mirrors the set of
+  owner-column tables to `_meta/ownerTables` (`BackendHelpers.ownerTablesOf`). The data rules allow
+  owner-create **only** on a table in that set — otherwise a member could inject owner-stamped rows into
+  any table. The set is re-derived on every schema save; no manual upkeep.
+- **Migration**: if `_meta/ownerTables` doesn't exist yet (rules deployed before the schema was next
+  saved), owner-create falls back to permissive so existing sign-up flows keep working; enforcement
+  activates on the next schema save.
+- The local/dev server is unauthenticated (loopback only) and does not enforce this — it is a
+  Firestore-rules mechanism.
 
 ## user profiles, user-backed lists & membership (Firebase)
 

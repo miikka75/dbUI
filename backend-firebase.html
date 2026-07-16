@@ -14,7 +14,12 @@ backend = {
     });
   },
   saveSchema: function(folderId, schema) {
-    return StorageFirestore.setMeta('schema', schema);
+    // Mirror the self-service table set (tables with an owner column) to _meta/ownerTables so the
+    // schema-blind firestore rules can gate owner-create on it. Kept in sync on every schema write.
+    return Promise.all([
+      StorageFirestore.setMeta('schema', schema),
+      StorageFirestore.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) })
+    ]);
   },
   validateFolder: function(id) {
     return Promise.resolve({ valid: true, name: 'Firebase' });
