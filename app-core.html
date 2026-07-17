@@ -2212,9 +2212,11 @@ function createVueApp() {
         if (typeof backend_users === 'undefined' || !backend_users.getProfiles) { self.profilesByEmail = {}; return; }
         backend_users.getProfiles().then(function(m) { self.profilesByEmail = m || {}; }).catch(function() { self.profilesByEmail = {}; });
       },
-      userDisplayName: function(u) {
-        return (this.profilesByEmail[(u.key || '').toLowerCase()] || {}).name || '';
-      },
+      // Opted-in display name for an email, or '' if none. The single lookup into profilesByEmail;
+      // callers pick their own fallback (the Users table wants a blank cell, the rsvp roster wants the
+      // email so the row still reads as someone).
+      profileName: function(email) { return (this.profilesByEmail[(email || '').toLowerCase()] || {}).name || ''; },
+      userDisplayName: function(u) { return this.profileName(u.key); },
       renameUserProfile: function(u, name) {
         var self = this, email = (u.key || '').toLowerCase(), trimmed = (name || '').trim();
         if (typeof backend_users === 'undefined' || !backend_users.setProfileName) return;
@@ -3479,7 +3481,7 @@ function createVueApp() {
       // — whose name may resolve to another table's list under the per-column-name list resolver.
       statusLabel: function(v) { var list = this.cfg.statusList || appInstance.colIsList(this.cfg.statusColumn) || this.cfg.statusColumn; return appInstance.tOr('list.' + list + '.' + v, v); },
       tallyText: function(ev) { var self = this; return Object.keys(ev.tally).sort().map(function(s) { return self.statusLabel(s) + ': ' + ev.tally[s]; }).join('  ·  '); },
-      ownerName: function(email) { return ((appInstance.profilesByEmail || {})[(email || '').toLowerCase()] || {}).name || email; },
+      ownerName: function(email) { return appInstance.profileName(email) || email; },
       // Participants grouped by status: [{ status, label, names:[...] }], in the configured status order.
       rosterGroups: function(ev) {
         var self = this, order = this.options.map(function(o) { return o.value; }), groups = {};
