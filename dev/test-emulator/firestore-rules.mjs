@@ -64,6 +64,19 @@ await ok('viewer CAN create their own row in a self-service (owner-column) table
   assertSucceeds(setDoc(doc(viewer, 'rsvps__active/mine'), { id: 'mine', owner: 'viewer@x.com', status: 'coming' })));
 await ok('viewer CANNOT owner-inject into a non-self-service table (the #3 fix)',
   assertFails(setDoc(doc(viewer, 'tasks__active/spam'), { id: 'spam', owner: 'viewer@x.com', title: 'junk' })));
+// --- _profiles shape validation (display names feed user-backed lists / roster). ---
+await ok('user CAN write a well-formed profile',
+  assertSucceeds(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true })));
+await ok('name-only profile is allowed (setProfileName merge shape)',
+  assertSucceeds(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic2' })));
+await ok('oversized name is denied',
+  assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'x'.repeat(101), shared: true })));
+await ok('non-string name is denied',
+  assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: { a: 1 }, shared: true })));
+await ok('non-bool shared is denied',
+  assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: 'yes' })));
+await ok('extra fields are denied',
+  assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true, role: 'admin' })));
 
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);
