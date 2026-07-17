@@ -848,11 +848,9 @@ function createVueApp() {
                 var def = SCHEMA[t].columns[c];
                 if (def && typeof def === 'object' && def.list && !self.listsCache[def.list]) {
                   self.listsCache[def.list] = [];
-                  missing = true;
                 }
                 if (def && typeof def === 'object' && def.listSwitch && def.listSwitch.list && !self.listsCache[def.listSwitch.list]) {
                   self.listsCache[def.listSwitch.list] = [];
-                  missing = true;
                 }
               });
             });
@@ -2814,7 +2812,9 @@ function createVueApp() {
       },
       // (PRINT_CSS is a module-level var defined above createVueApp)
       _pe: function(s) { return Print.escape(s); },
-      _printOpen: function(title, bodyHtml) { var w = window.open('', '_blank'); w.document.write('<html><head><title>' + title + '</title><style>' + PRINT_CSS + '</style></head><body>' + bodyHtml + '</body></html>'); w.document.close(); w.print(); },
+      // `title` is escaped HERE (callers pass it raw): it comes from t()/displayValue — editor-writable
+      // shared data — and document.write renders it, so an unescaped title is stored XSS in the print window.
+      _printOpen: function(title, bodyHtml) { var w = window.open('', '_blank'); w.document.write('<html><head><title>' + Print.escape(title) + '</title><style>' + PRINT_CSS + '</style></head><body>' + bodyHtml + '</body></html>'); w.document.close(); w.print(); },
       // The print-HTML builders live in /print.js (pure over this ctx). Orchestration (window.open +
       // PRINT_CSS in _printOpen, and the printView/printCard entry points) stays here.
       _printCtx: function() {
@@ -2841,7 +2841,7 @@ function createVueApp() {
           return;
         }
         var cols = this.visibleCols;
-        var body = '<h2>' + title + '</h2>';
+        var body = '<h2>' + Print.escape(title) + '</h2>';
         if (this.useCardLayout) {
           this.sortedData.forEach(function(row) { body += Print.cardHtml(cols, row, ctx); });
         } else {
@@ -2859,7 +2859,7 @@ function createVueApp() {
       },
       printCard: function(item) {
         var cols = this.visibleCols;
-        var title = Print.escape(this.displayValue(cols[0], item[cols[0]]) || item.id);
+        var title = this.displayValue(cols[0], item[cols[0]]) || item.id; // raw — _printOpen escapes
         this._printOpen(title, Print.cardHtml(cols, item, this._printCtx()));
       }
     },

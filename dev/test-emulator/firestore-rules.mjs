@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 const rulesPath = fileURLToPath(new URL('../../firestore.rules', import.meta.url));
 const testEnv = await initializeTestEnvironment({
@@ -22,11 +22,13 @@ const testEnv = await initializeTestEnvironment({
 await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(ctx.firestore(), '_meta/users'), {
     'admin@x.com': { role: 'admin', tables: 'all' },
+    'editor@x.com': { role: 'editor', tables: ['tasks'] },
     'viewer@x.com': { role: 'viewer', tables: [] }
   });
 });
 
 const viewer = testEnv.authenticatedContext('viewer-uid', { email: 'viewer@x.com' }).firestore();
+const editor = testEnv.authenticatedContext('editor-uid', { email: 'editor@x.com' }).firestore();
 const admin = testEnv.authenticatedContext('admin-uid', { email: 'admin@x.com' }).firestore();
 
 let passed = 0;
@@ -77,6 +79,19 @@ await ok('non-bool shared is denied',
   assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: 'yes' })));
 await ok('extra fields are denied',
   assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true, role: 'admin' })));
+
+// --- _meta hardening. ---
+// The bootstrap probe is exists(_meta/users): if that doc could be deleted while /_users docs exist,
+// noUsers() would flip true and every signed-in account would be admin. Not even an admin deletes it.
+await ok('admin CANNOT delete _meta/users (bootstrap probe)',
+  assertFails(deleteDoc(doc(admin, '_meta/users'))));
+await setDoc(doc(admin, '_meta/lang_xx'), { 'app.title': 'X' });   // other _meta docs stay admin-deletable
+await ok('admin CAN delete another _meta doc (deleteLanguage path)',
+  assertSucceeds(deleteDoc(doc(admin, '_meta/lang_xx'))));
+// Per-list storage moved to /_lists; the old editor branch on the legacy _meta/lists doc only allowed
+// clobbering lists outside their table grants. Editors write /_lists (gated per list), never _meta.
+await ok('editor CANNOT write the legacy _meta/lists doc',
+  assertFails(setDoc(doc(editor, '_meta/lists'), { mylist: ['a'] })));
 
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);

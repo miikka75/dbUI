@@ -8,7 +8,7 @@
     "seed:import": "node seed-import.js",
     "test": "node --test test/*.test.js",
     "test:ui": "npx playwright test --config=playwright.config.js",
-    "test:storage-rules": "cd .. && firebase emulators:exec --only storage --project demo-image \"node dev/test-emulator/storage-rules.mjs\"",
+    "test:storage-rules": "cd .. && firebase emulators:exec --only storage,firestore --project demo-image \"node dev/test-emulator/storage-rules.mjs\"",
     "test:rules": "cd .. && firebase emulators:exec --only firestore --project demo-rules \"node dev/test-emulator/firestore-rules.mjs\""
   },
   "devDependencies": {

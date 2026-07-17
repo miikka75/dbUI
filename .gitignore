@@ -17,3 +17,7 @@ dev/seed-test-*.db
 dev/seed-test-*.db-wal
 dev/seed-test-*.db-shm
 
+
+# firebase emulator logs
+firebase-debug.log
+firestore-debug.log

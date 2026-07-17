@@ -23,15 +23,18 @@ service cloud.firestore {
     }
 
     // Meta: read by registered. `lists` and `users` docs are admin-only reads (users holds every
-    // member's email/role/grants; per-user access now lives in /_users). Write by admin (or bootstrap);
-    // editors may write the shared lists doc only.
+    // member's email/role/grants; per-user access now lives in /_users). Write by admin (or bootstrap).
+    // Editors no longer write here: per-list storage moved to /_lists (its own rule below), so the old
+    // editor branch on the legacy lists doc only allowed clobbering lists outside their table grants.
     match /_meta/{doc} {
       allow read: if request.auth != null && isRegistered() && (
         (doc != 'lists' && doc != 'users') || noUsers() || role() == 'admin'
       );
-      allow write: if request.auth != null && (
-        noUsers() || role() == 'admin' || (doc == 'lists' && role() == 'editor')
-      );
+      allow create, update: if request.auth != null && (noUsers() || role() == 'admin');
+      // The bootstrap probe is exists(_meta/users): deleting that doc while /_users docs exist would
+      // flip noUsers() true and hand EVERY signed-in Google account full admin. Nobody deletes it —
+      // an admin resetting the registry overwrites it with {} instead (exists() stays true).
+      allow delete: if request.auth != null && doc != 'users' && (noUsers() || role() == 'admin');
     }
 
     // Per-user access docs: a user reads only their OWN doc; admins read/list/write all. Replaces the

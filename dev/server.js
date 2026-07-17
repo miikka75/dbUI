@@ -50,8 +50,8 @@ function parseBody(req) {
   });
 }
 
-function json(res, data) {
-  res.writeHead(200, { 'Content-Type': 'application/json' });
+function json(res, data, status) {
+  res.writeHead(status || 200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
 }
 
@@ -203,7 +203,16 @@ const server = http.createServer(async (req, res) => {
         backend.saveLists('local', merged);
         return json(res, { ok: true });
       }
-      case 'putListItem': if (!checkTableAccess(body.listName)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.putListItem('local', body.listName, body.value); return json(res, { ok: true });
+      case 'putListItem': {
+        // Per-list access: a list is writable if ANY of its owning tables is granted (same ownership
+        // model as saveLists above) — the list NAME is not a table id, so checkTableAccess was wrong here.
+        const allowedLi = getAllowedTables();
+        const schemaTablesLi = (backend.getSchema('local') || {}).tables || {};
+        if (allowedLi && !listOwningTables(schemaTablesLi, body.listName).some(t => allowedLi.indexOf(t) >= 0)) {
+          return json(res, { error: 'Access denied' }, 403);
+        }
+        backend.putListItem('local', body.listName, body.value); return json(res, { ok: true });
+      }
       case 'moveRow': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.moveRow(body.tableId, body.rowData, body.fromTab, body.toTab); return json(res, { ok: true });
       case 'saveChangesets': backend.saveChangesets('local', body.siteId, body.json); return json(res, { ok: true });
       case 'loadChangesets': return json(res, backend.loadChangesets('local', body.excludeSiteId));
