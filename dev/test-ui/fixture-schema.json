@@ -122,6 +122,18 @@
       ],
       "reorderable": true,
       "defaultSort": "position"
+    },
+    "signups": {
+      "columns": [
+        {
+          "name": "owner",
+          "type": "owner"
+        },
+        {
+          "name": "dish",
+          "type": "text"
+        }
+      ]
     }
   },
   "views": [
@@ -320,6 +332,9 @@
       },
       {
         "table": "crew_rotation"
+      },
+      {
+        "table": "signups"
       }
     ]
   }
