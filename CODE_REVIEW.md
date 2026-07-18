@@ -169,8 +169,9 @@ parts; the projectId-confirm guard on shared links; the loopback-bind refusal; e
 
 **Concerns:**
 1. **The access model is implemented three times** — `firestore.rules`, `dev/server.js`, client UI.
-   B3/S8 are live drift. **[PARTIAL]** The rules-emulator suites now run as a CI job
-   (`node.js.yml` `rules` job); the Playwright suite is still not in CI.
+   B3/S8 are live drift. **[FIXED]** The rules-emulator suites AND the Playwright E2E suite now run
+   as CI jobs (`node.js.yml` `rules` + `e2e` jobs). The e2e job also exercises the SRI-pinned CDN
+   fallbacks on every run (vendor payloads are gitignored), so a stale integrity hash fails CI.
 2. **Global mutable state** (`SCHEMA`/`VIEWS`/`window._listsCache`/`appInstance` + `ROOT_PROXY`) is
    a pragmatic no-build choice, honestly documented, but the Node-gotcha comments in
    `rows.js`/`embeds.js` are symptoms. A single explicit context object would remove the class.
@@ -226,5 +227,9 @@ Schema can't express (cross-references, rotation slot/roster arithmetic).
    before switching. CSP (S6 tail) needs a tested allowlist. S9 (clamping peer timestamps) trades
    CRDT convergence guarantees for clock-skew protection — document or redesign, don't patch.
 2. **When touching the area:** P3 (changeset compaction/mtime cursor), P4 (doc-view embed
-   memoization), P5 (Apps Script TextFinder), Playwright in CI, meta-schema + `schemaVersion`,
-   column-shape normalization.
+   memoization), P5 (Apps Script TextFinder), meta-schema + `schemaVersion`, column-shape
+   normalization. A CSP remains blocked on the fragment loader: `execScript` injects fragments as
+   INLINE scripts, which a meaningful `script-src` forbids — switch the loader to real
+   `<script src>`/ES modules first, accept `'unsafe-eval'` for Vue's in-browser template compiler,
+   and use wildcarded Google origins to fit the multi-database design; roll out via
+   `Content-Security-Policy-Report-Only` before enforcing.
