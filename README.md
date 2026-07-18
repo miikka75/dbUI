@@ -248,19 +248,25 @@ loopback entries so local dev + the Firebase emulators keep working.
 
 ### Violation reports
 
-The production (Report-Only) header carries `report-uri` pointing at the collector URL in
-`csp.js` (`REPORT_URI`). Run the collector on that host — it's dependency-free:
+The production (Report-Only) header carries `report-uri /csp-report` (relative — `csp.js`
+`REPORT_URI`). Two ways to collect:
+
+**A. Firebase-native (same-origin, recommended when hosting on Firebase Hosting).**
+The `/csp-report` Hosting rewrite (`firebase.json`) routes reports to the `cspReport` Cloud
+Function (`functions/`), which aggregates them into the client-inaccessible `_csp_reports`
+Firestore collection (one doc per distinct violation, counted at write time). Requires the
+**Blaze plan** (Cloud Functions). Setup:
 
 ```bash
-REPORT_TOKEN=<long-random-string> node dev/csp-report-collector.js   # port 3900
+firebase functions:secrets:set CSP_REPORT_TOKEN   # long random string; gates the read endpoint
+firebase deploy --only functions,hosting
 ```
 
-Terminate HTTPS in front of it (browsers refuse to post reports from an https page to plain http)
-and route `POST /csp-report` to it. Read the aggregated summary (violations deduped with counts):
+Read the aggregated summary: `https://<your-hosting-domain>/csp-report?token=<CSP_REPORT_TOKEN>`
 
-```
-https://<collector-host>/csp-report?token=<REPORT_TOKEN>
-```
+**B. Self-hosted (any static host, no Blaze).** Run the dependency-free collector
+(`REPORT_TOKEN=... node dev/csp-report-collector.js`, port 3900) on your own box behind an
+HTTPS-terminating proxy, and point `csp.js` `REPORT_URI` at its absolute URL.
 
 The dev/CI **enforcing** policy deliberately omits `report-uri` so test runs never post to the
 real collector; `dev/test/csp.test.js` pins that split.

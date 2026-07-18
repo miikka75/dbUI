@@ -28,11 +28,14 @@
     return out;
   }
 
-  // Where browsers POST violation reports (see dev/csp-report-collector.js — run it on this host).
+  // Where browsers POST violation reports. RELATIVE: on Firebase Hosting the /csp-report rewrite
+  // (firebase.json) routes it to the cspReport Cloud Function (functions/index.js) — same-origin,
+  // no separate collector host or certificate. A deployment on a plain static host instead points
+  // this at an absolute URL running dev/csp-report-collector.js (self-hosted alternative).
   // Used by the production Report-Only header ONLY: the dev/CI enforcing policy deliberately omits
   // it so test runs never post reports at the real collector. report-uri is deprecated-but-universal;
   // report-to can be added later via a Reporting-Endpoints header if wanted.
-  var REPORT_URI = 'https://piispakunta.ddns.net/csp-report';
+  var REPORT_URI = '/csp-report';
 
   // opts.scriptHashes: array from inlineScriptHashes; opts.meta: true strips header-only directives
   // (frame-ancestors, report-uri) for a <meta http-equiv> delivery (e.g. GitHub Pages);

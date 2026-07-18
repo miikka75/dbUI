@@ -29,3 +29,6 @@ vendor/fonts/
 dev/vendor/*.js
 dev/vendor/*.css
 dev/vendor/fonts/
+
+# Cloud Functions deps (functions/ deploys its own node_modules)
+functions/node_modules/
