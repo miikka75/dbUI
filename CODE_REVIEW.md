@@ -172,6 +172,11 @@ parts; the projectId-confirm guard on shared links; the loopback-bind refusal; e
    B3/S8 are live drift. **[FIXED]** The rules-emulator suites AND the Playwright E2E suite now run
    as CI jobs (`node.js.yml` `rules` + `e2e` jobs). The e2e job also exercises the SRI-pinned CDN
    fallbacks on every run (vendor payloads are gitignored), so a stale integrity hash fails CI.
+   Additionally, `test:e2e-firebase` boots the REAL app in Firebase mode against the
+   auth/firestore/storage emulators (`dev/test-ui/firebase-emulator.spec.js`, also in CI): bootstrap
+   admin registration, schema + grid-row round-trips through Firestore, the Storage upload through
+   the cross-service registration gate, and a zero-grant viewer reading the edited `_pages` body —
+   the first end-to-end coverage of the Firebase adapter + rules + loader working together.
 2. **Global mutable state** (`SCHEMA`/`VIEWS`/`window._listsCache`/`appInstance` + `ROOT_PROXY`) is
    a pragmatic no-build choice, honestly documented, but the Node-gotcha comments in
    `rows.js`/`embeds.js` are symptoms. A single explicit context object would remove the class.
