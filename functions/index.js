@@ -39,7 +39,9 @@ function normalize(body) {
 // Firestore doc id for a violation key: encode (no '/') and bound the length.
 function docId(r) { return ('v_' + encodeURIComponent(r.directive + ' ' + r.blockedURI)).slice(0, 400); }
 
-exports.cspReport = onRequest({ secrets: [TOKEN], maxInstances: 1, cors: false }, async (req, res) => {
+// Region: co-located with the project's Firestore (europe-north1) — avoids cross-region latency +
+// egress on every report write/summary read. The hosting rewrite must name the same region.
+exports.cspReport = onRequest({ region: 'europe-north1', secrets: [TOKEN], maxInstances: 1, cors: false }, async (req, res) => {
   const db = admin.firestore();
   if (req.method === 'POST') {
     // Content-Type is application/csp-report or application/reports+json -> use the raw body.

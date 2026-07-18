@@ -49,7 +49,10 @@
     "rewrites": [
       {
         "source": "/csp-report",
-        "function": "cspReport"
+        "function": {
+          "functionId": "cspReport",
+          "region": "europe-north1"
+        }
       }
     ]
   },
