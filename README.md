@@ -258,11 +258,12 @@ Firestore collection (one doc per distinct violation, counted at write time). Re
 **Blaze plan** (Cloud Functions). Setup:
 
 ```bash
-firebase functions:secrets:set CSP_REPORT_TOKEN   # long random string; gates the read endpoint
-firebase deploy --only functions,hosting
+firebase functions:secrets:set DBUI_CSP_REPORT_TOKEN   # long random string; gates the read endpoint
+cd functions && npm install && cd ..                   # deploy analyzes source locally, needs node_modules
+firebase deploy --only functions,hosting               # run from the repo root
 ```
 
-Read the aggregated summary: `https://<your-hosting-domain>/csp-report?token=<CSP_REPORT_TOKEN>`
+Read the aggregated summary: `https://<your-hosting-domain>/csp-report?token=<DBUI_CSP_REPORT_TOKEN>`
 
 **B. Self-hosted (any static host, no Blaze).** Run the dependency-free collector
 (`REPORT_TOKEN=... node dev/csp-report-collector.js`, port 3900) on your own box behind an
