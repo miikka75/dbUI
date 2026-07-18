@@ -9,8 +9,8 @@
 // Storage: Firestore collection `_csp_reports`. Leading underscore => the client catch-all rule in
 // firestore.rules denies all client access; only this function (Admin SDK, bypasses rules) touches it.
 //
-// Reading: GET /csp-report?token=<CSP_REPORT_TOKEN> returns { total, violations: [...] } sorted by
-// count. Set the secret once: firebase functions:secrets:set CSP_REPORT_TOKEN
+// Reading: GET /csp-report?token=<DBUI_CSP_REPORT_TOKEN> returns { total, violations: [...] } sorted by
+// count. Set the secret once: firebase functions:secrets:set DBUI_CSP_REPORT_TOKEN
 //
 // NOTE: normalize() is intentionally a self-contained copy of dev/csp-report-collector.js's —
 // Cloud Functions deploys ONLY this directory, so requiring across the repo root won't package.
@@ -19,7 +19,7 @@ const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 
 admin.initializeApp();
-const TOKEN = defineSecret('CSP_REPORT_TOKEN');
+const TOKEN = defineSecret('DBUI_CSP_REPORT_TOKEN');
 
 // Both browser report shapes -> flat records (classic {"csp-report": {...}} and report-to array).
 function normalize(body) {
