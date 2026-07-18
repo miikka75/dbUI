@@ -92,10 +92,15 @@ dropped, with an emulator test.
 its own folder. Use `drive.file`. (Token in `sessionStorage` is XSS-readable — acceptable for this
 class of app, but it raises the stakes on findings like S3.)
 
-**S6 [PARTIAL] — No SRI / CSP on CDN scripts** — `index.html`
-The jsdelivr Vue/Vuetify fallbacks are now SRI-pinned (sha384 of the exact npm-package bytes).
-Still open: the gstatic Firebase / GSI bundles can't be pinned (Google rotates them in place), and
-there is no CSP — adding one needs a carefully tested connect-src/script-src allowlist.
+**S6 [FIXED (Report-Only soak pending)] — No SRI / CSP on CDN scripts** — `index.html`
+The jsdelivr Vue/Vuetify fallbacks are SRI-pinned (sha384 of the exact npm-package bytes), and the
+app now ships a Content-Security-Policy built in `/csp.js` (Firebase-mode origins, multi-database
+wildcards, hash-allowed inline boot scripts — no `'unsafe-inline'` scripts; `'unsafe-eval'` only
+for Vue's template compiler). The policy is ENFORCED in every E2E run (dev server `CSP=1`, with
+zero-violation assertions in the boot/emulator specs) and shipped to production as a
+`Content-Security-Policy-Report-Only` header in `firebase.json` — after a clean soak across real
+sign-in flows, rename the header key to enforce; `dev/test/csp.test.js` guards header/hash drift.
+Remaining accepted risk: the gstatic Firebase bundles can't be SRI-pinned (Google rotates them).
 
 **S7 [FIXED] — Rules edge cases**
 Owner-scoped update/delete are now bounded to self-service (owner-column) tables like create, and

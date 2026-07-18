@@ -224,6 +224,28 @@ favicon.svg -resize 512x512 icon-512.png`).
 - **Requirements**: install needs HTTPS (Firebase Hosting provides it) and a valid manifest;
   the icon files must be reachable and served as `image/*`.
 
+## Content-Security-Policy
+
+The app ships a CSP built in **`/csp.js`** (one source of truth — rationale documented in the file):
+Firebase-mode origins with multi-database wildcards, hash-allowed inline boot scripts (no
+`'unsafe-inline'` scripts), `'unsafe-eval'` only for Vue's in-browser template compiler, and
+loopback entries so local dev + the Firebase emulators keep working.
+
+- **Enforced in every E2E run**: the dev server sends the policy as an enforcing header under
+  `CSP=1` (the Playwright config sets it), so CI proves the app works under the policy.
+- **Production (Firebase Hosting)**: `firebase.json` currently sends it as
+  **`Content-Security-Policy-Report-Only`** — deploy, watch DevTools/violation reports across your
+  real flows (especially Google sign-in) for a few days, then rename the header key to
+  `Content-Security-Policy` to enforce.
+- **Other static hosts (e.g. GitHub Pages)**: after the soak, add
+  `<meta http-equiv="Content-Security-Policy" content="...">` to `index.html` using the
+  `buildPolicy({ meta: true })` variant (drops `frame-ancestors`, which meta can't express).
+- **Keeping it in sync**: `dev/test/csp.test.js` fails CI if the `firebase.json` header drifts from
+  `csp.js`, or if an inline script in `index.html` is edited without its hash updating. After
+  editing either, regenerate the header value from `csp.js`.
+- **Future backends**: Sheets/Drive modes need `accounts.google.com` + `www.googleapis.com`
+  additions; a Supabase backend needs `https://*.supabase.co` in `connect-src`.
+
 ## Project Structure
 
 ```

@@ -18,6 +18,16 @@ const backend = USE_FS
   : require('./backend-local').createLocalBackend(APP_DB === ':memory:' ? undefined : (DB_PATH || path.join(__dirname, 'local.db')));
 const STATIC_DIR = path.join(__dirname, '..');
 
+// CSP=1 -> compute the enforced policy once at startup (inline-script hashes come from the real
+// index.html, so an edited inline block is immediately reflected here — and guarded by csp.test.js).
+const CSP_POLICY = process.env.CSP === '1' ? (() => {
+  const crypto = require('crypto');
+  const Csp = require('../csp');
+  const indexSrc = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
+  const hashes = Csp.inlineScriptHashes(indexSrc, (s) => crypto.createHash('sha256').update(s).digest('base64'));
+  return Csp.buildPolicy({ scriptHashes: hashes });
+})() : null;
+
 // No auto-init -- schema must be imported explicitly
 
 // Persist users to file. In isolated (in-memory test) mode use a throwaway path so resetData/test
@@ -296,7 +306,12 @@ const server = http.createServer(async (req, res) => {
   if (!fs.existsSync(filePath)) { res.writeHead(404); return res.end('Not found'); }
   const ext = path.extname(filePath);
   const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
-  res.writeHead(200, { 'Content-Type': types[ext] || 'text/plain' });
+  const hdrs = { 'Content-Type': types[ext] || 'text/plain' };
+  // CSP=1: serve HTML with the app's Content-Security-Policy ENFORCED (see /csp.js). The Playwright
+  // suite runs with this on (playwright.config.js webServer env), so every E2E run proves the policy
+  // doesn't break the app — the gate before production flips its Report-Only header to enforcing.
+  if (CSP_POLICY && hdrs['Content-Type'] === 'text/html') hdrs['Content-Security-Policy'] = CSP_POLICY;
+  res.writeHead(200, hdrs);
   res.end(fs.readFileSync(filePath));
 });
 

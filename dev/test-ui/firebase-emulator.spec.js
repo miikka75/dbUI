@@ -37,9 +37,15 @@ test.beforeEach(async () => {
   await fetch(AUTH + `/emulator/v1/projects/${PROJECT}/accounts`, { method: 'DELETE' });
 });
 
-// Seed the pre-boot localStorage that puts the app in Firebase-emulator mode.
+// Seed the pre-boot localStorage that puts the app in Firebase-emulator mode, and record any
+// Content-Security-Policy violations (the dev server ENFORCES the policy under CSP=1 — a violated
+// directive that doesn't happen to break a flow would otherwise pass unnoticed).
 function seed(page) {
   return page.addInitScript(() => {
+    window.__cspViolations = [];
+    document.addEventListener('securitypolicyviolation', (e) => {
+      window.__cspViolations.push(e.violatedDirective + ' <- ' + e.blockedURI);
+    });
     localStorage.setItem('app_mode', 'firebase');
     localStorage.setItem('firebase_config', JSON.stringify({
       apiKey: 'demo-key', projectId: 'demo-app',
@@ -47,6 +53,10 @@ function seed(page) {
     }));
     localStorage.setItem('firebase_emulators', '1');
   });
+}
+
+async function expectNoCspViolations(page) {
+  expect(await page.evaluate(() => window.__cspViolations || [])).toEqual([]);
 }
 
 // Sign in against the AUTH EMULATOR with a mock Google credential (the emulator accepts an unsigned
@@ -82,6 +92,7 @@ test('bootstrap: first sign-in registers admin and saves the default schema', as
   expect(legacyMap).toBeTruthy();
   const schemaDoc = await fsDoc('_meta/schema');  // first boot saves the bundled default schema
   expect(schemaDoc).toBeTruthy();
+  await expectNoCspViolations(page);
 });
 
 test('admin: schema seed, grid add-row round-trip, image upload through Storage', async ({ page }) => {
@@ -118,6 +129,7 @@ test('admin: schema seed, grid add-row round-trip, image upload through Storage'
   await expect(thumb).toBeVisible({ timeout: 15000 });
   const src = await thumb.getAttribute('src');
   expect(src).toContain('127.0.0.1:9199'); // served by the storage emulator
+  await expectNoCspViolations(page);
 });
 
 test('zero-grant viewer: sees the EDITED page body (not the schema seed), no edit controls, no tables', async ({ page, browser }) => {
@@ -151,5 +163,6 @@ test('zero-grant viewer: sees the EDITED page body (not the schema seed), no edi
   await expect(viewer.locator('text=SEED-BODY')).toHaveCount(0);
   // No edit controls for a viewer (canEditPages gate).
   await expect(viewer.locator('button:has-text("Edit")')).toHaveCount(0);
+  await expectNoCspViolations(viewer);
   await ctx.close();
 });
