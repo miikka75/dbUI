@@ -1,7 +1,6 @@
-<!-- storage-firestore.html -- Firestore storage adapter
-     Same interface as StorageIDB so backends are interchangeable.
-     Requires: firebase SDK loaded, _db set to firebase.firestore() instance -->
-<script>
+// storage-firestore.js -- Firestore storage adapter
+// Same interface as StorageIDB so backends are interchangeable.
+// Requires: firebase SDK loaded, _db set to firebase.firestore() instance
 var StorageFirestore = (function() {
   function _col(store) { return _db.collection(store); }
 
@@ -40,4 +39,3 @@ var StorageFirestore = (function() {
     clearPending: function() { return Promise.resolve(); }
   };
 })();
-</script>

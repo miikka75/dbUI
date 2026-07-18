@@ -1,4 +1,4 @@
-// columns.js — Pure schema-derived column typing, shared by app-core.html (browser) + dev/schema.js
+// columns.js — Pure schema-derived column typing, shared by app-core.js (browser) + dev/schema.js
 // (Node) + unit tests. Previously duplicated as globals in app-core and again in dev/schema.js.
 // Browser: <script src="/columns.js">, then use via Columns.*
 // Node:    const Columns = require('../columns');
@@ -100,7 +100,7 @@
   function colPicker(schema, col) { return colInfo(schema, col).picker; }   // 'chips' | 'toggle' | null (dropdown)
 
   // View column-entry shape predicates (a view's `columns` array mixes plain names, {name,...} defs,
-  // inline embeds, named-view embeds and legacy text blocks). Moved here from schema-loader.html so the
+  // inline embeds, named-view embeds and legacy text blocks). Moved here from schema-loader.js so the
   // embed/row modules can require them; the browser also gets them as bare globals (see export below).
   function colName(c) { return c && typeof c === 'object' ? (c.name || Object.keys(c)[0]) : c; }
   function isEmbed(c) { return typeof c === 'object' && c.sources && !c.name; }

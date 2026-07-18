@@ -1,7 +1,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-// Extract validateSchema logic (mirrors app-core.html)
+// Extract validateSchema logic (mirrors app-core.js)
 function validateSchema(SCHEMA, VIEWS) {
   var errors = [];
   for (var v in VIEWS) {

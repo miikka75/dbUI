@@ -1,6 +1,5 @@
-<script>
-// Shared Drive API helpers — used by backend-oauth.html AND transport-drive.html.
-// Depends on _fetch (from auth-oauth.html) being available as a global.
+// Shared Drive API helpers — used by backend-oauth.js AND transport-drive.js.
+// Depends on _fetch (from auth-oauth.js) being available as a global.
 var DriveHelpers = {
   // Escape a value for a single-quoted Drive API `q` string literal (backslash, then quote). Names
   // interpolated into queries come from schema/user data (table names, language codes) — an unescaped
@@ -29,4 +28,3 @@ var DriveHelpers = {
       });
   }
 };
-</script>

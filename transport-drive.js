@@ -1,5 +1,4 @@
-<!-- transport-drive.html -- Google Drive transport for CrdtEngine sync -->
-<script>
+// transport-drive.js -- Google Drive transport for CrdtEngine sync
 var TransportDrive = (function() {
   var _folderId = null;
 
@@ -103,4 +102,3 @@ var TransportDrive = (function() {
     pullChangesets: pullChangesets
   };
 })();
-</script>

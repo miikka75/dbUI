@@ -1,9 +1,9 @@
 // rotation.js — Pure rotation engine: interval math + the rotationView row generator + the calendar/
-// occurrence resolvers that computed columns use. Extracted from schema-loader.html so the app's most
+// occurrence resolvers that computed columns use. Extracted from schema-loader.js so the app's most
 // intricate logic (rotateEvery slot-swap cycling, calendar looping) gets fast Node unit tests. Its only
 // external dependency is calendar.js's fmtDate.
 //   Browser: <script src="/rotation.js"> after calendar.js. Exposes Rotation.* AND each function as a
-//            global (schema-loader.html's resolveComputed/validateSchema + app-core.html + tests call
+//            global (schema-loader.js's resolveComputed/validateSchema + app-core.js + tests call
 //            them bare) — so it must load before the schema-loader fragment.
 //   Node:    const Rotation = require('../rotation');
 (function(root) {

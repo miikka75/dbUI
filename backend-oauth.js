@@ -1,5 +1,4 @@
-<!-- backend-oauth.html — Google OAuth + REST API backend adapter -->
-<script>
+// backend-oauth.js — Google OAuth + REST API backend adapter
 backend = {
   async getSchema(folderId) {
     try {
@@ -294,4 +293,3 @@ async function _ensureSheet(folderId, name, columns) {
 }
 
 
-</script>

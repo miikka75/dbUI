@@ -102,26 +102,28 @@
 
       var mode = localStorage.getItem('app_mode');
       var backendFile;
-      if (mode === 'sheets') { backendFile = '/backend-oauth.html'; }
-      else if (mode === 'crdt') { backendFile = '/backend-crdt.html'; }
-      else if (mode === 'crdt-local') { backendFile = '/backend-crdt-local.html'; }
-      else if (mode === 'firebase') { backendFile = '/backend-firebase.html'; }
+      if (mode === 'sheets') { backendFile = '/backend-oauth.js'; }
+      else if (mode === 'crdt') { backendFile = '/backend-crdt.js'; }
+      else if (mode === 'crdt-local') { backendFile = '/backend-crdt-local.js'; }
+      else if (mode === 'firebase') { backendFile = '/backend-firebase.js'; }
       else {
         try {
           var probe = await fetch('/api/validateFolder', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' });
-          if (probe.ok) { var pj = await probe.json(); if (pj && pj.valid) backendFile = '/backend-local-client.html'; }
+          if (probe.ok) { var pj = await probe.json(); if (pj && pj.valid) backendFile = '/backend-local-client.js'; }
         } catch(e) {}
         if (!backendFile) {
-          backendFile = '/backend-oauth.html';
+          backendFile = '/backend-oauth.js';
         }
       }
 
-      var [styleResp, uiResp, coreResp, schemaLoaderResp, backendResp] = await Promise.all([
+      // Only the MARKUP fragments (styles + Vue templates) are fetched and injected — inserting
+      // markup via innerHTML never executes script. All CODE loads as real same-origin <script src>
+      // elements (loadScript/loadScriptsOrdered below), so a future Content-Security-Policy needs no
+      // script-src 'unsafe-inline': the old execScript() pattern injected every fragment as an
+      // inline script, which a meaningful CSP forbids.
+      var [styleResp, uiResp] = await Promise.all([
         fetch('/style.html'),
-        fetch('/ui.html'),
-        fetch('/app-core.html'),
-        fetch('/schema-loader.html'),
-        fetch(backendFile)
+        fetch('/ui.html')
       ]);
       bootMark('fragmentsFetched');
 
@@ -148,14 +150,14 @@
       bootMark('vueLibsLoaded');
 
       // Shared pure backend helpers (used by Firebase + CRDT backends)
-      if (backendFile === '/backend-firebase.html' || backendFile === '/backend-crdt.html' || backendFile === '/backend-crdt-local.html') {
+      if (backendFile === '/backend-firebase.js' || backendFile === '/backend-crdt.js' || backendFile === '/backend-crdt-local.js') {
         await loadScript('/backend-helpers.js');
       }
 
-      if (backendFile === '/backend-oauth.html' || backendFile === '/backend-crdt.html') {
+      if (backendFile === '/backend-oauth.js' || backendFile === '/backend-crdt.js') {
         await loadScript('https://accounts.google.com/gsi/client');
       }
-      if (backendFile === '/backend-firebase.html') {
+      if (backendFile === '/backend-firebase.js') {
         await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
         await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js');
         await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js');
@@ -163,43 +165,33 @@
       }
       bootMark('sdkLoaded');
 
-      // The domain modules (kicked off right after fragmentsApplied) must be executed before the
-      // schema-loader fragment + app-core, which call them as globals.
+      // The domain modules (kicked off right after fragmentsApplied) must be executed before
+      // schema-loader + app-core, which call them as globals.
       await appModulesReady;
-      execScript(await schemaLoaderResp.text());
-      execScript(await coreResp.text());
+      await loadScriptsOrdered(['/schema-loader.js', '/app-core.js']);
       createVueApp();
       bootMark('vueMounted');
       // Load shared auth before backend for OAuth/CRDT(Drive)
-      if (backendFile === '/backend-oauth.html' || backendFile === '/backend-crdt.html') {
-        var authResp = await fetch('/auth-oauth.html');
-        execScript(await authResp.text());
-        execScript(await (await fetch('/drive-helpers.html')).text());
+      if (backendFile === '/backend-oauth.js' || backendFile === '/backend-crdt.js') {
+        await loadScriptsOrdered(['/auth-oauth.js', '/drive-helpers.js']);
       }
       // Dev-server client helpers (_post + backend_users) shared by local + crdt-local
-      if (backendFile === '/backend-local-client.html' || backendFile === '/backend-crdt-local.html') {
-        execScript(await (await fetch('/dev-client.html')).text());
+      if (backendFile === '/backend-local-client.js' || backendFile === '/backend-crdt-local.js') {
+        await loadScript('/dev-client.js');
       }
       // Load shared CRDT modules (engine + IDB storage + transport + unified backend)
       // for both Drive CRDT and local CRDT — they differ only in the transport.
-      if (backendFile === '/backend-crdt.html' || backendFile === '/backend-crdt-local.html') {
-        var transportFile = backendFile === '/backend-crdt.html' ? '/transport-drive.html' : '/transport-local.html';
-        var [engineResp, storageResp, transportResp, crdtBackendResp] = await Promise.all([
-          fetch('/crdt-engine.html'), fetch('/storage-idb.html'), fetch(transportFile), fetch('/crdt-backend.html')
-        ]);
-        execScript(await engineResp.text());
-        execScript(await storageResp.text());
-        execScript(await transportResp.text());
-        execScript(await crdtBackendResp.text());
+      if (backendFile === '/backend-crdt.js' || backendFile === '/backend-crdt-local.js') {
+        var transportFile = backendFile === '/backend-crdt.js' ? '/transport-drive.js' : '/transport-local.js';
+        await loadScriptsOrdered(['/crdt-engine.js', '/storage-idb.js', transportFile, '/crdt-backend.js']);
       }
       // Load Firestore storage adapter for Firebase mode
-      if (backendFile === '/backend-firebase.html') {
-        var fsResp = await fetch('/storage-firestore.html');
-        execScript(await fsResp.text());
+      if (backendFile === '/backend-firebase.js') {
+        await loadScript('/storage-firestore.js');
       }
-      execScript(await backendResp.text());
+      await loadScript(backendFile);
       // For OAuth/CRDT(Drive): handle auth
-      if (backendFile === '/backend-oauth.html' || backendFile === '/backend-crdt.html') {
+      if (backendFile === '/backend-oauth.js' || backendFile === '/backend-crdt.js') {
         if (!localStorage.getItem('app_folder')) {
           appInstance.showSetup = true; appInstance.loading = false;
         } else if (sessionStorage.getItem('oauth_token')) {
@@ -209,10 +201,7 @@
           appInstance.needsReauth = true; appInstance.loading = false;
         }
       }
-      // Firebase: auth handled by onAuthStateChanged in backend-firebase.html
-      if (backendFile === '/backend-firebase.html') {
-        // onAuthStateChanged in backend-firebase.html handles auth state and calls init()
-      }
+      // Firebase: auth handled by onAuthStateChanged in backend-firebase.js
     }
 
     function loadScript(src, integrity) {
@@ -237,15 +226,6 @@
           document.body.appendChild(s);
         });
       }));
-    }
-
-    function execScript(html) {
-      var match = html.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
-      if (match) {
-        var s = document.createElement('script');
-        s.textContent = match[1];
-        document.body.appendChild(s);
-      }
     }
 
     loadApp();

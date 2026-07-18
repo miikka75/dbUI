@@ -1,4 +1,3 @@
-<script>
 // BCP-47 languages offered by the "add language" picker (Languages tab). The `code` doubles as the Intl
 // locale (see calLocale), so every entry is a valid BCP-47 tag; `name` is the endonym (renamable after).
 var BCP47_LANGS = [
@@ -3605,4 +3604,3 @@ function init() {
 }
 
 // createVueApp() and init() called by index.html after all scripts loaded
-</script>

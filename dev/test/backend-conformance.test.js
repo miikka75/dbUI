@@ -56,8 +56,8 @@ describe('backend contract — putRow merge semantics', () => {
 });
 
 describe('backend contract — browser backends (source scan)', () => {
-  // Browser backends are HTML fragments (not requireable); scan the <script> for each contract method,
-  // defined as `name: function` or `async name(`.
+  // Browser backends are plain scripts that assign globals (not requireable modules); scan the source
+  // for each contract method, defined as `name: function` or `async name(`.
   function definedMethods(file) {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8');
     const set = new Set();
@@ -67,7 +67,7 @@ describe('backend contract — browser backends (source scan)', () => {
     return set;
   }
 
-  for (const file of ['backend-firebase.html', 'backend-oauth.html', 'crdt-backend.html']) {
+  for (const file of ['backend-firebase.js', 'backend-oauth.js', 'crdt-backend.js']) {
     it(file + ' defines every contract method', () => {
       const defined = definedMethods(file);
       const missing = CONTRACT.filter(m => !defined.has(m));

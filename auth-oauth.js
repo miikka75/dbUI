@@ -1,5 +1,4 @@
-<!-- auth-oauth.html — shared OAuth authentication for Drive/Sheets backends -->
-<script>
+// auth-oauth.js — shared OAuth authentication for Drive/Sheets backends
 var _token = sessionStorage.getItem('oauth_token');
 var _oauthClient = null;
 var CLIENT_ID = localStorage.getItem('oauth_client_id');
@@ -46,4 +45,3 @@ function triggerOAuth() {
 }
 
 initOAuth();
-</script>

@@ -1,6 +1,5 @@
-<!-- backend-firebase.html — Firebase Firestore backend with Google Auth
-     Requires: storage-firestore.html loaded before this -->
-<script>
+// backend-firebase.js — Firebase Firestore backend with Google Auth
+// Requires: storage-firestore.js loaded before this
 var _db = null;
 var _auth = null;
 var _storage = null;
@@ -404,4 +403,3 @@ var backend_users = {
 };
 
 initFirebase();
-</script>

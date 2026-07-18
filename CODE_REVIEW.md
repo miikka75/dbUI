@@ -175,9 +175,13 @@ parts; the projectId-confirm guard on shared links; the loopback-bind refusal; e
 2. **Global mutable state** (`SCHEMA`/`VIEWS`/`window._listsCache`/`appInstance` + `ROOT_PROXY`) is
    a pragmatic no-build choice, honestly documented, but the Node-gotcha comments in
    `rows.js`/`embeds.js` are symptoms. A single explicit context object would remove the class.
-3. **Bespoke module loader**: `fetch` + regex `execScript` executes only the first `<script>` per
-   fragment and precludes SRI. Native ES modules work without a build step; isolate the Apps Script
-   sandbox constraint instead of shaping the whole app around it.
+3. **Bespoke module loader**: **[FIXED]** the `fetch` + regex `execScript` pattern (which injected
+   every code fragment as an INLINE script — the blocker for any meaningful CSP `script-src`) is
+   gone. All 16 script fragments are now plain `.js` files loaded as real same-origin
+   `<script src>` elements; only the markup fragments (`ui.html`, `style.html`) are still fetched
+   and injected, which executes no script. The Apps Script deployment keeps working via its
+   existing manual paste step (wrap each `.js` in `<script>` tags — DEPLOY.md updated, and its
+   stale file list now includes `schema-loader` + the ten domain modules the GAS page was missing).
 4. **Schema-blind rules + `_meta/ownerTables` mirror** is clever but derives security state
    client-side on `saveSchema`; a schema write that bypasses it leaves the mirror stale. Consider a
    server-side trigger or a rules-side freshness check.
@@ -228,8 +232,8 @@ Schema can't express (cross-references, rotation slot/roster arithmetic).
    CRDT convergence guarantees for clock-skew protection — document or redesign, don't patch.
 2. **When touching the area:** P3 (changeset compaction/mtime cursor), P4 (doc-view embed
    memoization), P5 (Apps Script TextFinder), meta-schema + `schemaVersion`, column-shape
-   normalization. A CSP remains blocked on the fragment loader: `execScript` injects fragments as
-   INLINE scripts, which a meaningful `script-src` forbids — switch the loader to real
-   `<script src>`/ES modules first, accept `'unsafe-eval'` for Vue's in-browser template compiler,
-   and use wildcarded Google origins to fit the multi-database design; roll out via
-   `Content-Security-Policy-Report-Only` before enforcing.
+   normalization. The CSP prerequisite is DONE (the loader now uses real `<script src>` elements —
+   no `'unsafe-inline'` scripts needed except index.html's own static boot script, which can be
+   hash-allowed); what remains is authoring the policy itself: accept `'unsafe-eval'` for Vue's
+   in-browser template compiler, wildcarded Google origins to fit the multi-database design, and a
+   `Content-Security-Policy-Report-Only` rollout before enforcing.

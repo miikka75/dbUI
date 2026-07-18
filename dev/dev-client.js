@@ -1,6 +1,5 @@
-<!-- dev-client.html -- Shared dev-server client helpers (_post + backend_users).
-     Loaded before backend-local-client.html and backend-crdt-local.html. Dev-server only. -->
-<script>
+// dev-client.js -- Shared dev-server client helpers (_post + backend_users).
+// Loaded before backend-local-client.js and backend-crdt-local.js. Dev-server only.
 function _post(route, body) {
   var user = (new URLSearchParams(location.search)).get('user') || localStorage.getItem('test_user') || 'local@dev';
   return fetch('/api/' + route, {
@@ -42,4 +41,3 @@ var backend_users = {
   setProfileName: function(email, name) { return _post('setProfileName', { email: email, name: name }); },
   getProfiles: function() { return _post('getProfiles', {}); }
 };
-</script>

@@ -40,7 +40,7 @@
   }
 
   // Tiny markdown -> HTML for pages (headings, bold/italic, lists, links, paragraphs). Embed tokens are
-  // split out before this runs. (Moved from schema-loader.html; location is browser-only, so guard.)
+  // split out before this runs. (Moved from schema-loader.js; location is browser-only, so guard.)
   function mdToHtml(md) {
     var esc = function(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
     // `url` here is already HTML-escaped (esc ran on the whole line first), so safeUrl's result is used

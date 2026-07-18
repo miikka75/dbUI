@@ -1,7 +1,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-// Pure copies of the folder-config export/import helpers in app-core.html. The design is a DENYLIST:
+// Pure copies of the folder-config export/import helpers in app-core.js. The design is a DENYLIST:
 // everything in appConfig is round-tripped EXCEPT keys listed here (environment-specific). This is what
 // makes a NEW appConfig parameter survive export/import with zero export-code changes — the guard test
 // at the bottom verifies exactly that property, so a future param can't silently get dropped.

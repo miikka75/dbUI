@@ -17,12 +17,29 @@ In the Apps Script editor, create these files:
 | `Code.gs` (default) | `apps-script/Code.gs` |
 | `sheets-helpers.gs` | `apps-script/sheets-helpers.js` (add as **+ → Script**) |
 | HTML: `index` | `apps-script/index.html` |
-| HTML: `app-core` | `app-core.html` |
 | HTML: `ui` | `ui.html` |
 | HTML: `style` | `style.html` |
 | HTML: `backend-appscript` | `apps-script/backend-appscript.html` |
+| HTML: `columns` | `columns.js` ⚠ wrap |
+| HTML: `access-features` | `access-features.js` ⚠ wrap |
+| HTML: `list-access` | `list-access.js` ⚠ wrap |
+| HTML: `calendar` | `calendar.js` ⚠ wrap |
+| HTML: `rotation` | `rotation.js` ⚠ wrap |
+| HTML: `rows` | `rows.js` ⚠ wrap |
+| HTML: `embeds` | `embeds.js` ⚠ wrap |
+| HTML: `print` | `print.js` ⚠ wrap |
+| HTML: `pivot` | `pivot.js` ⚠ wrap |
+| HTML: `rsvp` | `rsvp.js` ⚠ wrap |
+| HTML: `schema-loader` | `schema-loader.js` ⚠ wrap |
+| HTML: `app-core` | `app-core.js` ⚠ wrap |
 
 To add HTML files: click **+** → **HTML file** → enter name (without `.html`)
+
+> ⚠ **wrap**: the app's code files are plain `.js` in the repo (the web loader uses real
+> `<script src>` tags so a Content-Security-Policy needs no `'unsafe-inline'`). Apps Script can only
+> include HTML files, so when pasting a `.js` source into its HTML file, wrap the whole content in
+> `<script>` … `</script>` tags. `index` includes them in dependency order — keep that order if you
+> rename files.
 
 ### 3. Create a Drive folder
 

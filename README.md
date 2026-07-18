@@ -232,19 +232,19 @@ manifest.json                  ← static PWA manifest (baseline name/icons, dis
 sw.js                          ← minimal service worker (enables install prompt; no caching)
 favicon.svg                    ← static favicon (replace to rebrand)
 icon-512.png                   ← static apple-touch + manifest install/splash/maskable icon (512×512)
-app-core.html                  ← Vue app logic + computeds + helpers
+app-core.js                  ← Vue app logic + computeds + helpers
 ui.html                        ← Vue template (data views, forms, setup)
 style.html                     ← CSS styles
-auth-oauth.html                ← shared OAuth (GSI) for Sheets + CRDT(Drive)
-backend-oauth.html             ← adapter: REST API + OAuth
-backend-firebase.html          ← adapter: Firestore + Firebase Auth
-storage-firestore.html         ← Firestore storage adapter
+auth-oauth.js                ← shared OAuth (GSI) for Sheets + CRDT(Drive)
+backend-oauth.js             ← adapter: REST API + OAuth
+backend-firebase.js          ← adapter: Firestore + Firebase Auth
+storage-firestore.js         ← Firestore storage adapter
 ── Unified CRDT (shared by Drive + local) ──
-crdt-backend.html              ← shared CRDT backend (data via engine, files via transport)
-crdt-engine.html               ← storage-agnostic LWW CRDT engine
-storage-idb.html               ← IndexedDB storage adapter
-transport-drive.html           ← Drive transport (files + changesets via Drive API)
-backend-crdt.html              ← Drive CRDT initializer (Transport = TransportDrive)
+crdt-backend.js              ← shared CRDT backend (data via engine, files via transport)
+crdt-engine.js               ← storage-agnostic LWW CRDT engine
+storage-idb.js               ← IndexedDB storage adapter
+transport-drive.js           ← Drive transport (files + changesets via Drive API)
+backend-crdt.js              ← Drive CRDT initializer (Transport = TransportDrive)
 ────────────────────────────────────────────
 firebase.json                  ← Firebase Hosting config
 firestore.rules                ← Firestore Security Rules
@@ -261,9 +261,9 @@ dev/                           ← Local development (dev-server-only files live
   server.js                    ← HTTP server (port 3000; --fs for JSON-file storage)
   backend-local.js             ← SQLite backend (better-sqlite3)
   storage-fs.js                ← JSON-file backend (node server.js --fs)
-  backend-local-client.html    ← client adapter for local server (direct SQLite)
-  backend-crdt-local.html      ← local CRDT initializer (Transport = TransportLocal)
-  transport-local.html         ← local transport (files + changesets via dev server)
+  backend-local-client.js    ← client adapter for local server (direct SQLite)
+  backend-crdt-local.js      ← local CRDT initializer (Transport = TransportLocal)
+  transport-local.js         ← local transport (files + changesets via dev server)
   test/                        ← node:test backend tests
   test-ui/                     ← Playwright E2E tests
 ```
@@ -303,7 +303,7 @@ markdown documents and their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens
 ┌──────────────────────────────────────────────────┐
 │                  index.html                      │  ← auto-detects backend
 ├────────────────┬─────────────────────────────────┤
-│  app-core.html │         ui.html                 │  ← Vue 3 app + template
+│  app-core.js │         ui.html                 │  ← Vue 3 app + template
 ├────────────────┼─────────────────────────────────┤
 │ backend-*.html │   schema.json / firebase-config │  ← adapter + config
 ├────────────────┴─────────────────────────────────┤
@@ -320,16 +320,16 @@ markdown documents and their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens
 
 **Key design decisions:**
 - Schema is pure JSON (user-editable in Drive without code access)
-- `defaultSchema` in app-core.html is minimal empty fallback only
+- `defaultSchema` in app-core.js is minimal empty fallback only
 - Column order in Google Sheets preserved via JSON string serialization (avoids RPC key reordering)
 - All backends implement the same 16-function interface
 
 ### Unified CRDT (Drive + Local)
 
-Both CRDT modes share **one backend** (`crdt-backend.html`) built on a storage-agnostic engine. They differ **only in the transport**:
+Both CRDT modes share **one backend** (`crdt-backend.js`) built on a storage-agnostic engine. They differ **only in the transport**:
 
 ```
-            crdt-backend.html  (one shared backend)
+            crdt-backend.js  (one shared backend)
         data ─► CrdtEngine + StorageIDB  (IndexedDB, LWW per field)
        files ─► Transport.readJson / writeJson / deleteFile
                         │

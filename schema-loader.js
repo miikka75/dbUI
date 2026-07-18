@@ -1,4 +1,3 @@
-<script>
 // localStorage shim for Apps Script sandbox (where localStorage is undefined)
 if (typeof localStorage === 'undefined') { window.localStorage = { _d:{}, getItem:function(k){return this._d[k]||null;}, setItem:function(k,v){this._d[k]=String(v);}, removeItem:function(k){delete this._d[k];}, clear:function(){this._d={};} }; }
 
@@ -103,7 +102,7 @@ function withMirrors(base) {
 // fragment; _normalizeSchema (convertViewFilters) and app-core call those as globals from that module.
 
 // The per-list access model (listOwningTables/accessibleListNames/filterLists) lives in /list-access.js,
-// loaded before this fragment; backend-firebase.html calls listOwningTables as a global from it.
+// loaded before this fragment; backend-firebase.js calls listOwningTables as a global from it.
 
 // mdToHtml (tiny markdown -> HTML for pages) lives in /embeds.js, exposed as a global from there.
 
@@ -257,4 +256,3 @@ function buildNavTabs(navItems, t, canAccess, opts) {
   tabs.push({ id: '__settings', title: t('tab.settings'), icon: 'mdi-cog-outline' });
   return tabs;
 }
-</script>

@@ -1,7 +1,7 @@
-// calendar.js — Pure calendar geometry + the canonical date-string primitive. Shared by app-core.html
+// calendar.js — Pure calendar geometry + the canonical date-string primitive. Shared by app-core.js
 // (browser) and Node unit tests, mirroring columns.js / access-features.js.
 //   Browser: <script src="/calendar.js">, then Calendar.* ; also exposes fmtDate() as a global (the app's
-//            canonical local YYYY-MM-DD formatter — schema-loader.html + app-core.html call it bare).
+//            canonical local YYYY-MM-DD formatter — schema-loader.js + app-core.js call it bare).
 //   Node:    const Calendar = require('../calendar');
 //
 // Grid/window builders are pure functions of (anchor, weekStart, today); source resolvers are pure over

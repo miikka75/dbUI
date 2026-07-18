@@ -1,8 +1,8 @@
-// crdt-merge.test.js — Functional tests for the CRDT engine's LWW merge (crdt-engine.html).
-// The engine ships as a browser <script> fragment; extract and evaluate it in a vm context with an
-// in-memory storage adapter + fake transport, then drive it through the public interface
-// (init/putRow/deleteRow/getTableData/pullChanges). Guards the row-grouped mergeChanges rewrite:
-// tombstone no-resurrection, per-field LWW, compact {t,b,id,ts,d} expansion, in-order application.
+// crdt-merge.test.js — Functional tests for the CRDT engine's LWW merge (crdt-engine.js).
+// The engine is a browser global-assigning script (not a requireable module); evaluate it in a vm
+// context with an in-memory storage adapter + fake transport, then drive it through the public
+// interface (init/putRow/deleteRow/getTableData/pullChanges). Guards the row-grouped mergeChanges
+// rewrite: tombstone no-resurrection, per-field LWW, compact {t,b,id,ts,d} expansion, in-order application.
 const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -10,8 +10,7 @@ const path = require('path');
 const vm = require('vm');
 
 function loadEngine() {
-  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'crdt-engine.html'), 'utf8');
-  const script = /<script>([\s\S]*?)<\/script>/.exec(src)[1];
+  const script = fs.readFileSync(path.join(__dirname, '..', '..', 'crdt-engine.js'), 'utf8');
   const ctx = {
     BackendHelpers: require('../../backend-helpers'),
     setInterval, clearInterval, Promise, Date, Math, Object, JSON, console
