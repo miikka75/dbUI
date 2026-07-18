@@ -79,13 +79,26 @@ const server = http.createServer(async (req, res) => {
     // NOT the production access model — that is Firestore security rules (firestore.rules), which key on
     // the real, unspoofable request.auth.token.email. Never expose this server to a network.
     const userEmail = req.headers['x-user'] || 'local@dev';
+    // The one lookup for "who is this user" — previously getAllowedTables and getMyAccess each rolled
+    // their own with different fallbacks (getMyAccess also tried key lookups), a latent access split.
+    function userRecord() {
+      if (!backend._users) return undefined;
+      return Object.values(backend._users).find(v => v.user === userEmail)
+        || backend._users[userEmail] || backend._users[(userEmail || '').toLowerCase()];
+    }
     function getAllowedTables() {
       if (!backend._users) return null; // no users = no restrictions
-      const u = Object.values(backend._users).find(v => v.user === userEmail);
+      const u = userRecord();
       if (!u) return []; // unknown user = no access
       if (u.role === 'admin' || u.tables === 'all') return null; // null = unrestricted
       return u.tables || [];
     }
+    // Doc-view bodies (_pages) mirror firestore.rules' dedicated block: any REGISTERED user reads
+    // (content pages; each embedded table's rows stay gated by their own access), admins/editors write.
+    // Without this, hasTableAccess('_pages') — which no grant ever satisfies — denied restricted reads.
+    function pagesTable(tableId) { return (tableId ? tableId.split('__')[0] : '') === '_pages'; }
+    function canReadPages() { return !backend._users || !!userRecord(); }
+    function canWritePages() { const u = userRecord(); return !backend._users || !!(u && (u.role === 'admin' || u.role === 'editor')); }
     function checkTableAccess(tableId) {
       const allowed = getAllowedTables();
       if (!allowed) return true;
@@ -143,6 +156,10 @@ const server = http.createServer(async (req, res) => {
       case 'serverInfo': return json(res, { storage: USE_FS ? 'fs' : 'sqlite' });
       case 'getAvailableLanguages': return json(res, backend.getAvailableLanguages('local'));
       case 'getTableData': {
+        if (pagesTable(body.tableId)) {
+          if (canReadPages()) return json(res, backend.getTableData(body.tableId, body.tab));
+          return json(res, { error: 'Access denied' }, 403);
+        }
         if (checkTableAccess(body.tableId)) return json(res, backend.getTableData(body.tableId, body.tab));
         const oc = selfServiceOwnerCol(body.tableId);                 // self-service: own rows + public roster only
         if (!oc) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
@@ -150,6 +167,10 @@ const server = http.createServer(async (req, res) => {
         return json(res, Object.assign({}, data, { rows: (data.rows || []).filter(r => _mine(r[oc]) || r.rosterPublic === true) }));
       }
       case 'putRow': {
+        if (pagesTable(body.tableId)) {
+          if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
+          backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
+        }
         if (checkTableAccess(body.tableId)) { backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true }); }
         const oc = selfServiceOwnerCol(body.tableId);
         const existing = oc ? _rowById(body.tableId, body.tab, body.data && body.data.id) : null;
@@ -171,6 +192,10 @@ const server = http.createServer(async (req, res) => {
         return json(res, { url: 'http://' + host + '/uploads/' + fname });
       }
       case 'deleteRow': {
+        if (pagesTable(body.tableId)) {
+          if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
+          return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
+        }
         if (checkTableAccess(body.tableId)) return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
         const oc = selfServiceOwnerCol(body.tableId);
         const existing = oc ? _rowById(body.tableId, body.tab, body.id) : null;   // may delete only my own owned row
@@ -223,8 +248,7 @@ const server = http.createServer(async (req, res) => {
       case 'getUsers': return json(res, backend._users || {});
       case 'getMyAccess': {
         if (!backend._users || !Object.keys(backend._users).length) return json(res, { bootstrap: true });
-        const mine = Object.values(backend._users).find(v => v.user === userEmail)
-          || backend._users[userEmail] || backend._users[(userEmail || '').toLowerCase()];
+        const mine = userRecord();
         return json(res, mine ? { role: mine.role, tables: mine.tables || 'all' } : { registered: false });
       }
       case 'setUserRole': { if (!backend._users) backend._users = {}; backend._users[body.uid] = { role: body.role, user: body.user || '', tables: body.tables || 'all' }; saveUsers(); return json(res, { ok: true }); }

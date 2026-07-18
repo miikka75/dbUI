@@ -64,6 +64,10 @@ See `apps-script/DEPLOY.md` for deployment guide.
 
 First user is auto-registered as admin (bootstrap mode). After that, only registered users can access. Per-table permissions configurable per user.
 
+> ⚠️ **Sign in yourself immediately after publishing the rules.** The first Google account to sign
+> in becomes the admin — so never share the app URL or a pre-configured link before you have signed
+> in once. Anyone holding the link during the bootstrap window could claim the admin role.
+
 Firebase config is stored in browser localStorage. Share a pre-configured URL to onboard users without manual setup.
 
 ### Firefox: "Sign in with Google" fails (third-party cookies)

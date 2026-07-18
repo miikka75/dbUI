@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 
 const rulesPath = fileURLToPath(new URL('../../firestore.rules', import.meta.url));
 const testEnv = await initializeTestEnvironment({
@@ -79,6 +79,40 @@ await ok('non-bool shared is denied',
   assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: 'yes' })));
 await ok('extra fields are denied',
   assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true, role: 'admin' })));
+
+// --- _pages (doc-view bodies): readable by every registered user, writable by editors/admins. ---
+// (Restricted members previously hit the data catch-all's hasTableAccess('_pages') gate, which no
+// grant ever satisfies, and silently saw the stale schema-seeded markdown.)
+await ok('viewer (no grants) CAN read a _pages__active doc',
+  assertSucceeds(getDoc(doc(viewer, '_pages__active/home'))));
+await ok('viewer CANNOT write a _pages__active doc',
+  assertFails(setDoc(doc(viewer, '_pages__active/home'), { id: 'home', markdown: 'defaced' })));
+await ok('editor CAN write a _pages__active doc',
+  assertSucceeds(setDoc(doc(editor, '_pages__active/home'), { id: 'home', markdown: '# Edited' })));
+
+// --- Owner-scoped update/delete are bounded to self-service (owner-column) tables, like create. ---
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), 'tasks__active/stray'), { id: 'stray', owner: 'viewer@x.com', title: 'x' });
+});
+await ok('owner CAN update their own row in a self-service table',
+  assertSucceeds(setDoc(doc(viewer, 'rsvps__active/mine'), { id: 'mine', owner: 'viewer@x.com', status: 'out' })));
+await ok('owner CANNOT update an owner-stamped row in a non-self-service table',
+  assertFails(setDoc(doc(viewer, 'tasks__active/stray'), { id: 'stray', owner: 'viewer@x.com', title: 'y' })));
+await ok('owner CAN delete their own row in a self-service table',
+  assertSucceeds(deleteDoc(doc(viewer, 'rsvps__active/mine'))));
+await ok('owner CANNOT delete an owner-stamped row in a non-self-service table',
+  assertFails(deleteDoc(doc(viewer, 'tasks__active/stray'))));
+
+// --- _access_requests shape validation (self-create only; these render in the admin approval UI). ---
+const stranger = testEnv.authenticatedContext('s-uid', { email: 'stranger@x.com' }).firestore();
+await ok('well-formed access request is allowed',
+  assertSucceeds(setDoc(doc(stranger, '_access_requests/stranger@x.com'), { email: 'stranger@x.com', name: 'Sam', note: 'hi', ts: Date.now() })));
+await ok('oversized request note is denied',
+  assertFails(setDoc(doc(stranger, '_access_requests/stranger@x.com'), { email: 'stranger@x.com', name: 'Sam', note: 'x'.repeat(501), ts: Date.now() })));
+await ok('request with extra fields is denied',
+  assertFails(setDoc(doc(stranger, '_access_requests/stranger@x.com'), { email: 'stranger@x.com', name: 'Sam', note: '', ts: 1, role: 'admin' })));
+await ok('request with mismatched email is denied',
+  assertFails(setDoc(doc(stranger, '_access_requests/stranger@x.com'), { email: 'other@x.com', name: 'Sam', note: '', ts: 1 })));
 
 // --- _meta hardening. ---
 // The bootstrap probe is exists(_meta/users): if that doc could be deleted while /_users docs exist,

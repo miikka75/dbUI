@@ -7,6 +7,13 @@ var _storage = null;
 
 function _storeName(table, tab) { return BackendHelpers.storeName(table, tab); }
 
+// The signed-in user's lowercased email ('' when signed out) — auth first, app state as fallback.
+// Was copy-pasted at six call sites across backend/backend_users.
+function _myEmail() {
+  return (((_auth && _auth.currentUser && _auth.currentUser.email)
+    || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail)) || '').toLowerCase();
+}
+
 backend = {
   getSchema: function(folderId) {
     return StorageFirestore.getMeta('schema').then(function(d) {
@@ -110,7 +117,7 @@ backend = {
   // prune, since their list map is partial. Migration is additive (legacy _meta/lists is kept). ---
   _myTables: function() {
     // null = unrestricted (admin or no users); [] = known-but-no-access; [..] = restricted set.
-    var email = ((( _auth && _auth.currentUser && _auth.currentUser.email) || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail)) || '').toLowerCase();
+    var email = _myEmail();
     if (!email) return Promise.resolve([]);
     return _db.collection('_users').doc(email).get().then(function(d) {
       if (d.exists) { var v = d.data(); return (v.role === 'admin' || v.tables === 'all') ? null : (v.tables || []); }
@@ -233,7 +240,7 @@ backend = {
   // backends without it fall back to a paste-a-URL input.
   uploadFile: function(file, opts) {
     if (!_storage) return Promise.reject(new Error('Firebase Storage not initialized'));
-    var email = ((appInstance && appInstance.currentUserEmail) || 'anon').toLowerCase();
+    var email = _myEmail() || 'anon';
     var safe = String((file && file.name) || 'file').replace(/[^\w.\-]+/g, '_');
     var path = 'uploads/' + email + '/' + Date.now() + '_' + safe;
     return _storage.ref().child(path).put(file).then(function(snap) { return snap.ref.getDownloadURL(); });
@@ -290,7 +297,7 @@ function triggerOAuth() {
 var backend_users = {
   // The CURRENT user's own access only (self-scoped) so non-admins never read the whole users map.
   getMyAccess: function() {
-    var email = ((( _auth && _auth.currentUser && _auth.currentUser.email) || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail)) || '').toLowerCase();
+    var email = _myEmail();
     if (!email) return Promise.resolve({ registered: false });
     return _db.collection('_users').doc(email).get().then(function(d) {
       if (d.exists) { var v = d.data(); return { role: v.role, tables: v.tables || 'all' }; }
@@ -344,7 +351,7 @@ var backend_users = {
   // --- Membership requests (self-service; admin approves) ---
   // An unregistered user submits a request for access; only they can write their own request doc.
   requestAccess: function(name, note) {
-    var email = ((( _auth && _auth.currentUser && _auth.currentUser.email) || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail)) || '').toLowerCase();
+    var email = _myEmail();
     if (!email) return Promise.reject(new Error('not signed in'));
     return _db.collection('_access_requests').doc(email).set({ email: email, name: name || '', note: note || '', ts: Date.now() });
   },
@@ -358,14 +365,14 @@ var backend_users = {
   },
   // --- Opt-in display-name profiles (for user-backed lists / leaderboard identity) ---
   getMyProfile: function() {
-    var email = ((( _auth && _auth.currentUser && _auth.currentUser.email) || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail)) || '').toLowerCase();
+    var email = _myEmail();
     if (!email) return Promise.resolve({ name: '', shared: false });
     return _db.collection('_profiles').doc(email).get()
       .then(function(d) { return d.exists ? { name: d.data().name || '', shared: !!d.data().shared } : { name: '', shared: false }; })
       .catch(function() { return { name: '', shared: false }; });
   },
   setMyProfile: function(name, shared) {
-    var email = ((( _auth && _auth.currentUser && _auth.currentUser.email) || (typeof appInstance !== 'undefined' && appInstance && appInstance.currentUserEmail)) || '').toLowerCase();
+    var email = _myEmail();
     if (!email) return Promise.reject(new Error('not signed in'));
     return _db.collection('_profiles').doc(email).set({ name: name || '', shared: !!shared });
   },

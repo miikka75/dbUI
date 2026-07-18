@@ -32,29 +32,27 @@ would flip `noUsers()` true and hand **every signed-in Google account full admin
 docs still exist. The rules now forbid deleting `_meta/users` (even by admins — reset by overwriting
 with `{}` instead), with an emulator test. Longer-term: a dedicated bootstrap marker.
 
-**B5 — `putRow` semantics diverge across backends**
-SQLite (`INSERT OR REPLACE`; missing columns → `''`) **replaces**; storage-fs (`Object.assign`),
-Firestore (`merge:true`) and the CRDT engine **merge**. Today's callers send full rows so it's
-latent, but any future partial `putRow` silently wipes fields on SQLite only. Pin the intended
-semantics in the backend-conformance test.
+**B5 [FIXED] — `putRow` semantics diverged across backends**
+SQLite (`INSERT OR REPLACE`; missing columns → `''`) **replaced** while storage-fs
+(`Object.assign`), Firestore (`merge:true`) and the CRDT engine **merge**. SQLite now overlays
+partial rows onto the stored values, and the merge contract is pinned in the backend-conformance
+test for both Node backends.
 
 **B6 [FIXED] — `resetData` LIKE-pattern hazards** — `dev/backend-local.js`
 `name LIKE 'name%'` over-matched: table `task` dropped `tasks__active`, and `_` is a LIKE
 single-char wildcard. Now matches the exact name plus escaped `name\_\_%` partitions.
 
-**B7 — `_pages` invisible to restricted users** — `firestore.rules` + `loadPage`
-Doc-view bodies live in `_pages__active`, gated by `hasTableAccess('_pages')` — but `_pages` is
-never part of any grant (`access-features.js` doesn't emit it). A restricted member's read is
-denied, `loadPage`'s empty `.catch` swallows it, and they silently see the stale schema-seeded
-markdown instead of the edited document; editors without `tables:'all'` can't save pages either.
-Either add `_pages` to grant closures or give it its own rule.
+**B7 [FIXED] — `_pages` invisible to restricted users**
+Doc-view bodies now have a dedicated `_pages__active` rules block (read: any registered user;
+write: admins/editors), mirrored in the dev server, with emulator tests. The page Edit/Save
+buttons are also gated on the same roles (viewers previously saw controls whose save would 403).
 
 **B8 [FIXED] — Implicit global** — `app-core.html`
 `missing = true` in the list seeder (never declared, never read) removed.
 
-**B9 — Drive query interpolation** — `transport-drive.html:21,75,83`
-File/folder names (language codes, table names — schema/user-controlled) are interpolated into
-Drive `q` strings without escaping `'`. A name with a quote breaks sync. Escape or reject.
+**B9 [FIXED] — Drive query interpolation**
+Schema/user-controlled names interpolated into Drive `q` strings are now escaped via
+`DriveHelpers.q()` (backslash + quote) in drive-helpers and transport-drive.
 
 ---
 
@@ -69,10 +67,10 @@ lookup (`/_users` doc, legacy `_meta/users` map fallback), with emulator tests f
 (unregistered) and both allow paths. Note: running `npm run test:storage-rules` now needs both
 emulators (script updated) and a `firebase.json` (added — minimal; extend with your hosting config).
 
-**S2 — Admin-bootstrap race**
-The first signer-in becomes admin. Anyone who obtains the share link before the intended admin
-signs in owns the database. Mitigation: seed the admin `/_users` doc as a documented setup step
-before sharing the link.
+**S2 [MITIGATED] — Admin-bootstrap race**
+The first signer-in becomes admin; anyone holding the share link during the bootstrap window can
+claim the role. The README now warns to sign in once before sharing any link. A stronger fix
+remains available: seed the admin `/_users` doc at deploy time.
 
 **S3 [FIXED] — Stored XSS in the print window** — `app-core.html`
 `_printOpen` wrote `title` unescaped into `document.write` (`<title>`), and `printView` built
@@ -94,14 +92,15 @@ dropped, with an emulator test.
 its own folder. Use `drive.file`. (Token in `sessionStorage` is XSS-readable — acceptable for this
 class of app, but it raises the stakes on findings like S3.)
 
-**S6 — No SRI / CSP on CDN scripts** — `index.html`
-Vue/Vuetify fall back to jsdelivr; Firebase/GSI load from CDNs — no `integrity` hashes, no CSP.
-For an app whose security model lives client-side, a compromised CDN is game over.
+**S6 [PARTIAL] — No SRI / CSP on CDN scripts** — `index.html`
+The jsdelivr Vue/Vuetify fallbacks are now SRI-pinned (sha384 of the exact npm-package bytes).
+Still open: the gstatic Firebase / GSI bundles can't be pinned (Google rotates them in place), and
+there is no CSP — adding one needs a carefully tested connect-src/script-src allowlist.
 
-**S7 — Rules edge cases**
-`selfServiceTable()` bounds owner-*create* only; owner-update/delete work on any collection (low
-impact — the row must already carry `owner == me`). `_access_requests` create has no shape/size
-validation (unlike the nicely validated `_profiles`) — add `keys().hasOnly(...)` + size caps.
+**S7 [FIXED] — Rules edge cases**
+Owner-scoped update/delete are now bounded to self-service (owner-column) tables like create, and
+`_access_requests` self-creates are shape/size-validated (`keys().hasOnly`, name ≤100, note ≤500,
+numeric ts) — both with emulator tests.
 
 **S8 — Dev server nits** (all loopback-mitigated and clearly documented)
 `uploadFile` keeps the original extension, so an uploaded `evil.html` is served as `text/html` on
@@ -121,11 +120,13 @@ Document it or clamp incoming `ts` to `now + ε`.
 `getTableData`/list write — O(tables × schema size) per boot. Now parsed once and invalidated on
 `saveSchema`/`resetData` (public `getSchema` still returns a fresh parse since callers may mutate).
 
-**P2 — Serial fetches where parallel is safe**
-The non-`bootData` boot path loads tables one at a time (the Firebase path proves `Promise.all` is
-fine); `importData` issues delete+put **per row, serially** (a 1,000-row import = 2,000 sequential
-round-trips); `CrdtEngine.mergeChanges` chains one IDB op per *field change* (slow first-device
-bootstrap); `TransportDrive.pullChangesets` downloads files one by one.
+**P2 [PARTIAL] — Serial fetches where parallel is safe**
+Fixed: `CrdtEngine.mergeChanges` now does one storage get/put per **row** instead of per field
+change (with a new functional test suite for the engine), and `TransportDrive.pullChangesets`
+downloads changesets concurrently — made safe by a single-flight OAuth token refresh (concurrent
+401s previously would each have opened a consent popup). Left as-is deliberately: the sequential
+boot path and per-row `importData` writes also serve the OAuth **Sheets** backend, whose per-call
+rate limits are why they were serialized — parallelize per-backend if needed.
 
 **P3 — Changesets and tombstones grow forever**
 Tombstones are never GC'd, and every 30 s sync re-downloads every peer's full changeset file (the
@@ -168,8 +169,8 @@ parts; the projectId-confirm guard on shared links; the loopback-bind refusal; e
 
 **Concerns:**
 1. **The access model is implemented three times** — `firestore.rules`, `dev/server.js`, client UI.
-   B3/S8 are live drift. The rules-emulator and Playwright suites are **not in CI**
-   (`node.js.yml` runs `npm test` only) — the security model is the least-guarded layer. Add them.
+   B3/S8 are live drift. **[PARTIAL]** The rules-emulator suites now run as a CI job
+   (`node.js.yml` `rules` job); the Playwright suite is still not in CI.
 2. **Global mutable state** (`SCHEMA`/`VIEWS`/`window._listsCache`/`appInstance` + `ROOT_PROXY`) is
    a pragmatic no-build choice, honestly documented, but the Node-gotcha comments in
    `rows.js`/`embeds.js` are symptoms. A single explicit context object would remove the class.
@@ -179,8 +180,10 @@ parts; the projectId-confirm guard on shared links; the loopback-bind refusal; e
 4. **Schema-blind rules + `_meta/ownerTables` mirror** is clever but derives security state
    client-side on `saveSchema`; a schema write that bypasses it leaves the mirror stale. Consider a
    server-side trigger or a rules-side freshness check.
-5. `firebase.json` was referenced by the README but never committed — the storage-rules test could
-   not run from a fresh clone. A minimal one is now committed (extend with your hosting config).
+5. `firebase.json`, `favicon.svg` and `icon-512.png` were referenced by the README (and required
+   by the Playwright suite) but never committed — a fresh clone could run neither the storage-rules
+   test nor the E2E suite. Minimal defaults are now committed (extend `firebase.json` with your
+   hosting config; replace the icons to rebrand).
 
 ---
 
@@ -213,7 +216,10 @@ Schema can't express (cross-references, rotation slot/roster arithmetic).
 
 ## Remaining priorities
 
-1. **Soon:** B7 (`_pages` access), S5 (`drive.file` scope), S2 (seeded admin), CI jobs for the
-   rules suites, S6 (SRI/CSP).
-2. **When touching the area:** B5, B9, S7, S9, P2–P5, the dedup list, meta-schema +
-   `schemaVersion`, column-shape normalization.
+1. **Needs a product decision:** S5 — narrowing the OAuth scope to `drive.file` restricts the app
+   to files it created or the user picked, which changes the shared-folder onboarding flow; decide
+   before switching. CSP (S6 tail) needs a tested allowlist. S9 (clamping peer timestamps) trades
+   CRDT convergence guarantees for clock-skew protection — document or redesign, don't patch.
+2. **When touching the area:** P3 (changeset compaction/mtime cursor), P4 (doc-view embed
+   memoization), P5 (Apps Script TextFinder), Playwright in CI, meta-schema + `schemaVersion`,
+   column-shape normalization.

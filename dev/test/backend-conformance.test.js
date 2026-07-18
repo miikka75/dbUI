@@ -34,6 +34,27 @@ describe('backend contract — Node backends (runtime)', () => {
   }
 });
 
+describe('backend contract — putRow merge semantics', () => {
+  // Pinned contract: a PARTIAL putRow (a subset of columns) MERGES onto the stored row — it must not
+  // blank the columns it omits. This is what Firestore ({merge:true}) and the CRDT engine (per-field
+  // LWW) do; SQLite's INSERT OR REPLACE used to silently blank absent columns, so any partial-row
+  // caller would lose data on exactly one backend.
+  const FS_DIR = path.join(__dirname, '.test-merge-' + process.pid);
+  const sqlite = createLocalBackend();          // in-memory
+  const fsb = createFsBackend(FS_DIR);
+  after(() => { try { sqlite.close(); } catch (e) {} fs.rmSync(FS_DIR, { recursive: true, force: true }); });
+
+  for (const [name, backend] of [['SQLite', sqlite], ['FS', fsb]]) {
+    it(name + ': partial putRow keeps the stored values of omitted columns', () => {
+      backend.putRow('mergetest', { id: 'r1', a: 'A', b: 'B' }, 'active');
+      backend.putRow('mergetest', { id: 'r1', a: 'A2' }, 'active');
+      const row = backend.getTableData('mergetest', 'active').rows.find(r => r.id === 'r1');
+      assert.equal(row.a, 'A2', name + ' updated column');
+      assert.equal(row.b, 'B', name + ' omitted column preserved');
+    });
+  }
+});
+
 describe('backend contract — browser backends (source scan)', () => {
   // Browser backends are HTML fragments (not requireable); scan the <script> for each contract method,
   // defined as `name: function` or `async name(`.

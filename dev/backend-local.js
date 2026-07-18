@@ -200,7 +200,16 @@ function createLocalBackend(dbPath) {
         const cols = columns.map(c => c === 'id' ? qid(c) + ' TEXT PRIMARY KEY' : qid(c) + ' TEXT').join(', ');
         db.exec('CREATE TABLE IF NOT EXISTS ' + qid(actualTable) + ' (' + cols + ')');
       }
-      const values = columns.map(c => { const v = rowData[c]; if (Array.isArray(v)) return JSON.stringify(v); return v !== undefined ? v : ''; });
+      // MERGE semantics (parity with storage-fs Object.assign, Firestore {merge:true}, and the CRDT
+      // engine's per-field LWW): a partial rowData must not blank the columns it omits. INSERT OR
+      // REPLACE writes the full column list, so absent keys fall back to the stored row's values.
+      let existing = null;
+      try { existing = db.prepare('SELECT * FROM ' + qid(actualTable) + ' WHERE id = ?').get(rowData.id); } catch (e) {}
+      const values = columns.map(c => {
+        const v = rowData[c] !== undefined ? rowData[c] : (existing ? existing[c] : undefined);
+        if (Array.isArray(v)) return JSON.stringify(v);
+        return v !== undefined ? v : '';
+      });
       if (values.length !== columns.length) console.error('putRow mismatch:', tableId, 'cols:', columns.length, 'vals:', values.length);
       const badVals = values.filter(v => typeof v === 'object' && v !== null);
       if (badVals.length) console.error('putRow has object values:', badVals, 'for cols:', columns.filter((c,i) => typeof values[i] === 'object'));

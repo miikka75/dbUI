@@ -138,8 +138,13 @@
         '/rotation.js', '/rows.js', '/embeds.js', '/print.js', '/pivot.js', '/rsvp.js'
       ]);
 
-      await loadScript('/vendor/vue.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vue@3.5.34/dist/vue.global.prod.js'); });
-      await loadScript('/vendor/vuetify.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vuetify@4.0.7/dist/vuetify.min.js'); });
+      // CDN fallbacks are SRI-pinned (sha384 of the exact npm-package file — jsdelivr /npm/ serves
+      // tarball bytes verbatim): a compromised or tampered CDN response fails the integrity check and
+      // the script simply doesn't run, instead of executing foreign code with the app's storage/tokens.
+      // Update the hash whenever the pinned version changes. The gstatic/GSI SDKs below can't be
+      // pinned — Google rotates those bundles in place, so an SRI hash there would break auth.
+      await loadScript('/vendor/vue.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vue@3.5.34/dist/vue.global.prod.js', 'sha384-o/dkigrGbFcEo9IQnKb3UkoDe43ZnvA9D531VRI1eaHuP+QiVLB7YYAxGnIEoe+t'); });
+      await loadScript('/vendor/vuetify.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vuetify@4.0.7/dist/vuetify.min.js', 'sha384-wnK0Mlw0rYYNIBzsFn4aOQ595f/X6hleKb5nrU00buuLaFz5ZPqbwpF4QQTjcDZh'); });
       bootMark('vueLibsLoaded');
 
       // Shared pure backend helpers (used by Firebase + CRDT backends)
@@ -210,10 +215,11 @@
       }
     }
 
-    function loadScript(src) {
+    function loadScript(src, integrity) {
       return new Promise(function(resolve, reject) {
         var s = document.createElement('script');
         s.src = src; s.onload = resolve; s.onerror = reject;
+        if (integrity) { s.integrity = integrity; s.crossOrigin = 'anonymous'; }
         document.body.appendChild(s);
       });
     }
