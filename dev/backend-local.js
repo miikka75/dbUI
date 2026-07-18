@@ -10,13 +10,25 @@ function createLocalBackend(dbPath) {
   // Quote a SQL identifier safely: wrap in "" and escape embedded quotes (blocks identifier injection).
   function qid(n) { return '"' + String(n).replace(/"/g, '""') + '"'; }
 
+  // Parsed-schema cache: msMultiCols/_listOwning run on EVERY getTableData/list write, and each used
+  // to re-SELECT + JSON.parse the whole stored schema — O(tables x schema size) per boot. Parse once,
+  // invalidate on saveSchema/resetData. undefined = not loaded yet; null = no schema stored.
+  var _schemaCache;
+  function _storedSchema() {
+    if (_schemaCache === undefined) {
+      var row = db.prepare('SELECT value FROM _schema WHERE key = ?').get('schema');
+      _schemaCache = row ? JSON.parse(row.value) : null;
+    }
+    return _schemaCache;
+  }
+
   // multiselect columns are stored as JSON-encoded arrays in TEXT cells (SQLite has no array type).
   // Return a set of multiselect column names for a table, read from the stored schema.
   function msMultiCols(tableId) {
     try {
-      var row = db.prepare('SELECT value FROM _schema WHERE key = ?').get('schema');
-      if (!row) return {};
-      var def = (JSON.parse(row.value).tables || {})[tableId];
+      var stored = _storedSchema();
+      if (!stored) return {};
+      var def = (stored.tables || {})[tableId];
       var out = {}, cols = def && def.columns;
       if (Array.isArray(cols)) {
         // Authored/stored form: columns is an array of {name,type,...} objects.
@@ -33,9 +45,8 @@ function createLocalBackend(dbPath) {
   // The scan itself is the shared list-access module (no more copied logic).
   function _listOwning(listName) {
     try {
-      var row = db.prepare('SELECT value FROM _schema WHERE key = ?').get('schema');
-      var tables = row ? (JSON.parse(row.value).tables || {}) : {};
-      return LA.listOwningTables(tables, listName);
+      var stored = _storedSchema();
+      return LA.listOwningTables((stored && stored.tables) || {}, listName);
     } catch (e) { return []; }
   }
   // Per-list storage: one row per list { name PRIMARY KEY, items JSON, tables JSON } — shape parity
@@ -71,6 +82,7 @@ function createLocalBackend(dbPath) {
 
   return {
     getSchema(folderId) {
+      // Fresh parse per call (callers may mutate the result); the internal helpers use _storedSchema.
       const row = db.prepare('SELECT value FROM _schema WHERE key = ?').get('schema');
       if (row) return JSON.parse(row.value);
       return null;
@@ -78,6 +90,7 @@ function createLocalBackend(dbPath) {
 
     saveSchema(folderId, schema) {
       db.prepare('INSERT OR REPLACE INTO _schema (key, value) VALUES (?, ?)').run('schema', JSON.stringify(schema));
+      _schemaCache = undefined; // invalidate the parsed-schema cache
     },
 
     validateFolder(folderId) {
@@ -129,9 +142,14 @@ function createLocalBackend(dbPath) {
     resetData() {
       const tables = db.prepare('SELECT name FROM _tables').all();
       for (const t of tables) {
-        const stmts = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?").all(t.name + '%');
+        // Match the table itself + its partition tables (name__tab) EXACTLY. A raw `name + '%'` LIKE
+        // over-matched: table "task" would drop "tasks__active", and `_` is a LIKE single-char wildcard
+        // (so "a_b%" also matched "axb..."). Escape the literals and anchor the partition separator.
+        const esc = t.name.replace(/[\\%_]/g, '\\$&');
+        const stmts = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND (name = ? OR name LIKE ? ESCAPE '\\')").all(t.name, esc + '\\_\\_%');
         for (const s of stmts) db.exec('DROP TABLE IF EXISTS ' + qid(s.name));
       }
+      _schemaCache = undefined; // schema rows are deleted below -> drop the parsed cache too
       try { db.exec('DELETE FROM _lists'); } catch(e) {}
       try { db.exec('DELETE FROM _schema'); } catch(e) {}
       try { db.exec('DELETE FROM _tables'); } catch(e) {}
@@ -182,7 +200,16 @@ function createLocalBackend(dbPath) {
         const cols = columns.map(c => c === 'id' ? qid(c) + ' TEXT PRIMARY KEY' : qid(c) + ' TEXT').join(', ');
         db.exec('CREATE TABLE IF NOT EXISTS ' + qid(actualTable) + ' (' + cols + ')');
       }
-      const values = columns.map(c => { const v = rowData[c]; if (Array.isArray(v)) return JSON.stringify(v); return v !== undefined ? v : ''; });
+      // MERGE semantics (parity with storage-fs Object.assign, Firestore {merge:true}, and the CRDT
+      // engine's per-field LWW): a partial rowData must not blank the columns it omits. INSERT OR
+      // REPLACE writes the full column list, so absent keys fall back to the stored row's values.
+      let existing = null;
+      try { existing = db.prepare('SELECT * FROM ' + qid(actualTable) + ' WHERE id = ?').get(rowData.id); } catch (e) {}
+      const values = columns.map(c => {
+        const v = rowData[c] !== undefined ? rowData[c] : (existing ? existing[c] : undefined);
+        if (Array.isArray(v)) return JSON.stringify(v);
+        return v !== undefined ? v : '';
+      });
       if (values.length !== columns.length) console.error('putRow mismatch:', tableId, 'cols:', columns.length, 'vals:', values.length);
       const badVals = values.filter(v => typeof v === 'object' && v !== null);
       if (badVals.length) console.error('putRow has object values:', badVals, 'for cols:', columns.filter((c,i) => typeof values[i] === 'object'));

@@ -2,7 +2,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const { SCHEMA, VIEWS } = require('../schema');
 
-// Pure logic extracted from app-core.html computed properties
+// Pure logic extracted from app-core.js computed properties
 
 function resolveTableSelection(selected, prev) {
   if (selected.indexOf('all') >= 0 && prev.indexOf('all') < 0) return 'all';
@@ -200,7 +200,7 @@ describe('Server-side table access check', () => {
 });
 
 describe('Permission features (primary chips + materialized closure)', () => {
-  // Feature helpers are the REAL module (../../access-features), shared with app-core.html — no more
+  // Feature helpers are the REAL module (../../access-features), shared with app-core.js — no more
   // hand-copied logic that can drift. Thin adapters preserve this suite's expected shapes: grantFeatures
   // -> ids (the module returns { id, view }); featureClosure/expandFeatureGrants sorted for stable
   // assertions (the module returns insertion order, which the app doesn't depend on).

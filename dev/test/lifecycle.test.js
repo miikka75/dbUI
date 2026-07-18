@@ -10,7 +10,7 @@ let backend;
 beforeEach(() => { backend = createLocalBackend(); backend.initSchema('local', SCHEMA); });
 afterEach(() => { backend.close(); });
 
-// archiveRow/restoreRow fan-out: iterate the view's sources (mirrors app-core.html)
+// archiveRow/restoreRow fan-out: iterate the view's sources (mirrors app-core.js)
 function fanMove(id, sources, dir) {
   sources.forEach(function(src) {
     var active = SCHEMA[src].partition, archive = SCHEMA[src].archivePartition;

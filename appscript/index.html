@@ -9,6 +9,20 @@
   <?!= HtmlService.createHtmlOutputFromFile('ui').getContent(); ?>
   <script src="https://cdn.jsdelivr.net/npm/vue@3.4.38/dist/vue.global.prod.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/vuetify@3.7.6/dist/vuetify.min.js"></script>
+  <!-- Pure domain modules (each pasted from the repo's .js file, wrapped in <script> tags — see
+       DEPLOY.md). Order mirrors index.html's loadScriptsOrdered: modules first (schema-loader +
+       app-core call them as globals), then schema-loader, then app-core. -->
+  <?!= HtmlService.createHtmlOutputFromFile('columns').getContent(); ?>
+  <?!= HtmlService.createHtmlOutputFromFile('access-features').getContent(); ?>
+  <?!= HtmlService.createHtmlOutputFromFile('list-access').getContent(); ?>
+  <?!= HtmlService.createHtmlOutputFromFile('calendar').getContent(); ?>
+  <?!= HtmlService.createHtmlOutputFromFile('rotation').getContent(); ?>
+  <?!= HtmlService.createHtmlOutputFromFile('rows').getContent(); ?>
+  <?!= HtmlService.createHtmlOutputFromFile('embeds').getContent(); ?>
+  <?!= HtmlService.createHtmlOutputFromFile('print').getContent(); ?>
+  <?!= HtmlService.createHtmlOutputFromFile('pivot').getContent(); ?>
+  <?!= HtmlService.createHtmlOutputFromFile('rsvp').getContent(); ?>
+  <?!= HtmlService.createHtmlOutputFromFile('schema-loader').getContent(); ?>
   <?!= HtmlService.createHtmlOutputFromFile('app-core').getContent(); ?>
   <script>createVueApp();</script>
   <?!= HtmlService.createHtmlOutputFromFile('backend-appscript').getContent(); ?>

@@ -17,7 +17,9 @@ module.exports = defineConfig({
   },
   webServer: {
     command: 'node server.js',
-    env: { PORT: String(TEST_PORT), APP_DB: ':memory:' },
+    // CSP: '1' -> the app's Content-Security-Policy is ENFORCED for every E2E test (see /csp.js),
+    // so a policy that would break the app fails CI before production flips Report-Only to enforcing.
+    env: { PORT: String(TEST_PORT), APP_DB: ':memory:', CSP: '1' },
     port: TEST_PORT,
     reuseExistingServer: false,
     timeout: 10000,

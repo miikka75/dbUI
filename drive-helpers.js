@@ -1,9 +1,12 @@
-<script>
-// Shared Drive API helpers — used by backend-oauth.html AND transport-drive.html.
-// Depends on _fetch (from auth-oauth.html) being available as a global.
+// Shared Drive API helpers — used by backend-oauth.js AND transport-drive.js.
+// Depends on _fetch (from auth-oauth.js) being available as a global.
 var DriveHelpers = {
+  // Escape a value for a single-quoted Drive API `q` string literal (backslash, then quote). Names
+  // interpolated into queries come from schema/user data (table names, language codes) — an unescaped
+  // quote breaks the query and stalls sync for that file.
+  q: function(s) { return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); },
   getOrCreateFolder: function(parentId, name) {
-    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + parentId + '\' in parents and name=\'' + name + '\' and mimeType=\'application/vnd.google-apps.folder\' and trashed=false&fields=files(id)')
+    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + parentId + '\' in parents and name=\'' + DriveHelpers.q(name) + '\' and mimeType=\'application/vnd.google-apps.folder\' and trashed=false&fields=files(id)')
       .then(function(r) { return r.json(); }).then(function(d) {
         if (d.files && d.files.length) return d.files[0].id;
         return _fetch('https://www.googleapis.com/drive/v3/files', 'POST', { name: name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
@@ -11,7 +14,7 @@ var DriveHelpers = {
       });
   },
   uploadFile: function(folderId, name, content) {
-    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + folderId + '\' in parents and name=\'' + name + '\' and trashed=false&fields=files(id)')
+    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + folderId + '\' in parents and name=\'' + DriveHelpers.q(name) + '\' and trashed=false&fields=files(id)')
       .then(function(r) { return r.json(); }).then(function(d) {
         var fileId = d.files && d.files[0] ? d.files[0].id : null;
         var metadata = { name: name }; if (!fileId) metadata.parents = [folderId];
@@ -25,4 +28,3 @@ var DriveHelpers = {
       });
   }
 };
-</script>

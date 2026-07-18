@@ -2,9 +2,9 @@
 // it (via `list` or the dual-list `listSwitch.list`); a restricted user may read only the lists owned by
 // a table they can access. A list with no owning table (orphan) is admin-only.
 //
-// This was previously defined in schema-loader.html and HAND-COPIED in dev/server.js, dev/backend-local.js
+// This was previously defined in schema-loader.js and HAND-COPIED in dev/server.js, dev/backend-local.js
 // and dev/test/list-access.test.js — four drift-prone copies of access-control logic. One module now:
-//   Browser: <script src="/list-access.js"> before the schema-loader fragment; backend-firebase.html
+//   Browser: <script src="/list-access.js"> before the schema-loader fragment; backend-firebase.js
 //            calls listOwningTables as a global to stamp each _lists/{name} doc with its owning tables.
 //   Node:    const LA = require('../list-access')  (dev/server.js request filtering, backend-local stamping).
 //

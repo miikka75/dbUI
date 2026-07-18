@@ -23,15 +23,18 @@ service cloud.firestore {
     }
 
     // Meta: read by registered. `lists` and `users` docs are admin-only reads (users holds every
-    // member's email/role/grants; per-user access now lives in /_users). Write by admin (or bootstrap);
-    // editors may write the shared lists doc only.
+    // member's email/role/grants; per-user access now lives in /_users). Write by admin (or bootstrap).
+    // Editors no longer write here: per-list storage moved to /_lists (its own rule below), so the old
+    // editor branch on the legacy lists doc only allowed clobbering lists outside their table grants.
     match /_meta/{doc} {
       allow read: if request.auth != null && isRegistered() && (
         (doc != 'lists' && doc != 'users') || noUsers() || role() == 'admin'
       );
-      allow write: if request.auth != null && (
-        noUsers() || role() == 'admin' || (doc == 'lists' && role() == 'editor')
-      );
+      allow create, update: if request.auth != null && (noUsers() || role() == 'admin');
+      // The bootstrap probe is exists(_meta/users): deleting that doc while /_users docs exist would
+      // flip noUsers() true and hand EVERY signed-in Google account full admin. Nobody deletes it —
+      // an admin resetting the registry overwrites it with {} instead (exists() stays true).
+      allow delete: if request.auth != null && doc != 'users' && (noUsers() || role() == 'admin');
     }
 
     // Per-user access docs: a user reads only their OWN doc; admins read/list/write all. Replaces the
@@ -46,8 +49,19 @@ service cloud.firestore {
     // request doc; admins read/list/delete all. The request is inert until an admin approves it by
     // writing a /_users doc (the role/tables are the admin's choice, never the requester's).
     match /_access_requests/{email} {
-      allow read, create, delete: if request.auth != null && myEmail() == email;
-      allow read, write:          if request.auth != null && !noUsers() && role() == 'admin';
+      // Shape-validate the self-create (mirrors _profiles): requestAccess writes exactly
+      // { email, name, note, ts }, so an arbitrary signed-in account can't park an oversized or
+      // wrong-shaped doc here (these render in the admin's approval UI).
+      function validRequest() {
+        return request.resource.data.keys().hasOnly(['email', 'name', 'note', 'ts'])
+          && request.resource.data.email == email
+          && (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() <= 100))
+          && (!('note' in request.resource.data) || (request.resource.data.note is string && request.resource.data.note.size() <= 500))
+          && (!('ts' in request.resource.data) || request.resource.data.ts is number);
+      }
+      allow read, delete: if request.auth != null && myEmail() == email;
+      allow create:       if request.auth != null && myEmail() == email && validRequest();
+      allow read, write:  if request.auth != null && !noUsers() && role() == 'admin';
     }
 
     // Opt-in display-name profiles. A user reads/writes ONLY their own doc; a profile with
@@ -83,6 +97,17 @@ service cloud.firestore {
       );
     }
 
+    // Doc-view bodies (savePage/loadPage -> putRow('_pages', …) -> _pages__active). Content PAGES, not
+    // row data: readable by EVERY registered user — a page's embeds are resolved client-side and each
+    // embedded table's rows stay gated by their own rules, so the body text is the only thing exposed.
+    // Writable by admins/editors. Previously governed by the data catch-all, whose
+    // hasTableAccess('_pages') gate no grant ever satisfies (access-features never emits '_pages'), so
+    // restricted members were silently served the stale schema-seeded markdown instead of the edited body.
+    match /_pages__active/{doc} {
+      allow read:  if request.auth != null && isRegistered();
+      allow write: if request.auth != null && (noUsers() || role() == 'admin' || role() == 'editor');
+    }
+
     // Data tables (never _meta or _lists). Read needs table access. Writes split into create/update/delete
     // so OWNER-SCOPED self-service rows work: a registered member may create/edit/delete ONLY their own
     // row (one carrying `owner == their email`), no table-editor grant required — this backs the RSVP /
@@ -92,9 +117,8 @@ service cloud.firestore {
     // role:'admin' — a privilege escalation, since role() reads that doc. Firestore ORs overlapping match
     // blocks, so naming only _meta/_lists here left _users/_profiles/_access_requests reachable through
     // this rule. Exclude the whole underscore namespace (fail-safe: a future system collection is denied
-    // here by default and must get its own block), EXCEPT _pages — the doc-view body store is genuine
-    // user data written via putRow('_pages', …) -> the _pages__active/_pages__archive collections.
-    function base(coll) { return request.auth != null && isRegistered() && (!coll.matches('^_.*') || coll.matches('^_pages__.*')); }
+    // here by default and must get its own block — _pages__active has one above).
+    function base(coll) { return request.auth != null && isRegistered() && !coll.matches('^_.*'); }
     // Self-service is bounded to tables that DECLARE an owner column -- mirrored to _meta/ownerTables by
     // saveSchema (BackendHelpers.ownerTablesOf). Without this, owner-create was allowed on ANY table, so a
     // registered member could inject owner-stamped junk rows into tables never meant for self-service.
@@ -122,12 +146,14 @@ service cloud.firestore {
       );
       allow update: if base(collection) && (
         noUsers() || role() == 'admin' ||
-        (resource.data.owner == myEmail() && request.resource.data.owner == myEmail()) || // edit my own; can't reassign owner
+        // edit my own (can't reassign owner) — bounded to owner-column tables like create, so a stray
+        // owner-stamped row in a non-self-service table doesn't stay member-editable forever
+        (resource.data.owner == myEmail() && request.resource.data.owner == myEmail() && selfServiceTable(collection)) ||
         (role() == 'editor' && hasTableAccess(collection))
       );
       allow delete: if base(collection) && (
         noUsers() || role() == 'admin' ||
-        resource.data.owner == myEmail() ||                              // delete my own owned row
+        (resource.data.owner == myEmail() && selfServiceTable(collection)) || // delete my own owned row (self-service tables only)
         (role() == 'editor' && hasTableAccess(collection))
       );
     }

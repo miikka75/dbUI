@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const { SCHEMA } = require('../schema');
 const { createLocalBackend } = require('../backend-local');
 
-// Mirror helper (same logic as app-core.html)
+// Mirror helper (same logic as app-core.js)
 function getTableMirrorSource(tables, tableName) {
   var cols = tables[tableName] && tables[tableName].columns;
   if (!cols) return null;

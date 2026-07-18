@@ -1,7 +1,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-// The rotation helpers now live in the requireable /rotation.js module (extracted from schema-loader.html),
+// The rotation helpers now live in the requireable /rotation.js module (extracted from schema-loader.js),
 // so this no longer needs to scrape the <script> block out of the HTML fragment via a vm sandbox.
 const { sortRosterRows } = require('../../rotation');
 

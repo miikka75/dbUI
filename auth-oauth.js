@@ -1,9 +1,21 @@
-<!-- auth-oauth.html — shared OAuth authentication for Drive/Sheets backends -->
-<script>
+// auth-oauth.js — shared OAuth authentication for Drive/Sheets backends
 var _token = sessionStorage.getItem('oauth_token');
 var _oauthClient = null;
 var CLIENT_ID = localStorage.getItem('oauth_client_id');
 var SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets';
+
+// Single-flight token refresh: concurrent 401s (parallel Drive requests after expiry) share ONE
+// requestAccessToken() instead of each opening its own consent popup.
+var _tokenRefresh = null;
+function _refreshToken() {
+  if (!_tokenRefresh) {
+    _tokenRefresh = new Promise(function(resolve) {
+      _oauthClient.callback = function(response) { if (response.access_token) { _token = response.access_token; sessionStorage.setItem('oauth_token', _token); } resolve(); };
+      _oauthClient.requestAccessToken();
+    }).then(function() { _tokenRefresh = null; }, function() { _tokenRefresh = null; });
+  }
+  return _tokenRefresh;
+}
 
 function _fetch(url, method, body) {
   method = method || 'GET';
@@ -11,10 +23,7 @@ function _fetch(url, method, body) {
   if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   return fetch(url, opts).then(function(res) {
     if (res.status === 401 && _oauthClient) {
-      return new Promise(function(resolve) {
-        _oauthClient.callback = function(response) { if (response.access_token) { _token = response.access_token; sessionStorage.setItem('oauth_token', _token); } resolve(); };
-        _oauthClient.requestAccessToken();
-      }).then(function() { opts.headers.Authorization = 'Bearer ' + _token; return fetch(url, opts); });
+      return _refreshToken().then(function() { opts.headers.Authorization = 'Bearer ' + _token; return fetch(url, opts); });
     }
     return res;
   });
@@ -36,4 +45,3 @@ function triggerOAuth() {
 }
 
 initOAuth();
-</script>

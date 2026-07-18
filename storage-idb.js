@@ -1,5 +1,4 @@
-<!-- storage-idb.html -- IndexedDB storage adapter for CrdtEngine -->
-<script>
+// storage-idb.js -- IndexedDB storage adapter for CrdtEngine
 var StorageIDB = (function() {
   var DB_NAME = 'dbui';
   var _db = null;
@@ -120,4 +119,3 @@ var StorageIDB = (function() {
     }
   };
 })();
-</script>

@@ -17,3 +17,18 @@ dev/seed-test-*.db
 dev/seed-test-*.db-wal
 dev/seed-test-*.db-shm
 
+
+# firebase emulator logs
+firebase-debug.log
+firestore-debug.log
+
+# vendored third-party dists — provisioned locally via update-vendor.sh (fresh clones fall back to the SRI-pinned CDN)
+vendor/*.js
+vendor/*.css
+vendor/fonts/
+dev/vendor/*.js
+dev/vendor/*.css
+dev/vendor/fonts/
+
+# Cloud Functions deps (functions/ deploys its own node_modules)
+functions/node_modules/

@@ -1,4 +1,3 @@
-<script>
 // BCP-47 languages offered by the "add language" picker (Languages tab). The `code` doubles as the Intl
 // locale (see calLocale), so every entry is a valid BCP-47 tag; `name` is the endonym (renamable after).
 var BCP47_LANGS = [
@@ -482,6 +481,9 @@ function createVueApp() {
       },
       // List values are editable only by recognized writable roles (admin/editor); visibleLists already scopes WHICH lists
       canEditLists: function() { return this.isAdmin || this.currentUserRole === 'editor'; },
+      // Doc-view bodies are writable by admins/editors (mirrors the _pages__active rule / dev-server
+      // gate); viewers get a read-only page with no Edit button instead of a save that would 403.
+      canEditPages: function() { return this.isAdmin || this.currentUserRole === 'editor'; },
       visibleCols: function() {
         var self = this;
         if (!this.currentTable) return [];
@@ -772,16 +774,7 @@ function createVueApp() {
             // saveLists's batch write would then be denied wholesale (Firestore batches are atomic --
             // one disallowed doc fails the lot). result.unrestricted is only ever explicitly false
             // for a scoped Firebase user; other backends don't set it, so they keep seeding as before.
-            if (result.unrestricted !== false) {
-              Object.keys(SCHEMA).forEach(function(t) {
-                Object.keys(SCHEMA[t].columns).forEach(function(c) {
-                  var def = SCHEMA[t].columns[c];
-                  if (def && typeof def === 'object' && def.list && !self.listsCache[def.list]) { self.listsCache[def.list] = []; }
-                  if (def && typeof def === 'object' && def.listSwitch && def.listSwitch.list && !self.listsCache[def.listSwitch.list]) { self.listsCache[def.listSwitch.list] = []; }
-                });
-              });
-              if (_seedListValues(self.listsCache)) backend.saveLists(self.folderId, self.listsCache);
-            }
+            if (result.unrestricted !== false && self._seedSchemaLists()) backend.saveLists(self.folderId, self.listsCache);
             // Populate data cache
             for (var key in result.data) {
               var d = result.data[key];
@@ -838,26 +831,10 @@ function createVueApp() {
             }
           });
         }).then(function() {
-          // Preload lists
+          // Preload lists + auto-seed (shared with the bootData path via _seedSchemaLists)
           return backend.getLists(self.folderId).then(function(lists) {
             self.listsCache = lists || {}; window._listsCache = self.listsCache;
-            // Auto-seed: ensure list values referenced in filters/conditionals exist
-            // 1. Create empty lists for all referenced list names
-            Object.keys(SCHEMA).forEach(function(t) {
-              Object.keys(SCHEMA[t].columns).forEach(function(c) {
-                var def = SCHEMA[t].columns[c];
-                if (def && typeof def === 'object' && def.list && !self.listsCache[def.list]) {
-                  self.listsCache[def.list] = [];
-                  missing = true;
-                }
-                if (def && typeof def === 'object' && def.listSwitch && def.listSwitch.list && !self.listsCache[def.listSwitch.list]) {
-                  self.listsCache[def.listSwitch.list] = [];
-                  missing = true;
-                }
-              });
-            });
-            // 2. Seed mandatory filter values into lists
-            if (_seedListValues(self.listsCache)) backend.saveLists(self.folderId, self.listsCache);
+            if (self._seedSchemaLists()) backend.saveLists(self.folderId, self.listsCache);
           });
         }).then(function() {
           // Load users FIRST to know access restrictions
@@ -1152,6 +1129,40 @@ function createVueApp() {
         this.notify('Saved');
       },
 
+      // Ensure every schema-referenced list exists (both `list` and `listSwitch.list`), then seed
+      // mandatory filter values. Returns true when a filter VALUE was seeded (callers persist via
+      // saveLists then). One implementation for the bootData and sequential boot paths — they had
+      // drifted into two hand-copied blocks (one with a leftover implicit global).
+      _seedSchemaLists: function() {
+        var lists = this.listsCache;
+        Object.keys(SCHEMA).forEach(function(t) {
+          Object.keys(SCHEMA[t].columns).forEach(function(c) {
+            var def = SCHEMA[t].columns[c];
+            if (def && typeof def === 'object' && def.list && !lists[def.list]) lists[def.list] = [];
+            if (def && typeof def === 'object' && def.listSwitch && def.listSwitch.list && !lists[def.listSwitch.list]) lists[def.listSwitch.list] = [];
+          });
+        });
+        return _seedListValues(lists);
+      },
+
+      // Load each table's active partition into dataCache unless already cached or outside the user's
+      // grants (fail-closed: a denied/failed read contributes an empty cache entry, never an error).
+      // `onLoad` (optional) runs after each table lands — used by views that must re-derive rows.
+      // One implementation for the calendar/rotation/pivot/rsvp preload blocks in loadTableData.
+      _ensureCached: function(tables, onLoad) {
+        var self = this, allowed = this.userAllowedTables;
+        (tables || []).forEach(function(tbl) {
+          // Reachable = granted OR self-serviceable (owner-column table: the backend returns only the
+          // member's own rows) — same reachability the sidebar's canAccess uses, so an rsvp view's
+          // responses table loads for a no-grant member instead of silently staying empty.
+          if (!tbl || self.dataCache[tbl] || (allowed && allowed.indexOf(tbl) < 0 && !self.canSelfServe(tbl))) return;
+          backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
+            self.dataCache[tbl] = parseTableResult(result).rows;
+            if (onLoad) onLoad(tbl);
+          }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
+        });
+      },
+
       loadTableData: function() {
         var self = this;
         var view = VIEWS[this.currentTable];
@@ -1159,7 +1170,6 @@ function createVueApp() {
           // Calendar view: load each distinct source table (deduped); the grid/panel read from
           // dataCache via calEventsFor. No stored calendar rows — pure presentation of source rows.
           if (view.calendar) {
-            var allowedCal = self.userAllowedTables;
             var calTables = [];
             self.calSources(self.currentTable).forEach(function(s) { if (s && s.table && calTables.indexOf(s.table) < 0) calTables.push(s.table); });
             // Also preload each rotationSource's rosters so generated duty events can resolve.
@@ -1167,18 +1177,12 @@ function createVueApp() {
               var rvv = VIEWS[rs.view] && VIEWS[rs.view].rotation;
               ((rvv && rvv.rosters) || []).forEach(function(tbl) { if (tbl && calTables.indexOf(tbl) < 0) calTables.push(tbl); });
             });
-            calTables.forEach(function(tbl) {
-              if (self.dataCache[tbl] || (allowedCal && allowedCal.indexOf(tbl) < 0)) return;
-              backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
-                self.dataCache[tbl] = parseTableResult(result).rows;
-              }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
-            });
+            self._ensureCached(calTables);
             return;
           }
           // rotationView (third view kind): generate rows from range; no sources to read.
           if (view.rotation) {
             var todayStr = fmtDate(new Date());
-            var allowedRv = self.userAllowedTables;
             var regen = function() {
               var rows = buildRotationViewRows(view, self.dataCache, todayStr, self.anchorForView(self.currentTable), self.rangeForView(self.currentTable), self.rotateEveryForView(self.currentTable));
               if (view.filter) rows = filterRows(rows, self.resolveMeTokens(view.filter)); // filter generated period rows
@@ -1186,40 +1190,20 @@ function createVueApp() {
             };
             regen();
             var rvDef = view.rotation;
-            var deps = rvDef.rosters ? rvDef.rosters.slice() : (rvDef.columns || []).map(function(c) { return c.rotationTable; });
-            deps.forEach(function(tbl) {
-              if (!tbl || (allowedRv && allowedRv.indexOf(tbl) < 0) || self.dataCache[tbl]) return;
-              backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
-                self.dataCache[tbl] = parseTableResult(result).rows; regen();
-              }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
-            });
+            self._ensureCached(rvDef.rosters ? rvDef.rosters.slice() : (rvDef.columns || []).map(function(c) { return c.rotationTable; }), regen);
             return;
           }
           // Pivot view: cross-tab of a source table/view. Load the source's table(s) into the reactive
           // dataCache; pivotFor() (read by the component) then builds the grid and re-derives on load.
           if (view.pivot) {
-            var allowedPv = self.userAllowedTables;
-            var pvTables = VIEWS[view.pivot.source] ? (VIEWS[view.pivot.source].sources || []) : [view.pivot.source];
-            pvTables.forEach(function(tbl) {
-              if (!tbl || self.dataCache[tbl] || (allowedPv && allowedPv.indexOf(tbl) < 0)) return;
-              backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
-                self.dataCache[tbl] = parseTableResult(result).rows;
-              }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
-            });
+            self._ensureCached(VIEWS[view.pivot.source] ? (VIEWS[view.pivot.source].sources || []) : [view.pivot.source]);
             return;
           }
           // RSVP view: load the events + responses tables; rsvpFor() builds the list, re-derives on load.
           if (view.rsvp) {
-            var allowedRs = self.userAllowedTables;
-            var rsTables = [];
-            (VIEWS[view.rsvp.events] ? (VIEWS[view.rsvp.events].sources || []) : [view.rsvp.events]).forEach(function(t) { if (t) rsTables.push(t); });
+            var rsTables = (VIEWS[view.rsvp.events] ? (VIEWS[view.rsvp.events].sources || []) : [view.rsvp.events]).slice();
             if (view.rsvp.responses) rsTables.push(view.rsvp.responses);
-            rsTables.forEach(function(tbl) {
-              if (!tbl || self.dataCache[tbl] || (allowedRs && allowedRs.indexOf(tbl) < 0)) return;
-              backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
-                self.dataCache[tbl] = parseTableResult(result).rows;
-              }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
-            });
+            self._ensureCached(rsTables);
             return;
           }
           // Union or join view
@@ -1660,12 +1644,9 @@ function createVueApp() {
       },
       addRefParent: function() {
         var self = this;
-        var table = self.currentRefTable;
-        var row = { id: self.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-        getColumns(table).forEach(function(c) { if (!row[c]) row[c] = ''; });
-        if (!self.dataCache[table]) self.dataCache[table] = [];
-        self.dataCache[table].push(row);
-        backend.putRow(self.tableMap[table], row, 'active');
+        // All three ref-table add paths ride the shared blank-row factory (_createBlankRow) — they
+        // used to hand-roll row creation, the exact drift its comment warns about.
+        self._createBlankRow(self.currentRefTable);
         self.notify('Group added');
         self.$nextTick(function() {
           var els = document.querySelectorAll('.ref-hierarchy .v-list-group');
@@ -1678,13 +1659,8 @@ function createVueApp() {
       },
       addRefChild: function(parentValue) {
         var self = this;
-        var table = self.currentRefTable;
-        var row = { id: self.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-        getColumns(table).forEach(function(c) { if (!row[c]) row[c] = ''; });
-        row[self.refParentCol] = parentValue;
-        if (!self.dataCache[table]) self.dataCache[table] = [];
-        self.dataCache[table].push(row);
-        backend.putRow(self.tableMap[table], row, 'active');
+        var prefill = {}; prefill[self.refParentCol] = parentValue;
+        self._createBlankRow(self.currentRefTable, { prefill: prefill });
         self.notify('Item added');
         self.$nextTick(function() {
           var cells = document.querySelectorAll('.ref-hierarchy .editable-cell.ref-child');
@@ -1706,12 +1682,7 @@ function createVueApp() {
       },
       addRefRow: function() {
         var self = this;
-        var table = self.currentRefTable;
-        var row = { id: self.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-        getColumns(table).forEach(function(c) { if (!row[c]) row[c] = ''; });
-        if (!self.dataCache[table]) self.dataCache[table] = [];
-        self.dataCache[table].push(row);
-        backend.putRow(self.tableMap[table], row, 'active');
+        self._createBlankRow(self.currentRefTable);
         self.notify('Row added');
         self.focusLastEditable('.v-main .v-card .v-table tbody tr:last-child .editable-cell');
       },
@@ -2397,6 +2368,17 @@ function createVueApp() {
             return backend.getTranslations(self.folderId, lang.code).then(function(t) { translations[lang.code] = t; });
           });
         });
+        // Shared tail for both branches below: assemble the bundle around the cleaned schema + extras,
+        // then download it (the stringify/Blob/anchor dance was duplicated verbatim in then/catch).
+        var download = function(schema, extras) {
+          var payload = Object.assign({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations }, extras, { config: exportableConfig(self.appConfig), exportedAt: new Date().toISOString() });
+          var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json';
+          a.click();
+          self.notify('Exported');
+        };
         chain.then(function() {
           return Promise.resolve(backend.getTableData('_pages', 'active')).then(function(d) {
             var pages = (d && d.rows || []).filter(function(r) { return r.id && r.markdown; });
@@ -2414,23 +2396,11 @@ function createVueApp() {
               }
             });
             convertViewFilters(schema.views);   // emit array-IN filters as explicit $or (forward-deprecation)
-            var json = JSON.stringify({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations, pages: pages.length ? pages : undefined, config: exportableConfig(self.appConfig), exportedAt: new Date().toISOString() }, null, 2);
-            var blob = new Blob([json], { type: 'application/json' });
-            var a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json';
-            a.click();
-            self.notify('Exported');
+            download(schema, pages.length ? { pages: pages } : {});
           }).catch(function() {
             var schema = JSON.parse(JSON.stringify(self.schemaData));
             if (schema.tables) Object.keys(schema.tables).forEach(function(t) { var c = schema.tables[t].columns; if (c) { delete c.id; } delete schema.tables[t].partition; delete schema.tables[t].archivePartition; });
-            var json = JSON.stringify({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations, config: exportableConfig(self.appConfig), exportedAt: new Date().toISOString() }, null, 2);
-            var blob = new Blob([json], { type: 'application/json' });
-            var a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json';
-            a.click();
-            self.notify('Exported');
+            download(schema, {});
           });
         });
       },
@@ -2814,7 +2784,9 @@ function createVueApp() {
       },
       // (PRINT_CSS is a module-level var defined above createVueApp)
       _pe: function(s) { return Print.escape(s); },
-      _printOpen: function(title, bodyHtml) { var w = window.open('', '_blank'); w.document.write('<html><head><title>' + title + '</title><style>' + PRINT_CSS + '</style></head><body>' + bodyHtml + '</body></html>'); w.document.close(); w.print(); },
+      // `title` is escaped HERE (callers pass it raw): it comes from t()/displayValue — editor-writable
+      // shared data — and document.write renders it, so an unescaped title is stored XSS in the print window.
+      _printOpen: function(title, bodyHtml) { var w = window.open('', '_blank'); w.document.write('<html><head><title>' + Print.escape(title) + '</title><style>' + PRINT_CSS + '</style></head><body>' + bodyHtml + '</body></html>'); w.document.close(); w.print(); },
       // The print-HTML builders live in /print.js (pure over this ctx). Orchestration (window.open +
       // PRINT_CSS in _printOpen, and the printView/printCard entry points) stays here.
       _printCtx: function() {
@@ -2841,7 +2813,7 @@ function createVueApp() {
           return;
         }
         var cols = this.visibleCols;
-        var body = '<h2>' + title + '</h2>';
+        var body = '<h2>' + Print.escape(title) + '</h2>';
         if (this.useCardLayout) {
           this.sortedData.forEach(function(row) { body += Print.cardHtml(cols, row, ctx); });
         } else {
@@ -2859,7 +2831,7 @@ function createVueApp() {
       },
       printCard: function(item) {
         var cols = this.visibleCols;
-        var title = Print.escape(this.displayValue(cols[0], item[cols[0]]) || item.id);
+        var title = this.displayValue(cols[0], item[cols[0]]) || item.id; // raw — _printOpen escapes
         this._printOpen(title, Print.cardHtml(cols, item, this._printCtx()));
       }
     },
@@ -3571,7 +3543,7 @@ function createVueApp() {
     computed: { a: function() { return appInstance; } },
     template: ''
       + '<v-card variant="outlined" class="pa-4">'
-      + '<div class="d-flex align-center mb-2"><v-spacer></v-spacer>'
+      + '<div v-if="a.canEditPages" class="d-flex align-center mb-2"><v-spacer></v-spacer>'
       + '<v-btn size="small" variant="text" :prepend-icon="a.pageEditing ? \'mdi-eye\' : \'mdi-pencil\'" @click="a.togglePageEdit()">{{ a.pageEditing ? \'Preview\' : \'Edit\' }}</v-btn>'
       + '<v-btn v-if="a.pageEditing" size="small" color="primary" prepend-icon="mdi-content-save" @click="a.savePage()" class="ml-2">Save</v-btn></div>'
       + '<v-textarea v-if="a.pageEditing" :model-value="a.pageEditText" @update:model-value="a.pageEditText = $event" auto-grow variant="outlined" density="compact" placeholder="# Markdown — embed views with {{view:name}} or {{table:name}}"></v-textarea>'
@@ -3632,4 +3604,3 @@ function init() {
 }
 
 // createVueApp() and init() called by index.html after all scripts loaded
-</script>

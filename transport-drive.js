@@ -1,5 +1,4 @@
-<!-- transport-drive.html -- Google Drive transport for CrdtEngine sync -->
-<script>
+// transport-drive.js -- Google Drive transport for CrdtEngine sync
 var TransportDrive = (function() {
   var _folderId = null;
 
@@ -47,32 +46,33 @@ var TransportDrive = (function() {
   }
 
   function pullChangesets(excludeSiteId) {
+    // Folder listings + changeset downloads run CONCURRENTLY (they were a serial promise chain —
+    // one round-trip per device per table per 30s sync). Safe: reads are independent, and _fetch's
+    // 401 refresh is single-flight (auth-oauth) so parallel expiry can't stack consent popups.
     return DriveHelpers.getOrCreateFolder(_folderId, 'sync').then(function(syncId) {
       return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + syncId + '\' in parents and mimeType=\'application/vnd.google-apps.folder\' and trashed=false&fields=files(id,name)')
         .then(function(r) { return r.json(); });
     }).then(function(d) {
-      var folders = d.files || [];
-      var results = [];
-      return folders.reduce(function(chain, folder) {
-        return chain.then(function() {
-          return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + folder.id + '\' in parents and trashed=false&fields=files(id,name)')
-            .then(function(r) { return r.json(); }).then(function(fd) {
-              var files = (fd.files || []).filter(function(f) { return f.name !== excludeSiteId + '.json'; });
-              return files.reduce(function(fChain, f) {
-                return fChain.then(function() {
-                  return _downloadFile(f.id).then(function(text) {
-                    try { results.push(JSON.parse(text)); } catch(e) {}
-                  });
-                });
-              }, Promise.resolve());
-            });
-        });
-      }, Promise.resolve()).then(function() { return results; });
+      return Promise.all((d.files || []).map(function(folder) {
+        return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + folder.id + '\' in parents and trashed=false&fields=files(id,name)')
+          .then(function(r) { return r.json(); }).then(function(fd) {
+            var files = (fd.files || []).filter(function(f) { return f.name !== excludeSiteId + '.json'; });
+            return Promise.all(files.map(function(f) {
+              return _downloadFile(f.id).then(function(text) {
+                try { return JSON.parse(text); } catch(e) { return null; }
+              });
+            }));
+          });
+      })).then(function(nested) {
+        var results = [];
+        nested.forEach(function(arr) { arr.forEach(function(x) { if (x) results.push(x); }); });
+        return results;
+      });
     });
   }
 
   function _readJson(name) {
-    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + _folderId + '\' in parents and name=\'' + name + '\' and trashed=false&fields=files(id)')
+    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + _folderId + '\' in parents and name=\'' + DriveHelpers.q(name) + '\' and trashed=false&fields=files(id)')
       .then(function(r) { return r.json(); }).then(function(d) {
         if (!d.files || !d.files.length) return null;
         return _downloadFile(d.files[0].id).then(function(t) { try { return JSON.parse(t); } catch(e) { return null; } });
@@ -80,7 +80,7 @@ var TransportDrive = (function() {
   }
 
   function _deleteFile(name) {
-    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + _folderId + '\' in parents and name=\'' + name + '\' and trashed=false&fields=files(id)')
+    return _fetch('https://www.googleapis.com/drive/v3/files?q=\'' + _folderId + '\' in parents and name=\'' + DriveHelpers.q(name) + '\' and trashed=false&fields=files(id)')
       .then(function(r) { return r.json(); }).then(function(d) {
         if (!d.files || !d.files.length) return;
         return _fetch('https://www.googleapis.com/drive/v3/files/' + d.files[0].id, 'DELETE');
@@ -102,4 +102,3 @@ var TransportDrive = (function() {
     pullChangesets: pullChangesets
   };
 })();
-</script>

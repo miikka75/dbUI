@@ -1,4 +1,3 @@
-<script>
 // localStorage shim for Apps Script sandbox (where localStorage is undefined)
 if (typeof localStorage === 'undefined') { window.localStorage = { _d:{}, getItem:function(k){return this._d[k]||null;}, setItem:function(k,v){this._d[k]=String(v);}, removeItem:function(k){delete this._d[k];}, clear:function(){this._d={};} }; }
 
@@ -103,7 +102,7 @@ function withMirrors(base) {
 // fragment; _normalizeSchema (convertViewFilters) and app-core call those as globals from that module.
 
 // The per-list access model (listOwningTables/accessibleListNames/filterLists) lives in /list-access.js,
-// loaded before this fragment; backend-firebase.html calls listOwningTables as a global from it.
+// loaded before this fragment; backend-firebase.js calls listOwningTables as a global from it.
 
 // mdToHtml (tiny markdown -> HTML for pages) lives in /embeds.js, exposed as a global from there.
 
@@ -197,7 +196,7 @@ function validateSchema() {
   for (var t2 in SCHEMA) { for (var c2 in SCHEMA[t2].columns) {
     var def = SCHEMA[t2].columns[c2];
     if (def && typeof def === 'object' && def.syncFrom && !SCHEMA[def.syncFrom]) errors.push('Table "' + t2 + '": mirror source "' + def.syncFrom + '" not found');
-    if (def && typeof def === 'object' && def.type === 'ref' && def.partitionle && !SCHEMA[def.partitionle]) errors.push('Table "' + t2 + '": ref table "' + def.partitionle + '" not found');
+    if (def && typeof def === 'object' && def.type === 'ref' && def.table && !SCHEMA[def.table]) errors.push('Table "' + t2 + '": ref table "' + def.table + '" not found');
   }}
   // Check embed view references and circular embeds
   for (var v3 in VIEWS) {
@@ -257,4 +256,3 @@ function buildNavTabs(navItems, t, canAccess, opts) {
   tabs.push({ id: '__settings', title: t('tab.settings'), icon: 'mdi-cog-outline' });
   return tabs;
 }
-</script>

@@ -1,15 +1,15 @@
 // rows.js — Pure view row pipeline: build (union/join) -> filter (condMatches) -> aggregate ->
-// computed columns -> sort. Extracted from schema-loader.html so the pipeline gets real Node unit
+// computed columns -> sort. Extracted from schema-loader.js so the pipeline gets real Node unit
 // tests (dev/test previously re-implemented "simulated" unions/aggregates instead of testing this).
 //   Browser: <script src="/rows.js"> after calendar.js + rotation.js. Exposes Rows.* AND each function
-//            as a global (schema-loader.html internals, app-core.html and the tests call them bare) —
+//            as a global (schema-loader.js internals, app-core.js and the tests call them bare) —
 //            so it must load before the schema-loader fragment.
 //   Node:    const Rows = require('../rows');
 //
 // Runtime-bound globals (looked up through `root` at call time, never captured):
 //   root._listsCache   — the loaded named lists (matchList/notMatchList operators, list-ordered sort).
 //                        Node tests set global._listsCache.
-//   root.getColumnList — SCHEMA-bound column->list resolver (defined by app-core.html in the browser).
+//   root.getColumnList — SCHEMA-bound column->list resolver (defined by app-core.js in the browser).
 //                        Only the list-ordered branch of sortByCol needs it; guarded when absent.
 (function(root) {
   var isNode = (typeof module !== 'undefined' && module.exports);

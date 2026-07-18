@@ -1,5 +1,4 @@
-<!-- transport-local.html -- Local server transport for CrdtEngine sync + file I/O -->
-<script>
+// transport-local.js -- Local server transport for CrdtEngine sync + file I/O
 var TransportLocal = (function() {
   function pushChangesets(siteId, changes) {
     return _post('saveChangesets', { siteId: siteId, json: JSON.stringify({ siteId: siteId, changes: changes }) });
@@ -20,4 +19,3 @@ var TransportLocal = (function() {
     pullChangesets: pullChangesets
   };
 })();
-</script>

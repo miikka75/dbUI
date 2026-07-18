@@ -64,6 +64,10 @@ See `apps-script/DEPLOY.md` for deployment guide.
 
 First user is auto-registered as admin (bootstrap mode). After that, only registered users can access. Per-table permissions configurable per user.
 
+> ⚠️ **Sign in yourself immediately after publishing the rules.** The first Google account to sign
+> in becomes the admin — so never share the app URL or a pre-configured link before you have signed
+> in once. Anyone holding the link during the bootstrap window could claim the admin role.
+
 Firebase config is stored in browser localStorage. Share a pre-configured URL to onboard users without manual setup.
 
 ### Firefox: "Sign in with Google" fails (third-party cookies)
@@ -220,6 +224,53 @@ favicon.svg -resize 512x512 icon-512.png`).
 - **Requirements**: install needs HTTPS (Firebase Hosting provides it) and a valid manifest;
   the icon files must be reachable and served as `image/*`.
 
+## Content-Security-Policy
+
+The app ships a CSP built in **`/csp.js`** (one source of truth — rationale documented in the file):
+Firebase-mode origins with multi-database wildcards, hash-allowed inline boot scripts (no
+`'unsafe-inline'` scripts), `'unsafe-eval'` only for Vue's in-browser template compiler, and
+loopback entries so local dev + the Firebase emulators keep working.
+
+- **Enforced in every E2E run**: the dev server sends the policy as an enforcing header under
+  `CSP=1` (the Playwright config sets it), so CI proves the app works under the policy.
+- **Production (Firebase Hosting)**: `firebase.json` currently sends it as
+  **`Content-Security-Policy-Report-Only`** — deploy, watch DevTools/violation reports across your
+  real flows (especially Google sign-in) for a few days, then rename the header key to
+  `Content-Security-Policy` to enforce.
+- **Other static hosts (e.g. GitHub Pages)**: after the soak, add
+  `<meta http-equiv="Content-Security-Policy" content="...">` to `index.html` using the
+  `buildPolicy({ meta: true })` variant (drops `frame-ancestors`, which meta can't express).
+- **Keeping it in sync**: `dev/test/csp.test.js` fails CI if the `firebase.json` header drifts from
+  `csp.js`, or if an inline script in `index.html` is edited without its hash updating. After
+  editing either, regenerate the header value from `csp.js`.
+- **Future backends**: Sheets/Drive modes need `accounts.google.com` + `www.googleapis.com`
+  additions; a Supabase backend needs `https://*.supabase.co` in `connect-src`.
+
+### Violation reports
+
+The production (Report-Only) header carries `report-uri /csp-report` (relative — `csp.js`
+`REPORT_URI`). Two ways to collect:
+
+**A. Firebase-native (same-origin, recommended when hosting on Firebase Hosting).**
+The `/csp-report` Hosting rewrite (`firebase.json`) routes reports to the `cspReport` Cloud
+Function (`functions/`), which aggregates them into the client-inaccessible `_csp_reports`
+Firestore collection (one doc per distinct violation, counted at write time). Requires the
+**Blaze plan** (Cloud Functions). Setup:
+
+```bash
+firebase functions:secrets:set CSP_REPORT_TOKEN   # long random string; gates the read endpoint
+firebase deploy --only functions,hosting
+```
+
+Read the aggregated summary: `https://<your-hosting-domain>/csp-report?token=<CSP_REPORT_TOKEN>`
+
+**B. Self-hosted (any static host, no Blaze).** Run the dependency-free collector
+(`REPORT_TOKEN=... node dev/csp-report-collector.js`, port 3900) on your own box behind an
+HTTPS-terminating proxy, and point `csp.js` `REPORT_URI` at its absolute URL.
+
+The dev/CI **enforcing** policy deliberately omits `report-uri` so test runs never post to the
+real collector; `dev/test/csp.test.js` pins that split.
+
 ## Project Structure
 
 ```
@@ -228,19 +279,19 @@ manifest.json                  ← static PWA manifest (baseline name/icons, dis
 sw.js                          ← minimal service worker (enables install prompt; no caching)
 favicon.svg                    ← static favicon (replace to rebrand)
 icon-512.png                   ← static apple-touch + manifest install/splash/maskable icon (512×512)
-app-core.html                  ← Vue app logic + computeds + helpers
+app-core.js                  ← Vue app logic + computeds + helpers
 ui.html                        ← Vue template (data views, forms, setup)
 style.html                     ← CSS styles
-auth-oauth.html                ← shared OAuth (GSI) for Sheets + CRDT(Drive)
-backend-oauth.html             ← adapter: REST API + OAuth
-backend-firebase.html          ← adapter: Firestore + Firebase Auth
-storage-firestore.html         ← Firestore storage adapter
+auth-oauth.js                ← shared OAuth (GSI) for Sheets + CRDT(Drive)
+backend-oauth.js             ← adapter: REST API + OAuth
+backend-firebase.js          ← adapter: Firestore + Firebase Auth
+storage-firestore.js         ← Firestore storage adapter
 ── Unified CRDT (shared by Drive + local) ──
-crdt-backend.html              ← shared CRDT backend (data via engine, files via transport)
-crdt-engine.html               ← storage-agnostic LWW CRDT engine
-storage-idb.html               ← IndexedDB storage adapter
-transport-drive.html           ← Drive transport (files + changesets via Drive API)
-backend-crdt.html              ← Drive CRDT initializer (Transport = TransportDrive)
+crdt-backend.js              ← shared CRDT backend (data via engine, files via transport)
+crdt-engine.js               ← storage-agnostic LWW CRDT engine
+storage-idb.js               ← IndexedDB storage adapter
+transport-drive.js           ← Drive transport (files + changesets via Drive API)
+backend-crdt.js              ← Drive CRDT initializer (Transport = TransportDrive)
 ────────────────────────────────────────────
 firebase.json                  ← Firebase Hosting config
 firestore.rules                ← Firestore Security Rules
@@ -257,9 +308,9 @@ dev/                           ← Local development (dev-server-only files live
   server.js                    ← HTTP server (port 3000; --fs for JSON-file storage)
   backend-local.js             ← SQLite backend (better-sqlite3)
   storage-fs.js                ← JSON-file backend (node server.js --fs)
-  backend-local-client.html    ← client adapter for local server (direct SQLite)
-  backend-crdt-local.html      ← local CRDT initializer (Transport = TransportLocal)
-  transport-local.html         ← local transport (files + changesets via dev server)
+  backend-local-client.js    ← client adapter for local server (direct SQLite)
+  backend-crdt-local.js      ← local CRDT initializer (Transport = TransportLocal)
+  transport-local.js         ← local transport (files + changesets via dev server)
   test/                        ← node:test backend tests
   test-ui/                     ← Playwright E2E tests
 ```
@@ -299,7 +350,7 @@ markdown documents and their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens
 ┌──────────────────────────────────────────────────┐
 │                  index.html                      │  ← auto-detects backend
 ├────────────────┬─────────────────────────────────┤
-│  app-core.html │         ui.html                 │  ← Vue 3 app + template
+│  app-core.js │         ui.html                 │  ← Vue 3 app + template
 ├────────────────┼─────────────────────────────────┤
 │ backend-*.html │   schema.json / firebase-config │  ← adapter + config
 ├────────────────┴─────────────────────────────────┤
@@ -316,16 +367,16 @@ markdown documents and their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens
 
 **Key design decisions:**
 - Schema is pure JSON (user-editable in Drive without code access)
-- `defaultSchema` in app-core.html is minimal empty fallback only
+- `defaultSchema` in app-core.js is minimal empty fallback only
 - Column order in Google Sheets preserved via JSON string serialization (avoids RPC key reordering)
 - All backends implement the same 16-function interface
 
 ### Unified CRDT (Drive + Local)
 
-Both CRDT modes share **one backend** (`crdt-backend.html`) built on a storage-agnostic engine. They differ **only in the transport**:
+Both CRDT modes share **one backend** (`crdt-backend.js`) built on a storage-agnostic engine. They differ **only in the transport**:
 
 ```
-            crdt-backend.html  (one shared backend)
+            crdt-backend.js  (one shared backend)
         data ─► CrdtEngine + StorageIDB  (IndexedDB, LWW per field)
        files ─► Transport.readJson / writeJson / deleteFile
                         │

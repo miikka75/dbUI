@@ -1,5 +1,4 @@
-<!-- backend-local-client.html — Local server backend adapter -->
-<script>
+// backend-local-client.js — Local server backend adapter
 backend = {
   getSchema: (folderId) => _post('getSchema', { folderId }),
   saveSchema: (folderId, schema) => _post('saveSchema', { folderId, schema }),
@@ -29,4 +28,3 @@ backend = {
 if (typeof _devUploadFile === 'function') backend.uploadFile = _devUploadFile; // image-column upload (dev store)
 
 init();
-</script>

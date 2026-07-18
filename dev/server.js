@@ -18,6 +18,16 @@ const backend = USE_FS
   : require('./backend-local').createLocalBackend(APP_DB === ':memory:' ? undefined : (DB_PATH || path.join(__dirname, 'local.db')));
 const STATIC_DIR = path.join(__dirname, '..');
 
+// CSP=1 -> compute the enforced policy once at startup (inline-script hashes come from the real
+// index.html, so an edited inline block is immediately reflected here — and guarded by csp.test.js).
+const CSP_POLICY = process.env.CSP === '1' ? (() => {
+  const crypto = require('crypto');
+  const Csp = require('../csp');
+  const indexSrc = fs.readFileSync(path.join(STATIC_DIR, 'index.html'), 'utf8');
+  const hashes = Csp.inlineScriptHashes(indexSrc, (s) => crypto.createHash('sha256').update(s).digest('base64'));
+  return Csp.buildPolicy({ scriptHashes: hashes });
+})() : null;
+
 // No auto-init -- schema must be imported explicitly
 
 // Persist users to file. In isolated (in-memory test) mode use a throwaway path so resetData/test
@@ -50,8 +60,8 @@ function parseBody(req) {
   });
 }
 
-function json(res, data) {
-  res.writeHead(200, { 'Content-Type': 'application/json' });
+function json(res, data, status) {
+  res.writeHead(status || 200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
 }
 
@@ -79,13 +89,26 @@ const server = http.createServer(async (req, res) => {
     // NOT the production access model — that is Firestore security rules (firestore.rules), which key on
     // the real, unspoofable request.auth.token.email. Never expose this server to a network.
     const userEmail = req.headers['x-user'] || 'local@dev';
+    // The one lookup for "who is this user" — previously getAllowedTables and getMyAccess each rolled
+    // their own with different fallbacks (getMyAccess also tried key lookups), a latent access split.
+    function userRecord() {
+      if (!backend._users) return undefined;
+      return Object.values(backend._users).find(v => v.user === userEmail)
+        || backend._users[userEmail] || backend._users[(userEmail || '').toLowerCase()];
+    }
     function getAllowedTables() {
       if (!backend._users) return null; // no users = no restrictions
-      const u = Object.values(backend._users).find(v => v.user === userEmail);
+      const u = userRecord();
       if (!u) return []; // unknown user = no access
       if (u.role === 'admin' || u.tables === 'all') return null; // null = unrestricted
       return u.tables || [];
     }
+    // Doc-view bodies (_pages) mirror firestore.rules' dedicated block: any REGISTERED user reads
+    // (content pages; each embedded table's rows stay gated by their own access), admins/editors write.
+    // Without this, hasTableAccess('_pages') — which no grant ever satisfies — denied restricted reads.
+    function pagesTable(tableId) { return (tableId ? tableId.split('__')[0] : '') === '_pages'; }
+    function canReadPages() { return !backend._users || !!userRecord(); }
+    function canWritePages() { const u = userRecord(); return !backend._users || !!(u && (u.role === 'admin' || u.role === 'editor')); }
     function checkTableAccess(tableId) {
       const allowed = getAllowedTables();
       if (!allowed) return true;
@@ -143,6 +166,10 @@ const server = http.createServer(async (req, res) => {
       case 'serverInfo': return json(res, { storage: USE_FS ? 'fs' : 'sqlite' });
       case 'getAvailableLanguages': return json(res, backend.getAvailableLanguages('local'));
       case 'getTableData': {
+        if (pagesTable(body.tableId)) {
+          if (canReadPages()) return json(res, backend.getTableData(body.tableId, body.tab));
+          return json(res, { error: 'Access denied' }, 403);
+        }
         if (checkTableAccess(body.tableId)) return json(res, backend.getTableData(body.tableId, body.tab));
         const oc = selfServiceOwnerCol(body.tableId);                 // self-service: own rows + public roster only
         if (!oc) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
@@ -150,6 +177,10 @@ const server = http.createServer(async (req, res) => {
         return json(res, Object.assign({}, data, { rows: (data.rows || []).filter(r => _mine(r[oc]) || r.rosterPublic === true) }));
       }
       case 'putRow': {
+        if (pagesTable(body.tableId)) {
+          if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
+          backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
+        }
         if (checkTableAccess(body.tableId)) { backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true }); }
         const oc = selfServiceOwnerCol(body.tableId);
         const existing = oc ? _rowById(body.tableId, body.tab, body.data && body.data.id) : null;
@@ -171,6 +202,10 @@ const server = http.createServer(async (req, res) => {
         return json(res, { url: 'http://' + host + '/uploads/' + fname });
       }
       case 'deleteRow': {
+        if (pagesTable(body.tableId)) {
+          if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
+          return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
+        }
         if (checkTableAccess(body.tableId)) return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
         const oc = selfServiceOwnerCol(body.tableId);
         const existing = oc ? _rowById(body.tableId, body.tab, body.id) : null;   // may delete only my own owned row
@@ -203,7 +238,16 @@ const server = http.createServer(async (req, res) => {
         backend.saveLists('local', merged);
         return json(res, { ok: true });
       }
-      case 'putListItem': if (!checkTableAccess(body.listName)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.putListItem('local', body.listName, body.value); return json(res, { ok: true });
+      case 'putListItem': {
+        // Per-list access: a list is writable if ANY of its owning tables is granted (same ownership
+        // model as saveLists above) — the list NAME is not a table id, so checkTableAccess was wrong here.
+        const allowedLi = getAllowedTables();
+        const schemaTablesLi = (backend.getSchema('local') || {}).tables || {};
+        if (allowedLi && !listOwningTables(schemaTablesLi, body.listName).some(t => allowedLi.indexOf(t) >= 0)) {
+          return json(res, { error: 'Access denied' }, 403);
+        }
+        backend.putListItem('local', body.listName, body.value); return json(res, { ok: true });
+      }
       case 'moveRow': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.moveRow(body.tableId, body.rowData, body.fromTab, body.toTab); return json(res, { ok: true });
       case 'saveChangesets': backend.saveChangesets('local', body.siteId, body.json); return json(res, { ok: true });
       case 'loadChangesets': return json(res, backend.loadChangesets('local', body.excludeSiteId));
@@ -214,8 +258,7 @@ const server = http.createServer(async (req, res) => {
       case 'getUsers': return json(res, backend._users || {});
       case 'getMyAccess': {
         if (!backend._users || !Object.keys(backend._users).length) return json(res, { bootstrap: true });
-        const mine = Object.values(backend._users).find(v => v.user === userEmail)
-          || backend._users[userEmail] || backend._users[(userEmail || '').toLowerCase()];
+        const mine = userRecord();
         return json(res, mine ? { role: mine.role, tables: mine.tables || 'all' } : { registered: false });
       }
       case 'setUserRole': { if (!backend._users) backend._users = {}; backend._users[body.uid] = { role: body.role, user: body.user || '', tables: body.tables || 'all' }; saveUsers(); return json(res, { ok: true }); }
@@ -263,7 +306,12 @@ const server = http.createServer(async (req, res) => {
   if (!fs.existsSync(filePath)) { res.writeHead(404); return res.end('Not found'); }
   const ext = path.extname(filePath);
   const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
-  res.writeHead(200, { 'Content-Type': types[ext] || 'text/plain' });
+  const hdrs = { 'Content-Type': types[ext] || 'text/plain' };
+  // CSP=1: serve HTML with the app's Content-Security-Policy ENFORCED (see /csp.js). The Playwright
+  // suite runs with this on (playwright.config.js webServer env), so every E2E run proves the policy
+  // doesn't break the app — the gate before production flips its Report-Only header to enforcing.
+  if (CSP_POLICY && hdrs['Content-Type'] === 'text/html') hdrs['Content-Security-Policy'] = CSP_POLICY;
+  res.writeHead(200, hdrs);
   res.end(fs.readFileSync(filePath));
 });
 

@@ -1,8 +1,7 @@
-<!-- crdt-backend.html -- Unified CRDT backend (data via CrdtEngine+StorageIDB, files via Transport)
-     Requires: crdt-engine.html, storage-idb.html, and a Transport (TransportDrive or TransportLocal).
-     Metadata files (Drive-compatible names): schema.json, .app-config.json, lists.json,
-     languages.json, lang_{code}.json. Table data lives in IDB + _sync changesets. -->
-<script>
+// crdt-backend.js -- Unified CRDT backend (data via CrdtEngine+StorageIDB, files via Transport)
+// Requires: crdt-engine.js, storage-idb.js, and a Transport (TransportDrive or TransportLocal).
+// Metadata files (Drive-compatible names): schema.json, .app-config.json, lists.json,
+// languages.json, lang_{code}.json. Table data lives in IDB + _sync changesets.
 backend = {
   getSchema: function(folderId) { return Transport.readJson('schema.json'); },
   saveSchema: function(folderId, schema) { return Transport.writeJson('schema.json', schema); },
@@ -72,4 +71,3 @@ backend = {
   saveChangesets: function() { return CrdtEngine.pushChanges(); },
   loadChangesets: function() { return CrdtEngine.pullChanges(); }
 };
-</script>
