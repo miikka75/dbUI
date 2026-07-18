@@ -39,9 +39,26 @@ function normalize(body) {
 // Firestore doc id for a violation key: encode (no '/') and bound the length.
 function docId(r) { return ('v_' + encodeURIComponent(r.directive + ' ' + r.blockedURI)).slice(0, 400); }
 
-// Region: co-located with the project's Firestore (europe-north1) — avoids cross-region latency +
-// egress on every report write/summary read. The hosting rewrite must name the same region.
-exports.cspReport = onRequest({ region: 'europe-north1', secrets: [TOKEN], maxInstances: 1, cors: false }, async (req, res) => {
+// Region: SINGLE SOURCE OF TRUTH is firebase.json's /csp-report rewrite (the two must match or the
+// rewrite 404s). This module is executed locally by the CLI during deploy analysis — from the repo
+// checkout, where ../firebase.json exists — so the declared region is read from it. Inside the
+// DEPLOYED container only functions/ is packaged, so the read falls back to the literal; that's
+// inert at runtime (the function is already provisioned wherever the analysis said). A drift guard
+// test (dev/test/deploy-config.test.js) keeps the fallback literal aligned with firebase.json.
+function rewriteRegion() {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'firebase.json'), 'utf8'));
+    const r = (cfg.hosting.rewrites || []).find((x) => x.function && x.function.functionId === 'cspReport');
+    if (r && r.function.region) return r.function.region;
+  } catch (e) {}
+  return 'europe-north1';
+}
+
+// Co-located with the project's Firestore — avoids cross-region latency + egress on every report
+// write / summary read.
+exports.cspReport = onRequest({ region: rewriteRegion(), secrets: [TOKEN], maxInstances: 1, cors: false }, async (req, res) => {
   const db = admin.firestore();
   if (req.method === 'POST') {
     // Content-Type is application/csp-report or application/reports+json -> use the raw body.
