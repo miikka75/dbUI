@@ -28,8 +28,15 @@
     return out;
   }
 
+  // Where browsers POST violation reports (see dev/csp-report-collector.js — run it on this host).
+  // Used by the production Report-Only header ONLY: the dev/CI enforcing policy deliberately omits
+  // it so test runs never post reports at the real collector. report-uri is deprecated-but-universal;
+  // report-to can be added later via a Reporting-Endpoints header if wanted.
+  var REPORT_URI = 'https://piispakunta.ddns.net/csp-report';
+
   // opts.scriptHashes: array from inlineScriptHashes; opts.meta: true strips header-only directives
-  // (frame-ancestors) for a <meta http-equiv> delivery (e.g. GitHub Pages).
+  // (frame-ancestors, report-uri) for a <meta http-equiv> delivery (e.g. GitHub Pages);
+  // opts.reportUri: append a report-uri directive (pass REPORT_URI for the production header).
   function buildPolicy(opts) {
     opts = opts || {};
     var d = [
@@ -48,10 +55,11 @@
       "form-action 'self'"
     ];
     if (!opts.meta) d.push("frame-ancestors 'self'");
+    if (!opts.meta && opts.reportUri) d.push('report-uri ' + opts.reportUri);
     return d.join('; ');
   }
 
-  var M = { buildPolicy: buildPolicy, inlineScriptHashes: inlineScriptHashes };
+  var M = { buildPolicy: buildPolicy, inlineScriptHashes: inlineScriptHashes, REPORT_URI: REPORT_URI };
   if (isNode) module.exports = M;
   else root.Csp = M;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

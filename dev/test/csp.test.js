@@ -24,7 +24,12 @@ describe('Content-Security-Policy', () => {
     const hdr = (cfg.hosting.headers || []).flatMap(h => h.headers || [])
       .find(h => h.key === 'Content-Security-Policy-Report-Only');
     assert.ok(hdr, 'firebase.json carries a Content-Security-Policy-Report-Only header');
-    assert.equal(hdr.value, builtPolicy(), 'regenerate firebase.json header from csp.js after editing either');
+    assert.equal(hdr.value, builtPolicy({ reportUri: Csp.REPORT_URI }), 'regenerate firebase.json header from csp.js after editing either');
+  });
+
+  it('reporting: production header posts to the collector; the dev/CI enforcing policy does not', () => {
+    assert.ok(builtPolicy({ reportUri: Csp.REPORT_URI }).endsWith('report-uri ' + Csp.REPORT_URI));
+    assert.ok(!builtPolicy().includes('report-uri'), 'CI/E2E enforcement must never post reports to the real collector');
   });
 
   it('every inline <script> in index.html is hash-allowed (edits must re-sync firebase.json)', () => {

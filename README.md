@@ -246,6 +246,25 @@ loopback entries so local dev + the Firebase emulators keep working.
 - **Future backends**: Sheets/Drive modes need `accounts.google.com` + `www.googleapis.com`
   additions; a Supabase backend needs `https://*.supabase.co` in `connect-src`.
 
+### Violation reports
+
+The production (Report-Only) header carries `report-uri` pointing at the collector URL in
+`csp.js` (`REPORT_URI`). Run the collector on that host — it's dependency-free:
+
+```bash
+REPORT_TOKEN=<long-random-string> node dev/csp-report-collector.js   # port 3900
+```
+
+Terminate HTTPS in front of it (browsers refuse to post reports from an https page to plain http)
+and route `POST /csp-report` to it. Read the aggregated summary (violations deduped with counts):
+
+```
+https://<collector-host>/csp-report?token=<REPORT_TOKEN>
+```
+
+The dev/CI **enforcing** policy deliberately omits `report-uri` so test runs never post to the
+real collector; `dev/test/csp.test.js` pins that split.
+
 ## Project Structure
 
 ```
