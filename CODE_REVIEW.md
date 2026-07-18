@@ -183,7 +183,12 @@ parts; the projectId-confirm guard on shared links; the loopback-bind refusal; e
 5. `firebase.json`, `favicon.svg` and `icon-512.png` were referenced by the README (and required
    by the Playwright suite) but never committed — a fresh clone could run neither the storage-rules
    test nor the E2E suite. Minimal defaults are now committed (extend `firebase.json` with your
-   hosting config; replace the icons to rebrand).
+   hosting config; replace the icons to rebrand). The `vendor/` JS payloads are in the same class
+   (only the `versions` manifest was tracked): they are now explicitly gitignored as local artifacts
+   of `update-vendor.sh`, `vendor/versions` is re-synced with the `index.html` fallback pin
+   (`VUE=3.5.24` vs `vue@3.5.34` had drifted), and `update-vendor.sh` now refreshes the SRI hashes
+   on version bumps — without that, any bump would leave a stale hash and the CDN fallback would
+   permanently fail its integrity check.
 
 ---
 
