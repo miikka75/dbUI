@@ -24,11 +24,16 @@
     "ignore": [
       "firebase.json",
       "**/.*",
+      ".git/**",
       "**/node_modules/**",
       "dev/**",
       "appscript/**",
-      "CODE_REVIEW.md",
-      "functions/**"
+      "functions/**",
+      ".github/**",
+      "*.md",
+      "update-vendor.sh",
+      "storage.rules",
+      "csp.js"
     ],
     "headers": [
       {
@@ -44,7 +49,10 @@
     "rewrites": [
       {
         "source": "/csp-report",
-        "function": "cspReport"
+        "function": {
+          "functionId": "cspReport",
+          "region": "europe-north1"
+        }
       }
     ]
   },
