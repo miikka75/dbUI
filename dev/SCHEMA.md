@@ -127,6 +127,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `icon` | string | MDI icon for the sidebar |
 | `printable` | `"view"` \| `"cards"` \| `["view","cards"]` | Opt-in print buttons. `"view"` = view toolbar print only; `"cards"` = per-card buttons only; `["view","cards"]` = both. **Off by default** — omit to hide all print buttons. Note: per-card buttons only render in `card`/`list` layout, so `"cards"` on a `table` layout shows nothing. Applies to views and tables |
 | `markdown` | string | Makes this a **document** view (see below) instead of a data grid |
+| `access` | string[] | **Doc-views only.** Restrict the page to users granted at least one of these tables (see "Restricting a page to some users" below). Omit = visible to all registered users |
 | `rotation` | object | Makes this a **rotationView** (third view kind) — a generated rotating-roster table (see below) |
 | `obscureNames` | boolean \| string[] | Display-only privacy: abbreviate person names to "First L." in this view. `true` = all list/multiselect columns (or all area columns of a rotationView); an array = exactly those columns. Stored data is untouched |
 
@@ -414,6 +415,28 @@ A view with a `markdown` field renders as a **document** instead of a data grid:
   `{id, markdown}`) — NOT in `schema.json`. Edit in-app via the Edit toggle in the corner →
   textarea → Save (persists via `putRow`). The view's schema `markdown` acts only as a
   seed/fallback until first saved.
+
+### Restricting a page to some users (`access`)
+
+By default a doc-view is visible to **every registered user** (its embedded tables' rows stay
+gated by their own access, so only the prose is shared). To restrict a page, add an `access` array
+of table names — the page is then visible only to users **granted at least one** of those tables
+(admins and `tables: "all"` users always see it):
+
+```json
+{ "name": "staff_handbook", "markdown": "…", "access": ["hr", "payroll"] }
+```
+
+- Reuses your existing per-table grants — no new permission type or admin UI. Tag a page with a
+  table only its intended audience can access.
+- **Enforced server-side on Firebase**: `saveSchema` mirrors the page→tables map to
+  `_meta/pageAccess`, and the `_pages__active` read rule denies the stored body to users without a
+  listed grant. The dev server mirrors this from the schema. (Sheets/Drive-CRDT backends have no
+  server rules — there access is Drive folder sharing, so `access` is client-side hiding only.)
+- **Protects the stored (edited) body, not the page's existence.** The page name/title and the
+  schema-defined *seed* markdown live in the schema every registered user reads — so a restricted
+  user can learn the page exists and see its seed, just never its edited body. **Don't put secrets
+  in a restricted page's schema `markdown` seed** — put them in the edited (server-stored) body.
 
 ## rotationView (third view kind)
 A view with a `rotation` field renders a rotating roster across a **range of calendar periods**

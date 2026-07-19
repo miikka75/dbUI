@@ -194,6 +194,9 @@ function createVueApp() {
           if (!allowedTables) return true;
           if (VIEWS[id]) {
             var v = VIEWS[id];
+            // Restricted doc-view: a markdown page with `access:[tables]` is hidden unless the user is
+            // granted one of them (the firestore _pages rule enforces the matching read server-side).
+            if (typeof v.markdown === 'string' && !self.canAccessPage(v)) return false;
             // A source is reachable if granted OR self-serviceable (owner-column table): a member sees a
             // self-service table/view in nav without a table grant, scoped to their own rows by the rules.
             if (!(v.sources || []).every(function(s) { return allowedTables.indexOf(s) >= 0 || self.canSelfServe(s); })) return false;
@@ -1068,11 +1071,32 @@ function createVueApp() {
       },
       // Doc-view bodies live in a server-side "_pages" collection (not in schema.json).
       // Falls back to the view's schema-defined `markdown` (seed), then caches it.
+      // A markdown doc-view with `access:[tables]` is visible only to users granted one of those tables
+      // (or admins/unrestricted). No `access` -> visible to all registered users (the default). Pure
+      // over userAllowedTables; the firestore _pages rule enforces the matching body read server-side.
+      canAccessPage: function(view) {
+        if (!view || typeof view.markdown !== 'string') return true;   // not a doc-view
+        var acc = view.access;
+        if (!Array.isArray(acc) || !acc.length) return true;           // untagged -> all registered
+        var allowed = this.userAllowedTables;
+        if (!allowed) return true;                                     // admin / unrestricted
+        return acc.some(function(t) { return allowed.indexOf(t) >= 0; });
+      },
       loadPage: function(name) {
         var self = this;
+        var seed = function() { return (VIEWS[name] && VIEWS[name].markdown) || ''; };
+        // Prefer a single-page read (backend.getPage) so per-page access can restrict it -- a
+        // whole-collection read is denied wholesale once any page is restricted (rules aren't filters).
+        // Backends without getPage (Sheets/CRDT/local) fall back to the collection read.
+        if (backend.getPage) {
+          Promise.resolve(backend.getPage(name)).then(function(p) {
+            self.pageCache[name] = (p && p.markdown != null) ? p.markdown : seed();
+          }).catch(function() { self.pageCache[name] = seed(); });
+          return;
+        }
         Promise.resolve(backend.getTableData('_pages', 'active')).then(function(d) {
           var row = (d && d.rows || []).find(function(r) { return r.id === name; });
-          self.pageCache[name] = row ? row.markdown : ((VIEWS[name] && VIEWS[name].markdown) || '');
+          self.pageCache[name] = row ? row.markdown : seed();
         }).catch(function() {});
       },
       // Embed resolution lives in /embeds.js (pure over this ctx). The root keeps same-named thin

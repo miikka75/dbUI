@@ -100,3 +100,24 @@ describe('backend-helpers - ownerTablesOf (self-service table set)', () => {
     assert.deepEqual(H.ownerTablesOf({ tables: {} }), []);
   });
 });
+
+describe('backend-helpers - pageAccessOf (restricted doc-view map)', () => {
+  it('maps only markdown views with a non-empty access array; tables sorted', () => {
+    const schema = { views: [
+      { name: 'handbook', markdown: '# hi', access: ['staff', 'board'] },   // restricted
+      { name: 'notice',   markdown: '# all' },                              // untagged -> omitted
+      { name: 'empty',    markdown: '# x', access: [] },                    // empty -> omitted
+      { name: 'data',     sources: ['t'], access: ['staff'] }              // not a doc-view -> omitted
+    ] };
+    assert.deepEqual(H.pageAccessOf(schema), { handbook: ['board', 'staff'] });
+  });
+  it('recurses into nested views', () => {
+    const schema = { views: [{ name: 'grp', views: [{ name: 'secret', markdown: '#', access: ['x'] }] }] };
+    assert.deepEqual(H.pageAccessOf(schema), { secret: ['x'] });
+  });
+  it('empty / missing schema -> {}', () => {
+    assert.deepEqual(H.pageAccessOf(null), {});
+    assert.deepEqual(H.pageAccessOf({}), {});
+    assert.deepEqual(H.pageAccessOf({ views: [] }), {});
+  });
+});

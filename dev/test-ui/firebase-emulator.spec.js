@@ -16,13 +16,17 @@ const FS = 'http://127.0.0.1:8080';
 const AUTH = 'http://127.0.0.1:9099';
 const OWNER = { Authorization: 'Bearer owner' }; // emulator admin bypass for REST verification
 
-// Minimal self-contained schema: one plain table (with an image column for the Storage test) and
-// one markdown doc-view (for the _pages restricted-read test). `nav` is required.
+// Minimal self-contained schema: one plain table (with an image column for the Storage test), an
+// untagged doc-view (readable by all — the _pages restricted-read test), and a doc-view gated on the
+// `notes` grant via `access` (the per-page access test). `nav` is required.
 const SCHEMA = {
   defaultLanguage: 'en',
   tables: { notes: { columns: [{ name: 'title', type: 'text' }, { name: 'photo', type: 'image' }] } },
-  views: [{ name: 'handbook', markdown: 'SEED-BODY' }],
-  nav: { items: [{ table: 'notes' }, { view: 'handbook' }] }
+  views: [
+    { name: 'handbook', markdown: 'SEED-BODY' },
+    { name: 'secret_page', markdown: 'SEED-SECRET', access: ['notes'] }
+  ],
+  nav: { items: [{ table: 'notes' }, { view: 'handbook' }, { view: 'secret_page' }] }
 };
 
 let emulatorsUp = false;
@@ -163,6 +167,49 @@ test('zero-grant viewer: sees the EDITED page body (not the schema seed), no edi
   await expect(viewer.locator('text=SEED-BODY')).toHaveCount(0);
   // No edit controls for a viewer (canEditPages gate).
   await expect(viewer.locator('button:has-text("Edit")')).toHaveCount(0);
+  // Per-page access: secret_page is gated on the `notes` grant, which this viewer lacks -> not in nav.
+  expect(tabs).not.toContain('secret_page');
   await expectNoCspViolations(viewer);
   await ctx.close();
+});
+
+test('per-page access: gated doc-view is hidden + read-denied without the grant, visible with it', async ({ page, browser }) => {
+  test.setTimeout(60000);
+  await seed(page);
+  await page.goto('/');
+  await signIn(page, 'admin@test.com');
+  await page.waitForFunction(() => appInstance.isAdmin === true);
+  await page.evaluate((schema) => backend.saveSchema('', schema), SCHEMA);
+  // Admin edits the gated page's body and registers two users: one granted `notes`, one with nothing.
+  await page.evaluate(() => backend.putRow('_pages', { id: 'secret_page', markdown: 'EDITED-SECRET' }, 'active'));
+  await page.evaluate(() => backend_users.setUserRole('member@test.com', 'editor', 'member@test.com', ['notes']));
+  await page.evaluate(() => backend_users.setUserRole('nobody@test.com', 'viewer', 'nobody@test.com', []));
+  const origin = new URL(page.url()).origin;
+
+  // Granted member: page IS in nav and the EDITED body renders (single-doc read authorized by the rule).
+  const ctxM = await browser.newContext({ baseURL: origin });
+  const member = await ctxM.newPage();
+  await seed(member);
+  await member.goto('/');
+  await signIn(member, 'member@test.com');
+  await member.waitForFunction(() => window.appInstance && appInstance.usersLoaded && !appInstance.loading, null, { timeout: 15000 });
+  let mtabs = await member.evaluate(() => appInstance.sidebarTabs.filter(t => !t.divider).map(t => t.id));
+  expect(mtabs).toContain('secret_page');
+  await member.evaluate(() => appInstance.selectTab('secret_page'));
+  await expect(member.locator('text=EDITED-SECRET')).toBeVisible({ timeout: 15000 });
+  await ctxM.close();
+
+  // No-grant user: page is NOT in nav, and a direct single-doc read is denied by the rule (so even a
+  // forced navigation can't reveal the edited body — it falls back to the non-secret schema seed).
+  const ctxN = await browser.newContext({ baseURL: origin });
+  const nobody = await ctxN.newPage();
+  await seed(nobody);
+  await nobody.goto('/');
+  await signIn(nobody, 'nobody@test.com');
+  await nobody.waitForFunction(() => window.appInstance && appInstance.usersLoaded && !appInstance.loading, null, { timeout: 15000 });
+  const ntabs = await nobody.evaluate(() => appInstance.sidebarTabs.filter(t => !t.divider).map(t => t.id));
+  expect(ntabs).not.toContain('secret_page');
+  const denied = await nobody.evaluate(() => backend.getPage('secret_page').then(p => (p && p.markdown) || null));
+  expect(denied).toBeNull();   // rule denied the read -> getPage resolves null, never the edited body
+  await ctxN.close();
 });

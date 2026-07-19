@@ -65,6 +65,25 @@
         if (has) out.push(t);
       }
       return out.sort();
+    },
+
+    // Per-page access map for RESTRICTED doc-views: { pageName: [tables...] } for every markdown view
+    // that declares a non-empty `access` array ("visible to users granted any of these tables"). A page
+    // WITHOUT `access` is omitted -> readable by every registered user (the default). Firestore rules are
+    // schema-blind, so saveSchema mirrors this to _meta/pageAccess and the _pages__active read rule gates
+    // on it (see firestore.rules). Table grants are reused as the vocabulary -- no new permission type.
+    // Walks nested `views` like the app's flattener; tables sorted for a stable mirror doc.
+    pageAccessOf: function(schema) {
+      var out = {};
+      (function walk(arr) {
+        (arr || []).forEach(function(v) {
+          if (v && v.name && typeof v.markdown === 'string' && Array.isArray(v.access) && v.access.length) {
+            out[v.name] = v.access.slice().sort();
+          }
+          if (v && v.views) walk(v.views);
+        });
+      })((schema && schema.views) || []);
+      return out;
     }
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = H;

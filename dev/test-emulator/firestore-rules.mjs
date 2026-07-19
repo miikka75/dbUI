@@ -90,6 +90,26 @@ await ok('viewer CANNOT write a _pages__active doc',
 await ok('editor CAN write a _pages__active doc',
   assertSucceeds(setDoc(doc(editor, '_pages__active/home'), { id: 'home', markdown: '# Edited' })));
 
+// --- Per-page access: a doc-view with `access:[tables]` (mirrored to _meta/pageAccess by saveSchema)
+// is readable only by users granted a listed table (admins/unrestricted always). editor grants 'tasks';
+// viewer grants nothing. Seed pageAccess + two restricted pages + an untagged one. ---
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), '_meta/pageAccess'), { staff_handbook: ['tasks'], board_notes: ['finance'] });
+  await setDoc(doc(ctx.firestore(), '_pages__active/staff_handbook'), { id: 'staff_handbook', markdown: 'staff only' });
+  await setDoc(doc(ctx.firestore(), '_pages__active/board_notes'), { id: 'board_notes', markdown: 'board only' });
+  await setDoc(doc(ctx.firestore(), '_pages__active/open_notice'), { id: 'open_notice', markdown: 'everyone' });
+});
+await ok('untagged page stays readable by any registered user (viewer, no grants)',
+  assertSucceeds(getDoc(doc(viewer, '_pages__active/open_notice'))));
+await ok('editor (grants tasks) CAN read a page gated on tasks',
+  assertSucceeds(getDoc(doc(editor, '_pages__active/staff_handbook'))));
+await ok('viewer (no grants) CANNOT read a page gated on tasks',
+  assertFails(getDoc(doc(viewer, '_pages__active/staff_handbook'))));
+await ok('editor (grants tasks, not finance) CANNOT read a page gated on finance',
+  assertFails(getDoc(doc(editor, '_pages__active/board_notes'))));
+await ok('admin reads a restricted page regardless of grants',
+  assertSucceeds(getDoc(doc(admin, '_pages__active/board_notes'))));
+
 // --- Owner-scoped update/delete are bounded to self-service (owner-column) tables, like create. ---
 await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(ctx.firestore(), 'tasks__active/stray'), { id: 'stray', owner: 'viewer@x.com', title: 'x' });
