@@ -22,6 +22,9 @@ dev/seed-test-*.db-shm
 firebase-debug.log
 firestore-debug.log
 
+# firebase hosting deploy cache (local, machine-specific — regenerated each deploy)
+.firebase/
+
 # vendored third-party dists — provisioned locally via update-vendor.sh (fresh clones fall back to the SRI-pinned CDN)
 vendor/*.js
 vendor/*.css
