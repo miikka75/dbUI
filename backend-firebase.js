@@ -20,12 +20,23 @@ backend = {
     });
   },
   saveSchema: function(folderId, schema) {
-    // Mirror the self-service table set (tables with an owner column) to _meta/ownerTables so the
-    // schema-blind firestore rules can gate owner-create on it. Kept in sync on every schema write.
+    // Mirror two schema-derived facts the schema-blind firestore rules need, kept in sync on every
+    // schema write: _meta/ownerTables (tables with an owner column -> gates owner-create) and
+    // _meta/pageAccess (restricted doc-views -> gates _pages__active reads; see pageAccessOf).
     return Promise.all([
       StorageFirestore.setMeta('schema', schema),
-      StorageFirestore.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) })
+      StorageFirestore.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) }),
+      StorageFirestore.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema))
     ]);
+  },
+  // Single doc-view body by name. loadPage uses this (not the whole _pages__active collection) so that
+  // per-page access can restrict it: Firestore rules aren't filters, so a collection read is denied
+  // wholesale once ANY page is restricted, whereas a single-doc get() is authorized by the page's own
+  // rule. Returns { markdown } or null (missing / denied).
+  getPage: function(name) {
+    return StorageFirestore.get('_pages__active', name)
+      .then(function(d) { return d ? { markdown: d.markdown || '' } : null; })
+      .catch(function() { return null; });
   },
   validateFolder: function(id) {
     return Promise.resolve({ valid: true, name: 'Firebase' });

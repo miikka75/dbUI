@@ -98,13 +98,30 @@ service cloud.firestore {
     }
 
     // Doc-view bodies (savePage/loadPage -> putRow('_pages', …) -> _pages__active). Content PAGES, not
-    // row data: readable by EVERY registered user — a page's embeds are resolved client-side and each
-    // embedded table's rows stay gated by their own rules, so the body text is the only thing exposed.
-    // Writable by admins/editors. Previously governed by the data catch-all, whose
-    // hasTableAccess('_pages') gate no grant ever satisfies (access-features never emits '_pages'), so
-    // restricted members were silently served the stale schema-seeded markdown instead of the edited body.
+    // row data: a page's embeds are resolved client-side and each embedded table's rows stay gated by
+    // their own rules, so the body text is the only thing exposed. Writable by admins/editors.
+    //
+    // Read defaults to EVERY registered user, but a page may declare `access: [tables]` in the schema
+    // ("visible to users granted any of these tables"), mirrored to _meta/pageAccess by saveSchema
+    // (BackendHelpers.pageAccessOf) since rules can't read the schema. Reused table grants = no new
+    // permission type. loadPage reads a SINGLE page doc (rules aren't filters -> a whole-collection read
+    // would be denied once any page is restricted). Untagged pages keep the all-registered default.
+    // NOTE: this protects the stored (edited) body; the schema-defined seed markdown is in the schema
+    // doc every registered user reads, so don't put secrets in a restricted page's schema seed.
+    function pageAccessMap() {
+      return exists(/databases/$(database)/documents/_meta/pageAccess)
+        ? get(/databases/$(database)/documents/_meta/pageAccess).data : {};
+    }
+    function pageAllowed(doc) {
+      let pa = pageAccessMap();
+      return !(doc in pa)                                   // untagged page -> all registered
+        || userData().tables == 'all'
+        || userData().tables.hasAny(pa[doc]);               // grant on any listed table
+    }
     match /_pages__active/{doc} {
-      allow read:  if request.auth != null && isRegistered();
+      allow read:  if request.auth != null && isRegistered() && (
+        noUsers() || role() == 'admin' || pageAllowed(doc)
+      );
       allow write: if request.auth != null && (noUsers() || role() == 'admin' || role() == 'editor');
     }
 

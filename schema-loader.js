@@ -119,6 +119,11 @@ function validateSchema() {
     var view = VIEWS[v];
     // Check sources exist
     (view.sources || []).forEach(function(s) { if (!SCHEMA[s]) errors.push('View "' + v + '" references non-existent table "' + s + '"'); });
+    // A restricted doc-view's `access` lists the tables whose grant unlocks the page; each must exist.
+    if (typeof view.markdown === 'string' && view.access !== undefined) {
+      if (!Array.isArray(view.access)) errors.push('doc-view "' + v + '": `access` must be an array of table names');
+      else view.access.forEach(function(t) { if (!SCHEMA[t]) errors.push('doc-view "' + v + '": `access` references non-existent table "' + t + '"'); });
+    }
     // Check columns exist in at least one source (skip aggregate views)
     if (!view.groupBy) (view.columns || []).forEach(function(c) {
       if (isEmbed(c) || isViewEmbed(c) || isText(c) || (c && typeof c === 'object' && c.computed)) return;

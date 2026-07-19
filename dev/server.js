@@ -108,6 +108,22 @@ const server = http.createServer(async (req, res) => {
     // Without this, hasTableAccess('_pages') — which no grant ever satisfies — denied restricted reads.
     function pagesTable(tableId) { return (tableId ? tableId.split('__')[0] : '') === '_pages'; }
     function canReadPages() { return !backend._users || !!userRecord(); }
+    // Per-page access parity with firestore.rules: a restricted caller (allowed != null) may read only
+    // pages whose schema view has no `access`, or whose `access` intersects their grants. Computed from
+    // the schema directly (the dev server reads it), so no mirror doc is needed here. Returns the
+    // filtered { headers, rows } for a whole-_pages read.
+    function filterPages(data) {
+      const allowed = getAllowedTables();
+      if (!allowed) return data;                          // admin / unrestricted -> all pages
+      const views = ((backend.getSchema('local') || {}).views) || [];
+      const acc = {};
+      (function walk(arr) { (arr || []).forEach(v => {
+        if (v && v.name && typeof v.markdown === 'string' && Array.isArray(v.access) && v.access.length) acc[v.name] = v.access;
+        if (v && v.views) walk(v.views);
+      }); })(views);
+      const rows = (data.rows || []).filter(r => !acc[r.id] || acc[r.id].some(t => allowed.indexOf(t) >= 0));
+      return Object.assign({}, data, { rows });
+    }
     function canWritePages() { const u = userRecord(); return !backend._users || !!(u && (u.role === 'admin' || u.role === 'editor')); }
     function checkTableAccess(tableId) {
       const allowed = getAllowedTables();
@@ -167,7 +183,7 @@ const server = http.createServer(async (req, res) => {
       case 'getAvailableLanguages': return json(res, backend.getAvailableLanguages('local'));
       case 'getTableData': {
         if (pagesTable(body.tableId)) {
-          if (canReadPages()) return json(res, backend.getTableData(body.tableId, body.tab));
+          if (canReadPages()) return json(res, filterPages(backend.getTableData(body.tableId, body.tab) || { headers: [], rows: [] }));
           return json(res, { error: 'Access denied' }, 403);
         }
         if (checkTableAccess(body.tableId)) return json(res, backend.getTableData(body.tableId, body.tab));
