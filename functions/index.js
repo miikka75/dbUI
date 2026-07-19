@@ -17,6 +17,10 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
+// Modular Firestore API: works identically on the deployed runtime AND under the
+// Functions emulator (whose admin stub doesn't populate the namespaced static
+// admin.firestore.FieldValue), so the /csp-report path stays end-to-end testable.
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
 admin.initializeApp();
 const TOKEN = defineSecret('DBUI_CSP_REPORT_TOKEN');
@@ -59,14 +63,14 @@ function rewriteRegion() {
 // Co-located with the project's Firestore — avoids cross-region latency + egress on every report
 // write / summary read.
 exports.cspReport = onRequest({ region: rewriteRegion(), secrets: [TOKEN], maxInstances: 1, cors: false }, async (req, res) => {
-  const db = admin.firestore();
+  const db = getFirestore();
   if (req.method === 'POST') {
     // Content-Type is application/csp-report or application/reports+json -> use the raw body.
     const body = (req.rawBody || Buffer.alloc(0)).toString('utf8').slice(0, 64 * 1024);
     const rows = normalize(body);
     await Promise.all(rows.map((r) => db.collection('_csp_reports').doc(docId(r)).set({
       directive: r.directive, blockedURI: r.blockedURI, sampleDocument: r.document,
-      count: admin.firestore.FieldValue.increment(1),
+      count: FieldValue.increment(1),
       lastSeen: new Date().toISOString()
     }, { merge: true })));
     return res.status(204).end();   // browsers ignore the response either way
