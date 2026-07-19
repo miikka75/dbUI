@@ -2699,6 +2699,26 @@ test.describe('calendar view', () => {
     expect(joined).toContain('ref');   // "needs a `ref` column pointing at the events table"
   });
 
+  test('validateSchema warns when a mirror detail of an archivable master is not archivable', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      // master is archivable; detail mirrors it (syncFrom) but is NOT archivable -> archiving a master
+      // row would orphan the detail row (the exact church ovimiehet_vuorot / kokoukset case).
+      window.SCHEMA.mtg = { columns: { pvm: { type: 'date' } }, archivable: true };
+      window.SCHEMA.shift = { columns: { pvm: { type: 'date', syncFrom: 'mtg' } } };            // not archivable
+      const warn = window.validateSchema().join(' | ');
+      // control: making the detail archivable clears it
+      window.SCHEMA.shift.archivable = true;
+      const clean = window.validateSchema().filter(e => e.indexOf('shift') >= 0).join(' | ');
+      delete window.SCHEMA.mtg; delete window.SCHEMA.shift;
+      return { warn, clean };
+    });
+    expect(r.warn).toContain('shift');
+    expect(r.warn).toContain('archivable');
+    expect(r.warn).toContain('mtg');           // names the master
+    expect(r.clean).toBe('');                  // no warning once the detail is archivable too
+  });
+
   test('calendar renders in a markdown page embed ({{view:cal}})', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {

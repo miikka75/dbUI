@@ -204,6 +204,20 @@ function validateSchema() {
       if (isEmbed(c)) { (c.sources || []).forEach(function(s) { if (!SCHEMA[s]) errors.push('View "' + v3 + '": embed references non-existent table "' + s + '"'); }); }
     });
   }
+  // Mirror-cluster archive consistency: a table that syncFrom an ARCHIVABLE master should itself be
+  // archivable. delete cascades across the mirror cluster, but archive skips non-archivable tables --
+  // so archiving a master row leaves the mirrored detail row behind, and any view over the detail keeps
+  // showing the orphan (e.g. a rotation over the stale rows). Advisory: the schema still loads.
+  for (var dt in SCHEMA) {
+    var dcols = (SCHEMA[dt] && SCHEMA[dt].columns) || {};
+    for (var dc in dcols) {
+      var dd = dcols[dc], master = (dd && typeof dd === 'object') ? dd.syncFrom : null;
+      if (master && SCHEMA[master] && SCHEMA[master].archivable && !SCHEMA[dt].archivable) {
+        errors.push('Table "' + dt + '" mirrors archivable "' + master + '" (syncFrom on "' + dc + '") but is not archivable — archiving a "' + master + '" row will orphan its "' + dt + '" row; add "archivable": true to "' + dt + '"');
+        break; // one advisory per detail table
+      }
+    }
+  }
   return errors;
 }
 // Structural dangling-reference check on a raw schema (names only; safe to run pre-normalization, e.g. on import).
