@@ -8,9 +8,11 @@
     "seed:import": "node seed-import.js",
     "test": "node --test test/*.test.js",
     "test:ui": "npx playwright test --config=playwright.config.js",
-    "test:e2e-firebase": "cd .. && firebase emulators:exec --only auth,firestore,storage --project demo-app \"cd dev && npx playwright test test-ui/firebase-emulator.spec.js\"",
-    "test:storage-rules": "cd .. && firebase emulators:exec --only storage,firestore --project demo-image \"node dev/test-emulator/storage-rules.mjs\"",
-    "test:rules": "cd .. && firebase emulators:exec --only firestore --project demo-rules \"node dev/test-emulator/firestore-rules.mjs\""
+    "test:e2e-firebase": "node run-with-emulators.mjs --only auth,firestore,storage --project demo-app -- npx playwright test test-ui/firebase-emulator.spec.js",
+    "test:storage-rules": "node run-with-emulators.mjs --only storage,firestore --project demo-image -- node test-emulator/storage-rules.mjs",
+    "test:rules": "node run-with-emulators.mjs --only firestore --project demo-rules -- node test-emulator/firestore-rules.mjs",
+    "free-ports": "node free-emulator-ports.mjs",
+    "test:all": "npm test && npm run test:rules && npm run test:storage-rules && npm run test:e2e-firebase && npm run test:ui"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.1",
