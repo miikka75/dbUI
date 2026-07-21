@@ -1030,7 +1030,10 @@ function createVueApp() {
       // A doc-view (markdown page). Embedding one inside another page (`{{view:x}}`) renders its
       // ACCESS-GATED server body -- see embed-view's doc branch: it hides the block via canAccessPage
       // and pulls pageCache (loadPage, server-filtered) rather than the world-readable schema seed.
-      isDocViewName: function(name) { return !!(VIEWS[name] && typeof VIEWS[name].markdown === 'string'); },
+      // A PURE doc-view (markdown page, no own grid). A view that also has `sources` is a data-view whose
+      // markdown is a self-embedding layout wrapper -- its {{self}} -> {{view:self}} must render the GRID,
+      // not recurse into the markdown as a doc. So exclude sourced views here (they embed as `data`).
+      isDocViewName: function(name) { var v = VIEWS[name]; return !!(v && typeof v.markdown === 'string' && !(v.sources && v.sources.length)); },
       // Build the self-service RSVP list (upcoming events + the current user's own response per event +
       // tallies), via the pure Rsvp module. Owner identity = the auth email (matches the firestore rules).
       // The response<->event link is derived (not configured): the responses table's `ref` column pointing
