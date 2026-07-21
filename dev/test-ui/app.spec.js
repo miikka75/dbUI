@@ -707,7 +707,7 @@ test.describe('Archive from a view whose source has a mirror table not in source
     expect((await get(page, 'music', 'archive')).rows.some(r => r.id === id)).toBe(true);
   });
 
-  test('archiving from the DETAIL view also archives the upstream master row', async ({ page }) => {
+  test('a DETAIL view hides its own add/archive; archiving via the master rides to the mirror', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');
@@ -716,17 +716,25 @@ test.describe('Archive from a view whose source has a mirror table not in source
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
-    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'mus' }).first().click(); // detail view (music)
-    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
 
-    // ADD in the detail view -> music row + propagated upstream master 'meetings' row (same id)
+    // The DETAIL view (source 'music' = syncFrom meetings) inherits its master, so it offers NO
+    // independent add/archive -- the music rows are created/archived with the meeting, never on their own.
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'mus' }).first().click(); // detail view (music)
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(() => appInstance.canMutateRows)).toBe(false);
+    expect(await page.locator('button:has(.mdi-plus)').count()).toBe(0);
+    expect(await page.locator('button:has(.mdi-archive-outline)').count()).toBe(0);
+
+    // ADD from the MASTER view 'mtg' (source 'meetings') -> meetings row + propagated music mirror (same id)
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'mtg' }).first().click();
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
     await page.waitForTimeout(600);
     expect((await get(page, 'music', 'active')).rows.length).toBe(1);
     expect((await get(page, 'meetings', 'active')).rows.length).toBe(1);
-    const id = (await get(page, 'music', 'active')).rows[0].id;
+    const id = (await get(page, 'meetings', 'active')).rows[0].id;
 
-    // ARCHIVE from the detail view -> upstream master 'meetings' moves to archive too
+    // ARCHIVE from the master view -> the mirror 'music' detail row rides along to archive
     await page.locator('button:has(.mdi-archive-outline)').first().click();
     await page.waitForTimeout(600);
     expect((await get(page, 'music', 'active')).rows.length).toBe(0);
@@ -771,8 +779,9 @@ test.describe('Permissions — restricted user UI gating', () => {
     expect(info.ids).toEqual(expect.arrayContaining(['mus', 'mtg', '__lookup']));
     expect(info.ref).toContain('venues');
     expect(info.lists).toContain('mkind');
-    // add a row in the mus view -> archive button visible (admin has full access)
-    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.mus' }).first().click();
+    // add a row in the master 'mtg' view -> archive button visible (admin has full access + a
+    // master-sourced view is mutable; the detail 'mus' view rides its master and stays read-only)
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.mtg' }).first().click();
     await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
     await page.waitForTimeout(200);
@@ -783,12 +792,14 @@ test.describe('Permissions — restricted user UI gating', () => {
   test('editor restricted to music: filtered sidebar, no lookup tab, no archive button', async ({ page }) => {
     test.setTimeout(20000);
     await setup(page);
-    // seed a music row as admin so the editor's view has data
+    // seed a music row via the MASTER in an authenticated admin session. The detail 'mus' view can't add
+    // (its rows ride the master), and the unauthenticated seed API writes a store the role-gated session
+    // can't read -- so add through the master 'mtg' view, whose mirror propagates a row into 'music'.
     await bootAs(page, 'admin@x');
-    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.mus' }).first().click();
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.mtg' }).first().click();
     await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(300);
 
     await bootAs(page, 'ed@x');
     const info = await page.evaluate(() => ({ ids: appInstance.sidebarTabs.map(t => t.id), ref: appInstance.refTables, lists: Object.keys(appInstance.visibleLists) }));
@@ -822,7 +833,7 @@ test.describe('Mirror cluster is transitive (master + 2 details)', () => {
   };
   const get = (page, t) => page.request.post('/api/getTableData', { data: { tableId: t, tab: 'active' } }).then(r => r.json());
 
-  test('add + delete from a detail view propagate transitively to master and sibling detail', async ({ page }) => {
+  test('a detail view hides its own controls; add + delete via the master propagate transitively', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');
@@ -831,17 +842,24 @@ test.describe('Mirror cluster is transitive (master + 2 details)', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
-    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'musv' }).first().click();
-    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
 
-    // ADD in the mus detail view -> meet (master) + task (sibling detail) created too
+    // The detail view 'musv' (source 'mus' = syncFrom meet) inherits its master, so it offers no
+    // independent add/delete -- the cluster mutates only through the master 'meet'.
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'musv' }).first().click();
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(() => appInstance.canMutateRows)).toBe(false);
+    expect(await page.locator('button:has(.mdi-plus)').count()).toBe(0);
+
+    // ADD in the MASTER table 'meet' -> mus (detail) + task (sibling detail) created transitively
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'meet' }).first().click();
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
     await page.waitForTimeout(600);
     expect((await get(page, 'mus')).rows.length).toBe(1);
     expect((await get(page, 'meet')).rows.length).toBe(1);
     expect((await get(page, 'task')).rows.length).toBe(1);
 
-    // DELETE (two-press) -> all three removed
+    // DELETE (two-press) from the master -> all three removed transitively
     await page.locator('.v-table button:has(.mdi-close)').first().click();
     await page.waitForTimeout(200);
     await page.locator('.v-table button:has(.mdi-check-circle)').first().click();
