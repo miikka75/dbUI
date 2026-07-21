@@ -3061,6 +3061,8 @@ function createVueApp() {
       fontSize: { type: String, default: '0.75rem' }, cellPad: { type: String, default: '2px 6px' }, header: { type: Boolean, default: false },
       depth: { type: Number, default: 0 } // recursion guard for doc-view-in-doc-view embeds
     },
+    // Per-embed inline-edit state for doc-view embeds (each embed edits its own page independently).
+    data: function() { return { editing: false, docDraft: '' }; },
     created: function() {
       // A doc-view embed renders the ACCESS-GATED server body, not the world-readable schema seed. Kick
       // off the single-page read (server-filtered) once, but only if the viewer may see it -- a restricted
@@ -3088,6 +3090,12 @@ function createVueApp() {
         var body = appInstance.pageCache[this.name];
         return appInstance.mdBlocks(body != null ? body : (v.markdown || ''), this.name);
       },
+      // Inline edit is offered only for a real (page-path) doc embed the viewer can both see AND write:
+      // canAccessPage gates the read (a restricted user never sees the block), canEditPages the write
+      // (admin/editor) — matching the top-level page-view Edit button and the _pages write rule.
+      canEditDoc: function() {
+        return this.isDoc && !!appInstance && appInstance.canEditPages && appInstance.canAccessPage(VIEWS[this.name]);
+      },
       calName: function() { return this.spec ? this.spec.name : this.name; },
       cols: function() {
         if (this.spec) return this.spec.columns;
@@ -3112,16 +3120,39 @@ function createVueApp() {
       isArmed: function(item) { return appInstance.isArmed('erow:' + item.id); },
       addRow: function() { return appInstance.embedAddRow(this.type, this.name); },
       delRow: function(item) { return appInstance.embedDeleteRow(this.type, this.name, item); },
-      archRow: function(item) { return appInstance.embedArchiveRow(this.type, this.name, item); }
+      archRow: function(item) { return appInstance.embedArchiveRow(this.type, this.name, item); },
+      // Inline doc-view editing — mirrors the root togglePageEdit/savePage, but scoped to THIS embed's
+      // page (this.name) and its local editing/docDraft state. Save writes the gated _pages body that
+      // both this embed and the standalone page read, so the two stay in sync.
+      toggleDocEdit: function() {
+        this.editing = !this.editing;
+        if (this.editing) {
+          var body = appInstance.pageCache[this.name];
+          this.docDraft = body != null ? body : ((VIEWS[this.name] && VIEWS[this.name].markdown) || '');
+        }
+      },
+      saveDoc: function() {
+        appInstance.pageCache[this.name] = this.docDraft;
+        if (backend.putRow) backend.putRow('_pages', { id: this.name, markdown: this.docDraft }, 'active');
+        this.editing = false;
+        appInstance.notify('Saved');
+      }
     }),
     template: ''
       + '<calendar-view v-if="kind===\'calendar\'" :name="calName" :embed="true"></calendar-view>'
       + '<rotation-view v-else-if="kind===\'rotation\'" :name="calName" :embed="true"></rotation-view>'
       + '<pivot-view v-else-if="kind===\'pivot\'" :name="calName" :embed="true"></pivot-view>'
       + '<rsvp-view v-else-if="kind===\'rsvp\'" :name="calName" :embed="true"></rsvp-view>'
-      + '<template v-else-if="kind===\'doc\'" v-for="(blk, bi) in blocks" :key="bi">'
+      + '<template v-else-if="kind===\'doc\'">'
+      + '<div v-if="canEditDoc" class="d-flex align-center"><v-spacer></v-spacer>'
+      + '<v-btn size="x-small" variant="text" :prepend-icon="editing ? \'mdi-eye\' : \'mdi-pencil\'" @click="toggleDocEdit()">{{ editing ? \'Preview\' : \'Edit\' }}</v-btn>'
+      + '<v-btn v-if="editing" size="x-small" color="primary" variant="text" prepend-icon="mdi-content-save" @click="saveDoc()">Save</v-btn>'
+      + '</div>'
+      + '<v-textarea v-if="editing" :model-value="docDraft" @update:model-value="docDraft = $event" auto-grow variant="outlined" density="compact" hide-details placeholder="# Markdown"></v-textarea>'
+      + '<template v-else v-for="(blk, bi) in blocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
       + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart" :depth="depth + 1"></embed-view>'
+      + '</template>'
       + '</template>'
       // --- read-only data (data-view spec path): inline {{self}} blocks, or table/card/chip + header ---
       + '<template v-else-if="spec">'
