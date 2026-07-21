@@ -449,7 +449,15 @@ function createVueApp() {
       embedItems: function() { var self = this; return this.embedConfigs.map(function(cfg) { return self.resolveEmbed(cfg); }); },
       hasMaster: function() {
         var table = this.currentTable;
-        if (VIEWS[table]) return false;
+        var v = VIEWS[table];
+        if (v) {
+          // A view whose every source table is a mirror DETAIL (syncFrom a master) inherits that master:
+          // its rows are cloned/archived/deleted with the master (musiikki/tulkit ride kokoukset), so it
+          // must NOT offer independent add/archive/delete — only the master (the meeting) mutates the
+          // cluster. A view mixing in a master source (e.g. ohjelma over kokoukset) stays master-less.
+          var srcs = v.sources || [];
+          return srcs.length > 0 && srcs.every(function(s) { return !!getTableMirrorSource(SCHEMA, s); });
+        }
         return !!getTableMirrorSource(SCHEMA, table);
       },
       hasArchive: function() {
@@ -1019,6 +1027,10 @@ function createVueApp() {
         return Pivot.build(rows, p);
       },
       isRsvpName: function(name) { return !!(VIEWS[name] && VIEWS[name].rsvp); },
+      // A doc-view (markdown page). Embedding one inside another page (`{{view:x}}`) renders its
+      // ACCESS-GATED server body -- see embed-view's doc branch: it hides the block via canAccessPage
+      // and pulls pageCache (loadPage, server-filtered) rather than the world-readable schema seed.
+      isDocViewName: function(name) { return !!(VIEWS[name] && typeof VIEWS[name].markdown === 'string'); },
       // Build the self-service RSVP list (upcoming events + the current user's own response per event +
       // tallies), via the pure Rsvp module. Owner identity = the auth email (matches the firestore rules).
       // The response<->event link is derived (not configured): the responses table's `ref` column pointing
@@ -2977,14 +2989,36 @@ function createVueApp() {
     props: {
       type: { type: String, default: 'view' }, name: { type: String, default: null }, part: { type: String, default: null },
       spec: { type: Object, default: null }, row: { type: Object, default: null },
-      fontSize: { type: String, default: '0.75rem' }, cellPad: { type: String, default: '2px 6px' }, header: { type: Boolean, default: false }
+      fontSize: { type: String, default: '0.75rem' }, cellPad: { type: String, default: '2px 6px' }, header: { type: Boolean, default: false },
+      depth: { type: Number, default: 0 } // recursion guard for doc-view-in-doc-view embeds
+    },
+    created: function() {
+      // A doc-view embed renders the ACCESS-GATED server body, not the world-readable schema seed. Kick
+      // off the single-page read (server-filtered) once, but only if the viewer may see it -- a restricted
+      // user's block is hidden anyway (docBlocks), and skipping the read avoids a pointless denied fetch.
+      if (this.isDoc && appInstance && appInstance.canAccessPage(VIEWS[this.name]) && appInstance.pageCache[this.name] === undefined) {
+        appInstance.loadPage(this.name);
+      }
     },
     computed: {
       isCal: function() { return this.type === 'view' && !!(appInstance && appInstance.isCalendarName(this.name)); },
       isRot: function() { return this.type === 'view' && !!(appInstance && appInstance.isRotationName(this.name)); },
       isPiv: function() { return this.type === 'view' && !!(appInstance && appInstance.isPivotName(this.name)); },
       isRsvp: function() { return this.type === 'view' && !!(appInstance && appInstance.isRsvpName(this.name)); },
-      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : this.isRsvp ? 'rsvp' : 'data'); },
+      // A doc-view embedded inside another page (only via the no-spec page path; the spec path pre-tags kind='doc').
+      isDoc: function() { return !this.spec && this.type === 'view' && !!(appInstance && appInstance.isDocViewName(this.name)); },
+      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : this.isRsvp ? 'rsvp' : this.isDoc ? 'doc' : 'data'); },
+      // Render blocks for a doc embed. Spec path carries its own blocks (built from the schema seed by
+      // resolveEmbed); the page path builds them here from the ACCESS-GATED body: hidden entirely unless
+      // canAccessPage passes, then the server-filtered pageCache body (seed only as a pre-load fallback).
+      blocks: function() {
+        if (this.spec) return this.spec.blocks;
+        if (!appInstance || !this.isDoc || this.depth > 4) return []; // depth cap: bound doc<->doc cycles
+        var v = VIEWS[this.name];
+        if (!appInstance.canAccessPage(v)) return []; // access-gated: no grant -> render nothing
+        var body = appInstance.pageCache[this.name];
+        return appInstance.mdBlocks(body != null ? body : (v.markdown || ''), this.name);
+      },
       calName: function() { return this.spec ? this.spec.name : this.name; },
       cols: function() {
         if (this.spec) return this.spec.columns;
@@ -3016,9 +3050,9 @@ function createVueApp() {
       + '<rotation-view v-else-if="kind===\'rotation\'" :name="calName" :embed="true"></rotation-view>'
       + '<pivot-view v-else-if="kind===\'pivot\'" :name="calName" :embed="true"></pivot-view>'
       + '<rsvp-view v-else-if="kind===\'rsvp\'" :name="calName" :embed="true"></rsvp-view>'
-      + '<template v-else-if="kind===\'doc\'" v-for="(blk, bi) in spec.blocks" :key="bi">'
+      + '<template v-else-if="kind===\'doc\'" v-for="(blk, bi) in blocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
-      + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>'
+      + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart" :depth="depth + 1"></embed-view>'
       + '</template>'
       // --- read-only data (data-view spec path): inline {{self}} blocks, or table/card/chip + header ---
       + '<template v-else-if="spec">'

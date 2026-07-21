@@ -156,6 +156,57 @@ describe('Embed access filtering', () => {
   });
 });
 
+describe('Doc-view embed access gating (access + "all" sentinel)', () => {
+  // Mirrors app-core.js canAccessPage() and embed-view's blocks() gating for a doc-view embedded in a
+  // page ({{view:x}}). The block renders the ACCESS-GATED server body: hidden unless canAccessPage
+  // passes, then built from the loaded pageCache body (schema seed only as a pre-load fallback).
+  // `allowed` is userAllowedTables: null = admin / tables:'all' (unrestricted), [] = registered no-grant.
+  function canAccessPage(view, allowed) {
+    if (!view || typeof view.markdown !== 'string') return true;   // not a doc-view
+    var acc = view.access;
+    if (!Array.isArray(acc) || !acc.length) return true;           // untagged -> all registered
+    if (!allowed) return true;                                     // admin / unrestricted
+    return acc.some(function(t) { return allowed.indexOf(t) >= 0; });
+  }
+  // Returns the markdown text a doc embed would render, or null if the block is hidden. `mdBlocks` is
+  // the identity here (we assert on the resolved source text, not on parsed blocks).
+  function docEmbedText(view, allowed, cacheBody, depth) {
+    if ((depth || 0) > 4) return null;                             // recursion cap for doc<->doc cycles
+    if (!canAccessPage(view, allowed)) return null;                // access-gated: no grant -> nothing
+    return cacheBody != null ? cacheBody : (view.markdown || '');  // server body wins; seed is fallback
+  }
+
+  const restricted = { name: 'sisainen', markdown: '# seed', access: ['all'] };
+  const untagged = { name: 'welcome', markdown: '# hi' };
+
+  it('access:["all"] — admin / tables:all (allowed=null) can see it', () => {
+    assert.equal(canAccessPage(restricted, null), true);
+  });
+  it('access:["all"] — a partial-grant user is denied, even with a real table', () => {
+    assert.equal(canAccessPage(restricted, ['musiikki']), false);
+  });
+  it('access:["all"] — a registered no-grant user ([]) is denied', () => {
+    assert.equal(canAccessPage(restricted, []), false);
+  });
+  it('untagged doc-view stays visible to every registered user', () => {
+    assert.equal(canAccessPage(untagged, []), true);
+    assert.equal(canAccessPage(untagged, ['musiikki']), true);
+  });
+
+  it('embed renders the loaded server body for a full-access user', () => {
+    assert.equal(docEmbedText(restricted, null, '# real links'), '# real links');
+  });
+  it('embed falls back to the schema seed before the body loads', () => {
+    assert.equal(docEmbedText(restricted, null, undefined), '# seed');
+  });
+  it('embed renders NOTHING for a restricted user (no seed leak either)', () => {
+    assert.equal(docEmbedText(restricted, ['musiikki'], '# real links'), null);
+  });
+  it('embed is capped past max recursion depth', () => {
+    assert.equal(docEmbedText(untagged, null, '# x', 5), null);
+  });
+});
+
 describe('Server-side table access check', () => {
   function checkTableAccess(tableId, users, userEmail) {
     if (!users) return true;
