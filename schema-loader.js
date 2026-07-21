@@ -120,9 +120,13 @@ function validateSchema() {
     // Check sources exist
     (view.sources || []).forEach(function(s) { if (!SCHEMA[s]) errors.push('View "' + v + '" references non-existent table "' + s + '"'); });
     // A restricted doc-view's `access` lists the tables whose grant unlocks the page; each must exist.
+    // The literal "all" is a first-class sentinel meaning "only full-access users" (`tables: 'all'` +
+    // admins): no real grant array ever contains it, so canAccessPage / dev-server filterPages /
+    // firestore.rules pageAllowed all deny every partial-grant user while the `tables == 'all'` check
+    // still admits full-access users. It is NOT a table name, so exempt it from the existence check.
     if (typeof view.markdown === 'string' && view.access !== undefined) {
       if (!Array.isArray(view.access)) errors.push('doc-view "' + v + '": `access` must be an array of table names');
-      else view.access.forEach(function(t) { if (!SCHEMA[t]) errors.push('doc-view "' + v + '": `access` references non-existent table "' + t + '"'); });
+      else view.access.forEach(function(t) { if (t !== 'all' && !SCHEMA[t]) errors.push('doc-view "' + v + '": `access` references non-existent table "' + t + '"'); });
     }
     // Check columns exist in at least one source (skip aggregate views)
     if (!view.groupBy) (view.columns || []).forEach(function(c) {

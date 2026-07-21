@@ -137,3 +137,48 @@ describe('archive propagation to mirror tables', () => {
     assert.ok(backend.getTableData(mirrorTable, mirrorArchive).rows.find(r => r.id === 'arch1'));
   });
 });
+
+describe('hasMaster (view over mirror-detail suppresses add/archive/delete)', () => {
+  // Mirrors app-core.js hasMaster: a view whose EVERY source is a mirror-detail (syncFrom a master)
+  // inherits that master, so canMutateRows (= !hasMaster && ...) hides independent add/archive/delete —
+  // the detail rows are cloned/archived/deleted with the master (the meeting). Cells stay editable
+  // because cellReadonly is gated per-column, independent of hasMaster.
+  function hasMaster(currentTable, VIEWS, tables) {
+    var v = VIEWS[currentTable];
+    if (v) {
+      var srcs = v.sources || [];
+      return srcs.length > 0 && srcs.every(function(s) { return !!getTableMirrorSource(tables, s); });
+    }
+    return !!getTableMirrorSource(tables, currentTable);
+  }
+
+  const tables = {
+    meetings: { columns: { pvm: { type: 'date' }, theme: { type: 'text' } } },                    // master
+    music:    { columns: { pvm: { type: 'date', syncFrom: 'meetings' }, pianist: { type: 'text' } } }, // detail
+    interp:   { columns: { pvm: { type: 'date', syncFrom: 'meetings' }, who: { type: 'text' } } }      // detail
+  };
+  const VIEWS = {
+    music:   { name: 'music', sources: ['music'] },
+    interp:  { name: 'interp', sources: ['interp'] },
+    program: { name: 'program', sources: ['meetings', 'music'] }, // mixes the master
+    agenda:  { name: 'agenda', sources: ['meetings'] },
+    docpage: { name: 'docpage', markdown: '# hi' }               // no sources
+  };
+
+  it('view over a single mirror-detail table HAS a master', () => {
+    assert.equal(hasMaster('music', VIEWS, tables), true);
+    assert.equal(hasMaster('interp', VIEWS, tables), true);
+  });
+  it('view mixing in a master source stays master-less', () => {
+    assert.equal(hasMaster('program', VIEWS, tables), false);
+  });
+  it('view over the master table itself stays master-less (remains mutable)', () => {
+    assert.equal(hasMaster('agenda', VIEWS, tables), false);
+  });
+  it('doc-view (no sources) has no master', () => {
+    assert.equal(hasMaster('docpage', VIEWS, tables), false);
+  });
+  it('a bare detail table (not a view) still has a master', () => {
+    assert.equal(hasMaster('music', {}, tables), true);
+  });
+});

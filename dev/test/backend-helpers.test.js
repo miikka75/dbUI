@@ -120,4 +120,11 @@ describe('backend-helpers - pageAccessOf (restricted doc-view map)', () => {
     assert.deepEqual(H.pageAccessOf({}), {});
     assert.deepEqual(H.pageAccessOf({ views: [] }), {});
   });
+  it('mirrors the "all" sentinel verbatim (full-access-only page)', () => {
+    // access:["all"] gates a page to tables:'all' users + admins. No real grant array contains the
+    // literal 'all', so the mirrored map denies every partial-grant user while the rules' tables=='all'
+    // check still admits full-access users. pageAccessOf passes it through unchanged.
+    const schema = { views: [{ name: 'sisainen', markdown: '#', access: ['all'] }] };
+    assert.deepEqual(H.pageAccessOf(schema), { sisainen: ['all'] });
+  });
 });

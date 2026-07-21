@@ -429,6 +429,11 @@ of table names — the page is then visible only to users **granted at least one
 
 - Reuses your existing per-table grants — no new permission type or admin UI. Tag a page with a
   table only its intended audience can access.
+- **`access: ["all"]`** restricts the page to **full-access users only** (`tables: "all"` + admins).
+  `"all"` is a sentinel, not a table name: no partial-grant user's table list ever contains it, so
+  every enforcement point (`canAccessPage`, dev-server `filterPages`, firestore.rules `pageAllowed`)
+  denies them, while the `tables == "all"` check still admits full-access users. Use it for a section
+  only people who can see everything should read.
 - **Enforced server-side on Firebase**: `saveSchema` mirrors the page→tables map to
   `_meta/pageAccess`, and the `_pages__active` read rule denies the stored body to users without a
   listed grant. The dev server mirrors this from the schema. (Sheets/Drive-CRDT backends have no
@@ -437,6 +442,12 @@ of table names — the page is then visible only to users **granted at least one
   schema-defined *seed* markdown live in the schema every registered user reads — so a restricted
   user can learn the page exists and see its seed, just never its edited body. **Don't put secrets
   in a restricted page's schema `markdown` seed** — put them in the edited (server-stored) body.
+- **Embedding a restricted page inside another page** with `{{view:otherPage}}` respects its
+  `access`: the embed renders the **access-gated server body** (loaded per-page, server-filtered) and
+  is hidden entirely for users who fail `canAccessPage`. This lets one page combine a public section
+  and a restricted one — e.g. a welcome for everyone plus `{{view:sisainen}}` below it that only
+  full-access users see. The restricted page keeps its own `access` and typically drops its nav entry
+  (it shows inline). As always, keep the real content in the embedded page's *body*, not its seed.
 
 ## rotationView (third view kind)
 A view with a `rotation` field renders a rotating roster across a **range of calendar periods**
