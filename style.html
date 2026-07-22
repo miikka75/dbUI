@@ -1,5 +1,7 @@
-<link href="https://cdn.jsdelivr.net/npm/vuetify@4.0.7/dist/vuetify.min.css" rel="stylesheet">
-<link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" rel="stylesheet">
+<!-- Vuetify + MDI stylesheets are loaded by index.html's boot loader (loadStyle): /vendor first,
+     jsdelivr as an SRI-free resilience fallback — mirroring how vue.js/vuetify.js load. They live
+     there rather than as <link> tags here so the CDN fallback can run without a CSP-forbidden inline
+     onerror handler, and so the app self-hosts with no external request when /vendor is present. -->
 <style>
 [v-cloak] { display: none !important; }
 html, body { margin: 0; padding: 0; height: 100%; background: #1a1a1a; }

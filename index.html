@@ -131,6 +131,14 @@
       document.getElementById('app-root').innerHTML = await uiResp.text();
       bootMark('fragmentsApplied');
 
+      // Vuetify + MDI stylesheets: self-hosted from the committed /vendor assets (no external request),
+      // with jsdelivr as a resilience fallback. Kick the downloads off now — they overlap the vue/vuetify
+      // JS loads below — and await them just before mount so the app never flashes unstyled (FOUC).
+      var stylesReady = Promise.all([
+        loadStyle('/vendor/vuetify.css', 'https://cdn.jsdelivr.net/npm/vuetify@4.0.7/dist/vuetify.min.css'),
+        loadStyle('/vendor/mdi.css', 'https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css')
+      ]);
+
       // Pure domain modules for every backend (column typing, permission-features, per-list access,
       // calendar geometry + fmtDate, rotation engine, view row pipeline, embed resolution, print). They
       // don't depend on Vue/Vuetify/the SDK, so start downloading them NOW (in parallel, ordered exec)
@@ -169,6 +177,7 @@
       // schema-loader + app-core, which call them as globals.
       await appModulesReady;
       await loadScriptsOrdered(['/schema-loader.js', '/app-core.js']);
+      await stylesReady;   // ensure Vuetify's CSS is in before first paint (no FOUC)
       createVueApp();
       bootMark('vueMounted');
       // Load shared auth before backend for OAuth/CRDT(Drive)
@@ -210,6 +219,24 @@
         s.src = src; s.onload = resolve; s.onerror = reject;
         if (integrity) { s.integrity = integrity; s.crossOrigin = 'anonymous'; }
         document.body.appendChild(s);
+      });
+    }
+
+    // Stylesheet loader with the same /vendor-first, CDN-fallback shape as loadScript. A <link>'s
+    // onerror can't live in style.html (that would be a CSP-forbidden inline handler), so the fallback
+    // is wired here in JS. Resolves even when both sources fail so boot never hangs on a missing CSS —
+    // the app just renders unstyled rather than blocking. jsdelivr /npm/ CSS isn't SRI-pinned (the
+    // cdn-fallback CI job guards it against rot instead — see dev/test-cdn-fallback.mjs).
+    function loadStyle(href, fallbackHref) {
+      return new Promise(function(resolve) {
+        var l = document.createElement('link');
+        l.rel = 'stylesheet'; l.href = href;
+        l.onload = resolve;
+        l.onerror = function() {
+          if (fallbackHref) { l.onerror = resolve; l.href = fallbackHref; }
+          else resolve();
+        };
+        document.head.appendChild(l);
       });
     }
 

@@ -36,6 +36,20 @@ if (!only || !project || cmd.length === 0) {
 
 const log = (s) => process.stdout.write(s);
 
+// The emulators run entirely on loopback, and the Storage emulator's rules engine makes a
+// cross-service HTTP call to the Firestore emulator (the image-upload registration gate). In a
+// sandboxed environment that forces an outbound proxy (HTTPS_PROXY / a JAVA_TOOL_OPTIONS
+// -Dhttp.proxyHost=...), that proxy hijacks the loopback call and the gate lookup fails-closed —
+// denying every registered write. Nothing the emulators do needs egress once the JARs are cached,
+// so run them with the proxy stripped. No-op in CI / on a normal dev box where these aren't set.
+function emulatorEnv() {
+  const env = { ...process.env };
+  for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy', 'JAVA_TOOL_OPTIONS']) {
+    delete env[k];
+  }
+  return env;
+}
+
 function killTree(pid) {
   if (!pid) return;
   try {
@@ -51,6 +65,7 @@ async function main() {
     cwd: repoRoot,
     shell: true,
     detached: !isWin,
+    env: emulatorEnv(),
   });
 
   let ready = false;

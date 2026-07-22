@@ -18,7 +18,6 @@ import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');   // repo root (dev/ -> ..)
 const indexHtml = readFileSync(join(ROOT, 'index.html'), 'utf8');
-const styleHtml = readFileSync(join(ROOT, 'style.html'), 'utf8');
 
 // Map a CDN URL to the vendored file that mirrors it (so we can compare committed bytes), or null.
 function vendorPathFor(url) {
@@ -34,8 +33,10 @@ const sri = buf => 'sha384-' + createHash('sha384').update(buf).digest('base64')
 // SRI-pinned script fallbacks in index.html: loadScript('<https url>', '<sha384-...>').
 const scripts = [...indexHtml.matchAll(/loadScript\('(https:\/\/[^']+)',\s*'(sha384-[^']+)'\)/g)]
   .map(m => ({ url: m[1], integrity: m[2] }));
-// Un-pinned CSS fallbacks in style.html: <link href="<https url>" ...> (jsdelivr only — Google SDKs rotate).
-const styles = [...styleHtml.matchAll(/href="(https:\/\/cdn\.jsdelivr\.net\/[^"]+)"/g)].map(m => ({ url: m[1] }));
+// Un-pinned CSS fallbacks in index.html: loadStyle('/vendor/...', '<https jsdelivr url>')
+// (jsdelivr only, no SRI — CSS @font-face rewrites the bytes, so a hash pin would be brittle).
+const styles = [...indexHtml.matchAll(/loadStyle\('[^']+',\s*'(https:\/\/cdn\.jsdelivr\.net\/[^']+)'\)/g)]
+  .map(m => ({ url: m[1] }));
 
 if (!scripts.length) { console.error('✗ no SRI-pinned CDN scripts found in index.html — parser drift?'); process.exit(1); }
 
