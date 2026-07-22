@@ -485,6 +485,17 @@
             <template v-if="a.usersLoaded && !a.isUnregisteredUser">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-1 font-weight-bold mb-2">{{ a.t('profile.title') }}</p>
+            <div class="d-flex align-center flex-wrap mb-3" style="gap:12px">
+              <v-avatar size="72" color="surface-variant">
+                <v-img v-if="a.myProfile.picture" :src="a.myProfile.picture" :alt="a.tOr('profile.picture','Profile picture')" cover></v-img>
+                <v-icon v-else size="44" icon="mdi-account"></v-icon>
+              </v-avatar>
+              <div class="d-flex flex-column align-start" style="gap:4px">
+                <input ref="profilePicInput" type="file" accept="image/*" hidden @change="a.onProfilePictureFile($event)">
+                <v-btn size="small" variant="outlined" prepend-icon="mdi-camera" @click="$refs.profilePicInput.click()">{{ a.tOr('profile.upload_picture', a.myProfile.picture ? 'Change picture' : 'Upload picture') }}</v-btn>
+                <v-btn v-if="a.myProfile.picture" size="x-small" variant="text" color="error" prepend-icon="mdi-delete" @click="a.removeMyPicture()">{{ a.tOr('profile.remove_picture','Remove picture') }}</v-btn>
+              </div>
+            </div>
             <div class="d-flex align-center flex-wrap" style="gap:12px">
               <v-text-field :model-value="a.currentUserEmail" :label="a.t('profile.email')" density="compact" hide-details variant="outlined" readonly style="max-width:240px"></v-text-field>
               <v-text-field v-model="a.myProfile.name" :label="a.t('profile.your_name')" density="compact" hide-details variant="outlined" style="max-width:240px" @blur="a.saveMyProfile" @keydown.enter="$event.target.blur()" @keydown.home.stop @keydown.end.stop></v-text-field>
