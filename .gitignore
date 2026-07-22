@@ -25,11 +25,14 @@ firestore-debug.log
 # firebase hosting deploy cache (local, machine-specific — regenerated each deploy)
 .firebase/
 
-# vendored third-party dists (Vue/Vuetify/MDI) are COMMITTED so the app is self-hosted: it loads them
-# from /vendor at runtime with no external request, and the E2E/UI suites run with no network access.
-# Refresh them with ./update-vendor.sh (pulls the pinned versions from the CDN) and commit the result.
-# The SRI-pinned CDN URLs in index.html/style.html remain as a resilience fallback and are validated
-# separately by `npm run test:cdn` (the `cdn-fallback` CI job), not exercised by the functional suites.
+# vendored third-party dists (Vue/Vuetify/MDI) are GENERATED, not committed. The web SessionStart hook
+# (.claude/hooks/session-start.sh) materialises them into /vendor from npm; locally ./update-vendor.sh
+# pulls the pinned versions from the CDN. The app loads them from /vendor at runtime and falls back to
+# the SRI-pinned jsdelivr CDN (index.html loadScript/loadStyle, validated by `npm run test:cdn`) when
+# they're absent — so production and the offline UI/E2E suites work either way. Only vendor/versions is
+# tracked (it pins the versions both the hook and update-vendor.sh fetch).
+/vendor/*
+!/vendor/versions
 
 # Cloud Functions deps (functions/ deploys its own node_modules)
 functions/node_modules/
