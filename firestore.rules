@@ -68,14 +68,17 @@ service cloud.firestore {
     // shared==true is readable by any registered user (so `.where('shared','==',true)` — which IS
     // query-provable, unlike an intersection — can populate a user-backed name list). Admins read all.
     match /_profiles/{email} {
-      // A profile is exactly { name: <string>, shared: <bool> } (setProfileName merges name only).
-      // Validate on create/update so a self-write can't store an oversized or wrong-typed name -- these
-      // display names feed user-backed lists and the roster, so junk here poisons those.
+      // A profile is exactly { name: <string>, shared: <bool>, picture: <string> } (setProfileName merges
+      // name only; picture is an optional self-uploaded data-URL avatar, resized client-side). Validate on
+      // create/update so a self-write can't store an oversized or wrong-typed name -- these display names
+      // feed user-backed lists and the roster, so junk here poisons those. The picture is capped at ~350KB
+      // (data-URL chars) so a profile doc stays comfortably under Firestore's 1MB document limit.
       function validProfile() {
-        return request.resource.data.keys().hasOnly(['name', 'shared'])
+        return request.resource.data.keys().hasOnly(['name', 'shared', 'picture'])
           && request.resource.data.name is string
           && request.resource.data.name.size() <= 100
-          && (!('shared' in request.resource.data) || request.resource.data.shared is bool);
+          && (!('shared' in request.resource.data) || request.resource.data.shared is bool)
+          && (!('picture' in request.resource.data) || (request.resource.data.picture is string && request.resource.data.picture.size() <= 350000));
       }
       allow read:           if request.auth != null && (resource.data.shared == true || myEmail() == email || (!noUsers() && role() == 'admin'));
       allow create, update: if request.auth != null && (myEmail() == email || (!noUsers() && role() == 'admin')) && validProfile();

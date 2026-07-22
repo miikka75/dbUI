@@ -79,6 +79,12 @@ await ok('non-bool shared is denied',
   assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: 'yes' })));
 await ok('extra fields are denied',
   assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true, role: 'admin' })));
+await ok('profile with a picture data-URL is allowed',
+  assertSucceeds(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true, picture: 'data:image/jpeg;base64,abc' })));
+await ok('non-string picture is denied',
+  assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true, picture: 123 })));
+await ok('oversized picture is denied',
+  assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true, picture: 'x'.repeat(350001) })));
 
 // --- _pages (doc-view bodies): readable by every registered user, writable by editors/admins. ---
 // (Restricted members previously hit the data catch-all's hasTableAccess('_pages') gate, which no

@@ -287,8 +287,8 @@ const server = http.createServer(async (req, res) => {
       }
       case 'getAccessRequests': return json(res, backend._accessRequests || {});
       case 'removeAccessRequest': { if (backend._accessRequests) delete backend._accessRequests[(body.email || '').toLowerCase()]; saveRequests(); return json(res, { ok: true }); }
-      case 'getMyProfile': { const p = (backend._profiles || {})[(userEmail || '').toLowerCase()]; return json(res, p ? { name: p.name || '', shared: !!p.shared } : { name: '', shared: false }); }
-      case 'setMyProfile': { if (!backend._profiles) backend._profiles = {}; backend._profiles[(userEmail || '').toLowerCase()] = { name: body.name || '', shared: !!body.shared }; saveProfiles(); return json(res, { ok: true }); }
+      case 'getMyProfile': { const p = (backend._profiles || {})[(userEmail || '').toLowerCase()]; return json(res, p ? { name: p.name || '', shared: !!p.shared, picture: p.picture || '' } : { name: '', shared: false, picture: '' }); }
+      case 'setMyProfile': { if (!backend._profiles) backend._profiles = {}; backend._profiles[(userEmail || '').toLowerCase()] = { name: body.name || '', shared: !!body.shared, picture: body.picture || '' }; saveProfiles(); return json(res, { ok: true }); }
       case 'getSharedNames': {
         const names = Object.values(backend._profiles || {}).filter(p => p && p.shared && (p.name || '').trim()).map(p => p.name.trim());
         return json(res, Array.from(new Set(names)).sort((a, b) => a.localeCompare(b)));
@@ -297,7 +297,7 @@ const server = http.createServer(async (req, res) => {
         if (!backend._profiles) backend._profiles = {};
         const k = (body.email || '').toLowerCase();
         const ex = backend._profiles[k] || {};
-        backend._profiles[k] = { name: body.name || '', shared: !!ex.shared };  // merge: preserve opt-in
+        backend._profiles[k] = { name: body.name || '', shared: !!ex.shared, picture: ex.picture || '' };  // merge: preserve opt-in + avatar
         saveProfiles(); return json(res, { ok: true });
       }
       case 'getProfiles': return json(res, backend._profiles || {});

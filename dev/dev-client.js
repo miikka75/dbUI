@@ -36,7 +36,7 @@ var backend_users = {
   getAccessRequests: function() { return _post('getAccessRequests', {}); },
   removeAccessRequest: function(email) { return _post('removeAccessRequest', { email: email }); },
   getMyProfile: function() { return _post('getMyProfile', {}); },
-  setMyProfile: function(name, shared) { return _post('setMyProfile', { name: name, shared: shared }); },
+  setMyProfile: function(name, shared, picture) { return _post('setMyProfile', { name: name, shared: shared, picture: picture }); },
   getSharedNames: function() { return _post('getSharedNames', {}); },
   setProfileName: function(email, name) { return _post('setProfileName', { email: email, name: name }); },
   getProfiles: function() { return _post('getProfiles', {}); }

@@ -2199,6 +2199,31 @@ test.describe('access control: user matching + fail-closed', () => {
     expect(r.cached).toBe('Bob Builder');
   });
 
+  test('a user can set and remove their own profile picture (persists + renders as an avatar)', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
+    await expect(page.locator('.v-main')).toContainText('profile.title');
+    const pic = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
+    // set + save via the app (canvas resize is exercised in the browser through onProfilePictureFile's twin;
+    // here we drive the persistence path the UI uses on change).
+    const saved = await page.evaluate(async (p) => {
+      appInstance.myProfile.picture = p;
+      appInstance.saveMyProfile();
+      await new Promise(r => setTimeout(r, 300));
+      return backend_users.getMyProfile();
+    }, pic);
+    expect(saved.picture).toBe(pic);
+    // the settings avatar shows the uploaded image
+    await expect(page.locator('.v-main .v-avatar img').first()).toHaveAttribute('src', pic);
+    // remove clears it everywhere
+    const cleared = await page.evaluate(async () => {
+      appInstance.removeMyPicture();
+      await new Promise(r => setTimeout(r, 300));
+      return backend_users.getMyProfile();
+    });
+    expect(cleared.picture).toBe('');
+  });
+
   test('a registered user with no table access still sees and can edit their own profile name (not gated by user-backed lists)', async ({ page }) => {
     await ensureAppReady(page);
     await page.evaluate(() => { appInstance.setUserRole('noaccess@x.com', 'editor', 'noaccess@x.com', []); });

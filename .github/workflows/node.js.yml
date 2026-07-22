@@ -61,9 +61,31 @@ jobs:
     - name: Storage rules tests (cross-service registration gate)
       run: npm run test:storage-rules
 
-  # Playwright end-to-end suite against the real app (dev server + Chromium). vendor/ JS payloads are
-  # gitignored, so every run also exercises the SRI-pinned CDN fallbacks in index.html — a stale
-  # integrity hash after a version bump fails here instead of in production.
+  # CDN-fallback integrity check (network-only). The app is self-hosted from committed /vendor assets, so
+  # the functional suites never touch the CDN. This job is what keeps the SRI-pinned CDN *fallback* URLs in
+  # index.html/style.html honest — it fetches each one and verifies HTTP 200 + that the bytes still hash to
+  # the pinned integrity (and match the committed vendor copy). A version bump that forgets to refresh the
+  # hash or re-run update-vendor.sh fails HERE. It needs outbound network; keep it out of any offline lane.
+  cdn-fallback:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./dev
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22.x
+        cache: 'npm'
+        cache-dependency-path: dev/package-lock.json
+    - run: npm ci
+    - run: npm run test:cdn
+
+  # Playwright end-to-end suite against the real app (dev server + Chromium), served from the committed
+  # /vendor assets — no CDN at test time, so this lane is deterministic and network-light. The SRI-pinned
+  # CDN fallbacks are validated separately by the `cdn-fallback` job above, not exercised here.
   e2e:
     runs-on: ubuntu-latest
 

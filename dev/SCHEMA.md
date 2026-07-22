@@ -893,14 +893,17 @@ These features are Firebase-backed (the local/dev backend mirrors them for tests
 per-user access model (`_users/<lowercased-email>` docs; the legacy `_meta/users` map is admin-read
 only).
 
-### `_profiles/<email>` — opt-in display name
-Each user has an optional profile `{ name, shared }`, editable only by themselves (or an admin) under
-**Settings → My profile**:
+### `_profiles/<email>` — opt-in display name + avatar
+Each user has an optional profile `{ name, shared, picture }`, editable only by themselves (or an admin,
+who may set `name` only) under **Settings → My profile**:
 - `name` — the user's display name; the identity that `@me` resolves to and that a user-backed list
   shows. Optional (a registered user may have no name → `@me` matches nothing).
 - `shared` — opt-in (default `false`). When `true`, the name is readable by any registered user via a
   **rules-provable** `.where('shared','==',true)` query (a constant comparison — unlike an
   intersection query, which Firestore cannot prove-authorize).
+- `picture` — an optional self-uploaded avatar stored inline as a `data:` URL. The image is downscaled
+  client-side (longest side ≤ 256px, JPEG) before saving and capped by the rules at ~350KB so a profile
+  doc stays well under Firestore's 1MB document limit — no separate Storage bucket needed.
 
 ### `listSources: { "<listName>": "users" }` — a name list fed by profiles
 A top-level schema map marking a list as user-backed. On boot the app **merges** the opted-in shared

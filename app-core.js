@@ -132,8 +132,8 @@ function createVueApp() {
       accessRequests: [],       // admin: pending membership requests
       accessRequested: false,   // unregistered user: have I already submitted a request this session
       accessRequestName: '',    // optional display name entered on the request banner
-      myProfile: { name: '', shared: false },   // this user's opt-in display-name profile
-      profileSaved: null,       // last-persisted {name, shared} snapshot -> skip redundant blur saves
+      myProfile: { name: '', shared: false, picture: '' },   // this user's opt-in display-name profile (+ optional avatar)
+      profileSaved: null,       // last-persisted {name, shared, picture} snapshot -> skip redundant blur saves
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
       periodOffset: 0,          // leaderboard ‹ › navigation: periods back from now (0 = current)
       firestoreRules: '',
@@ -541,7 +541,7 @@ function createVueApp() {
          'cal.today', 'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
          'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
-         'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name',
+         'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name', 'profile.picture', 'profile.upload_picture', 'profile.remove_picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
          'lang.app', 'lang.schema'].sort();
       },
@@ -2241,21 +2241,63 @@ function createVueApp() {
         var self = this;
         if (typeof backend_users === 'undefined' || !backend_users.getMyProfile) return;
         backend_users.getMyProfile().then(function(p) {
-          self.myProfile = { name: (p && p.name) || '', shared: !!(p && p.shared) };
-          self.profileSaved = { name: self.myProfile.name, shared: self.myProfile.shared };
+          self.myProfile = { name: (p && p.name) || '', shared: !!(p && p.shared), picture: (p && p.picture) || '' };
+          self.profileSaved = { name: self.myProfile.name, shared: self.myProfile.shared, picture: self.myProfile.picture };
         }).catch(function() {});
       },
-      // Auto-saves on blur (name) / toggle (shared) -- no explicit Save button. Skips the write when
-      // nothing changed since the last save so a plain focus-out doesn't churn the backend + lists.
+      // Auto-saves on blur (name) / toggle (shared) / picture change -- no explicit Save button. Skips the
+      // write when nothing changed since the last save so a plain focus-out doesn't churn the backend + lists.
       saveMyProfile: function() {
         var self = this;
         if (typeof backend_users === 'undefined' || !backend_users.setMyProfile) return;
-        var name = (this.myProfile.name || '').trim(), shared = !!this.myProfile.shared;
-        if (this.profileSaved && this.profileSaved.name === name && this.profileSaved.shared === shared) return;
-        backend_users.setMyProfile(name, shared).then(function() {
-          self.profileSaved = { name: name, shared: shared };
+        var name = (this.myProfile.name || '').trim(), shared = !!this.myProfile.shared, picture = this.myProfile.picture || '';
+        if (this.profileSaved && this.profileSaved.name === name && this.profileSaved.shared === shared && this.profileSaved.picture === picture) return;
+        backend_users.setMyProfile(name, shared, picture).then(function() {
+          self.profileSaved = { name: name, shared: shared, picture: picture };
           self._overlayUserLists();   // reflect the added/removed shared name in user-backed lists immediately
         }).catch(function(e) { self.notify((e && e.message) || 'Save failed'); });
+      },
+      // Profile picture upload: read the chosen file, downscale it to a small square-ish avatar (max 256px,
+      // JPEG) via a canvas so the stored data-URL stays small (well under the backend's ~350KB cap), then
+      // save. Keeping it a data-URL means no separate storage bucket / URL lifecycle to manage.
+      onProfilePictureFile: function(e) {
+        var self = this, input = e && e.target, file = input && input.files && input.files[0];
+        if (input) input.value = '';   // reset so re-picking the same file still fires @change
+        if (!file) return;
+        if (!/^image\//.test(file.type || '')) { this.notify('Please choose an image file'); return; }
+        this._resizeImageFile(file, 256).then(function(dataUrl) {
+          if (dataUrl.length > 350000) { self.notify('Image is too large, please choose a smaller one'); return; }
+          self.myProfile.picture = dataUrl;
+          self.saveMyProfile();
+        }).catch(function(err) { self.notify((err && err.message) || 'Could not read image'); });
+      },
+      removeMyPicture: function() {
+        if (!this.myProfile.picture) return;
+        this.myProfile.picture = '';
+        this.saveMyProfile();
+      },
+      // Downscale an image File to a data-URL whose longest side is <= max, preserving aspect ratio.
+      _resizeImageFile: function(file, max) {
+        return new Promise(function(resolve, reject) {
+          var reader = new FileReader();
+          reader.onerror = function() { reject(new Error('Could not read image')); };
+          reader.onload = function() {
+            var img = new Image();
+            img.onerror = function() { reject(new Error('That file is not a valid image')); };
+            img.onload = function() {
+              var w = img.width || 1, h = img.height || 1, scale = Math.min(1, max / Math.max(w, h));
+              var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+              var canvas = document.createElement('canvas');
+              canvas.width = cw; canvas.height = ch;
+              try {
+                canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
+                resolve(canvas.toDataURL('image/jpeg', 0.85));
+              } catch (err) { reject(new Error('Could not process image')); }
+            };
+            img.src = String(reader.result || '');
+          };
+          reader.readAsDataURL(file);
+        });
       },
       // Admin: every user's display name, for the Users management table (own name uses
       // myProfile/saveMyProfile above instead -- this is for viewing/editing OTHER users' names).

@@ -376,15 +376,17 @@ var backend_users = {
   // --- Opt-in display-name profiles (for user-backed lists / leaderboard identity) ---
   getMyProfile: function() {
     var email = _myEmail();
-    if (!email) return Promise.resolve({ name: '', shared: false });
+    if (!email) return Promise.resolve({ name: '', shared: false, picture: '' });
     return _db.collection('_profiles').doc(email).get()
-      .then(function(d) { return d.exists ? { name: d.data().name || '', shared: !!d.data().shared } : { name: '', shared: false }; })
-      .catch(function() { return { name: '', shared: false }; });
+      .then(function(d) { return d.exists ? { name: d.data().name || '', shared: !!d.data().shared, picture: d.data().picture || '' } : { name: '', shared: false, picture: '' }; })
+      .catch(function() { return { name: '', shared: false, picture: '' }; });
   },
-  setMyProfile: function(name, shared) {
+  // picture: an optional data-URL avatar (resized client-side); '' clears it. Written together with
+  // name/shared so a full set() keeps them in sync (setProfileName still merges name only, preserving this).
+  setMyProfile: function(name, shared, picture) {
     var email = _myEmail();
     if (!email) return Promise.reject(new Error('not signed in'));
-    return _db.collection('_profiles').doc(email).set({ name: name || '', shared: !!shared });
+    return _db.collection('_profiles').doc(email).set({ name: name || '', shared: !!shared, picture: picture || '' });
   },
   // Names of users who opted to share -- the query is rules-provable (constant shared==true).
   // Deliberately does NOT catch: a rejection is distinguishable from "nobody opted in", and the caller

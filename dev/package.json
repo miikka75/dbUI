@@ -11,12 +11,13 @@
     "test:e2e-firebase": "node run-with-emulators.mjs --only auth,firestore,storage --project demo-app -- npx playwright test test-ui/firebase-emulator.spec.js",
     "test:storage-rules": "node run-with-emulators.mjs --only storage,firestore --project demo-image -- node test-emulator/storage-rules.mjs",
     "test:rules": "node run-with-emulators.mjs --only firestore --project demo-rules -- node test-emulator/firestore-rules.mjs",
+    "test:cdn": "node test-cdn-fallback.mjs",
     "free-ports": "node free-emulator-ports.mjs",
     "test:all": "npm test && npm run test:rules && npm run test:storage-rules && npm run test:e2e-firebase && npm run test:ui"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.1",
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "1.56.0",
     "better-sqlite3": "^12.11.1",
     "firebase": "^12.16.0"
   }
