@@ -3058,7 +3058,11 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(r.afterRemoveRoster).toEqual([{ owner: 'you@x.com', status: 'maybe' }]); // no blank "me@x.com" line
     expect(r.afterRemoveTally).toEqual({ maybe: 1 });
     await expect(page.locator('[data-testid="rsvp-view"]')).toBeVisible();
-    await expect(page.locator('[data-testid="rsvp-roster"]').first()).toContainText('you@x.com'); // roster names render
+    // Roster renders participants, but a non-admin viewer must NOT see another member's raw email (sensitive):
+    // an unnamed participant shows the neutral placeholder instead.
+    const rosterText = await page.locator('[data-testid="rsvp-roster"]').first().textContent();
+    expect(rosterText).toContain('rsvp.member');     // unnamed participant -> neutral placeholder (untranslated key)
+    expect(rosterText).not.toContain('you@x.com');   // ...never their email (viewer is not an admin)
   });
 
   test('rsvp: status labels translate (statusList) + picker type is configurable', async ({ page }) => {
