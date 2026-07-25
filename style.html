@@ -44,6 +44,11 @@ html, body { margin: 0; padding: 0; height: 100%; background: #1a1a1a; }
 /* Focus fill: a subtle on-surface state layer (adapts per theme, stays clear of the text color) rather
    than the fixed dark `surface-variant` — which read too dark in light mode / too bright in dark mode. */
 .editable-cell:focus { background: rgba(var(--v-theme-on-surface), var(--v-focus-opacity)); border-color: rgb(var(--v-theme-primary)); outline: none; }
+/* user avatar: the initial shown when someone has a name but no uploaded picture */
+.user-avatar__initial { font-weight: 600; line-height: 1; text-transform: uppercase; }
+/* rsvp roster: each person is an inline avatar + name chip; groups wrap without splitting a person */
+.rsvp-roster-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.rsvp-person { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 /* image-column thumbnail (data-cell): fixed-height preview that links to the full image */
 .cell-thumb { height: 36px; max-width: 96px; object-fit: cover; border-radius: 4px; border: 1px solid rgb(var(--v-theme-outline), 0.3); display: block; }
 td { vertical-align: middle; padding: 4px 8px !important; }

@@ -293,6 +293,11 @@ const server = http.createServer(async (req, res) => {
         const names = Object.values(backend._profiles || {}).filter(p => p && p.shared && (p.name || '').trim()).map(p => p.name.trim());
         return json(res, Array.from(new Set(names)).sort((a, b) => a.localeCompare(b)));
       }
+      case 'getSharedProfiles': {
+        const out = {};
+        for (const [email, p] of Object.entries(backend._profiles || {})) { if (p && p.shared) out[email] = { name: p.name || '', picture: p.picture || '' }; }
+        return json(res, out);
+      }
       case 'setProfileName': {
         if (!backend._profiles) backend._profiles = {};
         const k = (body.email || '').toLowerCase();

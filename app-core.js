@@ -541,7 +541,7 @@ function createVueApp() {
          'cal.today', 'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
          'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
-         'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name', 'profile.picture', 'profile.upload_picture', 'profile.remove_picture',
+         'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name', 'profile.picture', 'profile.upload_picture', 'profile.change_picture', 'profile.remove_picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
          'lang.app', 'lang.schema'].sort();
       },
@@ -2132,7 +2132,7 @@ function createVueApp() {
           var p = new URLSearchParams(location.search);
           self.currentUserEmail = p.get('user') || localStorage.getItem('test_user') || 'local@dev';
         }
-        var done = function() { self.usersLoaded = true; self.loading = false; self.loadMyProfile(); self._overlayUserLists(); self._autoSelectTab(); };
+        var done = function() { self.usersLoaded = true; self.loading = false; self.loadMyProfile(); self.loadSharedProfiles(); self._overlayUserLists(); self._autoSelectTab(); };
         // Legacy backends without getMyAccess: keep the full-map path (rules-free local/Drive).
         if (typeof backend_users.getMyAccess !== 'function') {
           backend_users.getUsers().then(function(u) {
@@ -2303,13 +2303,32 @@ function createVueApp() {
       // myProfile/saveMyProfile above instead -- this is for viewing/editing OTHER users' names).
       loadAllProfiles: function() {
         var self = this;
-        if (typeof backend_users === 'undefined' || !backend_users.getProfiles) { self.profilesByEmail = {}; return; }
-        backend_users.getProfiles().then(function(m) { self.profilesByEmail = m || {}; }).catch(function() { self.profilesByEmail = {}; });
+        if (typeof backend_users === 'undefined' || !backend_users.getProfiles) return;
+        // Merge (not replace): loadSharedProfiles may resolve either side of this, and both hold the same
+        // data for overlapping emails, so a union is always correct and order-independent.
+        backend_users.getProfiles().then(function(m) { self.profilesByEmail = Object.assign({}, self.profilesByEmail, m || {}); }).catch(function() {});
+      },
+      // Every user (not just admins) loads the opted-in shared profiles so other people's names + avatars can
+      // render wherever a user shows up (roster, user-backed surfaces). Shared profiles are world-readable by
+      // rule; this is the non-admin counterpart to loadAllProfiles (which reads the whole collection). Merge,
+      // for the same order-independence reason noted above.
+      loadSharedProfiles: function() {
+        var self = this;
+        if (typeof backend_users === 'undefined' || !backend_users.getSharedProfiles) return;
+        backend_users.getSharedProfiles().then(function(m) { self.profilesByEmail = Object.assign({}, self.profilesByEmail, m || {}); }).catch(function() {});
       },
       // Opted-in display name for an email, or '' if none. The single lookup into profilesByEmail;
       // callers pick their own fallback (the Users table wants a blank cell, the rsvp roster wants the
       // email so the row still reads as someone).
       profileName: function(email) { return (this.profilesByEmail[(email || '').toLowerCase()] || {}).name || ''; },
+      // Avatar data-URL for an email, or '' if none. Own email short-circuits to myProfile.picture so your
+      // face renders everywhere immediately — even before (or without) opting into sharing, and fresher than
+      // any cached copy in profilesByEmail.
+      profilePicture: function(email) {
+        var e = (email || '').toLowerCase();
+        if (e && e === (this.currentUserEmail || '').toLowerCase()) return this.myProfile.picture || '';
+        return (this.profilesByEmail[e] || {}).picture || '';
+      },
       userDisplayName: function(u) { return this.profileName(u.key); },
       renameUserProfile: function(u, name) {
         var self = this, email = (u.key || '').toLowerCase(), trimmed = (name || '').trim();
@@ -3534,6 +3553,26 @@ function createVueApp() {
       + '</component>'
   });
 
+  // A person's avatar, resolved from their email: their uploaded picture, else their name's initial, else a
+  // generic account icon. The single place a user's face renders, reused everywhere a user is shown (app bar,
+  // Users table, rsvp roster). `name` is an optional override so callers that already have the display name
+  // don't force a second profilesByEmail lookup. `title` falls through onto the avatar for a hover tooltip.
+  app.component('user-avatar', {
+    props: { email: { type: String, default: '' }, name: { type: String, default: '' }, size: { type: [Number, String], default: 28 } },
+    computed: {
+      pic: function() { return appInstance.profilePicture(this.email); },
+      label: function() { return this.name || appInstance.profileName(this.email) || this.email || ''; },
+      initial: function() { var s = (this.label || '').trim(); return s ? s.charAt(0).toUpperCase() : ''; },
+      iconSize: function() { return Math.round(Number(this.size) * 0.6) || 16; }
+    },
+    template: ''
+      + '<v-avatar :size="size" color="surface-variant" class="user-avatar">'
+      + '<v-img v-if="pic" :src="pic" :alt="label" cover></v-img>'
+      + '<span v-else-if="initial" class="user-avatar__initial" :style="{ fontSize: (Number(size) * 0.45) + \'px\' }">{{ initial }}</span>'
+      + '<v-icon v-else :size="iconSize" icon="mdi-account"></v-icon>'
+      + '</v-avatar>'
+  });
+
   // The current user's status control for one event — the 3 picker variants share this so the rsvp table
   // and card layouts render the same widget. Emits 'set' with the chosen value ('' when deselected).
   app.component('rsvp-picker', {
@@ -3599,12 +3638,14 @@ function createVueApp() {
       statusLabel: function(v) { var list = this.cfg.statusList || appInstance.colIsList(this.cfg.statusColumn) || this.cfg.statusColumn; return appInstance.tOr('list.' + list + '.' + v, v); },
       tallyText: function(ev) { var self = this; return Object.keys(ev.tally).sort().map(function(s) { return self.statusLabel(s) + ': ' + ev.tally[s]; }).join('  ·  '); },
       ownerName: function(email) { return appInstance.profileName(email) || email; },
-      // Participants grouped by status: [{ status, label, names:[...] }], in the configured status order.
+      // Participants grouped by status: [{ status, label, people:[{ email, name }] }], in the configured
+      // status order. Carries each person's email (not just a joined name string) so the roster can render an
+      // avatar per person.
       rosterGroups: function(ev) {
         var self = this, order = this.options.map(function(o) { return o.value; }), groups = {};
-        ev.participants.forEach(function(p) { (groups[p.status] || (groups[p.status] = [])).push(self.ownerName(p.owner)); });
+        ev.participants.forEach(function(p) { (groups[p.status] || (groups[p.status] = [])).push({ email: p.owner, name: self.ownerName(p.owner) }); });
         var keys = Object.keys(groups).sort(function(a, b) { var ia = order.indexOf(a), ib = order.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
-        return keys.map(function(s) { return { status: s, label: self.statusLabel(s), names: groups[s] }; });
+        return keys.map(function(s) { return { status: s, label: self.statusLabel(s), people: groups[s] }; });
       }
     }),
     template: ''
@@ -3624,7 +3665,7 @@ function createVueApp() {
       + '<td>{{ ev.title }}</td>'
       + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker></td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
-      + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status"><span style="opacity:0.6">{{ g.label }}:</span> {{ g.names.join(", ") }}</div></td>'
+      + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <span v-for="p in g.people" :key="p.email" class="rsvp-person"><user-avatar :email="p.email" :name="p.name" :size="20"></user-avatar>{{ p.name }}</span></div></td>'
       + '</tr>'
       + '<tr v-if="!events.length"><td colspan="5" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</td></tr>'
       + '</tbody>'
@@ -3635,7 +3676,7 @@ function createVueApp() {
       + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}</div>'
       + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
-      + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status"><span style="opacity:0.6">{{ g.label }}:</span> {{ g.names.join(", ") }}</div></div>'
+      + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <span v-for="p in g.people" :key="p.email" class="rsvp-person"><user-avatar :email="p.email" :name="p.name" :size="20"></user-avatar>{{ p.name }}</span></div></div>'
       + '</v-card>'
       + '<div v-if="!events.length" class="pa-2" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</div>'
       + '</div>'

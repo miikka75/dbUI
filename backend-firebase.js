@@ -398,6 +398,15 @@ var backend_users = {
       return out.sort(function(a, b) { return a.localeCompare(b); });
     });
   },
+  // Every opted-in user's { name, picture } keyed by email — the same rules-provable shared==true query as
+  // getSharedNames, but carrying the avatar so any registered user (not just admins) can render other
+  // people's faces in the roster / user-backed surfaces. Swallows into {} on a rejection/offline read: the
+  // avatar is decorative, so callers keep the plain name fallback rather than blanking anything.
+  getSharedProfiles: function() {
+    return _db.collection('_profiles').where('shared', '==', true).get().then(function(snap) {
+      var o = {}; snap.forEach(function(d) { var v = d.data(); o[d.id] = { name: v.name || '', picture: v.picture || '' }; }); return o;
+    }).catch(function() { return {}; });
+  },
   // Admin-only: seed/rename another user's profile display name (e.g. from their access request on
   // approval, or from the Users table). Merges name only so an existing `shared` opt-in is preserved.
   // Rules allow admin to write any profile.

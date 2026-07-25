@@ -143,6 +143,7 @@
       </v-tabs>
       <v-spacer v-else></v-spacer>
       <v-select v-if="languages.length > 1" v-model="currentLang" name="current-lang" :items="langItems" density="compact" variant="plain" hide-details style="max-width:120px" class="mr-2" @update:model-value="switchLanguage"></v-select>
+      <user-avatar v-if="usersLoaded && !isUnregisteredUser" :email="currentUserEmail" :name="myProfile.name" :size="32" :title="myProfile.name || currentUserEmail" class="mr-2"></user-avatar>
       <v-btn icon="mdi-refresh" @click="refreshData" :loading="syncing"></v-btn>
       <v-btn :icon="theme === 'dark' ? 'mdi-weather-sunny' : 'mdi-weather-night'" @click="toggleTheme"></v-btn>
     </v-app-bar>
@@ -492,7 +493,7 @@
               </v-avatar>
               <div class="d-flex flex-column align-start" style="gap:4px">
                 <input ref="profilePicInput" type="file" accept="image/*" hidden @change="a.onProfilePictureFile($event)">
-                <v-btn size="small" variant="outlined" prepend-icon="mdi-camera" @click="$refs.profilePicInput.click()">{{ a.tOr('profile.upload_picture', a.myProfile.picture ? 'Change picture' : 'Upload picture') }}</v-btn>
+                <v-btn size="small" variant="outlined" prepend-icon="mdi-camera" @click="$refs.profilePicInput.click()">{{ a.myProfile.picture ? a.tOr('profile.change_picture','Change picture') : a.tOr('profile.upload_picture','Upload picture') }}</v-btn>
                 <v-btn v-if="a.myProfile.picture" size="x-small" variant="text" color="error" prepend-icon="mdi-delete" @click="a.removeMyPicture()">{{ a.tOr('profile.remove_picture','Remove picture') }}</v-btn>
               </div>
             </div>
@@ -530,7 +531,7 @@
               <tbody>
                 <tr v-for="u in a.sortedUserList" :key="u.key">
                   <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="a.renameUser(u, $event.target.textContent.trim())">{{ u.key.indexOf('_new_') === 0 ? '' : u.key }}</span></td>
-                  <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="a.renameUserProfile(u, $event.target.textContent)">{{ a.userDisplayName(u) }}</span></td>
+                  <td><div class="d-flex align-center" style="gap:8px"><user-avatar :email="u.key" :name="a.userDisplayName(u)" :size="28"></user-avatar><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="a.renameUserProfile(u, $event.target.textContent)">{{ a.userDisplayName(u) }}</span></div></td>
                   <td><v-select :model-value="u.role" :name="'role-' + u.key" :items="a.roleItems" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="a.setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>
                   <td><v-select :model-value="a.userFeatures(u)" :items="a.grantFeatureChips" item-title="label" item-value="id" multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:180px;max-width:320px" @update:model-value="a.updateUserTables(u, $event)"></v-select></td>
                   <td><v-btn :icon="a.isArmed('user:'+u.key) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('user:'+u.key) ? 'error' : ''" @click="a.isArmed('user:'+u.key) ? a.removeUser(u.key) : a.armDelete('user:'+u.key)"></v-btn></td>
