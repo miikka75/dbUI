@@ -493,7 +493,7 @@
               </v-avatar>
               <div class="d-flex flex-column align-start" style="gap:4px">
                 <input ref="profilePicInput" type="file" accept="image/*" hidden @change="a.onProfilePictureFile($event)">
-                <v-btn size="small" variant="outlined" prepend-icon="mdi-camera" @click="$refs.profilePicInput.click()">{{ a.myProfile.picture ? a.tOr('profile.change_picture','Change picture') : a.tOr('profile.upload_picture','Upload picture') }}</v-btn>
+                <v-btn size="small" variant="outlined" prepend-icon="mdi-camera" @click="$refs.profilePicInput.click()">{{ a.myProfile.picture ? a.t('profile.change_picture') : a.t('profile.upload_picture') }}</v-btn>
                 <v-btn v-if="a.myProfile.picture" size="x-small" variant="text" color="error" prepend-icon="mdi-delete" @click="a.removeMyPicture()">{{ a.tOr('profile.remove_picture','Remove picture') }}</v-btn>
               </div>
             </div>

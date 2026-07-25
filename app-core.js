@@ -3642,7 +3642,7 @@ function createVueApp() {
       // A participant's display label: their shared name if any. Falls back to the raw email ONLY for admins
       // (sensitive data); a non-admin sees a neutral placeholder for anyone who hasn't shared a name, so the
       // public roster never leaks emails.
-      ownerName: function(email) { return appInstance.profileName(email) || (appInstance.isAdmin ? (email || '') : appInstance.tOr('rsvp.member', 'Member')); },
+      ownerName: function(email) { return appInstance.profileName(email) || (appInstance.isAdmin ? (email || '') : appInstance.t('rsvp.member')); },
       // Participants grouped by status: [{ status, label, people:[{ email, name }] }], in the configured
       // status order. Carries each person's email (not just a joined name string) so the roster can render an
       // avatar per person.
