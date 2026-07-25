@@ -10,6 +10,10 @@ curl -sfo vue.js "https://cdn.jsdelivr.net/npm/vue@${VUE}/dist/vue.global.prod.j
 curl -sfo vuetify.js "https://cdn.jsdelivr.net/npm/vuetify@${VUETIFY}/dist/vuetify.min.js"
 curl -sfo vuetify.css "https://cdn.jsdelivr.net/npm/vuetify@${VUETIFY}/dist/vuetify.min.css"
 curl -sfo mdi.css "https://cdn.jsdelivr.net/npm/@mdi/font@${MDI}/css/materialdesignicons.min.css"
+# The npm/CDN mdi css lives under css/ and points at ../fonts/. We flatten it to /vendor/mdi.css, so
+# rewrite the font ref to ./fonts/ — otherwise ../fonts/ resolves to /fonts/ (404) and the icon glyphs
+# never load. (Keep this in sync with .claude/hooks/session-start.sh, which materialises vendor/ in CI.)
+sed -i 's#\.\./fonts/#./fonts/#g' mdi.css
 mkdir -p fonts
 curl -sfo fonts/materialdesignicons-webfont.woff2 "https://cdn.jsdelivr.net/npm/@mdi/font@${MDI}/fonts/materialdesignicons-webfont.woff2"
 cd ..
