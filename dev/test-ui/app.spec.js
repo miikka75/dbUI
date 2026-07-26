@@ -240,7 +240,9 @@ test.describe('image/url column types', () => {
 
     // The local dev backend exposes uploadFile -> the image cell shows an upload button, not a URL field.
     await expect(page.locator('.mdi-camera-plus')).toBeVisible();
-    await expect(page.locator('input[placeholder="Image URL"]')).toHaveCount(0);
+    // Placeholder is i18n-keyed (t('img.url')); derive the rendered text so the selector survives translation.
+    const imgUrlPlaceholder = await page.evaluate(() => window.appInstance.t('img.url'));
+    await expect(page.locator(`input[placeholder="${imgUrlPlaceholder}"]`)).toHaveCount(0);
 
     // Pick a real PNG -> uploadFile POSTs it to the dev server, which stores it and returns a URL.
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -299,7 +301,9 @@ test.describe('image/url column types', () => {
 
     // No uploadFile -> image cell is a URL field (no upload button); url column has its own input.
     await expect(page.locator('.mdi-camera-plus, .mdi-image-edit')).toHaveCount(0);
-    await expect(page.locator('input[placeholder="Image URL"]')).toBeVisible();
+    // Placeholder is i18n-keyed (t('img.url')); derive the rendered text so the selector survives translation.
+    const imgUrlPlaceholder = await page.evaluate(() => window.appInstance.t('img.url'));
+    await expect(page.locator(`input[placeholder="${imgUrlPlaceholder}"]`)).toBeVisible();
     await expect(page.locator('input[placeholder^="https"]')).toBeVisible();
 
     // Store values, then assert the render: <img> thumbnail for image, open-link icon for url.
@@ -1602,7 +1606,9 @@ test.describe('importData error recovery', () => {
         setTimeout(function() { resolve(msg); }, 500);
       });
     });
-    expect(blocked).toContain('Import blocked');
+    // Notify text is i18n-keyed (t('msg.import_blocked') + detail); derive the prefix so the assertion survives translation.
+    const importBlockedPrefix = await page.evaluate(() => appInstance.t('msg.import_blocked'));
+    expect(blocked).toContain(importBlockedPrefix);
     expect(await page.evaluate(() => appInstance.sortedData.length)).toBe(before);
   });
 });
