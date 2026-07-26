@@ -1548,6 +1548,11 @@ function createVueApp() {
         var value = item[col];
         if (!value) return;
         var listName = this.colIsList(col);
+        // When the cell is switched to the alt list (the swap arrow), a newly typed name must be added to
+        // that alt list — not the primary one. Mirrors listItems()/isAltList() so the dropdown and the
+        // append target stay in sync.
+        var sw = this.colListSwitch(col);
+        if (sw && sw.list && this.isAltList(col, item)) listName = sw.list;
         if (!listName || !this.listsCache[listName]) return;
         var self = this, vals = Array.isArray(value) ? value : [value];
         vals.forEach(function(v) {
@@ -3392,7 +3397,11 @@ function createVueApp() {
     template: ''
       + '<v-list density="compact">'
       + '<v-list-item v-for="item in rows" :key="item.id" class="px-2">'
-      + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" style="font-size:0.85rem">{{ displayValue(col, item[col]) }}<span v-if="i < cols.length - 1" style="opacity:0.3; margin:0 6px">·</span></span></template>'
+      + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" class="d-inline-flex align-center" style="font-size:0.85rem">'
+      +   '<a v-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="safeImg(item[col])" class="cell-thumb" alt=""></a>'
+      +   '<template v-else>{{ displayValue(col, item[col]) }}</template>'
+      +   '<span v-if="i < cols.length - 1" style="opacity:0.3; margin:0 6px">·</span>'
+      + '</span></template>'
       + '<template v-slot:append>'
       + '<v-btn v-if="canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>'
       + '<template v-if="canMutateRows">'

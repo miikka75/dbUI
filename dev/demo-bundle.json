@@ -155,7 +155,16 @@
         "title": "Weekly sync",
         "content": "Discussed the roster and open tasks.",
         "author": "Cara",
+        "photo": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAQklEQVR4nO3OQQ0AIAwAselDHRpRgguOR5MK6Kx9vjL5QEhISKgeCAkJCdUDISEhoXogJCQkVA+EhISE6oGQkNBjF9JpnOKvnMJVAAAAAElFTkSuQmCC",
         "link": "https://example.com/weekly-sync"
+      },
+      {
+        "id": "seed-notes-2",
+        "date": "2026-07-20",
+        "title": "Design review",
+        "content": "Reviewed the new list layout with thumbnails.",
+        "author": "Dan",
+        "photo": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAQklEQVR4nO3OQQ0AIAwAselDGjJRgguOR5MK6Jy9vjL5QEhISKgeCAkJCdUDISEhoXogJCQkVA+EhISE6oGQkNBjF0gMZuIiFOH8AAAAAElFTkSuQmCC"
       }
     ],
     "practices": [

@@ -264,6 +264,35 @@ test.describe('image/url column types', () => {
     }, { timeout: 4000 }).toBe(src);
   });
 
+  test('compact list layout renders an image column as a thumbnail, not the raw URL', async ({ page }) => {
+    test.setTimeout(20000);
+    // Same gallery table, but forced through the compact single-line list layout (data-list).
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: Object.assign({}, GALLERY, {
+      tables: { gallery: Object.assign({ layout: 'list' }, GALLERY.tables.gallery) }
+    }) } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => window.appInstance.selectTab('gallery'));
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(150);
+
+    // Store a title + a raster data-image on the row.
+    const img1x1 = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+    await page.evaluate((s) => { const a = window.appInstance, r = a.currentData[0]; a.saveField(r, 'title', 'Widget'); a.saveField(r, 'photo', s); }, img1x1);
+
+    // We are in the list layout (no editing grid), and the image cell is a thumbnail whose src is the stored value.
+    await expect(page.locator('.v-table')).toHaveCount(0);
+    const thumb = page.locator('img.cell-thumb');
+    await expect(thumb).toBeVisible();
+    expect(await thumb.getAttribute('src')).toBe(img1x1);
+    // Non-image columns still render as text alongside it (same list row as the thumbnail).
+    await expect(page.locator('.v-list-item', { hasText: 'Widget' })).toBeVisible();
+  });
+
   test('image degrades to a paste-a-URL field on a backend without uploadFile; url renders a link', async ({ page }) => {
     test.setTimeout(20000);
     await openGallery(page, { dropUploader: true });
@@ -1743,6 +1772,40 @@ test.describe('listSwitch (toggle between two dropdown lists)', () => {
     const afterToggle = await page.evaluate(() => appInstance.isAltList('person', appInstance.sortedData[0]));
     expect(afterToggle).toBe(true);
   });
+
+  test('a new name typed while switched to the alt list is added to the alt list, not the primary', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/saveLists', { data: { folderId: 'local', lists: { internal: ['Alice', 'Bob'], external: ['ExtJohn', 'ExtJane'] } } });
+    await page.request.post('/api/putRow', { data: { tableId: 't', data: { id: 'r1', person: 'Alice' }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.t' }).first().click();
+    await page.waitForTimeout(200);
+    const result = await page.evaluate(async () => {
+      var item = appInstance.sortedData[0];
+      // Spy on the persistence call so we assert BOTH the in-memory cache and what was written to the backend.
+      var puts = [];
+      var realPut = backend.putListItem;
+      backend.putListItem = function(folder, list, v) { puts.push({ list: list, v: v }); return realPut && realPut.apply(backend, arguments); };
+      // Switch the cell to the alt list (the swap arrow), then type a brand-new name.
+      appInstance.toggleListSwitch('person', item);
+      item.person = 'Zelda';                       // a name in neither list
+      appInstance.addToListOnBlur(item, 'person');
+      backend.putListItem = realPut;
+      return {
+        inExternal: (appInstance.listsCache.external || []).indexOf('Zelda') >= 0,
+        inInternal: (appInstance.listsCache.internal || []).indexOf('Zelda') >= 0,
+        puts: puts
+      };
+    });
+    expect(result.inExternal).toBe(true);   // the new name landed in the alt list...
+    expect(result.inInternal).toBe(false);  // ...and NOT the primary list
+    expect(result.puts).toEqual([{ list: 'external', v: 'Zelda' }]); // persisted to the alt list only
+  });
 });
 
 test.describe('collectWith (role alongside date)', () => {
@@ -2892,7 +2955,7 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
     const ids = await page.evaluate(() => appInstance.sidebarTabs.map(t => t.id + (t.children ? '[' + t.children.map(c => c.id).join(',') + ']' : '')));
     expect(ids.some(s => s.startsWith('grp:Data['))).toBe(true);                 // nav group
-    expect(ids.some(s => s.startsWith('all_items[summary_cards,quick_list]'))).toBe(true); // nested clickable parent
+    expect(ids.some(s => s.startsWith('all_items[summary_cards,quick_list,notes_list]'))).toBe(true); // nested clickable parent
   });
 
   test('demo pages render embeds (combined + aggregate + archive) and all layouts', async ({ page }) => {
