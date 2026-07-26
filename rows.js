@@ -239,7 +239,16 @@
         if (comp.rotationTable) {
           var rot = cache[comp.rotationTable] || [];
           if (comp.advanceBy === 'occurrence') {
-            r[d.name] = Rot.resolveByOccurrence(rot, cache[comp.occurrenceSource] || rows, r, comp.occurrenceSort);
+            // Occurrence rank must be ABSOLUTE, so archiving a past occurrence never renumbers future
+            // ones. When the occurrenceSource is an archivable mirror (e.g. usher turns mirroring
+            // meetings), archived rows still count toward the rank. They sort before the active rows
+            // (earlier dates), so an active row keeps its index as earlier rows move to the archive
+            // (+1 archived, -1 active cancel). Without this, archiving one meeting slides the whole
+            // roster by a slot. Falls back to the view rows when no explicit occurrenceSource.
+            var occSrc = comp.occurrenceSource
+              ? (cache[comp.occurrenceSource] || []).concat(cache[comp.occurrenceSource + '__archive'] || [])
+              : rows;
+            r[d.name] = Rot.resolveByOccurrence(rot, occSrc, r, comp.occurrenceSort);
           } else if (comp.advanceBy === 'calendar') {
             var target = comp.dateField ? r[comp.dateField] : (ctx && ctx.todayDate);
             r[d.name] = Rot.resolveByCalendar(rot, target, Rot.resolveAnchorDate(comp, ctx && ctx.rotationAnchor), comp.interval);

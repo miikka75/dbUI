@@ -1294,17 +1294,25 @@ function createVueApp() {
             });
           });
           // Preload rotation-column dependencies (rotationTable + occurrenceSource), then recompute.
+          // The occurrenceSource ARCHIVE partition is also loaded so the occurrence rank stays absolute
+          // (archived turns still count) even when preload_archive is off — see resolveComputed.
+          var recomputeRotation = function() {
+            var vMe2 = self._viewWithMe(view);
+            var src2 = buildRows(vMe2, self.dataCache);
+            if (view.compute) src2 = resolveComputed(src2, view.compute, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
+            self.currentData = resolveComputed(aggregateRows(vMe2, src2), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
+          };
           (view.columns || []).forEach(function(c) {
             if (!c || typeof c !== 'object' || !c.computed || !c.computed.rotationTable) return;
-            [c.computed.rotationTable, c.computed.occurrenceSource].forEach(function(tbl) {
-              if (!tbl || (allowed && allowed.indexOf(tbl) < 0) || self.dataCache[tbl]) return;
-              backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
-                self.dataCache[tbl] = parseTableResult(result).rows;
-                var vMe2 = self._viewWithMe(view);
-                var src2 = buildRows(vMe2, self.dataCache);
-                if (view.compute) src2 = resolveComputed(src2, view.compute, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
-                self.currentData = resolveComputed(aggregateRows(vMe2, src2), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
-              }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
+            var comp = c.computed;
+            var deps = [{ table: comp.rotationTable, part: 'active', key: comp.rotationTable }, { table: comp.occurrenceSource, part: 'active', key: comp.occurrenceSource }];
+            if (comp.occurrenceSource) deps.push({ table: comp.occurrenceSource, part: 'archive', key: aKey(comp.occurrenceSource) });
+            deps.forEach(function(dep) {
+              if (!dep.table || (allowed && allowed.indexOf(dep.table) < 0) || self.dataCache[dep.key]) return;
+              backend.getTableData(self.tableMap[dep.table], dep.part).then(function(result) {
+                self.dataCache[dep.key] = parseTableResult(result).rows;
+                recomputeRotation();
+              }).catch(function() { self.dataCache[dep.key] = self.dataCache[dep.key] || []; });
             });
           });
         } else {
