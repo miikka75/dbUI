@@ -290,8 +290,19 @@ function _startFirebase(config) {
     try { _db.useEmulator('127.0.0.1', 8080); } catch (e) {}
     try { if (_storage) _storage.useEmulator('127.0.0.1', 9199); } catch (e) {}
     console.info('[firebase] using local emulators — auth:9099 firestore:8080 storage:9199');
+    // Emulator path: useEmulator() already consumed settings(), so keep the legacy persistence call.
+    _db.enablePersistence().catch(function() {});
+  } else {
+    // Enable offline persistence via the modern FirestoreSettings.cache API so the SDK doesn't log
+    // the enableIndexedDbPersistence() deprecation warning. persistentLocalCache with no tab manager
+    // matches the old single-tab enablePersistence() behavior. settings() must run before any read/write.
+    // Fall back to the legacy call on SDK builds that don't expose the cache builders.
+    try {
+      var ff = firebase.firestore;
+      if (ff && ff.persistentLocalCache) { _db.settings({ cache: ff.persistentLocalCache({}) }); }
+      else { _db.enablePersistence().catch(function() {}); }
+    } catch (e) { try { _db.enablePersistence().catch(function() {}); } catch (e2) {} }
   }
-  _db.enablePersistence().catch(function() {});
   _auth.onAuthStateChanged(function(user) {
     if (typeof window !== 'undefined' && window.bootMark) window.bootMark('authReady'); // auth RTT resolved
     if (user) { appInstance.currentUserEmail = user.email; init(); }

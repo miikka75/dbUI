@@ -3035,10 +3035,15 @@ function createVueApp() {
           }
         }
       });
-      // Probe local server availability for setup UI
-      fetch('/api/validateFolder', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' })
-        .then(function(r) { if (r.ok) self.hasLocalServer = true; })
-        .catch(function() {});
+      // Probe local server availability for setup UI — but only when a local dev server could
+      // actually be present. On a committed cloud backend (firebase/sheets/crdt) there is no /api
+      // endpoint, so the probe would just log a spurious 404 to the console on every load.
+      var appMode = (function() { try { return localStorage.getItem('app_mode'); } catch (e) { return null; } })();
+      if (appMode !== 'firebase' && appMode !== 'sheets' && appMode !== 'crdt') {
+        fetch('/api/validateFolder', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' })
+          .then(function(r) { if (r.ok) self.hasLocalServer = true; })
+          .catch(function() {});
+      }
     }
   });
 
