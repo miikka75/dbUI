@@ -125,7 +125,10 @@ function buildBundle() {
       { date: D.today,     title: 'Fix roof',    status: 'open',        assigned_to: 'Ann', city: 'Springfield' },
       { date: D.yesterday, title: 'Paint fence', status: 'in_progress', assigned_to: 'Bob', city: 'Chicago' }
     ],
-    notes: [ { date: D.today, title: 'Weekly sync', content: 'Discussed the roster and open tasks.', author: 'Cara', link: 'https://example.com/weekly-sync' } ],
+    notes: [
+      { date: D.today, title: 'Weekly sync', content: 'Discussed the roster and open tasks.', author: 'Cara', photo: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAQklEQVR4nO3OQQ0AIAwAselDHRpRgguOR5MK6Kx9vjL5QEhISKgeCAkJCdUDISEhoXogJCQkVA+EhISE6oGQkNBjF9JpnOKvnMJVAAAAAElFTkSuQmCC', link: 'https://example.com/weekly-sync' },
+      { date: D.yesterday, title: 'Design review', content: 'Reviewed the new list layout with thumbnails.', author: 'Dan', photo: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAQklEQVR4nO3OQQ0AIAwAselDGjJRgguOR5MK6Jy9vjL5QEhISKgeCAkJCdUDISEhoXogJCQkVA+EhISE6oGQkNBjF0gMZuIiFOH8AAAAAElFTkSuQmCC' }
+    ],
     // RSVP demo: upcoming events (practices) + everyone's owner-stamped responses (rsvps). The current
     // user (local@dev) has responded to p1/p2 but not p3 -> the my_rsvp view offers to set a status there.
     // rosterPublic marks each response readable by all (the roster:"all" gate; ignored by the dev server).

@@ -264,6 +264,35 @@ test.describe('image/url column types', () => {
     }, { timeout: 4000 }).toBe(src);
   });
 
+  test('compact list layout renders an image column as a thumbnail, not the raw URL', async ({ page }) => {
+    test.setTimeout(20000);
+    // Same gallery table, but forced through the compact single-line list layout (data-list).
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: Object.assign({}, GALLERY, {
+      tables: { gallery: Object.assign({ layout: 'list' }, GALLERY.tables.gallery) }
+    }) } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => window.appInstance.selectTab('gallery'));
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+    await page.locator('button:has(.mdi-plus)').click();
+    await page.waitForTimeout(150);
+
+    // Store a title + a raster data-image on the row.
+    const img1x1 = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+    await page.evaluate((s) => { const a = window.appInstance, r = a.currentData[0]; a.saveField(r, 'title', 'Widget'); a.saveField(r, 'photo', s); }, img1x1);
+
+    // We are in the list layout (no editing grid), and the image cell is a thumbnail whose src is the stored value.
+    await expect(page.locator('.v-table')).toHaveCount(0);
+    const thumb = page.locator('img.cell-thumb');
+    await expect(thumb).toBeVisible();
+    expect(await thumb.getAttribute('src')).toBe(img1x1);
+    // Non-image columns still render as text alongside it (same list row as the thumbnail).
+    await expect(page.locator('.v-list-item', { hasText: 'Widget' })).toBeVisible();
+  });
+
   test('image degrades to a paste-a-URL field on a backend without uploadFile; url renders a link', async ({ page }) => {
     test.setTimeout(20000);
     await openGallery(page, { dropUploader: true });

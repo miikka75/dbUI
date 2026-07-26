@@ -387,6 +387,18 @@
       ]
     },
     {
+      "name": "notes_list",
+      "sources": [
+        "notes"
+      ],
+      "mode": "union",
+      "layout": "list",
+      "columns": [
+        "title",
+        "photo"
+      ]
+    },
+    {
       "name": "combined_page",
       "markdown": "{{t:view.combined.header}}\n\n{{view:combined}}\n\n## Attendance\n\n{{view:attendance}}\n\n## Archived tasks\n\n{{table:tasks@archive?}}\n\n## Notes\n\n{{table:notes}}\n\n{{t:view.combined.footer}}"
     },
@@ -653,6 +665,9 @@
           },
           {
             "view": "quick_list"
+          },
+          {
+            "view": "notes_list"
           }
         ]
       },
