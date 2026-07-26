@@ -531,17 +531,26 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
+         'btn.edit', 'btn.preview', 'btn.save', 'col.switch_list',
+         'img.replace', 'img.upload', 'img.remove', 'img.url',
+         'msg.saved', 'msg.save_failed', 'msg.upload_failed', 'msg.choose_image', 'msg.image_too_large', 'msg.image_read_failed', 'msg.image_invalid', 'msg.image_process_failed',
+         'msg.row_added', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.synced', 'msg.sync_failed',
+         'msg.load_failed', 'msg.request_failed', 'msg.approve_failed', 'msg.import_complete',
+         'msg.group_added', 'msg.item_added', 'msg.translation_saved', 'msg.language_added', 'msg.language_renamed', 'msg.language_exists',
+         'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
+         'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error',
+         'pivot.total', 'pivot.empty',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
-         'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all', 'settings.save_failed',
+         'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all',
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset',
          'cal.today', 'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
          'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none', 'rsvp.member',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
-         'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name', 'profile.picture', 'profile.upload_picture', 'profile.change_picture', 'profile.remove_picture',
+         'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
          'lang.app', 'lang.schema'].sort();
       },
@@ -733,7 +742,7 @@ function createVueApp() {
               self.schemaData = Object.freeze(parsed);
               self._tableOrder = Object.keys(parsed.tables || {});
               var schemaErrors = validateSchema();
-              if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify('Schema: ' + schemaErrors[0]); }
+              if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify(self.t('msg.schema_error') + ' ' + schemaErrors[0]); }
             } else {
               // First time: save default schema to Drive
               if (backend.saveSchema) backend.saveSchema(self.folderId, defaultSchema);
@@ -756,8 +765,8 @@ function createVueApp() {
         // Fast path: single batch call (Apps Script)
         if (backend.bootData) {
           backend.bootData(self.folderId).then(function(result) {
-            if (!result) { self.notify('Server error: bootData returned null'); self.loading = false; return; }
-            if (result.error) { self.notify('Server error: ' + result.error); self.loading = false; return; }
+            if (!result) { self.notify(self.t('msg.server_error') + ' bootData returned null'); self.loading = false; return; }
+            if (result.error) { self.notify(self.t('msg.server_error') + ' ' + result.error); self.loading = false; return; }
             // Not registered yet: skip schema/data entirely and fall through to loadUsers() below,
             // which will detect this via the self-scoped access check and show the request-access banner.
             if (result.denied) return;
@@ -770,7 +779,7 @@ function createVueApp() {
               ensureImplicitId(SCHEMA, window._columnOrders); // re-run with overridden orders
               self.schemaData = Object.freeze(parsedSchema);
               var schemaErrors = validateSchema();
-              if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify('Schema: ' + schemaErrors[0]); }
+              if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify(self.t('msg.schema_error') + ' ' + schemaErrors[0]); }
             } else {
               // First boot: save bundled default schema to Drive
               self.schemaData = Object.freeze(defaultSchema);
@@ -812,7 +821,7 @@ function createVueApp() {
             self.loadUsers();
           }).catch(function(err) {
             self.loading = false;
-            self.notify(err && err.message ? err.message : 'Failed to load app');
+            self.notify(err && err.message ? err.message : self.t('msg.load_failed'));
           });
           return;
         }
@@ -898,7 +907,7 @@ function createVueApp() {
           self._autoSelectTab();
         }).catch(function(err) {
           self.loading = false;
-          self.notify(err && err.message ? err.message : 'Failed to load app');
+          self.notify(err && err.message ? err.message : self.t('msg.load_failed'));
         });
         }); // end schemaPromise.then
       },
@@ -958,7 +967,7 @@ function createVueApp() {
         prefill[s.dateColumn] = date;                   // the point: prefill the clicked day
         this._createBlankRow(s.table, { prefill: prefill });
         this.selectTab(s.table);
-        this.notify('Row added');
+        this.notify(this.t('msg.row_added'));
       },
       calRotationSources: function(name) { return Calendar.rotationSources(VIEWS, name); },
       // Visible grid window {from, toExclusive} for a calendar's anchor+mode (month/list -> month grid,
@@ -1060,7 +1069,7 @@ function createVueApp() {
         var cfg = v.rsvp, table = cfg.responses, ownerCol = getOwnerCol(table) || 'owner';
         var linkColumn = this.rsvpLink(cfg).linkColumn;
         var me = this.currentUserEmail || '';
-        if (!me) { this.notify('Sign in to respond'); return; }
+        if (!me) { this.notify(this.t('msg.sign_in_respond')); return; }
         // Denormalize the table's roster policy onto the row so the (schema-blind) firestore read rule can
         // enforce it: public tables -> readable by all; privateRoster tables -> only owner + organizers.
         var pub = !(SCHEMA[table] && SCHEMA[table].privateRoster);
@@ -1149,7 +1158,7 @@ function createVueApp() {
       embedHasArchive: function(type, name) { return this.embedSources(type, name).some(function(s) { return SCHEMA[s] && SCHEMA[s].archivable; }); },
       embedAddRow: function(type, name) {
         this._createBlankRow(this.embedSources(type, name)[0]);
-        this.notify('Row added');
+        this.notify(this.t('msg.row_added'));
       },
       embedDeleteRow: function(type, name, item) {
         var key = 'erow:' + item.id;
@@ -1165,7 +1174,7 @@ function createVueApp() {
         this.pageCache[name] = this.pageEditText;
         if (backend.putRow) backend.putRow('_pages', { id: name, markdown: this.pageEditText }, 'active');
         this.pageEditing = false;
-        this.notify('Saved');
+        this.notify(this.t('msg.saved'));
       },
 
       // Ensure every schema-referenced list exists (both `list` and `listSwitch.list`), then seed
@@ -1388,7 +1397,7 @@ function createVueApp() {
           backend.putRow(self.tableMap[source], row, tab);
           // Propagate to mirror tables if this column is mirrored
           self.propagateMirror(item.id, source, row);
-          self.notify('Saved');
+          self.notify(self.t('msg.saved'));
         }, 300);
       },
 
@@ -1435,7 +1444,7 @@ function createVueApp() {
           if (view.mode === 'union') viewRow._source = primary;
           self.currentData.push(viewRow);
         }
-        self.notify('Row added');
+        self.notify(self.t('msg.row_added'));
         self.focusLastEditable('.v-table tbody tr:last-child .editable-cell');
       },
 
@@ -1471,7 +1480,7 @@ function createVueApp() {
           backend.moveRow(self.tableMap[source], srcRow, 'archive', 'active');
         });
         self.currentData = self.currentData.filter(function(r) { return r.id !== item.id; });
-        self.notify('Restored');
+        self.notify(self.t('msg.restored'));
       },
 
       // Column helpers
@@ -1672,7 +1681,7 @@ function createVueApp() {
             backend.putRow(self.tableMap[table], row, 'active');
           }
         });
-        self.notify('Renamed');
+        self.notify(self.t('msg.renamed'));
       },
       deleteRefParent: function(parent) {
         var key = 'refp:' + parent;
@@ -1684,14 +1693,14 @@ function createVueApp() {
         self.dataCache[table] = (self.dataCache[table] || []).filter(function(r) { return r[parentCol] !== parent; });
         toDelete.forEach(function(row) { backend.deleteRow(self.tableMap[table], row.id, 'active'); });
         self.pendingDelete = null;
-        self.notify('Deleted');
+        self.notify(self.t('msg.deleted'));
       },
       addRefParent: function() {
         var self = this;
         // All three ref-table add paths ride the shared blank-row factory (_createBlankRow) — they
         // used to hand-roll row creation, the exact drift its comment warns about.
         self._createBlankRow(self.currentRefTable);
-        self.notify('Group added');
+        self.notify(self.t('msg.group_added'));
         self.$nextTick(function() {
           var els = document.querySelectorAll('.ref-hierarchy .v-list-group');
           if (els.length) {
@@ -1705,7 +1714,7 @@ function createVueApp() {
         var self = this;
         var prefill = {}; prefill[self.refParentCol] = parentValue;
         self._createBlankRow(self.currentRefTable, { prefill: prefill });
-        self.notify('Item added');
+        self.notify(self.t('msg.item_added'));
         self.$nextTick(function() {
           var cells = document.querySelectorAll('.ref-hierarchy .editable-cell.ref-child');
           if (cells.length) cells[cells.length - 1].focus();
@@ -1721,13 +1730,13 @@ function createVueApp() {
         clearTimeout(self.saveTimers[timerKey]);
         self.saveTimers[timerKey] = setTimeout(function() {
           backend.putRow(self.tableMap[refTable], item, 'active');
-          self.notify('Saved');
+          self.notify(self.t('msg.saved'));
         }, 500);
       },
       addRefRow: function() {
         var self = this;
         self._createBlankRow(self.currentRefTable);
-        self.notify('Row added');
+        self.notify(self.t('msg.row_added'));
         self.focusLastEditable('.v-main .v-card .v-table tbody tr:last-child .editable-cell');
       },
       deleteRefRow: function(item) {
@@ -1736,7 +1745,7 @@ function createVueApp() {
         var table = this.currentRefTable;
         this.dataCache[table] = (this.dataCache[table] || []).filter(function(r) { return r.id !== item.id; });
         backend.deleteRow(this.tableMap[table], item.id, 'active');
-        this.notify('Deleted');
+        this.notify(this.t('msg.deleted'));
       },
 
       // Languages
@@ -1768,7 +1777,7 @@ function createVueApp() {
         this._langTimer = setTimeout(function() {
           if (!self.editingLang) return;
           backend.updateTranslations(self.folderId, self.editingLang.code, self.currentTranslations);
-          self.notify('Translation saved');
+          self.notify(self.t('msg.translation_saved'));
         }, 500);
       },
       // BCP-47 language options for the add-language picker, minus those already added. The `code` IS the
@@ -1783,13 +1792,13 @@ function createVueApp() {
         var self = this;
         code = (code || '').trim();
         if (!code) return;
-        if ((this.languages || []).some(function(l) { return l.code === code; })) { this.notify('Language already added'); return; }
+        if ((this.languages || []).some(function(l) { return l.code === code; })) { this.notify(this.t('msg.language_exists')); return; }
         name = (name || code).trim();
         backend.createLanguage(this.folderId, code, name, this.translationKeys).then(function() {
           var newLang = { code: code, name: name };
           self.languages.push(newLang);
           self.openLangEditor(newLang);
-          self.notify('Language added');
+          self.notify(self.t('msg.language_added'));
           self.$nextTick(function() { var el = document.querySelector('[data-lang-code="' + code + '"] input'); if (el) el.focus(); });
         });
       },
@@ -1803,7 +1812,7 @@ function createVueApp() {
         // where the name IS the code) just skip persistence via the guard.
         if (backend.renameLanguage) backend.renameLanguage(self.folderId, lang.code, newName);
         lang.name = newName;
-        self.notify('Language renamed');
+        self.notify(self.t('msg.language_renamed'));
       },
       deleteLang: function(lang) {
         var key = 'lang:' + lang.code;
@@ -1828,7 +1837,7 @@ function createVueApp() {
             if (self.currentLang === lang.code) self.currentLang = self.languages[0].code;
             self.switchLanguage(self.currentLang);  // rebuild base(default)+current with the new default
           }
-          self.notify('Deleted');
+          self.notify(self.t('msg.deleted'));
         });
       },
 
@@ -1970,7 +1979,7 @@ function createVueApp() {
         this.appConfig = cfg;                       // local override for everyone with view access
         if (this.isAdmin && backend.setFolderConfig) {
           Promise.resolve(backend.setFolderConfig(this.folderId, cfg))
-            .catch(function() { self.notify(self.t('settings.save_failed')); });
+            .catch(function() { self.notify(self.t('msg.save_failed')); });
         }
         if (this.currentTable === viewName) this.loadTableData();
       },
@@ -2121,7 +2130,7 @@ function createVueApp() {
       copyText: function(text) {
         if (navigator.clipboard) { navigator.clipboard.writeText(text); }
         else { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); }
-        this.notify('Copied');
+        this.notify(this.t('msg.copied'));
       },
       _autoSelectTab: function() {
         if (!this.currentTable) { var ft = this.sidebarTabs.find(function(t) { return !t.divider; }); if (ft) this.selectTab(ft.id); }
@@ -2173,7 +2182,7 @@ function createVueApp() {
         return backend_users.setUserRole(adminEmail, 'admin', adminEmail, 'all').then(function() {
           self.selfUnregistered = false;
           self.userList = [{ key: adminEmail, addr: adminEmail, role: 'admin', tables: 'all' }];
-          done(); self.notify('You are registered as admin');
+          done(); self.notify(self.t('msg.registered_admin'));
         }).catch(function() { done(); });
       },
       setUserRole: function(uid, role, user, tables) {
@@ -2186,10 +2195,10 @@ function createVueApp() {
         var self = this;
         if (typeof backend_users === 'undefined' || !backend_users.requestAccess) return;
         var name = (this.accessRequestName || '').trim();
-        if (!name) { self.notify(self.tOr('access.name_required', 'Please enter your name first')); return; }
+        if (!name) { self.notify(self.t('access.name_required')); return; }
         backend_users.requestAccess(name, '').then(function() {
-          self.accessRequested = true; self.notify(self.tOr('access.request_sent', 'Access request sent'));
-        }).catch(function(e) { self.notify((e && e.message) || 'Request failed'); });
+          self.accessRequested = true; self.notify(self.t('access.request_sent'));
+        }).catch(function(e) { self.notify((e && e.message) || self.t('msg.request_failed')); });
       },
       loadAccessRequests: function() {
         var self = this;
@@ -2207,7 +2216,7 @@ function createVueApp() {
           return (name && backend_users.setProfileName) ? backend_users.setProfileName(email, name) : null;
         }).then(function() {
           return backend_users.removeAccessRequest(email);
-        }).then(function() { self.loadUsers(); }).catch(function(e) { self.notify((e && e.message) || 'Approve failed'); });
+        }).then(function() { self.loadUsers(); }).catch(function(e) { self.notify((e && e.message) || self.t('msg.approve_failed')); });
       },
       denyRequest: function(req) {
         var self = this;
@@ -2260,7 +2269,7 @@ function createVueApp() {
         backend_users.setMyProfile(name, shared, picture).then(function() {
           self.profileSaved = { name: name, shared: shared, picture: picture };
           self._overlayUserLists();   // reflect the added/removed shared name in user-backed lists immediately
-        }).catch(function(e) { self.notify((e && e.message) || 'Save failed'); });
+        }).catch(function(e) { self.notify((e && e.message) || self.t('msg.save_failed')); });
       },
       // Profile picture upload: read the chosen file, downscale it to a small square-ish avatar (max 256px,
       // JPEG) via a canvas so the stored data-URL stays small (well under the backend's ~350KB cap), then
@@ -2269,12 +2278,12 @@ function createVueApp() {
         var self = this, input = e && e.target, file = input && input.files && input.files[0];
         if (input) input.value = '';   // reset so re-picking the same file still fires @change
         if (!file) return;
-        if (!/^image\//.test(file.type || '')) { this.notify('Please choose an image file'); return; }
+        if (!/^image\//.test(file.type || '')) { this.notify(this.t('msg.choose_image')); return; }
         this._resizeImageFile(file, 256).then(function(dataUrl) {
-          if (dataUrl.length > 350000) { self.notify('Image is too large, please choose a smaller one'); return; }
+          if (dataUrl.length > 350000) { self.notify(self.t('msg.image_too_large')); return; }
           self.myProfile.picture = dataUrl;
           self.saveMyProfile();
-        }).catch(function(err) { self.notify((err && err.message) || 'Could not read image'); });
+        }).catch(function(err) { self.notify((err && err.message) || self.t('msg.image_read_failed')); });
       },
       removeMyPicture: function() {
         if (!this.myProfile.picture) return;
@@ -2283,12 +2292,13 @@ function createVueApp() {
       },
       // Downscale an image File to a data-URL whose longest side is <= max, preserving aspect ratio.
       _resizeImageFile: function(file, max) {
+        var self = this;
         return new Promise(function(resolve, reject) {
           var reader = new FileReader();
-          reader.onerror = function() { reject(new Error('Could not read image')); };
+          reader.onerror = function() { reject(new Error(self.t('msg.image_read_failed'))); };
           reader.onload = function() {
             var img = new Image();
-            img.onerror = function() { reject(new Error('That file is not a valid image')); };
+            img.onerror = function() { reject(new Error(self.t('msg.image_invalid'))); };
             img.onload = function() {
               var w = img.width || 1, h = img.height || 1, scale = Math.min(1, max / Math.max(w, h));
               var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
@@ -2297,7 +2307,7 @@ function createVueApp() {
               try {
                 canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
                 resolve(canvas.toDataURL('image/jpeg', 0.85));
-              } catch (err) { reject(new Error('Could not process image')); }
+              } catch (err) { reject(new Error(self.t('msg.image_process_failed'))); }
             };
             img.src = String(reader.result || '');
           };
@@ -2341,7 +2351,7 @@ function createVueApp() {
         backend_users.setProfileName(email, trimmed).then(function() {
           var patch = {}; patch[email] = Object.assign({}, self.profilesByEmail[email], { name: trimmed });
           self.profilesByEmail = Object.assign({}, self.profilesByEmail, patch);
-        }).catch(function(e) { self.notify((e && e.message) || 'Save failed'); });
+        }).catch(function(e) { self.notify((e && e.message) || self.t('msg.save_failed')); });
       },
       // Resolve the "@me" filter token to the current user's profile display name (as stored). An empty
       // profile name -> a sentinel that matches nothing (the user has no assigned identity yet).
@@ -2446,13 +2456,13 @@ function createVueApp() {
           if (jsonStr.lastIndexOf('}') < jsonStr.length - 1) jsonStr = jsonStr.substring(0, jsonStr.lastIndexOf('}') + 1);
           jsonStr = jsonStr.replace(/,\s*}/g, '}').replace(/^\s*(\w+)\s*:/gm, '"$1":');
           var config = JSON.parse(jsonStr);
-          if (!config.apiKey || !config.projectId) { this.notify('Invalid config: needs apiKey and projectId'); return; }
+          if (!config.apiKey || !config.projectId) { this.notify(this.t('msg.invalid_config')); return; }
           localStorage.setItem('firebase_config', JSON.stringify(config));
           localStorage.setItem('app_mode', 'firebase');
           // Try saving server-side for other users
           fetch('/api/saveConfig', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({filename:'firebase-config.json', data:config}) }).catch(function(){});
           location.reload();
-        } catch(e) { this.notify('Invalid JSON'); }
+        } catch(e) { this.notify(this.t('msg.invalid_json')); }
       },
       saveClientId: function() {
         if (this.oauthClientId) localStorage.setItem('oauth_client_id', this.oauthClientId);
@@ -2482,7 +2492,7 @@ function createVueApp() {
           a.href = URL.createObjectURL(blob);
           a.download = 'drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json';
           a.click();
-          self.notify('Exported');
+          self.notify(self.t('msg.exported'));
         };
         chain.then(function() {
           return Promise.resolve(backend.getTableData('_pages', 'active')).then(function(d) {
@@ -2524,7 +2534,7 @@ function createVueApp() {
             // Structural check: block import if the schema has dangling view/table references
             if (imported.schema) {
               var refErrs = validateRefs(imported.schema);
-              if (refErrs.length) { self.notify('Import blocked: ' + refErrs[0] + (refErrs.length > 1 ? ' (+' + (refErrs.length - 1) + ' more)' : '')); return; }
+              if (refErrs.length) { self.notify(self.t('msg.import_blocked') + ' ' + refErrs[0] + (refErrs.length > 1 ? ' (+' + (refErrs.length - 1) + ' more)' : '')); return; }
             }
             // Import schema if present (initializes empty databases)
             if (imported.schema && backend.saveSchema) {
@@ -2607,7 +2617,7 @@ function createVueApp() {
               savePromise.then(function() {
                 var rowCount = 0; Object.keys(tables).forEach(function(k) { var r = Array.isArray(tables[k]) ? tables[k] : (tables[k].rows || []); rowCount += r.length; });
                 var msg = 'Imported' + (imported.schema ? ' schema' : '') + (rowCount ? ' + ' + rowCount + ' rows' : '') + (imported.lists ? ' + lists' : '') + (imported.translations ? ' + translations' : '') + (imported.config ? ' + config' : '');
-                self.notify(msg || 'Import complete');
+                self.notify(msg || self.t('msg.import_complete'));
                 setTimeout(function() {
                 if (typeof _pushChanges === 'function') { _pushChanges().then(function() { location.reload(); }); }
                 else if (typeof CrdtEngine !== 'undefined') { CrdtEngine.pushChanges().then(function() { setTimeout(function() { location.reload(); }, 100); }); }
@@ -2615,7 +2625,7 @@ function createVueApp() {
                 }, 1500); // delay reload so the snackbar is visible
               });
             });
-          } catch(err) { self.notify('Import error: ' + err.message); }
+          } catch(err) { self.notify(self.t('msg.import_error') + ' ' + err.message); }
         };
         reader.readAsText(file);
         event.target.value = '';
@@ -2653,9 +2663,9 @@ function createVueApp() {
             });
           });
         });
-        chain.then(function() { self.loadTableData(); self.syncing = false; self.notify('Synced'); }).catch(function(err) {
+        chain.then(function() { self.loadTableData(); self.syncing = false; self.notify(self.t('msg.synced')); }).catch(function(err) {
           self.syncing = false;
-          self.notify(err && err.message ? err.message : 'Sync failed');
+          self.notify(err && err.message ? err.message : self.t('msg.sync_failed'));
         });
       },
 
@@ -2683,7 +2693,7 @@ function createVueApp() {
           backend.deleteRow(self.tableMap[src], itemId, tab);
         });
         this.currentData = this.currentData.filter(function(r) { return r.id !== itemId; });
-        this.notify('Deleted');
+        this.notify(this.t('msg.deleted'));
       },
       _archiveInSources: function(sources, itemId) {
         var self = this;
@@ -2698,7 +2708,7 @@ function createVueApp() {
           self.dataCache[aKey(source)].push(srcRow);
           backend.moveRow(self.tableMap[source], srcRow, 'active', 'archive');
         });
-        this.notify('Archived');
+        this.notify(this.t('msg.archived'));
       },
       armDelete: function(key) {
         var self = this;
@@ -2810,7 +2820,7 @@ function createVueApp() {
       // stored value on next render).
       commitTheme: function(mode, token, value) {
         var hex = this._normHex(value);
-        if (!hex) { this.notify('Invalid color'); return; }
+        if (!hex) { this.notify(this.t('msg.invalid_color')); return; }
         this.setThemeColor(mode, token, hex);
         this._persistTheme();
       },
@@ -2828,7 +2838,7 @@ function createVueApp() {
       },
       applyPalette: function(str) {
         var self = this, hex = this._parsePalette(str);
-        if (hex.length < 2) { this.notify('Paste 2+ #hex colors'); return; }
+        if (hex.length < 2) { this.notify(this.t('msg.paste_hex')); return; }
         var mode = (this.theme === 'dark') ? 'dark' : 'light';
         var arr = hex.map(function(h) { return { h: h, l: self._luminance(h), c: self._chroma(h) }; });
         var byL = arr.slice().sort(function(a, b) { return a.l - b.l; });   // dark -> light
@@ -2841,7 +2851,7 @@ function createVueApp() {
           : { background: lightest, surface: secondL, 'on-surface': darkest, primary: primary, secondary: secondary };
         Object.keys(map).forEach(function(t) { self.setThemeColor(mode, t, map[t]); });
         this._persistTheme();
-        this.notify('Palette applied (' + mode + ')');
+        this.notify(this.t('msg.palette_applied') + ' (' + mode + ')');
       },
       resetTheme: function() {
         var newSchema = Object.assign({}, this.schemaData); delete newSchema.theme;
@@ -2975,7 +2985,7 @@ function createVueApp() {
       sortedData: function(val) { if (this.currentConfig.collapsed && val.length) this.expandedCard = val[0].id; }
     },
 
-    errorCaptured: function(err) { console.error('Vue error:', err); this.notify('Error: ' + (err.message || err)); return false; },
+    errorCaptured: function(err) { console.error('Vue error:', err); this.notify(this.t('msg.error') + ' ' + (err.message || err)); return false; },
     mounted: function() {
       var self = this;
       window.addEventListener('resize', function() { self.mobile = window.innerWidth < 768; self.windowWidth = window.innerWidth; });
@@ -3135,7 +3145,7 @@ function createVueApp() {
         appInstance.pageCache[this.name] = this.docDraft;
         if (backend.putRow) backend.putRow('_pages', { id: this.name, markdown: this.docDraft }, 'active');
         this.editing = false;
-        appInstance.notify('Saved');
+        appInstance.notify(appInstance.t('msg.saved'));
       }
     }),
     template: ''
@@ -3145,8 +3155,8 @@ function createVueApp() {
       + '<rsvp-view v-else-if="kind===\'rsvp\'" :name="calName" :embed="true"></rsvp-view>'
       + '<template v-else-if="kind===\'doc\'">'
       + '<div v-if="canEditDoc" class="d-flex align-center"><v-spacer></v-spacer>'
-      + '<v-btn size="x-small" variant="text" :prepend-icon="editing ? \'mdi-eye\' : \'mdi-pencil\'" @click="toggleDocEdit()">{{ editing ? \'Preview\' : \'Edit\' }}</v-btn>'
-      + '<v-btn v-if="editing" size="x-small" color="primary" variant="text" prepend-icon="mdi-content-save" @click="saveDoc()">Save</v-btn>'
+      + '<v-btn size="x-small" variant="text" :prepend-icon="editing ? \'mdi-eye\' : \'mdi-pencil\'" @click="toggleDocEdit()">{{ editing ? t(\'btn.preview\') : t(\'btn.edit\') }}</v-btn>'
+      + '<v-btn v-if="editing" size="x-small" color="primary" variant="text" prepend-icon="mdi-content-save" @click="saveDoc()">{{ t(\'btn.save\') }}</v-btn>'
       + '</div>'
       + '<v-textarea v-if="editing" :model-value="docDraft" @update:model-value="docDraft = $event" auto-grow variant="outlined" density="compact" hide-details placeholder="# Markdown"></v-textarea>'
       + '<template v-else v-for="(blk, bi) in blocks" :key="bi">'
@@ -3242,7 +3252,7 @@ function createVueApp() {
         appInstance.uploadFile(file, { table: this.owner || appInstance.currentTable, col: col, rowId: item.id }).then(function(url) {
           self.uploading = false; self.save(item, col, url);
         }).catch(function(e) {
-          self.uploading = false; self.uploadErr = (e && e.message) || 'Upload failed';
+          self.uploading = false; self.uploadErr = (e && e.message) || self.t('msg.upload_failed');
         });
       }
     }),
@@ -3264,20 +3274,20 @@ function createVueApp() {
       + '<v-chip v-for="o in getListOptions(col)" :key="o.value" :value="o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
       + '</v-chip-group>'
       + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>'
-      + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || \'Switch list\'">mdi-swap-horizontal</v-icon></template>'
+      + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || t(\'col.switch_list\')">mdi-swap-horizontal</v-icon></template>'
       + '</v-combobox>'
       + '<v-autocomplete v-else-if="colIsList(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop>'
-      + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || \'Switch list\'">mdi-swap-horizontal</v-icon></template>'
+      + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || t(\'col.switch_list\')">mdi-swap-horizontal</v-icon></template>'
       + '</v-autocomplete>'
       + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
       + '<div v-else-if="colIsImage(col)" class="d-flex align-center" style="gap:6px;min-width:0">'
       +   '<a v-if="item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="safeImg(item[col])" class="cell-thumb" alt=""></a>'
       +   '<template v-if="canUpload">'
       +     '<input type="file" accept="image/*" ref="imgInput" style="display:none" @change="uploadImage(item, col, $event)">'
-      +     '<v-btn size="x-small" variant="text" :loading="uploading" :icon="item[col] ? \'mdi-image-edit\' : \'mdi-camera-plus\'" :title="item[col] ? \'Replace image\' : \'Upload image\'" @click="$refs.imgInput.click()"></v-btn>'
-      +     '<v-btn v-if="item[col]" size="x-small" variant="text" icon="mdi-close" title="Remove" @click="save(item, col, \'\')"></v-btn>'
+      +     '<v-btn size="x-small" variant="text" :loading="uploading" :icon="item[col] ? \'mdi-image-edit\' : \'mdi-camera-plus\'" :title="item[col] ? t(\'img.replace\') : t(\'img.upload\')" @click="$refs.imgInput.click()"></v-btn>'
+      +     '<v-btn v-if="item[col]" size="x-small" variant="text" icon="mdi-close" :title="t(\'img.remove\')" @click="save(item, col, \'\')"></v-btn>'
       +   '</template>'
-      +   '<input v-else type="url" :value="item[col] || \'\'" @change="save(item, col, $event.target.value)" placeholder="Image URL" spellcheck="false" style="border:none;background:transparent;color:inherit;font:inherit;flex:1;min-width:60px">'
+      +   '<input v-else type="url" :value="item[col] || \'\'" @change="save(item, col, $event.target.value)" :placeholder="t(\'img.url\')" spellcheck="false" style="border:none;background:transparent;color:inherit;font:inherit;flex:1;min-width:60px">'
       +   '<v-icon v-if="uploadErr" size="x-small" color="error" :title="uploadErr">mdi-alert-circle</v-icon>'
       + '</div>'
       + '<div v-else-if="colIsUrl(col)" class="d-flex align-center" style="gap:4px;min-width:0">'
@@ -3574,7 +3584,7 @@ function createVueApp() {
       + '<thead><tr>'
       + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));cursor:pointer" @click="toggleSort(\'__row__\')" data-testid="pivot-sort-row">{{ head(cfg.row) }}{{ sortIcon(\'__row__\') }}</th>'
       + '<th v-for="(c, ci) in grid.columns" :key="c" style="text-align:center;cursor:pointer" @click="toggleSort(ci)">{{ colLabel(c) }}{{ sortIcon(ci) }}</th>'
-      + '<th v-if="hasTotals" style="text-align:center;font-weight:700;cursor:pointer" @click="toggleSort(\'__total__\')">{{ a.tOr(\'pivot.total\', \'Total\') }}{{ sortIcon(\'__total__\') }}</th>'
+      + '<th v-if="hasTotals" style="text-align:center;font-weight:700;cursor:pointer" @click="toggleSort(\'__total__\')">{{ a.t(\'pivot.total\') }}{{ sortIcon(\'__total__\') }}</th>'
       + '</tr></thead>'
       + '<tbody>'
       + '<tr v-for="r in rows" :key="r.key">'
@@ -3582,10 +3592,10 @@ function createVueApp() {
       + '<td v-for="(v, ci) in r.cells" :key="ci" style="text-align:center">{{ cellFmt(v) }}</td>'
       + '<td v-if="hasTotals" style="text-align:center;font-weight:700">{{ r.total }}</td>'
       + '</tr>'
-      + '<tr v-if="!rows.length"><td :colspan="(grid.columns.length || 1) + 1" style="opacity:0.6;padding:12px">{{ a.tOr(\'pivot.empty\', \'No data\') }}</td></tr>'
+      + '<tr v-if="!rows.length"><td :colspan="(grid.columns.length || 1) + 1" style="opacity:0.6;padding:12px">{{ a.t(\'pivot.empty\') }}</td></tr>'
       + '</tbody>'
       + '<tfoot v-if="hasTotals"><tr>'
-      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:700">{{ a.tOr(\'pivot.total\', \'Total\') }}</th>'
+      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:700">{{ a.t(\'pivot.total\') }}</th>'
       + '<td v-for="(t, ci) in grid.columnTotals" :key="ci" style="text-align:center;font-weight:700">{{ t }}</td>'
       + '<td style="text-align:center;font-weight:800">{{ grid.grandTotal }}</td>'
       + '</tr></tfoot>'
@@ -3733,8 +3743,8 @@ function createVueApp() {
     template: ''
       + '<v-card variant="outlined" class="pa-4">'
       + '<div v-if="a.canEditPages" class="d-flex align-center mb-2"><v-spacer></v-spacer>'
-      + '<v-btn size="small" variant="text" :prepend-icon="a.pageEditing ? \'mdi-eye\' : \'mdi-pencil\'" @click="a.togglePageEdit()">{{ a.pageEditing ? \'Preview\' : \'Edit\' }}</v-btn>'
-      + '<v-btn v-if="a.pageEditing" size="small" color="primary" prepend-icon="mdi-content-save" @click="a.savePage()" class="ml-2">Save</v-btn></div>'
+      + '<v-btn size="small" variant="text" :prepend-icon="a.pageEditing ? \'mdi-eye\' : \'mdi-pencil\'" @click="a.togglePageEdit()">{{ a.pageEditing ? a.t(\'btn.preview\') : a.t(\'btn.edit\') }}</v-btn>'
+      + '<v-btn v-if="a.pageEditing" size="small" color="primary" prepend-icon="mdi-content-save" @click="a.savePage()" class="ml-2">{{ a.t(\'btn.save\') }}</v-btn></div>'
       + '<v-textarea v-if="a.pageEditing" :model-value="a.pageEditText" @update:model-value="a.pageEditText = $event" auto-grow variant="outlined" density="compact" placeholder="# Markdown — embed views with {{view:name}} or {{table:name}}"></v-textarea>'
       + '<template v-else v-for="(blk, bi) in a.pageBlocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html"></div>'

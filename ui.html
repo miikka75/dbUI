@@ -172,10 +172,10 @@
         <v-alert v-if="isUnregisteredUser" type="warning" variant="tonal" density="compact" class="mb-3" icon="mdi-account-alert">
           <div>Your account (<strong>{{ currentUserEmail }}</strong>) is not registered for this database, so no data can load.</div>
           <div v-if="!accessRequested" class="d-flex align-center flex-wrap mt-2" style="gap:8px">
-            <v-text-field v-model="accessRequestName" :label="tOr('access.your_name','Your name')" :rules="[v => !!(v && v.trim()) || '']" density="compact" hide-details variant="outlined" style="max-width:240px"></v-text-field>
-            <v-btn size="small" color="primary" variant="flat" prepend-icon="mdi-account-plus" :disabled="!accessRequestName || !accessRequestName.trim()" @click="requestAccess">{{ tOr('access.request_access','Request access') }}</v-btn>
+            <v-text-field v-model="accessRequestName" :label="t('access.your_name')" :rules="[v => !!(v && v.trim()) || '']" density="compact" hide-details variant="outlined" style="max-width:240px"></v-text-field>
+            <v-btn size="small" color="primary" variant="flat" prepend-icon="mdi-account-plus" :disabled="!accessRequestName || !accessRequestName.trim()" @click="requestAccess">{{ t('access.request_access') }}</v-btn>
           </div>
-          <div v-else class="mt-2">{{ tOr('access.request_sent','Access request sent') }} — an administrator will review it.</div>
+          <div v-else class="mt-2">{{ t('access.request_sent') }} — an administrator will review it.</div>
         </v-alert>
         <!-- Archive Toggle -->
         <v-tabs v-if="hasArchive" v-model="viewingArchive" density="compact" class="mb-3">
@@ -493,8 +493,8 @@
               </v-avatar>
               <div class="d-flex flex-column align-start" style="gap:4px">
                 <input ref="profilePicInput" type="file" accept="image/*" hidden @change="a.onProfilePictureFile($event)">
-                <v-btn size="small" variant="outlined" prepend-icon="mdi-camera" @click="$refs.profilePicInput.click()">{{ a.myProfile.picture ? a.t('profile.change_picture') : a.t('profile.upload_picture') }}</v-btn>
-                <v-btn v-if="a.myProfile.picture" size="x-small" variant="text" color="error" prepend-icon="mdi-delete" @click="a.removeMyPicture()">{{ a.t('profile.remove_picture') }}</v-btn>
+                <v-btn size="small" variant="outlined" prepend-icon="mdi-camera" @click="$refs.profilePicInput.click()">{{ a.myProfile.picture ? a.t('img.replace') : a.t('img.upload') }}</v-btn>
+                <v-btn v-if="a.myProfile.picture" size="x-small" variant="text" color="error" prepend-icon="mdi-delete" @click="a.removeMyPicture()">{{ a.t('img.remove') }}</v-btn>
               </div>
             </div>
             <div class="d-flex align-center flex-wrap" style="gap:12px">
