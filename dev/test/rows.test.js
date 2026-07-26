@@ -135,6 +135,36 @@ describe('rows.js — resolveComputed', () => {
     assert.deepEqual(rows[0].duty, ['B']);
   });
 
+  it('occurrence rotation stays anchored to the date when a past turn is archived', () => {
+    const roster = [
+      { id: 's1', position: 1, people: ['A'] },
+      { id: 's2', position: 2, people: ['B'] },
+      { id: 's3', position: 3, people: ['C'] }
+    ];
+    const cols = [{ name: 'usher', computed: { rotationTable: 'roster', occurrenceSource: 'turns', occurrenceSort: 'pvm', advanceBy: 'occurrence' } }];
+    // Turns mirror meetings 1:1 by id (like ovimiehet_vuorot mirrors kokoukset).
+    const turns = () => [
+      { id: 'm1', pvm: '2026-01-04' }, { id: 'm2', pvm: '2026-01-11' },
+      { id: 'm3', pvm: '2026-01-18' }, { id: 'm4', pvm: '2026-01-25' }
+    ];
+    const before = turns();
+    Rows.resolveComputed(before, cols, { dataCache: { roster, turns: turns() } });
+    assert.deepEqual(before.map(r => r.usher), [['A'], ['B'], ['C'], ['A']]);
+
+    // Archive the oldest turn (m1): it leaves the active partition for the archive one. The remaining
+    // dates must keep their slots (B, C, A) — the archived turn still counts toward the absolute rank,
+    // so nothing slides up to (A, B, C).
+    const after = turns().slice(1);
+    Rows.resolveComputed(after, cols, { dataCache: { roster, turns: turns().slice(1), turns__archive: [turns()[0]] } });
+    assert.deepEqual(after.map(r => r.usher), [['B'], ['C'], ['A']]);
+
+    // Guard: if the archived turn were NOT counted, every remaining date would slide up one slot —
+    // the original bug. This asserts the archive partition is what keeps the rank absolute.
+    const bug = turns().slice(1);
+    Rows.resolveComputed(bug, cols, { dataCache: { roster, turns: turns().slice(1) } });
+    assert.deepEqual(bug.map(r => r.usher), [['A'], ['B'], ['C']]);
+  });
+
   it('lookup denormalizes one field from a keyed table (with default)', () => {
     const cache = { chores: [{ name: 'dishes', points: 3 }] };
     const cols = [{ name: 'pts', computed: { lookup: { table: 'chores', match: 'chore', on: 'name', field: 'points', default: 0 } } }];
