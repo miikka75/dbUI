@@ -1772,6 +1772,40 @@ test.describe('listSwitch (toggle between two dropdown lists)', () => {
     const afterToggle = await page.evaluate(() => appInstance.isAltList('person', appInstance.sortedData[0]));
     expect(afterToggle).toBe(true);
   });
+
+  test('a new name typed while switched to the alt list is added to the alt list, not the primary', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/saveLists', { data: { folderId: 'local', lists: { internal: ['Alice', 'Bob'], external: ['ExtJohn', 'ExtJane'] } } });
+    await page.request.post('/api/putRow', { data: { tableId: 't', data: { id: 'r1', person: 'Alice' }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.t' }).first().click();
+    await page.waitForTimeout(200);
+    const result = await page.evaluate(async () => {
+      var item = appInstance.sortedData[0];
+      // Spy on the persistence call so we assert BOTH the in-memory cache and what was written to the backend.
+      var puts = [];
+      var realPut = backend.putListItem;
+      backend.putListItem = function(folder, list, v) { puts.push({ list: list, v: v }); return realPut && realPut.apply(backend, arguments); };
+      // Switch the cell to the alt list (the swap arrow), then type a brand-new name.
+      appInstance.toggleListSwitch('person', item);
+      item.person = 'Zelda';                       // a name in neither list
+      appInstance.addToListOnBlur(item, 'person');
+      backend.putListItem = realPut;
+      return {
+        inExternal: (appInstance.listsCache.external || []).indexOf('Zelda') >= 0,
+        inInternal: (appInstance.listsCache.internal || []).indexOf('Zelda') >= 0,
+        puts: puts
+      };
+    });
+    expect(result.inExternal).toBe(true);   // the new name landed in the alt list...
+    expect(result.inInternal).toBe(false);  // ...and NOT the primary list
+    expect(result.puts).toEqual([{ list: 'external', v: 'Zelda' }]); // persisted to the alt list only
+  });
 });
 
 test.describe('collectWith (role alongside date)', () => {

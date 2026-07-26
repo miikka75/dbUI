@@ -1548,6 +1548,11 @@ function createVueApp() {
         var value = item[col];
         if (!value) return;
         var listName = this.colIsList(col);
+        // When the cell is switched to the alt list (the swap arrow), a newly typed name must be added to
+        // that alt list — not the primary one. Mirrors listItems()/isAltList() so the dropdown and the
+        // append target stay in sync.
+        var sw = this.colListSwitch(col);
+        if (sw && sw.list && this.isAltList(col, item)) listName = sw.list;
         if (!listName || !this.listsCache[listName]) return;
         var self = this, vals = Array.isArray(value) ? value : [value];
         vals.forEach(function(v) {
