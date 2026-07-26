@@ -2955,7 +2955,7 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
     const ids = await page.evaluate(() => appInstance.sidebarTabs.map(t => t.id + (t.children ? '[' + t.children.map(c => c.id).join(',') + ']' : '')));
     expect(ids.some(s => s.startsWith('grp:Data['))).toBe(true);                 // nav group
-    expect(ids.some(s => s.startsWith('all_items[summary_cards,quick_list]'))).toBe(true); // nested clickable parent
+    expect(ids.some(s => s.startsWith('all_items[summary_cards,quick_list,notes_list]'))).toBe(true); // nested clickable parent
   });
 
   test('demo pages render embeds (combined + aggregate + archive) and all layouts', async ({ page }) => {
