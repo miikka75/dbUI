@@ -3127,11 +3127,72 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(r.afterRemoveRoster).toEqual([{ owner: 'you@x.com', status: 'maybe' }]); // no blank "me@x.com" line
     expect(r.afterRemoveTally).toEqual({ maybe: 1 });
     await expect(page.locator('[data-testid="rsvp-view"]')).toBeVisible();
-    // Roster renders participants, but a non-admin viewer must NOT see another member's raw email (sensitive):
-    // an unnamed participant shows the neutral placeholder instead.
+    // A non-admin viewer must not see an unshared member in the roster at all — neither name nor email
+    // (both participants here have no shared profile, so the roster reveals neither).
     const rosterText = await page.locator('[data-testid="rsvp-roster"]').first().textContent();
-    expect(rosterText).toContain('rsvp.member');     // unnamed participant -> neutral placeholder (untranslated key)
-    expect(rosterText).not.toContain('you@x.com');   // ...never their email (viewer is not an admin)
+    expect(rosterText).not.toContain('you@x.com');   // another member's email is never shown to a non-admin
+    expect(rosterText).not.toContain('me@x.com');    // unshared members are hidden entirely
+  });
+
+  test('rsvp roster: non-admin sees shared members by name (never email); unshared members are hidden', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(async () => {
+      // ann opts in with a name; zoe does not share at all
+      localStorage.setItem('test_user', 'ann@x.com'); await backend_users.setMyProfile('Ann', true);
+      localStorage.setItem('test_user', 'local@dev');
+      const app = window.appInstance;
+      app.currentUserEmail = 'member@x.com';        // a non-admin viewer
+      await app.loadSharedProfiles();               // pulls Ann's shared profile into profilesByEmail
+      const d = (n) => { const x = new Date(); x.setDate(x.getDate() + n); return window.fmtDate(x); };
+      app.dataCache['practices'] = [{ id: 'p1', date: d(3), title: 'Practice', opponent: '' }];
+      app.dataCache['rsvps'] = [
+        { id: 'a', owner: 'ann@x.com', practice: 'p1', response: 'coming' },
+        { id: 'z', owner: 'zoe@x.com', practice: 'p1', response: 'coming' }
+      ];
+      app.listsCache = Object.assign({}, app.listsCache, { rsvp_status: ['coming', 'maybe', 'out'] });
+      app.selectTab('my_rsvp');
+      return { admin: app.isAdmin };
+    });
+    expect(r.admin).toBe(false);                                     // viewer is not an admin
+    const rosterText = await page.locator('[data-testid="rsvp-roster"]').first().textContent();
+    expect(rosterText).toContain('Ann');             // shared member -> shown by name
+    expect(rosterText).not.toContain('ann@x.com');   // ...never their email
+    expect(rosterText).not.toContain('zoe@x.com');   // unshared member -> hidden entirely
+    // cleanup so the shared opt-in doesn't leak into other tests
+    await page.evaluate(async () => {
+      localStorage.setItem('test_user', 'ann@x.com'); await backend_users.setMyProfile('', false);
+      localStorage.setItem('test_user', 'local@dev');
+    });
+  });
+
+  test('profile: sharing is dropped when the display name is empty (name required to share)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      localStorage.setItem('test_user', 'named@x.com');
+      const app = window.appInstance;
+      app.currentUserEmail = 'named@x.com';
+      app.myProfile = { name: 'Named', shared: true, picture: '' };   // opt in WITH a name
+      app.saveMyProfile();
+      await new Promise(r => setTimeout(r, 200));
+      const withName = await backend_users.getMyProfile();
+      app.myProfile.name = ''; app.myProfile.shared = true;           // clear the name while still "shared"
+      app.saveMyProfile();
+      await new Promise(r => setTimeout(r, 200));
+      const cleared = await backend_users.getMyProfile();
+      const modelShared = app.myProfile.shared;
+      localStorage.setItem('test_user', 'local@dev');
+      return { withNameShared: withName.shared, clearedShared: cleared.shared, modelShared: modelShared };
+    });
+    expect(r.withNameShared).toBe(true);    // sharing allowed once a name is set
+    expect(r.clearedShared).toBe(false);    // clearing the name un-shares the profile
+    expect(r.modelShared).toBe(false);      // ...and the toggle state reflects it
   });
 
   test('rsvp: status labels translate (statusList) + picker type is configurable', async ({ page }) => {
