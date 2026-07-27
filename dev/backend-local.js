@@ -108,6 +108,17 @@ function createLocalBackend(dbPath) {
       db.prepare('INSERT OR REPLACE INTO _config (key, value) VALUES (?, ?)').run('folder-config', JSON.stringify(config));
     },
 
+    // User-linked lists (Option C): the admin-only { listName: { value: email } } link map, stored whole in
+    // the generic _config KV. The server derives the viewer-safe projection from it (see list-users.js).
+    getListUsers(folderId) {
+      const row = db.prepare('SELECT value FROM _config WHERE key = ?').get('list-users');
+      try { return row ? JSON.parse(row.value) : {}; } catch (e) { return {}; }
+    },
+
+    saveListUsers(folderId, map) {
+      db.prepare('INSERT OR REPLACE INTO _config (key, value) VALUES (?, ?)').run('list-users', JSON.stringify(map || {}));
+    },
+
     initSchema(folderId, schema) {
       const result = {};
       for (const [table, def] of Object.entries(schema)) {

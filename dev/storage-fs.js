@@ -18,7 +18,7 @@ function createFsBackend(dataDir) {
   function readJSON(name) { try { return JSON.parse(fs.readFileSync(filePath(name), 'utf8')); } catch(e) { return null; } }
   function writeJSON(name, data) { fs.writeFileSync(filePath(name), JSON.stringify(data, null, 2)); }
   // Drive-compatible metadata filenames (so the local folder mirrors a Drive folder)
-  var F_SCHEMA = 'schema', F_CONFIG = '.app-config', F_LISTS = 'lists', F_LANGS = 'languages';
+  var F_SCHEMA = 'schema', F_CONFIG = '.app-config', F_LISTS = 'lists', F_LANGS = 'languages', F_LISTUSERS = 'listusers';
   function fLang(code) { return 'lang_' + code; }
 
   return {
@@ -89,6 +89,14 @@ function createFsBackend(dataDir) {
       lists[listName] = lists[listName] || [];
       if (lists[listName].indexOf(value) === -1) lists[listName].push(value);
       writeJSON(F_LISTS, lists);
+    },
+    // User-linked lists (Option C): the admin-only { listName: { value: email } } link map. Stored whole;
+    // the server derives the viewer-safe projection from it (see list-users.js / getListAvatars).
+    getListUsers(folderId) {
+      return readJSON(F_LISTUSERS) || {};
+    },
+    saveListUsers(folderId, map) {
+      writeJSON(F_LISTUSERS, map || {});
     },
     getTranslations(folderId, code) {
       return readJSON(fLang(code)) || {};

@@ -3195,6 +3195,31 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(r.modelShared).toBe(false);      // ...and the toggle state reflects it
   });
 
+  test('user-linked lists: getListAvatars projects value->picture (non-admin: shared only, no email); links are admin-only', async ({ page }) => {
+    const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
+    await api('resetData');
+    // Seed profiles: Ann shared with a photo; Cara has a photo but did NOT share.
+    await api('setMyProfile', { name: 'Ann',  shared: true,  picture: 'PIC_ANN'  }, 'ann@x.com');
+    await api('setMyProfile', { name: 'Cara', shared: false, picture: 'PIC_CARA' }, 'cara@x.com');
+    // Register an admin + a viewer (once users exist, unregistered callers are non-admin).
+    await api('setUserRole', { uid: 'admin@x.com',  role: 'admin',  user: 'admin@x.com',  tables: 'all' });
+    await api('setUserRole', { uid: 'viewer@x.com', role: 'viewer', user: 'viewer@x.com', tables: [] }, 'admin@x.com');
+    // Admin links two list values to accounts.
+    await api('setListUser', { listName: 'people', value: 'Ann',  email: 'ann@x.com'  }, 'admin@x.com');
+    await api('setListUser', { listName: 'people', value: 'Cara', email: 'cara@x.com' }, 'admin@x.com');
+
+    const adminProj  = await (await api('getListAvatars', {}, 'admin@x.com')).json();
+    const viewerProj = await (await api('getListAvatars', {}, 'viewer@x.com')).json();
+    expect(adminProj).toEqual({ people: { Ann: 'PIC_ANN', Cara: 'PIC_CARA' } });  // admin sees both linked photos
+    expect(viewerProj).toEqual({ people: { Ann: 'PIC_ANN' } });                    // non-admin: shared linked only
+    expect(JSON.stringify(viewerProj)).not.toContain('@');                         // ...and never an email
+
+    const links = await (await api('getListUserLinks', {}, 'admin@x.com')).json();
+    expect(links).toEqual({ people: { Ann: 'ann@x.com', Cara: 'cara@x.com' } });   // admin gets the raw email links
+    const denied = await api('getListUserLinks', {}, 'viewer@x.com');
+    expect(denied.status()).toBe(403);                                             // non-admin denied the raw links
+  });
+
   test('rsvp: status labels translate (statusList) + picker type is configurable', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
