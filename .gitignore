@@ -36,3 +36,6 @@ firestore-debug.log
 
 # Cloud Functions deps (functions/ deploys its own node_modules)
 functions/node_modules/
+
+# Local browser-preview launch config (per-machine tooling)
+.claude/launch.json
