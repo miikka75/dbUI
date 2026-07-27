@@ -500,7 +500,7 @@
             <div class="d-flex align-center flex-wrap" style="gap:12px">
               <v-text-field :model-value="a.currentUserEmail" :label="a.t('profile.email')" density="compact" hide-details variant="outlined" readonly style="max-width:240px"></v-text-field>
               <v-text-field v-model="a.myProfile.name" :label="a.t('profile.your_name')" density="compact" hide-details variant="outlined" style="max-width:240px" @blur="a.saveMyProfile" @keydown.enter="$event.target.blur()" @keydown.home.stop @keydown.end.stop></v-text-field>
-              <v-switch v-if="a.userBackedLists().length" :model-value="a.myProfile.shared" @update:model-value="v => { a.myProfile.shared = v; a.saveMyProfile(); }" :label="a.t('profile.share_name')" density="compact" hide-details color="primary"></v-switch>
+              <v-switch v-if="a.userBackedLists().length" :model-value="a.myProfile.shared" :disabled="!(a.myProfile.name || '').trim()" @update:model-value="v => { a.myProfile.shared = v; a.saveMyProfile(); }" :label="a.t('profile.share_name')" density="compact" hide-details color="primary"></v-switch>
             </div>
             </template>
             <template v-if="a.usersLoaded && a.userList.length && a.isAdmin">

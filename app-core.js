@@ -548,7 +548,7 @@ function createVueApp() {
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset',
          'cal.today', 'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
-         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none', 'rsvp.member',
+         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
@@ -2272,7 +2272,12 @@ function createVueApp() {
       saveMyProfile: function() {
         var self = this;
         if (typeof backend_users === 'undefined' || !backend_users.setMyProfile) return;
-        var name = (this.myProfile.name || '').trim(), shared = !!this.myProfile.shared, picture = this.myProfile.picture || '';
+        var name = (this.myProfile.name || '').trim(), picture = this.myProfile.picture || '';
+        // Sharing requires a name: an unnamed profile can't be shared (it would surface as a nameless entry
+        // in member lists / the roster). Enforce here so clearing the name also drops the opt-in, and mirror
+        // it back into the model so the toggle reflects the real state.
+        var shared = !!this.myProfile.shared && !!name;
+        this.myProfile.shared = shared;
         if (this.profileSaved && this.profileSaved.name === name && this.profileSaved.shared === shared && this.profileSaved.picture === picture) return;
         backend_users.setMyProfile(name, shared, picture).then(function() {
           self.profileSaved = { name: name, shared: shared, picture: picture };
@@ -2326,10 +2331,10 @@ function createVueApp() {
       // myProfile/saveMyProfile above instead -- this is for viewing/editing OTHER users' names).
       loadAllProfiles: function() {
         var self = this;
-        if (typeof backend_users === 'undefined' || !backend_users.getProfiles) return;
+        if (typeof backend_users === 'undefined' || !backend_users.getProfiles) return Promise.resolve();
         // Merge (not replace): loadSharedProfiles may resolve either side of this, and both hold the same
         // data for overlapping emails, so a union is always correct and order-independent.
-        backend_users.getProfiles().then(function(m) { self.profilesByEmail = Object.assign({}, self.profilesByEmail, m || {}); }).catch(function() {});
+        return backend_users.getProfiles().then(function(m) { self.profilesByEmail = Object.assign({}, self.profilesByEmail, m || {}); }).catch(function() {});
       },
       // Every user (not just admins) loads the opted-in shared profiles so other people's names + avatars can
       // render wherever a user shows up (roster, user-backed surfaces). Shared profiles are world-readable by
@@ -2337,8 +2342,8 @@ function createVueApp() {
       // for the same order-independence reason noted above.
       loadSharedProfiles: function() {
         var self = this;
-        if (typeof backend_users === 'undefined' || !backend_users.getSharedProfiles) return;
-        backend_users.getSharedProfiles().then(function(m) { self.profilesByEmail = Object.assign({}, self.profilesByEmail, m || {}); }).catch(function() {});
+        if (typeof backend_users === 'undefined' || !backend_users.getSharedProfiles) return Promise.resolve();
+        return backend_users.getSharedProfiles().then(function(m) { self.profilesByEmail = Object.assign({}, self.profilesByEmail, m || {}); }).catch(function() {});
       },
       // Opted-in display name for an email, or '' if none. The single lookup into profilesByEmail;
       // callers pick their own fallback (the Users table wants a blank cell, the rsvp roster wants the
@@ -3702,16 +3707,22 @@ function createVueApp() {
       // — whose name may resolve to another table's list under the per-column-name list resolver.
       statusLabel: function(v) { var list = this.cfg.statusList || appInstance.colIsList(this.cfg.statusColumn) || this.cfg.statusColumn; return appInstance.tOr('list.' + list + '.' + v, v); },
       tallyText: function(ev) { var self = this; return Object.keys(ev.tally).sort().map(function(s) { return self.statusLabel(s) + ': ' + ev.tally[s]; }).join('  ·  '); },
-      // A participant's display label: their shared name if any. Falls back to the raw email ONLY for admins
-      // (sensitive data); a non-admin sees a neutral placeholder for anyone who hasn't shared a name, so the
-      // public roster never leaks emails.
-      ownerName: function(email) { return appInstance.profileName(email) || (appInstance.isAdmin ? (email || '') : appInstance.t('rsvp.member')); },
+      // A participant's display label under the profile-privacy rule: a shared (named) member shows their
+      // name; an admin additionally sees the raw email for members who haven't shared; a non-admin gets ''
+      // for any unshared member, so rosterGroups can drop them — an unshared profile is hidden from
+      // non-admins entirely, never revealed as a name OR an email.
+      ownerName: function(email) { return appInstance.profileName(email) || (appInstance.isAdmin ? (email || '') : ''); },
       // Participants grouped by status: [{ status, label, people:[{ email, name }] }], in the configured
-      // status order. Carries each person's email (not just a joined name string) so the roster can render an
-      // avatar per person.
+      // status order. Carries each person's email so the roster can render a per-person avatar, and drops
+      // anyone with no resolvable label (a non-admin viewing an unshared member) so the public roster never
+      // reveals or counts a hidden identity.
       rosterGroups: function(ev) {
         var self = this, order = this.options.map(function(o) { return o.value; }), groups = {};
-        ev.participants.forEach(function(p) { (groups[p.status] || (groups[p.status] = [])).push({ email: p.owner, name: self.ownerName(p.owner) }); });
+        ev.participants.forEach(function(p) {
+          var name = self.ownerName(p.owner);
+          if (!name) return;   // unshared member seen by a non-admin -> hidden
+          (groups[p.status] || (groups[p.status] = [])).push({ email: p.owner, name: name });
+        });
         var keys = Object.keys(groups).sort(function(a, b) { var ia = order.indexOf(a), ib = order.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
         return keys.map(function(s) { return { status: s, label: self.statusLabel(s), people: groups[s] }; });
       }
