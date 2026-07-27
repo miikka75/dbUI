@@ -213,6 +213,49 @@ backend = {
         { merge: true });
     });
   },
+  // --- User-linked lists (Option C): link a list VALUE to a registered user, for avatar display ---
+  // Each link is its own doc { list, value, email, shared }; `shared` caches the linked user's current
+  // opt-in so a non-admin can query ONLY shared links (whose emails are already world-readable via
+  // /_profiles) — mirroring getSharedProfiles. Admins read all; only admins write.
+  _linkDocId: function(listName, value) {
+    return encodeURIComponent(String(listName)) + '~' + encodeURIComponent(String(value));
+  },
+  // Viewer-safe { list: { value: picture } } projection. Tries the admin read (all links, joined against
+  // every profile's picture incl. unshared); on denial falls back to the shared-only query any registered
+  // user may run. Never returns an email. Join is inline (no list-users.js load-order dependency).
+  getListAvatars: function() {
+    function join(snap, profiles) {
+      profiles = profiles || {}; var out = {};
+      snap.forEach(function(d) {
+        var v = d.data(); var pic = (profiles[String(v.email || '').toLowerCase()] || {}).picture || '';
+        if (pic) { (out[v.list] || (out[v.list] = {}))[v.value] = pic; }
+      });
+      return out;
+    }
+    return _db.collection('_list_users').get()
+      .then(function(snap) { return backend_users.getProfiles().then(function(p) { return join(snap, p); }); })
+      .catch(function() {
+        return _db.collection('_list_users').where('shared', '==', true).get()
+          .then(function(snap) { return backend_users.getSharedProfiles().then(function(p) { return join(snap, p); }); })
+          .catch(function() { return {}; });
+      });
+  },
+  // Admin-only: the raw { list: { value: email } } links, for the Lookup editor's picker.
+  getListUserLinks: function() {
+    return _db.collection('_list_users').get().then(function(snap) {
+      var out = {}; snap.forEach(function(d) { var v = d.data(); (out[v.list] || (out[v.list] = {}))[v.value] = v.email; }); return out;
+    });
+  },
+  // Admin-only: link (email set) or unlink (empty) a value. Caches the linked user's current shared flag so
+  // the shared-only query stays rules-provable; a later share/unshare needs a re-link to refresh it.
+  setListUser: function(listName, value, email) {
+    var self = this, id = self._linkDocId(listName, value);
+    if (!email) return _db.collection('_list_users').doc(id).delete();
+    var e = String(email).toLowerCase();
+    return _db.collection('_profiles').doc(e).get().then(function(d) {
+      return _db.collection('_list_users').doc(id).set({ list: String(listName), value: String(value), email: e, shared: (d.exists && !!d.data().shared) });
+    });
+  },
   getTranslations: function(folderId, langCode) {
     return StorageFirestore.getMeta('lang_' + langCode).then(function(d) { return d || {}; });
   },

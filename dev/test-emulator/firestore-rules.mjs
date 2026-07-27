@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where } from 'firebase/firestore';
 
 const rulesPath = fileURLToPath(new URL('../../firestore.rules', import.meta.url));
 const testEnv = await initializeTestEnvironment({
@@ -152,6 +152,31 @@ await ok('admin CAN delete another _meta doc (deleteLanguage path)',
 // clobbering lists outside their table grants. Editors write /_lists (gated per list), never _meta.
 await ok('editor CANNOT write the legacy _meta/lists doc',
   assertFails(setDoc(doc(editor, '_meta/lists'), { mylist: ['a'] })));
+
+// --- _list_users (Option C): a SHARED link is world-readable (its email is already public via _profiles);
+// an UNSHARED link is admin-only; only admins write. Non-admins may query only `.where('shared','==',true)`. ---
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), '_list_users/people~Ann'),  { list: 'people', value: 'Ann',  email: 'ann@x.com',  shared: true });
+  await setDoc(doc(ctx.firestore(), '_list_users/people~Cara'), { list: 'people', value: 'Cara', email: 'cara@x.com', shared: false });
+});
+await ok('admin CAN write a valid list-user link',
+  assertSucceeds(setDoc(doc(admin, '_list_users/people~Bob'), { list: 'people', value: 'Bob', email: 'bob@x.com', shared: true })));
+await ok('viewer CANNOT write a list-user link',
+  assertFails(setDoc(doc(viewer, '_list_users/people~Evil'), { list: 'people', value: 'Evil', email: 'e@x.com', shared: true })));
+await ok('list-user link with extra fields is denied',
+  assertFails(setDoc(doc(admin, '_list_users/people~BadA'), { list: 'people', value: 'BadA', email: 'b@x.com', shared: true, role: 'admin' })));
+await ok('list-user link with a non-bool shared is denied',
+  assertFails(setDoc(doc(admin, '_list_users/people~BadB'), { list: 'people', value: 'BadB', email: 'b@x.com', shared: 'yes' })));
+await ok('viewer CAN read a SHARED list-user link (email already public via _profiles)',
+  assertSucceeds(getDoc(doc(viewer, '_list_users/people~Ann'))));
+await ok('viewer CANNOT read an UNSHARED list-user link',
+  assertFails(getDoc(doc(viewer, '_list_users/people~Cara'))));
+await ok('admin CAN read an unshared list-user link',
+  assertSucceeds(getDoc(doc(admin, '_list_users/people~Cara'))));
+await ok('viewer CAN query ONLY the shared links (rules-provable)',
+  assertSucceeds(getDocs(query(collection(viewer, '_list_users'), where('shared', '==', true)))));
+await ok('viewer CANNOT list ALL links (unconstrained query denied)',
+  assertFails(getDocs(collection(viewer, '_list_users'))));
 
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);
