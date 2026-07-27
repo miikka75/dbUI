@@ -1875,7 +1875,16 @@ function createVueApp() {
         this.saveLists();
         // Rename propagation: text is stored in rows, so rewrite the old value -> new value across
         // every table column backed by this list (both partitions). Skip no-ops / blank endpoints.
-        if (oldVal && value && oldVal !== value) this.propagateListChange(name, oldVal, value);
+        if (oldVal && value && oldVal !== value) { this.propagateListChange(name, oldVal, value); this.migrateListUserLink(name, oldVal, value); }
+      },
+      // Carry a user-linked-list link when its value is renamed (or drop it on delete): the link is keyed by
+      // the value string, so a rename would otherwise orphan it (like the row rewrite above). No-op unless a
+      // link exists for the old value (so non-admins, whose listUserLinks is empty, never call setListUser).
+      migrateListUserLink: function(list, oldVal, newVal) {
+        var email = (this.listUserLinks[list] || {})[oldVal];
+        if (!email) return;
+        this.setListUserLink(list, oldVal, '');                 // drop the stale-keyed link
+        if (newVal) this.setListUserLink(list, newVal, email);  // re-link under the new value (delete => none)
       },
       focusNextListItem: function(e) {
         var el = e.target;
@@ -1893,7 +1902,7 @@ function createVueApp() {
         this.saveLists();
         // Delete cascade: scrub the removed value from stored rows (text storage) so no orphans
         // remain — blank the cell for select columns, drop the element for multiselect columns.
-        if (oldVal) this.propagateListChange(name, oldVal, null);
+        if (oldVal) { this.propagateListChange(name, oldVal, null); this.migrateListUserLink(name, oldVal, null); }
       },
       moveListItem: function(name, i, dir) {
         var arr = this.listsCache[name]; var j = i + dir;

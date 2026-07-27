@@ -3284,6 +3284,36 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(r.uiLinks).toEqual({ people: { Ann: 'ann@x.com' } }); // editor state refreshed
   });
 
+  test('user-linked lists: a link follows a list-value rename and is dropped on delete', async ({ page }) => {
+    test.setTimeout(20000);
+    const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
+    await api('resetData');
+    await api('setMyProfile', { name: 'Ann', shared: true, picture: 'PIC_ANN' }, 'ann@x.com');
+    await api('setUserRole', { uid: 'local@dev', role: 'admin', user: 'local@dev', tables: 'all' });
+    await api('setUserRole', { uid: 'ann@x.com', role: 'viewer', user: 'ann@x.com', tables: [] });
+    await api('saveSchema', { schema: { tables: { roster: { columns: [{ name: 'who', type: 'select', list: 'people' }] } }, listSources: { people: 'userlink' } } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.listsCache = Object.assign({}, app.listsCache, { people: ['Ann'] });
+      window._listsCache = app.listsCache;
+      app.setListUserLink('people', 'Ann', 'ann@x.com');
+      await new Promise(r => setTimeout(r, 250));
+      app.updateListItem2('people', 0, 'Ann V.');       // rename the value
+      await new Promise(r => setTimeout(r, 400));
+      const afterRename = await backend.getListUserLinks();
+      app.removeListItem2('people', 0); app.removeListItem2('people', 0); // arm + confirm delete
+      await new Promise(r => setTimeout(r, 400));
+      const afterDelete = await backend.getListUserLinks();
+      return { afterRename, afterDelete };
+    });
+    expect(r.afterRename).toEqual({ people: { 'Ann V.': 'ann@x.com' } });  // link moved to the new value, old key gone
+    expect(r.afterDelete).toEqual({});                                     // deleting the value dropped the link
+  });
+
   test('rsvp: status labels translate (statusList) + picker type is configurable', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
