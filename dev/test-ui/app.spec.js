@@ -3220,6 +3220,33 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(denied.status()).toBe(403);                                             // non-admin denied the raw links
   });
 
+  test('user-linked lists: a readonly list cell renders the linked user avatar beside the value', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
+    await api('resetData');
+    await api('setMyProfile', { name: 'Ann', shared: true, picture: 'PIC_ANN' }, 'ann@x.com');  // linked user + photo
+    await api('setListUser', { listName: 'people', value: 'Ann', email: 'ann@x.com' });          // link the value (bootstrap admin)
+    await api('saveSchema', { schema: { tables: { roster: { readonly: true, columns: [{ name: 'who', type: 'select', list: 'people' }] } } } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const seeded = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.listsCache = Object.assign({}, app.listsCache, { people: ['Ann'] });
+      app.dataCache['roster'] = [{ id: 'r1', who: 'Ann' }];
+      app.selectTab('roster');
+      return { proj: app.listAvatars, resolved: app.listValuePicture('who', 'Ann') };
+    });
+    expect(seeded.proj).toEqual({ people: { Ann: 'PIC_ANN' } });   // projection loaded at boot
+    expect(seeded.resolved).toBe('PIC_ANN');                        // client resolver maps col->list->picture
+    // the cell renders the avatar image AND still shows the value text
+    const avatarImg = page.locator('.v-main .user-avatar img').first();
+    await expect(avatarImg).toHaveAttribute('src', 'PIC_ANN');
+    await expect(page.locator('.v-main')).toContainText('Ann');
+  });
+
   test('rsvp: status labels translate (statusList) + picker type is configurable', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });

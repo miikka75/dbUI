@@ -135,6 +135,7 @@ function createVueApp() {
       myProfile: { name: '', shared: false, picture: '' },   // this user's opt-in display-name profile (+ optional avatar)
       profileSaved: null,       // last-persisted {name, shared, picture} snapshot -> skip redundant blur saves
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
+      listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
       periodOffset: 0,          // leaderboard ‹ › navigation: periods back from now (0 = current)
       firestoreRules: '',
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
@@ -788,6 +789,7 @@ function createVueApp() {
             self.tableMap = result.tableMap || {};
             self.languages = result.languages || [];
             self.listsCache = result.lists || {}; window._listsCache = self.listsCache;
+            self.loadListAvatars();   // user-linked-list avatars (viewer-safe projection)
             // Auto-seed lists (create missing list names + seed mandatory filter values): admin-only
             // maintenance. A restricted user's listsCache is already scoped to their own tables
             // server-side; seeding+saving here would add entries for tables they don't own, and
@@ -855,6 +857,7 @@ function createVueApp() {
           return backend.getLists(self.folderId).then(function(lists) {
             self.listsCache = lists || {}; window._listsCache = self.listsCache;
             if (self._seedSchemaLists()) backend.saveLists(self.folderId, self.listsCache);
+            self.loadListAvatars();   // user-linked-list avatars (viewer-safe projection)
           });
         }).then(function() {
           // Load users FIRST to know access restrictions
@@ -2357,6 +2360,22 @@ function createVueApp() {
         if (e && e === (this.currentUserEmail || '').toLowerCase()) return this.myProfile.picture || '';
         return (this.profilesByEmail[e] || {}).picture || '';
       },
+      // User-linked lists (Option C): load the viewer-safe { list: { value: picture } } projection the
+      // server computed for us (non-admins already stripped of unshared users + all emails). Backends
+      // without the feature (legacy) just leave it empty.
+      loadListAvatars: function() {
+        var self = this;
+        if (typeof backend === 'undefined' || !backend.getListAvatars) return Promise.resolve();
+        return backend.getListAvatars(self.folderId).then(function(m) { self.listAvatars = m || {}; }).catch(function() {});
+      },
+      // The linked user's avatar for a single-select list VALUE, or '' — used to draw a face beside the
+      // value while the displayed text stays the value itself. Multiselect (array) values are skipped here.
+      listValuePicture: function(col, value) {
+        if (!value || typeof value !== 'string') return '';
+        var list = this.colIsList(col);
+        if (!list || !window.ListUsers) return '';
+        return window.ListUsers.pictureFor(this.listAvatars, list, value);
+      },
       userDisplayName: function(u) { return this.profileName(u.key); },
       renameUserProfile: function(u, name) {
         var self = this, email = (u.key || '').toLowerCase(), trimmed = (name || '').trim();
@@ -3245,6 +3264,7 @@ function createVueApp() {
       colIsMultiselect: function(col) { return appInstance.colIsMultiselect(col); },
       colAllowNew: function(col) { return appInstance.colAllowNew(col); },
       colIsList: function(col) { return appInstance.colIsList(col); },
+      listPic: function(col, value) { return appInstance.listValuePicture(col, value); },   // linked-user avatar for a list value
       colIsRef: function(col) { return appInstance.colIsRef(col); },
       colPicker: function(col) { return appInstance.colPicker(col); },
       colListSwitch: function(col) { return appInstance.colListSwitch(col); },
@@ -3280,7 +3300,7 @@ function createVueApp() {
       + '<span v-if="cellRO(item, col)" :style="{ opacity: embed ? 0.4 : 0.75 }">'
       +   '<a v-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="safeImg(item[col])" class="cell-thumb" alt=""></a>'
       +   '<a v-else-if="colIsUrl(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop>{{ item[col] }}</a>'
-      +   '<template v-else>{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</template>'
+      +   '<template v-else><user-avatar v-if="listPic(col, item[col])" :picture="listPic(col, item[col])" :name="item[col]" :size="18" class="mr-1" style="vertical-align:middle"></user-avatar>{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</template>'
       + '</span>'
       + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
       + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
@@ -3626,9 +3646,11 @@ function createVueApp() {
   // Users table, rsvp roster). `name` is an optional override so callers that already have the display name
   // don't force a second profilesByEmail lookup. `title` falls through onto the avatar for a hover tooltip.
   app.component('user-avatar', {
-    props: { email: { type: String, default: '' }, name: { type: String, default: '' }, size: { type: [Number, String], default: 28 } },
+    props: { email: { type: String, default: '' }, name: { type: String, default: '' }, size: { type: [Number, String], default: 28 }, picture: { type: String, default: '' } },
     computed: {
-      pic: function() { return appInstance.profilePicture(this.email); },
+      // A directly-supplied picture (e.g. a list-value's server-projected avatar, where the caller has no
+      // email to resolve) wins; otherwise resolve from the email's profile.
+      pic: function() { return this.picture || appInstance.profilePicture(this.email); },
       // Email is a last-resort label ONLY for admins — it's sensitive data a non-admin must not see (falls
       // through to the generic account icon instead). Named/pictured users are unaffected.
       label: function() { return this.name || appInstance.profileName(this.email) || (appInstance.isAdmin ? this.email : '') || ''; },
