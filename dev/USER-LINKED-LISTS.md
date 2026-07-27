@@ -38,6 +38,14 @@ Lists stay arrays of strings. A parallel per-list link map is added:
 - 1 value → 1 email. (A list is a set, so a value is one identity; same-named people
   and multi-holder roles are out of scope — pre-existing string-list limits.)
 
+## Enabling it per list
+
+A list opts in via `listSources[name] === 'userlink'` in the schema (distinct from `'users'`,
+which auto-populates a list from shared display names). Only `userlink` lists show the admin
+"link user" picker in the Lookup editor; a list's curated values are otherwise untouched. This
+is how you choose *which* list(s) to map (e.g. `seurakuntalaiset` and/or `piispakunta`). Rendering
+is not gated by the flag — any existing link projects an avatar — the flag only governs the editor.
+
 ## Behavior / correctness
 
 | Concern | Behavior |

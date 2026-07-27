@@ -136,6 +136,7 @@ function createVueApp() {
       profileSaved: null,       // last-persisted {name, shared, picture} snapshot -> skip redundant blur saves
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
       listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
+      listUserLinks: {},        // admin only: raw { listName: { value: email } } links, for the Lookup editor
       periodOffset: 0,          // leaderboard ‹ › navigation: periods back from now (0 = current)
       firestoreRules: '',
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
@@ -553,6 +554,7 @@ function createVueApp() {
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
+         'list.link_user', 'list.unlink_user',
          'lang.app', 'lang.schema'].sort();
       },
       schemaTranslationKeys: function() {
@@ -789,7 +791,7 @@ function createVueApp() {
             self.tableMap = result.tableMap || {};
             self.languages = result.languages || [];
             self.listsCache = result.lists || {}; window._listsCache = self.listsCache;
-            self.loadListAvatars();   // user-linked-list avatars (viewer-safe projection)
+            self.loadListAvatars(); self.loadListUserLinks();   // user-linked-list avatars + admin editor links
             // Auto-seed lists (create missing list names + seed mandatory filter values): admin-only
             // maintenance. A restricted user's listsCache is already scoped to their own tables
             // server-side; seeding+saving here would add entries for tables they don't own, and
@@ -857,7 +859,7 @@ function createVueApp() {
           return backend.getLists(self.folderId).then(function(lists) {
             self.listsCache = lists || {}; window._listsCache = self.listsCache;
             if (self._seedSchemaLists()) backend.saveLists(self.folderId, self.listsCache);
-            self.loadListAvatars();   // user-linked-list avatars (viewer-safe projection)
+            self.loadListAvatars(); self.loadListUserLinks();   // user-linked-list avatars + admin editor links
           });
         }).then(function() {
           // Load users FIRST to know access restrictions
@@ -2366,7 +2368,7 @@ function createVueApp() {
       loadListAvatars: function() {
         var self = this;
         if (typeof backend === 'undefined' || !backend.getListAvatars) return Promise.resolve();
-        return backend.getListAvatars(self.folderId).then(function(m) { self.listAvatars = m || {}; }).catch(function() {});
+        return backend.getListAvatars().then(function(m) { self.listAvatars = m || {}; }).catch(function() {});
       },
       // The linked user's avatar for a single-select list VALUE, or '' — used to draw a face beside the
       // value while the displayed text stays the value itself. Multiselect (array) values are skipped here.
@@ -2375,6 +2377,31 @@ function createVueApp() {
         var list = this.colIsList(col);
         if (!list || !window.ListUsers) return '';
         return window.ListUsers.pictureFor(this.listAvatars, list, value);
+      },
+      // Lists opted in to user linking (Lookup-editor picker): `listSources[name] === 'userlink'`. Distinct
+      // from 'users' (auto-populated shared names) -- these keep curated values and just map value -> account.
+      isUserLinkList: function(name) { return (((this.schemaData || {}).listSources) || {})[name] === 'userlink'; },
+      // Admin only: the raw value -> email links, for the editor's current-selection display. Denied for
+      // non-admins by the server/rules -> caught into {} (they never need it; rendering uses listAvatars).
+      loadListUserLinks: function() {
+        var self = this;
+        if (typeof backend === 'undefined' || !backend.getListUserLinks) return Promise.resolve();
+        return backend.getListUserLinks().then(function(m) { self.listUserLinks = m || {}; }).catch(function() { self.listUserLinks = {}; });
+      },
+      // Registered users as { email, name } options for the link picker, name-sorted (admins have userList).
+      listUserOptions: function() {
+        var self = this;
+        return (this.userList || []).map(function(u) { return { email: u.key, name: self.profileName(u.key) || u.key }; })
+          .sort(function(a, b) { return a.name.localeCompare(b.name); });
+      },
+      // Link (email set) or unlink (email '') a list value to a user, then refresh the raw links + the
+      // rendered avatar projection so the change shows immediately in the editor and in every cell.
+      setListUserLink: function(list, value, email) {
+        var self = this;
+        if (typeof backend === 'undefined' || !backend.setListUser) return;
+        backend.setListUser(list, value, email || '').then(function() {
+          self.loadListUserLinks(); self.loadListAvatars();
+        }).catch(function(e) { self.notify((e && (e.error || e.message)) || self.t('msg.save_failed')); });
       },
       userDisplayName: function(u) { return this.profileName(u.key); },
       renameUserProfile: function(u, name) {
@@ -3663,6 +3690,35 @@ function createVueApp() {
       + '<span v-else-if="initial" class="user-avatar__initial" :style="{ fontSize: (Number(size) * 0.45) + \'px\' }">{{ initial }}</span>'
       + '<v-icon v-else :size="iconSize" icon="mdi-account"></v-icon>'
       + '</v-avatar>'
+  });
+
+  // Admin picker in the Lookup editor: link a single list VALUE to a registered user (stores the email;
+  // the value itself is unchanged). The activator shows the linked user's avatar, or a "link" icon when
+  // none; the menu lists registered users (name + avatar) plus an unlink option.
+  app.component('list-user-picker', {
+    props: { list: { type: String, required: true }, value: { type: String, required: true } },
+    computed: {
+      a: function() { return appInstance; },
+      email: function() { return (appInstance.listUserLinks[this.list] || {})[this.value] || ''; },
+      options: function() { return appInstance.listUserOptions(); }
+    },
+    methods: { pick: function(email) { appInstance.setListUserLink(this.list, this.value, email || ''); } },
+    template: ''
+      + '<v-menu location="bottom end" :close-on-content-click="true">'
+      + '<template v-slot:activator="{ props }">'
+      + '<v-btn v-bind="props" size="x-small" variant="text" :title="email || a.t(\'list.link_user\')" data-testid="list-user-picker">'
+      + '<user-avatar v-if="email" :email="email" :size="22"></user-avatar>'
+      + '<v-icon v-else size="small" icon="mdi-account-plus-outline"></v-icon>'
+      + '</v-btn>'
+      + '</template>'
+      + '<v-list density="compact" max-height="320" min-width="180">'
+      + '<v-list-item v-if="email" @click="pick(\'\')" prepend-icon="mdi-link-off" :title="a.t(\'list.unlink_user\')"></v-list-item>'
+      + '<v-divider v-if="email"></v-divider>'
+      + '<v-list-item v-for="o in options" :key="o.email" @click="pick(o.email)" :active="o.email === email" :title="o.name">'
+      + '<template v-slot:prepend><user-avatar :email="o.email" :name="o.name" :size="24" class="mr-2"></user-avatar></template>'
+      + '</v-list-item>'
+      + '</v-list>'
+      + '</v-menu>'
   });
 
   // The current user's status control for one event — the 3 picker variants share this so the rsvp table

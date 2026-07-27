@@ -3247,6 +3247,43 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await expect(page.locator('.v-main')).toContainText('Ann');
   });
 
+  test('user-linked lists: the Lookup editor links a value to a user (admin picker) for userlink-flagged lists', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
+    await api('resetData');
+    await api('setMyProfile', { name: 'Ann', shared: true, picture: 'PIC_ANN' }, 'ann@x.com');   // a registered, shared user
+    await api('setUserRole', { uid: 'local@dev', role: 'admin', user: 'local@dev', tables: 'all' }); // the acting admin
+    await api('setUserRole', { uid: 'ann@x.com', role: 'viewer', user: 'ann@x.com', tables: [] });    // so she's a pick option
+    await api('saveSchema', { schema: { tables: { roster: { columns: [{ name: 'who', type: 'select', list: 'people' }] } }, listSources: { people: 'userlink', status: 'x' } } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const flags = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.listsCache = Object.assign({}, app.listsCache, { people: ['Ann'], status: ['open'] });
+      window._listsCache = app.listsCache;
+      app.selectTab('__lookup');
+      return { peopleIsLink: app.isUserLinkList('people'), statusIsLink: app.isUserLinkList('status'), opts: app.listUserOptions().map(o => o.email) };
+    });
+    expect(flags.peopleIsLink).toBe(true);     // flagged list is user-linkable
+    expect(flags.statusIsLink).toBe(false);    // a non-'userlink' listSource value is NOT
+    expect(flags.opts).toContain('ann@x.com'); // registered users are pick options
+    // the picker renders for a value of the userlink list (expand the group)
+    await page.locator('.v-main .v-list-group').filter({ hasText: 'people' }).locator('.v-list-group__header').first().click();
+    await expect(page.locator('[data-testid="list-user-picker"]').first()).toBeVisible();
+    // link through the app method, then verify it persisted, projected, and refreshed the editor state
+    const r = await page.evaluate(async () => {
+      window.appInstance.setListUserLink('people', 'Ann', 'ann@x.com');
+      await new Promise(r => setTimeout(r, 300));
+      return { links: await backend.getListUserLinks(), avatars: window.appInstance.listAvatars, uiLinks: window.appInstance.listUserLinks };
+    });
+    expect(r.links).toEqual({ people: { Ann: 'ann@x.com' } });   // persisted (raw admin links)
+    expect(r.avatars).toEqual({ people: { Ann: 'PIC_ANN' } });   // projected for cell rendering
+    expect(r.uiLinks).toEqual({ people: { Ann: 'ann@x.com' } }); // editor state refreshed
+  });
+
   test('rsvp: status labels translate (statusList) + picker type is configurable', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
