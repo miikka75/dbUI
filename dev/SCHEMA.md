@@ -862,6 +862,58 @@ The events live in one table; responses in another that has an **`owner` column*
 - With owner-scoped reads a non-organizer receives only their own response from the backend, so the
   rendered tally/roster reflects exactly what that user is permitted to see.
 
+## board (seventh view kind)
+
+A view with a `board` field renders a **kanban board**: a single table's rows grouped into vertical
+**lanes** by one `select` column, with each row shown as a card. Dragging a card between lanes (or using
+the card's move-menu) **writes that column** back to the row. It is the one-dimensional, *writable*
+cousin of the pivot — where a pivot aggregates to read-only numbers, a board keeps whole editable rows.
+Engine: `board.js`. A board is essentially a single-source **data view** plus a `lane` column, so it
+reuses the data-view load path (filters, `compute`, `defaultSort` all apply) and the standard
+`saveField` write.
+
+```json
+{ "name": "tickets_board",
+  "sources": ["tickets"],            // REQUIRED — exactly ONE table (the drag-write target must be unambiguous)
+  "mode": "join",
+  "defaultSort": "title",            // card order within each lane
+  "board": {
+    "lane": "status",                // REQUIRED — a `select` column on the source table; its value places the card
+    "lanes": ["open", "in_progress", "done"], // OPTIONAL — explicit lane order; keys here render even when empty.
+                                     //            Omit -> order from the column's list, else first-seen in the data.
+    "hiddenLanes": ["cancelled"],   // OPTIONAL — lane keys to drop from the board
+    "laneGroups": [                  // OPTIONAL — fold lanes under collapsible phase headers (tames many lanes)
+      { "label": "Active", "lanes": ["open", "in_progress"] },
+      { "label": "Closed", "lanes": ["done"], "collapsed": true }
+    ],
+    "title": "title",                // OPTIONAL — card heading column (default: first entry of `columns`)
+    "color": "assignee",             // OPTIONAL — column whose value tints each card's left border (hashed)
+    "addInLane": true                // OPTIONAL — per-lane "+" adds a row pre-stamped with that lane value
+  },
+  "columns": ["title", "assignee"]   // card-face columns (the lane/title columns are shown separately)
+}
+```
+
+- **One source, one lane column.** The source must be **exactly one** table and `lane` must be a `select`
+  on it (load-time validation enforces both) — a drag writes one column on one table, so a union/join or a
+  non-select lane would be ambiguous. This mirrors why a mirror-**detail** table (one whose columns
+  `syncFrom` a master) yields a **read-only** board: such rows are mutated only via their master, so the
+  board offers no drag/add (same `hasMaster` gate as the data view's add button). Board a **standalone**
+  table (like a status/workflow table).
+- **Lane order & labels.** `lanes` fixes the order and materializes empty lanes; otherwise lanes come from
+  the `select` column's list (authored order), else first-seen in the data. Lane headers and card values
+  are translated through the same `list.<list>.<value>` / `field.<col>` keys the grid uses — no board-only
+  i18n. The blank/unassigned lane uses the `board.unassigned` label (default `—`).
+- **Writes.** Dropping a card (desktop HTML5 drag) or picking a lane from the card's **move-menu**
+  (touch / keyboard / a11y fallback) calls the same debounced `saveField` as inline grid editing, so it
+  flows to every backend and updates the cache immediately. Gated on write access (`canMutateRows`); a
+  read-only user gets a static board.
+- **Many lanes → `laneGroups`.** For long lifecycles (e.g. a calling-status column with a dozen states),
+  group lanes into named phases; a group marked `"collapsed": true` starts folded. Lanes not named in any
+  group fall into a trailing implicit group.
+- **Integration.** Because a board only writes an existing column, moving cards feeds any other view that
+  filters on that column (e.g. a program/agenda view filtering `status: "approved"`), with no extra wiring.
+
 ## Self-service tables (Firebase)
 
 Any table that declares an **`owner` column** is a **self-service** table: a registered member may

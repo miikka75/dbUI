@@ -1,5 +1,14 @@
 # Kanban / Board View — Implementation Plan
 
+> **Status: implemented** on `claude/dbui-view-expansion-021bo9`. `board.js` + `board-view` +
+> wiring + validation are in; unit (`dev/test/board.test.js`) and E2E (`dev/test-ui/board.spec.js`)
+> suites pass. **One deviation from the draft below:** a board over a **mirror-detail** table (whose
+> columns `syncFrom` a master, like the demo/church `tasks`→`notes`) is **read-only** — the
+> `hasMaster` gate that hides the data view's add button also disables board drag/add, because such
+> rows mutate only via their master. So the board must target a **standalone** table (exactly the
+> real `tehtävät` shape). The demo/fixture therefore ship a standalone `tickets` table + status
+> board rather than boarding the mirror `tasks`. Everything else matches this plan.
+
 Add a **seventh view kind**, `board` (kanban), to dbUI. A board groups a single table's rows
 into vertical **lanes** by one categorical column; dragging a card between lanes writes that
 column back to the row. The flagship use case is the Tampere 1st ward's **`tehtävät`

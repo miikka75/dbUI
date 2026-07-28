@@ -190,6 +190,16 @@
         { "name": "response", "type": "select", "list": "rsvp_status" },
         { "name": "note", "type": "text" }
       ]
+    },
+    "tickets": {
+      "archivable": true,
+      "columns": [
+        { "name": "title", "type": "text" },
+        { "name": "status", "type": "select", "list": "ticket_status" },
+        { "name": "assignee", "type": "select", "list": "assigned_to", "allowNew": true },
+        { "name": "created_at", "type": "text", "hidden": true },
+        { "name": "updated_at", "type": "text", "hidden": true }
+      ]
     }
   },
   "views": [
@@ -452,6 +462,29 @@
       ]
     },
     {
+      "name": "tickets_board",
+      "sources": [
+        "tickets"
+      ],
+      "mode": "join",
+      "defaultSort": "title",
+      "icon": "mdi-view-column-outline",
+      "board": {
+        "lane": "status",
+        "lanes": [
+          "open",
+          "in_progress",
+          "done"
+        ],
+        "color": "assignee",
+        "addInLane": true
+      },
+      "columns": [
+        "title",
+        "assignee"
+      ]
+    },
+    {
       "name": "crewrota",
       "rotation": {
         "columns": [
@@ -656,6 +689,10 @@
       {
         "icon": "mdi-clipboard-list-outline",
         "view": "active_work"
+      },
+      {
+        "icon": "mdi-view-column-outline",
+        "view": "tickets_board"
       },
       {
         "view": "all_items",

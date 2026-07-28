@@ -231,12 +231,13 @@ function createVueApp() {
       bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
       isDataView: function() {
         var v = VIEWS[this.currentTable];
-        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp)) && (v || SCHEMA[this.currentTable]);
+        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp || v.board)) && (v || SCHEMA[this.currentTable]);
       },
       isRotationView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rotation); },
       isCalendarView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.calendar); },
       isPivotView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.pivot); },
       isRsvpView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rsvp); },
+      isBoardView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.board); },
       // Curated palette tokens exposed in the admin theme editor (Vuetify color names + friendly labels).
       themeTokens: function() {
         return [
@@ -256,6 +257,7 @@ function createVueApp() {
         if (this.isRotationView) return 'rotation';
         if (this.isPivotView) return 'pivot';
         if (this.isRsvpView) return 'rsvp';
+        if (this.isBoardView) return 'board';
         if (this.currentPage) return 'page';
         if (this.isDataView) return 'data';
         return null;
@@ -542,6 +544,7 @@ function createVueApp() {
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error',
          'pivot.total', 'pivot.empty',
+         'board.move_to', 'board.unassigned', 'board.add_in_lane',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
@@ -589,6 +592,7 @@ function createVueApp() {
                 (v.rotation.slots || []).forEach(function(a) { keys.push('field.' + a); });
                 (v.rotation.columns || []).forEach(function(c) { keys.push('field.' + colName(c)); });
               }
+              if (v.board && v.board.lane) keys.push('field.' + v.board.lane);       // board: lane header comes from the lane column
               if (v.pivot) {                                                         // pivot: axis headers come from row/column, not v.columns
                 if (v.pivot.row) keys.push('field.' + v.pivot.row);
                 if (v.pivot.column) keys.push('field.' + v.pivot.column);
@@ -931,7 +935,7 @@ function createVueApp() {
         this.sortCol = cfg.defaultSort || null;
         this.sortAsc = true;
         if (this.isCalendarView || this.isPivotView || this.isRsvpView) { this.loadTableData(); }
-        else if (this.isDataView || this.isRotationView) { this.periodOffset = 0; this.loadTableData(); }
+        else if (this.isDataView || this.isRotationView || this.isBoardView) { this.periodOffset = 0; this.loadTableData(); }
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
       // --- Calendar helpers (used by the calendar view + calendar embeds) ---
@@ -972,6 +976,17 @@ function createVueApp() {
         prefill[s.dateColumn] = date;                   // the point: prefill the clicked day
         this._createBlankRow(s.table, { prefill: prefill });
         this.selectTab(s.table);
+        this.notify(this.t('msg.row_added'));
+      },
+      // Board: add a blank card pre-stamped with a lane value (like addRow, but prefilling board.lane so
+      // the card lands in the clicked lane). Pushes into currentData so the board re-renders immediately.
+      boardAddInLane: function(name, laneKey) {
+        var v = VIEWS[name]; if (!v || !v.board || !this.canMutateRows) return;
+        var primary = v.sources[0], prefill = {}; prefill[v.board.lane] = laneKey;
+        var primaryRow = this._createBlankRow(primary, { tab: this.viewingArchive ? 'archive' : 'active', prefill: prefill });
+        var viewRow = Object.assign({}, primaryRow);
+        if (v.mode === 'union') viewRow._source = primary;
+        this.currentData.push(viewRow);
         this.notify(this.t('msg.row_added'));
       },
       calRotationSources: function(name) { return Calendar.rotationSources(VIEWS, name); },
@@ -3400,7 +3415,7 @@ function createVueApp() {
   // Top-level view-kind registry: kind -> the component that renders that whole view. Every kind is
   // componentized; the top-level dispatch is a single <component :is="viewComponent"> lookup in ui.html.
   window.VIEW_KINDS = {
-    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', page: 'page-view', data: 'data-view',
+    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', page: 'page-view', data: 'data-view',
     languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view'   // system screens
   };
 
@@ -3901,6 +3916,111 @@ function createVueApp() {
       + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></div>'
       + '</v-card>'
       + '<div v-if="!events.length" class="pa-2" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</div>'
+      + '</div>'
+      + '</component>'
+  });
+
+  // Board (kanban) view — single-source data view rendered as lanes grouped by `board.lane`. Reads the
+  // root's currentData (the same editable rows the data grid uses), so a drag/menu-move writes straight
+  // back through saveField. Cards carry native HTML5 drag (desktop) + a move-menu fallback (touch/a11y).
+  // name/embed parameterized like the other kind components; the embed path preloads its own rows.
+  app.component('board-view', {
+    props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    data: function() { return { dragId: null, overLane: null, collapsed: {} }; },
+    computed: {
+      a: function() { return appInstance; },
+      viewName: function() { return this.name || appInstance.currentTable; },
+      view: function() { return VIEWS[this.viewName] || {}; },
+      cfg: function() { return this.view.board || {}; },
+      laneCol: function() { return this.cfg.lane; },
+      canEdit: function() { return !this.embed && appInstance.canMutateRows; },
+      rows: function() { return this.embed ? (appInstance.boardRowsFor ? appInstance.boardRowsFor(this.viewName) : []) : (appInstance.currentData || []); },
+      // Lane keys in intended order: explicit `lanes`, else the lane column's list (authored order).
+      laneOrder: function() {
+        if (this.cfg.lanes) return this.cfg.lanes.slice();
+        return (appInstance.getListOptions(this.laneCol) || []).map(function(o) { return o.value; });
+      },
+      board: function() {
+        return Board.build(this.rows, { lane: this.laneCol, laneOrder: this.laneOrder, hidden: this.cfg.hiddenLanes || [] });
+      },
+      // Phase grouping (laneGroups). [{ label, key, lanes:[laneObj,...] }]; no config -> one unlabeled group.
+      groups: function() {
+        var laneMap = {}; this.board.lanes.forEach(function(l) { laneMap[l.key] = l; });
+        var cfgGroups = this.cfg.laneGroups;
+        if (!cfgGroups || !cfgGroups.length) return [{ label: null, key: '__all__', lanes: this.board.lanes }];
+        var used = {}, self = this;
+        var out = cfgGroups.map(function(g, gi) {
+          var lanes = (g.lanes || []).map(function(k) { used[k] = 1; return laneMap[k]; }).filter(Boolean);
+          return { label: g.label, key: 'g' + gi, count: lanes.reduce(function(s, l) { return s + l.count; }, 0), lanes: lanes };
+        });
+        var rest = this.board.lanes.filter(function(l) { return !used[l.key]; });
+        if (rest.length) out.push({ label: null, key: '__rest__', count: rest.reduce(function(s, l) { return s + l.count; }, 0), lanes: rest });
+        return out;
+      }
+    },
+    created: function() {
+      var self = this;
+      (this.cfg.laneGroups || []).forEach(function(g, gi) { if (g.collapsed) self.collapsed['g' + gi] = true; });
+    },
+    methods: Object.assign({}, ROOT_PROXY, {
+      laneLabel: function(k) { return k === '' ? appInstance.tOr('board.unassigned', '—') : appInstance.displayValue(this.laneCol, k); },
+      titleCol: function() { return colName(this.cfg.title || (this.view.columns || [])[0] || ''); },
+      cardTitle: function(item) { var c = this.titleCol(); return c ? appInstance.displayValue(c, item[c]) : (item.id || ''); },
+      cardCols: function() {
+        var self = this, title = this.titleCol();
+        return (this.view.columns || []).map(colName).filter(function(c) { return typeof c === 'string' && c && c !== title && c !== self.laneCol; });
+      },
+      cardColor: function(item) { return this.cfg.color ? Calendar.hashColor(String(item[this.cfg.color] || '')) : null; },
+      toggleGroup: function(key) { this.collapsed[key] = !this.collapsed[key]; },
+      // --- drag/drop (desktop) ---
+      onDragStart: function(item) { if (this.canEdit) this.dragId = item.id; },
+      onDragEnd: function() { this.dragId = null; this.overLane = null; },
+      onDrop: function(laneKey) {
+        if (!this.canEdit || this.dragId == null) return;
+        var id = this.dragId, self = this;
+        var item = (appInstance.currentData || []).find(function(r) { return r.id === id; });
+        if (item && String(item[self.laneCol] || '') !== laneKey) appInstance.saveField(item, self.laneCol, laneKey, self.viewName);
+        this.onDragEnd();
+      },
+      // --- mobile / a11y fallback: move via menu ---
+      moveTo: function(item, laneKey) { if (this.canEdit && String(item[this.laneCol] || '') !== laneKey) appInstance.saveField(item, this.laneCol, laneKey, this.viewName); },
+      laneMenuItems: function() { var self = this; return this.laneOrder.map(function(k) { return { value: k, title: self.laneLabel(k) }; }); },
+      addInLane: function(laneKey) { appInstance.boardAddInLane(this.viewName, laneKey); }
+    }),
+    template: ''
+      + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="board-view">'
+      + '<div v-for="g in groups" :key="g.key">'
+      + '  <div v-if="g.label" class="px-3 pt-3 pb-1" style="cursor:pointer;display:flex;align-items:center;gap:6px" @click="toggleGroup(g.key)" :data-testid="\'board-group-\'+g.key">'
+      + '    <v-icon size="x-small">{{ collapsed[g.key] ? \'mdi-chevron-right\' : \'mdi-chevron-down\' }}</v-icon>'
+      + '    <span style="font-size:0.72rem;font-weight:700;text-transform:uppercase;opacity:0.6">{{ g.label }}</span>'
+      + '    <span style="font-size:0.72rem;opacity:0.4">{{ g.count }}</span></div>'
+      + '  <div v-show="!collapsed[g.key]" style="display:flex;gap:10px;overflow-x:auto;padding:8px;align-items:flex-start">'
+      + '    <div v-for="lane in g.lanes" :key="lane.key"'
+      + '         style="flex:0 0 240px;min-width:240px;border-radius:8px;padding:6px;background:rgb(var(--v-theme-on-surface),0.04)"'
+      + '         :style="overLane===lane.key ? \'outline:2px dashed rgb(var(--v-theme-primary))\' : \'\'"'
+      + '         @dragover.prevent="canEdit && (overLane=lane.key)" @dragleave="overLane=null" @drop="onDrop(lane.key)" :data-testid="\'board-lane-\'+lane.key">'
+      + '      <div style="display:flex;align-items:center;gap:6px;font-weight:600;font-size:0.85rem;padding:2px 4px 6px">'
+      + '        <span>{{ laneLabel(lane.key) }}</span><span style="opacity:0.5;font-weight:400">{{ lane.count }}</span>'
+      + '        <template v-if="canEdit && cfg.addInLane"><v-spacer></v-spacer>'
+      + '        <v-btn icon="mdi-plus" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.add_in_lane\',\'Add\')" @click="addInLane(lane.key)" :data-testid="\'board-add-\'+lane.key"></v-btn></template>'
+      + '      </div>'
+      + '      <div v-for="item in lane.items" :key="item.id"'
+      + '           :draggable="canEdit ? \'true\' : \'false\'" @dragstart="onDragStart(item)" @dragend="onDragEnd"'
+      + '           :style="\'background:rgb(var(--v-theme-surface));border:1px solid rgb(var(--v-theme-outline),0.15);border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:\'+(canEdit?\'grab\':\'default\')+(cardColor(item)?\';border-left:3px solid \'+cardColor(item):\'\')"'
+      + '           :data-testid="\'board-card-\'+item.id">'
+      + '        <div style="display:flex;align-items:flex-start;gap:4px">'
+      + '          <div style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
+      + '          <v-menu v-if="canEdit"><template v-slot:activator="{ props }">'
+      + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
+      + '            <v-list density="compact"><v-list-subheader>{{ tOr(\'board.move_to\',\'Move to\') }}</v-list-subheader>'
+      + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value)" :active="String(item[laneCol]||\'\')===opt.value">'
+      + '              <v-list-item-title>{{ opt.title }}</v-list-item-title></v-list-item></v-list></v-menu>'
+      + '        </div>'
+      + '        <div v-for="col in cardCols()" :key="col" style="font-size:0.78rem;opacity:0.85"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, item[col]) }}</div>'
+      + '      </div>'
+      + '      <div v-if="!lane.items.length" style="opacity:0.4;font-size:0.78rem;padding:4px">—</div>'
+      + '    </div>'
+      + '  </div>'
       + '</div>'
       + '</component>'
   });

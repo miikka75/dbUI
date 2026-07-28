@@ -134,6 +134,26 @@
           "type": "text"
         }
       ]
+    },
+    "tickets": {
+      "archivable": true,
+      "columns": [
+        {
+          "name": "title",
+          "type": "text"
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "list": "status"
+        },
+        {
+          "name": "assignee",
+          "type": "select",
+          "list": "assigned_to",
+          "allowNew": true
+        }
+      ]
     }
   },
   "views": [
@@ -300,6 +320,27 @@
         ],
         "defaultView": "month"
       }
+    },
+    {
+      "name": "tickets_board",
+      "sources": [
+        "tickets"
+      ],
+      "mode": "join",
+      "defaultSort": "title",
+      "board": {
+        "lane": "status",
+        "lanes": [
+          "open",
+          "in_progress",
+          "done"
+        ],
+        "color": "assignee"
+      },
+      "columns": [
+        "title",
+        "assignee"
+      ]
     }
   ],
   "nav": {
@@ -335,7 +376,18 @@
       },
       {
         "table": "signups"
+      },
+      {
+        "view": "tickets_board",
+        "icon": "mdi-view-column-outline"
       }
+    ]
+  },
+  "lists": {
+    "status": [
+      "open",
+      "in_progress",
+      "done"
     ]
   }
 }

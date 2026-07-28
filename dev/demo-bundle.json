@@ -254,6 +254,32 @@
         "person": "Cara",
         "done_on": "2026-06-10"
       }
+    ],
+    "tickets": [
+      {
+        "id": "tkt1",
+        "title": "Fix projector in chapel",
+        "status": "open",
+        "assignee": "Alex"
+      },
+      {
+        "id": "tkt2",
+        "title": "Order sacrament bread",
+        "status": "in_progress",
+        "assignee": "Sam"
+      },
+      {
+        "id": "tkt3",
+        "title": "Update ward directory",
+        "status": "open",
+        "assignee": "Sam"
+      },
+      {
+        "id": "tkt4",
+        "title": "Print programs",
+        "status": "done",
+        "assignee": "Alex"
+      }
     ]
   },
   "lists": {
@@ -282,6 +308,11 @@
       "coming",
       "maybe",
       "out"
+    ],
+    "ticket_status": [
+      "open",
+      "in_progress",
+      "done"
     ]
   },
   "languages": [
