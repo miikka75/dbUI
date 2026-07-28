@@ -1429,6 +1429,25 @@ function createVueApp() {
         }, 300);
       },
 
+      // Board terminal-lane archive: set the lane column AND file the row into the archive partition in one
+      // step. We deliberately DON'T route through the debounced saveField active-write here — moveRow relocates
+      // the row to the archive partition, so a trailing putRow to `active` would resurrect it. Invoked when a
+      // card lands in a board.archiveOn lane (e.g. a calling reaching "Vapautus kirjattu"), so the final stage
+      // files it away instead of leaving it parked in the last lane.
+      boardArchiveMove: function(item, col, value, ownerId) {
+        ownerId = ownerId || this.currentTable;
+        var view = VIEWS && VIEWS[ownerId];
+        var source = (view && view.sources && view.sources[0]) || this.getSource(item, ownerId);
+        var now = new Date().toISOString();
+        item[col] = value; item.updated_at = now;
+        // Reflect the new lane value on the active-cache row so the copy moveRow relocates carries it.
+        var cached = this.dataCache[source];
+        if (cached) { var cr = cached.find(function(r) { return r.id === item.id; }); if (cr) { cr[col] = value; cr.updated_at = now; } }
+        // Cancel any pending debounced active-write for this row (it would re-create the row in `active`).
+        if (this.saveTimers) { var pfx = source + ':' + item.id + ':', t = this.saveTimers; Object.keys(t).forEach(function(k) { if (k.indexOf(pfx) === 0) clearTimeout(t[k]); }); }
+        this.archiveRow(item);
+      },
+
       // THE blank-row factory: every add path (the grid's addRow, embedAddRow, the calendar's
       // add-on-day) goes through here. Creates the row across the whole mirror cluster under one id
       // (consistent with archive/delete), stamps the owner, seeds `position` on a reorderable table,
@@ -3926,7 +3945,7 @@ function createVueApp() {
   // name/embed parameterized like the other kind components; the embed path preloads its own rows.
   app.component('board-view', {
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
-    data: function() { return { dragId: null, overLane: null, collapsed: {} }; },
+    data: function() { return { dragId: null, overLane: null, collapsed: {}, menuOf: {} }; },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
@@ -3979,13 +3998,25 @@ function createVueApp() {
         if (!this.canEdit || this.dragId == null) return;
         var id = this.dragId, self = this;
         var item = (appInstance.currentData || []).find(function(r) { return r.id === id; });
-        if (item && String(item[self.laneCol] || '') !== laneKey) appInstance.saveField(item, self.laneCol, laneKey, self.viewName);
+        if (item) this.commitMove(item, laneKey);
         this.onDragEnd();
       },
       // --- mobile / a11y fallback: move via menu ---
-      moveTo: function(item, laneKey) { if (this.canEdit && String(item[this.laneCol] || '') !== laneKey) appInstance.saveField(item, this.laneCol, laneKey, this.viewName); },
+      moveTo: function(item, laneKey) { if (this.canEdit) this.commitMove(item, laneKey); },
+      // A move into a `board.archiveOn` lane files the row away (reaching the final stage archives it);
+      // any other lane is a plain lane-column rewrite. No-op when the value is unchanged.
+      isArchiveLane: function(k) { var a = this.cfg.archiveOn; return !!a && (Array.isArray(a) ? a.indexOf(k) >= 0 : a === k); },
+      commitMove: function(item, laneKey) {
+        if (String(item[this.laneCol] || '') === laneKey) return;
+        if (this.isArchiveLane(laneKey)) appInstance.boardArchiveMove(item, this.laneCol, laneKey, this.viewName);
+        else appInstance.saveField(item, this.laneCol, laneKey, this.viewName);
+      },
       laneMenuItems: function() { var self = this; return this.laneOrder.map(function(k) { return { value: k, title: self.laneLabel(k) }; }); },
-      addInLane: function(laneKey) { appInstance.boardAddInLane(this.viewName, laneKey); }
+      addInLane: function(laneKey) { appInstance.boardAddInLane(this.viewName, laneKey); },
+      // Delete a card from its card menu. Reuses the app's armed-confirm delete (keyed row:<id>): the first
+      // click arms (3s) and re-labels the item, the second removes the row. Menu stays open between clicks.
+      isDelArmed: function(item) { return appInstance.isArmed('row:' + item.id); },
+      delItem: function(item) { if (this.canEdit) appInstance.deleteRow(item); }
     }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="board-view">'
@@ -3994,13 +4025,13 @@ function createVueApp() {
       + '    <v-icon size="x-small">{{ collapsed[g.key] ? \'mdi-chevron-right\' : \'mdi-chevron-down\' }}</v-icon>'
       + '    <span style="font-size:0.72rem;font-weight:700;text-transform:uppercase;opacity:0.6">{{ g.label }}</span>'
       + '    <span style="font-size:0.72rem;opacity:0.4">{{ g.count }}</span></div>'
-      + '  <div v-show="!collapsed[g.key]" style="display:flex;gap:10px;overflow-x:auto;padding:8px;align-items:flex-start">'
-      + '    <div v-for="lane in g.lanes" :key="lane.key"'
-      + '         style="flex:0 0 240px;min-width:240px;border-radius:8px;padding:6px;background:rgb(var(--v-theme-on-surface),0.04)"'
+      + '  <div v-show="!collapsed[g.key]" class="board-lane-row">'
+      + '    <div v-for="lane in g.lanes" :key="lane.key" class="board-lane"'
       + '         :style="overLane===lane.key ? \'outline:2px dashed rgb(var(--v-theme-primary))\' : \'\'"'
       + '         @dragover.prevent="canEdit && (overLane=lane.key)" @dragleave="overLane=null" @drop="onDrop(lane.key)" :data-testid="\'board-lane-\'+lane.key">'
       + '      <div style="display:flex;align-items:center;gap:6px;font-weight:600;font-size:0.85rem;padding:2px 4px 6px">'
       + '        <span>{{ laneLabel(lane.key) }}</span><span style="opacity:0.5;font-weight:400">{{ lane.count }}</span>'
+      + '        <v-icon v-if="isArchiveLane(lane.key)" size="x-small" style="opacity:0.45" :title="tOr(\'board.archives_on_drop\',\'Reaching this stage archives the item\')">mdi-archive-arrow-down-outline</v-icon>'
       + '        <template v-if="canEdit && cfg.addInLane"><v-spacer></v-spacer>'
       + '        <v-btn icon="mdi-plus" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.add_in_lane\',\'Add\')" @click="addInLane(lane.key)" :data-testid="\'board-add-\'+lane.key"></v-btn></template>'
       + '      </div>'
@@ -4010,11 +4041,16 @@ function createVueApp() {
       + '           :data-testid="\'board-card-\'+item.id">'
       + '        <div style="display:flex;align-items:flex-start;gap:4px">'
       + '          <div style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
-      + '          <v-menu v-if="canEdit"><template v-slot:activator="{ props }">'
+      + '          <v-menu v-if="canEdit" v-model="menuOf[item.id]" :close-on-content-click="false"><template v-slot:activator="{ props }">'
       + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
       + '            <v-list density="compact"><v-list-subheader>{{ tOr(\'board.move_to\',\'Move to\') }}</v-list-subheader>'
-      + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value)" :active="String(item[laneCol]||\'\')===opt.value">'
-      + '              <v-list-item-title>{{ opt.title }}</v-list-item-title></v-list-item></v-list></v-menu>'
+      + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value); menuOf[item.id]=false" :active="String(item[laneCol]||\'\')===opt.value">'
+      + '              <v-list-item-title>{{ opt.title }}</v-list-item-title></v-list-item>'
+      + '            <v-divider class="my-1"></v-divider>'
+      + '            <v-list-item @click="delItem(item)" :base-color="isDelArmed(item) ? \'error\' : undefined" :data-testid="\'board-del-\'+item.id">'
+      + '              <template v-slot:prepend><v-icon size="small">{{ isDelArmed(item) ? \'mdi-delete-alert\' : \'mdi-delete-outline\' }}</v-icon></template>'
+      + '              <v-list-item-title>{{ isDelArmed(item) ? tOr(\'board.confirm_delete\',\'Confirm delete?\') : tOr(\'board.delete\',\'Delete\') }}</v-list-item-title></v-list-item>'
+      + '            </v-list></v-menu>'
       + '        </div>'
       + '        <div v-for="col in cardCols()" :key="col" style="font-size:0.78rem;opacity:0.85"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, item[col]) }}</div>'
       + '      </div>'

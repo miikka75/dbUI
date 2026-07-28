@@ -888,7 +888,10 @@ reuses the data-view load path (filters, `compute`, `defaultSort` all apply) and
     ],
     "title": "title",                // OPTIONAL — card heading column (default: first entry of `columns`)
     "color": "assignee",             // OPTIONAL — column whose value tints each card's left border (hashed)
-    "addInLane": true                // OPTIONAL — per-lane "+" adds a row pre-stamped with that lane value
+    "addInLane": true,               // OPTIONAL — per-lane "+" adds a row pre-stamped with that lane value
+    "archiveOn": "done"              // OPTIONAL — lane key(s) (string|array) that ARCHIVE the row on drop: a
+                                     //            card moved here has its lane column set and is filed to the
+                                     //            archive partition (final stage → out of the active board)
   },
   "columns": ["title", "assignee"]   // card-face columns (the lane/title columns are shown separately)
 }
@@ -911,6 +914,14 @@ reuses the data-view load path (filters, `compute`, `defaultSort` all apply) and
 - **Many lanes → `laneGroups`.** For long lifecycles (e.g. a calling-status column with a dozen states),
   group lanes into named phases; a group marked `"collapsed": true` starts folded. Lanes not named in any
   group fall into a trailing implicit group.
+- **Terminal lane → archive (`archiveOn`).** List one or more lane keys whose drop should **file the row
+  away** rather than just relabel it: the lane column is set to that value and the row is moved to the
+  archive partition in one step (so a calling reaching its final `Vapautus kirjattu` stage leaves the active
+  board). Such lanes show an archive glyph in their header. Requires an `archivable` source table; the write
+  bypasses the debounced active save so the archived row isn't resurrected.
+- **Delete.** Each card's overflow (⋮) menu ends with a **Delete** action below the lane list, using the
+  same arm-then-confirm as the grid (first click re-labels to "Confirm delete?", second removes the row).
+  Gated on write access.
 - **Integration.** Because a board only writes an existing column, moving cards feeds any other view that
   filters on that column (e.g. a program/agenda view filtering `status: "approved"`), with no extra wiring.
 
