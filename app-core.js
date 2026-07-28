@@ -2378,6 +2378,11 @@ function createVueApp() {
         if (e && e === (this.currentUserEmail || '').toLowerCase()) return this.myProfile.picture || '';
         return (this.profilesByEmail[e] || {}).picture || '';
       },
+      // The DISPLAY label for a user identified by email, honoring the profile-privacy rule: their shared
+      // name, else the raw email ONLY for an admin (sensitive), else '' — so a non-admin surface hides an
+      // unshared user entirely rather than leaking their address. The single source of this rule, shared by
+      // user-avatar, user-ref, and the rsvp roster.
+      userLabel: function(email) { return this.profileName(email) || (this.isAdmin ? (email || '') : ''); },
       // User-linked lists (Option C): load the viewer-safe { list: { value: picture } } projection the
       // server computed for us (non-admins already stripped of unshared users + all emails). Backends
       // without the feature (legacy) just leave it empty.
@@ -3719,9 +3724,9 @@ function createVueApp() {
       // A directly-supplied picture (e.g. a list-value's server-projected avatar, where the caller has no
       // email to resolve) wins; otherwise resolve from the email's profile.
       pic: function() { return this.picture || appInstance.profilePicture(this.email); },
-      // Email is a last-resort label ONLY for admins — it's sensitive data a non-admin must not see (falls
-      // through to the generic account icon instead). Named/pictured users are unaffected.
-      label: function() { return this.name || appInstance.profileName(this.email) || (appInstance.isAdmin ? this.email : '') || ''; },
+      // Given name wins; otherwise the shared email->display-name rule (admins may fall back to the raw
+      // email, non-admins get '' -> the generic account icon). Named/pictured users are unaffected.
+      label: function() { return this.name || appInstance.userLabel(this.email); },
       initial: function() { var s = (this.label || '').trim(); return s ? s.charAt(0).toUpperCase() : ''; },
       iconSize: function() { return Math.round(Number(this.size) * 0.6) || 16; }
     },
@@ -3731,6 +3736,20 @@ function createVueApp() {
       + '<span v-else-if="initial" class="user-avatar__initial" :style="{ fontSize: (Number(size) * 0.45) + \'px\' }">{{ initial }}</span>'
       + '<v-icon v-else :size="iconSize" icon="mdi-account"></v-icon>'
       + '</v-avatar>'
+  });
+
+  // A person identified by EMAIL, rendered as their avatar + display name. The shared "show a user" chip for
+  // the email-keyed surfaces (rsvp roster today), pairing user-avatar with the same privacy-aware userLabel.
+  // `name` overrides the resolved label when the caller already has it. Distinct from <list-value>, which
+  // renders a curated list value + its LINKED avatar; here the email IS the identity.
+  app.component('user-ref', {
+    props: { email: { type: String, default: '' }, name: { type: String, default: '' }, size: { type: [Number, String], default: 20 } },
+    computed: { label: function() { return this.name || appInstance.userLabel(this.email); } },
+    template: ''
+      + '<span class="user-ref">'
+      + '<user-avatar :email="email" :name="label" :size="size"></user-avatar>'
+      + '<span v-if="label">{{ label }}</span>'
+      + '</span>'
   });
 
   // Admin picker in the Lookup editor: link a single list VALUE to a registered user (stores the email;
@@ -3835,7 +3854,7 @@ function createVueApp() {
       // name; an admin additionally sees the raw email for members who haven't shared; a non-admin gets ''
       // for any unshared member, so rosterGroups can drop them — an unshared profile is hidden from
       // non-admins entirely, never revealed as a name OR an email.
-      ownerName: function(email) { return appInstance.profileName(email) || (appInstance.isAdmin ? (email || '') : ''); },
+      ownerName: function(email) { return appInstance.userLabel(email); },
       // Participants grouped by status: [{ status, label, people:[{ email, name }] }], in the configured
       // status order. Carries each person's email so the roster can render a per-person avatar, and drops
       // anyone with no resolvable label (a non-admin viewing an unshared member) so the public roster never
@@ -3868,7 +3887,7 @@ function createVueApp() {
       + '<td>{{ ev.title }}</td>'
       + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker></td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
-      + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <span v-for="p in g.people" :key="p.email" class="rsvp-person"><user-avatar :email="p.email" :size="20"></user-avatar>{{ p.name }}</span></div></td>'
+      + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></td>'
       + '</tr>'
       + '<tr v-if="!events.length"><td colspan="5" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</td></tr>'
       + '</tbody>'
@@ -3879,7 +3898,7 @@ function createVueApp() {
       + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}</div>'
       + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
-      + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <span v-for="p in g.people" :key="p.email" class="rsvp-person"><user-avatar :email="p.email" :size="20"></user-avatar>{{ p.name }}</span></div></div>'
+      + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></div>'
       + '</v-card>'
       + '<div v-if="!events.length" class="pa-2" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</div>'
       + '</div>'
