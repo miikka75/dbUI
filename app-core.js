@@ -3945,7 +3945,7 @@ function createVueApp() {
   // name/embed parameterized like the other kind components; the embed path preloads its own rows.
   app.component('board-view', {
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
-    data: function() { return { dragId: null, overLane: null, collapsed: {}, menuOf: {} }; },
+    data: function() { return { dragId: null, overLane: null, collapsed: {}, menuOf: {}, editing: {} }; },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
@@ -4016,7 +4016,12 @@ function createVueApp() {
       // Delete a card from its card menu. Reuses the app's armed-confirm delete (keyed row:<id>): the first
       // click arms (3s) and re-labels the item, the second removes the row. Menu stays open between clicks.
       isDelArmed: function(item) { return appInstance.isArmed('row:' + item.id); },
-      delItem: function(item) { if (this.canEdit) appInstance.deleteRow(item); }
+      delItem: function(item) { if (this.canEdit) appInstance.deleteRow(item); },
+      // Inline card editing: a pencil flips one card into edit mode, where every field except the lane
+      // column (that stays a drag/move-menu action, so it honors archiveOn) becomes a shared `data-cell`
+      // editor writing back through saveField — the same widgets and persistence as the table grid.
+      editCols: function() { var self = this; return (this.view.columns || []).map(colName).filter(function(c) { return typeof c === 'string' && c && c !== self.laneCol; }); },
+      toggleEdit: function(item) { this.editing[item.id] = !this.editing[item.id]; }
     }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="board-view">'
@@ -4036,11 +4041,12 @@ function createVueApp() {
       + '        <v-btn icon="mdi-plus" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.add_in_lane\',\'Add\')" @click="addInLane(lane.key)" :data-testid="\'board-add-\'+lane.key"></v-btn></template>'
       + '      </div>'
       + '      <div v-for="item in lane.items" :key="item.id"'
-      + '           :draggable="canEdit ? \'true\' : \'false\'" @dragstart="onDragStart(item)" @dragend="onDragEnd"'
-      + '           :style="\'background:rgb(var(--v-theme-surface));border:1px solid rgb(var(--v-theme-outline),0.15);border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:\'+(canEdit?\'grab\':\'default\')+(cardColor(item)?\';border-left:3px solid \'+cardColor(item):\'\')"'
+      + '           :draggable="canEdit && !editing[item.id] ? \'true\' : \'false\'" @dragstart="onDragStart(item)" @dragend="onDragEnd"'
+      + '           :style="\'background:rgb(var(--v-theme-surface));border:1px solid rgb(var(--v-theme-outline),0.15);border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:\'+(canEdit && !editing[item.id] ?\'grab\':\'default\')+(cardColor(item)?\';border-left:3px solid \'+cardColor(item):\'\')"'
       + '           :data-testid="\'board-card-\'+item.id">'
       + '        <div style="display:flex;align-items:flex-start;gap:4px">'
       + '          <div style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
+      + '          <v-btn v-if="canEdit" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="tOr(\'board.edit\',\'Edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
       + '          <v-menu v-if="canEdit" v-model="menuOf[item.id]" :close-on-content-click="false"><template v-slot:activator="{ props }">'
       + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
       + '            <v-list density="compact"><v-list-subheader>{{ tOr(\'board.move_to\',\'Move to\') }}</v-list-subheader>'
@@ -4052,7 +4058,8 @@ function createVueApp() {
       + '              <v-list-item-title>{{ isDelArmed(item) ? tOr(\'board.confirm_delete\',\'Confirm delete?\') : tOr(\'board.delete\',\'Delete\') }}</v-list-item-title></v-list-item>'
       + '            </v-list></v-menu>'
       + '        </div>'
-      + '        <div v-for="col in cardCols()" :key="col" style="font-size:0.78rem;opacity:0.85"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, item[col]) }}</div>'
+      + '        <template v-if="editing[item.id]"><div v-for="col in editCols()" :key="col" style="display:flex;align-items:center;gap:6px;margin-top:4px"><span style="font-size:0.72rem;opacity:0.6;min-width:82px;flex-shrink:0">{{ t(\'field.\'+col) || col }}</span><data-cell :item="item" :col="col" :owner="viewName"></data-cell></div></template>'
+      + '        <template v-else><div v-for="col in cardCols()" :key="col" style="font-size:0.78rem;opacity:0.85"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, item[col]) }}</div></template>'
       + '      </div>'
       + '      <div v-if="!lane.items.length" style="opacity:0.4;font-size:0.78rem;padding:4px">—</div>'
       + '    </div>'

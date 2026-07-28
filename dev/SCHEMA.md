@@ -919,6 +919,10 @@ reuses the data-view load path (filters, `compute`, `defaultSort` all apply) and
   archive partition in one step (so a calling reaching its final `Vapautus kirjattu` stage leaves the active
   board). Such lanes show an archive glyph in their header. Requires an `archivable` source table; the write
   bypasses the debounced active save so the archived row isn't resurrected.
+- **Edit.** A pencil on each card flips it into edit mode, where every field except the lane column becomes
+  the shared `data-cell` editor (same select/date/text/ref widgets and `saveField` persistence as the grid),
+  so a card's details are editable in place; the lane stays a drag/move-menu action. Dragging is disabled
+  while a card is being edited. Gated on write access.
 - **Delete.** Each card's overflow (⋮) menu ends with a **Delete** action below the lane list, using the
   same arm-then-confirm as the grid (first click re-labels to "Confirm delete?", second removes the row).
   Gated on write access.
