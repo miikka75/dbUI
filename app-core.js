@@ -1538,12 +1538,19 @@ function createVueApp() {
         var key = item.id + '_' + col;
         this.listSwitchOverrides[key] = !this.isAltList(col, item);
       },
+      // The list a column's values come from: its own `list`, or — for an aggregate GROUP column (e.g.
+      // piispakunta grouped from vastuussa) — the list of the source column(s) it groups from. Shared by
+      // label translation and linked-user avatars, so both resolve the synthetic group column identically.
+      listNameForCol: function(col) {
+        var listName = this.colIsList(col);
+        if (!listName) { var v = VIEWS[this.currentTable]; if (v && v.groupBy && typeof v.groupBy === 'object' && v.groupBy.column === col && v.groupBy.from) { for (var i = 0; i < v.groupBy.from.length && !listName; i++) listName = this.colIsList(v.groupBy.from[i]); } }
+        return listName;
+      },
       displayValue: function(col, val) {
         if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x); }).filter(Boolean).join(', '); }
         if (!val) return '';
         var out = val;
-        var listName = this.colIsList(col);
-        if (!listName) { var v = VIEWS[this.currentTable]; if (v && v.groupBy && typeof v.groupBy === 'object' && v.groupBy.column === col && v.groupBy.from) { for (var i = 0; i < v.groupBy.from.length && !listName; i++) listName = this.colIsList(v.groupBy.from[i]); } }
+        var listName = this.listNameForCol(col);
         if (listName) {
           var key = 'list.' + listName + '.' + val;
           var translated = this.t(key);
@@ -2382,9 +2389,9 @@ function createVueApp() {
       // The linked user's avatar for a single-select list VALUE, or '' — used to draw a face beside the
       // value while the displayed text stays the value itself. Multiselect (array) values are skipped here.
       listValuePicture: function(col, value) {
-        if (!value || typeof value !== 'string') return '';
-        var list = this.colIsList(col);
-        if (!list || !window.ListUsers) return '';
+        if (!value || typeof value !== 'string' || !window.ListUsers) return '';
+        var list = this.listNameForCol(col);   // resolves aggregate group columns too (e.g. piispakunta)
+        if (!list) return '';
         return window.ListUsers.pictureFor(this.listAvatars, list, value);
       },
       // Lists opted in to user linking (Lookup-editor picker): `listSources[name] === 'userlink'`. Distinct

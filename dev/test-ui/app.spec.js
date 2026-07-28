@@ -3247,6 +3247,39 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await expect(page.locator('.v-main')).toContainText('Ann');
   });
 
+  test('user-linked lists: an aggregate group card shows the linked avatar in its title (piispakunta pattern)', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
+    await api('resetData');
+    await api('setMyProfile', { name: 'Ann', shared: true, picture: 'PIC_ANN' }, 'ann@x.com');
+    await api('setListUser', { listName: 'people', value: 'Ann', email: 'ann@x.com' });
+    // A grouped aggregate (like piispakunta): one card per group value of `role`, whose list is `people`.
+    await api('saveSchema', { schema: {
+      tables: { duties: { columns: [{ name: 'role', type: 'select', list: 'people' }, { name: 'd', type: 'date' }] } },
+      views: [{ name: 'byrole', layout: 'card', mode: 'union', sources: ['duties'], groupBy: { column: 'byrole', from: ['role'] }, collect: 'd', columns: ['byrole'] }],
+      listSources: { people: 'userlink' },
+      nav: { items: [{ view: 'byrole' }] }
+    } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const seeded = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.listsCache = Object.assign({}, app.listsCache, { people: ['Ann'] });
+      app.dataCache['duties'] = [{ id: 'd1', role: 'Ann', d: '2026-01-01' }];
+      app.selectTab('byrole');
+      return { titleCol: app.visibleCols[0], list: app.listNameForCol(app.visibleCols[0]), groupVals: app.sortedData.map(r => r[app.visibleCols[0]]) };
+    });
+    expect(seeded.titleCol).toBe('byrole');
+    expect(seeded.list).toBe('people');          // synthetic group column resolves to its source list
+    expect(seeded.groupVals).toContain('Ann');   // one card per role value
+    // the group card's title renders the linked user's avatar
+    const avatarImg = page.locator('.v-main .v-card .user-avatar img').first();
+    await expect(avatarImg).toHaveAttribute('src', 'PIC_ANN');
+  });
+
   test('user-linked lists: the Lookup editor links a value to a user (admin picker) for userlink-flagged lists', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
