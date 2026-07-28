@@ -100,6 +100,25 @@ service cloud.firestore {
       );
     }
 
+    // User-linked lists (Option C): each doc links a list VALUE to a registered user's email so a cell can
+    // show that user's avatar. `shared` caches whether the linked user currently shares their profile, so a
+    // non-admin can query ONLY the shared links (`.where('shared','==',true)`) — those emails are already
+    // world-readable via /_profiles, so this exposes nothing new. An unshared link is admin-only. Only
+    // admins write. Same shape as /_profiles, so it never falls through to the data catch-all (which
+    // excludes the whole `_` namespace anyway).
+    match /_list_users/{id} {
+      function validLink() {
+        return request.resource.data.keys().hasOnly(['list', 'value', 'email', 'shared'])
+          && request.resource.data.list is string && request.resource.data.list.size() <= 200
+          && request.resource.data.value is string && request.resource.data.value.size() <= 500
+          && request.resource.data.email is string && request.resource.data.email.size() <= 320
+          && request.resource.data.shared is bool;
+      }
+      allow read:           if request.auth != null && (resource.data.shared == true || (!noUsers() && role() == 'admin'));
+      allow create, update: if request.auth != null && (noUsers() || role() == 'admin') && validLink();
+      allow delete:         if request.auth != null && (noUsers() || role() == 'admin');
+    }
+
     // Doc-view bodies (savePage/loadPage -> putRow('_pages', …) -> _pages__active). Content PAGES, not
     // row data: a page's embeds are resolved client-side and each embedded table's rows stay gated by
     // their own rules, so the body text is the only thing exposed. Writable by admins/editors.

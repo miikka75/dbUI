@@ -135,6 +135,8 @@ function createVueApp() {
       myProfile: { name: '', shared: false, picture: '' },   // this user's opt-in display-name profile (+ optional avatar)
       profileSaved: null,       // last-persisted {name, shared, picture} snapshot -> skip redundant blur saves
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
+      listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
+      listUserLinks: {},        // admin only: raw { listName: { value: email } } links, for the Lookup editor
       periodOffset: 0,          // leaderboard ‹ › navigation: periods back from now (0 = current)
       firestoreRules: '',
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
@@ -552,6 +554,7 @@ function createVueApp() {
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
+         'list.link_user', 'list.unlink_user',
          'lang.app', 'lang.schema'].sort();
       },
       schemaTranslationKeys: function() {
@@ -788,6 +791,7 @@ function createVueApp() {
             self.tableMap = result.tableMap || {};
             self.languages = result.languages || [];
             self.listsCache = result.lists || {}; window._listsCache = self.listsCache;
+            self.loadListAvatars(); self.loadListUserLinks();   // user-linked-list avatars + admin editor links
             // Auto-seed lists (create missing list names + seed mandatory filter values): admin-only
             // maintenance. A restricted user's listsCache is already scoped to their own tables
             // server-side; seeding+saving here would add entries for tables they don't own, and
@@ -855,6 +859,7 @@ function createVueApp() {
           return backend.getLists(self.folderId).then(function(lists) {
             self.listsCache = lists || {}; window._listsCache = self.listsCache;
             if (self._seedSchemaLists()) backend.saveLists(self.folderId, self.listsCache);
+            self.loadListAvatars(); self.loadListUserLinks();   // user-linked-list avatars + admin editor links
           });
         }).then(function() {
           // Load users FIRST to know access restrictions
@@ -1533,12 +1538,19 @@ function createVueApp() {
         var key = item.id + '_' + col;
         this.listSwitchOverrides[key] = !this.isAltList(col, item);
       },
+      // The list a column's values come from: its own `list`, or — for an aggregate GROUP column (e.g.
+      // piispakunta grouped from vastuussa) — the list of the source column(s) it groups from. Shared by
+      // label translation and linked-user avatars, so both resolve the synthetic group column identically.
+      listNameForCol: function(col) {
+        var listName = this.colIsList(col);
+        if (!listName) { var v = VIEWS[this.currentTable]; if (v && v.groupBy && typeof v.groupBy === 'object' && v.groupBy.column === col && v.groupBy.from) { for (var i = 0; i < v.groupBy.from.length && !listName; i++) listName = this.colIsList(v.groupBy.from[i]); } }
+        return listName;
+      },
       displayValue: function(col, val) {
         if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x); }).filter(Boolean).join(', '); }
         if (!val) return '';
         var out = val;
-        var listName = this.colIsList(col);
-        if (!listName) { var v = VIEWS[this.currentTable]; if (v && v.groupBy && typeof v.groupBy === 'object' && v.groupBy.column === col && v.groupBy.from) { for (var i = 0; i < v.groupBy.from.length && !listName; i++) listName = this.colIsList(v.groupBy.from[i]); } }
+        var listName = this.listNameForCol(col);
         if (listName) {
           var key = 'list.' + listName + '.' + val;
           var translated = this.t(key);
@@ -1870,7 +1882,16 @@ function createVueApp() {
         this.saveLists();
         // Rename propagation: text is stored in rows, so rewrite the old value -> new value across
         // every table column backed by this list (both partitions). Skip no-ops / blank endpoints.
-        if (oldVal && value && oldVal !== value) this.propagateListChange(name, oldVal, value);
+        if (oldVal && value && oldVal !== value) { this.propagateListChange(name, oldVal, value); this.migrateListUserLink(name, oldVal, value); }
+      },
+      // Carry a user-linked-list link when its value is renamed (or drop it on delete): the link is keyed by
+      // the value string, so a rename would otherwise orphan it (like the row rewrite above). No-op unless a
+      // link exists for the old value (so non-admins, whose listUserLinks is empty, never call setListUser).
+      migrateListUserLink: function(list, oldVal, newVal) {
+        var email = (this.listUserLinks[list] || {})[oldVal];
+        if (!email) return;
+        this.setListUserLink(list, oldVal, '');                 // drop the stale-keyed link
+        if (newVal) this.setListUserLink(list, newVal, email);  // re-link under the new value (delete => none)
       },
       focusNextListItem: function(e) {
         var el = e.target;
@@ -1888,7 +1909,7 @@ function createVueApp() {
         this.saveLists();
         // Delete cascade: scrub the removed value from stored rows (text storage) so no orphans
         // remain — blank the cell for select columns, drop the element for multiselect columns.
-        if (oldVal) this.propagateListChange(name, oldVal, null);
+        if (oldVal) { this.propagateListChange(name, oldVal, null); this.migrateListUserLink(name, oldVal, null); }
       },
       moveListItem: function(name, i, dir) {
         var arr = this.listsCache[name]; var j = i + dir;
@@ -2356,6 +2377,52 @@ function createVueApp() {
         var e = (email || '').toLowerCase();
         if (e && e === (this.currentUserEmail || '').toLowerCase()) return this.myProfile.picture || '';
         return (this.profilesByEmail[e] || {}).picture || '';
+      },
+      // The DISPLAY label for a user identified by email, honoring the profile-privacy rule: their shared
+      // name, else the raw email ONLY for an admin (sensitive), else '' — so a non-admin surface hides an
+      // unshared user entirely rather than leaking their address. The single source of this rule, shared by
+      // user-avatar, user-ref, and the rsvp roster.
+      userLabel: function(email) { return this.profileName(email) || (this.isAdmin ? (email || '') : ''); },
+      // User-linked lists (Option C): load the viewer-safe { list: { value: picture } } projection the
+      // server computed for us (non-admins already stripped of unshared users + all emails). Backends
+      // without the feature (legacy) just leave it empty.
+      loadListAvatars: function() {
+        var self = this;
+        if (typeof backend === 'undefined' || !backend.getListAvatars) return Promise.resolve();
+        return backend.getListAvatars().then(function(m) { self.listAvatars = m || {}; }).catch(function() {});
+      },
+      // The linked user's avatar for a single-select list VALUE, or '' — used to draw a face beside the
+      // value while the displayed text stays the value itself. Multiselect (array) values are skipped here.
+      listValuePicture: function(col, value) {
+        if (!value || typeof value !== 'string' || !window.ListUsers) return '';
+        var list = this.listNameForCol(col);   // resolves aggregate group columns too (e.g. piispakunta)
+        if (!list) return '';
+        return window.ListUsers.pictureFor(this.listAvatars, list, value);
+      },
+      // Lists opted in to user linking (Lookup-editor picker): `listSources[name] === 'userlink'`. Distinct
+      // from 'users' (auto-populated shared names) -- these keep curated values and just map value -> account.
+      isUserLinkList: function(name) { return (((this.schemaData || {}).listSources) || {})[name] === 'userlink'; },
+      // Admin only: the raw value -> email links, for the editor's current-selection display. Denied for
+      // non-admins by the server/rules -> caught into {} (they never need it; rendering uses listAvatars).
+      loadListUserLinks: function() {
+        var self = this;
+        if (typeof backend === 'undefined' || !backend.getListUserLinks) return Promise.resolve();
+        return backend.getListUserLinks().then(function(m) { self.listUserLinks = m || {}; }).catch(function() { self.listUserLinks = {}; });
+      },
+      // Registered users as { email, name } options for the link picker, name-sorted (admins have userList).
+      listUserOptions: function() {
+        var self = this;
+        return (this.userList || []).map(function(u) { return { email: u.key, name: self.profileName(u.key) || u.key }; })
+          .sort(function(a, b) { return a.name.localeCompare(b.name); });
+      },
+      // Link (email set) or unlink (email '') a list value to a user, then refresh the raw links + the
+      // rendered avatar projection so the change shows immediately in the editor and in every cell.
+      setListUserLink: function(list, value, email) {
+        var self = this;
+        if (typeof backend === 'undefined' || !backend.setListUser) return;
+        backend.setListUser(list, value, email || '').then(function() {
+          self.loadListUserLinks(); self.loadListAvatars();
+        }).catch(function(e) { self.notify((e && (e.error || e.message)) || self.t('msg.save_failed')); });
       },
       userDisplayName: function(u) { return this.profileName(u.key); },
       renameUserProfile: function(u, name) {
@@ -3187,13 +3254,13 @@ function createVueApp() {
       + '<template v-if="spec.inlineBlocks" v-for="(blk, bi) in spec.inlineBlocks" :key="\'ib\'+bi">'
       + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
       + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle">{{ displayValue(ec, er[ec]) }}</td></tr></tbody></table>'
+      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
       + '</template>'
       + '<template v-else>'
       + '<div v-if="header" style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t(\'tab.\' + spec.config.table) || spec.config.table }} ({{ rows.length }})</div>'
       + '<table v-if="roLayout===\'table\'" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle">{{ displayValue(ec, er[ec]) }}</td></tr></tbody></table>'
-      + '<div v-else-if="roLayout===\'card\'" style="display:grid; gap:6px"><div v-for="er in rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in cols" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span>{{ displayValue(ec, er[ec]) }}</span></div></div>'
+      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
+      + '<div v-else-if="roLayout===\'card\'" style="display:grid; gap:6px"><div v-for="er in rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in cols" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span><list-value :col="ec" :value="er[ec]"></list-value></span></div></div>'
       + '<div v-else class="d-flex align-center flex-wrap ga-1"><v-chip v-for="er in rows" :key="er.id" size="small" variant="tonal" color="secondary" label><span v-for="(ec, i) in cols" :key="ec">{{ er[ec] }}<span v-if="i < cols.length - 1" style="opacity:0.4"> · </span></span></v-chip></div>'
       + '</template>'
       + '</template>'
@@ -3201,12 +3268,12 @@ function createVueApp() {
       + '<div v-else>'
       + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
       + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
-      + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" style="font-size:0.85rem">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}<span v-if="i < cols.length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
+      + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]"></list-value><span v-if="i < cols.length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
       + '<template v-slot:append><template v-if="canMutate"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></template></template>'
       + '</v-list-item></v-list>'
       + '<div v-else-if="layout===\'card\'" class="my-2">'
       + '<v-card v-for="(item, ri) in rows" :key="item.id || ri" variant="flat" class="ma-2 pa-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">'
-      + '<div v-for="col in cols" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span></div>'
+      + '<div v-for="col in cols" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8"><list-value :col="col" :value="item[col]"></list-value></span></div>'
       + '<div v-if="canMutate" style="text-align:right"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></div>'
       + '</v-card></div>'
       + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
@@ -3280,9 +3347,9 @@ function createVueApp() {
       + '<span v-if="cellRO(item, col)" :style="{ opacity: embed ? 0.4 : 0.75 }">'
       +   '<a v-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="safeImg(item[col])" class="cell-thumb" alt=""></a>'
       +   '<a v-else-if="colIsUrl(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop>{{ item[col] }}</a>'
-      +   '<template v-else>{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</template>'
+      +   '<template v-else><list-value :col="col" :value="item[col]"></list-value></template>'
       + '</span>'
-      + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
+      + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82"><list-value :col="col" :value="item[col]"></list-value></span>'
       + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
       + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
       + '<v-btn-toggle v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'toggle\'" :name="col" :model-value="item[col] || \'\'" density="compact" variant="outlined" divided @update:model-value="save(item, col, $event || \'\')">'
@@ -3411,7 +3478,7 @@ function createVueApp() {
     template: ''
       + '<v-table density="compact"><template v-slot:default>'
       + '<thead><tr><th v-for="col in cols" :key="col">{{ head(col) }}</th></tr></thead>'
-      + '<tbody><tr v-for="row in rows" :key="row.id"><td v-for="col in cols" :key="col" style="padding:3px 8px">{{ col === \'_period\' ? toDateStr(row[col]) : displayValue(col, row[col]) }}</td></tr></tbody>'
+      + '<tbody><tr v-for="row in rows" :key="row.id"><td v-for="col in cols" :key="col" style="padding:3px 8px"><list-value :col="col" :value="row[col]"></list-value></td></tr></tbody>'
       + '</template></v-table>'
   });
 
@@ -3421,7 +3488,7 @@ function createVueApp() {
       + '<div style="display:grid; gap:8px; padding:8px">'
       + '<div v-for="row in rows" :key="row.id" style="padding:8px 12px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:8px">'
       + '<div style="font-weight:600; margin-bottom:4px">{{ toDateStr(row._period) }}</div>'
-      + '<div v-for="col in slotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, row[col]) }}</div>'
+      + '<div v-for="col in slotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span><list-value :col="col" :value="row[col]"></list-value></div>'
       + '</div></div>'
   });
 
@@ -3431,7 +3498,7 @@ function createVueApp() {
       + '<div style="padding:4px 0">'
       + '<div v-for="row in rows" :key="row.id" style="padding:4px 12px; border-bottom:1px solid rgb(var(--v-theme-outline),0.08); font-size:0.9rem">'
       + '<span style="font-weight:600; margin-right:8px">{{ toDateStr(row._period) }}</span>'
-      + '<span v-for="(col, i) in slotCols" :key="col"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, row[col]) }}<span v-if="i < slotCols.length - 1" style="opacity:0.3"> · </span></span>'
+      + '<span v-for="(col, i) in slotCols" :key="col"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span><list-value :col="col" :value="row[col]"></list-value><span v-if="i < slotCols.length - 1" style="opacity:0.3"> · </span></span>'
       + '</div></div>'
   });
 
@@ -3458,7 +3525,7 @@ function createVueApp() {
       + '<v-list-item v-for="item in rows" :key="item.id" class="px-2">'
       + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" class="d-inline-flex align-center" style="font-size:0.85rem">'
       +   '<a v-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="safeImg(item[col])" class="cell-thumb" alt=""></a>'
-      +   '<template v-else>{{ displayValue(col, item[col]) }}</template>'
+      +   '<list-value v-else :col="col" :value="item[col]"></list-value>'
       +   '<span v-if="i < cols.length - 1" style="opacity:0.3; margin:0 6px">·</span>'
       + '</span></template>'
       + '<template v-slot:append>'
@@ -3601,12 +3668,12 @@ function createVueApp() {
       + '<v-table density="compact" class="my-1"><template v-slot:default>'
       + '<thead><tr>'
       + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));cursor:pointer" @click="toggleSort(\'__row__\')" data-testid="pivot-sort-row">{{ head(cfg.row) }}{{ sortIcon(\'__row__\') }}</th>'
-      + '<th v-for="(c, ci) in grid.columns" :key="c" style="text-align:center;cursor:pointer" @click="toggleSort(ci)">{{ colLabel(c) }}{{ sortIcon(ci) }}</th>'
+      + '<th v-for="(c, ci) in grid.columns" :key="c" style="text-align:center;cursor:pointer" @click="toggleSort(ci)"><list-value :col="cfg.column" :value="c"></list-value>{{ sortIcon(ci) }}</th>'
       + '<th v-if="hasTotals" style="text-align:center;font-weight:700;cursor:pointer" @click="toggleSort(\'__total__\')">{{ a.t(\'pivot.total\') }}{{ sortIcon(\'__total__\') }}</th>'
       + '</tr></thead>'
       + '<tbody>'
       + '<tr v-for="r in rows" :key="r.key">'
-      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:600">{{ rowLabel(r.key) }}</th>'
+      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:600"><list-value :col="cfg.row" :value="r.key"></list-value></th>'
       + '<td v-for="(v, ci) in r.cells" :key="ci" style="text-align:center">{{ cellFmt(v) }}</td>'
       + '<td v-if="hasTotals" style="text-align:center;font-weight:700">{{ r.total }}</td>'
       + '</tr>'
@@ -3621,17 +3688,45 @@ function createVueApp() {
       + '</component>'
   });
 
+  // ONE list VALUE (or a multiselect array of them), rendered as its display text with the linked user's
+  // avatar in front when there is one. This is THE single place a list value + optional avatar is drawn, so
+  // avatars appear consistently wherever a value is printed — read-only cells, embeds, the compact list
+  // layout, rotation slots, the pivot axes, and group-card titles. Non-list columns just render their text;
+  // dates (and the synthetic _period) pass through toDateStr. Drop-in for `{{ displayValue(col, val) }}`.
+  app.component('list-value', {
+    props: { col: { type: String, required: true }, value: {}, size: { type: [Number, String], default: 18 } },
+    computed: {
+      items: function() {
+        var col = this.col, v = this.value, a = appInstance;
+        if (col === '_period' || a.colIsDate(col)) return (v == null || v === '') ? [] : [{ text: a.toDateStr(v), pic: '' }];
+        var arr = Array.isArray(v) ? v : ((v == null || v === '') ? [] : [v]);
+        return arr.filter(function(x) { return x != null && x !== ''; }).map(function(x) {
+          return { text: a.displayValue(col, x), pic: a.listValuePicture(col, x) };
+        });
+      }
+    },
+    template: ''
+      + '<span class="list-value">'
+      + '<span v-for="(it, i) in items" :key="i" class="list-value__item">'
+      +   '<user-avatar v-if="it.pic" :picture="it.pic" :name="it.text" :size="size"></user-avatar>'
+      +   '<span>{{ it.text }}{{ i < items.length - 1 ? \',\' : \'\' }}</span>'
+      + '</span>'
+      + '</span>'
+  });
+
   // A person's avatar, resolved from their email: their uploaded picture, else their name's initial, else a
   // generic account icon. The single place a user's face renders, reused everywhere a user is shown (app bar,
   // Users table, rsvp roster). `name` is an optional override so callers that already have the display name
   // don't force a second profilesByEmail lookup. `title` falls through onto the avatar for a hover tooltip.
   app.component('user-avatar', {
-    props: { email: { type: String, default: '' }, name: { type: String, default: '' }, size: { type: [Number, String], default: 28 } },
+    props: { email: { type: String, default: '' }, name: { type: String, default: '' }, size: { type: [Number, String], default: 28 }, picture: { type: String, default: '' } },
     computed: {
-      pic: function() { return appInstance.profilePicture(this.email); },
-      // Email is a last-resort label ONLY for admins — it's sensitive data a non-admin must not see (falls
-      // through to the generic account icon instead). Named/pictured users are unaffected.
-      label: function() { return this.name || appInstance.profileName(this.email) || (appInstance.isAdmin ? this.email : '') || ''; },
+      // A directly-supplied picture (e.g. a list-value's server-projected avatar, where the caller has no
+      // email to resolve) wins; otherwise resolve from the email's profile.
+      pic: function() { return this.picture || appInstance.profilePicture(this.email); },
+      // Given name wins; otherwise the shared email->display-name rule (admins may fall back to the raw
+      // email, non-admins get '' -> the generic account icon). Named/pictured users are unaffected.
+      label: function() { return this.name || appInstance.userLabel(this.email); },
       initial: function() { var s = (this.label || '').trim(); return s ? s.charAt(0).toUpperCase() : ''; },
       iconSize: function() { return Math.round(Number(this.size) * 0.6) || 16; }
     },
@@ -3641,6 +3736,54 @@ function createVueApp() {
       + '<span v-else-if="initial" class="user-avatar__initial" :style="{ fontSize: (Number(size) * 0.45) + \'px\' }">{{ initial }}</span>'
       + '<v-icon v-else :size="iconSize" icon="mdi-account"></v-icon>'
       + '</v-avatar>'
+  });
+
+  // A person identified by EMAIL, rendered as their avatar + display name. The shared "show a user" chip for
+  // the email-keyed surfaces (rsvp roster today), pairing user-avatar with the same privacy-aware userLabel.
+  // `name` overrides the resolved label when the caller already has it. Distinct from <list-value>, which
+  // renders a curated list value + its LINKED avatar; here the email IS the identity.
+  app.component('user-ref', {
+    props: { email: { type: String, default: '' }, name: { type: String, default: '' }, size: { type: [Number, String], default: 20 } },
+    computed: { label: function() { return this.name || appInstance.userLabel(this.email); } },
+    template: ''
+      + '<span class="user-ref">'
+      + '<user-avatar :email="email" :name="label" :size="size"></user-avatar>'
+      + '<span v-if="label">{{ label }}</span>'
+      + '</span>'
+  });
+
+  // Admin picker in the Lookup editor: link a single list VALUE to a registered user (stores the email;
+  // the value itself is unchanged). The activator shows the linked user's avatar, or a "link" icon when
+  // none; the menu lists registered users (name + avatar) plus an unlink option.
+  app.component('list-user-picker', {
+    props: { list: { type: String, required: true }, value: { type: String, required: true } },
+    computed: {
+      a: function() { return appInstance; },
+      email: function() { return (appInstance.listUserLinks[this.list] || {})[this.value] || ''; },
+      pic: function() { return this.email ? appInstance.profilePicture(this.email) : ''; },
+      name: function() { return this.email ? (appInstance.profileName(this.email) || this.email) : ''; },
+      options: function() { return appInstance.listUserOptions(); }
+    },
+    methods: { pick: function(email) { appInstance.setListUserLink(this.list, this.value, email || ''); } },
+    // Three states: unlinked (muted add-person), linked with a photo (their face), linked without a photo
+    // (a primary "account linked" check — clearer than a bare name-initial). Tooltip names who is linked.
+    template: ''
+      + '<v-menu location="bottom end" :close-on-content-click="true">'
+      + '<template v-slot:activator="{ props }">'
+      + '<v-btn v-bind="props" size="x-small" variant="text" :color="email ? \'primary\' : \'\'" :title="email ? name : a.t(\'list.link_user\')" data-testid="list-user-picker">'
+      + '<user-avatar v-if="pic" :email="email" :size="22"></user-avatar>'
+      + '<v-icon v-else-if="email" color="primary" size="small" icon="mdi-account-check"></v-icon>'
+      + '<v-icon v-else size="small" icon="mdi-account-plus-outline"></v-icon>'
+      + '</v-btn>'
+      + '</template>'
+      + '<v-list density="compact" max-height="320" min-width="180">'
+      + '<v-list-item v-if="email" @click="pick(\'\')" prepend-icon="mdi-link-off" :title="a.t(\'list.unlink_user\')"></v-list-item>'
+      + '<v-divider v-if="email"></v-divider>'
+      + '<v-list-item v-for="o in options" :key="o.email" @click="pick(o.email)" :active="o.email === email" :title="o.name">'
+      + '<template v-slot:prepend><user-avatar :email="o.email" :name="o.name" :size="24" class="mr-2"></user-avatar></template>'
+      + '</v-list-item>'
+      + '</v-list>'
+      + '</v-menu>'
   });
 
   // The current user's status control for one event — the 3 picker variants share this so the rsvp table
@@ -3711,7 +3854,7 @@ function createVueApp() {
       // name; an admin additionally sees the raw email for members who haven't shared; a non-admin gets ''
       // for any unshared member, so rosterGroups can drop them — an unshared profile is hidden from
       // non-admins entirely, never revealed as a name OR an email.
-      ownerName: function(email) { return appInstance.profileName(email) || (appInstance.isAdmin ? (email || '') : ''); },
+      ownerName: function(email) { return appInstance.userLabel(email); },
       // Participants grouped by status: [{ status, label, people:[{ email, name }] }], in the configured
       // status order. Carries each person's email so the roster can render a per-person avatar, and drops
       // anyone with no resolvable label (a non-admin viewing an unshared member) so the public roster never
@@ -3744,7 +3887,7 @@ function createVueApp() {
       + '<td>{{ ev.title }}</td>'
       + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker></td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
-      + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <span v-for="p in g.people" :key="p.email" class="rsvp-person"><user-avatar :email="p.email" :size="20"></user-avatar>{{ p.name }}</span></div></td>'
+      + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></td>'
       + '</tr>'
       + '<tr v-if="!events.length"><td colspan="5" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</td></tr>'
       + '</tbody>'
@@ -3755,7 +3898,7 @@ function createVueApp() {
       + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}</div>'
       + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
-      + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <span v-for="p in g.people" :key="p.email" class="rsvp-person"><user-avatar :email="p.email" :size="20"></user-avatar>{{ p.name }}</span></div></div>'
+      + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></div>'
       + '</v-card>'
       + '<div v-if="!events.length" class="pa-2" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</div>'
       + '</div>'

@@ -245,7 +245,7 @@
                 <div style="flex:1">
                   <div v-if="a.visibleCols.length" class="card-field mb-2">
                     <span class="card-field-label">{{ a.t('field.' + a.visibleCols[0]) || a.visibleCols[0] }}</span>
-                    <span style="opacity:0.9">{{ a.displayValue(a.visibleCols[0], item[a.visibleCols[0]]) }}</span>
+                    <span style="opacity:0.9"><list-value :col="a.visibleCols[0]" :value="item[a.visibleCols[0]]" :size="28"></list-value></span>
                   </div>
                 </div>
                 <v-icon v-if="a.currentConfig.collapsed" size="small">{{ a.expandedCard === item.id || (!a.currentConfig.collapsed) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
@@ -375,6 +375,7 @@
                 <span v-if="!a.canEditLists || a.isLockedValue(name, val)" style="opacity:0.7">{{ a.t('list.' + name + '.' + val) !== ('list.' + name + '.' + val) ? a.t('list.' + name + '.' + val) : val }} <v-icon v-if="a.isLockedValue(name, val)" size="x-small" style="opacity:0.4">mdi-lock-outline</v-icon></span>
                 <span v-else class="editable-cell" contenteditable @blur="a.updateListItem2(name, i, $event.target.textContent)" @keydown.enter.prevent="a.focusNextListItem($event)" @keydown.home.stop @keydown.end.stop>{{ val }}</span>
                 <template v-if="a.canEditLists" v-slot:append>
+                  <list-user-picker v-if="a.isAdmin && a.isUserLinkList(name)" :list="name" :value="val"></list-user-picker>
                   <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="i === 0" @click="a.moveListItem(name, i, -1)"></v-btn>
                   <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="i === items.length - 1" @click="a.moveListItem(name, i, 1)"></v-btn>
                   <v-btn v-if="!a.isLockedValue(name, val)" :icon="a.isArmed('list_' + name + '_' + i) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('list_' + name + '_' + i) ? 'error' : ''" @click="a.removeListItem2(name, i)"></v-btn>

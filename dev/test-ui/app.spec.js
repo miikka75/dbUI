@@ -3195,6 +3195,158 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(r.modelShared).toBe(false);      // ...and the toggle state reflects it
   });
 
+  test('user-linked lists: getListAvatars projects value->picture (non-admin: shared only, no email); links are admin-only', async ({ page }) => {
+    const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
+    await api('resetData');
+    // Seed profiles: Ann shared with a photo; Cara has a photo but did NOT share.
+    await api('setMyProfile', { name: 'Ann',  shared: true,  picture: 'PIC_ANN'  }, 'ann@x.com');
+    await api('setMyProfile', { name: 'Cara', shared: false, picture: 'PIC_CARA' }, 'cara@x.com');
+    // Register an admin + a viewer (once users exist, unregistered callers are non-admin).
+    await api('setUserRole', { uid: 'admin@x.com',  role: 'admin',  user: 'admin@x.com',  tables: 'all' });
+    await api('setUserRole', { uid: 'viewer@x.com', role: 'viewer', user: 'viewer@x.com', tables: [] }, 'admin@x.com');
+    // Admin links two list values to accounts.
+    await api('setListUser', { listName: 'people', value: 'Ann',  email: 'ann@x.com'  }, 'admin@x.com');
+    await api('setListUser', { listName: 'people', value: 'Cara', email: 'cara@x.com' }, 'admin@x.com');
+
+    const adminProj  = await (await api('getListAvatars', {}, 'admin@x.com')).json();
+    const viewerProj = await (await api('getListAvatars', {}, 'viewer@x.com')).json();
+    expect(adminProj).toEqual({ people: { Ann: 'PIC_ANN', Cara: 'PIC_CARA' } });  // admin sees both linked photos
+    expect(viewerProj).toEqual({ people: { Ann: 'PIC_ANN' } });                    // non-admin: shared linked only
+    expect(JSON.stringify(viewerProj)).not.toContain('@');                         // ...and never an email
+
+    const links = await (await api('getListUserLinks', {}, 'admin@x.com')).json();
+    expect(links).toEqual({ people: { Ann: 'ann@x.com', Cara: 'cara@x.com' } });   // admin gets the raw email links
+    const denied = await api('getListUserLinks', {}, 'viewer@x.com');
+    expect(denied.status()).toBe(403);                                             // non-admin denied the raw links
+  });
+
+  test('user-linked lists: a readonly list cell renders the linked user avatar beside the value', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
+    await api('resetData');
+    await api('setMyProfile', { name: 'Ann', shared: true, picture: 'PIC_ANN' }, 'ann@x.com');  // linked user + photo
+    await api('setListUser', { listName: 'people', value: 'Ann', email: 'ann@x.com' });          // link the value (bootstrap admin)
+    await api('saveSchema', { schema: { tables: { roster: { readonly: true, columns: [{ name: 'who', type: 'select', list: 'people' }] } } } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const seeded = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.listsCache = Object.assign({}, app.listsCache, { people: ['Ann'] });
+      app.dataCache['roster'] = [{ id: 'r1', who: 'Ann' }];
+      app.selectTab('roster');
+      return { proj: app.listAvatars, resolved: app.listValuePicture('who', 'Ann') };
+    });
+    expect(seeded.proj).toEqual({ people: { Ann: 'PIC_ANN' } });   // projection loaded at boot
+    expect(seeded.resolved).toBe('PIC_ANN');                        // client resolver maps col->list->picture
+    // the cell renders the avatar image AND still shows the value text
+    const avatarImg = page.locator('.v-main .user-avatar img').first();
+    await expect(avatarImg).toHaveAttribute('src', 'PIC_ANN');
+    await expect(page.locator('.v-main')).toContainText('Ann');
+  });
+
+  test('user-linked lists: an aggregate group card shows the linked avatar in its title (piispakunta pattern)', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
+    await api('resetData');
+    await api('setMyProfile', { name: 'Ann', shared: true, picture: 'PIC_ANN' }, 'ann@x.com');
+    await api('setListUser', { listName: 'people', value: 'Ann', email: 'ann@x.com' });
+    // A grouped aggregate (like piispakunta): one card per group value of `role`, whose list is `people`.
+    await api('saveSchema', { schema: {
+      tables: { duties: { columns: [{ name: 'role', type: 'select', list: 'people' }, { name: 'd', type: 'date' }] } },
+      views: [{ name: 'byrole', layout: 'card', mode: 'union', sources: ['duties'], groupBy: { column: 'byrole', from: ['role'] }, collect: 'd', columns: ['byrole'] }],
+      listSources: { people: 'userlink' },
+      nav: { items: [{ view: 'byrole' }] }
+    } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const seeded = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.listsCache = Object.assign({}, app.listsCache, { people: ['Ann'] });
+      app.dataCache['duties'] = [{ id: 'd1', role: 'Ann', d: '2026-01-01' }];
+      app.selectTab('byrole');
+      return { titleCol: app.visibleCols[0], list: app.listNameForCol(app.visibleCols[0]), groupVals: app.sortedData.map(r => r[app.visibleCols[0]]) };
+    });
+    expect(seeded.titleCol).toBe('byrole');
+    expect(seeded.list).toBe('people');          // synthetic group column resolves to its source list
+    expect(seeded.groupVals).toContain('Ann');   // one card per role value
+    // the group card's title renders the linked user's avatar
+    const avatarImg = page.locator('.v-main .v-card .user-avatar img').first();
+    await expect(avatarImg).toHaveAttribute('src', 'PIC_ANN');
+  });
+
+  test('user-linked lists: the Lookup editor links a value to a user (admin picker) for userlink-flagged lists', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
+    await api('resetData');
+    await api('setMyProfile', { name: 'Ann', shared: true, picture: 'PIC_ANN' }, 'ann@x.com');   // a registered, shared user
+    await api('setUserRole', { uid: 'local@dev', role: 'admin', user: 'local@dev', tables: 'all' }); // the acting admin
+    await api('setUserRole', { uid: 'ann@x.com', role: 'viewer', user: 'ann@x.com', tables: [] });    // so she's a pick option
+    await api('saveSchema', { schema: { tables: { roster: { columns: [{ name: 'who', type: 'select', list: 'people' }] } }, listSources: { people: 'userlink', status: 'x' } } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const flags = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.listsCache = Object.assign({}, app.listsCache, { people: ['Ann'], status: ['open'] });
+      window._listsCache = app.listsCache;
+      app.selectTab('__lookup');
+      return { peopleIsLink: app.isUserLinkList('people'), statusIsLink: app.isUserLinkList('status'), opts: app.listUserOptions().map(o => o.email) };
+    });
+    expect(flags.peopleIsLink).toBe(true);     // flagged list is user-linkable
+    expect(flags.statusIsLink).toBe(false);    // a non-'userlink' listSource value is NOT
+    expect(flags.opts).toContain('ann@x.com'); // registered users are pick options
+    // the picker renders for a value of the userlink list (expand the group)
+    await page.locator('.v-main .v-list-group').filter({ hasText: 'people' }).locator('.v-list-group__header').first().click();
+    await expect(page.locator('[data-testid="list-user-picker"]').first()).toBeVisible();
+    // link through the app method, then verify it persisted, projected, and refreshed the editor state
+    const r = await page.evaluate(async () => {
+      window.appInstance.setListUserLink('people', 'Ann', 'ann@x.com');
+      await new Promise(r => setTimeout(r, 300));
+      return { links: await backend.getListUserLinks(), avatars: window.appInstance.listAvatars, uiLinks: window.appInstance.listUserLinks };
+    });
+    expect(r.links).toEqual({ people: { Ann: 'ann@x.com' } });   // persisted (raw admin links)
+    expect(r.avatars).toEqual({ people: { Ann: 'PIC_ANN' } });   // projected for cell rendering
+    expect(r.uiLinks).toEqual({ people: { Ann: 'ann@x.com' } }); // editor state refreshed
+  });
+
+  test('user-linked lists: a link follows a list-value rename and is dropped on delete', async ({ page }) => {
+    test.setTimeout(20000);
+    const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
+    await api('resetData');
+    await api('setMyProfile', { name: 'Ann', shared: true, picture: 'PIC_ANN' }, 'ann@x.com');
+    await api('setUserRole', { uid: 'local@dev', role: 'admin', user: 'local@dev', tables: 'all' });
+    await api('setUserRole', { uid: 'ann@x.com', role: 'viewer', user: 'ann@x.com', tables: [] });
+    await api('saveSchema', { schema: { tables: { roster: { columns: [{ name: 'who', type: 'select', list: 'people' }] } }, listSources: { people: 'userlink' } } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.listsCache = Object.assign({}, app.listsCache, { people: ['Ann'] });
+      window._listsCache = app.listsCache;
+      app.setListUserLink('people', 'Ann', 'ann@x.com');
+      await new Promise(r => setTimeout(r, 250));
+      app.updateListItem2('people', 0, 'Ann V.');       // rename the value
+      await new Promise(r => setTimeout(r, 400));
+      const afterRename = await backend.getListUserLinks();
+      app.removeListItem2('people', 0); app.removeListItem2('people', 0); // arm + confirm delete
+      await new Promise(r => setTimeout(r, 400));
+      const afterDelete = await backend.getListUserLinks();
+      return { afterRename, afterDelete };
+    });
+    expect(r.afterRename).toEqual({ people: { 'Ann V.': 'ann@x.com' } });  // link moved to the new value, old key gone
+    expect(r.afterDelete).toEqual({});                                     // deleting the value dropped the link
+  });
+
   test('rsvp: status labels translate (statusList) + picker type is configurable', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });

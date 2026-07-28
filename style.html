@@ -46,6 +46,12 @@ html, body { margin: 0; padding: 0; height: 100%; background: #1a1a1a; }
 .editable-cell:focus { background: rgba(var(--v-theme-on-surface), var(--v-focus-opacity)); border-color: rgb(var(--v-theme-primary)); outline: none; }
 /* user avatar: the initial shown when someone has a name but no uploaded picture */
 .user-avatar__initial { font-weight: 600; line-height: 1; text-transform: uppercase; }
+/* list value + optional linked-user avatar (the shared <list-value> renderer). Inline-flex so it flows in
+   cells/labels like text, wrapping multiselect entries without splitting an avatar from its name. */
+.list-value { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; vertical-align: middle; }
+.list-value__item { display: inline-flex; align-items: center; gap: 4px; }
+/* user-ref: avatar + display name chip for email-keyed people (rsvp roster) */
+.user-ref { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
 /* rsvp roster: each person is an inline avatar + name chip; groups wrap without splitting a person */
 .rsvp-roster-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .rsvp-person { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }

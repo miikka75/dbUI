@@ -144,7 +144,7 @@
       // don't depend on Vue/Vuetify/the SDK, so start downloading them NOW (in parallel, ordered exec)
       // and await just before the schema-loader fragment — they overlap the vue/vuetify/sdk loads for free.
       var appModulesReady = loadScriptsOrdered([
-        '/columns.js', '/access-features.js', '/list-access.js', '/calendar.js',
+        '/columns.js', '/access-features.js', '/list-access.js', '/list-users.js', '/calendar.js',
         '/rotation.js', '/rows.js', '/embeds.js', '/print.js', '/pivot.js', '/rsvp.js'
       ]);
 

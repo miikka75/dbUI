@@ -213,3 +213,34 @@ test('per-page access: gated doc-view is hidden + read-denied without the grant,
   expect(denied).toBeNull();   // rule denied the read -> getPage resolves null, never the edited body
   await ctxN.close();
 });
+
+test('user-linked lists: avatar projection over Firestore — admin sees all links, a non-admin only shared, never an email', async ({ page }) => {
+  test.setTimeout(60000);
+  await seed(page);
+  await page.goto('/');
+  await signIn(page, 'admin@test.com');                      // bootstrap admin
+  await page.waitForFunction(() => appInstance.isAdmin === true);
+  await page.evaluate(() => backend_users.setUserRole('viewer@test.com', 'viewer', 'viewer@test.com', []));
+
+  // Two people set up their own profiles: Ann shares (with a photo), Cara does not.
+  await signIn(page, 'ann@test.com');
+  await page.evaluate(() => backend_users.setMyProfile('Ann', true, 'PIC_ANN'));
+  await signIn(page, 'cara@test.com');
+  await page.evaluate(() => backend_users.setMyProfile('Cara', false, 'PIC_CARA'));
+
+  // Admin links both list values to their accounts, then reads the projection.
+  await signIn(page, 'admin@test.com');
+  const adminProj = await page.evaluate(async () => {
+    await backend.setListUser('people', 'Ann', 'ann@test.com');
+    await backend.setListUser('people', 'Cara', 'cara@test.com');
+    return backend.getListAvatars();
+  });
+  expect(adminProj).toEqual({ people: { Ann: 'PIC_ANN', Cara: 'PIC_CARA' } });   // admin sees both
+
+  // The registered viewer gets a projection with only the SHARED link, and no email anywhere.
+  await signIn(page, 'viewer@test.com');
+  const viewerProj = await page.evaluate(() => backend.getListAvatars());
+  expect(viewerProj).toEqual({ people: { Ann: 'PIC_ANN' } });                    // Cara (unshared) hidden
+  expect(JSON.stringify(viewerProj)).not.toContain('@');                         // never an email
+  await expectNoCspViolations(page);
+});

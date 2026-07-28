@@ -6,6 +6,8 @@ const fs = require('fs');
 const path = require('path');
 // Per-list access model — shared module (also loaded by the browser app + backend-local), no more copies.
 const { listOwningTables, filterLists } = require('../list-access');
+// User-linked lists (Option C): pure link/projection logic, shared with the browser app.
+const LU = require('../list-users');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const USE_FS = process.argv.includes('--fs');
@@ -103,6 +105,13 @@ const server = http.createServer(async (req, res) => {
       if (u.role === 'admin' || u.tables === 'all') return null; // null = unrestricted
       return u.tables || [];
     }
+    // Admin for the profile-visibility rule (can see unshared users). Bootstrap (no users) counts as admin.
+    // Note this is stricter than getAllowedTables()===null, which also passes tables:'all' editors.
+    function isAdminReq() {
+      if (!backend._users || !Object.keys(backend._users).length) return true;
+      const u = userRecord();
+      return !!(u && u.role === 'admin');
+    }
     // Doc-view bodies (_pages) mirror firestore.rules' dedicated block: any REGISTERED user reads
     // (content pages; each embedded table's rows stay gated by their own access), admins/editors write.
     // Without this, hasTableAccess('_pages') — which no grant ever satisfies — denied restricted reads.
@@ -177,7 +186,7 @@ const server = http.createServer(async (req, res) => {
         });
         return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), tableMap: tableMapB, languages: languagesB, lists: listsB, data: dataB });
       }
-      case 'resetData': backend.resetData(); backend._users = undefined; saveUsers(); backend._accessRequests = undefined; saveRequests(); backend._profiles = undefined; saveProfiles(); return json(res, { ok: true });
+      case 'resetData': backend.resetData(); backend._users = undefined; saveUsers(); backend._accessRequests = undefined; saveRequests(); backend._profiles = undefined; saveProfiles(); if (backend.saveListUsers) backend.saveListUsers('local', {}); return json(res, { ok: true });
       case 'getAvailableTables': return json(res, backend.getAvailableTables('local'));
       case 'serverInfo': return json(res, { storage: USE_FS ? 'fs' : 'sqlite' });
       case 'getAvailableLanguages': return json(res, backend.getAvailableLanguages('local'));
@@ -263,6 +272,25 @@ const server = http.createServer(async (req, res) => {
           return json(res, { error: 'Access denied' }, 403);
         }
         backend.putListItem('local', body.listName, body.value); return json(res, { ok: true });
+      }
+      // --- User-linked lists (Option C) ---
+      case 'getListAvatars': {
+        // Viewer-safe projection: { listName: { value: pictureDataUrl } }. Non-admins get only SHARED
+        // linked users; no email is ever included. Safe for everyone to read.
+        const links = backend.getListUsers ? backend.getListUsers('local') : {};
+        return json(res, LU.buildAvatarProjection(links, backend._profiles || {}, isAdminReq()));
+      }
+      case 'getListUserLinks': {
+        // Admin-only: the raw { value: email } links, for the Lookup editor's picker.
+        if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
+        return json(res, backend.getListUsers ? backend.getListUsers('local') : {});
+      }
+      case 'setListUser': {
+        // Admin-only: link (email set) or unlink (email empty) a list value to a registered user.
+        if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
+        const cur = backend.getListUsers ? backend.getListUsers('local') : {};
+        backend.saveListUsers('local', LU.setLink(cur, body.listName, body.value, body.email || ''));
+        return json(res, { ok: true });
       }
       case 'moveRow': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.moveRow(body.tableId, body.rowData, body.fromTab, body.toTab); return json(res, { ok: true });
       case 'saveChangesets': backend.saveChangesets('local', body.siteId, body.json); return json(res, { ok: true });
