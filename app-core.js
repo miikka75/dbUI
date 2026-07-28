@@ -3249,13 +3249,13 @@ function createVueApp() {
       + '<template v-if="spec.inlineBlocks" v-for="(blk, bi) in spec.inlineBlocks" :key="\'ib\'+bi">'
       + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
       + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle">{{ displayValue(ec, er[ec]) }}</td></tr></tbody></table>'
+      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
       + '</template>'
       + '<template v-else>'
       + '<div v-if="header" style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t(\'tab.\' + spec.config.table) || spec.config.table }} ({{ rows.length }})</div>'
       + '<table v-if="roLayout===\'table\'" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle">{{ displayValue(ec, er[ec]) }}</td></tr></tbody></table>'
-      + '<div v-else-if="roLayout===\'card\'" style="display:grid; gap:6px"><div v-for="er in rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in cols" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span>{{ displayValue(ec, er[ec]) }}</span></div></div>'
+      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
+      + '<div v-else-if="roLayout===\'card\'" style="display:grid; gap:6px"><div v-for="er in rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in cols" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span><list-value :col="ec" :value="er[ec]"></list-value></span></div></div>'
       + '<div v-else class="d-flex align-center flex-wrap ga-1"><v-chip v-for="er in rows" :key="er.id" size="small" variant="tonal" color="secondary" label><span v-for="(ec, i) in cols" :key="ec">{{ er[ec] }}<span v-if="i < cols.length - 1" style="opacity:0.4"> · </span></span></v-chip></div>'
       + '</template>'
       + '</template>'
@@ -3263,12 +3263,12 @@ function createVueApp() {
       + '<div v-else>'
       + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
       + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
-      + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" style="font-size:0.85rem">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}<span v-if="i < cols.length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
+      + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]"></list-value><span v-if="i < cols.length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
       + '<template v-slot:append><template v-if="canMutate"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></template></template>'
       + '</v-list-item></v-list>'
       + '<div v-else-if="layout===\'card\'" class="my-2">'
       + '<v-card v-for="(item, ri) in rows" :key="item.id || ri" variant="flat" class="ma-2 pa-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">'
-      + '<div v-for="col in cols" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span></div>'
+      + '<div v-for="col in cols" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8"><list-value :col="col" :value="item[col]"></list-value></span></div>'
       + '<div v-if="canMutate" style="text-align:right"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></div>'
       + '</v-card></div>'
       + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
@@ -3307,7 +3307,6 @@ function createVueApp() {
       colIsMultiselect: function(col) { return appInstance.colIsMultiselect(col); },
       colAllowNew: function(col) { return appInstance.colAllowNew(col); },
       colIsList: function(col) { return appInstance.colIsList(col); },
-      listPic: function(col, value) { return appInstance.listValuePicture(col, value); },   // linked-user avatar for a list value
       colIsRef: function(col) { return appInstance.colIsRef(col); },
       colPicker: function(col) { return appInstance.colPicker(col); },
       colListSwitch: function(col) { return appInstance.colListSwitch(col); },
@@ -3343,9 +3342,9 @@ function createVueApp() {
       + '<span v-if="cellRO(item, col)" :style="{ opacity: embed ? 0.4 : 0.75 }">'
       +   '<a v-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="safeImg(item[col])" class="cell-thumb" alt=""></a>'
       +   '<a v-else-if="colIsUrl(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop>{{ item[col] }}</a>'
-      +   '<template v-else><user-avatar v-if="listPic(col, item[col])" :picture="listPic(col, item[col])" :name="item[col]" :size="18" class="mr-1" style="vertical-align:middle"></user-avatar>{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</template>'
+      +   '<template v-else><list-value :col="col" :value="item[col]"></list-value></template>'
       + '</span>'
-      + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82">{{ colIsDate(col) ? toDateStr(item[col]) : displayValue(col, item[col]) }}</span>'
+      + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82"><list-value :col="col" :value="item[col]"></list-value></span>'
       + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
       + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
       + '<v-btn-toggle v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'toggle\'" :name="col" :model-value="item[col] || \'\'" density="compact" variant="outlined" divided @update:model-value="save(item, col, $event || \'\')">'
@@ -3474,7 +3473,7 @@ function createVueApp() {
     template: ''
       + '<v-table density="compact"><template v-slot:default>'
       + '<thead><tr><th v-for="col in cols" :key="col">{{ head(col) }}</th></tr></thead>'
-      + '<tbody><tr v-for="row in rows" :key="row.id"><td v-for="col in cols" :key="col" style="padding:3px 8px">{{ col === \'_period\' ? toDateStr(row[col]) : displayValue(col, row[col]) }}</td></tr></tbody>'
+      + '<tbody><tr v-for="row in rows" :key="row.id"><td v-for="col in cols" :key="col" style="padding:3px 8px"><list-value :col="col" :value="row[col]"></list-value></td></tr></tbody>'
       + '</template></v-table>'
   });
 
@@ -3484,7 +3483,7 @@ function createVueApp() {
       + '<div style="display:grid; gap:8px; padding:8px">'
       + '<div v-for="row in rows" :key="row.id" style="padding:8px 12px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:8px">'
       + '<div style="font-weight:600; margin-bottom:4px">{{ toDateStr(row._period) }}</div>'
-      + '<div v-for="col in slotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, row[col]) }}</div>'
+      + '<div v-for="col in slotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span><list-value :col="col" :value="row[col]"></list-value></div>'
       + '</div></div>'
   });
 
@@ -3494,7 +3493,7 @@ function createVueApp() {
       + '<div style="padding:4px 0">'
       + '<div v-for="row in rows" :key="row.id" style="padding:4px 12px; border-bottom:1px solid rgb(var(--v-theme-outline),0.08); font-size:0.9rem">'
       + '<span style="font-weight:600; margin-right:8px">{{ toDateStr(row._period) }}</span>'
-      + '<span v-for="(col, i) in slotCols" :key="col"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, row[col]) }}<span v-if="i < slotCols.length - 1" style="opacity:0.3"> · </span></span>'
+      + '<span v-for="(col, i) in slotCols" :key="col"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span><list-value :col="col" :value="row[col]"></list-value><span v-if="i < slotCols.length - 1" style="opacity:0.3"> · </span></span>'
       + '</div></div>'
   });
 
@@ -3521,7 +3520,7 @@ function createVueApp() {
       + '<v-list-item v-for="item in rows" :key="item.id" class="px-2">'
       + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" class="d-inline-flex align-center" style="font-size:0.85rem">'
       +   '<a v-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="safeImg(item[col])" class="cell-thumb" alt=""></a>'
-      +   '<template v-else>{{ displayValue(col, item[col]) }}</template>'
+      +   '<list-value v-else :col="col" :value="item[col]"></list-value>'
       +   '<span v-if="i < cols.length - 1" style="opacity:0.3; margin:0 6px">·</span>'
       + '</span></template>'
       + '<template v-slot:append>'
@@ -3664,12 +3663,12 @@ function createVueApp() {
       + '<v-table density="compact" class="my-1"><template v-slot:default>'
       + '<thead><tr>'
       + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));cursor:pointer" @click="toggleSort(\'__row__\')" data-testid="pivot-sort-row">{{ head(cfg.row) }}{{ sortIcon(\'__row__\') }}</th>'
-      + '<th v-for="(c, ci) in grid.columns" :key="c" style="text-align:center;cursor:pointer" @click="toggleSort(ci)">{{ colLabel(c) }}{{ sortIcon(ci) }}</th>'
+      + '<th v-for="(c, ci) in grid.columns" :key="c" style="text-align:center;cursor:pointer" @click="toggleSort(ci)"><list-value :col="cfg.column" :value="c"></list-value>{{ sortIcon(ci) }}</th>'
       + '<th v-if="hasTotals" style="text-align:center;font-weight:700;cursor:pointer" @click="toggleSort(\'__total__\')">{{ a.t(\'pivot.total\') }}{{ sortIcon(\'__total__\') }}</th>'
       + '</tr></thead>'
       + '<tbody>'
       + '<tr v-for="r in rows" :key="r.key">'
-      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:600">{{ rowLabel(r.key) }}</th>'
+      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:600"><list-value :col="cfg.row" :value="r.key"></list-value></th>'
       + '<td v-for="(v, ci) in r.cells" :key="ci" style="text-align:center">{{ cellFmt(v) }}</td>'
       + '<td v-if="hasTotals" style="text-align:center;font-weight:700">{{ r.total }}</td>'
       + '</tr>'
@@ -3682,6 +3681,32 @@ function createVueApp() {
       + '</tr></tfoot>'
       + '</template></v-table>'
       + '</component>'
+  });
+
+  // ONE list VALUE (or a multiselect array of them), rendered as its display text with the linked user's
+  // avatar in front when there is one. This is THE single place a list value + optional avatar is drawn, so
+  // avatars appear consistently wherever a value is printed — read-only cells, embeds, the compact list
+  // layout, rotation slots, the pivot axes, and group-card titles. Non-list columns just render their text;
+  // dates (and the synthetic _period) pass through toDateStr. Drop-in for `{{ displayValue(col, val) }}`.
+  app.component('list-value', {
+    props: { col: { type: String, required: true }, value: {}, size: { type: [Number, String], default: 18 } },
+    computed: {
+      items: function() {
+        var col = this.col, v = this.value, a = appInstance;
+        if (col === '_period' || a.colIsDate(col)) return (v == null || v === '') ? [] : [{ text: a.toDateStr(v), pic: '' }];
+        var arr = Array.isArray(v) ? v : ((v == null || v === '') ? [] : [v]);
+        return arr.filter(function(x) { return x != null && x !== ''; }).map(function(x) {
+          return { text: a.displayValue(col, x), pic: a.listValuePicture(col, x) };
+        });
+      }
+    },
+    template: ''
+      + '<span class="list-value">'
+      + '<span v-for="(it, i) in items" :key="i" class="list-value__item">'
+      +   '<user-avatar v-if="it.pic" :picture="it.pic" :name="it.text" :size="size"></user-avatar>'
+      +   '<span>{{ it.text }}{{ i < items.length - 1 ? \',\' : \'\' }}</span>'
+      + '</span>'
+      + '</span>'
   });
 
   // A person's avatar, resolved from their email: their uploaded picture, else their name's initial, else a
