@@ -3709,14 +3709,19 @@ function createVueApp() {
     computed: {
       a: function() { return appInstance; },
       email: function() { return (appInstance.listUserLinks[this.list] || {})[this.value] || ''; },
+      pic: function() { return this.email ? appInstance.profilePicture(this.email) : ''; },
+      name: function() { return this.email ? (appInstance.profileName(this.email) || this.email) : ''; },
       options: function() { return appInstance.listUserOptions(); }
     },
     methods: { pick: function(email) { appInstance.setListUserLink(this.list, this.value, email || ''); } },
+    // Three states: unlinked (muted add-person), linked with a photo (their face), linked without a photo
+    // (a primary "account linked" check — clearer than a bare name-initial). Tooltip names who is linked.
     template: ''
       + '<v-menu location="bottom end" :close-on-content-click="true">'
       + '<template v-slot:activator="{ props }">'
-      + '<v-btn v-bind="props" size="x-small" variant="text" :title="email || a.t(\'list.link_user\')" data-testid="list-user-picker">'
-      + '<user-avatar v-if="email" :email="email" :size="22"></user-avatar>'
+      + '<v-btn v-bind="props" size="x-small" variant="text" :color="email ? \'primary\' : \'\'" :title="email ? name : a.t(\'list.link_user\')" data-testid="list-user-picker">'
+      + '<user-avatar v-if="pic" :email="email" :size="22"></user-avatar>'
+      + '<v-icon v-else-if="email" color="primary" size="small" icon="mdi-account-check"></v-icon>'
       + '<v-icon v-else size="small" icon="mdi-account-plus-outline"></v-icon>'
       + '</v-btn>'
       + '</template>'
