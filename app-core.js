@@ -593,6 +593,8 @@ function createVueApp() {
                 (v.rotation.columns || []).forEach(function(c) { keys.push('field.' + colName(c)); });
               }
               if (v.board && v.board.lane) keys.push('field.' + v.board.lane);       // board: lane header comes from the lane column
+              if (v.board) (v.board.laneGroups || []).forEach(function(g) { if (g && g.label) keys.push('board.group.' + g.label); });  // board: phase-header labels are translatable
+
               if (v.pivot) {                                                         // pivot: axis headers come from row/column, not v.columns
                 if (v.pivot.row) keys.push('field.' + v.pivot.row);
                 if (v.pivot.column) keys.push('field.' + v.pivot.column);
@@ -4004,7 +4006,7 @@ function createVueApp() {
       + '<div v-for="g in groups" :key="g.key">'
       + '  <div v-if="g.label" class="px-3 pt-3 pb-1" style="cursor:pointer;display:flex;align-items:center;gap:6px" @click="toggleGroup(g.key)" :data-testid="\'board-group-\'+g.key">'
       + '    <v-icon size="x-small">{{ collapsed[g.key] ? \'mdi-chevron-right\' : \'mdi-chevron-down\' }}</v-icon>'
-      + '    <span style="font-size:0.72rem;font-weight:700;text-transform:uppercase;opacity:0.6">{{ g.label }}</span>'
+      + '    <span style="font-size:0.72rem;font-weight:700;text-transform:uppercase;opacity:0.6">{{ tOr(\'board.group.\'+g.label, g.label) }}</span>'
       + '    <span style="font-size:0.72rem;opacity:0.4">{{ g.count }}</span></div>'
       + '  <div v-show="!collapsed[g.key]" class="board-lane-row">'
       + '    <div v-for="lane in g.lanes" :key="lane.key" class="board-lane"'

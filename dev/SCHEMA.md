@@ -910,7 +910,8 @@ reuses the data-view load path (filters, `compute`, `defaultSort` all apply) and
   read-only user gets a static board.
 - **Many lanes → `laneGroups`.** For long lifecycles (e.g. a calling-status column with a dozen states),
   group lanes into named phases; a group marked `"collapsed": true` starts folded. Lanes not named in any
-  group fall into a trailing implicit group.
+  group fall into a trailing implicit group. Each phase `label` is translatable through a
+  `board.group.<label>` key (seeded into the translation editor), falling back to the literal `label`.
 - **Card row controls.** Each card carries the same per-row actions as the grid, gated on write access: a
   **pencil** flips the card into edit mode (every field except the lane becomes the shared `data-cell`
   editor — same widgets and `saveField` persistence as the grid — with dragging disabled while editing); an
