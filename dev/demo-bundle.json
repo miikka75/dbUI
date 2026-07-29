@@ -260,25 +260,61 @@
         "id": "tkt1",
         "title": "Fix projector in chapel",
         "status": "open",
-        "assignee": "Alex"
+        "assignee": "Alex",
+        "stage": "triaged"
       },
       {
         "id": "tkt2",
         "title": "Order sacrament bread",
         "status": "in_progress",
-        "assignee": "Sam"
+        "assignee": "Sam",
+        "stage": "in_progress"
       },
       {
         "id": "tkt3",
         "title": "Update ward directory",
         "status": "open",
-        "assignee": "Sam"
+        "assignee": "Sam",
+        "stage": "new"
       },
       {
         "id": "tkt4",
         "title": "Print programs",
         "status": "done",
-        "assignee": "Alex"
+        "assignee": "Alex",
+        "stage": "shipped"
+      }
+    ],
+    "ticket_stages": [
+      {
+        "id": "stg1",
+        "phase": "Backlog",
+        "stage": "new"
+      },
+      {
+        "id": "stg2",
+        "phase": "Backlog",
+        "stage": "triaged"
+      },
+      {
+        "id": "stg3",
+        "phase": "Active",
+        "stage": "in_progress"
+      },
+      {
+        "id": "stg4",
+        "phase": "Active",
+        "stage": "in_review"
+      },
+      {
+        "id": "stg5",
+        "phase": "Done",
+        "stage": "shipped"
+      },
+      {
+        "id": "stg6",
+        "phase": "Done",
+        "stage": "wont_fix"
       }
     ]
   },
@@ -444,7 +480,18 @@
       "msg.import_blocked": "Import blocked:",
       "msg.import_error": "Import error:",
       "msg.palette_applied": "Palette applied",
-      "msg.error": "Error:"
+      "msg.error": "Error:",
+      "view.ticket_pipeline": "Ticket Pipeline",
+      "field.stage": "Stage",
+      "list.ticket_stages.Backlog": "Backlog",
+      "list.ticket_stages.Active": "Active",
+      "list.ticket_stages.Done": "Done",
+      "list.ticket_stages.new": "New",
+      "list.ticket_stages.triaged": "Triaged",
+      "list.ticket_stages.in_progress": "In progress",
+      "list.ticket_stages.in_review": "In review",
+      "list.ticket_stages.shipped": "Shipped",
+      "list.ticket_stages.wont_fix": "Won't fix"
     },
     "es": {
       "app.title": "Demo de Equipo",
@@ -560,7 +607,18 @@
       "msg.import_blocked": "Importación bloqueada:",
       "msg.import_error": "Error de importación:",
       "msg.palette_applied": "Paleta aplicada",
-      "msg.error": "Error:"
+      "msg.error": "Error:",
+      "view.ticket_pipeline": "Flujo de Tickets",
+      "field.stage": "Etapa",
+      "list.ticket_stages.Backlog": "Pendientes",
+      "list.ticket_stages.Active": "Activo",
+      "list.ticket_stages.Done": "Hecho",
+      "list.ticket_stages.new": "Nuevo",
+      "list.ticket_stages.triaged": "Clasificado",
+      "list.ticket_stages.in_progress": "En progreso",
+      "list.ticket_stages.in_review": "En revisión",
+      "list.ticket_stages.shipped": "Entregado",
+      "list.ticket_stages.wont_fix": "No se corrige"
     },
     "sv": {
       "app.title": "Team-demo",
@@ -676,7 +734,18 @@
       "msg.import_blocked": "Import blockerad:",
       "msg.import_error": "Importfel:",
       "msg.palette_applied": "Palett tillämpad",
-      "msg.error": "Fel:"
+      "msg.error": "Fel:",
+      "view.ticket_pipeline": "Ärendeflöde",
+      "field.stage": "Steg",
+      "list.ticket_stages.Backlog": "Kvarhållna",
+      "list.ticket_stages.Active": "Aktiv",
+      "list.ticket_stages.Done": "Klar",
+      "list.ticket_stages.new": "Ny",
+      "list.ticket_stages.triaged": "Sorterad",
+      "list.ticket_stages.in_progress": "Pågår",
+      "list.ticket_stages.in_review": "Granskas",
+      "list.ticket_stages.shipped": "Levererad",
+      "list.ticket_stages.wont_fix": "Åtgärdas ej"
     }
   },
   "config": {
