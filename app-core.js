@@ -571,17 +571,20 @@ function createVueApp() {
             if (c !== 'id' && c !== 'created_at' && c !== 'updated_at') keys.push('field.' + c);
           }
         }
-        // List value keys -- only lists referenced by schema columns
-        var referencedLists = {};
-        for (var tbl2 in SCHEMA) {
-          var cols2 = SCHEMA[tbl2].columns || {};
-          for (var c2 in cols2) { var d = cols2[c2]; if (d && typeof d === 'object' && d.list) referencedLists[d.list] = true; }
-        }
+        // List-value translation keys come from two places:
+        //  (1) filter/conditional-pinned values (lockedListValues) — always translatable; schema logic keys on
+        //      them, so their labels must be stable/localizable regardless of opt-in.
+        //  (2) lists explicitly opted in via top-level `schema.translatableLists: [name,...]` — expose ALL of
+        //      each named list's current values. This is how a controlled vocabulary (status/organisation/…)
+        //      is made fully translatable while open-data lists (member names, etc.) are left out. See SCHEMA.md.
         var lists = this.listsCache || {};
         var lockedVals = this.lockedListValues;
         for (var ln in lockedVals) {
           for (var lv in lockedVals[ln]) { keys.push('list.' + ln + '.' + lv); }
         }
+        (schema.translatableLists || []).forEach(function(name) {
+          (lists[name] || []).forEach(function(val) { keys.push('list.' + name + '.' + val); });
+        });
         var views = schema.views || {};
         function addViewKeys(arr) {
           (arr || []).forEach(function(v) {

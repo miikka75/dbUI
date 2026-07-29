@@ -921,6 +921,30 @@ reuses the data-view load path (filters, `compute`, `defaultSort` all apply) and
 - **Integration.** Because a board only writes an existing column, moving cards feeds any other view that
   filters on that column (e.g. a program/agenda view filtering `status: "approved"`), with no extra wiring.
 
+## Translatable lists (`translatableLists`)
+
+List **values** (the options behind a `select`/`multiselect` column) are translated through
+`list.<list>.<value>` keys — the same keys the grid, board lanes, and pivot axes resolve through. Most
+lists are open data you would never localize (member names, song titles), so the Languages editor does
+**not** expose every list by default. It surfaces list-value keys from two sources:
+
+1. **Filter/conditional-pinned values** — any value a schema `filter`/`when` references (e.g. a program
+   view filtering `tila: "vastaanotettu"`). These are always translatable (and locked from deletion),
+   because schema logic keys on them; you get exactly those values, not the whole list.
+2. **Opt-in lists** — a top-level **`"translatableLists": ["tilat", "organisaatio", …]`** array. Every
+   current value of each named list becomes a translation key. Use this for controlled vocabularies you
+   want fully localized (status lifecycles, organisations, roles) while leaving open/data lists out.
+
+```json
+{ "defaultLanguage": "Suomi",
+  "translatableLists": ["tilat", "organisaatio", "tehtävät", "piispakunta"],
+  "tables": { … } }
+```
+
+In the **Languages** tab these keys are grouped under their own collapsible **Lists** section (separate
+from **App** and **Schema**) so they're easy to find. A value with no translation falls back to the raw
+value, so opting a list in is non-breaking.
+
 ## Self-service tables (Firebase)
 
 Any table that declares an **`owner` column** is a **self-service** table: a registered member may
