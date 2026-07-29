@@ -1621,6 +1621,10 @@ function createVueApp() {
         var self = this;
         return (this.refGroupedData[parent] || []).some(function(it) { return self.isLockedRefRow(it); });
       },
+      // Translated label for a lookup value, keyed by its table's namespace (list.<table>.<value>) — the same
+      // key the board/grid resolve through. The ref editor shows this for locked (filter-pinned) rows so their
+      // link to `list.<table>.<value>` translations is visible, mirroring how the Lists editor labels values.
+      refValueLabel: function(val) { var t = this.currentRefTable; return t ? this.tOr('list.' + t + '.' + val, val) : val; },
       colAllowNew: function(col) { return Columns.colAllowNew(SCHEMA, col); },
       colIsSorted: function(col) { return Columns.colIsSorted(SCHEMA, col); },
       addToListOnBlur: function(item, col) {

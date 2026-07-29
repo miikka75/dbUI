@@ -418,7 +418,8 @@
                     </v-list-item>
                   </template>
                   <v-list-item v-for="item in children" :key="item.id">
-                    <span class="editable-cell ref-child" :contenteditable="a.isLockedRefRow(item) ? 'false' : 'true'" @blur="a.saveRefField(item, a.refChildCol, $event.target.textContent)">{{ item[a.refChildCol] || '' }}</span>
+                    <span v-if="a.isLockedRefRow(item)" class="ref-child" style="opacity:0.7">{{ a.refValueLabel(item[a.refChildCol]) }}</span>
+                    <span v-else class="editable-cell ref-child" contenteditable @blur="a.saveRefField(item, a.refChildCol, $event.target.textContent)">{{ item[a.refChildCol] || '' }}</span>
                     <template v-slot:append>
                       <v-icon v-if="a.isLockedRefRow(item)" size="x-small" style="opacity:0.4" title="Used by a schema filter">mdi-lock-outline</v-icon>
                       <v-btn v-else :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn>
@@ -444,7 +445,8 @@
                 <tbody>
                   <tr v-for="item in a.refTableData" :key="item.id">
                     <td v-for="col in a.refTableCols" :key="col">
-                      <span class="editable-cell" :contenteditable="a.isLockedRefRow(item) ? 'false' : 'true'" @blur="a.saveRefField(item, col, $event.target.textContent)">{{ item[col] || '' }}</span>
+                      <span v-if="a.isLockedRefRow(item)" class="editable-cell" style="opacity:0.7">{{ a.refValueLabel(item[col]) }}</span>
+                      <span v-else class="editable-cell" contenteditable @blur="a.saveRefField(item, col, $event.target.textContent)">{{ item[col] || '' }}</span>
                     </td>
                     <td><v-icon v-if="a.isLockedRefRow(item)" size="x-small" style="opacity:0.4" title="Used by a schema filter">mdi-lock-outline</v-icon><v-btn v-else :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn></td>
                   </tr>
