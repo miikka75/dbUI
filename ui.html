@@ -347,9 +347,15 @@
                     <td colspan="2"><v-textarea :model-value="a.currentTranslations[key] || ''" @update:model-value="a.saveTranslation(key, $event)" :label="key" auto-grow rows="1" density="compact" variant="outlined" hide-details></v-textarea></td>
                   </tr>
                   <tr @click="a.settings._collapseSchema = !a.settings._collapseSchema" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ a.settings._collapseSchema ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ a.t('lang.schema') }}</td></tr>
-                  <tr v-for="key in a.schemaTranslationKeys" :key="key" v-show="!a.settings._collapseSchema">
+                  <tr v-for="key in a.schemaTranslationKeysNonList" :key="key" v-show="!a.settings._collapseSchema">
                     <td colspan="2"><v-textarea :model-value="a.currentTranslations[key] || ''" @update:model-value="a.saveTranslation(key, $event)" :label="key" auto-grow rows="1" density="compact" variant="outlined" hide-details></v-textarea></td>
                   </tr>
+                  <template v-if="a.listTranslationKeys.length">
+                  <tr @click="a.settings._collapseLists = !a.settings._collapseLists" style="cursor:pointer"><td colspan="2" style="font-weight:bold; opacity:0.6; padding-top:12px"><v-icon size="small">{{ a.settings._collapseLists ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon> {{ a.t('lang.lists') }}</td></tr>
+                  <tr v-for="key in a.listTranslationKeys" :key="key" v-show="!a.settings._collapseLists">
+                    <td colspan="2"><v-textarea :model-value="a.currentTranslations[key] || ''" @update:model-value="a.saveTranslation(key, $event)" :label="key" auto-grow rows="1" density="compact" variant="outlined" hide-details></v-textarea></td>
+                  </tr>
+                  </template>
                 </tbody>
                 </template>
               </v-table>

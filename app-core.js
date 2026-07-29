@@ -169,7 +169,7 @@ function createVueApp() {
       syncing: false,
       snackbar: false,
       snackText: '',
-      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false },
+      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false },
       appConfig: null,
       saveTimers: {},
       pendingDelete: null,
@@ -544,7 +544,7 @@ function createVueApp() {
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error',
          'pivot.total', 'pivot.empty',
-         'board.move_to', 'board.unassigned', 'board.add_in_lane',
+         'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.edit', 'board.archive', 'board.delete', 'board.confirm_delete',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
@@ -558,7 +558,7 @@ function createVueApp() {
          'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
          'list.link_user', 'list.unlink_user',
-         'lang.app', 'lang.schema'].sort();
+         'lang.app', 'lang.schema', 'lang.lists'].sort();
       },
       schemaTranslationKeys: function() {
         var keys = [];
@@ -625,6 +625,12 @@ function createVueApp() {
         var seen = {};
         return keys.filter(function(k) { if (seen[k]) return false; seen[k] = true; return true; }).sort();
       },
+      // The Languages editor splits schema keys into two collapsible sections so the `list.<list>.<value>`
+      // value keys (e.g. status/calling-state labels) don't get buried among the field/view/tab keys:
+      // "Schema" shows everything except list values, "Lists" shows only them. Both derive from
+      // schemaTranslationKeys, which stays the full set used to seed a new language (translationKeys).
+      schemaTranslationKeysNonList: function() { return this.schemaTranslationKeys.filter(function(k) { return k.indexOf('list.') !== 0; }); },
+      listTranslationKeys: function() { return this.schemaTranslationKeys.filter(function(k) { return k.indexOf('list.') === 0; }); },
       translationKeys: function() {
         var seen = {};
         return this.staticTranslationKeys.concat(this.schemaTranslationKeys).filter(function(k) { if (seen[k]) return false; seen[k] = true; return true; });
