@@ -939,8 +939,11 @@ lists are open data you would never localize (member names, song titles), so the
 **not** expose every list by default. It surfaces list-value keys from two sources:
 
 1. **Filter/conditional-pinned values** — any value a schema `filter`/`when` references (e.g. a program
-   view filtering `tila: "vastaanotettu"`). These are always translatable (and locked from deletion),
-   because schema logic keys on them; you get exactly those values, not the whole list.
+   view filtering `tila: "vastaanotettu"`). These are always translatable (and locked from rename/deletion),
+   because schema logic keys on them; you get exactly those values, not the whole list. This holds whether
+   the filtered column is a `select` (pinned under its list) **or a `ref`** (pinned under its lookup table),
+   so a 2-D ref lane's filter-referenced values can't be renamed or removed from the lookup — the ref/lookup
+   editor shows them locked, the same way the Lists editor locks list values.
 2. **Opt-in lists** — a top-level **`"translatableLists": ["tilat", "organisaatio", …]`** array. Every
    current value of each named list becomes a translation key. Use this for controlled vocabularies you
    want fully localized (status lifecycles, organisations, roles) while leaving open/data lists out. An

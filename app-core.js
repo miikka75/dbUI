@@ -542,7 +542,7 @@ function createVueApp() {
          'msg.load_failed', 'msg.request_failed', 'msg.approve_failed', 'msg.import_complete',
          'msg.group_added', 'msg.item_added', 'msg.translation_saved', 'msg.language_added', 'msg.language_renamed', 'msg.language_exists',
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
-         'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error',
+         'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
          'pivot.total', 'pivot.empty',
          'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.edit', 'board.archive', 'board.delete', 'board.confirm_delete',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
@@ -1608,6 +1608,19 @@ function createVueApp() {
         var lv = this.lockedListValues;
         return !!(lv[listName] && lv[listName][val]);
       },
+      // A ref/lookup row is "locked" when any of its cell values is a filter-pinned value for that table
+      // (lockedListValues keys ref tables by name too — see forEachFilterListValue). Filter-referenced lookup
+      // rows must not be renamed/deleted or the filter keying on them silently breaks; the ref editor honors
+      // this the same way the Lists editor does for list values.
+      isLockedRefRow: function(item) {
+        var t = this.currentRefTable, lv = t && this.lockedListValues[t];
+        if (!lv || !item) return false;
+        return this.refTableCols.some(function(c) { return !!lv[item[c]]; });
+      },
+      refParentLocked: function(parent) {
+        var self = this;
+        return (this.refGroupedData[parent] || []).some(function(it) { return self.isLockedRefRow(it); });
+      },
       colAllowNew: function(col) { return Columns.colAllowNew(SCHEMA, col); },
       colIsSorted: function(col) { return Columns.colIsSorted(SCHEMA, col); },
       addToListOnBlur: function(item, col) {
@@ -1744,6 +1757,7 @@ function createVueApp() {
         self.notify(self.t('msg.renamed'));
       },
       deleteRefParent: function(parent) {
+        if (this.refParentLocked(parent)) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot delete')); return; }
         var key = 'refp:' + parent;
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
         var self = this;
@@ -1782,6 +1796,8 @@ function createVueApp() {
       },
       saveRefField: function(item, col, value) {
         if (item[col] === value) return;
+        var lv = this.lockedListValues[this.currentRefTable];
+        if (lv && lv[item[col]]) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot rename')); return; }  // renaming a pinned value breaks the filter
         item[col] = value;
         item.updated_at = new Date().toISOString();
         var self = this;
@@ -1800,6 +1816,7 @@ function createVueApp() {
         self.focusLastEditable('.v-main .v-card .v-table tbody tr:last-child .editable-cell');
       },
       deleteRefRow: function(item) {
+        if (this.isLockedRefRow(item)) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot delete')); return; }
         var key = 'ref:' + item.id;
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
         var table = this.currentRefTable;

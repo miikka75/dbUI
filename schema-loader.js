@@ -57,6 +57,9 @@ function forEachFilterListValue(cb) {
     for (var col in filter) {
       if (col[0] === '$') continue;
       var ln = Columns.colIsList(SCHEMA, col);   // memoized any-table scan; was hand-rolled in 4 places
+      if (!ln && Columns.colIsRef(SCHEMA, col)) {                          // a ref filter column (e.g. a 2-D board
+        for (var rt in SCHEMA) { var rf = Columns.columnRef(SCHEMA, rt, col); if (rf && rf.table) { ln = rf.table; break; } }
+      }                                                                    // lane): pin under its lookup TABLE name
       if (!ln) continue;
       var vals = Array.isArray(filter[col]) ? filter[col] : [filter[col]];
       vals.forEach(function(val) { if (typeof val === 'string' && !isFilterToken(val)) cb(ln, val); });
