@@ -542,7 +542,7 @@ function createVueApp() {
          'msg.load_failed', 'msg.request_failed', 'msg.approve_failed', 'msg.import_complete',
          'msg.group_added', 'msg.item_added', 'msg.translation_saved', 'msg.language_added', 'msg.language_renamed', 'msg.language_exists',
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
-         'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
+         'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked', 'msg.translate_in_lists',
          'pivot.total', 'pivot.empty',
          'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.edit', 'board.archive', 'board.delete', 'board.confirm_delete',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
@@ -1625,6 +1625,12 @@ function createVueApp() {
       // key the board/grid resolve through. The ref editor shows this for locked (filter-pinned) rows so their
       // link to `list.<table>.<value>` translations is visible, mirroring how the Lists editor labels values.
       refValueLabel: function(val) { var t = this.currentRefTable; return t ? this.tOr('list.' + t + '.' + val, val) : val; },
+      // A lookup opted into `translatableLists` is a translatable controlled vocabulary: its values ARE the
+      // `list.<table>.<value>` translation keys, so an EXISTING value can't be renamed in the ref editor (that
+      // would orphan its translation + every row storing it) — labels are set in Languages → Lists. A blank
+      // new cell stays editable so you can type its initial key; filter-pinned rows are always read-only.
+      isTranslatableRefTable: function() { return (((this.schemaData && this.schemaData.translatableLists) || []).indexOf(this.currentRefTable) >= 0); },
+      isReadonlyRefCell: function(item, col) { return this.isLockedRefRow(item) || (this.isTranslatableRefTable() && !!(item && item[col])); },
       colAllowNew: function(col) { return Columns.colAllowNew(SCHEMA, col); },
       colIsSorted: function(col) { return Columns.colIsSorted(SCHEMA, col); },
       addToListOnBlur: function(item, col) {
@@ -1748,6 +1754,7 @@ function createVueApp() {
       renameRefParent: function(oldParent, newParent) {
         newParent = (newParent || '').trim();
         if (newParent === oldParent) return;
+        if (this.isTranslatableRefTable() && oldParent) { this.notify(this.tOr('msg.translate_in_lists', 'Set its label in Languages → Lists')); return; }  // existing group key: rename orphans its translation
         var self = this;
         var table = self.currentRefTable;
         var parentCol = self.refParentCol;
@@ -1802,6 +1809,7 @@ function createVueApp() {
         if (item[col] === value) return;
         var lv = this.lockedListValues[this.currentRefTable];
         if (lv && lv[item[col]]) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot rename')); return; }  // renaming a pinned value breaks the filter
+        if (this.isTranslatableRefTable() && item[col]) { this.notify(this.tOr('msg.translate_in_lists', 'Set its label in Languages → Lists')); return; }  // existing key: rename orphans its translation
         item[col] = value;
         item.updated_at = new Date().toISOString();
         var self = this;
