@@ -895,15 +895,25 @@ reuses the data-view load path (filters, `compute`, `defaultSort` all apply) and
 ```
 
 - **One source, one lane column.** The source must be **exactly one** table and `lane` must be a `select`
-  on it (load-time validation enforces both) — a drag writes one column on one table, so a union/join or a
-  non-select lane would be ambiguous. This mirrors why a mirror-**detail** table (one whose columns
-  `syncFrom` a master) yields a **read-only** board: such rows are mutated only via their master, so the
-  board offers no drag/add (same `hasMaster` gate as the data view's add button). Board a **standalone**
-  table (like a status/workflow table).
+  **or a `ref`** column on it (load-time validation enforces both) — a drag writes one column on one table,
+  so a union/join or an unsupported lane type would be ambiguous. This mirrors why a mirror-**detail** table
+  (one whose columns `syncFrom` a master) yields a **read-only** board: such rows are mutated only via their
+  master, so the board offers no drag/add (same `hasMaster` gate as the data view's add button). Board a
+  **standalone** table (like a status/workflow table).
 - **Lane order & labels.** `lanes` fixes the order and materializes empty lanes; otherwise lanes come from
   the `select` column's list (authored order), else first-seen in the data. Lane headers and card values
   are translated through the same `list.<list>.<value>` / `field.<col>` keys the grid uses — no board-only
   i18n. The blank/unassigned lane uses the `board.unassigned` label (default `—`).
+- **2-D ref lane (grouping from data, no `laneGroups`).** If `lane` is a **`ref` to a 2-column lookup**, the
+  lookup's two dimensions *are* the board: the **parent** column is the phase/group, the **child** column
+  (`valueCol`) is the lane value (what the row stores). Lane order, group order, and grouping all come from
+  the lookup **rows** — so adding / renaming / reordering states or phases is plain data entry in that
+  lookup, with nothing duplicated in the schema (`laneGroups`/`hiddenLanes` aren't needed). A ref lane's
+  values **and** its group labels localize through `list.<lookupTable>.<value>` keys — the same namespace as
+  list values, so they appear in the Languages editor's **Lists** section when the lookup table is named in
+  `translatableLists`. A plain 1-D `select` lane stays flat (or grouped via `laneGroups`); a 2-column ref
+  lane is grouped. Drag/move writes the child value exactly like a select lane, so filters and existing data
+  keep matching.
 - **Writes.** Dropping a card (desktop HTML5 drag) or picking a lane from the card's **move-menu**
   (touch / keyboard / a11y fallback) calls the same debounced `saveField` as inline grid editing, so it
   flows to every backend and updates the cache immediately. Gated on write access (`canMutateRows`); a
@@ -933,7 +943,9 @@ lists are open data you would never localize (member names, song titles), so the
    because schema logic keys on them; you get exactly those values, not the whole list.
 2. **Opt-in lists** — a top-level **`"translatableLists": ["tilat", "organisaatio", …]`** array. Every
    current value of each named list becomes a translation key. Use this for controlled vocabularies you
-   want fully localized (status lifecycles, organisations, roles) while leaving open/data lists out.
+   want fully localized (status lifecycles, organisations, roles) while leaving open/data lists out. An
+   entry may also name a **lookup/ref table** (e.g. a board's 2-D ref-lane table): its distinct cell values
+   across all non-system columns are exposed the same way, so both dimensions of a ref lane are translatable.
 
 ```json
 { "defaultLanguage": "Suomi",

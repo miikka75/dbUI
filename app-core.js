@@ -582,8 +582,15 @@ function createVueApp() {
         for (var ln in lockedVals) {
           for (var lv in lockedVals[ln]) { keys.push('list.' + ln + '.' + lv); }
         }
+        var dc = this.dataCache || {};
         (schema.translatableLists || []).forEach(function(name) {
-          (lists[name] || []).forEach(function(val) { keys.push('list.' + name + '.' + val); });
+          if (lists[name]) { lists[name].forEach(function(val) { keys.push('list.' + name + '.' + val); }); return; }
+          // A lookup/ref TABLE name is also accepted: expose the distinct values across its non-system columns
+          // so a 2-D ref lane (its group + value dimensions) is fully translatable via the same list.<name>.<value> keys.
+          if (SCHEMA[name]) {
+            var sys = { id: 1, created_at: 1, updated_at: 1 }, seenv = {};
+            (dc[name] || []).forEach(function(r) { for (var c in r) { if (sys[c]) continue; var v = r[c]; if (v && !seenv[v]) { seenv[v] = 1; keys.push('list.' + name + '.' + v); } } });
+          }
         });
         var views = schema.views || {};
         function addViewKeys(arr) {
@@ -1576,9 +1583,13 @@ function createVueApp() {
         if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x); }).filter(Boolean).join(', '); }
         if (!val) return '';
         var out = val;
-        var listName = this.listNameForCol(col);
-        if (listName) {
-          var key = 'list.' + listName + '.' + val;
+        // Translation namespace: a list column uses its list name; a `ref` column uses its lookup TABLE name,
+        // so ref-backed values (e.g. a board's 2-D ref lane and its group dimension) localize through the same
+        // `list.<ns>.<value>` keys as list values do. Either way it falls back to the raw value.
+        var ns = this.listNameForCol(col);
+        if (!ns && this.colIsRef(col)) { var rf = this.colRef(col); ns = rf && rf.table; }
+        if (ns) {
+          var key = 'list.' + ns + '.' + val;
           var translated = this.t(key);
           out = translated !== key ? translated : val;
         }
@@ -1619,6 +1630,9 @@ function createVueApp() {
       },
 
       colIsRef: function(col) { return Columns.colIsRef(SCHEMA, col); },
+      // The `ref` config for a column, found across whichever table declares it (columns aren't view-scoped).
+      // Shared by displayValue's ref-translation namespace and the board's 2-D ref lane grouping.
+      colRef: function(col) { for (var t in SCHEMA) { var r = getColumnRef(t, col); if (r) return r; } return null; },
       colIsMirrorForTable: function(col) {
         var table = this.currentTable;
         if (VIEWS[table]) return false;
@@ -3947,27 +3961,61 @@ function createVueApp() {
       canEdit: function() { return !this.embed && appInstance.canMutateRows; },
       hasArchive: function() { return appInstance.hasArchive; },
       rows: function() { return this.embed ? (appInstance.boardRowsFor ? appInstance.boardRowsFor(this.viewName) : []) : (appInstance.currentData || []); },
-      // Lane keys in intended order: explicit `lanes`, else the lane column's list (authored order).
+      // A 2-D REF lane: when `board.lane` is a `ref` to a 2-column lookup, the lookup's two dimensions are the
+      // group (parent col) and the lane value (child col). Lane order, grouping, and labels then come from that
+      // lookup DATA — no schema laneGroups. Null for a plain select lane, so the list/laneGroups paths run.
+      refLane: function() {
+        if (!appInstance.colIsRef(this.laneCol)) return null;
+        var rf = appInstance.colRef(this.laneCol);
+        if (!rf || !rf.table) return null;
+        var cols = getColumns(rf.table).filter(function(c) { return c !== 'id' && c !== 'created_at' && c !== 'updated_at'; });
+        if (cols.length < 2) return null;                       // 1-col ref -> no group dimension; treat as flat
+        var childCol = rf.valueCol || cols[cols.length - 1];
+        var parentCol = cols[0] === childCol ? cols[1] : cols[0];
+        return { table: rf.table, parentCol: parentCol, childCol: childCol, rows: appInstance.dataCache[rf.table] || [] };
+      },
+      // Lane keys in intended order: a ref lane -> the lookup's child values in row order; else explicit
+      // `lanes`, else the select column's list (authored order).
       laneOrder: function() {
+        var rl = this.refLane;
+        if (rl) { var cc = rl.childCol; return rl.rows.map(function(r) { return r[cc]; }).filter(function(v) { return v != null && v !== ''; }); }
         if (this.cfg.lanes) return this.cfg.lanes.slice();
         return (appInstance.getListOptions(this.laneCol) || []).map(function(o) { return o.value; });
       },
       board: function() {
         return Board.build(this.rows, { lane: this.laneCol, laneOrder: this.laneOrder, hidden: this.cfg.hiddenLanes || [] });
       },
-      // Phase grouping (laneGroups). [{ label, key, lanes:[laneObj,...] }]; no config -> one unlabeled group.
+      // Phase grouping. [{ label, key, lanes:[laneObj,...] }]. Source of the grouping:
+      //   ref lane   -> the lookup's parent dimension (group order = first appearance across lookup rows);
+      //   laneGroups -> schema-declared phases (legacy/select lanes);
+      //   neither    -> one unlabeled group (flat board).
       groups: function() {
         var laneMap = {}; this.board.lanes.forEach(function(l) { laneMap[l.key] = l; });
+        var rl = this.refLane;
+        if (rl) {
+          var order = [], byParent = {}, used = {};
+          rl.rows.forEach(function(r) {
+            var lane = laneMap[r[rl.childCol]];
+            if (!lane) return;
+            var p = r[rl.parentCol] == null ? '' : String(r[rl.parentCol]);
+            if (!(p in byParent)) { byParent[p] = []; order.push(p); }
+            byParent[p].push(lane); used[lane.key] = 1;
+          });
+          var out = order.map(function(p, gi) { var ls = byParent[p]; return { label: p, key: 'g' + gi, count: ls.reduce(function(s, l) { return s + l.count; }, 0), lanes: ls }; });
+          var rest = this.board.lanes.filter(function(l) { return !used[l.key]; });   // data values not in the lookup (e.g. blank)
+          if (rest.length) out.push({ label: null, key: '__rest__', count: rest.reduce(function(s, l) { return s + l.count; }, 0), lanes: rest });
+          return out;
+        }
         var cfgGroups = this.cfg.laneGroups;
         if (!cfgGroups || !cfgGroups.length) return [{ label: null, key: '__all__', lanes: this.board.lanes }];
-        var used = {}, self = this;
-        var out = cfgGroups.map(function(g, gi) {
-          var lanes = (g.lanes || []).map(function(k) { used[k] = 1; return laneMap[k]; }).filter(Boolean);
+        var used2 = {};
+        var out2 = cfgGroups.map(function(g, gi) {
+          var lanes = (g.lanes || []).map(function(k) { used2[k] = 1; return laneMap[k]; }).filter(Boolean);
           return { label: g.label, key: 'g' + gi, count: lanes.reduce(function(s, l) { return s + l.count; }, 0), lanes: lanes };
         });
-        var rest = this.board.lanes.filter(function(l) { return !used[l.key]; });
-        if (rest.length) out.push({ label: null, key: '__rest__', count: rest.reduce(function(s, l) { return s + l.count; }, 0), lanes: rest });
-        return out;
+        var rest2 = this.board.lanes.filter(function(l) { return !used2[l.key]; });
+        if (rest2.length) out2.push({ label: null, key: '__rest__', count: rest2.reduce(function(s, l) { return s + l.count; }, 0), lanes: rest2 });
+        return out2;
       }
     },
     created: function() {
@@ -3976,6 +4024,13 @@ function createVueApp() {
     },
     methods: Object.assign({}, ROOT_PROXY, {
       laneLabel: function(k) { return k === '' ? appInstance.tOr('board.unassigned', '—') : appInstance.displayValue(this.laneCol, k); },
+      // Phase-header label. A ref lane's group is the lookup's parent VALUE, localized through the lookup
+      // table's namespace (list.<table>.<value>); a laneGroups phase uses its authored board.group.<label>.
+      groupLabel: function(g) {
+        if (g.label == null || g.label === '') return '';
+        if (this.refLane) return appInstance.tOr('list.' + this.refLane.table + '.' + g.label, g.label);
+        return appInstance.tOr('board.group.' + g.label, g.label);
+      },
       titleCol: function() { return colName(this.cfg.title || (this.view.columns || [])[0] || ''); },
       cardTitle: function(item) { var c = this.titleCol(); return c ? appInstance.displayValue(c, item[c]) : (item.id || ''); },
       cardCols: function() {
@@ -4015,7 +4070,7 @@ function createVueApp() {
       + '<div v-for="g in groups" :key="g.key">'
       + '  <div v-if="g.label" class="px-3 pt-3 pb-1" style="cursor:pointer;display:flex;align-items:center;gap:6px" @click="toggleGroup(g.key)" :data-testid="\'board-group-\'+g.key">'
       + '    <v-icon size="x-small">{{ collapsed[g.key] ? \'mdi-chevron-right\' : \'mdi-chevron-down\' }}</v-icon>'
-      + '    <span style="font-size:0.72rem;font-weight:700;text-transform:uppercase;opacity:0.6">{{ tOr(\'board.group.\'+g.label, g.label) }}</span>'
+      + '    <span style="font-size:0.72rem;font-weight:700;text-transform:uppercase;opacity:0.6">{{ groupLabel(g) }}</span>'
       + '    <span style="font-size:0.72rem;opacity:0.4">{{ g.count }}</span></div>'
       + '  <div v-show="!collapsed[g.key]" class="board-lane-row">'
       + '    <div v-for="lane in g.lanes" :key="lane.key" class="board-lane"'

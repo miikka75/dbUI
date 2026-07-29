@@ -209,7 +209,7 @@ function validateSchema() {
         var bt = view.sources[0], bcols = (SCHEMA[bt] && SCHEMA[bt].columns) || {};
         var ld = bcols[bd.lane], lt = (typeof ld === 'string') ? ld : (ld && ld.type);
         if (bd.lane && !ld) errors.push('board "' + v + '" lane "' + bd.lane + '" not found in "' + bt + '"');
-        else if (bd.lane && lt !== 'select') errors.push('board "' + v + '" lane "' + bd.lane + '" in "' + bt + '" must be a select column');
+        else if (bd.lane && lt !== 'select' && lt !== 'ref') errors.push('board "' + v + '" lane "' + bd.lane + '" in "' + bt + '" must be a select or ref column');
       }
       (bd.laneGroups || []).forEach(function(g) { if (!g || !Array.isArray(g.lanes)) errors.push('board "' + v + '" laneGroups entries need a `lanes` array'); });
     }
