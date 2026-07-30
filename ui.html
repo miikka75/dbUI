@@ -375,6 +375,7 @@
               <template v-slot:activator="{ props }">
                 <v-list-item v-bind="props" prepend-icon="mdi-format-list-bulleted">
                   <span>{{ name }}</span>
+                  <v-icon v-if="a.isTranslatableList(name)" size="x-small" style="opacity:0.45" class="ml-2" title="Translatable — labels set in Languages → Lists">mdi-translate</v-icon>
                 </v-list-item>
               </template>
               <v-list-item v-for="(val, i) in items" :key="i">
