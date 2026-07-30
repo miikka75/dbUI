@@ -374,8 +374,10 @@
             <v-list-group v-for="(items, name) in a.visibleLists" :key="name" :value="name">
               <template v-slot:activator="{ props }">
                 <v-list-item v-bind="props" prepend-icon="mdi-format-list-bulleted">
-                  <span>{{ name }}</span>
-                  <v-icon v-if="a.isTranslatableList(name)" size="x-small" style="opacity:0.45" class="ml-2" title="Translatable — labels set in Languages → Lists">mdi-translate</v-icon>
+                  <div style="display:flex;align-items:center;width:100%">
+                    <span>{{ name }}</span>
+                    <v-icon v-if="a.isTranslatableList(name)" size="x-small" style="margin-left:auto;opacity:0.45" title="Translatable — labels set in Languages → Lists">mdi-translate</v-icon>
+                  </div>
                 </v-list-item>
               </template>
               <v-list-item v-for="(val, i) in items" :key="i">
@@ -404,7 +406,10 @@
             <v-list-group v-for="rt in a.refTables" :key="rt" :value="rt">
               <template v-slot:activator="{ props }">
                 <v-list-item v-bind="props" :prepend-icon="'mdi-database-outline'" @click="a.currentRefTable = rt">
-                  <span>{{ rt }}</span>
+                  <div style="display:flex;align-items:center;width:100%">
+                    <span>{{ rt }}</span>
+                    <v-icon v-if="a.isTranslatableList(rt)" size="x-small" style="margin-left:auto;opacity:0.45" title="Translatable — labels set in Languages → Lists">mdi-translate</v-icon>
+                  </div>
                 </v-list-item>
               </template>
             <!-- Hierarchical mode (2 data columns) -->
