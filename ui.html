@@ -413,7 +413,10 @@
                       <span v-else class="editable-cell" contenteditable @click.stop @blur="a.renameRefParent(parent, $event.target.textContent)">{{ parent }}</span>
                       <template v-slot:append>
                         <v-icon v-if="a.refParentLocked(parent)" size="x-small" style="opacity:0.4" class="mr-2" title="Contains a value used by a schema filter">mdi-lock-outline</v-icon>
-                        <v-btn v-else :icon="a.isArmed('refp:'+parent) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed('refp:'+parent) ? 'error' : ''" @click.stop="a.deleteRefParent(parent)" class="mr-2"></v-btn>
+                        <template v-else>
+                          <v-icon v-if="a.isTranslatableRefTable() && parent" size="x-small" style="opacity:0.35" class="mr-1" title="Label set in Languages → Lists">mdi-translate</v-icon>
+                          <v-btn :icon="a.isArmed('refp:'+parent) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed('refp:'+parent) ? 'error' : ''" @click.stop="a.deleteRefParent(parent)" class="mr-2"></v-btn>
+                        </template>
                         <v-icon>mdi-chevron-down</v-icon>
                       </template>
                     </v-list-item>
