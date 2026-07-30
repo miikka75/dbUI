@@ -542,7 +542,7 @@ function createVueApp() {
          'msg.load_failed', 'msg.request_failed', 'msg.approve_failed', 'msg.import_complete',
          'msg.group_added', 'msg.item_added', 'msg.translation_saved', 'msg.language_added', 'msg.language_renamed', 'msg.language_exists',
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
-         'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked', 'msg.translate_in_lists',
+         'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
          'pivot.total', 'pivot.empty',
          'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.edit', 'board.archive', 'board.delete', 'board.confirm_delete',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
@@ -1630,10 +1630,14 @@ function createVueApp() {
       // would orphan its translation + every row storing it) — labels are set in Languages → Lists. A blank
       // new cell stays editable so you can type its initial key; filter-pinned rows are always read-only.
       isTranslatableRefTable: function() { return (((this.schemaData && this.schemaData.translatableLists) || []).indexOf(this.currentRefTable) >= 0); },
-      isReadonlyRefCell: function(item, col) { return this.isLockedRefRow(item) || (this.isTranslatableRefTable() && !!(item && item[col])); },
-      // A plain list opted into `translatableLists` is a translatable controlled vocabulary too (same as a ref
-      // lookup): its values ARE the list.<list>.<value> keys, so an existing value is read-only in the Lists
-      // editor (label set in Languages → Lists) and gets a translate hint. Blank/new items stay editable.
+      // A lookup value is READ-ONLY only when a schema filter/conditional pins it (renaming would break that
+      // filter) — being merely translatable no longer locks it, so existing values stay renamable. A locked
+      // value shows its translated label; everything else is editable (raw). The translate icon is a separate,
+      // purely informational badge (see the editor templates).
+      isLockedRefValue: function(val) { var lv = this.lockedListValues[this.currentRefTable]; return !!(lv && val != null && lv[val]); },
+      isReadonlyRefCell: function(item, col) { return this.isLockedRefValue(item && item[col]); },
+      // Whether a plain list is opted into `translatableLists` (its values have list.<list>.<value> labels).
+      // Used only to show the translate badge in the Lists editor — values stay editable unless filter-pinned.
       isTranslatableList: function(name) { return (((this.schemaData && this.schemaData.translatableLists) || []).indexOf(name) >= 0); },
       colAllowNew: function(col) { return Columns.colAllowNew(SCHEMA, col); },
       colIsSorted: function(col) { return Columns.colIsSorted(SCHEMA, col); },
@@ -1758,7 +1762,7 @@ function createVueApp() {
       renameRefParent: function(oldParent, newParent) {
         newParent = (newParent || '').trim();
         if (newParent === oldParent) return;
-        if (this.isTranslatableRefTable() && oldParent) { this.notify(this.tOr('msg.translate_in_lists', 'Set its label in Languages → Lists')); return; }  // existing group key: rename orphans its translation
+        if (this.isLockedRefValue(oldParent)) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot rename')); return; }  // a filter-pinned group value can't be renamed
         var self = this;
         var table = self.currentRefTable;
         var parentCol = self.refParentCol;
@@ -1813,7 +1817,6 @@ function createVueApp() {
         if (item[col] === value) return;
         var lv = this.lockedListValues[this.currentRefTable];
         if (lv && lv[item[col]]) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot rename')); return; }  // renaming a pinned value breaks the filter
-        if (this.isTranslatableRefTable() && item[col]) { this.notify(this.tOr('msg.translate_in_lists', 'Set its label in Languages → Lists')); return; }  // existing key: rename orphans its translation
         item[col] = value;
         item.updated_at = new Date().toISOString();
         var self = this;
@@ -1951,7 +1954,7 @@ function createVueApp() {
       },
       updateListItem2: function(name, i, value) {
         var oldVal = this.listsCache[name][i];
-        if (oldVal && this.isTranslatableList(name)) { this.notify(this.tOr('msg.translate_in_lists', 'Set its label in Languages → Lists')); return; }  // translatable list value = a key; rename orphans its translation
+        if (this.isLockedValue(name, oldVal)) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot rename')); return; }  // filter-pinned value can't be renamed
         this.listsCache[name][i] = value;
         this.saveLists();
         // Rename propagation: text is stored in rows, so rewrite the old value -> new value across

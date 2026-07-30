@@ -378,14 +378,18 @@
                 </v-list-item>
               </template>
               <v-list-item v-for="(val, i) in items" :key="i">
-                <span v-if="!a.canEditLists || a.isLockedValue(name, val) || (a.isTranslatableList(name) && val)" style="opacity:0.7">{{ a.t('list.' + name + '.' + val) !== ('list.' + name + '.' + val) ? a.t('list.' + name + '.' + val) : val }} <v-icon v-if="a.isTranslatableList(name)" size="x-small" style="opacity:0.35" title="Label set in Languages → Lists">mdi-translate</v-icon><v-icon v-if="a.isLockedValue(name, val)" size="x-small" style="opacity:0.4" title="Used by a schema filter">mdi-lock-outline</v-icon></span>
+                <span v-if="!a.canEditLists || a.isLockedValue(name, val)" style="opacity:0.7">{{ a.t('list.' + name + '.' + val) !== ('list.' + name + '.' + val) ? a.t('list.' + name + '.' + val) : val }}</span>
                 <span v-else class="editable-cell" contenteditable @blur="a.updateListItem2(name, i, $event.target.textContent)" @keydown.enter.prevent="a.focusNextListItem($event)" @keydown.home.stop @keydown.end.stop>{{ val }}</span>
-                <template v-if="a.canEditLists" v-slot:append>
-                  <list-user-picker v-if="a.isAdmin && a.isUserLinkList(name)" :list="name" :value="val"></list-user-picker>
-                  <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="i === 0" @click="a.moveListItem(name, i, -1)"></v-btn>
-                  <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="i === items.length - 1" @click="a.moveListItem(name, i, 1)"></v-btn>
-                  <v-btn v-if="!a.isLockedValue(name, val)" :icon="a.isArmed('list_' + name + '_' + i) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('list_' + name + '_' + i) ? 'error' : ''" @click="a.removeListItem2(name, i)"></v-btn>
-                  <div v-else style="width:36px"></div>
+                <template v-slot:append>
+                  <v-icon v-if="a.isTranslatableList(name)" size="x-small" style="opacity:0.35" title="Label set in Languages → Lists">mdi-translate</v-icon>
+                  <v-icon v-if="a.isLockedValue(name, val)" size="x-small" style="opacity:0.4" title="Used by a schema filter">mdi-lock-outline</v-icon>
+                  <template v-if="a.canEditLists">
+                    <list-user-picker v-if="a.isAdmin && a.isUserLinkList(name)" :list="name" :value="val"></list-user-picker>
+                    <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="i === 0" @click="a.moveListItem(name, i, -1)"></v-btn>
+                    <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="i === items.length - 1" @click="a.moveListItem(name, i, 1)"></v-btn>
+                    <v-btn v-if="!a.isLockedValue(name, val)" :icon="a.isArmed('list_' + name + '_' + i) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('list_' + name + '_' + i) ? 'error' : ''" @click="a.removeListItem2(name, i)"></v-btn>
+                    <div v-else style="width:36px"></div>
+                  </template>
                 </template>
               </v-list-item>
               <v-list-item v-if="a.canEditLists">
@@ -409,7 +413,7 @@
                 <v-list-group v-for="(children, parent) in a.refGroupedData" :key="parent" :value="parent">
                   <template v-slot:activator="{ props }">
                     <v-list-item v-bind="props">
-                      <span v-if="a.isTranslatableRefTable() && parent" class="editable-cell" style="opacity:0.7" @click.stop>{{ a.refValueLabel(parent) }}</span>
+                      <span v-if="a.isLockedRefValue(parent)" class="editable-cell" style="opacity:0.7" @click.stop>{{ a.refValueLabel(parent) }}</span>
                       <span v-else class="editable-cell" contenteditable @click.stop @blur="a.renameRefParent(parent, $event.target.textContent)">{{ parent }}</span>
                       <template v-slot:append>
                         <v-icon v-if="a.isTranslatableRefTable() && parent" size="x-small" style="opacity:0.35" class="mr-1" title="Label set in Languages → Lists">mdi-translate</v-icon>
