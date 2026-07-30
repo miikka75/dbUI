@@ -1773,6 +1773,7 @@ function createVueApp() {
             backend.putRow(self.tableMap[table], row, 'active');
           }
         });
+        self.migrateListTranslation(table, oldParent, newParent);   // carry the group's own label
         self.notify(self.t('msg.renamed'));
       },
       deleteRefParent: function(parent) {
@@ -1817,10 +1818,14 @@ function createVueApp() {
         if (item[col] === value) return;
         var lv = this.lockedListValues[this.currentRefTable];
         if (lv && lv[item[col]]) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot rename')); return; }  // renaming a pinned value breaks the filter
+        var oldVal = item[col];
         item[col] = value;
         item.updated_at = new Date().toISOString();
         var self = this;
         var refTable = self.currentRefTable;
+        // Rename side-effects (mirror list renames): carry the value across every table that refs it + its
+        // translations, so an existing lookup value can be renamed without orphaning rows or its label.
+        if (oldVal && value) { self.propagateRefChange(refTable, oldVal, value); self.migrateListTranslation(refTable, oldVal, value); }
         var timerKey = refTable + ':' + item.id;
         clearTimeout(self.saveTimers[timerKey]);
         self.saveTimers[timerKey] = setTimeout(function() {
@@ -1959,7 +1964,22 @@ function createVueApp() {
         this.saveLists();
         // Rename propagation: text is stored in rows, so rewrite the old value -> new value across
         // every table column backed by this list (both partitions). Skip no-ops / blank endpoints.
-        if (oldVal && value && oldVal !== value) { this.propagateListChange(name, oldVal, value); this.migrateListUserLink(name, oldVal, value); }
+        if (oldVal && value && oldVal !== value) { this.propagateListChange(name, oldVal, value); this.migrateListUserLink(name, oldVal, value); this.migrateListTranslation(name, oldVal, value); }
+      },
+      // Carry a value's translations when it's renamed: list.<ns>.<old> -> list.<ns>.<new> across every
+      // language (and clear the old key), so a rename in the Lists/ref editor doesn't orphan its label — the
+      // i18n counterpart of propagateListChange/propagateRefChange. `ns` is the list name or ref-table name.
+      migrateListTranslation: function(ns, oldVal, newVal) {
+        if (!ns || !oldVal || !newVal || oldVal === newVal) return;
+        var self = this, oldKey = 'list.' + ns + '.' + oldVal, newKey = 'list.' + ns + '.' + newVal;
+        if (self.strings && self.strings[oldKey] != null) { self.strings[newKey] = self.strings[oldKey]; delete self.strings[oldKey]; }  // active language, immediate
+        (self.languages || []).forEach(function(lang) {
+          Promise.resolve(backend.getTranslations(self.folderId, lang.code)).then(function(t) {
+            if (!t || t[oldKey] == null || t[oldKey] === '') return;
+            var updates = {}; updates[newKey] = t[oldKey]; updates[oldKey] = '';   // '' clears the old key (getTranslations drops empty)
+            backend.updateTranslations(self.folderId, lang.code, updates);
+          }).catch(function() {});
+        });
       },
       // Carry a user-linked-list link when its value is renamed (or drop it on delete): the link is keyed by
       // the value string, so a rename would otherwise orphan it (like the row rewrite above). No-op unless a
@@ -2020,9 +2040,25 @@ function createVueApp() {
       // persists only the rows that actually changed. Returns a promise of the changed-row count.
       propagateListChange: function(listName, oldVal, newVal) {
         if (!oldVal || oldVal === newVal) return Promise.resolve(0);
-        var self = this, del = !newVal;
         var targets = this.listBackedColumns(listName);
-        if (!targets.length) return Promise.resolve(0);
+        return targets.length ? this._rewriteValueInColumns(targets, oldVal, newVal) : Promise.resolve(0);
+      },
+      // Columns that `ref` a given lookup table (the ref counterpart of listBackedColumns). Lets a renamed or
+      // removed lookup value be scrubbed out of every table that stores it, the same way list renames propagate.
+      refBackedColumns: function(refTable) {
+        var out = [];
+        for (var t in SCHEMA) { var cols = (SCHEMA[t] && SCHEMA[t].columns) || {}; for (var c in cols) { var r = getColumnRef(t, c); if (r && r.table === refTable) out.push({ table: t, col: c, multi: false, altList: null }); } }
+        return out;
+      },
+      propagateRefChange: function(refTable, oldVal, newVal) {
+        if (!oldVal || oldVal === newVal) return Promise.resolve(0);
+        var targets = this.refBackedColumns(refTable);
+        return targets.length ? this._rewriteValueInColumns(targets, oldVal, newVal) : Promise.resolve(0);
+      },
+      // Shared engine: rewrite oldVal -> newVal (or delete when newVal is falsy) across the given target
+      // columns in both partitions, persisting each changed row. Returns the total count changed.
+      _rewriteValueInColumns: function(targets, oldVal, newVal) {
+        var self = this, del = !newVal;
         var byTable = {};
         targets.forEach(function(t) { (byTable[t.table] = byTable[t.table] || []).push(t); });
         var jobs = [];
