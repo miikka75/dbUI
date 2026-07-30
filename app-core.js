@@ -1631,6 +1631,10 @@ function createVueApp() {
       // new cell stays editable so you can type its initial key; filter-pinned rows are always read-only.
       isTranslatableRefTable: function() { return (((this.schemaData && this.schemaData.translatableLists) || []).indexOf(this.currentRefTable) >= 0); },
       isReadonlyRefCell: function(item, col) { return this.isLockedRefRow(item) || (this.isTranslatableRefTable() && !!(item && item[col])); },
+      // A plain list opted into `translatableLists` is a translatable controlled vocabulary too (same as a ref
+      // lookup): its values ARE the list.<list>.<value> keys, so an existing value is read-only in the Lists
+      // editor (label set in Languages → Lists) and gets a translate hint. Blank/new items stay editable.
+      isTranslatableList: function(name) { return (((this.schemaData && this.schemaData.translatableLists) || []).indexOf(name) >= 0); },
       colAllowNew: function(col) { return Columns.colAllowNew(SCHEMA, col); },
       colIsSorted: function(col) { return Columns.colIsSorted(SCHEMA, col); },
       addToListOnBlur: function(item, col) {
@@ -1947,6 +1951,7 @@ function createVueApp() {
       },
       updateListItem2: function(name, i, value) {
         var oldVal = this.listsCache[name][i];
+        if (oldVal && this.isTranslatableList(name)) { this.notify(this.tOr('msg.translate_in_lists', 'Set its label in Languages → Lists')); return; }  // translatable list value = a key; rename orphans its translation
         this.listsCache[name][i] = value;
         this.saveLists();
         // Rename propagation: text is stored in rows, so rewrite the old value -> new value across

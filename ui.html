@@ -378,7 +378,7 @@
                 </v-list-item>
               </template>
               <v-list-item v-for="(val, i) in items" :key="i">
-                <span v-if="!a.canEditLists || a.isLockedValue(name, val)" style="opacity:0.7">{{ a.t('list.' + name + '.' + val) !== ('list.' + name + '.' + val) ? a.t('list.' + name + '.' + val) : val }} <v-icon v-if="a.isLockedValue(name, val)" size="x-small" style="opacity:0.4">mdi-lock-outline</v-icon></span>
+                <span v-if="!a.canEditLists || a.isLockedValue(name, val) || (a.isTranslatableList(name) && val)" style="opacity:0.7">{{ a.t('list.' + name + '.' + val) !== ('list.' + name + '.' + val) ? a.t('list.' + name + '.' + val) : val }} <v-icon v-if="a.isTranslatableList(name)" size="x-small" style="opacity:0.35" title="Label set in Languages → Lists">mdi-translate</v-icon><v-icon v-if="a.isLockedValue(name, val)" size="x-small" style="opacity:0.4" title="Used by a schema filter">mdi-lock-outline</v-icon></span>
                 <span v-else class="editable-cell" contenteditable @blur="a.updateListItem2(name, i, $event.target.textContent)" @keydown.enter.prevent="a.focusNextListItem($event)" @keydown.home.stop @keydown.end.stop>{{ val }}</span>
                 <template v-if="a.canEditLists" v-slot:append>
                   <list-user-picker v-if="a.isAdmin && a.isUserLinkList(name)" :list="name" :value="val"></list-user-picker>
@@ -412,11 +412,9 @@
                       <span v-if="a.isTranslatableRefTable() && parent" class="editable-cell" style="opacity:0.7" @click.stop>{{ a.refValueLabel(parent) }}</span>
                       <span v-else class="editable-cell" contenteditable @click.stop @blur="a.renameRefParent(parent, $event.target.textContent)">{{ parent }}</span>
                       <template v-slot:append>
+                        <v-icon v-if="a.isTranslatableRefTable() && parent" size="x-small" style="opacity:0.35" class="mr-1" title="Label set in Languages → Lists">mdi-translate</v-icon>
                         <v-icon v-if="a.refParentLocked(parent)" size="x-small" style="opacity:0.4" class="mr-2" title="Contains a value used by a schema filter">mdi-lock-outline</v-icon>
-                        <template v-else>
-                          <v-icon v-if="a.isTranslatableRefTable() && parent" size="x-small" style="opacity:0.35" class="mr-1" title="Label set in Languages → Lists">mdi-translate</v-icon>
-                          <v-btn :icon="a.isArmed('refp:'+parent) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed('refp:'+parent) ? 'error' : ''" @click.stop="a.deleteRefParent(parent)" class="mr-2"></v-btn>
-                        </template>
+                        <v-btn v-else :icon="a.isArmed('refp:'+parent) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed('refp:'+parent) ? 'error' : ''" @click.stop="a.deleteRefParent(parent)" class="mr-2"></v-btn>
                         <v-icon>mdi-chevron-down</v-icon>
                       </template>
                     </v-list-item>
@@ -425,11 +423,9 @@
                     <span v-if="a.isReadonlyRefCell(item, a.refChildCol)" class="ref-child" style="opacity:0.7">{{ a.refValueLabel(item[a.refChildCol]) }}</span>
                     <span v-else class="editable-cell ref-child" contenteditable @blur="a.saveRefField(item, a.refChildCol, $event.target.textContent)">{{ item[a.refChildCol] || '' }}</span>
                     <template v-slot:append>
+                      <v-icon v-if="a.isTranslatableRefTable()" size="x-small" style="opacity:0.35" title="Label set in Languages → Lists">mdi-translate</v-icon>
                       <v-icon v-if="a.isLockedRefRow(item)" size="x-small" style="opacity:0.4" title="Used by a schema filter">mdi-lock-outline</v-icon>
-                      <template v-else>
-                        <v-icon v-if="a.isTranslatableRefTable()" size="x-small" style="opacity:0.35" title="Label set in Languages → Lists">mdi-translate</v-icon>
-                        <v-btn :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn>
-                      </template>
+                      <v-btn v-else :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn>
                     </template>
                   </v-list-item>
                   <v-list-item>
@@ -455,7 +451,7 @@
                       <span v-if="a.isReadonlyRefCell(item, col)" class="editable-cell" style="opacity:0.7">{{ a.refValueLabel(item[col]) }}</span>
                       <span v-else class="editable-cell" contenteditable @blur="a.saveRefField(item, col, $event.target.textContent)">{{ item[col] || '' }}</span>
                     </td>
-                    <td><v-icon v-if="a.isLockedRefRow(item)" size="x-small" style="opacity:0.4" title="Used by a schema filter">mdi-lock-outline</v-icon><template v-else><v-icon v-if="a.isTranslatableRefTable()" size="x-small" style="opacity:0.35" title="Label set in Languages → Lists">mdi-translate</v-icon><v-btn :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn></template></td>
+                    <td><v-icon v-if="a.isTranslatableRefTable()" size="x-small" style="opacity:0.35" title="Label set in Languages → Lists">mdi-translate</v-icon><v-icon v-if="a.isLockedRefRow(item)" size="x-small" style="opacity:0.4" title="Used by a schema filter">mdi-lock-outline</v-icon><v-btn v-else :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn></td>
                   </tr>
                 </tbody>
                 </template>
