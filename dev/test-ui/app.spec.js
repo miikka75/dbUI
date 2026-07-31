@@ -4473,10 +4473,10 @@ test.describe('list-item delete/rename cascade into table data', () => {
       window.backend.putRow = (t, row, part) => { puts.push(row.id + ':' + part); };
       app.tableMap = Object.assign({}, app.tableMap, { tasks: 'tasks', crew_rotation: 'crew_rotation' });
       app.listsCache = { status: ['open', 'done'], crew: ['A', 'B'] };
-      app.dataCache['tasks'] = [ { id: 't1', status: 'open' } ];
-      app.dataCache['tasks__archive'] = [ { id: 't3', status: 'open' } ];
+      app.dataCache['tasks'] = [ { id: 't1', status: 'done' } ];
+      app.dataCache['tasks__archive'] = [ { id: 't3', status: 'done' } ];
       app.dataCache['crew_rotation'] = [ { id: 'c1', people: ['A', 'B'] } ];
-      app.updateListItem2('status', 0, 'in_progress'); // rename open -> in_progress
+      app.updateListItem2('status', 1, 'closed');      // rename done -> closed ('open'/'in_progress' are filter-pinned, so non-renamable)
       app.updateListItem2('crew', 0, 'Alice');         // rename A -> Alice
       await new Promise(res => setTimeout(res, 50));
       return {
@@ -4486,9 +4486,9 @@ test.describe('list-item delete/rename cascade into table data', () => {
         puts: puts.sort()
       };
     });
-    expect(r.statusList).toEqual(['in_progress', 'done']);
-    expect(r.t1).toBe('in_progress');                 // rename propagated to active row
-    expect(r.t3).toBe('in_progress');                 // and to archive row
+    expect(r.statusList).toEqual(['open', 'closed']);
+    expect(r.t1).toBe('closed');                      // rename propagated to active row
+    expect(r.t3).toBe('closed');                      // and to archive row
     expect(r.c1).toEqual(['Alice', 'B']);             // multiselect element renamed in place
     expect(r.puts).toEqual(['c1:active', 't1:active', 't3:archive']);
   });

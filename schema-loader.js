@@ -7,7 +7,7 @@ var defaultSchema = {"tables":{},"views":[]};
 // Active schema — initially from defaultSchema, overwritten from Drive on boot
 var SCHEMA = defaultSchema.tables;
 var _viewsNav = Array.isArray(defaultSchema.views) ? defaultSchema.views : [];var VIEWS = {};
-function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp)) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
+function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp || v.board)) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
 // (Legacy `pages` map / {page:} nav and `text` entries are removed features with no load-time
 //  handling; a legacy schema must be hand-upgraded to markdown doc-views. See SCHEMA.md.)
 _flattenViews(_viewsNav);
@@ -57,6 +57,9 @@ function forEachFilterListValue(cb) {
     for (var col in filter) {
       if (col[0] === '$') continue;
       var ln = Columns.colIsList(SCHEMA, col);   // memoized any-table scan; was hand-rolled in 4 places
+      if (!ln && Columns.colIsRef(SCHEMA, col)) {                          // a ref filter column (e.g. a 2-D board
+        for (var rt in SCHEMA) { var rf = Columns.columnRef(SCHEMA, rt, col); if (rf && rf.table) { ln = rf.table; break; } }
+      }                                                                    // lane): pin under its lookup TABLE name
       if (!ln) continue;
       var vals = Array.isArray(filter[col]) ? filter[col] : [filter[col]];
       vals.forEach(function(val) { if (typeof val === 'string' && !isFilterToken(val)) cb(ln, val); });
@@ -199,6 +202,19 @@ function validateSchema() {
         for (var rc in rcols) { var rd = rcols[rc]; if (rd && typeof rd === 'object' && rd.type === 'ref' && rd.table === rvp.events) { hasLink = true; break; } }
         if (!hasLink) errors.push('rsvp "' + v + '": responses table "' + rvp.responses + '" needs a `ref` column pointing at the events table "' + rvp.events + '" (it is the response↔event link — replaces linkColumn/eventKey)');
       }
+    }
+    // Board (kanban) view: exactly one writable source + a select lane column (drag writes that column).
+    if (view.board) {
+      var bd = view.board;
+      if (!bd.lane) errors.push('board "' + v + '" needs a `lane` column');
+      if (!view.sources || view.sources.length !== 1) errors.push('board "' + v + '" needs exactly one source table (drag writes go to one table)');
+      else {
+        var bt = view.sources[0], bcols = (SCHEMA[bt] && SCHEMA[bt].columns) || {};
+        var ld = bcols[bd.lane], lt = (typeof ld === 'string') ? ld : (ld && ld.type);
+        if (bd.lane && !ld) errors.push('board "' + v + '" lane "' + bd.lane + '" not found in "' + bt + '"');
+        else if (bd.lane && lt !== 'select' && lt !== 'ref') errors.push('board "' + v + '" lane "' + bd.lane + '" in "' + bt + '" must be a select or ref column');
+      }
+      (bd.laneGroups || []).forEach(function(g) { if (!g || !Array.isArray(g.lanes)) errors.push('board "' + v + '" laneGroups entries need a `lanes` array'); });
     }
   }
   // Check list references

@@ -210,6 +210,11 @@ function createLocalBackend(dbPath) {
       if (tab) {
         const cols = columns.map(c => c === 'id' ? qid(c) + ' TEXT PRIMARY KEY' : qid(c) + ' TEXT').join(', ');
         db.exec('CREATE TABLE IF NOT EXISTS ' + qid(actualTable) + ' (' + cols + ')');
+        // A partition table (e.g. tilat__active) is created lazily and initSchema only ALTERs the base/
+        // declared-partition tables — so a column added to the schema afterwards (e.g. a reorderable
+        // table's `position`) never reaches it. Add any missing columns here so writes don't silently drop them.
+        const have = db.pragma('table_info(' + qid(actualTable) + ')').map(r => r.name);
+        for (const c of columns) if (!have.includes(c)) db.exec('ALTER TABLE ' + qid(actualTable) + ' ADD COLUMN ' + qid(c) + ' TEXT');
       }
       // MERGE semantics (parity with storage-fs Object.assign, Firestore {merge:true}, and the CRDT
       // engine's per-field LWW): a partial rowData must not blank the columns it omits. INSERT OR

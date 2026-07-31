@@ -8,7 +8,7 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 - **Six backends**: Google Sheets (Apps Script), OAuth REST API, Browser + CRDT Sync (Google Drive), Browser + CRDT Sync (Local Server), Firebase (Firestore), Dev Server (SQLite)
 - **Unified CRDT**: one offline-first engine; Drive and local server differ only in the transport
 - **i18n**: multi-language with auto-generated translation keys from schema
-- **Views**: flat union, join, and aggregate views, plus **rotationView** (generated rotating roster), **calendar** (month/week/list), **pivot** (cross-tab grid), and **rsvp** (self-service signup sheet); columns can embed named views/inline tables
+- **Views**: flat union, join, and aggregate views, plus **rotationView** (generated rotating roster), **calendar** (month/week/list), **pivot** (cross-tab grid), **rsvp** (self-service signup sheet), and **board** (kanban — group a table's rows into lanes by a `select` column; drag a card between lanes to write that column); columns can embed named views/inline tables
 - **Rotating rosters**: `multiselect` columns hold a group of people; rotation tables cycle a group per occurrence (tied to another table's rows) or per calendar interval (`daily/weekly/monthly/yearly` or `<n><unit>` like `3w`), with the anchor stored as editable data
   - **Occurrence rotations & archiving**: an occurrence rotation assigns each row a roster slot by its rank among the occurrence rows (e.g. ushers cycling through meetings). The rank counts both **active and archived** occurrences, so **archiving** a past occurrence leaves every remaining assignment anchored to its date. **Deleting** an occurrence, however, removes it from the count entirely, so later occurrences shift up a slot. Archive occurrences that happened; reserve delete for genuine mistakes.
 - **Self-service RSVP**: an `rsvp` view is a read-write signup sheet where each member toggles their own attendance; backed by the `owner` column type (auto-stamped current-user email, read-only) + per-row Firestore rules, so a participant writes only their own row without a table grant
@@ -323,7 +323,7 @@ dev/                           ← Local development (dev-server-only files live
 
 The complete schema reference is maintained in **[`dev/SCHEMA.md`](dev/SCHEMA.md)** — the single
 source of truth. It covers: `icon`/title, `theme` (brand palette), tables (column types incl.
-`multiselect`, `owner` & properties), views (data, document, rotationView, calendar, pivot & rsvp),
+`multiselect`, `owner` & properties), views (data, document, rotationView, calendar, pivot, rsvp & board),
 embeds (inline / named-view / `filterBy`), filters (`$or`/`$and`/`matchList`), aggregate views
 (`groupBy`/`collect`/`collectWith`), computed columns (incl. rotation columns — occurrence/calendar),
 markdown documents and their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens, `nav` (layout, groups,
@@ -341,8 +341,8 @@ markdown documents and their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens
 
 > `nav` is **required**; `views` are flat (hierarchy lives in `nav`). Each view is one **kind**, chosen
 > by which field it carries: a **data view** (`sources`/`columns`), a **document** (`markdown`), a
-> **rotationView** (`rotation`), a **calendar** (`calendar`), a **pivot** (`pivot`), or an **rsvp**
-> (`rsvp`).
+> **rotationView** (`rotation`), a **calendar** (`calendar`), a **pivot** (`pivot`), an **rsvp**
+> (`rsvp`), or a **board** (`board`).
 
 ---
 

@@ -169,7 +169,7 @@ function createVueApp() {
       syncing: false,
       snackbar: false,
       snackText: '',
-      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false },
+      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false },
       appConfig: null,
       saveTimers: {},
       pendingDelete: null,
@@ -231,12 +231,13 @@ function createVueApp() {
       bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
       isDataView: function() {
         var v = VIEWS[this.currentTable];
-        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp)) && (v || SCHEMA[this.currentTable]);
+        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp || v.board)) && (v || SCHEMA[this.currentTable]);
       },
       isRotationView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rotation); },
       isCalendarView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.calendar); },
       isPivotView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.pivot); },
       isRsvpView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rsvp); },
+      isBoardView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.board); },
       // Curated palette tokens exposed in the admin theme editor (Vuetify color names + friendly labels).
       themeTokens: function() {
         return [
@@ -256,6 +257,7 @@ function createVueApp() {
         if (this.isRotationView) return 'rotation';
         if (this.isPivotView) return 'pivot';
         if (this.isRsvpView) return 'rsvp';
+        if (this.isBoardView) return 'board';
         if (this.currentPage) return 'page';
         if (this.isDataView) return 'data';
         return null;
@@ -540,8 +542,9 @@ function createVueApp() {
          'msg.load_failed', 'msg.request_failed', 'msg.approve_failed', 'msg.import_complete',
          'msg.group_added', 'msg.item_added', 'msg.translation_saved', 'msg.language_added', 'msg.language_renamed', 'msg.language_exists',
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
-         'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error',
+         'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
          'pivot.total', 'pivot.empty',
+         'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.edit', 'board.archive', 'board.delete', 'board.confirm_delete',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
@@ -555,7 +558,7 @@ function createVueApp() {
          'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
          'list.link_user', 'list.unlink_user',
-         'lang.app', 'lang.schema'].sort();
+         'lang.app', 'lang.schema', 'lang.lists'].sort();
       },
       schemaTranslationKeys: function() {
         var keys = [];
@@ -568,17 +571,27 @@ function createVueApp() {
             if (c !== 'id' && c !== 'created_at' && c !== 'updated_at') keys.push('field.' + c);
           }
         }
-        // List value keys -- only lists referenced by schema columns
-        var referencedLists = {};
-        for (var tbl2 in SCHEMA) {
-          var cols2 = SCHEMA[tbl2].columns || {};
-          for (var c2 in cols2) { var d = cols2[c2]; if (d && typeof d === 'object' && d.list) referencedLists[d.list] = true; }
-        }
+        // List-value translation keys come from two places:
+        //  (1) filter/conditional-pinned values (lockedListValues) — always translatable; schema logic keys on
+        //      them, so their labels must be stable/localizable regardless of opt-in.
+        //  (2) lists explicitly opted in via top-level `schema.translatableLists: [name,...]` — expose ALL of
+        //      each named list's current values. This is how a controlled vocabulary (status/organisation/…)
+        //      is made fully translatable while open-data lists (member names, etc.) are left out. See SCHEMA.md.
         var lists = this.listsCache || {};
         var lockedVals = this.lockedListValues;
         for (var ln in lockedVals) {
           for (var lv in lockedVals[ln]) { keys.push('list.' + ln + '.' + lv); }
         }
+        var dc = this.dataCache || {};
+        (schema.translatableLists || []).forEach(function(name) {
+          if (lists[name]) { lists[name].forEach(function(val) { keys.push('list.' + name + '.' + val); }); return; }
+          // A lookup/ref TABLE name is also accepted: expose the distinct values across its non-system columns
+          // so a 2-D ref lane (its group + value dimensions) is fully translatable via the same list.<name>.<value> keys.
+          if (SCHEMA[name]) {
+            var sys = { id: 1, created_at: 1, updated_at: 1 }, seenv = {};
+            (dc[name] || []).forEach(function(r) { for (var c in r) { if (sys[c]) continue; var v = r[c]; if (v && !seenv[v]) { seenv[v] = 1; keys.push('list.' + name + '.' + v); } } });
+          }
+        });
         var views = schema.views || {};
         function addViewKeys(arr) {
           (arr || []).forEach(function(v) {
@@ -589,6 +602,9 @@ function createVueApp() {
                 (v.rotation.slots || []).forEach(function(a) { keys.push('field.' + a); });
                 (v.rotation.columns || []).forEach(function(c) { keys.push('field.' + colName(c)); });
               }
+              if (v.board && v.board.lane) keys.push('field.' + v.board.lane);       // board: lane header comes from the lane column
+              if (v.board) (v.board.laneGroups || []).forEach(function(g) { if (g && g.label) keys.push('board.group.' + g.label); });  // board: phase-header labels are translatable
+
               if (v.pivot) {                                                         // pivot: axis headers come from row/column, not v.columns
                 if (v.pivot.row) keys.push('field.' + v.pivot.row);
                 if (v.pivot.column) keys.push('field.' + v.pivot.column);
@@ -619,6 +635,12 @@ function createVueApp() {
         var seen = {};
         return keys.filter(function(k) { if (seen[k]) return false; seen[k] = true; return true; }).sort();
       },
+      // The Languages editor splits schema keys into two collapsible sections so the `list.<list>.<value>`
+      // value keys (e.g. status/calling-state labels) don't get buried among the field/view/tab keys:
+      // "Schema" shows everything except list values, "Lists" shows only them. Both derive from
+      // schemaTranslationKeys, which stays the full set used to seed a new language (translationKeys).
+      schemaTranslationKeysNonList: function() { return this.schemaTranslationKeys.filter(function(k) { return k.indexOf('list.') !== 0; }); },
+      listTranslationKeys: function() { return this.schemaTranslationKeys.filter(function(k) { return k.indexOf('list.') === 0; }); },
       translationKeys: function() {
         var seen = {};
         return this.staticTranslationKeys.concat(this.schemaTranslationKeys).filter(function(k) { if (seen[k]) return false; seen[k] = true; return true; });
@@ -638,11 +660,23 @@ function createVueApp() {
       },
       refTableCols: function() {
         if (!this.currentRefTable) return [];
-        return getColumns(this.currentRefTable).filter(function(c) { return c !== 'id' && c !== 'created_at' && c !== 'updated_at'; });
+        var cols = (SCHEMA[this.currentRefTable] && SCHEMA[this.currentRefTable].columns) || {};
+        // Exclude hidden columns (e.g. a reorderable table's `position`) so they don't show as editable cells
+        // OR count toward isHierarchicalRef's 2-column test.
+        return getColumns(this.currentRefTable).filter(function(c) {
+          if (c === 'id' || c === 'created_at' || c === 'updated_at') return false;
+          var d = cols[c]; return !(d && typeof d === 'object' && d.hidden);
+        });
       },
+      // A ref/lookup table opted into `reorderable` orders its rows by a `position` column — the same
+      // convention as a reorderable data table — so the lookup editor's arrows and the board's ref-lane order
+      // are stable across edits (instead of drifting with SQLite insertion order).
+      refReorderable: function() { return !!(this.currentRefTable && SCHEMA[this.currentRefTable] && SCHEMA[this.currentRefTable].reorderable); },
       refTableData: function() {
         if (!this.currentRefTable) return [];
-        return this.dataCache[this.currentRefTable] || [];
+        var rows = this.dataCache[this.currentRefTable] || [];
+        if (this.refReorderable) rows = rows.slice().sort(function(a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0); });
+        return rows;
       },
       isHierarchicalRef: function() {
         return this.refTableCols.length === 2;
@@ -931,7 +965,7 @@ function createVueApp() {
         this.sortCol = cfg.defaultSort || null;
         this.sortAsc = true;
         if (this.isCalendarView || this.isPivotView || this.isRsvpView) { this.loadTableData(); }
-        else if (this.isDataView || this.isRotationView) { this.periodOffset = 0; this.loadTableData(); }
+        else if (this.isDataView || this.isRotationView || this.isBoardView) { this.periodOffset = 0; this.loadTableData(); }
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
       // --- Calendar helpers (used by the calendar view + calendar embeds) ---
@@ -972,6 +1006,17 @@ function createVueApp() {
         prefill[s.dateColumn] = date;                   // the point: prefill the clicked day
         this._createBlankRow(s.table, { prefill: prefill });
         this.selectTab(s.table);
+        this.notify(this.t('msg.row_added'));
+      },
+      // Board: add a blank card pre-stamped with a lane value (like addRow, but prefilling board.lane so
+      // the card lands in the clicked lane). Pushes into currentData so the board re-renders immediately.
+      boardAddInLane: function(name, laneKey) {
+        var v = VIEWS[name]; if (!v || !v.board || !this.canMutateRows) return;
+        var primary = v.sources[0], prefill = {}; prefill[v.board.lane] = laneKey;
+        var primaryRow = this._createBlankRow(primary, { tab: this.viewingArchive ? 'archive' : 'active', prefill: prefill });
+        var viewRow = Object.assign({}, primaryRow);
+        if (v.mode === 'union') viewRow._source = primary;
+        this.currentData.push(viewRow);
         this.notify(this.t('msg.row_added'));
       },
       calRotationSources: function(name) { return Calendar.rotationSources(VIEWS, name); },
@@ -1550,9 +1595,13 @@ function createVueApp() {
         if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x); }).filter(Boolean).join(', '); }
         if (!val) return '';
         var out = val;
-        var listName = this.listNameForCol(col);
-        if (listName) {
-          var key = 'list.' + listName + '.' + val;
+        // Translation namespace: a list column uses its list name; a `ref` column uses its lookup TABLE name,
+        // so ref-backed values (e.g. a board's 2-D ref lane and its group dimension) localize through the same
+        // `list.<ns>.<value>` keys as list values do. Either way it falls back to the raw value.
+        var ns = this.listNameForCol(col);
+        if (!ns && this.colIsRef(col)) { var rf = this.colRef(col); ns = rf && rf.table; }
+        if (ns) {
+          var key = 'list.' + ns + '.' + val;
           var translated = this.t(key);
           out = translated !== key ? translated : val;
         }
@@ -1571,6 +1620,37 @@ function createVueApp() {
         var lv = this.lockedListValues;
         return !!(lv[listName] && lv[listName][val]);
       },
+      // A ref/lookup row is "locked" when any of its cell values is a filter-pinned value for that table
+      // (lockedListValues keys ref tables by name too — see forEachFilterListValue). Filter-referenced lookup
+      // rows must not be renamed/deleted or the filter keying on them silently breaks; the ref editor honors
+      // this the same way the Lists editor does for list values.
+      isLockedRefRow: function(item) {
+        var t = this.currentRefTable, lv = t && this.lockedListValues[t];
+        if (!lv || !item) return false;
+        return this.refTableCols.some(function(c) { return !!lv[item[c]]; });
+      },
+      refParentLocked: function(parent) {
+        var self = this;
+        return (this.refGroupedData[parent] || []).some(function(it) { return self.isLockedRefRow(it); });
+      },
+      // Translated label for a lookup value, keyed by its table's namespace (list.<table>.<value>) — the same
+      // key the board/grid resolve through. The ref editor shows this for locked (filter-pinned) rows so their
+      // link to `list.<table>.<value>` translations is visible, mirroring how the Lists editor labels values.
+      refValueLabel: function(val) { var t = this.currentRefTable; return t ? this.tOr('list.' + t + '.' + val, val) : val; },
+      // A lookup opted into `translatableLists` is a translatable controlled vocabulary: its values ARE the
+      // `list.<table>.<value>` translation keys, so an EXISTING value can't be renamed in the ref editor (that
+      // would orphan its translation + every row storing it) — labels are set in Languages → Lists. A blank
+      // new cell stays editable so you can type its initial key; filter-pinned rows are always read-only.
+      isTranslatableRefTable: function() { return (((this.schemaData && this.schemaData.translatableLists) || []).indexOf(this.currentRefTable) >= 0); },
+      // A lookup value is READ-ONLY only when a schema filter/conditional pins it (renaming would break that
+      // filter) — being merely translatable no longer locks it, so existing values stay renamable. A locked
+      // value shows its translated label; everything else is editable (raw). The translate icon is a separate,
+      // purely informational badge (see the editor templates).
+      isLockedRefValue: function(val) { var lv = this.lockedListValues[this.currentRefTable]; return !!(lv && val != null && lv[val]); },
+      isReadonlyRefCell: function(item, col) { return this.isLockedRefValue(item && item[col]); },
+      // Whether a plain list is opted into `translatableLists` (its values have list.<list>.<value> labels).
+      // Used only to show the translate badge in the Lists editor — values stay editable unless filter-pinned.
+      isTranslatableList: function(name) { return (((this.schemaData && this.schemaData.translatableLists) || []).indexOf(name) >= 0); },
       colAllowNew: function(col) { return Columns.colAllowNew(SCHEMA, col); },
       colIsSorted: function(col) { return Columns.colIsSorted(SCHEMA, col); },
       addToListOnBlur: function(item, col) {
@@ -1593,6 +1673,9 @@ function createVueApp() {
       },
 
       colIsRef: function(col) { return Columns.colIsRef(SCHEMA, col); },
+      // The `ref` config for a column, found across whichever table declares it (columns aren't view-scoped).
+      // Shared by displayValue's ref-translation namespace and the board's 2-D ref lane grouping.
+      colRef: function(col) { for (var t in SCHEMA) { var r = getColumnRef(t, col); if (r) return r; } return null; },
       colIsMirrorForTable: function(col) {
         var table = this.currentTable;
         if (VIEWS[table]) return false;
@@ -1691,6 +1774,7 @@ function createVueApp() {
       renameRefParent: function(oldParent, newParent) {
         newParent = (newParent || '').trim();
         if (newParent === oldParent) return;
+        if (this.isLockedRefValue(oldParent)) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot rename')); return; }  // a filter-pinned group value can't be renamed
         var self = this;
         var table = self.currentRefTable;
         var parentCol = self.refParentCol;
@@ -1701,9 +1785,11 @@ function createVueApp() {
             backend.putRow(self.tableMap[table], row, 'active');
           }
         });
+        self.migrateListTranslation(table, oldParent, newParent);   // carry the group's own label
         self.notify(self.t('msg.renamed'));
       },
       deleteRefParent: function(parent) {
+        if (this.refParentLocked(parent)) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot delete')); return; }
         var key = 'refp:' + parent;
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
         var self = this;
@@ -1740,12 +1826,47 @@ function createVueApp() {
           if (cells.length) cells[cells.length - 1].focus();
         });
       },
+      // --- Reorder a reorderable lookup (arrows in the ref editor). Mirrors moveListItem/moveRowPosition:
+      // renumber the affected rows' `position` so the lookup editor AND the board's ref-lane order follow it.
+      _refGroupRows: function(parentVal) { var pc = this.refParentCol; return this.refTableData.filter(function(r) { return r[pc] === parentVal; }); },
+      // Move a child value up/down WITHIN its group (swap position with the adjacent same-group sibling).
+      moveRefChild: function(item, dir) {
+        if (!this.refReorderable) return;
+        var self = this, table = this.currentRefTable, group = this._refGroupRows(item[this.refParentCol]);
+        var i = group.findIndex(function(r) { return r.id === item.id; }), j = i + dir;
+        if (i < 0 || j < 0 || j >= group.length) return;
+        var b = group[j], pa = item.position, pb = b.position, now = new Date().toISOString();
+        item.position = pb; b.position = pa; item.updated_at = b.updated_at = now;
+        backend.putRow(self.tableMap[table], item, 'active');
+        backend.putRow(self.tableMap[table], b, 'active');
+      },
+      // Move a whole group up/down (swap it with the adjacent group), then renumber every row sequentially.
+      moveRefGroup: function(parentVal, dir) {
+        if (!this.refReorderable) return;
+        var self = this, table = this.currentRefTable, grouped = this.refGroupedData;
+        var order = Object.keys(grouped), i = order.indexOf(parentVal), j = i + dir;
+        if (i < 0 || j < 0 || j >= order.length) return;
+        var t = order[i]; order[i] = order[j]; order[j] = t;
+        var pos = 1, now = new Date().toISOString();
+        order.forEach(function(g) { (grouped[g] || []).forEach(function(r) {
+          if (Number(r.position) !== pos) { r.position = String(pos); r.updated_at = now; backend.putRow(self.tableMap[table], r, 'active'); }
+          pos++;
+        }); });
+      },
+      refChildAtEdge: function(item, dir) { var g = this._refGroupRows(item[this.refParentCol]), i = g.findIndex(function(r) { return r.id === item.id; }); return dir < 0 ? i <= 0 : i >= g.length - 1; },
+      refGroupAtEdge: function(parentVal, dir) { var o = Object.keys(this.refGroupedData), i = o.indexOf(parentVal); return dir < 0 ? i <= 0 : i >= o.length - 1; },
       saveRefField: function(item, col, value) {
         if (item[col] === value) return;
+        var lv = this.lockedListValues[this.currentRefTable];
+        if (lv && lv[item[col]]) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot rename')); return; }  // renaming a pinned value breaks the filter
+        var oldVal = item[col];
         item[col] = value;
         item.updated_at = new Date().toISOString();
         var self = this;
         var refTable = self.currentRefTable;
+        // Rename side-effects (mirror list renames): carry the value across every table that refs it + its
+        // translations, so an existing lookup value can be renamed without orphaning rows or its label.
+        if (oldVal && value) { self.propagateRefChange(refTable, oldVal, value); self.migrateListTranslation(refTable, oldVal, value); }
         var timerKey = refTable + ':' + item.id;
         clearTimeout(self.saveTimers[timerKey]);
         self.saveTimers[timerKey] = setTimeout(function() {
@@ -1760,6 +1881,7 @@ function createVueApp() {
         self.focusLastEditable('.v-main .v-card .v-table tbody tr:last-child .editable-cell');
       },
       deleteRefRow: function(item) {
+        if (this.isLockedRefRow(item)) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot delete')); return; }
         var key = 'ref:' + item.id;
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
         var table = this.currentRefTable;
@@ -1878,11 +2000,27 @@ function createVueApp() {
       },
       updateListItem2: function(name, i, value) {
         var oldVal = this.listsCache[name][i];
+        if (this.isLockedValue(name, oldVal)) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot rename')); return; }  // filter-pinned value can't be renamed
         this.listsCache[name][i] = value;
         this.saveLists();
         // Rename propagation: text is stored in rows, so rewrite the old value -> new value across
         // every table column backed by this list (both partitions). Skip no-ops / blank endpoints.
-        if (oldVal && value && oldVal !== value) { this.propagateListChange(name, oldVal, value); this.migrateListUserLink(name, oldVal, value); }
+        if (oldVal && value && oldVal !== value) { this.propagateListChange(name, oldVal, value); this.migrateListUserLink(name, oldVal, value); this.migrateListTranslation(name, oldVal, value); }
+      },
+      // Carry a value's translations when it's renamed: list.<ns>.<old> -> list.<ns>.<new> across every
+      // language (and clear the old key), so a rename in the Lists/ref editor doesn't orphan its label — the
+      // i18n counterpart of propagateListChange/propagateRefChange. `ns` is the list name or ref-table name.
+      migrateListTranslation: function(ns, oldVal, newVal) {
+        if (!ns || !oldVal || !newVal || oldVal === newVal) return;
+        var self = this, oldKey = 'list.' + ns + '.' + oldVal, newKey = 'list.' + ns + '.' + newVal;
+        if (self.strings && self.strings[oldKey] != null) { self.strings[newKey] = self.strings[oldKey]; delete self.strings[oldKey]; }  // active language, immediate
+        (self.languages || []).forEach(function(lang) {
+          Promise.resolve(backend.getTranslations(self.folderId, lang.code)).then(function(t) {
+            if (!t || t[oldKey] == null || t[oldKey] === '') return;
+            var updates = {}; updates[newKey] = t[oldKey]; updates[oldKey] = '';   // '' clears the old key (getTranslations drops empty)
+            backend.updateTranslations(self.folderId, lang.code, updates);
+          }).catch(function() {});
+        });
       },
       // Carry a user-linked-list link when its value is renamed (or drop it on delete): the link is keyed by
       // the value string, so a rename would otherwise orphan it (like the row rewrite above). No-op unless a
@@ -1943,9 +2081,25 @@ function createVueApp() {
       // persists only the rows that actually changed. Returns a promise of the changed-row count.
       propagateListChange: function(listName, oldVal, newVal) {
         if (!oldVal || oldVal === newVal) return Promise.resolve(0);
-        var self = this, del = !newVal;
         var targets = this.listBackedColumns(listName);
-        if (!targets.length) return Promise.resolve(0);
+        return targets.length ? this._rewriteValueInColumns(targets, oldVal, newVal) : Promise.resolve(0);
+      },
+      // Columns that `ref` a given lookup table (the ref counterpart of listBackedColumns). Lets a renamed or
+      // removed lookup value be scrubbed out of every table that stores it, the same way list renames propagate.
+      refBackedColumns: function(refTable) {
+        var out = [];
+        for (var t in SCHEMA) { var cols = (SCHEMA[t] && SCHEMA[t].columns) || {}; for (var c in cols) { var r = getColumnRef(t, c); if (r && r.table === refTable) out.push({ table: t, col: c, multi: false, altList: null }); } }
+        return out;
+      },
+      propagateRefChange: function(refTable, oldVal, newVal) {
+        if (!oldVal || oldVal === newVal) return Promise.resolve(0);
+        var targets = this.refBackedColumns(refTable);
+        return targets.length ? this._rewriteValueInColumns(targets, oldVal, newVal) : Promise.resolve(0);
+      },
+      // Shared engine: rewrite oldVal -> newVal (or delete when newVal is falsy) across the given target
+      // columns in both partitions, persisting each changed row. Returns the total count changed.
+      _rewriteValueInColumns: function(targets, oldVal, newVal) {
+        var self = this, del = !newVal;
         var byTable = {};
         targets.forEach(function(t) { (byTable[t.table] = byTable[t.table] || []).push(t); });
         var jobs = [];
@@ -3400,7 +3554,7 @@ function createVueApp() {
   // Top-level view-kind registry: kind -> the component that renders that whole view. Every kind is
   // componentized; the top-level dispatch is a single <component :is="viewComponent"> lookup in ui.html.
   window.VIEW_KINDS = {
-    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', page: 'page-view', data: 'data-view',
+    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', page: 'page-view', data: 'data-view',
     languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view'   // system screens
   };
 
@@ -3901,6 +4055,170 @@ function createVueApp() {
       + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></div>'
       + '</v-card>'
       + '<div v-if="!events.length" class="pa-2" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</div>'
+      + '</div>'
+      + '</component>'
+  });
+
+  // Board (kanban) view — single-source data view rendered as lanes grouped by `board.lane`. Reads the
+  // root's currentData (the same editable rows the data grid uses), so a drag/menu-move writes straight
+  // back through saveField. Cards carry native HTML5 drag (desktop) + a move-menu fallback (touch/a11y).
+  // name/embed parameterized like the other kind components; the embed path preloads its own rows.
+  app.component('board-view', {
+    props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    data: function() { return { dragId: null, overLane: null, collapsed: {}, menuOf: {}, editing: {} }; },
+    computed: {
+      a: function() { return appInstance; },
+      viewName: function() { return this.name || appInstance.currentTable; },
+      view: function() { return VIEWS[this.viewName] || {}; },
+      cfg: function() { return this.view.board || {}; },
+      laneCol: function() { return this.cfg.lane; },
+      canEdit: function() { return !this.embed && appInstance.canMutateRows; },
+      hasArchive: function() { return appInstance.hasArchive; },
+      rows: function() { return this.embed ? (appInstance.boardRowsFor ? appInstance.boardRowsFor(this.viewName) : []) : (appInstance.currentData || []); },
+      // A 2-D REF lane: when `board.lane` is a `ref` to a 2-column lookup, the lookup's two dimensions are the
+      // group (parent col) and the lane value (child col). Lane order, grouping, and labels then come from that
+      // lookup DATA — no schema laneGroups. Null for a plain select lane, so the list/laneGroups paths run.
+      refLane: function() {
+        if (!appInstance.colIsRef(this.laneCol)) return null;
+        var rf = appInstance.colRef(this.laneCol);
+        if (!rf || !rf.table) return null;
+        var scols = (SCHEMA[rf.table] && SCHEMA[rf.table].columns) || {};
+        var cols = getColumns(rf.table).filter(function(c) { if (c === 'id' || c === 'created_at' || c === 'updated_at') return false; var d = scols[c]; return !(d && typeof d === 'object' && d.hidden); });
+        if (cols.length < 2) return null;                       // 1-col ref -> no group dimension; treat as flat
+        var childCol = rf.valueCol || cols[cols.length - 1];
+        var parentCol = cols[0] === childCol ? cols[1] : cols[0];
+        var rows = appInstance.dataCache[rf.table] || [];
+        if (SCHEMA[rf.table] && SCHEMA[rf.table].reorderable) rows = rows.slice().sort(function(a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0); });  // stable, reorderable order
+        return { table: rf.table, parentCol: parentCol, childCol: childCol, rows: rows };
+      },
+      // Lane keys in intended order: a ref lane -> the lookup's child values in row order; else explicit
+      // `lanes`, else the select column's list (authored order).
+      laneOrder: function() {
+        var rl = this.refLane;
+        if (rl) { var cc = rl.childCol; return rl.rows.map(function(r) { return r[cc]; }).filter(function(v) { return v != null && v !== ''; }); }
+        if (this.cfg.lanes) return this.cfg.lanes.slice();
+        return (appInstance.getListOptions(this.laneCol) || []).map(function(o) { return o.value; });
+      },
+      board: function() {
+        return Board.build(this.rows, { lane: this.laneCol, laneOrder: this.laneOrder, hidden: this.cfg.hiddenLanes || [] });
+      },
+      // Phase grouping. [{ label, key, lanes:[laneObj,...] }]. Source of the grouping:
+      //   ref lane   -> the lookup's parent dimension (group order = first appearance across lookup rows);
+      //   laneGroups -> schema-declared phases (legacy/select lanes);
+      //   neither    -> one unlabeled group (flat board).
+      groups: function() {
+        var laneMap = {}; this.board.lanes.forEach(function(l) { laneMap[l.key] = l; });
+        var rl = this.refLane;
+        if (rl) {
+          var order = [], byParent = {}, used = {};
+          rl.rows.forEach(function(r) {
+            var lane = laneMap[r[rl.childCol]];
+            if (!lane) return;
+            var p = r[rl.parentCol] == null ? '' : String(r[rl.parentCol]);
+            if (!(p in byParent)) { byParent[p] = []; order.push(p); }
+            byParent[p].push(lane); used[lane.key] = 1;
+          });
+          var out = order.map(function(p, gi) { var ls = byParent[p]; return { label: p, key: 'g' + gi, count: ls.reduce(function(s, l) { return s + l.count; }, 0), lanes: ls }; });
+          var rest = this.board.lanes.filter(function(l) { return !used[l.key]; });   // data values not in the lookup (e.g. blank)
+          if (rest.length) out.push({ label: null, key: '__rest__', count: rest.reduce(function(s, l) { return s + l.count; }, 0), lanes: rest });
+          return out;
+        }
+        var cfgGroups = this.cfg.laneGroups;
+        if (!cfgGroups || !cfgGroups.length) return [{ label: null, key: '__all__', lanes: this.board.lanes }];
+        var used2 = {};
+        var out2 = cfgGroups.map(function(g, gi) {
+          var lanes = (g.lanes || []).map(function(k) { used2[k] = 1; return laneMap[k]; }).filter(Boolean);
+          return { label: g.label, key: 'g' + gi, count: lanes.reduce(function(s, l) { return s + l.count; }, 0), lanes: lanes };
+        });
+        var rest2 = this.board.lanes.filter(function(l) { return !used2[l.key]; });
+        if (rest2.length) out2.push({ label: null, key: '__rest__', count: rest2.reduce(function(s, l) { return s + l.count; }, 0), lanes: rest2 });
+        return out2;
+      }
+    },
+    created: function() {
+      var self = this;
+      (this.cfg.laneGroups || []).forEach(function(g, gi) { if (g.collapsed) self.collapsed['g' + gi] = true; });
+    },
+    methods: Object.assign({}, ROOT_PROXY, {
+      laneLabel: function(k) { return k === '' ? appInstance.tOr('board.unassigned', '—') : appInstance.displayValue(this.laneCol, k); },
+      // Phase-header label. A ref lane's group is the lookup's parent VALUE, localized through the lookup
+      // table's namespace (list.<table>.<value>); a laneGroups phase uses its authored board.group.<label>.
+      groupLabel: function(g) {
+        if (g.label == null || g.label === '') return '';
+        if (this.refLane) return appInstance.tOr('list.' + this.refLane.table + '.' + g.label, g.label);
+        return appInstance.tOr('board.group.' + g.label, g.label);
+      },
+      titleCol: function() { return colName(this.cfg.title || (this.view.columns || [])[0] || ''); },
+      cardTitle: function(item) { var c = this.titleCol(); return c ? appInstance.displayValue(c, item[c]) : (item.id || ''); },
+      cardCols: function() {
+        var self = this, title = this.titleCol();
+        return (this.view.columns || []).map(colName).filter(function(c) { return typeof c === 'string' && c && c !== title && c !== self.laneCol; });
+      },
+      cardColor: function(item) { return this.cfg.color ? Calendar.hashColor(String(item[this.cfg.color] || '')) : null; },
+      toggleGroup: function(key) { this.collapsed[key] = !this.collapsed[key]; },
+      // --- drag/drop (desktop) ---
+      onDragStart: function(item) { if (this.canEdit) this.dragId = item.id; },
+      onDragEnd: function() { this.dragId = null; this.overLane = null; },
+      onDrop: function(laneKey) {
+        if (!this.canEdit || this.dragId == null) return;
+        var id = this.dragId, self = this;
+        var item = (appInstance.currentData || []).find(function(r) { return r.id === id; });
+        if (item && String(item[self.laneCol] || '') !== laneKey) appInstance.saveField(item, self.laneCol, laneKey, self.viewName);
+        this.onDragEnd();
+      },
+      // --- mobile / a11y fallback: move via menu ---
+      moveTo: function(item, laneKey) { if (this.canEdit && String(item[this.laneCol] || '') !== laneKey) appInstance.saveField(item, this.laneCol, laneKey, this.viewName); },
+      laneMenuItems: function() { var self = this; return this.laneOrder.map(function(k) { return { value: k, title: self.laneLabel(k) }; }); },
+      addInLane: function(laneKey) { appInstance.boardAddInLane(this.viewName, laneKey); },
+      // Per-card row controls (mirror the grid's row-append buttons): archive files the card to the archive
+      // partition (reversible via restore); delete uses the app's armed-confirm (keyed row:<id>) — first click
+      // arms for 3s and swaps the icon, the second removes the row.
+      archItem: function(item) { if (this.canEdit) appInstance.archiveRow(item); },
+      isDelArmed: function(item) { return appInstance.isArmed('row:' + item.id); },
+      delItem: function(item) { if (this.canEdit) appInstance.deleteRow(item); },
+      // Inline card editing: a pencil flips one card into edit mode, where every field except the lane
+      // column (that stays a drag/move-menu action, so it honors archiveOn) becomes a shared `data-cell`
+      // editor writing back through saveField — the same widgets and persistence as the table grid.
+      editCols: function() { var self = this; return (this.view.columns || []).map(colName).filter(function(c) { return typeof c === 'string' && c && c !== self.laneCol; }); },
+      toggleEdit: function(item) { this.editing[item.id] = !this.editing[item.id]; }
+    }),
+    template: ''
+      + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="board-view">'
+      + '<div v-for="g in groups" :key="g.key">'
+      + '  <div v-if="g.label" class="px-3 pt-3 pb-1" style="cursor:pointer;display:flex;align-items:center;gap:6px" @click="toggleGroup(g.key)" :data-testid="\'board-group-\'+g.key">'
+      + '    <v-icon size="x-small">{{ collapsed[g.key] ? \'mdi-chevron-right\' : \'mdi-chevron-down\' }}</v-icon>'
+      + '    <span style="font-size:0.72rem;font-weight:700;text-transform:uppercase;opacity:0.6">{{ groupLabel(g) }}</span>'
+      + '    <span style="font-size:0.72rem;opacity:0.4">{{ g.count }}</span></div>'
+      + '  <div v-show="!collapsed[g.key]" class="board-lane-row">'
+      + '    <div v-for="lane in g.lanes" :key="lane.key" class="board-lane"'
+      + '         :style="overLane===lane.key ? \'outline:2px dashed rgb(var(--v-theme-primary))\' : \'\'"'
+      + '         @dragover.prevent="canEdit && (overLane=lane.key)" @dragleave="overLane=null" @drop="onDrop(lane.key)" :data-testid="\'board-lane-\'+lane.key">'
+      + '      <div style="display:flex;align-items:center;gap:6px;font-weight:600;font-size:0.85rem;padding:2px 4px 6px">'
+      + '        <span>{{ laneLabel(lane.key) }}</span><span style="opacity:0.5;font-weight:400">{{ lane.count }}</span>'
+      + '        <template v-if="canEdit && cfg.addInLane"><v-spacer></v-spacer>'
+      + '        <v-btn icon="mdi-plus" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.add_in_lane\',\'Add\')" @click="addInLane(lane.key)" :data-testid="\'board-add-\'+lane.key"></v-btn></template>'
+      + '      </div>'
+      + '      <div v-for="item in lane.items" :key="item.id"'
+      + '           :draggable="canEdit && !editing[item.id] ? \'true\' : \'false\'" @dragstart="onDragStart(item)" @dragend="onDragEnd"'
+      + '           :style="\'background:rgb(var(--v-theme-surface));border:1px solid rgb(var(--v-theme-outline),0.15);border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:\'+(canEdit && !editing[item.id] ?\'grab\':\'default\')+(cardColor(item)?\';border-left:3px solid \'+cardColor(item):\'\')"'
+      + '           :data-testid="\'board-card-\'+item.id">'
+      + '        <div style="display:flex;align-items:flex-start;gap:4px">'
+      + '          <div style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
+      + '          <v-btn v-if="canEdit" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="tOr(\'board.edit\',\'Edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
+      + '          <v-btn v-if="canEdit && hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.archive\',\'Archive\')" @click="archItem(item)" :data-testid="\'board-arch-\'+item.id"></v-btn>'
+      + '          <v-btn v-if="canEdit" :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" density="comfortable" :color="isDelArmed(item) ? \'error\' : undefined" :title="isDelArmed(item) ? tOr(\'board.confirm_delete\',\'Confirm delete?\') : tOr(\'board.delete\',\'Delete\')" @click="delItem(item)" :data-testid="\'board-del-\'+item.id"></v-btn>'
+      + '          <v-menu v-if="canEdit" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
+      + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.move_to\',\'Move to\')" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
+      + '            <v-list density="compact"><v-list-subheader>{{ tOr(\'board.move_to\',\'Move to\') }}</v-list-subheader>'
+      + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value)" :active="String(item[laneCol]||\'\')===opt.value">'
+      + '              <v-list-item-title>{{ opt.title }}</v-list-item-title></v-list-item></v-list></v-menu>'
+      + '        </div>'
+      + '        <template v-if="editing[item.id]"><div v-for="col in editCols()" :key="col" style="display:flex;align-items:center;gap:6px;margin-top:4px"><span style="font-size:0.72rem;opacity:0.6;min-width:82px;flex-shrink:0">{{ t(\'field.\'+col) || col }}</span><data-cell :item="item" :col="col" :owner="viewName"></data-cell></div></template>'
+      + '        <template v-else><div v-for="col in cardCols()" :key="col" style="font-size:0.78rem;opacity:0.85"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, item[col]) }}</div></template>'
+      + '      </div>'
+      + '      <div v-if="!lane.items.length" style="opacity:0.4;font-size:0.78rem;padding:4px">—</div>'
+      + '    </div>'
+      + '  </div>'
       + '</div>'
       + '</component>'
   });

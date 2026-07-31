@@ -5,6 +5,7 @@
     "dark": { "primary": "#4db6ac", "secondary": "#26a69a" }
   },
   "defaultLanguage": "en",
+  "translatableLists": ["ticket_stages"],
   "listSources": {
     "members": "users"
   },
@@ -189,6 +190,26 @@
         { "name": "practice", "type": "ref", "table": "practices", "valueCol": "id" },
         { "name": "response", "type": "select", "list": "rsvp_status" },
         { "name": "note", "type": "text" }
+      ]
+    },
+    "tickets": {
+      "archivable": true,
+      "columns": [
+        { "name": "title", "type": "text" },
+        { "name": "status", "type": "select", "list": "ticket_status" },
+        { "name": "assignee", "type": "select", "list": "assigned_to", "allowNew": true },
+        { "name": "stage", "type": "ref", "table": "ticket_stages", "valueCol": "stage" },
+        { "name": "created_at", "type": "text", "hidden": true },
+        { "name": "updated_at", "type": "text", "hidden": true }
+      ]
+    },
+    "ticket_stages": {
+      "isLookup": true,
+      "columns": [
+        { "name": "phase", "type": "text" },
+        { "name": "stage", "type": "text" },
+        { "name": "created_at", "type": "text", "hidden": true },
+        { "name": "updated_at", "type": "text", "hidden": true }
       ]
     }
   },
@@ -452,6 +473,47 @@
       ]
     },
     {
+      "name": "tickets_board",
+      "sources": [
+        "tickets"
+      ],
+      "mode": "join",
+      "defaultSort": "title",
+      "icon": "mdi-view-column-outline",
+      "board": {
+        "lane": "status",
+        "lanes": [
+          "open",
+          "in_progress",
+          "done"
+        ],
+        "color": "assignee",
+        "addInLane": true
+      },
+      "columns": [
+        "title",
+        "assignee"
+      ]
+    },
+    {
+      "name": "ticket_pipeline",
+      "sources": [
+        "tickets"
+      ],
+      "mode": "join",
+      "defaultSort": "title",
+      "icon": "mdi-source-branch",
+      "board": {
+        "lane": "stage",
+        "color": "assignee",
+        "addInLane": true
+      },
+      "columns": [
+        "title",
+        "assignee"
+      ]
+    },
+    {
       "name": "crewrota",
       "rotation": {
         "columns": [
@@ -656,6 +718,14 @@
       {
         "icon": "mdi-clipboard-list-outline",
         "view": "active_work"
+      },
+      {
+        "icon": "mdi-view-column-outline",
+        "view": "tickets_board"
+      },
+      {
+        "icon": "mdi-source-branch",
+        "view": "ticket_pipeline"
       },
       {
         "view": "all_items",

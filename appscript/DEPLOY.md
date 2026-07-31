@@ -30,6 +30,7 @@ In the Apps Script editor, create these files:
 | HTML: `print` | `print.js` ⚠ wrap |
 | HTML: `pivot` | `pivot.js` ⚠ wrap |
 | HTML: `rsvp` | `rsvp.js` ⚠ wrap |
+| HTML: `board` | `board.js` ⚠ wrap |
 | HTML: `schema-loader` | `schema-loader.js` ⚠ wrap |
 | HTML: `app-core` | `app-core.js` ⚠ wrap |
 

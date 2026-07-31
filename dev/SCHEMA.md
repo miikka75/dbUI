@@ -862,6 +862,104 @@ The events live in one table; responses in another that has an **`owner` column*
 - With owner-scoped reads a non-organizer receives only their own response from the backend, so the
   rendered tally/roster reflects exactly what that user is permitted to see.
 
+## board (seventh view kind)
+
+A view with a `board` field renders a **kanban board**: a single table's rows grouped into vertical
+**lanes** by one `select` column, with each row shown as a card. Dragging a card between lanes (or using
+the card's move-menu) **writes that column** back to the row. It is the one-dimensional, *writable*
+cousin of the pivot — where a pivot aggregates to read-only numbers, a board keeps whole editable rows.
+Engine: `board.js`. A board is essentially a single-source **data view** plus a `lane` column, so it
+reuses the data-view load path (filters, `compute`, `defaultSort` all apply) and the standard
+`saveField` write.
+
+```json
+{ "name": "tickets_board",
+  "sources": ["tickets"],            // REQUIRED — exactly ONE table (the drag-write target must be unambiguous)
+  "mode": "join",
+  "defaultSort": "title",            // card order within each lane
+  "board": {
+    "lane": "status",                // REQUIRED — a `select` column on the source table; its value places the card
+    "lanes": ["open", "in_progress", "done"], // OPTIONAL — explicit lane order; keys here render even when empty.
+                                     //            Omit -> order from the column's list, else first-seen in the data.
+    "hiddenLanes": ["cancelled"],   // OPTIONAL — lane keys to drop from the board
+    "laneGroups": [                  // OPTIONAL — fold lanes under collapsible phase headers (tames many lanes)
+      { "label": "Active", "lanes": ["open", "in_progress"] },
+      { "label": "Closed", "lanes": ["done"], "collapsed": true }
+    ],
+    "title": "title",                // OPTIONAL — card heading column (default: first entry of `columns`)
+    "color": "assignee",             // OPTIONAL — column whose value tints each card's left border (hashed)
+    "addInLane": true                // OPTIONAL — per-lane "+" adds a row pre-stamped with that lane value
+  },
+  "columns": ["title", "assignee"]   // card-face columns (the lane/title columns are shown separately)
+}
+```
+
+- **One source, one lane column.** The source must be **exactly one** table and `lane` must be a `select`
+  **or a `ref`** column on it (load-time validation enforces both) — a drag writes one column on one table,
+  so a union/join or an unsupported lane type would be ambiguous. This mirrors why a mirror-**detail** table
+  (one whose columns `syncFrom` a master) yields a **read-only** board: such rows are mutated only via their
+  master, so the board offers no drag/add (same `hasMaster` gate as the data view's add button). Board a
+  **standalone** table (like a status/workflow table).
+- **Lane order & labels.** `lanes` fixes the order and materializes empty lanes; otherwise lanes come from
+  the `select` column's list (authored order), else first-seen in the data. Lane headers and card values
+  are translated through the same `list.<list>.<value>` / `field.<col>` keys the grid uses — no board-only
+  i18n. The blank/unassigned lane uses the `board.unassigned` label (default `—`).
+- **2-D ref lane (grouping from data, no `laneGroups`).** If `lane` is a **`ref` to a 2-column lookup**, the
+  lookup's two dimensions *are* the board: the **parent** column is the phase/group, the **child** column
+  (`valueCol`) is the lane value (what the row stores). Lane order, group order, and grouping all come from
+  the lookup **rows** — so adding / renaming / reordering states or phases is plain data entry in that
+  lookup, with nothing duplicated in the schema (`laneGroups`/`hiddenLanes` aren't needed). A ref lane's
+  values **and** its group labels localize through `list.<lookupTable>.<value>` keys — the same namespace as
+  list values, so they appear in the Languages editor's **Lists** section when the lookup table is named in
+  `translatableLists`. A plain 1-D `select` lane stays flat (or grouped via `laneGroups`); a 2-column ref
+  lane is grouped. Drag/move writes the child value exactly like a select lane, so filters and existing data
+  keep matching.
+- **Writes.** Dropping a card (desktop HTML5 drag) or picking a lane from the card's **move-menu**
+  (touch / keyboard / a11y fallback) calls the same debounced `saveField` as inline grid editing, so it
+  flows to every backend and updates the cache immediately. Gated on write access (`canMutateRows`); a
+  read-only user gets a static board.
+- **Many lanes → `laneGroups`.** For long lifecycles (e.g. a calling-status column with a dozen states),
+  group lanes into named phases; a group marked `"collapsed": true` starts folded. Lanes not named in any
+  group fall into a trailing implicit group. Each phase `label` is translatable through a
+  `board.group.<label>` key (seeded into the translation editor), falling back to the literal `label`.
+- **Card row controls.** Each card carries the same per-row actions as the grid, gated on write access: a
+  **pencil** flips the card into edit mode (every field except the lane becomes the shared `data-cell`
+  editor — same widgets and `saveField` persistence as the grid — with dragging disabled while editing); an
+  **archive** button (when the source table is `archivable`) files the card to the archive partition
+  (reversible via restore); and a **delete** button uses the grid's arm-then-confirm (first click swaps the
+  icon, the second removes the row). The lane itself is changed by drag or the card's **move-menu** (⋮).
+- **Integration.** Because a board only writes an existing column, moving cards feeds any other view that
+  filters on that column (e.g. a program/agenda view filtering `status: "approved"`), with no extra wiring.
+
+## Translatable lists (`translatableLists`)
+
+List **values** (the options behind a `select`/`multiselect` column) are translated through
+`list.<list>.<value>` keys — the same keys the grid, board lanes, and pivot axes resolve through. Most
+lists are open data you would never localize (member names, song titles), so the Languages editor does
+**not** expose every list by default. It surfaces list-value keys from two sources:
+
+1. **Filter/conditional-pinned values** — any value a schema `filter`/`when` references (e.g. a program
+   view filtering `tila: "vastaanotettu"`). These are always translatable (and locked from rename/deletion),
+   because schema logic keys on them; you get exactly those values, not the whole list. This holds whether
+   the filtered column is a `select` (pinned under its list) **or a `ref`** (pinned under its lookup table),
+   so a 2-D ref lane's filter-referenced values can't be renamed or removed from the lookup — the ref/lookup
+   editor shows them locked, the same way the Lists editor locks list values.
+2. **Opt-in lists** — a top-level **`"translatableLists": ["tilat", "organisaatio", …]`** array. Every
+   current value of each named list becomes a translation key. Use this for controlled vocabularies you
+   want fully localized (status lifecycles, organisations, roles) while leaving open/data lists out. An
+   entry may also name a **lookup/ref table** (e.g. a board's 2-D ref-lane table): its distinct cell values
+   across all non-system columns are exposed the same way, so both dimensions of a ref lane are translatable.
+
+```json
+{ "defaultLanguage": "Suomi",
+  "translatableLists": ["tilat", "organisaatio", "tehtävät", "piispakunta"],
+  "tables": { … } }
+```
+
+In the **Languages** tab these keys are grouped under their own collapsible **Lists** section (separate
+from **App** and **Schema**) so they're easy to find. A value with no translation falls back to the raw
+value, so opting a list in is non-breaking.
+
 ## Self-service tables (Firebase)
 
 Any table that declares an **`owner` column** is a **self-service** table: a registered member may
