@@ -660,11 +660,23 @@ function createVueApp() {
       },
       refTableCols: function() {
         if (!this.currentRefTable) return [];
-        return getColumns(this.currentRefTable).filter(function(c) { return c !== 'id' && c !== 'created_at' && c !== 'updated_at'; });
+        var cols = (SCHEMA[this.currentRefTable] && SCHEMA[this.currentRefTable].columns) || {};
+        // Exclude hidden columns (e.g. a reorderable table's `position`) so they don't show as editable cells
+        // OR count toward isHierarchicalRef's 2-column test.
+        return getColumns(this.currentRefTable).filter(function(c) {
+          if (c === 'id' || c === 'created_at' || c === 'updated_at') return false;
+          var d = cols[c]; return !(d && typeof d === 'object' && d.hidden);
+        });
       },
+      // A ref/lookup table opted into `reorderable` orders its rows by a `position` column — the same
+      // convention as a reorderable data table — so the lookup editor's arrows and the board's ref-lane order
+      // are stable across edits (instead of drifting with SQLite insertion order).
+      refReorderable: function() { return !!(this.currentRefTable && SCHEMA[this.currentRefTable] && SCHEMA[this.currentRefTable].reorderable); },
       refTableData: function() {
         if (!this.currentRefTable) return [];
-        return this.dataCache[this.currentRefTable] || [];
+        var rows = this.dataCache[this.currentRefTable] || [];
+        if (this.refReorderable) rows = rows.slice().sort(function(a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0); });
+        return rows;
       },
       isHierarchicalRef: function() {
         return this.refTableCols.length === 2;
@@ -1814,6 +1826,35 @@ function createVueApp() {
           if (cells.length) cells[cells.length - 1].focus();
         });
       },
+      // --- Reorder a reorderable lookup (arrows in the ref editor). Mirrors moveListItem/moveRowPosition:
+      // renumber the affected rows' `position` so the lookup editor AND the board's ref-lane order follow it.
+      _refGroupRows: function(parentVal) { var pc = this.refParentCol; return this.refTableData.filter(function(r) { return r[pc] === parentVal; }); },
+      // Move a child value up/down WITHIN its group (swap position with the adjacent same-group sibling).
+      moveRefChild: function(item, dir) {
+        if (!this.refReorderable) return;
+        var self = this, table = this.currentRefTable, group = this._refGroupRows(item[this.refParentCol]);
+        var i = group.findIndex(function(r) { return r.id === item.id; }), j = i + dir;
+        if (i < 0 || j < 0 || j >= group.length) return;
+        var b = group[j], pa = item.position, pb = b.position, now = new Date().toISOString();
+        item.position = pb; b.position = pa; item.updated_at = b.updated_at = now;
+        backend.putRow(self.tableMap[table], item, 'active');
+        backend.putRow(self.tableMap[table], b, 'active');
+      },
+      // Move a whole group up/down (swap it with the adjacent group), then renumber every row sequentially.
+      moveRefGroup: function(parentVal, dir) {
+        if (!this.refReorderable) return;
+        var self = this, table = this.currentRefTable, grouped = this.refGroupedData;
+        var order = Object.keys(grouped), i = order.indexOf(parentVal), j = i + dir;
+        if (i < 0 || j < 0 || j >= order.length) return;
+        var t = order[i]; order[i] = order[j]; order[j] = t;
+        var pos = 1, now = new Date().toISOString();
+        order.forEach(function(g) { (grouped[g] || []).forEach(function(r) {
+          if (Number(r.position) !== pos) { r.position = String(pos); r.updated_at = now; backend.putRow(self.tableMap[table], r, 'active'); }
+          pos++;
+        }); });
+      },
+      refChildAtEdge: function(item, dir) { var g = this._refGroupRows(item[this.refParentCol]), i = g.findIndex(function(r) { return r.id === item.id; }); return dir < 0 ? i <= 0 : i >= g.length - 1; },
+      refGroupAtEdge: function(parentVal, dir) { var o = Object.keys(this.refGroupedData), i = o.indexOf(parentVal); return dir < 0 ? i <= 0 : i >= o.length - 1; },
       saveRefField: function(item, col, value) {
         if (item[col] === value) return;
         var lv = this.lockedListValues[this.currentRefTable];
@@ -4041,11 +4082,14 @@ function createVueApp() {
         if (!appInstance.colIsRef(this.laneCol)) return null;
         var rf = appInstance.colRef(this.laneCol);
         if (!rf || !rf.table) return null;
-        var cols = getColumns(rf.table).filter(function(c) { return c !== 'id' && c !== 'created_at' && c !== 'updated_at'; });
+        var scols = (SCHEMA[rf.table] && SCHEMA[rf.table].columns) || {};
+        var cols = getColumns(rf.table).filter(function(c) { if (c === 'id' || c === 'created_at' || c === 'updated_at') return false; var d = scols[c]; return !(d && typeof d === 'object' && d.hidden); });
         if (cols.length < 2) return null;                       // 1-col ref -> no group dimension; treat as flat
         var childCol = rf.valueCol || cols[cols.length - 1];
         var parentCol = cols[0] === childCol ? cols[1] : cols[0];
-        return { table: rf.table, parentCol: parentCol, childCol: childCol, rows: appInstance.dataCache[rf.table] || [] };
+        var rows = appInstance.dataCache[rf.table] || [];
+        if (SCHEMA[rf.table] && SCHEMA[rf.table].reorderable) rows = rows.slice().sort(function(a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0); });  // stable, reorderable order
+        return { table: rf.table, parentCol: parentCol, childCol: childCol, rows: rows };
       },
       // Lane keys in intended order: a ref lane -> the lookup's child values in row order; else explicit
       // `lanes`, else the select column's list (authored order).
