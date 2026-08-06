@@ -33,8 +33,18 @@ global `window.supabase`), exactly like the Firebase compat SDK — no ES module
 3. **Authentication → URL Configuration → Redirect URLs**: add your site URL, e.g.
    `https://miikka75.github.io/dbUI/` (and `http://localhost:*` for local dev).
 4. **SQL Editor**: paste all of `supabase-schema.sql` and **Run** (idempotent).
-5. **Settings → API**: copy the **Project URL** and **anon public** key — enter them in the app's setup
-   screen (Setup → Supabase). The anon key is public by design; RLS is the security boundary.
+5. **Project Settings → API Keys**: copy the **Project URL** and *one* client key — enter them in the
+   app's setup screen (Setup → Supabase). Either key format works; the app passes the key straight to
+   `createClient` as an opaque string and never parses it:
+   - **Publishable key** (`sb_publishable_…`, under "Publishable and secret API keys") — the current
+     format, and the one to prefer for new projects.
+   - **anon public** key (a long `eyJ…` JWT, under "Legacy anon, service_role API keys") — the older
+     format, still fine.
+
+   Both are public by design; RLS is the security boundary. **Never** use the **Secret key**
+   (`sb_secret_…`) or **service_role** key: this app is pure client-side, so the key ships to every
+   visitor's browser, and those keys bypass RLS entirely — anyone loading the page would get
+   unrestricted read/write over the whole database. They belong only on a trusted server.
 
 First sign-in, while no members exist, acts as **admin** (bootstrap). Import a schema
 (Settings → Import from JSON), then add yourself under **Settings → User Access**. From then on only

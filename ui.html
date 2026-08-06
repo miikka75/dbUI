@@ -68,11 +68,17 @@
               2) Authentication → Providers → Enable <strong>Google</strong> (add a Google OAuth client)<br>
               3) Authentication → URL Configuration → Redirect URLs → add this site's URL<br>
               4) SQL Editor → run the repo's <code>supabase-schema.sql</code><br>
-              5) Settings → API → copy <em>Project URL</em> + <em>anon public</em> key below<br>
-              <span style="opacity:0.6">&nbsp;&nbsp;&nbsp;The anon key is public by design — Row-Level Security is the boundary.</span>
+              5) Project Settings → <strong>API Keys</strong> → copy the <em>Project URL</em> and one key below<br>
+              <span style="opacity:0.6">&nbsp;&nbsp;&nbsp;Use the <strong>Publishable key</strong> (<code>sb_publishable_…</code>, under "Publishable and secret API keys")
+              or the legacy <strong>anon public</strong> key (a long <code>eyJ…</code> JWT, under "Legacy anon, service_role API keys") — either works, this app
+              accepts both formats. They're public by design; Row-Level Security is the boundary.<br>
+              &nbsp;&nbsp;&nbsp;<strong>Never</strong> use the <strong>Secret key</strong> (<code>sb_secret_…</code>) or <strong>service_role</strong> key here —
+              this app runs entirely in the visitor's browser, so a secret key would hand every visitor unrestricted
+              access to the whole database, bypassing Row-Level Security. Secret keys belong only on a trusted server,
+              which this app doesn't have.</span>
             </div>
             <v-text-field v-model="supabaseUrlInput" name="supabase-url" label="Project URL" variant="outlined" density="compact" class="mb-2" placeholder="https://xxxx.supabase.co"></v-text-field>
-            <v-text-field v-model="supabaseKeyInput" name="supabase-anon-key" label="anon public key" variant="outlined" density="compact" class="mb-2" placeholder="eyJhbGciOi..."></v-text-field>
+            <v-text-field v-model="supabaseKeyInput" name="supabase-anon-key" label="Publishable / anon public key" variant="outlined" density="compact" class="mb-2" placeholder="sb_publishable_... or eyJhbGciOi..."></v-text-field>
             <v-btn color="primary" prepend-icon="mdi-content-save" :disabled="!supabaseUrlInput || !supabaseKeyInput" @click="saveSupabaseConfig()">Save &amp; Continue</v-btn>
             <v-btn variant="text" @click="selectSetupMode(''); setupStep = null" class="ml-2">Back</v-btn>
             <div class="mt-3" style="font-size:0.8rem;opacity:0.7">After first sign-in: Settings → Import from JSON to load a schema, then Settings → User Access → add yourself as admin.</div>
