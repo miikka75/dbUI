@@ -1,3 +1,8 @@
+// Resolve a same-origin path against the app's own directory rather than the domain root, so the app
+// works when hosted under a subpath (e.g. a GitHub Pages project site at /<repo>/). Delegates to the
+// appUrl() defined in index.html's boot; the fallback keeps this file loadable on its own.
+function _u(p) { return (typeof window !== 'undefined' && window.appUrl) ? window.appUrl(p) : p; }
+
 // BCP-47 languages offered by the "add language" picker (Languages tab). The `code` doubles as the Intl
 // locale (see calLocale), so every entry is a valid BCP-47 tag; `name` is the endonym (renamable after).
 var BCP47_LANGS = [
@@ -750,7 +755,7 @@ function createVueApp() {
       openCrdtLocalSetup: function() {
         var self = this;
         this.setupStep = 'crdt-local';
-        fetch('/api/serverInfo').then(function(r) { return r.json(); }).then(function(d) { self.serverStorage = d.storage; }).catch(function() {});
+        fetch(_u('/api/serverInfo')).then(function(r) { return r.json(); }).then(function(d) { self.serverStorage = d.storage; }).catch(function() {});
       },
       backToSetup: function() {
         this.setupStep = null;
@@ -2313,7 +2318,7 @@ function createVueApp() {
         localStorage.clear();
         function done() {
           // Clear server-side data if a local server is available, then reload
-          fetch('/api/resetData', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' })
+          fetch(_u('/api/resetData'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' })
             .catch(function() {}).finally(function() { location.reload(); });
         }
         var req = indexedDB.deleteDatabase('dbui');
@@ -2703,7 +2708,7 @@ function createVueApp() {
           localStorage.setItem('firebase_config', JSON.stringify(config));
           localStorage.setItem('app_mode', 'firebase');
           // Try saving server-side for other users
-          fetch('/api/saveConfig', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({filename:'firebase-config.json', data:config}) }).catch(function(){});
+          fetch(_u('/api/saveConfig'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({filename:'firebase-config.json', data:config}) }).catch(function(){});
           location.reload();
         } catch(e) { this.notify(this.t('msg.invalid_json')); }
       },
@@ -2718,7 +2723,7 @@ function createVueApp() {
         localStorage.setItem('app_mode', 'supabase');
         localStorage.setItem('app_folder', 'supabase');
         // Try saving server-side for other users (dev server only; harmless 404 on static hosting).
-        fetch('/api/saveConfig', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({filename:'supabase-config.json', data:{url:url, anonKey:key}}) }).catch(function(){});
+        fetch(_u('/api/saveConfig'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({filename:'supabase-config.json', data:{url:url, anonKey:key}}) }).catch(function(){});
         location.reload();   // reload so index.html loads the SDK + backend for mode=supabase
       },
       exportData: function() {
@@ -2891,7 +2896,7 @@ function createVueApp() {
         else { localStorage.removeItem('app_mode'); location.reload(); return; }
         if (mode === 'firebase' && !this.firestoreRules) {
           var self = this;
-          fetch('/firestore.rules').then(function(r) { return r.ok ? r.text() : ''; }).then(function(t) { self.firestoreRules = t; }).catch(function(){});
+          fetch(_u('/firestore.rules')).then(function(r) { return r.ok ? r.text() : ''; }).then(function(t) { self.firestoreRules = t; }).catch(function(){});
         }
         if (mode === 'sheets' || mode === 'crdt') {
           if (typeof google !== 'undefined' && google.script) { return; }
@@ -3286,7 +3291,7 @@ function createVueApp() {
       // endpoint, so the probe would just log a spurious 404 to the console on every load.
       var appMode = (function() { try { return localStorage.getItem('app_mode'); } catch (e) { return null; } })();
       if (appMode !== 'firebase' && appMode !== 'sheets' && appMode !== 'crdt') {
-        fetch('/api/validateFolder', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' })
+        fetch(_u('/api/validateFolder'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' })
           .then(function(r) { if (r.ok) self.hasLocalServer = true; })
           .catch(function() {});
       }
@@ -4293,7 +4298,7 @@ function init() {
     } else if (savedMode === 'sheets' || savedMode === 'oauth' || savedMode === 'crdt') {
       instance.mode = savedMode; instance.showSetup = true; instance.loading = false;
     } else {
-      fetch('/api/validateFolder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"id":"local"}' })
+      fetch(_u('/api/validateFolder'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"id":"local"}' })
         .then(function(r) {
           if (r.ok) { instance.mode = 'local'; instance.showSetup = true; instance.loading = false; }
           else { instance.showSetup = true; instance.loading = false; }
