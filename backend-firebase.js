@@ -1,5 +1,8 @@
 // backend-firebase.js — Firebase Firestore backend with Google Auth
 // Requires: storage-firestore.js loaded before this
+// _u(): resolve same-origin paths against the app's own directory (see appUrl in index.html) so the
+// app works when hosted under a subpath, e.g. a GitHub Pages project site at /<repo>/.
+function _u(p) { return (typeof window !== 'undefined' && window.appUrl) ? window.appUrl(p) : p; }
 var _db = null;
 var _auth = null;
 var _storage = null;
@@ -305,7 +308,7 @@ function initFirebase() {
   var config;
   try { config = (stored && JSON.parse(stored)) || window.FIREBASE_CONFIG || {}; } catch(e) { config = window.FIREBASE_CONFIG || {}; }
   if (config.apiKey) { _startFirebase(config); return; }
-  fetch('/firebase-config.json').then(function(r) { return r.ok ? r.json() : null; }).then(function(c) {
+  fetch(_u('/firebase-config.json')).then(function(r) { return r.ok ? r.json() : null; }).then(function(c) {
     if (c && c.apiKey) { localStorage.setItem('firebase_config', JSON.stringify(c)); _startFirebase(c); }
     else { appInstance.showSetup = true; appInstance.setupStep = 'firebase'; appInstance.loading = false; }
   }).catch(function() { appInstance.showSetup = true; appInstance.setupStep = 'firebase'; appInstance.loading = false; });

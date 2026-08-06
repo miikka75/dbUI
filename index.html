@@ -61,6 +61,17 @@
     }
     bootMark('loadAppStart');
 
+    // The app is NOT always served from the domain root: a GitHub Pages *project* site lives under
+    // /<repo>/. A root-absolute asset path ('/ui.html') resolves against the domain root there, 404s,
+    // and — because fetch() doesn't throw on 404 — the host's 404 PAGE gets injected as a fragment,
+    // bringing its own <meta> CSP into <head>, which then blocks every later script. One bad path
+    // therefore kills the whole boot. So every same-origin asset resolves through appUrl(), which
+    // rewrites a leading '/' to this document's own directory. Absolute (https://…) CDN URLs are
+    // passed through untouched. Exposed on window so the backends and app-core resolve identically.
+    var APP_BASE = location.pathname.replace(/[^/]*$/, '');
+    function appUrl(p) { return (typeof p === 'string' && p.charAt(0) === '/') ? APP_BASE + p.slice(1) : p; }
+    window.appUrl = appUrl;
+
     async function loadApp() {
       // Shared-link support: persist URL params to localStorage, then read mode.
       // shareLink generates: ?mode=firebase&k=<apiKey>&d=<authDomain>&p=<projectId>
@@ -124,7 +135,7 @@
       else if (mode === 'supabase') { backendFile = '/backend-supabase.js'; }
       else {
         try {
-          var probe = await fetch('/api/validateFolder', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' });
+          var probe = await fetch(appUrl('/api/validateFolder'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' });
           if (probe.ok) { var pj = await probe.json(); if (pj && pj.valid) backendFile = '/backend-local-client.js'; }
         } catch(e) {}
         if (!backendFile) {
@@ -138,10 +149,17 @@
       // script-src 'unsafe-inline': the old execScript() pattern injected every fragment as an
       // inline script, which a meaningful CSP forbids.
       var [styleResp, uiResp] = await Promise.all([
-        fetch('/style.html'),
-        fetch('/ui.html')
+        fetch(appUrl('/style.html')),
+        fetch(appUrl('/ui.html'))
       ]);
       bootMark('fragmentsFetched');
+
+      // fetch() resolves on 404, so WITHOUT this check a miss would inject the host's error page —
+      // including any <meta> CSP it carries — straight into <head>/#app-root. Fail loudly instead.
+      if (!styleResp.ok || !uiResp.ok) {
+        throw new Error('boot fragments missing: style.html ' + styleResp.status + ', ui.html ' + uiResp.status +
+                        ' (resolved against ' + APP_BASE + ')');
+      }
 
       document.head.insertAdjacentHTML('beforeend', await styleResp.text());
       document.getElementById('app-root').innerHTML = await uiResp.text();
@@ -239,7 +257,7 @@
     function loadScript(src, integrity) {
       return new Promise(function(resolve, reject) {
         var s = document.createElement('script');
-        s.src = src; s.onload = resolve; s.onerror = reject;
+        s.src = appUrl(src); s.onload = resolve; s.onerror = reject;
         if (integrity) { s.integrity = integrity; s.crossOrigin = 'anonymous'; }
         document.body.appendChild(s);
       });
@@ -253,10 +271,10 @@
     function loadStyle(href, fallbackHref) {
       return new Promise(function(resolve) {
         var l = document.createElement('link');
-        l.rel = 'stylesheet'; l.href = href;
+        l.rel = 'stylesheet'; l.href = appUrl(href);
         l.onload = resolve;
         l.onerror = function() {
-          if (fallbackHref) { l.onerror = resolve; l.href = fallbackHref; }
+          if (fallbackHref) { l.onerror = resolve; l.href = appUrl(fallbackHref); }
           else resolve();
         };
         document.head.appendChild(l);
@@ -271,7 +289,7 @@
       return Promise.all(srcs.map(function(src) {
         return new Promise(function(resolve, reject) {
           var s = document.createElement('script');
-          s.src = src; s.async = false;
+          s.src = appUrl(src); s.async = false;
           s.onload = resolve; s.onerror = reject;
           document.body.appendChild(s);
         });
