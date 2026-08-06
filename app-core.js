@@ -140,9 +140,11 @@ function createVueApp() {
       periodOffset: 0,          // leaderboard ‹ › navigation: periods back from now (0 = current)
       firestoreRules: '',
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
+      supabaseUrlInput: '',
+      supabaseKeyInput: '',
       oauthClientId: localStorage.getItem('oauth_client_id') || '',
       needsReauth: false,
-      setupStep: (function() { var m = localStorage.getItem('app_mode'); return (m === 'sheets' || m === 'crdt' || m === 'firebase') ? m : null; })(),
+      setupStep: (function() { var m = localStorage.getItem('app_mode'); return (m === 'sheets' || m === 'crdt' || m === 'firebase' || m === 'supabase') ? m : null; })(),
       mode: 'sheets',
       folderId: '',
       tableMap: {},
@@ -403,6 +405,13 @@ function createVueApp() {
             var d = (c.authDomain && c.authDomain !== c.projectId + '.firebaseapp.com') ? '&d=' + encodeURIComponent(c.authDomain) : '';
             return base + '?mode=firebase&k=' + encodeURIComponent(c.apiKey) + d + '&p=' + encodeURIComponent(c.projectId); }
           catch(e) { return base + '?mode=firebase&config=' + btoa(cfg); } // fallback to full encoding
+        }
+        if (mode === 'supabase') {
+          var sc = localStorage.getItem('supabase_config');
+          if (!sc) return base;
+          try { var s = JSON.parse(sc);
+            return base + '?mode=supabase&url=' + encodeURIComponent(s.url) + '&key=' + encodeURIComponent(s.anonKey); }
+          catch (e) { return base; }
         }
         var folder = localStorage.getItem('app_folder');
         var clientId = localStorage.getItem('oauth_client_id');
@@ -2700,6 +2709,17 @@ function createVueApp() {
       },
       saveClientId: function() {
         if (this.oauthClientId) localStorage.setItem('oauth_client_id', this.oauthClientId);
+      },
+      saveSupabaseConfig: function() {
+        var url = (this.supabaseUrlInput || '').trim().replace(/\/+$/, '');
+        var key = (this.supabaseKeyInput || '').trim();
+        if (!url || !key) return;
+        localStorage.setItem('supabase_config', JSON.stringify({ url: url, anonKey: key }));
+        localStorage.setItem('app_mode', 'supabase');
+        localStorage.setItem('app_folder', 'supabase');
+        // Try saving server-side for other users (dev server only; harmless 404 on static hosting).
+        fetch('/api/saveConfig', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({filename:'supabase-config.json', data:{url:url, anonKey:key}}) }).catch(function(){});
+        location.reload();   // reload so index.html loads the SDK + backend for mode=supabase
       },
       exportData: function() {
         var self = this;

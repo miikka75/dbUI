@@ -28,6 +28,10 @@
               <v-icon start>mdi-firebase</v-icon>
               <div><strong>Firebase</strong><br><small style="opacity:0.6">Real-time sync via Firestore with offline support</small></div>
             </v-btn>
+            <v-btn block variant="outlined" class="mb-3 text-left mode-btn" @click="selectSetupMode('supabase')">
+              <v-icon start>mdi-database-outline</v-icon>
+              <div><strong>Supabase</strong><br><small style="opacity:0.6">Postgres + Auth on Supabase, hosted anywhere (e.g. GitHub Pages)</small></div>
+            </v-btn>
             <v-btn block variant="outlined" class="mb-3 text-left mode-btn" @click="selectSetupMode('crdt')">
               <v-icon start>mdi-google-drive</v-icon>
               <div><strong>Browser + CRDT Sync (Google Drive)</strong><br><small style="opacity:0.6">Browser IndexedDB synced to Google Drive in the background</small></div>
@@ -55,6 +59,23 @@
             </p>
             <v-btn color="primary" @click="completeCrdtLocalSetup">Start Browser + CRDT</v-btn>
             <v-btn variant="text" @click="backToSetup" class="ml-2">Back</v-btn>
+          </div>
+          <!-- Step 2: Supabase -->
+          <div v-if="setupStep === 'supabase'">
+            <div class="mb-3 pa-2" style="background:rgb(var(--v-theme-surface-variant),0.3);border-radius:8px;font-size:0.8rem">
+              <strong>Supabase Setup:</strong><br>
+              1) Create a project at <a href="https://supabase.com" target="_blank">supabase.com</a><br>
+              2) Authentication → Providers → Enable <strong>Google</strong> (add a Google OAuth client)<br>
+              3) Authentication → URL Configuration → Redirect URLs → add this site's URL<br>
+              4) SQL Editor → run the repo's <code>supabase-schema.sql</code><br>
+              5) Settings → API → copy <em>Project URL</em> + <em>anon public</em> key below<br>
+              <span style="opacity:0.6">&nbsp;&nbsp;&nbsp;The anon key is public by design — Row-Level Security is the boundary.</span>
+            </div>
+            <v-text-field v-model="supabaseUrlInput" name="supabase-url" label="Project URL" variant="outlined" density="compact" class="mb-2" placeholder="https://xxxx.supabase.co"></v-text-field>
+            <v-text-field v-model="supabaseKeyInput" name="supabase-anon-key" label="anon public key" variant="outlined" density="compact" class="mb-2" placeholder="eyJhbGciOi..."></v-text-field>
+            <v-btn color="primary" prepend-icon="mdi-content-save" :disabled="!supabaseUrlInput || !supabaseKeyInput" @click="saveSupabaseConfig()">Save &amp; Continue</v-btn>
+            <v-btn variant="text" @click="selectSetupMode(''); setupStep = null" class="ml-2">Back</v-btn>
+            <div class="mt-3" style="font-size:0.8rem;opacity:0.7">After first sign-in: Settings → Import from JSON to load a schema, then Settings → User Access → add yourself as admin.</div>
           </div>
           <!-- Step 2: Sheets / CRDT / Firebase (need sign-in) -->
           <div v-if="setupStep === 'sheets' || setupStep === 'crdt' || setupStep === 'firebase'">

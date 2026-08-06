@@ -1,0 +1,50 @@
+# .github/workflows/deploy-pages.yml
+# Deploy the static site to GitHub Pages on every push to main.
+#
+# The app is plain static files (no build step), so this just uploads the repo root as the Pages
+# artifact and publishes it. One-time setup: repo Settings -> Pages -> Build and deployment ->
+# Source: "GitHub Actions".
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Allow the workflow to publish Pages; one concurrent deploy, newest wins.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      # Publish the whole repo root. Excludes below keep secrets / dev-only files out of the public site.
+      - name: Prune non-public files
+        run: |
+          rm -rf .github dev node_modules tests test appscript .git || true
+          rm -f supabase-schema.sql firebase-config.json supabase-config.json .env* firebase.json .firebaserc firestore.indexes.json split-supabase-commits.bat || true
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
