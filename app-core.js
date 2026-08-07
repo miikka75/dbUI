@@ -3,6 +3,16 @@
 // appUrl() defined in index.html's boot; the fallback keeps this file loadable on its own.
 function _u(p) { return (typeof window !== 'undefined' && window.appUrl) ? window.appUrl(p) : p; }
 
+// Columns with nothing to translate: the storage/bookkeeping ones, plus any the schema marks `hidden`.
+// A hidden column is filtered out of visibleCols, the lookup editor and the ref-lane column list, so it
+// never reaches the screen — offering its header or its values for translation only pads the Languages
+// editor with keys that can never be seen (a reorderable table's numeric `position` being the usual case).
+function _untranslatableCol(cols, name) {
+  if (name === 'id' || name === 'created_at' || name === 'updated_at') return true;
+  var def = cols && cols[name];
+  return !!(def && typeof def === 'object' && def.hidden);
+}
+
 // Guard for the /api probes below: skip them on origins where no dev server can exist (see
 // mayHaveLocalServer in index.html), so a static host doesn't log a 405 on every load. Defaults to
 // true if the boot didn't define it, preserving the old always-probe behaviour.
@@ -589,7 +599,8 @@ function createVueApp() {
           keys.push('tab.' + tbl);
           var cols = tables[tbl].columns || {};
           for (var c in cols) {
-            if (c !== 'id' && c !== 'created_at' && c !== 'updated_at') keys.push('field.' + c);
+            if (_untranslatableCol(cols, c)) continue;
+            keys.push('field.' + c);
           }
         }
         // List-value translation keys come from two places:
@@ -609,8 +620,8 @@ function createVueApp() {
           // A lookup/ref TABLE name is also accepted: expose the distinct values across its non-system columns
           // so a 2-D ref lane (its group + value dimensions) is fully translatable via the same list.<name>.<value> keys.
           if (SCHEMA[name]) {
-            var sys = { id: 1, created_at: 1, updated_at: 1 }, seenv = {};
-            (dc[name] || []).forEach(function(r) { for (var c in r) { if (sys[c]) continue; var v = r[c]; if (v && !seenv[v]) { seenv[v] = 1; keys.push('list.' + name + '.' + v); } } });
+            var rcols = SCHEMA[name].columns || {}, seenv = {};
+            (dc[name] || []).forEach(function(r) { for (var c in r) { if (_untranslatableCol(rcols, c)) continue; var v = r[c]; if (v && !seenv[v]) { seenv[v] = 1; keys.push('list.' + name + '.' + v); } } });
           }
         });
         var views = schema.views || {};
