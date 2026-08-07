@@ -115,7 +115,27 @@
       "tab.lists": "Listat",
       "tab.lookup": "Listat",
       "tab.ref_data": "Tietokannat",
-      "tab.settings": "Asetukset"
+      "tab.settings": "Asetukset",
+      "cal.week": "Viikko",
+      "profile.picture": "Kuva",
+      "cal.today": "Tänään",
+      "cal.undated": "Ei päivämäärää",
+      "cal.month": "Kuukausi",
+      "cal.items": "Tapahtumat",
+      "list.unlink_user": "Poista liitos",
+      "cal.add_on_day": "Lisää päivälle",
+      "list.link_user": "Liitä käyttäjä",
+      "cal.list": "Lista",
+      "cal.no_events": "Ei tapahtumia",
+      "rsvp.date": "Päivä",
+      "rsvp.title": "Otsikko",
+      "rsvp.your_response": "Vastauksesi",
+      "rsvp.responses": "Vastaukset",
+      "rsvp.who": "Kuka",
+      "rsvp.none": "Ei vastauksia",
+      "msg.locked": "Lukittu",
+      "period.weeks_ago": "viikkoa sitten",
+      "period.current": "Nykyinen"
     }
   }
 }
