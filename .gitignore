@@ -39,3 +39,11 @@ functions/node_modules/
 
 # Local browser-preview launch config (per-machine tooling)
 .claude/launch.json
+
+# Exported/importable database bundles. These carry real rows and list values — member names,
+# contact details, meeting content — so they must never land in git (this repo is public, and a
+# commit is permanent). The genericised, data-free schemas under examples/ ARE tracked.
+drive-sync-export-*.json
+english-schema-import.json
+english-translations-import.json
+firebase-*-import.json
