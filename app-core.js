@@ -666,7 +666,17 @@ function createVueApp() {
         return this.staticTranslationKeys.concat(this.schemaTranslationKeys).filter(function(k) { if (seen[k]) return false; seen[k] = true; return true; });
       },
       EN: function() { return this.strings; },
-      defaultLanguage: function() { return (this.schemaData && this.schemaData.defaultLanguage) || (this.languages.length ? this.languages[0].code : null); },
+      // The configured default is only honoured if that language still EXISTS. A schema can outlive the
+      // language it names — rename a language's code (or import a schema whose default names a code this
+      // database doesn't have) and the old value strands the whole UI on raw keys, because the base
+      // strings load from a translations doc that isn't there. Falling back to a real language keeps the
+      // app readable; the stale name is a schema edit to make, not a reason to show nothing.
+      defaultLanguage: function() {
+        var codes = (this.languages || []).map(function(l) { return l.code; });
+        var configured = this.schemaData && this.schemaData.defaultLanguage;
+        if (configured && codes.indexOf(configured) >= 0) return configured;
+        return codes.length ? codes[0] : null;
+      },
       refTables: function() {
         var all = Object.keys(SCHEMA).filter(function(k) { return SCHEMA[k].isLookup; });
         var allowed = this.userAllowedTables;
@@ -867,9 +877,12 @@ function createVueApp() {
             var defCode = self.defaultLanguage;
             return backend.getTranslations(self.folderId, defCode).then(function(baseTrans) {
               self.strings = baseTrans || {};
-              var saved = localStorage.getItem('app_lang') || self.languages[0].code;
+              // A remembered code can outlive its language too (a rename, or a different database on the
+              // same origin), so validate it against the list rather than trusting localStorage.
+              var saved = localStorage.getItem('app_lang');
+              if (!self.languages.some(function(l) { return l.code === saved; })) saved = defCode;
               self.currentLang = saved;
-              if (saved !== defCode && self.languages.length > 1) {
+              if (saved !== defCode) {
                 return backend.getTranslations(self.folderId, saved).then(function(trans) {
                   if (trans) self.strings = Object.assign({}, self.strings, trans);
                 });
@@ -900,9 +913,12 @@ function createVueApp() {
           var defCode = self.defaultLanguage;
           return backend.getTranslations(self.folderId, defCode).then(function(baseTrans) {
             self.strings = baseTrans || {};
-            var saved = localStorage.getItem('app_lang') || self.languages[0].code;
+            // Same validation as the bootData path above: a stale app_lang must not select a language
+            // that no longer exists.
+            var saved = localStorage.getItem('app_lang');
+            if (!self.languages.some(function(l) { return l.code === saved; })) saved = defCode;
             self.currentLang = saved;
-            if (saved !== defCode && self.languages.length > 1) {
+            if (saved !== defCode) {
               return backend.getTranslations(self.folderId, saved).then(function(trans) {
                 if (trans) self.strings = Object.assign({}, self.strings, trans);
               });

@@ -998,6 +998,37 @@ test.describe('Import round-trip', () => {
   });
 });
 
+test.describe('Stale defaultLanguage', () => {
+  // A schema can outlive the language it names: change a language's code (Suomi -> fi) and
+  // schema.defaultLanguage still says the old one. The base strings then load from a translations doc
+  // that doesn't exist and the ENTIRE UI falls back to raw keys, even though a perfectly good language
+  // is present. defaultLanguage now only honours a configured code that actually exists.
+  const SCH = { defaultLanguage: 'Suomi', tables: { docs: { columns: [{ name: 'title', type: 'text' }] } }, views: [{ table: 'docs' }], nav: { items: [{ table: 'docs' }] } };
+
+  test('falls back to an existing language when the configured default is gone', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    // Only 'fi' exists — the schema's 'Suomi' names nothing.
+    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'fi', name: 'Suomi', keys: [] } });
+    await page.request.post('/api/updateTranslations', { data: { folderId: 'local', langCode: 'fi', updates: { 'tab.docs': 'Asiakirjat' } } });
+    // A remembered code that no longer exists must not select a missing language either.
+    await page.addInitScript(() => {
+      localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local');
+      localStorage.setItem('app_lang', 'Suomi');
+    });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+
+    expect(await page.evaluate(() => appInstance.defaultLanguage)).toBe('fi');
+    expect(await page.evaluate(() => appInstance.currentLang)).toBe('fi');
+    // The translated string is used, not the raw key — the actual user-visible symptom.
+    expect(await page.evaluate(() => appInstance.strings['tab.docs'])).toBe('Asiakirjat');
+    await expect(page.locator('.v-navigation-drawer .v-list-item', { hasText: 'Asiakirjat' }).first()).toBeVisible();
+  });
+});
+
 test.describe('Translation keys for view columns', () => {
   test('aggregate/computed view columns get field.* keys (plus normal columns)', async ({ page }) => {
     await ensureAppReady(page); // default schema includes the aggregate "attendance" subview
