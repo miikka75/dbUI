@@ -979,8 +979,14 @@ test.describe('Import round-trip', () => {
     await page.setInputFiles('input[type=file][accept=".json"]', { name: 'import.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bundle)) });
 
     // The dialog stays up on a partial import (rather than auto-reloading) so the failure can be read.
-    await expect(page.locator('.v-card-title:has-text("Import finished with errors")')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('text=simulated write failure')).toBeVisible();
+    // The dialog is wordless by design, so assert on structure + the backend's own message, never on
+    // UI prose: the error list appearing and a Reload button offered IS the "finished with errors" state.
+    await expect(page.locator('[data-testid="import-errors"]')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="import-reload"]')).toBeVisible();
+    await expect(page.locator('[data-testid="import-errors"]')).toContainText('simulated write failure');
+    // The failing row is identified by neutral data (index/total · table), not a translated label.
+    await expect(page.locator('[data-testid="import-errors"]')).toContainText('1/2');
+    await expect(page.locator('[data-testid="import-errors"]')).toContainText('docs');
 
     // The point of the fix: everything AFTER the failed row still ran.
     const fi = await (await page.request.post('/api/getTranslations', { data: { folderId: 'local', langCode: 'fi' } })).json();

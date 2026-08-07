@@ -148,7 +148,7 @@ function createVueApp() {
       listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
       listUserLinks: {},        // admin only: raw { listName: { value: email } } links, for the Lookup editor
       periodOffset: 0,          // leaderboard ‹ › navigation: periods back from now (0 = current)
-      importProgress: null,     // {done,total,phase,errors,finished} while an import runs; null otherwise
+      importProgress: null,     // {done,total,icon,detail,errors,finished} while an import runs; null otherwise
       firestoreRules: '',
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
       supabaseUrlInput: '',
@@ -2822,7 +2822,7 @@ function createVueApp() {
             // That is how an import could land schema + rows and then no translations at all, with no
             // error shown. (The old try/catch only ever caught synchronous errors while BUILDING the chain.)
             var prog = {
-              active: true, done: 0, phase: 'Starting…', errors: [], finished: false,
+              active: true, done: 0, icon: 'mdi-timer-sand', detail: '', errors: [], finished: false,
               total: (imported.schema ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
                    + langCodes.length + pages.length + (imported.config ? 1 : 0) + 1
             };
@@ -2831,11 +2831,14 @@ function createVueApp() {
 
             // One unit of work: record a failure and CARRY ON, so one bad row can't cost you the
             // translations, pages and config that come after it.
-            function step(phase, fn) {
+            // An import runs BEFORE any translations are loaded — and is often the very thing installing
+            // them — so it can't describe itself in words. Each step carries an mdi icon plus `detail`
+            // that reads the same in any language: counts, table names, language codes.
+            function step(icon, detail, fn) {
               return function() {
-                prog.phase = phase;
+                prog.icon = icon; prog.detail = detail;
                 return Promise.resolve().then(fn).catch(function(err) {
-                  prog.errors.push(phase + ' — ' + ((err && err.message) || String(err)));
+                  prog.errors.push({ icon: icon, detail: detail, message: (err && err.message) || String(err) });
                 }).then(function() { prog.done++; });
               };
             }
@@ -2843,7 +2846,7 @@ function createVueApp() {
             var chain = Promise.resolve();
             // Import schema if present (initializes empty databases)
             if (imported.schema && backend.saveSchema) {
-              chain = chain.then(step('Schema', function() {
+              chain = chain.then(step('mdi-table-cog', '', function() {
                 // Rebuild VIEWS from new schema so lockedListValues works
                 if (Array.isArray(imported.schema.views)) {
                   _viewsNav = imported.schema.views;
@@ -2859,7 +2862,7 @@ function createVueApp() {
               }));
             }
             rowJobs.forEach(function(job, i) {
-              chain = chain.then(step('Rows ' + (i + 1) + '/' + rowJobs.length + ' · ' + job.table, function() {
+              chain = chain.then(step('mdi-table-row', (i + 1) + '/' + rowJobs.length + ' · ' + job.table, function() {
                 var target = self.tableMap[job.table] || job.table;
                 // Delete first to force CRDT change detection on re-import
                 return backend.deleteRow(target, job.row.id, job.tab).catch(function() {})
@@ -2867,13 +2870,13 @@ function createVueApp() {
               }));
             });
             if (imported.lists) {
-              chain = chain.then(step('Lists', function() {
+              chain = chain.then(step('mdi-format-list-bulleted', '', function() {
                 self.listsCache = imported.lists;
                 return backend.saveLists(self.folderId, imported.lists);
               }));
             }
             langCodes.forEach(function(code) {
-              chain = chain.then(step('Translations · ' + code, function() {
+              chain = chain.then(step('mdi-translate', code, function() {
                 // Ensure language exists before writing translations
                 var langName = (imported.languages || []).find(function(l) { return l.code === code; });
                 return backend.createLanguage(self.folderId, code, langName ? langName.name : code, Object.keys(imported.translations[code]))
@@ -2882,20 +2885,20 @@ function createVueApp() {
               }));
             });
             pages.forEach(function(page) {
-              chain = chain.then(step('Page · ' + page.id, function() {
+              chain = chain.then(step('mdi-file-document-outline', page.id, function() {
                 return backend.putRow('_pages', { id: page.id, markdown: page.markdown }, 'active');
               }));
             });
             // Restore portable folder config (rotationAnchors, rotationRanges, any future portable key),
             // preserving this environment's `mode`. Excluded keys never cross the import boundary.
             if (imported.config && backend.setFolderConfig) {
-              chain = chain.then(step('Config', function() {
+              chain = chain.then(step('mdi-cog', '', function() {
                 var merged = mergeImportedConfig(self.appConfig, imported.config, self.mode);
                 self.appConfig = merged;
                 return backend.setFolderConfig(self.folderId, merged);
               }));
             }
-            chain = chain.then(step('Reconciling lists', function() {
+            chain = chain.then(step('mdi-format-list-checks', '', function() {
               var locked = self.lockedListValues;
               var needSave = false;
               for (var ln in locked) {
@@ -2909,22 +2912,26 @@ function createVueApp() {
 
             chain.then(function() {
               prog.finished = true;
-              prog.phase = 'Done';
+              prog.icon = prog.errors.length ? 'mdi-alert' : 'mdi-check';
+              prog.detail = '';
               if (prog.errors.length) {
                 // Hold the dialog open: a PARTIAL import has to be seen and acted on, not flashed past.
-                console.error('[import] ' + prog.errors.length + ' step(s) failed:\n' + prog.errors.join('\n'));
+                // The console copy stays plain text — it's for a developer, not the UI.
+                console.error('[import] ' + prog.errors.length + '/' + prog.total + ' failed:\n' +
+                  prog.errors.map(function(e) {
+                    return '  ' + e.icon.replace(/^mdi-/, '') + (e.detail ? ' ' + e.detail : '') + ' — ' + e.message;
+                  }).join('\n'));
                 return;
               }
               self.importProgress = null;
-              var msg = 'Imported' + (imported.schema ? ' schema' : '') + (rowJobs.length ? ' + ' + rowJobs.length + ' rows' : '')
-                      + (imported.lists ? ' + lists' : '') + (langCodes.length ? ' + translations' : '') + (imported.config ? ' + config' : '');
-              self.notify(msg || self.t('msg.import_complete'));
+              self.notify(self.t('msg.import_complete'));   // translated key, not an assembled English sentence
               setTimeout(function() { self.finishImportReload(); }, 1500); // delay reload so the snackbar is visible
             }).catch(function(err) {
               // Last-resort net: step() already absorbs per-step failures, so reaching here means the
               // bookkeeping itself broke. Surface it rather than leaving a spinner up forever.
               prog.finished = true;
-              prog.errors.push('Import — ' + ((err && err.message) || String(err)));
+              prog.icon = 'mdi-alert';
+              prog.errors.push({ icon: 'mdi-alert-circle', detail: '', message: (err && err.message) || String(err) });
             });
           } catch(err) { self.importProgress = null; self.notify(self.t('msg.import_error') + ' ' + err.message); }
         };
