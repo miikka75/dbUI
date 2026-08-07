@@ -34,6 +34,33 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
+      # The vendored Vue/Vuetify/MDI dists are GENERATED, not committed (see .gitignore), so a plain
+      # checkout has none of them. Without this step the deployed app 404s on every /vendor/* asset and
+      # each visitor silently falls back to the jsdelivr CDN — inverting the intended "self-host first,
+      # CDN only as a resilience fallback" design and making a third party a hard dependency of the
+      # production site. Materialise the exact pinned versions from npm, mirroring
+      # .claude/hooks/session-start.sh. (update-vendor.sh is deliberately NOT reused: it also rewrites
+      # index.html/style.html versions + SRI hashes, which a deploy must never do.)
+      - name: Materialise vendored front-end dists
+        run: |
+          set -euo pipefail
+          . vendor/versions          # VUE, VUETIFY, MDI
+          tmp="$(mktemp -d)"
+          ( cd "$tmp"
+            npm pack "vue@${VUE}" "vuetify@${VUETIFY}" "@mdi/font@${MDI}" >/dev/null 2>&1
+            for f in *.tgz; do tar xzf "$f"; mv package "${f%.tgz}"; done )
+          mkdir -p vendor/fonts
+          cp "$tmp/vue-${VUE}/dist/vue.global.prod.js"                      vendor/vue.js
+          cp "$tmp/vuetify-${VUETIFY}/dist/vuetify.min.js"                  vendor/vuetify.js
+          cp "$tmp/vuetify-${VUETIFY}/dist/vuetify.min.css"                 vendor/vuetify.css
+          cp "$tmp/mdi-font-${MDI}/css/materialdesignicons.min.css"         vendor/mdi.css
+          cp "$tmp/mdi-font-${MDI}/fonts/materialdesignicons-webfont.woff2" vendor/fonts/materialdesignicons-webfont.woff2
+          # The npm mdi css lives under css/ and points at ../fonts/. We serve it flattened as
+          # /vendor/mdi.css, where ../fonts/ would resolve to /fonts/ (404) and no glyph would load.
+          sed -i 's#\.\./fonts/#./fonts/#g' vendor/mdi.css
+          rm -rf "$tmp"
+          ls -l vendor/ vendor/fonts/
+
       # Publish the whole repo root. Excludes below keep secrets / dev-only files out of the public site.
       - name: Prune non-public files
         run: |
