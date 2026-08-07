@@ -979,8 +979,14 @@ test.describe('Import round-trip', () => {
     await page.setInputFiles('input[type=file][accept=".json"]', { name: 'import.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bundle)) });
 
     // The dialog stays up on a partial import (rather than auto-reloading) so the failure can be read.
-    await expect(page.locator('.v-card-title:has-text("Import finished with errors")')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('text=simulated write failure')).toBeVisible();
+    // The dialog is wordless by design, so assert on structure + the backend's own message, never on
+    // UI prose: the error list appearing and a Reload button offered IS the "finished with errors" state.
+    await expect(page.locator('[data-testid="import-errors"]')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="import-reload"]')).toBeVisible();
+    await expect(page.locator('[data-testid="import-errors"]')).toContainText('simulated write failure');
+    // The failing row is identified by neutral data (index/total · table), not a translated label.
+    await expect(page.locator('[data-testid="import-errors"]')).toContainText('1/2');
+    await expect(page.locator('[data-testid="import-errors"]')).toContainText('docs');
 
     // The point of the fix: everything AFTER the failed row still ran.
     const fi = await (await page.request.post('/api/getTranslations', { data: { folderId: 'local', langCode: 'fi' } })).json();
@@ -995,6 +1001,37 @@ test.describe('Import round-trip', () => {
     const reported = _consoleErrors.findIndex(e => e.includes('[import]') && e.includes('simulated write failure'));
     expect(reported, 'import failure logged to console').toBeGreaterThanOrEqual(0);
     _consoleErrors.splice(reported, 1);
+  });
+});
+
+test.describe('Stale defaultLanguage', () => {
+  // A schema can outlive the language it names: change a language's code (Suomi -> fi) and
+  // schema.defaultLanguage still says the old one. The base strings then load from a translations doc
+  // that doesn't exist and the ENTIRE UI falls back to raw keys, even though a perfectly good language
+  // is present. defaultLanguage now only honours a configured code that actually exists.
+  const SCH = { defaultLanguage: 'Suomi', tables: { docs: { columns: [{ name: 'title', type: 'text' }] } }, views: [{ table: 'docs' }], nav: { items: [{ table: 'docs' }] } };
+
+  test('falls back to an existing language when the configured default is gone', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    // Only 'fi' exists — the schema's 'Suomi' names nothing.
+    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'fi', name: 'Suomi', keys: [] } });
+    await page.request.post('/api/updateTranslations', { data: { folderId: 'local', langCode: 'fi', updates: { 'tab.docs': 'Asiakirjat' } } });
+    // A remembered code that no longer exists must not select a missing language either.
+    await page.addInitScript(() => {
+      localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local');
+      localStorage.setItem('app_lang', 'Suomi');
+    });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+
+    expect(await page.evaluate(() => appInstance.defaultLanguage)).toBe('fi');
+    expect(await page.evaluate(() => appInstance.currentLang)).toBe('fi');
+    // The translated string is used, not the raw key — the actual user-visible symptom.
+    expect(await page.evaluate(() => appInstance.strings['tab.docs'])).toBe('Asiakirjat');
+    await expect(page.locator('.v-navigation-drawer .v-list-item', { hasText: 'Asiakirjat' }).first()).toBeVisible();
   });
 });
 

@@ -154,24 +154,47 @@
          real database, ~a minute), so it needs a visible progress state instead of an apparently frozen
          UI. It also doubles as the failure report: steps are individually fault-tolerant now, so a partial
          import stays on screen to be read rather than being flashed past in a snackbar. -->
+    <!-- Deliberately WORDLESS: the import runs before any translations are loaded (and can be the very
+         thing installing them), so prose here would be stuck in one language. Every label is an icon plus
+         data that reads the same everywhere — counts, table names, language codes. -->
     <v-dialog :model-value="!!importProgress" persistent max-width="480">
-      <v-card v-if="importProgress">
-        <v-card-title>{{ importProgress.finished ? (importProgress.errors.length ? 'Import finished with errors' : 'Import complete') : 'Importing…' }}</v-card-title>
-        <v-card-text>
-          <v-progress-linear :model-value="importProgress.total ? (importProgress.done / importProgress.total * 100) : 0"
-                             :indeterminate="!importProgress.total" height="8" rounded color="primary" class="mb-3"></v-progress-linear>
-          <div style="font-size:0.85rem;opacity:0.75">{{ importProgress.done }} / {{ importProgress.total }} — {{ importProgress.phase }}</div>
-          <div v-if="importProgress.errors.length" class="mt-3">
-            <div class="mb-1" style="font-size:0.85rem;color:rgb(var(--v-theme-error))">{{ importProgress.errors.length }} step(s) failed — the rest were still imported:</div>
-            <ul style="font-size:0.75rem;max-height:180px;overflow:auto;padding-left:1.1rem">
-              <li v-for="(e, i) in importProgress.errors.slice(0, 25)" :key="i">{{ e }}</li>
+      <v-card v-if="importProgress" data-testid="import-progress">
+        <v-card-text class="pt-5">
+          <div class="d-flex align-center mb-3">
+            <v-icon :icon="importProgress.finished ? (importProgress.errors.length ? 'mdi-alert-circle' : 'mdi-check-circle') : 'mdi-database-import'"
+                    :color="importProgress.finished ? (importProgress.errors.length ? 'error' : 'success') : 'primary'"
+                    size="28" class="mr-3"></v-icon>
+            <v-progress-linear :model-value="importProgress.total ? (importProgress.done / importProgress.total * 100) : 0"
+                               :indeterminate="!importProgress.total"
+                               :color="importProgress.errors.length ? 'error' : 'primary'"
+                               height="8" rounded></v-progress-linear>
+          </div>
+          <div class="d-flex align-center" style="font-size:0.85rem;opacity:0.75">
+            <v-icon :icon="importProgress.icon" size="16" class="mr-1"></v-icon>
+            <span data-testid="import-detail">{{ importProgress.detail }}</span>
+            <v-spacer></v-spacer>
+            <span class="font-monospace">{{ importProgress.done }}&#8202;/&#8202;{{ importProgress.total }}</span>
+          </div>
+          <div v-if="importProgress.errors.length" class="mt-3" data-testid="import-errors">
+            <div class="d-flex align-center mb-1" style="font-size:0.85rem;color:rgb(var(--v-theme-error))">
+              <v-icon icon="mdi-alert" size="16" class="mr-1"></v-icon>
+              <span class="font-monospace">{{ importProgress.errors.length }}&#8202;/&#8202;{{ importProgress.total }}</span>
+            </div>
+            <ul style="font-size:0.75rem;max-height:180px;overflow:auto;list-style:none;padding-left:0">
+              <li v-for="(e, i) in importProgress.errors.slice(0, 25)" :key="i" class="d-flex align-start mb-1">
+                <v-icon :icon="e.icon" size="14" class="mr-1 mt-1"></v-icon>
+                <span><span class="font-monospace mr-1" v-if="e.detail">{{ e.detail }}</span>{{ e.message }}</span>
+              </li>
             </ul>
-            <div v-if="importProgress.errors.length > 25" style="font-size:0.75rem;opacity:0.6">…and {{ importProgress.errors.length - 25 }} more (see the browser console)</div>
+            <div v-if="importProgress.errors.length > 25" class="d-flex align-center" style="font-size:0.75rem;opacity:0.6">
+              <v-icon icon="mdi-dots-horizontal" size="14" class="mr-1"></v-icon>
+              <span class="font-monospace">+{{ importProgress.errors.length - 25 }}</span>
+            </div>
           </div>
         </v-card-text>
         <v-card-actions v-if="importProgress.finished">
           <v-spacer></v-spacer>
-          <v-btn color="primary" @click="finishImportReload()">Reload</v-btn>
+          <v-btn color="primary" variant="tonal" icon="mdi-refresh" data-testid="import-reload" @click="finishImportReload()"></v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
