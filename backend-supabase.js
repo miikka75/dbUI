@@ -3,6 +3,10 @@
 // triggerOAuth). Firestore's document model is reproduced on a single Postgres key-value table (`kv`,
 // one row per doc), so each per-doc Firestore rule becomes a per-row RLS policy (see supabase-schema.sql).
 // Requires: storage-supabase.js loaded before this, and the supabase-js UMD global window.supabase.
+// _u(): resolve same-origin paths against the app's own directory (see appUrl in index.html) so the
+// app works when hosted under a subpath, e.g. a GitHub Pages project site at /<repo>/.
+function _u(p) { return (typeof window !== 'undefined' && window.appUrl) ? window.appUrl(p) : p; }
+
 var _sb = null;                 // supabase client
 var _sbUser = null;             // current auth user ({ email, ... }) or null
 var _sbAuthInited = false;      // guard: boot the app once, not on every auth event
@@ -286,7 +290,7 @@ function initSupabase() {
   var config;
   try { config = (stored && JSON.parse(stored)) || window.SUPABASE_CONFIG || {}; } catch (e) { config = window.SUPABASE_CONFIG || {}; }
   if (config.url && config.anonKey) { _startSupabase(config); return; }
-  fetch('/supabase-config.json').then(function(r) { return r.ok ? r.json() : null; }).then(function(c) {
+  fetch(_u('/supabase-config.json')).then(function(r) { return r.ok ? r.json() : null; }).then(function(c) {
     if (c && c.url && c.anonKey) { localStorage.setItem('supabase_config', JSON.stringify(c)); _startSupabase(c); }
     else { appInstance.showSetup = true; appInstance.setupStep = 'supabase'; appInstance.loading = false; }
   }).catch(function() { appInstance.showSetup = true; appInstance.setupStep = 'supabase'; appInstance.loading = false; });
