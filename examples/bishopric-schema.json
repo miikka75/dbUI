@@ -1001,7 +1001,11 @@
     "choristers": [],
     "hymns": [],
     "organizations": [],
-    "bishopric": [],
+    "bishopric": [
+      "bishop",
+      "counselor1",
+      "counselor2"
+    ],
     "members": [],
     "cleaners": [],
     "accompanists": [],

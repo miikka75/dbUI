@@ -32,18 +32,27 @@ disturbs data you've already entered.
 
 ## What about list values used in filters?
 
-Some views filter on specific values (`{"status": "released"}`, `{"responsible": "bishop"}`). Those
-values are **not** shipped as list contents — the lists here are empty — but you don't have to recreate
-them by hand either: on import the app scans every filter and **auto-seeds** the values it finds
-(`lockedListValues`). After importing the schema you'll find `bishopric` already populated with
-`bishop`, `counselor1`, `counselor2`.
+Some views filter on specific values — `admin_bishopric` matches `{"responsible": "bishop"}`,
+`"counselor1"`, `"counselor2"` and groups by them; `meeting_program` filters on `{"status": "released"}`
+and `"accepted"`. **A value the schema names is part of the schema**, so those ship here:
 
-The one thing auto-seeding cannot recreate is a **lookup table's rows**. `status` is a `ref` column into
-the `ref_statuses` table, and the board view lanes by it — with no rows there would be no lanes and
-nothing to pick in the status dropdown. So `ref_statuses` rows ship *with the schema*: they're a
-controlled vocabulary (a callings workflow of 14 statuses in 5 phases), not anyone's data.
+- **`bishopric`** carries its three role slots (`bishop`, `counselor1`, `counselor2`) with labels
+  (*Bishop*, *First Counselor*, *Second Counselor*). It's a user-linked list, so a deployment attaches
+  its own people to the slots — the slots belong to the schema, the people don't.
+- **`ref_statuses`** ships its 14 rows: `status` is a `ref` column into that lookup table and the board
+  lanes by it, so without rows there'd be no lanes and nothing to pick.
 
-That's the rule of thumb for this split: **a lookup table is structure, a data table is yours.**
+Every other list is empty — those are yours to fill (`members`, `hymns`, `visitors`, …).
+
+Two things worth knowing about how the app behaves here:
+
+- On import it **auto-seeds** filter-referenced values it finds (`lockedListValues`), so the
+  `bishopric` values would reappear even if this file omitted them. They ship anyway, so the file is
+  self-describing and the values can carry proper labels.
+- Auto-seeding creates **list entries only, never table rows** — which is exactly why `ref_statuses`
+  has to ship its rows explicitly.
+
+The rule of thumb: **a lookup table and the values a filter names are structure; a roster is yours.**
 
 ## Naming convention
 

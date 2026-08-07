@@ -125,7 +125,10 @@
       "view.doc_sacrament": "Sakramentti",
       "view.doc_sacrament_intro": "Sakramenttisanat",
       "view.doc_thanks": "Kiitokset",
-      "view.doc_welcome": "Tervetuloa"
+      "view.doc_welcome": "Tervetuloa",
+      "list.bishopric.bishop": "Piispa",
+      "list.bishopric.counselor1": "1. neuvonantaja",
+      "list.bishopric.counselor2": "2. neuvonantaja"
     }
   }
 }

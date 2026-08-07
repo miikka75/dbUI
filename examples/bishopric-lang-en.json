@@ -104,7 +104,10 @@
       "view.doc_sacrament": "Sacrament",
       "view.doc_sacrament_intro": "Sacrament introduction",
       "view.doc_thanks": "Thanks",
-      "view.doc_welcome": "Welcome"
+      "view.doc_welcome": "Welcome",
+      "list.bishopric.bishop": "Bishop",
+      "list.bishopric.counselor1": "First Counselor",
+      "list.bishopric.counselor2": "Second Counselor"
     }
   }
 }
