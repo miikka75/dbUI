@@ -72,6 +72,18 @@
     function appUrl(p) { return (typeof p === 'string' && p.charAt(0) === '/') ? APP_BASE + p.slice(1) : p; }
     window.appUrl = appUrl;
 
+    // Could a local dev server plausibly be serving this origin? The dev server is plain HTTP — it binds
+    // loopback by default, and even the ALLOW_INSECURE_HOST escape hatch serves http:// — so an https
+    // origin is by definition a static/cloud host (GitHub Pages, Firebase Hosting) with no /api endpoint.
+    // Probing there only logs a spurious "405 (Method Not Allowed)" on every single visit: the browser
+    // prints a failed response to the console regardless of how the promise is handled, so try/catch
+    // cannot silence it — the request simply must not be made. Loopback passes whatever the scheme, to
+    // keep https-on-localhost dev setups working.
+    function mayHaveLocalServer() {
+      return location.protocol === 'http:' || /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(location.hostname);
+    }
+    window.mayHaveLocalServer = mayHaveLocalServer;
+
     async function loadApp() {
       // Shared-link support: persist URL params to localStorage, then read mode.
       // shareLink generates: ?mode=firebase&k=<apiKey>&d=<authDomain>&p=<projectId>
@@ -134,10 +146,12 @@
       else if (mode === 'firebase') { backendFile = '/backend-firebase.js'; }
       else if (mode === 'supabase') { backendFile = '/backend-supabase.js'; }
       else {
-        try {
-          var probe = await fetch(appUrl('/api/validateFolder'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' });
-          if (probe.ok) { var pj = await probe.json(); if (pj && pj.valid) backendFile = '/backend-local-client.js'; }
-        } catch(e) {}
+        if (mayHaveLocalServer()) {
+          try {
+            var probe = await fetch(appUrl('/api/validateFolder'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' });
+            if (probe.ok) { var pj = await probe.json(); if (pj && pj.valid) backendFile = '/backend-local-client.js'; }
+          } catch(e) {}
+        }
         if (!backendFile) {
           backendFile = '/backend-oauth.js';
         }

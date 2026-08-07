@@ -3,6 +3,11 @@
 // appUrl() defined in index.html's boot; the fallback keeps this file loadable on its own.
 function _u(p) { return (typeof window !== 'undefined' && window.appUrl) ? window.appUrl(p) : p; }
 
+// Guard for the /api probes below: skip them on origins where no dev server can exist (see
+// mayHaveLocalServer in index.html), so a static host doesn't log a 405 on every load. Defaults to
+// true if the boot didn't define it, preserving the old always-probe behaviour.
+function _mayLocal() { return (typeof window !== 'undefined' && window.mayHaveLocalServer) ? window.mayHaveLocalServer() : true; }
+
 // BCP-47 languages offered by the "add language" picker (Languages tab). The `code` doubles as the Intl
 // locale (see calLocale), so every entry is a valid BCP-47 tag; `name` is the endonym (renamable after).
 var BCP47_LANGS = [
@@ -3290,7 +3295,7 @@ function createVueApp() {
       // actually be present. On a committed cloud backend (firebase/sheets/crdt) there is no /api
       // endpoint, so the probe would just log a spurious 404 to the console on every load.
       var appMode = (function() { try { return localStorage.getItem('app_mode'); } catch (e) { return null; } })();
-      if (appMode !== 'firebase' && appMode !== 'sheets' && appMode !== 'crdt') {
+      if (appMode !== 'firebase' && appMode !== 'sheets' && appMode !== 'crdt' && _mayLocal()) {
         fetch(_u('/api/validateFolder'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' })
           .then(function(r) { if (r.ok) self.hasLocalServer = true; })
           .catch(function() {});
@@ -4297,6 +4302,9 @@ function init() {
       instance.showSetup = true; instance.loading = false;
     } else if (savedMode === 'sheets' || savedMode === 'oauth' || savedMode === 'crdt') {
       instance.mode = savedMode; instance.showSetup = true; instance.loading = false;
+    } else if (!_mayLocal()) {
+      // No dev server can exist on this origin: same outcome as a failed probe, minus the request.
+      instance.showSetup = true; instance.loading = false;
     } else {
       fetch(_u('/api/validateFolder'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"id":"local"}' })
         .then(function(r) {
