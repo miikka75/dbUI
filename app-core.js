@@ -148,6 +148,7 @@ function createVueApp() {
       listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
       listUserLinks: {},        // admin only: raw { listName: { value: email } } links, for the Lookup editor
       periodOffset: 0,          // leaderboard ‹ › navigation: periods back from now (0 = current)
+      importProgress: null,     // {done,total,phase,errors,finished} while an import runs; null otherwise
       firestoreRules: '',
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
       supabaseUrlInput: '',
@@ -2791,7 +2792,6 @@ function createVueApp() {
         reader.onload = function(e) {
           try {
             var imported = JSON.parse(e.target.result);
-            var chain = Promise.resolve();
             // Detect if file is a raw schema.json (has tables with column definitions, not row arrays)
             var isRawSchema = imported.tables && !imported.schema && Object.values(imported.tables).some(function(t) { return t && t.columns; });
             if (isRawSchema) { imported = { schema: imported, tables: {} }; }
@@ -2800,75 +2800,102 @@ function createVueApp() {
               var refErrs = validateRefs(imported.schema);
               if (refErrs.length) { self.notify(self.t('msg.import_blocked') + ' ' + refErrs[0] + (refErrs.length > 1 ? ' (+' + (refErrs.length - 1) + ' more)' : '')); return; }
             }
+
+            // Flatten the row work up front: it dominates the run (two round-trips per row) and so defines
+            // both the ordering and the progress total.
+            var tables = imported.tables || {};
+            var rowJobs = [];
+            Object.keys(tables).forEach(function(key) {
+              var rows = Array.isArray(tables[key]) ? tables[key] : (tables[key].rows || []);
+              var parts = key.split('__');
+              // bare key = active partition; any suffixed key = the (single) archive partition
+              var tab = parts.length > 1 ? 'archive' : 'active';
+              rows.forEach(function(row) { rowJobs.push({ table: parts[0], tab: tab, row: row }); });
+            });
+            var langCodes = imported.translations ? Object.keys(imported.translations) : [];
+            var pages = (imported.pages && Array.isArray(imported.pages))
+              ? imported.pages.filter(function(p) { return p.id && p.markdown; }) : [];
+
+            // Progress + failure state. Two things were wrong before: the run gave no sign of life for the
+            // ~minute it takes on a real database, and — worse — the whole thing was ONE serial promise
+            // chain with no .catch(), so a single rejected write silently abandoned every step after it.
+            // That is how an import could land schema + rows and then no translations at all, with no
+            // error shown. (The old try/catch only ever caught synchronous errors while BUILDING the chain.)
+            var prog = {
+              active: true, done: 0, phase: 'Starting…', errors: [], finished: false,
+              total: (imported.schema ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
+                   + langCodes.length + pages.length + (imported.config ? 1 : 0) + 1
+            };
+            self.importProgress = prog;
+            prog = self.importProgress;   // Vue hands back a reactive proxy; mutate THAT or the UI never updates
+
+            // One unit of work: record a failure and CARRY ON, so one bad row can't cost you the
+            // translations, pages and config that come after it.
+            function step(phase, fn) {
+              return function() {
+                prog.phase = phase;
+                return Promise.resolve().then(fn).catch(function(err) {
+                  prog.errors.push(phase + ' — ' + ((err && err.message) || String(err)));
+                }).then(function() { prog.done++; });
+              };
+            }
+
+            var chain = Promise.resolve();
             // Import schema if present (initializes empty databases)
             if (imported.schema && backend.saveSchema) {
-              chain = chain.then(function() {
+              chain = chain.then(step('Schema', function() {
                 // Rebuild VIEWS from new schema so lockedListValues works
                 if (Array.isArray(imported.schema.views)) {
                   _viewsNav = imported.schema.views;
                   VIEWS = {}; _flattenViews(_viewsNav);
                 }
-                return backend.saveSchema(self.folderId, imported.schema);
-              }).then(function() {
-                _normalizeSchema(imported.schema);
-                self.schemaData = Object.freeze(imported.schema); // mirror boot: refresh the reactive schema (invalidates lockedListValues et al.)
-                return backend.initSchema(self.folderId, SCHEMA);
-              }).then(function(tableMap) {
-                if (tableMap) self.tableMap = tableMap;
-              });
-            }
-            var tables = imported.tables || {};
-            Object.keys(tables).forEach(function(key) {
-              var rows = Array.isArray(tables[key]) ? tables[key] : (tables[key].rows || []);
-              var parts = key.split('__');
-              var table = parts[0];
-              // bare key = active partition; any suffixed key = the (single) archive partition
-              var tab = parts.length > 1 ? 'archive' : 'active';
-              rows.forEach(function(row) {
-                chain = chain.then(function() {
-                  // Delete first to force CRDT change detection on re-import
-                  return backend.deleteRow(self.tableMap[table] || table, row.id, tab).catch(function() {});
-                }).then(function() {
-                  return backend.putRow(self.tableMap[table] || table, row, tab);
+                return backend.saveSchema(self.folderId, imported.schema).then(function() {
+                  _normalizeSchema(imported.schema);
+                  self.schemaData = Object.freeze(imported.schema); // mirror boot: refresh the reactive schema (invalidates lockedListValues et al.)
+                  return backend.initSchema(self.folderId, SCHEMA);
+                }).then(function(tableMap) {
+                  if (tableMap) self.tableMap = tableMap;
                 });
-              });
+              }));
+            }
+            rowJobs.forEach(function(job, i) {
+              chain = chain.then(step('Rows ' + (i + 1) + '/' + rowJobs.length + ' · ' + job.table, function() {
+                var target = self.tableMap[job.table] || job.table;
+                // Delete first to force CRDT change detection on re-import
+                return backend.deleteRow(target, job.row.id, job.tab).catch(function() {})
+                  .then(function() { return backend.putRow(target, job.row, job.tab); });
+              }));
             });
             if (imported.lists) {
-              chain = chain.then(function() {
+              chain = chain.then(step('Lists', function() {
                 self.listsCache = imported.lists;
                 return backend.saveLists(self.folderId, imported.lists);
-              });
+              }));
             }
-            if (imported.translations) {
-              Object.keys(imported.translations).forEach(function(code) {
-                chain = chain.then(function() {
-                  // Ensure language exists before writing translations
-                  var langName = (imported.languages || []).find(function(l) { return l.code === code; });
-                  return backend.createLanguage(self.folderId, code, langName ? langName.name : code, Object.keys(imported.translations[code])).catch(function() {});
-                }).then(function() {
-                  return backend.updateTranslations(self.folderId, code, imported.translations[code]);
-                });
-              });
-            }
-            if (imported.pages && Array.isArray(imported.pages)) {
-              imported.pages.forEach(function(page) {
-                if (page.id && page.markdown) {
-                  chain = chain.then(function() {
-                    return backend.putRow('_pages', { id: page.id, markdown: page.markdown }, 'active');
-                  });
-                }
-              });
-            }
+            langCodes.forEach(function(code) {
+              chain = chain.then(step('Translations · ' + code, function() {
+                // Ensure language exists before writing translations
+                var langName = (imported.languages || []).find(function(l) { return l.code === code; });
+                return backend.createLanguage(self.folderId, code, langName ? langName.name : code, Object.keys(imported.translations[code]))
+                  .catch(function() {})   // already present is fine; the merge below still writes the strings
+                  .then(function() { return backend.updateTranslations(self.folderId, code, imported.translations[code]); });
+              }));
+            });
+            pages.forEach(function(page) {
+              chain = chain.then(step('Page · ' + page.id, function() {
+                return backend.putRow('_pages', { id: page.id, markdown: page.markdown }, 'active');
+              }));
+            });
             // Restore portable folder config (rotationAnchors, rotationRanges, any future portable key),
             // preserving this environment's `mode`. Excluded keys never cross the import boundary.
             if (imported.config && backend.setFolderConfig) {
-              chain = chain.then(function() {
+              chain = chain.then(step('Config', function() {
                 var merged = mergeImportedConfig(self.appConfig, imported.config, self.mode);
                 self.appConfig = merged;
                 return backend.setFolderConfig(self.folderId, merged);
-              });
+              }));
             }
-            chain.then(function() {
+            chain = chain.then(step('Reconciling lists', function() {
               var locked = self.lockedListValues;
               var needSave = false;
               for (var ln in locked) {
@@ -2877,22 +2904,40 @@ function createVueApp() {
                   if (self.listsCache[ln].indexOf(lv) < 0) { self.listsCache[ln].push(lv); needSave = true; }
                 }
               }
-              var savePromise = needSave ? backend.saveLists(self.folderId, self.listsCache) : Promise.resolve();
-              savePromise.then(function() {
-                var rowCount = 0; Object.keys(tables).forEach(function(k) { var r = Array.isArray(tables[k]) ? tables[k] : (tables[k].rows || []); rowCount += r.length; });
-                var msg = 'Imported' + (imported.schema ? ' schema' : '') + (rowCount ? ' + ' + rowCount + ' rows' : '') + (imported.lists ? ' + lists' : '') + (imported.translations ? ' + translations' : '') + (imported.config ? ' + config' : '');
-                self.notify(msg || self.t('msg.import_complete'));
-                setTimeout(function() {
-                if (typeof _pushChanges === 'function') { _pushChanges().then(function() { location.reload(); }); }
-                else if (typeof CrdtEngine !== 'undefined') { CrdtEngine.pushChanges().then(function() { setTimeout(function() { location.reload(); }, 100); }); }
-                else { location.reload(); }
-                }, 1500); // delay reload so the snackbar is visible
-              });
+              return needSave ? backend.saveLists(self.folderId, self.listsCache) : Promise.resolve();
+            }));
+
+            chain.then(function() {
+              prog.finished = true;
+              prog.phase = 'Done';
+              if (prog.errors.length) {
+                // Hold the dialog open: a PARTIAL import has to be seen and acted on, not flashed past.
+                console.error('[import] ' + prog.errors.length + ' step(s) failed:\n' + prog.errors.join('\n'));
+                return;
+              }
+              self.importProgress = null;
+              var msg = 'Imported' + (imported.schema ? ' schema' : '') + (rowJobs.length ? ' + ' + rowJobs.length + ' rows' : '')
+                      + (imported.lists ? ' + lists' : '') + (langCodes.length ? ' + translations' : '') + (imported.config ? ' + config' : '');
+              self.notify(msg || self.t('msg.import_complete'));
+              setTimeout(function() { self.finishImportReload(); }, 1500); // delay reload so the snackbar is visible
+            }).catch(function(err) {
+              // Last-resort net: step() already absorbs per-step failures, so reaching here means the
+              // bookkeeping itself broke. Surface it rather than leaving a spinner up forever.
+              prog.finished = true;
+              prog.errors.push('Import — ' + ((err && err.message) || String(err)));
             });
-          } catch(err) { self.notify(self.t('msg.import_error') + ' ' + err.message); }
+          } catch(err) { self.importProgress = null; self.notify(self.t('msg.import_error') + ' ' + err.message); }
         };
         reader.readAsText(file);
         event.target.value = '';
+      },
+      // Reload so the freshly imported data is picked up. Extracted from importData so the progress
+      // dialog's "Reload" button can trigger it after a partial import the user has read.
+      finishImportReload: function() {
+        this.importProgress = null;
+        if (typeof _pushChanges === 'function') { _pushChanges().then(function() { location.reload(); }); }
+        else if (typeof CrdtEngine !== 'undefined') { CrdtEngine.pushChanges().then(function() { setTimeout(function() { location.reload(); }, 100); }); }
+        else { location.reload(); }
       },
       triggerOAuth: function() { if (typeof triggerOAuth === 'function') triggerOAuth(); },
       selectSetupMode: function(mode) {

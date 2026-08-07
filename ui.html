@@ -150,6 +150,32 @@
       </v-card>
     </v-dialog>
 
+    <!-- Import progress. An import is a long SERIAL run of network writes (a few hundred round-trips on a
+         real database, ~a minute), so it needs a visible progress state instead of an apparently frozen
+         UI. It also doubles as the failure report: steps are individually fault-tolerant now, so a partial
+         import stays on screen to be read rather than being flashed past in a snackbar. -->
+    <v-dialog :model-value="!!importProgress" persistent max-width="480">
+      <v-card v-if="importProgress">
+        <v-card-title>{{ importProgress.finished ? (importProgress.errors.length ? 'Import finished with errors' : 'Import complete') : 'Importing…' }}</v-card-title>
+        <v-card-text>
+          <v-progress-linear :model-value="importProgress.total ? (importProgress.done / importProgress.total * 100) : 0"
+                             :indeterminate="!importProgress.total" height="8" rounded color="primary" class="mb-3"></v-progress-linear>
+          <div style="font-size:0.85rem;opacity:0.75">{{ importProgress.done }} / {{ importProgress.total }} — {{ importProgress.phase }}</div>
+          <div v-if="importProgress.errors.length" class="mt-3">
+            <div class="mb-1" style="font-size:0.85rem;color:rgb(var(--v-theme-error))">{{ importProgress.errors.length }} step(s) failed — the rest were still imported:</div>
+            <ul style="font-size:0.75rem;max-height:180px;overflow:auto;padding-left:1.1rem">
+              <li v-for="(e, i) in importProgress.errors.slice(0, 25)" :key="i">{{ e }}</li>
+            </ul>
+            <div v-if="importProgress.errors.length > 25" style="font-size:0.75rem;opacity:0.6">…and {{ importProgress.errors.length - 25 }} more (see the browser console)</div>
+          </div>
+        </v-card-text>
+        <v-card-actions v-if="importProgress.finished">
+          <v-spacer></v-spacer>
+          <v-btn color="primary" @click="finishImportReload()">Reload</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- App Bar -->
     <v-app-bar v-if="!loading" density="compact" elevation="1">
       <v-app-bar-nav-icon @click="mobile ? (drawerOpen = !drawerOpen) : (rail = !rail)"></v-app-bar-nav-icon>
