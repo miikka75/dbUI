@@ -107,7 +107,22 @@
       "view.doc_welcome": "Welcome",
       "list.bishopric.bishop": "Bishop",
       "list.bishopric.counselor1": "First Counselor",
-      "list.bishopric.counselor2": "Second Counselor"
+      "list.bishopric.counselor2": "Second Counselor",
+      "list.ref_statuses.consideration": "Consideration",
+      "list.ref_statuses.call": "Call",
+      "list.ref_statuses.setting_apart": "Setting apart",
+      "list.ref_statuses.release": "Release",
+      "list.ref_statuses.declined": "Declined",
+      "list.ref_statuses.under_discussion": "Under discussion",
+      "list.ref_statuses.praying_about_it": "Praying about it",
+      "list.ref_statuses.approved_by_bishopric": "Approved by bishopric",
+      "list.ref_statuses.sustained": "Sustained",
+      "list.ref_statuses.sustaining_recorded": "Sustaining recorded",
+      "list.ref_statuses.set_apart": "Set apart",
+      "list.ref_statuses.setting_apart_recorded": "Setting apart recorded",
+      "list.ref_statuses.needs_release": "Needs release",
+      "list.ref_statuses.release_done": "Release completed",
+      "list.ref_statuses.release_recorded": "Release recorded"
     }
   }
 }

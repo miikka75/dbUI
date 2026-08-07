@@ -40,7 +40,12 @@ and `"accepted"`. **A value the schema names is part of the schema**, so those s
   (*Bishop*, *First Counselor*, *Second Counselor*). It's a user-linked list, so a deployment attaches
   its own people to the slots — the slots belong to the schema, the people don't.
 - **`ref_statuses`** ships its 14 rows: `status` is a `ref` column into that lookup table and the board
-  lanes by it, so without rows there'd be no lanes and nothing to pick.
+  lanes by it, so without rows there'd be no lanes and nothing to pick. Its stored values are
+  **`lowercase_underscore` codes** (`under_discussion`, `set_apart`, `release_recorded`), never display
+  text — the label comes from `list.ref_statuses.<code>` in the language files. That keeps the stored
+  value stable when the wording changes, and lets the same row read correctly in every language.
+  Because the table is listed in `translatableLists`, this applies to **both** its columns: the app
+  exposes the distinct values of every non-system column, so the `phase` codes are translatable too.
 
 Every other list is empty — those are yours to fill (`members`, `hymns`, `visitors`, …).
 

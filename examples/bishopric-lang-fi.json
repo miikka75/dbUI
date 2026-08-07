@@ -80,8 +80,8 @@
       "list.ref_statuses.harkinta": "Harkinta",
       "list.ref_statuses.released": "Kiitetään",
       "list.ref_statuses.kutsu": "Kutsu",
-      "list.ref_statuses.called": "Kutsutaan",
-      "list.ref_statuses.accepted": "Vastaanotettu",
+      "list.ref_statuses.called": "Kutsutaan tehtävään",
+      "list.ref_statuses.accepted": "Tehtävä vastaanotettu",
       "text.sacrament_prayers": "Leivän siunaaminen\n\n…\n\nVeden siunaaminen\n\n…",
       "text.sacrament_intro": "Valmistaudumme sakramenttiin laulamalla sakramenttilaulun.",
       "settings.save_failed": "Tallennus epäonnistui",
@@ -128,7 +128,22 @@
       "view.doc_welcome": "Tervetuloa",
       "list.bishopric.bishop": "Piispa",
       "list.bishopric.counselor1": "1. neuvonantaja",
-      "list.bishopric.counselor2": "2. neuvonantaja"
+      "list.bishopric.counselor2": "2. neuvonantaja",
+      "list.ref_statuses.consideration": "Harkinta",
+      "list.ref_statuses.call": "Kutsu",
+      "list.ref_statuses.setting_apart": "Erottaminen",
+      "list.ref_statuses.release": "Vapautus",
+      "list.ref_statuses.declined": "Kieltäytyminen",
+      "list.ref_statuses.under_discussion": "Keskustellaan",
+      "list.ref_statuses.praying_about_it": "Rukoillaan",
+      "list.ref_statuses.approved_by_bishopric": "Hyväksytty piispakunnassa",
+      "list.ref_statuses.sustained": "Hyväksytty seurakunnassa",
+      "list.ref_statuses.sustaining_recorded": "Hyväksyminen kirjattu",
+      "list.ref_statuses.set_apart": "Erotettu tehtävään",
+      "list.ref_statuses.setting_apart_recorded": "Erotus tehtävään kirjattu",
+      "list.ref_statuses.needs_release": "Tarvitsee vapauttaa",
+      "list.ref_statuses.release_done": "Vapautettu",
+      "list.ref_statuses.release_recorded": "Vapautus kirjattu"
     }
   }
 }

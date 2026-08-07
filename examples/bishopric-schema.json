@@ -1018,86 +1018,86 @@
       {
         "id": "st-1",
         "position": "1",
-        "phase": "Consideration",
-        "status": "Under discussion"
+        "phase": "consideration",
+        "status": "under_discussion"
       },
       {
         "id": "st-2",
         "position": "2",
-        "phase": "Consideration",
-        "status": "Praying about it"
+        "phase": "consideration",
+        "status": "praying_about_it"
       },
       {
         "id": "st-3",
         "position": "3",
-        "phase": "Consideration",
-        "status": "Approved by bishopric"
+        "phase": "consideration",
+        "status": "approved_by_bishopric"
       },
       {
         "id": "st-4",
         "position": "4",
-        "phase": "Call",
+        "phase": "call",
         "status": "called"
       },
       {
         "id": "st-5",
         "position": "5",
-        "phase": "Call",
+        "phase": "call",
         "status": "accepted"
       },
       {
         "id": "st-6",
         "position": "6",
-        "phase": "Call",
-        "status": "Sustained"
+        "phase": "call",
+        "status": "sustained"
       },
       {
         "id": "st-7",
         "position": "7",
-        "phase": "Call",
-        "status": "Sustaining recorded"
+        "phase": "call",
+        "status": "sustaining_recorded"
       },
       {
         "id": "st-8",
         "position": "8",
-        "phase": "Setting apart",
-        "status": "Set apart"
+        "phase": "setting_apart",
+        "status": "set_apart"
       },
       {
         "id": "st-9",
         "position": "9",
-        "phase": "Setting apart",
-        "status": "Setting apart recorded"
+        "phase": "setting_apart",
+        "status": "setting_apart_recorded"
       },
       {
         "id": "st-10",
         "position": "10",
-        "phase": "Release",
-        "status": "Needs release"
+        "phase": "release",
+        "status": "needs_release"
       },
       {
         "id": "st-11",
         "position": "11",
-        "phase": "Release",
+        "phase": "release",
         "status": "released"
       },
       {
         "id": "st-12",
         "position": "12",
-        "phase": "Release",
-        "status": "Release done"
+        "phase": "release",
+        "status": "release_done"
       },
       {
         "id": "st-13",
         "position": "13",
-        "phase": "Release",
-        "status": "Release recorded"
+        "phase": "release",
+        "status": "release_recorded"
       },
       {
         "id": "st-14",
         "position": "14",
-        "phase": "Declined",
-        "status": "Declined"
+        "phase": "declined",
+        "status": "declined"
       }
     ]
   }
