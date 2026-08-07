@@ -928,6 +928,74 @@ test.describe('Import round-trip', () => {
     expect(archive.rows.some(r => r.id === 'z1' && r.title === 'Arch1')).toBe(true);   // __archive key -> archive partition
     expect(active.headers).toContain('id'); // implicit id present after import
   });
+
+  // The import used to be ONE serial promise chain with no .catch(): a single rejected write silently
+  // abandoned every step queued after it, so a bundle whose rows failed landed schema + rows and then
+  // NO translations, with nothing shown to the user. These two tests pin both halves of that fix.
+  const I18N_SCH = { defaultLanguage: 'en', tables: { docs: { columns: [{ name: 'title', type: 'text' }] } }, views: [{ table: 'docs' }], nav: { items: [{ table: 'docs' }] } };
+  const I18N_BUNDLE = {
+    schema: I18N_SCH,
+    tables: { docs: [{ id: 'a1', title: 'Active1' }] },
+    languages: [{ code: 'fi', name: 'Suomi' }],
+    translations: { fi: { 'tab.docs': 'Asiakirjat', 'field.title': 'Otsikko' } }
+  };
+
+  async function openSettings(page, schema) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
+    await page.waitForTimeout(150);
+  }
+
+  test('importing a bundle restores its translations', async ({ page }) => {
+    test.setTimeout(20000);
+    await openSettings(page, I18N_SCH);
+    await page.setInputFiles('input[type=file][accept=".json"]', { name: 'import.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(I18N_BUNDLE)) });
+    await page.waitForTimeout(2500);
+
+    const fi = await (await page.request.post('/api/getTranslations', { data: { folderId: 'local', langCode: 'fi' } })).json();
+    expect(fi['tab.docs']).toBe('Asiakirjat');
+    expect(fi['field.title']).toBe('Otsikko');
+  });
+
+  test('a failing row does not abandon the translations queued after it, and the failure is reported', async ({ page }) => {
+    test.setTimeout(20000);
+    await openSettings(page, I18N_SCH);
+    // Force one row write to reject, mid-bundle — the exact shape that used to silently truncate the run.
+    await page.evaluate(() => {
+      const orig = backend.putRow;
+      backend.putRow = function(t, row, tab) {
+        if (row && row.id === 'BOOM') return Promise.reject(new Error('simulated write failure'));
+        return orig.apply(this, arguments);
+      };
+    });
+    const bundle = JSON.parse(JSON.stringify(I18N_BUNDLE));
+    bundle.tables.docs = [{ id: 'BOOM', title: 'explodes' }, { id: 'a1', title: 'Active1' }];
+    await page.setInputFiles('input[type=file][accept=".json"]', { name: 'import.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bundle)) });
+
+    // The dialog stays up on a partial import (rather than auto-reloading) so the failure can be read.
+    await expect(page.locator('.v-card-title:has-text("Import finished with errors")')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('text=simulated write failure')).toBeVisible();
+
+    // The point of the fix: everything AFTER the failed row still ran.
+    const fi = await (await page.request.post('/api/getTranslations', { data: { folderId: 'local', langCode: 'fi' } })).json();
+    expect(fi['tab.docs']).toBe('Asiakirjat');
+    const active = await (await page.request.post('/api/getTableData', { data: { tableId: 'docs', tab: 'active' } })).json();
+    expect(active.rows.some(r => r.id === 'a1')).toBe(true);   // the row after the failure
+    expect(active.rows.some(r => r.id === 'BOOM')).toBe(false); // the failed one really did fail
+
+    // This test provokes the import's own console report on purpose. Assert it was emitted (the detail
+    // that makes a partial import diagnosable), then consume it so the global console guard still applies
+    // to everything else in this test.
+    const reported = _consoleErrors.findIndex(e => e.includes('[import]') && e.includes('simulated write failure'));
+    expect(reported, 'import failure logged to console').toBeGreaterThanOrEqual(0);
+    _consoleErrors.splice(reported, 1);
+  });
 });
 
 test.describe('Translation keys for view columns', () => {
