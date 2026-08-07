@@ -569,6 +569,7 @@ function createVueApp() {
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
+         'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html asks t() for these; omitting them hid the Theme labels from the Languages editor, so they could never be translated in ANY language
          'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all',
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset',
