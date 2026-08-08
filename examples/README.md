@@ -34,6 +34,11 @@ schema without touching it.
 Then start entering data: Settings → User Access to register yourself, the Lists tab to fill in the
 list values the schema declares, and the table tabs for rows.
 
+> On the **local dev server** the identity is the `?user=` query parameter, defaulting to `local@dev`.
+> Once any user exists the registry is enforced, so register `local@dev` too (or always browse with
+> `?user=<a registered address>`) — otherwise a plain `localhost:3000` visit is an unknown account and
+> fails closed with "not registered for this database", showing no data.
+
 Re-importing later updates in place — rows are matched by `id`, so a schema-only re-import never
 disturbs data you've already entered.
 

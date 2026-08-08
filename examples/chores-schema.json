@@ -176,7 +176,7 @@
   "views": [
     {
       "name": "doc_home",
-      "markdown": "# {{t:text.home_heading}}\n\n{{t:text.home_intro}}\n\n## {{t:text.home_scoreboard}}\n\n{{view:chore_points_month}}\n\n{{view:chore_balance}}\n\n## {{t:text.home_mine}}\n\n{{view:chore_mine?}}\n\n## {{t:text.home_rota}}\n\n{{view:duty_schedule}}\n\n## {{t:text.home_shopping}}\n\n{{view:shop_open?}}\n",
+      "markdown": "# {{t:text.home_heading}}\n\n{{t:text.home_intro}}\n\n## {{t:text.home_scoreboard}}\n\n{{view:chore_points_month}}\n\n{{view:chore_balance}}\n\n## {{t:text.home_mine}}\n\n{{view:chore_mine?}}\n\n## {{t:text.home_rota}}\n\n{{view:duty_schedule}}\n\n## {{t:text.home_shopping}}\n\n{{view:shop_todo?}}\n",
       "icon": "mdi-home"
     },
     {
@@ -505,7 +505,9 @@
       ],
       "mode": "join",
       "columns": [
+        "item",
         "qty",
+        "shop_status",
         "needed_by",
         {
           "name": "days_late",
@@ -539,6 +541,42 @@
         "title": "item",
         "color": "added_by",
         "addInLane": true
+      }
+    },
+    {
+      "name": "shop_todo",
+      "sources": [
+        "home_shopping"
+      ],
+      "mode": "join",
+      "layout": "table",
+      "readonly": true,
+      "defaultSort": "needed_by",
+      "columns": [
+        "item",
+        "qty",
+        "needed_by",
+        {
+          "name": "days_late",
+          "computed": {
+            "daysSince": "needed_by"
+          },
+          "when": {
+            "days_late": {
+              "gt": 0
+            }
+          }
+        }
+      ],
+      "filter": {
+        "$or": [
+          {
+            "shop_status": "needed"
+          },
+          {
+            "shop_status": "in_cart"
+          }
+        ]
       }
     },
     {
