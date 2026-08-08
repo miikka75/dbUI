@@ -1,0 +1,1104 @@
+{
+  "schema": {
+    "icon": "./favicon.svg",
+    "nav": {
+      "items": [
+        {
+          "view": "doc_about",
+          "icon": "mdi-information-variant-circle-outline"
+        },
+        {
+          "icon": "mdi-progress-clock",
+          "view": "meeting_program"
+        },
+        {
+          "view": "meeting_agenda",
+          "items": [
+            {
+              "view": "meeting_speakers",
+              "icon": "mdi-chat-outline"
+            }
+          ],
+          "icon": "mdi-account-tie-voice"
+        },
+        {
+          "view": "meeting_music",
+          "icon": "mdi-book-music-outline"
+        },
+        {
+          "icon": "mdi-clipboard-account-outline",
+          "view": "admin_callings",
+          "items": [
+            {
+              "view": "admin_callings_board",
+              "icon": "mdi-view-column-outline"
+            }
+          ]
+        },
+        {
+          "view": "admin_bishopric",
+          "items": [
+            {
+              "icon": "mdi-arrow-decision-outline",
+              "view": "admin_responsibilities"
+            },
+            {
+              "view": "admin_interviews",
+              "icon": "mdi-account-multiple"
+            },
+            {
+              "view": "admin_reminders",
+              "icon": "mdi-checkbox-multiple-marked-outline"
+            }
+          ],
+          "icon": "mdi-account-group"
+        },
+        {
+          "view": "duty_cleaning",
+          "items": [
+            {
+              "table": "duty_cleaning_a"
+            },
+            {
+              "table": "duty_cleaning_b"
+            }
+          ],
+          "icon": "mdi-broom"
+        },
+        {
+          "view": "duty_usher_shifts",
+          "items": [
+            {
+              "table": "duty_ushers"
+            }
+          ],
+          "icon": "mdi-door-closed"
+        },
+        {
+          "icon": "mdi-translate-variant",
+          "view": "duty_interpreters"
+        }
+      ],
+      "bottomNav": [
+        "doc_about",
+        "meeting_program",
+        "admin_bishopric",
+        "meeting_agenda",
+        "admin_callings",
+        "admin_interviews",
+        "admin_reminders"
+      ],
+      "layout": "drawer"
+    },
+    "tables": {
+      "meeting_music": {
+        "archivable": true,
+        "columns": [
+          {
+            "name": "date",
+            "type": "date",
+            "syncFrom": "kokoukset"
+          },
+          {
+            "name": "theme",
+            "type": "text",
+            "syncFrom": "kokoukset"
+          },
+          {
+            "name": "opening_hymn",
+            "type": "select",
+            "list": "hymns"
+          },
+          {
+            "name": "sacrament_hymn",
+            "type": "select",
+            "list": "hymns"
+          },
+          {
+            "name": "musical_number",
+            "type": "text"
+          },
+          {
+            "name": "intermediate_hymn",
+            "list": "hymns",
+            "type": "select"
+          },
+          {
+            "name": "closing_hymn",
+            "type": "select",
+            "list": "hymns"
+          },
+          {
+            "name": "accompanist",
+            "type": "select",
+            "sorted": true,
+            "list": "accompanists",
+            "allowNew": true
+          },
+          {
+            "name": "chorister",
+            "list": "choristers",
+            "allowNew": true,
+            "type": "select",
+            "sorted": true
+          },
+          {
+            "name": "created_at",
+            "hidden": true,
+            "type": "text"
+          },
+          {
+            "name": "updated_at",
+            "hidden": true,
+            "type": "text"
+          }
+        ]
+      },
+      "meeting_agenda": {
+        "columns": [
+          {
+            "name": "date",
+            "type": "date"
+          },
+          {
+            "name": "theme",
+            "type": "text"
+          },
+          {
+            "name": "presiding",
+            "listSwitch": {
+              "list": "visitors",
+              "label": "Vieras"
+            },
+            "list": "bishopric",
+            "type": "select"
+          },
+          {
+            "name": "responsible",
+            "type": "select",
+            "list": "bishopric"
+          },
+          {
+            "name": "opening_prayer",
+            "list": "members",
+            "allowNew": true,
+            "sorted": true,
+            "type": "select"
+          },
+          {
+            "name": "testimony1",
+            "listSwitch": {
+              "list": "visitors",
+              "label": "Vieras"
+            },
+            "allowNew": true,
+            "list": "members",
+            "sorted": true,
+            "type": "select"
+          },
+          {
+            "name": "testimony2",
+            "listSwitch": {
+              "list": "visitors",
+              "label": "Vieras"
+            },
+            "list": "members",
+            "allowNew": true,
+            "type": "select",
+            "sorted": true
+          },
+          {
+            "name": "talk1",
+            "listSwitch": {
+              "label": "Vieras",
+              "list": "visitors"
+            },
+            "allowNew": true,
+            "list": "members",
+            "type": "select",
+            "sorted": true
+          },
+          {
+            "name": "talk2",
+            "list": "members",
+            "listSwitch": {
+              "list": "visitors",
+              "label": "Vieras"
+            },
+            "allowNew": true,
+            "sorted": true,
+            "type": "select"
+          },
+          {
+            "name": "talk3",
+            "allowNew": true,
+            "listSwitch": {
+              "label": "Vieras",
+              "list": "visitors"
+            },
+            "list": "members",
+            "sorted": true,
+            "type": "select"
+          },
+          {
+            "name": "closing_prayer",
+            "type": "select",
+            "sorted": true,
+            "list": "members",
+            "allowNew": true
+          },
+          {
+            "name": "created_at",
+            "hidden": true,
+            "type": "text"
+          },
+          {
+            "name": "updated_at",
+            "type": "text",
+            "hidden": true
+          }
+        ],
+        "archivable": true
+      },
+      "admin_reminders": {
+        "archivable": true,
+        "columns": [
+          {
+            "name": "date",
+            "type": "date"
+          },
+          {
+            "name": "responsible",
+            "type": "select",
+            "list": "bishopric"
+          },
+          {
+            "name": "item",
+            "type": "text"
+          },
+          {
+            "name": "person",
+            "type": "select",
+            "sorted": true,
+            "allowNew": true,
+            "list": "members"
+          }
+        ]
+      },
+      "duty_usher_dates": {
+        "archivable": true,
+        "columns": [
+          {
+            "name": "date",
+            "syncFrom": "kokoukset",
+            "type": "date"
+          }
+        ]
+      },
+      "admin_responsibilities": {
+        "defaultSort": "organization",
+        "columns": [
+          {
+            "name": "organization",
+            "list": "organizations",
+            "type": "select",
+            "sorted": true
+          },
+          {
+            "name": "responsible",
+            "list": "bishopric",
+            "type": "select"
+          }
+        ]
+      },
+      "duty_ushers": {
+        "columns": [
+          {
+            "name": "position",
+            "type": "number",
+            "hidden": true
+          },
+          {
+            "name": "people",
+            "sorted": true,
+            "type": "multiselect",
+            "allowNew": true,
+            "list": "members"
+          }
+        ],
+        "defaultSort": "position",
+        "reorderable": true
+      },
+      "duty_interpreters": {
+        "columns": [
+          {
+            "name": "date",
+            "type": "date",
+            "syncFrom": "kokoukset"
+          },
+          {
+            "name": "theme",
+            "type": "text",
+            "syncFrom": "kokoukset"
+          },
+          {
+            "name": "interpreter",
+            "allowNew": true,
+            "list": "interpreters",
+            "type": "select",
+            "sorted": true
+          }
+        ],
+        "archivable": true
+      },
+      "admin_interviews": {
+        "columns": [
+          {
+            "name": "meeting",
+            "type": "date"
+          },
+          {
+            "name": "person",
+            "sorted": true,
+            "type": "select",
+            "list": "members",
+            "allowNew": true
+          },
+          {
+            "name": "topic",
+            "list": "interview_topics",
+            "type": "select"
+          },
+          {
+            "name": "responsible",
+            "list": "bishopric",
+            "type": "select"
+          },
+          {
+            "name": "expires",
+            "type": "date"
+          }
+        ],
+        "archivable": true
+      },
+      "duty_cleaning_b": {
+        "columns": [
+          {
+            "name": "position",
+            "hidden": true,
+            "type": "number"
+          },
+          {
+            "name": "people",
+            "sorted": true,
+            "type": "multiselect",
+            "allowNew": true,
+            "list": "cleaners"
+          }
+        ],
+        "defaultSort": "position",
+        "reorderable": true
+      },
+      "duty_cleaning_a": {
+        "reorderable": true,
+        "columns": [
+          {
+            "name": "position",
+            "type": "number",
+            "hidden": true
+          },
+          {
+            "name": "people",
+            "type": "multiselect",
+            "sorted": true,
+            "list": "members",
+            "allowNew": true
+          }
+        ],
+        "defaultSort": "position"
+      },
+      "admin_callings": {
+        "columns": [
+          {
+            "name": "date",
+            "type": "date"
+          },
+          {
+            "name": "person",
+            "list": "members",
+            "type": "select",
+            "allowNew": true
+          },
+          {
+            "name": "organization",
+            "type": "select",
+            "list": "organizations"
+          },
+          {
+            "name": "calling",
+            "type": "select",
+            "list": "callings"
+          },
+          {
+            "name": "status",
+            "type": "ref",
+            "table": "ref_statuses",
+            "valueCol": "status"
+          },
+          {
+            "name": "responsible",
+            "list": "bishopric",
+            "type": "select"
+          },
+          {
+            "name": "notes",
+            "type": "text"
+          },
+          {
+            "name": "created_at",
+            "hidden": true,
+            "type": "text"
+          },
+          {
+            "name": "updated_at",
+            "hidden": true,
+            "type": "text"
+          }
+        ],
+        "archivable": true
+      },
+      "ref_statuses": {
+        "isLookup": true,
+        "columns": [
+          {
+            "name": "phase",
+            "type": "text"
+          },
+          {
+            "name": "status",
+            "type": "text"
+          },
+          {
+            "name": "position",
+            "type": "number",
+            "hidden": true
+          },
+          {
+            "name": "created_at",
+            "type": "text",
+            "hidden": true
+          },
+          {
+            "name": "updated_at",
+            "type": "text",
+            "hidden": true
+          }
+        ],
+        "reorderable": true,
+        "defaultSort": "position"
+      }
+    },
+    "views": [
+      {
+        "markdown": "# Welcome\n\nThis site carries the sacrament meeting program and the ward duty rosters.\n\n{{view:doc_internal}}",
+        "name": "doc_about"
+      },
+      {
+        "access": [
+          "all"
+        ],
+        "name": "doc_internal",
+        "bare": true,
+        "markdown": "# Bishopric tool"
+      },
+      {
+        "markdown": "{{t:text.welcome}}",
+        "bare": true,
+        "name": "doc_welcome"
+      },
+      {
+        "bare": true,
+        "markdown": "{{t:text.sacrament_intro}}",
+        "name": "doc_sacrament_intro"
+      },
+      {
+        "markdown": "{{t:text.sacrament_prayers}}",
+        "bare": true,
+        "name": "doc_sacrament"
+      },
+      {
+        "name": "doc_thanks",
+        "bare": true,
+        "markdown": "{{t:text.closing_thanks}}"
+      },
+      {
+        "hideEmpty": true,
+        "readonly": true,
+        "layout": "card",
+        "mode": "join",
+        "collapsed": true,
+        "name": "meeting_program",
+        "defaultSort": "date",
+        "printable": "cards",
+        "columns": [
+          "date",
+          "theme",
+          {
+            "name": "ushers",
+            "computed": {
+              "occurrenceSource": "duty_usher_dates",
+              "occurrenceSort": "date",
+              "rotationTable": "duty_ushers",
+              "advanceBy": "occurrence"
+            }
+          },
+          "interpreter",
+          "accompanist",
+          "chorister",
+          {
+            "view": "doc_welcome"
+          },
+          "presiding",
+          "responsible",
+          {
+            "computed": {
+              "matchList": "visitors",
+              "fromColumns": [
+                "testimony1",
+                "testimony2",
+                "talk1",
+                "talk2",
+                "talk3"
+              ]
+            },
+            "name": "visitors"
+          },
+          "opening_hymn",
+          {
+            "name": "opening_prayer",
+            "hideEmpty": false
+          },
+          {
+            "sources": [
+              "admin_callings"
+            ],
+            "columns": [],
+            "bare": true,
+            "mode": "union",
+            "markdown": "{{t:text.ward_business}}",
+            "hideEmpty": true,
+            "filter": {
+              "$or": [
+                {
+                  "status": "accepted"
+                },
+                {
+                  "status": "released"
+                }
+              ]
+            }
+          },
+          {
+            "filter": {
+              "status": "accepted"
+            },
+            "hideEmpty": true,
+            "markdown": "{{t:text.sustaining_header}}\n\n{{self}}\n\n{{t:text.sustaining_footer}}",
+            "readonly": true,
+            "mode": "union",
+            "bare": true,
+            "columns": [
+              "person",
+              "organization",
+              "calling"
+            ],
+            "sources": [
+              "admin_callings"
+            ]
+          },
+          {
+            "mode": "union",
+            "bare": true,
+            "columns": [
+              "person",
+              "organization",
+              "calling"
+            ],
+            "sources": [
+              "admin_callings"
+            ],
+            "filter": {
+              "status": "released"
+            },
+            "markdown": "{{t:text.releases_header}}\n\n{{self}}\n\n{{t:text.releases_footer}}",
+            "hideEmpty": true,
+            "readonly": true
+          },
+          {
+            "view": "doc_sacrament_intro"
+          },
+          "sacrament_hymn",
+          {
+            "view": "doc_sacrament"
+          },
+          "testimony1",
+          "testimony2",
+          "talk1",
+          "talk2",
+          "musical_number",
+          "intermediate_hymn",
+          "talk3",
+          {
+            "view": "doc_thanks"
+          },
+          "closing_hymn",
+          {
+            "hideEmpty": false,
+            "name": "closing_prayer"
+          }
+        ],
+        "sources": [
+          "meeting_agenda",
+          "meeting_music",
+          "duty_interpreters"
+        ]
+      },
+      {
+        "defaultSort": "date",
+        "name": "meeting_agenda",
+        "columns": [
+          "date",
+          "theme",
+          "presiding",
+          "responsible",
+          "opening_prayer",
+          "testimony1",
+          "testimony2",
+          "talk1",
+          "talk2",
+          "talk3",
+          "closing_prayer"
+        ],
+        "sources": [
+          "meeting_agenda"
+        ],
+        "mode": "join"
+      },
+      {
+        "name": "meeting_speakers",
+        "collect": "date",
+        "defaultSort": "previous1",
+        "mode": "union",
+        "groupBy": {
+          "from": [
+            "talk1",
+            "talk2",
+            "talk3"
+          ],
+          "column": "speaker",
+          "filter": {
+            "speaker": {
+              "notMatchList": "visitors"
+            }
+          }
+        },
+        "columns": [
+          "speaker",
+          "previous1",
+          "previous2",
+          "previous3"
+        ],
+        "sources": [
+          "meeting_agenda"
+        ]
+      },
+      {
+        "columns": [
+          "date",
+          "theme",
+          "accompanist",
+          "chorister",
+          "opening_hymn",
+          "sacrament_hymn",
+          "musical_number",
+          "intermediate_hymn",
+          "closing_hymn"
+        ],
+        "sources": [
+          "meeting_music"
+        ],
+        "mode": "join",
+        "defaultSort": "date",
+        "name": "meeting_music"
+      },
+      {
+        "defaultSort": "date",
+        "name": "admin_callings",
+        "columns": [
+          "date",
+          "status",
+          "person",
+          "organization",
+          "calling",
+          "responsible",
+          "notes"
+        ],
+        "sources": [
+          "admin_callings"
+        ],
+        "mode": "join"
+      },
+      {
+        "name": "admin_callings_board",
+        "sources": [
+          "admin_callings"
+        ],
+        "mode": "join",
+        "defaultSort": "date",
+        "icon": "mdi-view-column-outline",
+        "board": {
+          "lane": "status",
+          "color": "organization",
+          "addInLane": true
+        },
+        "columns": [
+          "person",
+          "organization",
+          "calling",
+          "responsible",
+          "notes",
+          "date"
+        ]
+      },
+      {
+        "sources": [
+          "admin_responsibilities"
+        ],
+        "columns": [
+          "organization",
+          "responsible"
+        ],
+        "name": "admin_responsibilities",
+        "mode": "union"
+      },
+      {
+        "name": "admin_interviews",
+        "mode": "union",
+        "sources": [
+          "admin_interviews"
+        ],
+        "columns": [
+          "meeting",
+          "person",
+          "responsible",
+          "expires",
+          "topic"
+        ]
+      },
+      {
+        "sources": [
+          "admin_reminders"
+        ],
+        "columns": [
+          "date",
+          "responsible",
+          "item",
+          "person"
+        ],
+        "name": "admin_reminders",
+        "mode": "union"
+      },
+      {
+        "groupBy": {
+          "from": [
+            "responsible"
+          ],
+          "column": "bishopric"
+        },
+        "filter": {
+          "$or": [
+            {
+              "responsible": "bishop"
+            },
+            {
+              "responsible": "counselor1"
+            },
+            {
+              "responsible": "counselor2"
+            }
+          ]
+        },
+        "name": "admin_bishopric",
+        "sources": [
+          "meeting_agenda",
+          "admin_callings",
+          "admin_interviews"
+        ],
+        "hideArchive": true,
+        "readonly": true,
+        "layout": "card",
+        "hideEmpty": true,
+        "collect": "responsible",
+        "collapsed": true,
+        "mode": "union",
+        "defaultSort": "bishopric",
+        "columns": [
+          "bishopric",
+          {
+            "sources": [
+              "meeting_agenda"
+            ],
+            "columns": [
+              "date",
+              "theme"
+            ],
+            "bare": true,
+            "mode": "union",
+            "filterBy": {
+              "responsible": "bishopric"
+            },
+            "defaultSort": "date",
+            "markdown": "{{t:tab.meeting_agenda}}\n\n{{self}}",
+            "hideEmpty": true
+          },
+          {
+            "defaultSort": "date",
+            "filterBy": {
+              "responsible": "bishopric"
+            },
+            "filter": {
+              "status": "called"
+            },
+            "columns": [
+              "date",
+              "person",
+              "organization",
+              "calling"
+            ],
+            "sources": [
+              "admin_callings"
+            ],
+            "bare": true,
+            "hideEmpty": true,
+            "markdown": "{{t:tab.admin_callings}}\n\n{{self}}",
+            "mode": "union"
+          },
+          {
+            "hideEmpty": true,
+            "markdown": "{{t:tab.admin_interviews}}\n\n{{self}}",
+            "filterBy": {
+              "responsible": "bishopric"
+            },
+            "bare": true,
+            "mode": "union",
+            "sources": [
+              "admin_interviews"
+            ],
+            "columns": [
+              "meeting",
+              "person",
+              "expires",
+              "topic"
+            ]
+          },
+          {
+            "columns": [
+              "date",
+              "item",
+              "person"
+            ],
+            "sources": [
+              "admin_reminders"
+            ],
+            "mode": "union",
+            "bare": true,
+            "filterBy": {
+              "responsible": "bishopric"
+            },
+            "markdown": "{{t:tab.admin_reminders}}\n\n{{self}}",
+            "hideEmpty": true
+          }
+        ]
+      },
+      {
+        "obscureNames": true,
+        "name": "duty_cleaning",
+        "printable": "view",
+        "layout": "table",
+        "rotation": {
+          "slots": [
+            "area_a",
+            "area_b"
+          ],
+          "advanceBy": "calendar",
+          "rosters": [
+            "duty_cleaning_a",
+            "duty_cleaning_b"
+          ],
+          "interval": "weekly",
+          "rotateEvery": [
+            1,
+            "cycle"
+          ],
+          "range": {
+            "periods": 12,
+            "from": "today"
+          }
+        }
+      },
+      {
+        "columns": [
+          "date",
+          {
+            "computed": {
+              "occurrenceSort": "date",
+              "occurrenceSource": "duty_usher_dates",
+              "rotationTable": "duty_ushers",
+              "advanceBy": "occurrence"
+            },
+            "name": "usher"
+          }
+        ],
+        "sources": [
+          "duty_usher_dates"
+        ],
+        "defaultSort": "date",
+        "readonly": true,
+        "layout": "table",
+        "printable": "view",
+        "name": "duty_usher_shifts",
+        "obscureNames": [
+          "usher"
+        ]
+      },
+      {
+        "columns": [
+          "date",
+          "interpreter"
+        ],
+        "sources": [
+          "duty_interpreters"
+        ],
+        "mode": "join",
+        "defaultSort": "date",
+        "name": "duty_interpreters"
+      }
+    ],
+    "listSources": {
+      "members": "userlink",
+      "bishopric": "userlink"
+    },
+    "translatableLists": [
+      "ref_statuses",
+      "organizations",
+      "callings",
+      "bishopric",
+      "interview_topics"
+    ]
+  },
+  "lists": {
+    "interview_topics": [],
+    "choristers": [],
+    "hymns": [],
+    "organizations": [],
+    "bishopric": [
+      "bishop",
+      "counselor1",
+      "counselor2"
+    ],
+    "members": [],
+    "cleaners": [],
+    "accompanists": [],
+    "callings": [],
+    "interpreters": [],
+    "visitors": []
+  },
+  "tables": {
+    "ref_statuses": [
+      {
+        "id": "st-1",
+        "position": "1",
+        "phase": "consideration",
+        "status": "under_discussion"
+      },
+      {
+        "id": "st-2",
+        "position": "2",
+        "phase": "consideration",
+        "status": "praying_about_it"
+      },
+      {
+        "id": "st-3",
+        "position": "3",
+        "phase": "consideration",
+        "status": "approved_by_bishopric"
+      },
+      {
+        "id": "st-4",
+        "position": "4",
+        "phase": "call",
+        "status": "called"
+      },
+      {
+        "id": "st-5",
+        "position": "5",
+        "phase": "call",
+        "status": "accepted"
+      },
+      {
+        "id": "st-6",
+        "position": "6",
+        "phase": "call",
+        "status": "sustained"
+      },
+      {
+        "id": "st-7",
+        "position": "7",
+        "phase": "call",
+        "status": "sustaining_recorded"
+      },
+      {
+        "id": "st-8",
+        "position": "8",
+        "phase": "setting_apart",
+        "status": "set_apart"
+      },
+      {
+        "id": "st-9",
+        "position": "9",
+        "phase": "setting_apart",
+        "status": "setting_apart_recorded"
+      },
+      {
+        "id": "st-10",
+        "position": "10",
+        "phase": "release",
+        "status": "needs_release"
+      },
+      {
+        "id": "st-11",
+        "position": "11",
+        "phase": "release",
+        "status": "released"
+      },
+      {
+        "id": "st-12",
+        "position": "12",
+        "phase": "release",
+        "status": "release_done"
+      },
+      {
+        "id": "st-13",
+        "position": "13",
+        "phase": "release",
+        "status": "release_recorded"
+      },
+      {
+        "id": "st-14",
+        "position": "14",
+        "phase": "declined",
+        "status": "declined"
+      }
+    ]
+  }
+}
