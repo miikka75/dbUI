@@ -14,12 +14,35 @@ service cloud.firestore {
     }
     function role() { return noUsers() ? 'admin' : (userData() != null ? userData().role : null); } // bootstrap = admin
     function isRegistered() { return noUsers() || userData() != null; }
+    // --- Grants. `tables` is 'all', a LEGACY list of names (read+write on each), or a map
+    // { table: 'r' | 'rw' } where 'r' is read-but-not-write (reference data an editor should see and
+    // not change). READ membership is identical for both containers — `x in <list>` matches an element
+    // and `x in <map>` matches a key — so the read gates below are untouched and no stored grant needs
+    // migrating. WRITE reads a denormalized `rwTables` list written alongside the grant (same trick as
+    // _meta/ownerTables and the per-row rosterPublic flag: rules can't filter a map, so the writable
+    // subset is materialized at write time). A doc with no `rwTables` predates the split — fall back to
+    // plain membership so every existing grant keeps working. ---
     function hasTableAccess(collection) {
       let table = collection.split('__')[0];
       return userData().tables == 'all' || table in userData().tables;
     }
+    function hasTableWrite(collection) {
+      let table = collection.split('__')[0];
+      let u = userData();
+      return u.tables == 'all' || ('rwTables' in u ? table in u.rwTables : table in u.tables);
+    }
     function listAllowed() {
-      return userData().tables == 'all' || userData().tables.hasAny(resource.data.tables);
+      let t = userData().tables;
+      return t == 'all' || (t is list && t.hasAny(resource.data.tables))
+                        || (t is map && t.keys().hasAny(resource.data.tables));
+    }
+    // Writing a list needs WRITE access to an owning table, not merely sight of it — otherwise a
+    // read-only grant would let that table's lists be edited, which is the opposite of the point.
+    function listWriteAllowed() {
+      let u = userData();
+      return u.tables == 'all'
+        || ('rwTables' in u ? resource.data.tables.hasAny(u.rwTables)
+                            : (u.tables is list && u.tables.hasAny(resource.data.tables)));
     }
 
     // Meta: read by registered. `lists` and `users` docs are admin-only reads (users holds every
@@ -96,7 +119,7 @@ service cloud.firestore {
       );
       allow write: if request.auth != null && isRegistered() && (
         noUsers() || role() == 'admin' ||
-        (role() == 'editor' && listAllowed() && request.resource.data.tables == resource.data.tables)
+        (role() == 'editor' && listWriteAllowed() && request.resource.data.tables == resource.data.tables)
       );
     }
 
@@ -181,19 +204,19 @@ service cloud.firestore {
       allow create: if base(collection) && (
         noUsers() || role() == 'admin' ||
         (request.resource.data.owner == myEmail() && selfServiceTable(collection)) || // self-service: my own row, only on an owner-column table
-        (role() == 'editor' && hasTableAccess(collection))
+        (role() == 'editor' && hasTableWrite(collection))
       );
       allow update: if base(collection) && (
         noUsers() || role() == 'admin' ||
         // edit my own (can't reassign owner) — bounded to owner-column tables like create, so a stray
         // owner-stamped row in a non-self-service table doesn't stay member-editable forever
         (resource.data.owner == myEmail() && request.resource.data.owner == myEmail() && selfServiceTable(collection)) ||
-        (role() == 'editor' && hasTableAccess(collection))
+        (role() == 'editor' && hasTableWrite(collection))
       );
       allow delete: if base(collection) && (
         noUsers() || role() == 'admin' ||
         (resource.data.owner == myEmail() && selfServiceTable(collection)) || // delete my own owned row (self-service tables only)
-        (role() == 'editor' && hasTableAccess(collection))
+        (role() == 'editor' && hasTableWrite(collection))
       );
     }
   }

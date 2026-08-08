@@ -178,5 +178,73 @@ await ok('viewer CAN query ONLY the shared links (rules-provable)',
 await ok('viewer CANNOT list ALL links (unconstrained query denied)',
   assertFails(getDocs(collection(viewer, '_list_users'))));
 
+// --- Per-table grant modes: `tables` may be 'all', a LEGACY name array (read+write on each), or a map
+// { table: 'r' | 'rw' }. Reads use membership, which `in` satisfies for BOTH a list and a map — that is
+// what lets old grants keep working unmigrated. Writes read the denormalized `rwTables` list, falling
+// back to membership when it is absent (pre-split docs). Seeded as real /_users docs, which take
+// precedence over the legacy _meta/users map. ---
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  await setDoc(doc(db, '_users/mixed@x.com'), {
+    role: 'editor', user: 'mixed@x.com',
+    tables: { tasks: 'rw', refdata: 'r' }, rwTables: ['tasks']
+  });
+  // Same modes but with NO rwTables mirror — a doc written before the split. Must stay fully writable
+  // rather than silently losing write access to tables it was granted.
+  await setDoc(doc(db, '_users/premigration@x.com'), {
+    role: 'editor', user: 'premigration@x.com', tables: { tasks: 'rw', refdata: 'r' }
+  });
+  await setDoc(doc(db, 'refdata__active/ref1'), { id: 'ref1', label: 'points' });
+  await setDoc(doc(db, 'tasks__active/t1'), { id: 't1', title: 'a task' });
+});
+const mixed = testEnv.authenticatedContext('mixed-uid', { email: 'mixed@x.com' }).firestore();
+const premig = testEnv.authenticatedContext('premig-uid', { email: 'premigration@x.com' }).firestore();
+
+await ok("map grant: 'r' table is READABLE",
+  assertSucceeds(getDoc(doc(mixed, 'refdata__active/ref1'))));
+await ok("map grant: 'r' table CANNOT be updated",
+  assertFails(setDoc(doc(mixed, 'refdata__active/ref1'), { id: 'ref1', label: 'tampered' })));
+await ok("map grant: 'r' table CANNOT be created into",
+  assertFails(setDoc(doc(mixed, 'refdata__active/ref2'), { id: 'ref2', label: 'new' })));
+await ok("map grant: 'r' table CANNOT be deleted from",
+  assertFails(deleteDoc(doc(mixed, 'refdata__active/ref1'))));
+await ok("map grant: 'rw' table is readable AND writable",
+  assertSucceeds(setDoc(doc(mixed, 'tasks__active/t1'), { id: 't1', title: 'edited' })));
+await ok('map grant: an ungranted table stays unreadable',
+  assertFails(getDoc(doc(mixed, 'secrets__active/s1'))));
+await ok('legacy array grant still reads AND writes (no migration)',
+  assertSucceeds(setDoc(doc(editor, 'tasks__active/t1'), { id: 't1', title: 'editor edit' })));
+await ok('a map grant with no rwTables mirror falls back to membership (pre-split doc)',
+  assertSucceeds(setDoc(doc(premig, 'refdata__active/ref1'), { id: 'ref1', label: 'still writable' })));
+
+// A read-only grant on an OWNER-column table is the chore-log shape: see every row, write only my own.
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  await setDoc(doc(db, '_meta/ownerTables'), { tables: ['rsvps', 'chore_log'] });
+  await setDoc(doc(db, '_users/kid@x.com'), {
+    role: 'editor', user: 'kid@x.com', tables: { chore_log: 'r' }, rwTables: []
+  });
+  await setDoc(doc(db, 'chore_log__active/sib'), { id: 'sib', owner: 'other@x.com', chore: 'dishes' });
+});
+const kid = testEnv.authenticatedContext('kid-uid', { email: 'kid@x.com' }).firestore();
+await ok("read-only grant on an owner table: CAN read a sibling's row (shared leaderboard)",
+  assertSucceeds(getDoc(doc(kid, 'chore_log__active/sib'))));
+await ok('read-only grant on an owner table: CAN create my own owner-stamped row',
+  assertSucceeds(setDoc(doc(kid, 'chore_log__active/mine'), { id: 'mine', owner: 'kid@x.com', chore: 'bins' })));
+await ok("read-only grant on an owner table: CANNOT edit a sibling's row",
+  assertFails(setDoc(doc(kid, 'chore_log__active/sib'), { id: 'sib', owner: 'other@x.com', chore: 'stolen' })));
+
+// Lists follow the same split: sight of an owning table is not permission to edit its list.
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), '_lists/refvalues'), { name: 'refvalues', items: ['a'], tables: ['refdata'] });
+  await setDoc(doc(ctx.firestore(), '_lists/taskvalues'), { name: 'taskvalues', items: ['a'], tables: ['tasks'] });
+});
+await ok("list of an 'r' table is readable",
+  assertSucceeds(getDoc(doc(mixed, '_lists/refvalues'))));
+await ok("list of an 'r' table is NOT writable",
+  assertFails(setDoc(doc(mixed, '_lists/refvalues'), { name: 'refvalues', items: ['a', 'b'], tables: ['refdata'] })));
+await ok("list of an 'rw' table IS writable",
+  assertSucceeds(setDoc(doc(mixed, '_lists/taskvalues'), { name: 'taskvalues', items: ['a', 'b'], tables: ['tasks'] })));
+
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);

@@ -6,6 +6,8 @@ const fs = require('fs');
 const path = require('path');
 // Per-list access model — shared module (also loaded by the browser app + backend-local), no more copies.
 const { listOwningTables, filterLists } = require('../list-access');
+const AccessFeatures = require('../access-features');
+const BackendHelpers = require('../backend-helpers');
 // User-linked lists (Option C): pure link/projection logic, shared with the browser app.
 const LU = require('../list-users');
 
@@ -98,12 +100,22 @@ const server = http.createServer(async (req, res) => {
       return Object.values(backend._users).find(v => v.user === userEmail)
         || backend._users[userEmail] || backend._users[(userEmail || '').toLowerCase()];
     }
+    // Tables the caller may SEE. Mirrors firestore.rules hasTableAccess: a grant map { t:'r'|'rw' } is
+    // read-visible on every key, exactly as the rules' `x in <map>` membership test is.
     function getAllowedTables() {
       if (!backend._users) return null; // no users = no restrictions
       const u = userRecord();
       if (!u) return []; // unknown user = no access
       if (u.role === 'admin' || u.tables === 'all') return null; // null = unrestricted
-      return u.tables || [];
+      return AccessFeatures.readableTables(u.tables) || [];
+    }
+    // Tables the caller may WRITE — the 'rw' subset. Mirrors hasTableWrite / app_has_table_write.
+    function getWritableTables() {
+      if (!backend._users) return null;
+      const u = userRecord();
+      if (!u) return [];
+      if (u.role === 'admin' || u.tables === 'all') return null;
+      return AccessFeatures.writableTables(u.tables) || [];
     }
     // Admin for the profile-visibility rule (can see unshared users). Bootstrap (no users) counts as admin.
     // Note this is stricter than getAllowedTables()===null, which also passes tables:'all' editors.
@@ -141,14 +153,22 @@ const server = http.createServer(async (req, res) => {
       const base = tableId ? tableId.split('__')[0] : '';
       return allowed.indexOf(base) >= 0;
     }
+    // Write gate: the 'rw' subset only, so a read-only grant can be seen and not changed.
+    function checkTableWrite(tableId) {
+      const writable = getWritableTables();
+      if (!writable) return true;
+      const base = tableId ? tableId.split('__')[0] : '';
+      return writable.indexOf(base) >= 0;
+    }
     // Self-service (mirrors firestore.rules on the unauthenticated dev backend so the local demo behaves
-    // like Firebase): a member with NO grant on a table that declares an `owner` column may still read
-    // their own rows (+ rosterPublic) and create/update/delete their own owned rows. Returns that table's
-    // owner column name, or null if the caller is granted/unrestricted or the table has no owner column.
+    // like Firebase): a member with no WRITE grant on a table that declares an `owner` column may still
+    // create/update/delete their own owned rows. Keyed on the writable set, not the readable one, so a
+    // read-only grant on an owner table gives the useful combination: see every row, write only my own.
+    // Returns that table's owner column name, or null if the caller may write it anyway / it has none.
     function selfServiceOwnerCol(tableId) {
       const base = tableId ? tableId.split('__')[0] : '';
-      const allowed = getAllowedTables();
-      if (!allowed || allowed.indexOf(base) >= 0) return null;      // unrestricted or granted -> normal path
+      const allowed = getWritableTables();
+      if (!allowed || allowed.indexOf(base) >= 0) return null;      // unrestricted or writable -> normal path
       const cols = (((backend.getSchema('local') || {}).tables || {})[base] || {}).columns;
       if (!cols) return null;
       if (Array.isArray(cols)) { const o = cols.find(c => c && c.type === 'owner'); return o ? o.name : null; }
@@ -206,7 +226,7 @@ const server = http.createServer(async (req, res) => {
           if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
           backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
         }
-        if (checkTableAccess(body.tableId)) { backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true }); }
+        if (checkTableWrite(body.tableId)) { backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true }); }
         const oc = selfServiceOwnerCol(body.tableId);
         const existing = oc ? _rowById(body.tableId, body.tab, body.data && body.data.id) : null;
         // Must stamp myself as owner AND (on update) not overwrite a row owned by someone else.
@@ -231,7 +251,7 @@ const server = http.createServer(async (req, res) => {
           if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
           return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
         }
-        if (checkTableAccess(body.tableId)) return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
+        if (checkTableWrite(body.tableId)) return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
         const oc = selfServiceOwnerCol(body.tableId);
         const existing = oc ? _rowById(body.tableId, body.tab, body.id) : null;   // may delete only my own owned row
         if (!oc || !existing || !_mine(existing[oc])) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
@@ -250,7 +270,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, filterLists(backend.getLists('local'), schemaTables, allowed));
       }
       case 'saveLists': {
-        const allowedW = getAllowedTables();
+        const allowedW = getWritableTables();   // list WRITES need rw on an owning table
         if (!allowedW) { backend.saveLists('local', body.lists); return json(res, { ok: true }); }
         // Restricted user: merge their (owned) lists over the existing set — never drop lists they
         // can't see (their submitted map is a filtered subset). Also ignore writes to lists they don't own.
@@ -266,7 +286,7 @@ const server = http.createServer(async (req, res) => {
       case 'putListItem': {
         // Per-list access: a list is writable if ANY of its owning tables is granted (same ownership
         // model as saveLists above) — the list NAME is not a table id, so checkTableAccess was wrong here.
-        const allowedLi = getAllowedTables();
+        const allowedLi = getWritableTables();  // list WRITES need rw on an owning table
         const schemaTablesLi = (backend.getSchema('local') || {}).tables || {};
         if (allowedLi && !listOwningTables(schemaTablesLi, body.listName).some(t => allowedLi.indexOf(t) >= 0)) {
           return json(res, { error: 'Access denied' }, 403);
@@ -292,7 +312,7 @@ const server = http.createServer(async (req, res) => {
         backend.saveListUsers('local', LU.setLink(cur, body.listName, body.value, body.email || ''));
         return json(res, { ok: true });
       }
-      case 'moveRow': if (!checkTableAccess(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.moveRow(body.tableId, body.rowData, body.fromTab, body.toTab); return json(res, { ok: true });
+      case 'moveRow': if (!checkTableWrite(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.moveRow(body.tableId, body.rowData, body.fromTab, body.toTab); return json(res, { ok: true });
       case 'saveChangesets': backend.saveChangesets('local', body.siteId, body.json); return json(res, { ok: true });
       case 'loadChangesets': return json(res, backend.loadChangesets('local', body.excludeSiteId));
       case 'readFile': return json(res, { data: backend.readFile('local', body.name) });
@@ -305,7 +325,7 @@ const server = http.createServer(async (req, res) => {
         const mine = userRecord();
         return json(res, mine ? { role: mine.role, tables: mine.tables || 'all' } : { registered: false });
       }
-      case 'setUserRole': { if (!backend._users) backend._users = {}; backend._users[body.uid] = { role: body.role, user: body.user || '', tables: body.tables || 'all' }; saveUsers(); return json(res, { ok: true }); }
+      case 'setUserRole': { if (!backend._users) backend._users = {}; backend._users[body.uid] = BackendHelpers.userGrantDoc(body.uid, body.role, body.user || '', body.tables); saveUsers(); return json(res, { ok: true }); }
       case 'removeUser': { if (backend._users) delete backend._users[body.uid]; saveUsers(); return json(res, { ok: true }); }
       case 'requestAccess': {
         if (!backend._accessRequests) backend._accessRequests = {};

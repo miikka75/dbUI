@@ -1006,6 +1006,15 @@ table — the `rsvp` view is one presentation of it; a plain data grid over an o
   available; per-row edit/delete is gated on ownership (their own rows are editable, others render
   read-only, the `owner` column is always read-only). Admins/editors with a grant manage all rows as
   before.
+- **Who can READ the rows** is the separate `owner` / `rosterPublic` axis. Every owner-stamped row
+  created through the app carries `rosterPublic: true` unless the table sets **`privateRoster: true`**,
+  in which case each row is visible only to its owner and to organizers (a table grant) — the flag has
+  to ride on the row because both rules layers are schema-blind. Leave it off for a shared log whose
+  totals everyone should see (a chore leaderboard); switch it on for genuinely private submissions.
+  Rows written before this behaviour existed carry no flag and stay owner-private until re-saved.
+- **Read-only grant + `owner` column** is the other useful combination: `{ "<table>": "r" }` lets a
+  member see every row while writes still route through self-service, so they change only their own.
+  See **Access modes** below.
 - **How the rules know**: Firestore rules are schema-blind, so `saveSchema` mirrors the set of
   owner-column tables to `_meta/ownerTables` (`BackendHelpers.ownerTablesOf`). The data rules allow
   owner-create **only** on a table in that set — otherwise a member could inject owner-stamped rows into
@@ -1017,6 +1026,32 @@ table — the `rsvp` view is one presentation of it; a plain data grid over an o
   security boundary, but **mirrors** owner-scoped reads/writes for a self-service table so the local demo
   behaves like Firebase: a non-granted member reads their own rows (+ `rosterPublic`) and may create /
   edit / delete only their own owned rows.
+
+## Access modes (`r` / `rw`)
+
+A user's grant (`_users/<email>.tables`) is one of three shapes, all still accepted:
+
+| Stored value | Means |
+|---|---|
+| `"all"` | every table, read + write |
+| `["tasks", "notes"]` | **legacy** — read + write on each. Nothing writes this shape any more; existing grants keep working untouched |
+| `{ "tasks": "rw", "ref_chores": "r" }` | per-table mode. `"r"` = **visible but not editable** |
+
+`"r"` is for reference data a member must see and must not change — a chore catalogue with point
+values, a price list, a status vocabulary. The table appears in the nav, its rows load, its lists and
+ref-pickers resolve, and every cell renders read-only; add/delete/archive controls are hidden.
+
+- **Edited in Settings → Users** as two chip columns: *Tables* (can edit) and *Can view*. They merge
+  into the one stored map, with edit winning where a feature is in both.
+- **Enforced server-side.** Reads use plain membership, which both rules languages satisfy for either
+  container (`x in <map>` matches keys; `jsonb ? k` matches array elements *or* object keys) — which is
+  exactly why no stored grant needed migrating. Writes consult a denormalized **`rwTables`** list saved
+  next to the grant, since neither rules layer can filter a map (same trick as `_meta/ownerTables`).
+  A user doc without `rwTables` predates the split and falls back to membership.
+- **Lists follow the table.** Editing a list requires *write* access to an owning table; a read-only
+  grant sees the list and cannot change it.
+- No grant at all still means no access (fail closed), and clearing every chip in the UI still means
+  "no restriction" rather than locking the user out.
 
 ## user profiles, user-backed lists & membership (Firebase)
 

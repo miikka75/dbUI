@@ -3161,6 +3161,88 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await expect(page.locator('[data-testid="pivot-view"]')).toBeVisible();  // renders in the DOM
   });
 
+  test("read-only grant ('r'): visible and loaded, every cell read-only, no add/delete", async ({ page }) => {
+    // Before per-table modes, "can't write it" was implied by "can't see it", so cell editing never had
+    // to consult grants. A read-only grant breaks that implication — these are the gates that had to learn.
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.currentUserEmail = 'kid@x.com';
+      app.usersLoaded = true;
+      // tickets editable; notes read-only; chore_log ungranted; rsvps read-only WITH an owner column.
+      // tasks is granted rw but MIRRORS notes (date/title syncFrom) — the cluster decides, not the table.
+      app.userList = [{ key: 'kid@x.com', addr: 'kid@x.com', role: 'editor',
+                        tables: { tickets: 'rw', tasks: 'rw', notes: 'r', rsvps: 'r' } }];
+      const seen = (t) => (app.userAllowedTables || []).indexOf(t) >= 0;
+      const writable = (t) => (app.userWritableTables || []).indexOf(t) >= 0;
+      const at = (tab, row, col) => { app.selectTab(tab); return { readonly: app.viewReadonly(tab), mutate: app.canMutateRows, cell: app.cellReadonly(row, col, tab) }; };
+      return {
+        sees: [seen('notes'), seen('tickets'), seen('chore_log')],
+        writes: [writable('notes'), writable('tickets')],
+        notes: at('notes', { id: 'n1' }, 'title'),
+        tickets: at('tickets', { id: 'k1' }, 'title'),
+        mirroredTasks: at('tasks', { id: 't1' }, 'status'),
+        // 'r' on an owner-column table still routes writes through self-service (own rows only);
+        // a table granted 'rw' does not.
+        selfServeReadOnlyOwnerTable: app.canSelfServe('rsvps'),
+        selfServeWritableTable: app.canSelfServe('tickets')
+      };
+    });
+    expect(r.sees).toEqual([true, true, false]);   // 'r' and 'rw' are both visible; ungranted is not
+    expect(r.writes).toEqual([false, true]);       // ...but only 'rw' is writable
+    expect(r.notes).toEqual({ readonly: true, mutate: false, cell: true });
+    expect(r.tickets).toEqual({ readonly: false, mutate: true, cell: false });
+    // A write fans out across the whole mirror cluster, so one 'r' member closes the lot: tasks is
+    // granted rw but syncs date/title from notes, which is read-only.
+    expect(r.mirroredTasks).toEqual({ readonly: true, mutate: false, cell: true });
+    expect(r.selfServeReadOnlyOwnerTable).toBe(true);
+    expect(r.selfServeWritableTable).toBe(false);
+  });
+
+  test('plain grid Add on an owner table stamps owner + rosterPublic (not just the rsvp writer)', async ({ page }) => {
+    // The rsvp writer always stamped rosterPublic; _createBlankRow did not. An owner-stamped row without
+    // the flag is readable only by its owner, so a shared leaderboard over a self-service table showed
+    // each member only their own rows. The policy now belongs to the table, not to one view kind.
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.currentUserEmail = 'me@x.com';
+      app.myProfile = { name: 'Me Myself', shared: true, picture: '' };
+      const made = app._createBlankRow('rsvps', {});
+      // A table opting out of a public roster must NOT be stamped public.
+      window.SCHEMA.rsvps.privateRoster = true;
+      const priv = app._createBlankRow('rsvps', {});
+      delete window.SCHEMA.rsvps.privateRoster;
+      // A table with no owner column is untouched by either stamp.
+      const plain = app._createBlankRow('tasks', {});
+      return {
+        owner: made.owner, rosterPublic: made.rosterPublic,
+        privRosterPublic: priv.rosterPublic,
+        plainHasFlag: 'rosterPublic' in plain,
+        defaultFrom: app.defaultFromValue('@me'),
+        unknownToken: app.defaultFromValue('@nope')
+      };
+    });
+    expect(r.owner).toBe('me@x.com');
+    expect(r.rosterPublic).toBe(true);        // default: the roster is shared
+    expect(r.privRosterPublic).toBe(false);   // privateRoster tables opt out, per-row
+    expect(r.plainHasFlag).toBe(false);       // no owner column -> no roster policy to carry
+    expect(r.defaultFrom).toBe('Me Myself');  // defaultFrom:"@me" resolves to the profile display name
+    expect(r.unknownToken).toBe('');          // an unknown token stamps blank, never the token text
+  });
+
   test('rsvp view (my_rsvp): self-service response upserts an owner-stamped row + tallies', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });

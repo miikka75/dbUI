@@ -358,13 +358,23 @@ function createVueApp() {
           return (a.key || '').toLowerCase().localeCompare((b.key || '').toLowerCase());
         });
       },
+      // Tables I may SEE (grant mode 'r' or 'rw'). This is the visibility set every nav/load/list gate
+      // uses; the write gates use userWritableTables below. null = unrestricted, [] = none.
       userAllowedTables: function() {
         if (this.selfUnregistered) return [];   // FAIL CLOSED: users exist but we're not one
         if (this.isAdmin) return null; // null = unrestricted
         var u = this.currentUserEntry;
         if (!u) return [];             // FAIL CLOSED: registered users exist but we're not one -> no access
-        if (u.tables === 'all') return null;
-        return u.tables || [];
+        return AccessFeatures.readableTables(u.tables) || [];
+      },
+      // Tables I may WRITE — the 'rw' subset. A read-only grant appears here as absent, which is what
+      // turns its views read-only and (on an owner-column table) hands the row back to self-service.
+      userWritableTables: function() {
+        if (this.selfUnregistered) return [];
+        if (this.isAdmin) return null;
+        var u = this.currentUserEntry;
+        if (!u) return [];
+        return AccessFeatures.writableTables(u.tables) || [];
       },
       visibleLists: function() {
         if (this.isAdmin) return this.listsCache;
@@ -402,6 +412,10 @@ function createVueApp() {
         });
         return chips;
       },
+      // Same chips for the view-only column, minus the 'all' sentinel — "view everything" is what a full
+      // access grant in the edit column already means, so offering it here would just be a second way to
+      // say it (and an ambiguous one, since it can't downgrade an existing rw grant to r).
+      viewGrantChips: function() { return this.grantFeatureChips.filter(function(c) { return c.id !== 'all'; }); },
       // Role dropdown options for the Users table: translatable label (role.<id>, shows the raw key
       // when untranslated) + the stored role VALUE (unchanged, so setUserRole keeps writing
       // 'admin'/'editor'/'viewer').
@@ -501,9 +515,10 @@ function createVueApp() {
         if (VIEWS[this.currentTable]) return (VIEWS[this.currentTable].sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].archivable; });
         return SCHEMA[this.currentTable] && SCHEMA[this.currentTable].archivable;
       },
-      // Add/delete/archive/restore fan out across the whole mirror cluster; only allow if the user can access every table in it
+      // Add/delete/archive/restore fan out across the whole mirror cluster; only allow if the user can WRITE
+      // every table in it (a read-only grant on any member of the cluster closes the whole control).
       canMutateCurrent: function() {
-        var allowed = this.userAllowedTables;
+        var allowed = this.userWritableTables;
         if (!allowed) return true; // admin / unrestricted
         var view = VIEWS[this.currentTable];
         var base = view ? (view.sources || []) : [this.currentTable];
@@ -586,7 +601,7 @@ function createVueApp() {
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
-         'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all',
+         'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.tables_view', 'settings.add_user', 'settings.all',
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset',
          'cal.today', 'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
@@ -1047,7 +1062,7 @@ function createVueApp() {
         var s = srcs[0];
         if (!s || !s.table || !s.dateColumn || !SCHEMA[s.table]) return false;
         if (this.viewReadonly(name)) return false;
-        var allowed = this.userAllowedTables;
+        var allowed = this.userWritableTables;   // adding an event is a WRITE to the source table
         if (!allowed) return true;
         return withMirrors([s.table]).every(function(t) { return allowed.indexOf(t) >= 0; });
       },
@@ -1255,7 +1270,7 @@ function createVueApp() {
       embedSources: function(type, name) { return type === 'view' && VIEWS[name] ? (VIEWS[name].sources || []) : [name]; },
       canMutateEmbed: function(type, name) {
         if (this.viewReadonly(name)) return false;
-        var allowed = this.userAllowedTables;
+        var allowed = this.userWritableTables;   // embed row controls mutate the embedded tables
         if (!allowed) return true;
         return withMirrors(this.embedSources(type, name)).every(function(t) { return allowed.indexOf(t) >= 0; });
       },
@@ -1762,8 +1777,23 @@ function createVueApp() {
         if (!view || view.mode !== 'union' || !item._source) return false;
         return !(SCHEMA[item._source] && SCHEMA[item._source].columns && SCHEMA[item._source].columns[col]);
       },
-      // Is a view/table read-only as a whole (config flag, viewer role, or aggregate)
-      viewReadonly: function(id) { var v = VIEWS[id], cfg = VIEWS[id] || SCHEMA[id] || {}; return !!cfg.readonly || this.currentUserRole === 'viewer' || !!(v && v.groupBy && v.collect); },
+      // Is a view/table read-only as a whole (config flag, viewer role, aggregate, or a read-only grant)
+      viewReadonly: function(id) {
+        var v = VIEWS[id], cfg = VIEWS[id] || SCHEMA[id] || {};
+        if (!!cfg.readonly || this.currentUserRole === 'viewer' || !!(v && v.groupBy && v.collect)) return true;
+        return !this.grantAllowsWrite(id);
+      },
+      // Does my grant permit writing everything behind this view/table? Before per-table modes this was
+      // implied — a table you couldn't write was a table you couldn't see — so cell editing never had to
+      // ask. A read-only grant breaks that implication: the table is visible and must stay uneditable.
+      grantAllowsWrite: function(id) {
+        var writable = this.userWritableTables;
+        if (!writable) return true;                       // admin / unrestricted: skip the work entirely
+        var v = VIEWS[id];
+        var base = v ? (v.sources || []) : (SCHEMA[id] ? [id] : []);
+        if (!base.length) return true;                    // sourceless (rotation/calendar): nothing to write
+        return withMirrors(base).every(function(t) { return writable.indexOf(t) >= 0; });
+      },
       // Shared gate for whether a data cell renders read-only (ownerId defaults to currentTable).
       // On a self-service table the viewer-role blanket-readonly yields to per-row ownership: I may edit
       // MY rows, others stay read-only (owner/mirror/union-foreign columns are always read-only).
@@ -2710,17 +2740,37 @@ function createVueApp() {
       periodPrev: function() { this.periodOffset++; this.loadTableData(); },                 // older
       periodNext: function() { if (this.periodOffset > 0) { this.periodOffset--; this.loadTableData(); } }, // newer (not past present)
       periodToday: function() { if (this.periodOffset !== 0) { this.periodOffset = 0; this.loadTableData(); } },
+      // Grants are edited as TWO chip rows — what the user may change, and what they may only look at —
+      // which merge into one stored { table: 'r' | 'rw' } map. Each handler re-reads the other row's
+      // current selection so editing one never silently drops the other.
       updateUserTables: function(u, selected) {
         var prev = u.tables === 'all' ? ['all'] : this.userFeatures(u);
         var feats = this._resolveTableSelection(selected, prev);   // 'all' or array of FEATURE ids
-        var tables = feats === 'all' ? 'all' : expandFeatureGrants(feats); // materialize closure -> table names
-        if (Array.isArray(tables) && !tables.length) tables = 'all';
-        backend_users.setUserRole(u.key, u.role, u.addr, tables).then(this.loadUsers.bind(this));
+        if (feats === 'all') return this._saveGrants(u, 'all');
+        this._saveGrants(u, AccessFeatures.buildGrants(feats, this.userViewFeatures(u), SCHEMA, VIEWS));
+      },
+      updateUserViewTables: function(u, selected) {
+        if (u.tables === 'all') return;   // full access already sees everything; nothing to add
+        this._saveGrants(u, AccessFeatures.buildGrants(this.userFeatures(u), selected, SCHEMA, VIEWS));
+      },
+      // Clearing every chip means "no restriction" (the long-standing behaviour of the single row) —
+      // an empty grant would otherwise lock the user out of an app they were just given access to.
+      _saveGrants: function(u, tables) {
+        if (tables !== 'all' && !Object.keys(tables).length) tables = 'all';
+        return backend_users.setUserRole(u.key, u.role, u.addr, tables).then(this.loadUsers.bind(this));
       },
       userFeatures: function(u) {
-        // Stored table list -> selected feature ids (chip selection state).
+        // Stored grant -> selected feature ids for the EDIT row (features fully covered at 'rw').
         if (!u || u.tables === 'all') return ['all'];
-        return selectedFeatures(u.tables || []);
+        return selectedFeatures(AccessFeatures.writableTables(u.tables) || []);
+      },
+      userViewFeatures: function(u) {
+        // The VIEW row shows what is readable but NOT writable — otherwise every edit grant would also
+        // light up here and un-ticking it would read as revoking sight, not revoking write.
+        if (!u || u.tables === 'all') return [];
+        var write = selectedFeatures(AccessFeatures.writableTables(u.tables) || []);
+        return selectedFeatures(AccessFeatures.readableTables(u.tables) || [])
+          .filter(function(f) { return write.indexOf(f) < 0; });
       },
       _resolveTableSelection: function(selected, prev) {
         if (selected.indexOf('all') >= 0 && prev.indexOf('all') < 0) return 'all';

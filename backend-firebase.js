@@ -133,13 +133,13 @@ backend = {
     var email = _myEmail();
     if (!email) return Promise.resolve([]);
     return _db.collection('_users').doc(email).get().then(function(d) {
-      if (d.exists) { var v = d.data(); return (v.role === 'admin' || v.tables === 'all') ? null : (v.tables || []); }
+      if (d.exists) { var v = d.data(); return (v.role === 'admin') ? null : AccessFeatures.readableTables(v.tables); }
       // No per-user doc yet: bootstrap (no users) or un-migrated -> consult the legacy _meta/users map.
       return _db.collection('_meta').doc('users').get().then(function(doc) {
         if (!doc.exists) return null;                 // bootstrap
         var u = doc.data()[email];
         if (!u) return [];                            // registered but not me
-        return (u.role === 'admin' || u.tables === 'all') ? null : (u.tables || []);
+        return (u.role === 'admin') ? null : AccessFeatures.readableTables(u.tables);
       }).catch(function() { return []; });            // map read denied -> fail closed
     }).catch(function() { return []; });
   },
@@ -397,7 +397,7 @@ var backend_users = {
   },
   setUserRole: function(uid, role, user, tables) {
     var key = String(uid || '').toLowerCase();
-    var doc = { role: role, user: user || key, tables: tables || 'all' };
+    var doc = BackendHelpers.userGrantDoc(key, role, user, tables);
     // Source of truth = /_users/<key>; also mirror into the legacy _meta/users map so a rules
     // rollback keeps working during the transition.
     return Promise.all([

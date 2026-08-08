@@ -48,6 +48,20 @@
       var t = {}; if (keys) keys.forEach(function(k) { t[k] = ''; }); return t;
     },
 
+    // The stored /_users/<key> document for a grant. `tables` may be 'all', a legacy name array, or a
+    // per-table mode map { table: 'r' | 'rw' }. For the map shape ONLY, the writable subset is
+    // denormalized alongside as `rwTables`: neither firestore.rules nor the Supabase RLS functions can
+    // filter a map, so the write gates read this list (same denormalize-for-schema-blind-rules trick as
+    // _meta/ownerTables). Omitted for 'all' and legacy arrays, whose write gates fall back to plain
+    // membership -- which is why no stored grant needs migrating.
+    userGrantDoc: function(key, role, user, tables) {
+      var doc = { role: role, user: user || key, tables: (tables == null ? 'all' : tables) };
+      if (doc.tables && typeof doc.tables === 'object' && !Array.isArray(doc.tables)) {
+        doc.rwTables = Object.keys(doc.tables).filter(function(t) { return doc.tables[t] !== 'r'; });
+      }
+      return doc;
+    },
+
     // Table names whose schema declares an `owner`-typed column -- the SELF-SERVICE set. An owner column
     // means each row belongs to a member (auto-stamped, read-only), so those are exactly the tables where
     // a member may create/edit/delete THEIR OWN row without a table grant (the RSVP/sign-up pattern,

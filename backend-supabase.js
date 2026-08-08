@@ -125,7 +125,7 @@ backend = {
     var email = _myEmail();
     if (!email) return Promise.resolve([]);
     return StorageSupabase.get('_users', email).then(function(v) {
-      if (v) return (v.role === 'admin' || v.tables === 'all') ? null : (v.tables || []);
+      if (v) return (v.role === 'admin') ? null : AccessFeatures.readableTables(v.tables);
       // No per-user row: on Supabase /_users is authoritative (setUserRole always writes it), so a missing
       // row means either bootstrap (no users at all -> admin) or not-a-member (fail closed).
       return _noUsers().then(function(none) { return none ? null : []; });
@@ -362,7 +362,7 @@ var backend_users = {
   },
   setUserRole: function(uid, role, user, tables) {
     var key = String(uid || '').toLowerCase();
-    var rec = { role: role, user: user || key, tables: tables || 'all' };
+    var rec = BackendHelpers.userGrantDoc(key, role, user, tables);
     // Source of truth = /_users/<key>; also mirror into the legacy _meta/users map so an admin importing
     // from / exporting to a Firestore deployment stays consistent.
     var patch = {}; patch[key] = rec;

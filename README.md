@@ -132,20 +132,27 @@ Any backend defining `backend_users` gets built-in user access control (Settings
 1. **Bootstrap mode**: first user auto-registered as admin
 2. **Add users** inline (click +, edit email/role/tables in-place)
 3. **Roles**: admin (manage schema/users/translations + all tables), editor (read+write allowed tables + edit allowed lists), viewer (read-only)
-4. **Per-table access**: select which tables each user can access (or "All")
+4. **Per-table access**: two chip columns per user — *Tables* (can edit) and *Can view* (read-only:
+   visible in the nav, rows load, every cell renders read-only, no add/delete). Or "All".
 5. **View filtering**: views are only visible if user has access to ALL source tables
-6. **List filtering**: editors see only lists used by their allowed tables
+6. **List filtering**: editors see only lists used by their allowed tables; editing a list needs *write*
+   access to an owning table
 7. **Security Rules** (`firestore.rules`): enforces roles + per-table access server-side. Deploy once.
 
 Local dev: test access control with `http://localhost:3000/?user=editor1` (user must exist in registry).
 
-Firestore document structure (`_meta/users`):
+Firestore document structure (`_users/<email>`, mirrored into the legacy `_meta/users` map):
 ```json
 {
-  "user@gmail.com": { "role": "admin", "user": "user@gmail.com", "tables": "all" },
-  "other@gmail.com": { "role": "editor", "user": "other@gmail.com", "tables": ["tasks", "notes"] }
+  "user@gmail.com":  { "role": "admin",  "user": "user@gmail.com",  "tables": "all" },
+  "other@gmail.com": { "role": "editor", "user": "other@gmail.com",
+                       "tables": { "tasks": "rw", "notes": "rw", "price_list": "r" },
+                       "rwTables": ["tasks", "notes"] }
 }
 ```
+`tables` may also be a plain array of names (the older shape — read + write on each); it keeps working
+unchanged, so no existing deployment needs migrating. `rwTables` is a denormalized copy of the writable
+subset that the rules read, written automatically alongside the grant.
 
 ### Multi-Database (Single Deployment)
 
