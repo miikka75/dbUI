@@ -12,6 +12,7 @@ schema, and a schema's labels carry no UI prose.
 | `bishopric-lang-en.json` / `-fi.json` | labels for **this schema**: `tab.*`, `field.*`, `view.*`, `list.*`, `text.*` |
 | `chores-schema.json` | a household chore tracker — points, approvals, rewards, a weekly rota and a shopping list |
 | `chores-lang-en.json` | labels for the chores schema |
+| `chores-data.json` | optional **sample rows** for the chores schema — a household of four, a chore catalogue, a fortnight of logged chores, rewards and a shopping list |
 | `app-lang-en.json` / `-fi.json` | the **app's own UI**: buttons, messages, settings, calendar. Schema-independent — the browser-tab title lives in the *schema* bundle (`app.title`), since it names the deployment |
 
 ## Import order
@@ -25,6 +26,10 @@ Settings → **Import JSON**, one file at a time:
 
 Translations **merge** into the language, so steps 2 and 3 combine rather than overwrite, in either
 order. Add a second language any time by importing the other pair.
+
+`chores-data.json` is a fourth, optional step for the chores schema: import it last for a database
+that already has something in it. It is the same bundle shape Export produces, so it layers onto the
+schema without touching it.
 
 Then start entering data: Settings → User Access to register yourself, the Lists tab to fill in the
 list values the schema declares, and the table tabs for rows.
@@ -117,6 +122,21 @@ Sweepy, Homey). It leans on a different part of dbUI than the bishopric schema:
 `ref_chores` and `ref_rewards` ship empty — the chores a household cares about, and what a point is
 worth, are theirs to enter. The `members` list is user-backed (`listSources`), so it fills itself from
 the display names people share in their profile.
+
+**Sample data.** `chores-data.json` fills the catalogue (11 chores priced 1–5 points across five
+rooms), four rewards, a three-slot rota, fourteen logged chores, three reward claims and a shopping
+list — enough for every view to show something real: the leaderboards rank, the balance nets earned
+against spent, the heatmap has a grid and the shopping list has one genuinely overdue item.
+
+Two things it deliberately does **not** contain:
+
+- **User accounts.** Roles and table grants are per-deployment security data, not portable content —
+  the importer has no branch for them by design. The bundle seeds the `members` *list* and stamps a
+  plausible `owner` email on each row so the data reads like a household; register the real people in
+  Settings → User Access.
+- **Fresh dates.** `done_on` / `claimed_on` are written relative to the day the bundle was generated,
+  and `chore_points_week` / `chore_points_month` filter on the *current* period — so an old bundle
+  ranks empty. Either bump the dates or use the ‹ › period arrows to step back to when they land.
 
 **Suggested access setup.** Parents `admin`. Everyone else `editor`, with *Can view* on `ref_chores`
 and `ref_rewards` (see what a chore is worth, can't rewrite it), *Tables* on `home_shopping`, and **no**
