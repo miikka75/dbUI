@@ -2,6 +2,7 @@
   "languages": [ { "code": "en", "name": "English" } ],
   "translations": {
     "en": {
+      "app.title": "Our Home",
       "tab.chore_log": "Chore log",
       "tab.duty_rotation": "Duty rota",
       "tab.home_shopping": "Shopping list",
@@ -10,6 +11,7 @@
       "tab.reward_claim": "Reward claims",
 
       "view.chore_add": "Log a chore",
+      "view.chore_balance": "Points balance",
       "view.chore_board": "Approvals",
       "view.chore_heatmap": "Who did what",
       "view.chore_mine": "My chores",
@@ -29,9 +31,11 @@
       "nav.Scoreboard": "Scoreboard",
 
       "field.added_by": "Added by",
+      "field.balance": "Balance",
       "field.chore": "Chore",
       "field.claimed_on": "Claimed",
       "field.cost": "Cost",
+      "field.days_late": "Days late",
       "field.done_on": "Done",
       "field.duty": "On duty",
       "field.item": "Item",
@@ -39,6 +43,7 @@
       "field.note": "Note",
       "field.owner": "Logged by",
       "field.people": "People",
+      "field.period": "Week of",
       "field.person": "Person",
       "field.points": "Points",
       "field.position": "Order",

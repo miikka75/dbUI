@@ -12,7 +12,7 @@ schema, and a schema's labels carry no UI prose.
 | `bishopric-lang-en.json` / `-fi.json` | labels for **this schema**: `tab.*`, `field.*`, `view.*`, `list.*`, `text.*` |
 | `chores-schema.json` | a household chore tracker — points, approvals, rewards, a weekly rota and a shopping list |
 | `chores-lang-en.json` | labels for the chores schema |
-| `app-lang-en.json` / `-fi.json` | the **app's own UI**: buttons, messages, settings, calendar. Schema-independent |
+| `app-lang-en.json` / `-fi.json` | the **app's own UI**: buttons, messages, settings, calendar. Schema-independent — the browser-tab title lives in the *schema* bundle (`app.title`), since it names the deployment |
 
 ## Import order
 
