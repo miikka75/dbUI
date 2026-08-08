@@ -28,6 +28,7 @@
   //   { "f": { "notEmpty": true } }                value is truthy (set) — works on computed values
   //   { "f": { "empty": true } }                   value is falsy (blank)
   //   { "f": { "ne": v } }                         !==  (equality is the scalar form above)
+  //   { "f": { "lt"|"gt"|"lte"|"gte": v } }        ordered comparison (see _cmp) — combinable in one object
   // Membership is expressed with `$or` of equalities (array-IN shorthand was retired; convertViewFilters
   // upgrades any legacy `{f:[a,b]}` to `$or` at load). Empty/absent cond => true.
   function condMatches(item, cond) {
@@ -46,12 +47,40 @@
           if (c.notEmpty && !v) return false;
           if (c.empty && v) return false;
           if ('ne' in c && v === c.ne) return false;
+          if ('lt' in c && !(_cmp(v, c.lt) < 0)) return false;
+          if ('gt' in c && !(_cmp(v, c.gt) > 0)) return false;
+          if ('lte' in c && !(_cmp(v, c.lte) <= 0)) return false;
+          if ('gte' in c && !(_cmp(v, c.gte) >= 0)) return false;
         }
       } else {
         if (v !== c) return false;
       }
     }
     return true;
+  }
+
+  // Ordered comparison behind lt/gt/lte/gte. Numeric when BOTH sides parse as numbers (so 9 < 10, not
+  // "9" > "10"), otherwise a plain string compare — which orders ISO YYYY-MM-DD dates correctly, so a
+  // date column works without a separate operator. Returns NaN when either side is blank or missing:
+  // every comparison against NaN is false, so an unset value matches NO ordered filter in either
+  // direction (fail-closed, matching `within`) instead of silently sorting as zero.
+  function _cmp(a, b) {
+    if (a == null || a === '' || b == null || b === '') return NaN;
+    var na = Number(a), nb = Number(b);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    var sa = String(a), sb = String(b);
+    return sa < sb ? -1 : sa > sb ? 1 : 0;
+  }
+
+  // Whole days between a YYYY-MM-DD value and today (or `today`, which tests pin to a fixed date).
+  // Parsed at local midnight on both ends and rounded, so a DST boundary inside the span can't turn a
+  // whole number of days into 6.96. '' for a missing or unparseable date.
+  function _daysSince(dateVal, today) {
+    if (!dateVal) return '';
+    var from = new Date(String(dateVal).slice(0, 10) + 'T00:00:00');
+    var to = new Date(String(today || fmtDate(new Date())).slice(0, 10) + 'T00:00:00');
+    if (isNaN(from.getTime()) || isNaN(to.getTime())) return '';
+    return Math.round((to - from) / 86400000);
   }
 
   // Relative period membership for the `within` filter operator. Token: @today|@day|@week|@month|@year,
@@ -233,55 +262,78 @@
     var cache = (ctx && ctx.dataCache) || {};
     rows.forEach(function(r) {
       defs.forEach(function(d) {
-        var comp = d.computed;
-        // Rotation columns: index into a pre-authored ordered list (rotationTable) by computed POSITION
-        // (occurrence count or elapsed calendar intervals). Output is the slot's value (often an array).
-        if (comp.rotationTable) {
-          var rot = cache[comp.rotationTable] || [];
-          if (comp.advanceBy === 'occurrence') {
-            // Occurrence rank must be ABSOLUTE, so archiving a past occurrence never renumbers future
-            // ones. When the occurrenceSource is an archivable mirror (e.g. usher turns mirroring
-            // meetings), archived rows still count toward the rank. They sort before the active rows
-            // (earlier dates), so an active row keeps its index as earlier rows move to the archive
-            // (+1 archived, -1 active cancel). Without this, archiving one meeting slides the whole
-            // roster by a slot. Falls back to the view rows when no explicit occurrenceSource.
-            var occSrc = comp.occurrenceSource
-              ? (cache[comp.occurrenceSource] || []).concat(cache[comp.occurrenceSource + '__archive'] || [])
-              : rows;
-            r[d.name] = Rot.resolveByOccurrence(rot, occSrc, r, comp.occurrenceSort);
-          } else if (comp.advanceBy === 'calendar') {
-            var target = comp.dateField ? r[comp.dateField] : (ctx && ctx.todayDate);
-            r[d.name] = Rot.resolveByCalendar(rot, target, Rot.resolveAnchorDate(comp, ctx && ctx.rotationAnchor), comp.interval);
-          } else {
-            r[d.name] = [];
-          }
-          return;
-        }
-        // Lookup: denormalize ONE field from a keyed/referenced table into this row. Matches the local
-        // column `lookup.match` against the target table's `lookup.on` column (defaults to the same name)
-        // and copies `lookup.field`. General — reusable for chore->points, member->role/phone, etc.
-        if (comp.lookup) {
-          var lk = comp.lookup, lsrc = cache[lk.table] || [], onCol = lk.on || lk.match, lkey = r[lk.match], lhit = null;
-          for (var li = 0; li < lsrc.length; li++) { if (lsrc[li][onCol] === lkey) { lhit = lsrc[li]; break; } }
-          r[d.name] = (lhit && lhit[lk.field] != null) ? lhit[lk.field] : (lk.default != null ? lk.default : '');
-          return;
-        }
-        var ml = comp.matchList;
-        if (!ml || !root._listsCache) return;
-        if (typeof ml === 'string') {
-          // String matchList: collect values from fromColumns that are in the named list
-          var list = root._listsCache[ml] || [];
-          var vals = (comp.fromColumns || []).reduce(function(acc, c) { var x = r[c]; if (Array.isArray(x)) { acc.push.apply(acc, x); } else if (x != null && x !== '') { acc.push(x); } return acc; }, []).filter(function(v) { return list.indexOf(v) >= 0; });
-          r[d.name] = vals.join(', ');
-        } else if (typeof ml === 'object') {
-          // Object matchList: categorize fromColumn value by which list it belongs to
-          var src = r[comp.fromColumn];
-          r[d.name] = '';
-          for (var ln in ml) { if (root._listsCache[ln] && root._listsCache[ln].indexOf(src) >= 0) { r[d.name] = ml[ln]; break; } }
-        }
+        // Per-source compute (union views only): apply this def only to rows from `d.source`, which
+        // buildRows tags as _source. Two defs writing the SAME output column — one per source table,
+        // one of them scaled -1 — is how a single aggregate sums a signed quantity across tables
+        // (points earned minus points spent). Rows no def matched keep the column unset, and
+        // aggregateRows skips non-numeric cells, so they contribute nothing rather than a zero.
+        if (d.source && r._source !== d.source) return;
+        _computeInto(r, d, rows, cache, ctx);
+        // `scale` multiplies a numeric result (use -1 to subtract in an aggregate). Left alone when the
+        // computed value isn't numeric — scaling a name or a rotation array is meaningless, not an error.
+        if (d.scale != null) { var sv = Number(r[d.name]); if (!isNaN(sv) && r[d.name] !== '' && r[d.name] != null) r[d.name] = sv * Number(d.scale); }
       });
     });
     return rows;
+  }
+
+  // One computed def resolved into one row. Split out of resolveComputed so the per-source / scale
+  // wrapper above stays readable; the branches are unchanged and mutually exclusive.
+  function _computeInto(r, d, rows, cache, ctx) {
+    var comp = d.computed;
+    // Rotation columns: index into a pre-authored ordered list (rotationTable) by computed POSITION
+    // (occurrence count or elapsed calendar intervals). Output is the slot's value (often an array).
+    if (comp.rotationTable) {
+      var rot = cache[comp.rotationTable] || [];
+      if (comp.advanceBy === 'occurrence') {
+        // Occurrence rank must be ABSOLUTE, so archiving a past occurrence never renumbers future
+        // ones. When the occurrenceSource is an archivable mirror (e.g. usher turns mirroring
+        // meetings), archived rows still count toward the rank. They sort before the active rows
+        // (earlier dates), so an active row keeps its index as earlier rows move to the archive
+        // (+1 archived, -1 active cancel). Without this, archiving one meeting slides the whole
+        // roster by a slot. Falls back to the view rows when no explicit occurrenceSource.
+        var occSrc = comp.occurrenceSource
+          ? (cache[comp.occurrenceSource] || []).concat(cache[comp.occurrenceSource + '__archive'] || [])
+          : rows;
+        r[d.name] = Rot.resolveByOccurrence(rot, occSrc, r, comp.occurrenceSort);
+      } else if (comp.advanceBy === 'calendar') {
+        var target = comp.dateField ? r[comp.dateField] : (ctx && ctx.todayDate);
+        r[d.name] = Rot.resolveByCalendar(rot, target, Rot.resolveAnchorDate(comp, ctx && ctx.rotationAnchor), comp.interval);
+      } else {
+        r[d.name] = [];
+      }
+      return;
+    }
+    // daysSince: whole days from a date column to today — the age of a row. Negative for a future date.
+    // Recomputed every render (never stored), so an "overdue" filter re-evaluates as the day rolls over.
+    // A blank/unparseable date yields '' rather than 0, so `empty` still reads correctly and the ordered
+    // operators (which treat '' as incomparable) leave undated rows out of both < and > filters.
+    if (comp.daysSince) {
+      r[d.name] = _daysSince(r[comp.daysSince], ctx && ctx.todayDate);
+      return;
+    }
+    // Lookup: denormalize ONE field from a keyed/referenced table into this row. Matches the local
+    // column `lookup.match` against the target table's `lookup.on` column (defaults to the same name)
+    // and copies `lookup.field`. General — reusable for chore->points, member->role/phone, etc.
+    if (comp.lookup) {
+      var lk = comp.lookup, lsrc = cache[lk.table] || [], onCol = lk.on || lk.match, lkey = r[lk.match], lhit = null;
+      for (var li = 0; li < lsrc.length; li++) { if (lsrc[li][onCol] === lkey) { lhit = lsrc[li]; break; } }
+      r[d.name] = (lhit && lhit[lk.field] != null) ? lhit[lk.field] : (lk.default != null ? lk.default : '');
+      return;
+    }
+    var ml = comp.matchList;
+    if (!ml || !root._listsCache) return;
+    if (typeof ml === 'string') {
+      // String matchList: collect values from fromColumns that are in the named list
+      var list = root._listsCache[ml] || [];
+      var vals = (comp.fromColumns || []).reduce(function(acc, c) { var x = r[c]; if (Array.isArray(x)) { acc.push.apply(acc, x); } else if (x != null && x !== '') { acc.push(x); } return acc; }, []).filter(function(v) { return list.indexOf(v) >= 0; });
+      r[d.name] = vals.join(', ');
+    } else if (typeof ml === 'object') {
+      // Object matchList: categorize fromColumn value by which list it belongs to
+      var src = r[comp.fromColumn];
+      r[d.name] = '';
+      for (var ln in ml) { if (root._listsCache[ln] && root._listsCache[ln].indexOf(src) >= 0) { r[d.name] = ml[ln]; break; } }
+    }
   }
 
   // A filter value that is a per-user TOKEN, not a literal value. '@me' is rewritten to the signed-in

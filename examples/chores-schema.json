@@ -1,0 +1,299 @@
+{
+  "icon": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>🧹</text></svg>",
+  "theme": {
+    "light": { "primary": "#00695c", "secondary": "#26a69a", "success": "#43a047" },
+    "dark":  { "primary": "#4db6ac", "secondary": "#26a69a", "success": "#66bb6a" }
+  },
+
+  "defaultLanguage": "English",
+  "translatableLists": ["chore_status", "claim_status", "shop_status", "room"],
+  "listSources": { "members": "users" },
+
+  "tables": {
+    "ref_chores": {
+      "isLookup": true,
+      "columns": [
+        { "name": "room",   "type": "select", "list": "room", "allowNew": true, "sorted": true },
+        { "name": "chore",  "type": "text" },
+        { "name": "points", "type": "number" }
+      ]
+    },
+
+    "ref_rewards": {
+      "isLookup": true,
+      "columns": [
+        { "name": "reward", "type": "text" },
+        { "name": "cost",   "type": "number" }
+      ]
+    },
+
+    "chore_log": {
+      "archivable": true,
+      "defaultSort": "done_on",
+      "columns": [
+        { "name": "owner",   "type": "owner" },
+        { "name": "person",  "type": "select", "list": "members", "sorted": true, "defaultFrom": "@me" },
+        { "name": "chore",   "type": "ref", "table": "ref_chores", "valueCol": "chore" },
+        { "name": "done_on", "type": "date" },
+        { "name": "status",  "type": "select", "list": "chore_status", "picker": "toggle" },
+        { "name": "note",    "type": "text" }
+      ]
+    },
+
+    "reward_claim": {
+      "archivable": true,
+      "defaultSort": "claimed_on",
+      "columns": [
+        { "name": "owner",      "type": "owner" },
+        { "name": "person",     "type": "select", "list": "members", "sorted": true, "defaultFrom": "@me" },
+        { "name": "reward",     "type": "ref", "table": "ref_rewards", "valueCol": "reward" },
+        { "name": "claimed_on", "type": "date" },
+        { "name": "status",     "type": "select", "list": "claim_status", "picker": "toggle" }
+      ]
+    },
+
+    "duty_rotation": {
+      "reorderable": true,
+      "defaultSort": "position",
+      "columns": [
+        { "name": "position", "type": "number", "hidden": true },
+        { "name": "people",   "type": "multiselect", "list": "members", "allowNew": true }
+      ]
+    },
+
+    "home_shopping": {
+      "archivable": true,
+      "columns": [
+        { "name": "item",      "type": "text" },
+        { "name": "qty",       "type": "text" },
+        { "name": "status",    "type": "select", "list": "shop_status", "picker": "chips" },
+        { "name": "added_by",  "type": "select", "list": "members", "sorted": true },
+        { "name": "needed_by", "type": "date" }
+      ]
+    }
+  },
+
+  "views": [
+    {
+      "name": "doc_home",
+      "markdown": "# {{t:text.home_heading}}\n\n{{t:text.home_intro}}\n\n## {{t:text.home_scoreboard}}\n\n{{view:chore_points_month}}\n\n{{view:chore_balance}}\n\n## {{t:text.home_mine}}\n\n{{view:chore_mine?}}\n\n## {{t:text.home_rota}}\n\n{{view:duty_schedule}}\n\n## {{t:text.home_shopping}}\n\n{{view:shop_open?}}\n",
+      "icon": "mdi-home"
+    },
+
+    {
+      "name": "chore_add",
+      "sources": ["chore_log"],
+      "mode": "join",
+      "layout": "card",
+      "defaultSort": "done_on",
+      "columns": ["done_on", "chore", "person", "note", "status"],
+      "icon": "mdi-plus-circle"
+    },
+
+    {
+      "name": "chore_mine",
+      "sources": ["chore_log"],
+      "mode": "union",
+      "layout": "list",
+      "readonly": true,
+      "defaultSort": "done_on",
+      "columns": ["done_on", "chore", "status"],
+      "filter": { "person": "@me" },
+      "icon": "mdi-account-check"
+    },
+
+    {
+      "name": "chore_board",
+      "sources": ["chore_log"],
+      "mode": "join",
+      "defaultSort": "done_on",
+      "columns": ["person", "done_on", "note"],
+      "board": {
+        "lane": "status",
+        "lanes": ["logged", "approved", "rejected"],
+        "title": "chore",
+        "color": "person",
+        "addInLane": false
+      },
+      "icon": "mdi-check-decagram"
+    },
+
+    {
+      "name": "chore_points_month",
+      "sources": ["chore_log"],
+      "mode": "union",
+      "groupBy": { "column": "person", "from": ["person"] },
+      "compute": [
+        { "name": "points", "computed": {
+            "lookup": { "table": "ref_chores", "match": "chore", "on": "chore", "field": "points", "default": 0 } } }
+      ],
+      "aggregate": { "sum": "points", "into": "total" },
+      "columns": ["person", "total"],
+      "period": "month",
+      "filter": { "status": "approved", "done_on": { "within": "@month" } },
+      "readonly": true,
+      "icon": "mdi-trophy"
+    },
+
+    {
+      "name": "chore_points_week",
+      "sources": ["chore_log"],
+      "mode": "union",
+      "groupBy": { "column": "person", "from": ["person"] },
+      "compute": [
+        { "name": "points", "computed": {
+            "lookup": { "table": "ref_chores", "match": "chore", "on": "chore", "field": "points", "default": 0 } } }
+      ],
+      "aggregate": { "sum": "points", "into": "total" },
+      "columns": ["person", "total"],
+      "period": "week",
+      "filter": { "status": "approved", "done_on": { "within": "@week" } },
+      "readonly": true,
+      "icon": "mdi-trophy-variant"
+    },
+
+    {
+      "name": "chore_spent_month",
+      "sources": ["reward_claim"],
+      "mode": "union",
+      "groupBy": { "column": "person", "from": ["person"] },
+      "compute": [
+        { "name": "cost", "computed": {
+            "lookup": { "table": "ref_rewards", "match": "reward", "on": "reward", "field": "cost", "default": 0 } } }
+      ],
+      "aggregate": { "sum": "cost", "into": "total" },
+      "columns": ["person", "total"],
+      "period": "month",
+      "filter": { "status": "granted", "claimed_on": { "within": "@month" } },
+      "readonly": true,
+      "icon": "mdi-cash-minus"
+    },
+
+    {
+      "name": "chore_balance",
+      "sources": ["chore_log", "reward_claim"],
+      "mode": "union",
+      "groupBy": { "column": "person", "from": ["person"] },
+      "compute": [
+        { "name": "delta", "source": "chore_log", "computed": {
+            "lookup": { "table": "ref_chores", "match": "chore", "on": "chore", "field": "points", "default": 0 } } },
+        { "name": "delta", "source": "reward_claim", "scale": -1, "computed": {
+            "lookup": { "table": "ref_rewards", "match": "reward", "on": "reward", "field": "cost", "default": 0 } } }
+      ],
+      "aggregate": { "sum": "delta", "into": "balance" },
+      "columns": ["person", "balance"],
+      "filter": { "$or": [ { "status": "approved" }, { "status": "granted" } ] },
+      "readonly": true,
+      "icon": "mdi-scale-balance"
+    },
+
+    {
+      "name": "chore_heatmap",
+      "pivot": {
+        "source": "chore_log",
+        "row": "person",
+        "column": "chore",
+        "aggregate": "count",
+        "totals": "count"
+      },
+      "icon": "mdi-grid"
+    },
+
+    {
+      "name": "home_calendar",
+      "calendar": {
+        "sources": [
+          { "table": "chore_log",     "dateColumn": "done_on",   "titleColumns": ["chore", "person"], "label": "Chore" },
+          { "table": "home_shopping", "dateColumn": "needed_by", "titleColumns": ["item"],            "label": "Shopping" }
+        ],
+        "rotationSources": [ { "view": "duty_schedule", "label": "Duty" } ],
+        "defaultView": "month",
+        "weekStart": 1
+      },
+      "icon": "mdi-calendar-check"
+    },
+
+    {
+      "name": "duty_schedule",
+      "layout": "table",
+      "rotation": {
+        "columns": [
+          { "name": "duty", "rotationTable": "duty_rotation", "advanceBy": "calendar", "interval": "weekly" }
+        ],
+        "range": { "from": "today", "periods": 8 }
+      },
+      "icon": "mdi-rotate-3d-variant"
+    },
+
+    {
+      "name": "shop_open",
+      "sources": ["home_shopping"],
+      "mode": "join",
+      "layout": "list",
+      "columns": [
+        "item", "qty", "status", "needed_by",
+        { "name": "days_late", "computed": { "daysSince": "needed_by" }, "when": { "days_late": { "gt": 0 } } }
+      ],
+      "filter": { "$or": [ { "status": "needed" }, { "status": "in_cart" } ] },
+      "icon": "mdi-cart"
+    },
+
+    {
+      "name": "reward_shop",
+      "sources": ["ref_rewards"],
+      "mode": "join",
+      "layout": "card",
+      "readonly": true,
+      "defaultSort": "cost",
+      "columns": ["reward", "cost"],
+      "icon": "mdi-gift"
+    },
+
+    {
+      "name": "reward_mine",
+      "sources": ["reward_claim"],
+      "mode": "join",
+      "layout": "list",
+      "defaultSort": "claimed_on",
+      "columns": ["claimed_on", "reward", "status"],
+      "icon": "mdi-gift-open"
+    },
+
+    {
+      "name": "doc_rules",
+      "markdown": "# {{t:text.rules_heading}}\n\n{{t:text.rules_body}}\n\n## {{t:text.rules_points}}\n\n{{view:reward_shop}}\n",
+      "icon": "mdi-book-open-variant"
+    }
+  ],
+
+  "nav": {
+    "layout": "drawer",
+    "items": [
+      { "view": "doc_home" },
+      { "view": "chore_add" },
+      { "view": "chore_mine" },
+      { "group": "Scoreboard", "icon": "mdi-trophy", "items": [
+        { "view": "chore_points_week" },
+        { "view": "chore_points_month" },
+        { "view": "chore_spent_month" },
+        { "view": "chore_balance" },
+        { "view": "chore_heatmap" }
+      ]},
+      { "view": "chore_board" },
+      { "group": "Rewards", "icon": "mdi-gift", "items": [
+        { "view": "reward_shop" },
+        { "view": "reward_mine" }
+      ]},
+      { "view": "shop_open" },
+      { "view": "home_calendar" },
+      { "group": "Household", "icon": "mdi-home-group", "items": [
+        { "view": "duty_schedule" },
+        { "table": "duty_rotation" },
+        { "table": "home_shopping" },
+        { "table": "chore_log" }
+      ]},
+      { "view": "doc_rules" }
+    ],
+    "bottomNav": ["doc_home", "chore_add", "chore_mine", "chore_points_week", "shop_open"]
+  }
+}

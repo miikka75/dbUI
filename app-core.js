@@ -48,6 +48,7 @@ function getColumnRef(table, col) { return Columns.columnRef(SCHEMA, table, col)
 function colIsMirror(tables, col, tableName) { return Columns.isMirror(tables, tableName, col); }
 function getTableMirrorSource(tables, tableName) { return Columns.tableMirrorSource(tables, tableName); }
 function getOwnerCol(table) { return Columns.tableOwnerCol(SCHEMA, table); } // table's type:'owner' column name, or null
+function getDefaultCols(table) { return Columns.tableDefaultCols(SCHEMA, table); } // [{name, from}] for `defaultFrom` columns
 
 // --- Permission "features" model: extracted to /access-features.js (AccessFeatures.*), a pure module
 //     over (schema, views) shared with the unit tests. These thin wrappers bind the app's global
@@ -517,6 +518,10 @@ function createVueApp() {
       // own rows and edit/delete ONLY those. Mirrors the RSVP permission model into the plain data grid;
       // Firestore rules are the real enforcement (see _meta/ownerTables), this is the matching UI. ---
       myEmailLc: function() { return (this.currentUserEmail || '').toLowerCase(); },
+      // My profile display name — the identity `@me` filters resolve to and `defaultFrom: "@me"` stamps.
+      // '' when I haven't set one; each caller decides what that means (a filter matches nothing, a
+      // stamp writes blank).
+      myDisplayName: function() { return ((this.myProfile && this.myProfile.name) || '').trim(); },
       // The underlying owner table for the current view/table (a self-service view has one source).
       selfServeTable: function() { var v = VIEWS[this.currentTable]; return v ? (v.sources || [])[0] : this.currentTable; },
       // Is the current table/view self-serviceable by me right now?
@@ -1522,7 +1527,21 @@ function createVueApp() {
           var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           var cols = getColumns(src);
           cols.forEach(function(c) { if (!row[c]) row[c] = ''; });
-          var oc = getOwnerCol(src); if (oc) row[oc] = self.currentUserEmail || '';   // stamp owner on create
+          // Stamp owner on create, and with it the table's roster policy. rosterPublic has to ride on the
+          // ROW because both rules layers are schema-blind (firestore.rules `resource.data.rosterPublic`,
+          // supabase app_can_read) — without it an owner-stamped row is readable only by its owner, so a
+          // shared leaderboard over a self-service table would show each member only themselves. This is
+          // the same policy the rsvp writer applies (saveRsvp); it belongs on every owner table, not just
+          // the one view kind that happened to implement it first.
+          var oc = getOwnerCol(src);
+          if (oc) {
+            row[oc] = self.currentUserEmail || '';
+            row.rosterPublic = !(SCHEMA[src] && SCHEMA[src].privateRoster);
+          }
+          // `defaultFrom` columns seed themselves on create and stay editable after (unlike owner).
+          getDefaultCols(src).forEach(function(dc) {
+            if (cols.indexOf(dc.name) >= 0) row[dc.name] = self.defaultFromValue(dc.from);
+          });
           for (var pc in prefill) { if (cols.indexOf(pc) >= 0) row[pc] = prefill[pc]; }  // only columns the mirror actually has
           var cacheKey = tab === 'archive' ? aKey(src) : src;
           if (!self.dataCache[cacheKey]) self.dataCache[cacheKey] = [];
@@ -1757,14 +1776,19 @@ function createVueApp() {
       // it isn't part of a mirror cluster (adds fan out across the cluster -> keep self-service to simple
       // single-table owned rows). Admin/unrestricted (allowed == null) use full access, not self-service.
       canSelfServe: function(table) {
-        var allowed = this.userAllowedTables;
-        // Must be a REGISTERED member with an identity. userAllowedTables is [] for both "registered, no
+        // Keyed on the WRITABLE set: a read-only grant on an owner-column table still routes writes
+        // through self-service, giving "see every row, change only my own" — the shared-log policy.
+        var allowed = this.userWritableTables;
+        // Must be a REGISTERED member with an identity. userWritableTables is [] for both "registered, no
         // grants" and "not a member (fail closed)" -- isUnregisteredUser separates them so self-service
         // never opens a table to a non-member.
         if (!allowed || !this.currentUserEmail || this.isUnregisteredUser) return false;
         if (!table || !getOwnerCol(table) || allowed.indexOf(table) >= 0) return false;
         return withMirrors([table]).length === 1;
       },
+      // Resolve a column's `defaultFrom` token to the value stamped on a new row. Unknown tokens stamp
+      // blank rather than writing the token text, so a typo can't end up looking like data.
+      defaultFromValue: function(token) { return token === '@me' ? this.myDisplayName : ''; },
       // Row belongs to the current user (its owner column equals my email, case-insensitive).
       rowOwnedByMe: function(item, table) {
         var oc = getOwnerCol(table);
@@ -2641,7 +2665,7 @@ function createVueApp() {
       // Display-only client filter -- it never widens server-enforced access.
       resolveMeTokens: function(filter) {
         if (filter == null) return filter;
-        var me = ((this.myProfile && this.myProfile.name) || '').trim() || '\u0000__no_me__';
+        var me = this.myDisplayName || '\u0000__no_me__';
         var walk = function(v) {
           if (v === '@me') return me;
           if (Array.isArray(v)) return v.map(walk);

@@ -10,6 +10,8 @@ schema, and a schema's labels carry no UI prose.
 |------|------------|
 | `bishopric-schema.json` | structure: tables, columns, views, nav, list *names* — plus the `ref_statuses` lookup rows the schema depends on |
 | `bishopric-lang-en.json` / `-fi.json` | labels for **this schema**: `tab.*`, `field.*`, `view.*`, `list.*`, `text.*` |
+| `chores-schema.json` | a household chore tracker — points, approvals, rewards, a weekly rota and a shopping list |
+| `chores-lang-en.json` | labels for the chores schema |
 | `app-lang-en.json` / `-fi.json` | the **app's own UI**: buttons, messages, settings, calendar. Schema-independent |
 
 ## Import order
@@ -93,3 +95,34 @@ one schema:
 
 The doc-view text is placeholder prose, and the people-lists are empty — no real congregation's roster
 or wording is in here.
+
+## What chores-schema.json exercises
+
+A household chore tracker, built to sit next to the commercial apps in the category (OurHome, OurFlat,
+Sweepy, Homey). It leans on a different part of dbUI than the bishopric schema:
+
+- an **`owner` column** on `chore_log` / `reward_claim`, so a family member logs their own rows with
+  **no table grant** (self-service; the Firestore rules are the enforcement)
+- **aggregate leaderboards** with `period` navigation — `chore_points_week` / `chore_points_month`
+  sum each chore's catalogue `points` through a `lookup` computed column
+- a **board** for the parent's approve/reject pass, laned by `status`
+- a **pivot** heatmap (person × chore) and a **multi-source calendar** that also overlays the rota
+- a **rotation** view for whose-week-it-is, over a `reorderable` roster table
+- **`defaultFrom: "@me"`** on `person`, so a logged chore is attributed to whoever logged it
+- **`daysSince` + an ordered comparison** on the shopping list — `days_late` appears only once an item
+  is past its `needed_by` date
+- a **signed cross-source aggregate** (`chore_balance`): points earned minus points spent, as one
+  figure, by scoping one compute def per source table and negating the second
+
+`ref_chores` and `ref_rewards` ship empty — the chores a household cares about, and what a point is
+worth, are theirs to enter. The `members` list is user-backed (`listSources`), so it fills itself from
+the display names people share in their profile.
+
+**Suggested access setup.** Parents `admin`. Everyone else `editor`, with *Can view* on `ref_chores`
+and `ref_rewards` (see what a chore is worth, can't rewrite it), *Tables* on `home_shopping`, and **no**
+grant on `chore_log` / `reward_claim` — those carry an `owner` column, so self-service lets each person
+log their own and nobody else's, while `rosterPublic` keeps the leaderboard shared.
+
+**Still not expressible**: recurring/scheduled chores and Tody-style aging ("this chore hasn't been
+done in three weeks") — `daysSince` ages a row's own date, and there is no max-per-group that feeds
+back into a lookup. Reminders and push notifications have no foundation in the app at all.

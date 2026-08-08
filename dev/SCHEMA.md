@@ -66,6 +66,7 @@ nav     ← navigation tree + layout, references views/tables by name
 | `sorted` | Sort dropdown items alphabetically |
 | `picker` | Input widget for a single `select` column: `"chips"` (selectable chips) or `"toggle"` (segmented buttons); omit for the default dropdown. Applies wherever the column is edited (any view). Deselecting the current value clears the cell. Ignored with `allowNew` (which needs free-text entry) and for `multiselect` (already chips). Same widget vocabulary as the `rsvp` view's `picker`. |
 | `syncFrom` | Mirror this column's value from another table |
+| `defaultFrom` | Seed the cell when a row is **created**. Only token: `"@me"` = the signed-in user's profile display name (blank when they have none, like the `@me` filter). Unlike `owner`, the value stays editable afterwards — use it so a self-service row is attributed to its author by default without hard-wiring it |
 | `table` | Reference table name (for `ref`) |
 | `valueCol` | Column used as value (for `ref`) |
 | `filterBy` | Filter ref options by another column (for `ref`) |
@@ -165,7 +166,8 @@ A `filter` (on a view, an inline/named-view embed, or a conditional column) matc
 - **`$or` / `$and`** = explicit logical groups, nestable:
   `{ "$and": [ { "city": "X" }, { "$or": [ {"status":"open"}, {"status":"in_progress"} ] } ] }`.
 - **Value operators** (also usable in column `when` / conditional columns — same engine):
-  `{ "col": { "notEmpty": true } }`, `{ "empty": true }`, `{ "ne": v }`.
+  `{ "col": { "notEmpty": true } }`, `{ "empty": true }`, `{ "ne": v }`,
+  and the ordered comparisons `{ "lt": v }` / `{ "gt": v }` / `{ "lte": v }` / `{ "gte": v }`.
   `notEmpty`/`empty` work on **computed** values too. Row filters and column/embed conditions share
   one matcher (`condMatches`), so **every operator above works in `filter`, `when`, and embed `when`.**
 
@@ -214,6 +216,27 @@ Instead of `collect`, use `aggregate` to produce one **numeric** row per group, 
 - **`view.compute`**: an array of computed defs resolved on the **source rows before grouping** — so an
   aggregate can `sum` a *looked-up* (or otherwise computed) per-row value, not just a stored column.
   These are preparation-only (not displayed); the displayed columns are `columns`.
+- **Signed totals across two tables** (`source` + `scale` on a compute def): in a **union** view each row
+  is tagged with its origin table, and `"source": "<table>"` restricts a def to those rows while
+  `"scale": -1` negates its result. Two defs writing the **same** output column — one per table, one
+  negated — let a single `aggregate.sum` produce a *balance* (earned minus spent), which one `sum` over
+  one table cannot. Rows no def matched leave the column unset and contribute nothing (not a zero).
+  `scale` is ignored for non-numeric results.
+
+  ```json
+  { "name": "balance", "sources": ["chore_log", "reward_claim"], "mode": "union",
+    "groupBy": { "column": "person", "from": ["person"] },
+    "compute": [
+      { "name": "delta", "source": "chore_log",
+        "computed": { "lookup": { "table": "ref_chores", "match": "chore", "field": "points", "default": 0 } } },
+      { "name": "delta", "source": "reward_claim", "scale": -1,
+        "computed": { "lookup": { "table": "ref_rewards", "match": "reward", "field": "cost", "default": 0 } } }
+    ],
+    "aggregate": { "sum": "delta", "into": "balance" },
+    "columns": ["person", "balance"] }
+  ```
+  The two tables usually have different date/status column names, so scope such a view with `$or`
+  (`{ "$or": [ {"status":"approved"}, {"status":"granted"} ] }`) rather than a flat equality.
 
 ##### Worked example — chores with per-chore points → ranked leaderboard
 The demo schema (`dev/schema.json`) wires this up: a `chores` ref table holds each chore's point value,
@@ -275,6 +298,15 @@ A column with `computed` derives its value from other columns at render time (no
   ```
   General-purpose — chore→points, member→role/phone, room→capacity, category→colour, etc. Pairs with
   `view.compute` + `aggregate.sum` to total a looked-up value (see **Leaderboard totals**).
+- **Age of a row** (`daysSince`): whole days from a date column to today, as a **number** (negative for a
+  future date, `""` when the date is blank or unparseable):
+  ```json
+  { "name": "days_late", "computed": { "daysSince": "needed_by" }, "when": { "days_late": { "gt": 0 } } }
+  ```
+  Recomputed every render and never stored, so an "overdue" view re-evaluates as the day rolls over.
+  Pair it with the ordered operators above for due/overdue/stale filters. Note this ages **one row's own
+  date** — "when was this chore last done by anyone" would need a max-per-group, which aggregates don't
+  feed back into a lookup.
 - Computed columns are read-only (no cell editor renders for them).
 - They appear in the view's visible columns and in card/table layout.
 
@@ -295,6 +327,7 @@ row when **every** field matches. Each field accepts a scalar (equality) or an o
 | `{ "f": { "notEmpty": true } }` | `row.f` is truthy (set) |
 | `{ "f": { "empty": true } }` | `row.f` is falsy (blank) |
 | `{ "f": { "ne": v } }` | `row.f !== v` |
+| `{ "f": { "lt": v } }` / `gt` / `lte` / `gte` | ordered comparison. **Numeric** when both sides parse as numbers (`9 < 10`, not `"9" > "10"`), otherwise a string compare — which orders `YYYY-MM-DD` dates correctly, so no separate date operator is needed. Combinable in one object for a range: `{ "gte": 10, "lte": 20 }`. A **blank or missing value is incomparable** and matches *no* ordered filter in either direction (fail-closed — otherwise `Number('') === 0` would quietly pull undated rows into an "overdue" view) |
 | `{ "$or": [...] }` / `{ "$and": [...] }` | logical groups (membership via `$or` of equalities) |
 | `{ "f": { "matchList": "L" } }` / `notMatchList` | value in / not in named list |
 
