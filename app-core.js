@@ -1454,16 +1454,21 @@ function createVueApp() {
         }
       },
 
-      colHideEmpty: function(col) {
-        var cfg = this.currentConfig;
+      // Column visibility is a question about a CONFIG, not about whatever is on screen: an embed has to
+      // ask about the view it embeds. Both helpers take an optional config and default to the current
+      // one, so the primary grid's call sites are unchanged while embed-view can pass its own — without
+      // it, a `when`/`hideEmpty` column entry was silently ignored inside {{view:x}}, because the lookup
+      // ran against the hosting doc-view's columns, which never contain the embedded view's entries.
+      colHideEmpty: function(col, cfg) {
+        cfg = cfg || this.currentConfig;
         var arr = Array.isArray(cfg.columns) ? cfg.columns : [];
         var entry = arr.find(function(c) { return colName(c) === col; });
         if (entry && typeof entry === 'object' && typeof entry.hideEmpty === 'boolean') return entry.hideEmpty;
         return !!cfg.hideEmpty;
       },
-      isColumnHidden: function(col, item) {
-        var cfg = this.currentConfig;
-        if (this.colHideEmpty(col) && !item[col]) return true;
+      isColumnHidden: function(col, item, cfg) {
+        cfg = cfg || this.currentConfig;
+        if (this.colHideEmpty(col, cfg) && !item[col]) return true;
         var cols = cfg.columns;
         if (!cols || !Array.isArray(cols)) return false;
         // `when` clause on a column entry: { "name": col, "computed"?: {...}, "when": { <condition> } }
@@ -3546,11 +3551,19 @@ function createVueApp() {
       hasArchive: function() { return !this.part && appInstance && appInstance.embedHasArchive(this.type, this.name); },
       layout: function() { return appInstance ? appInstance.embedViewLayout(this.type, this.name) : 'table'; },
       roLayout: function() { return (this.spec && this.spec.config.layout) || 'table'; },
+      // The config whose column entries govern THIS embed's per-row visibility: an inline/named-view
+      // embed carries its own spec.config, a {{view:x}}/{{table:x}} token resolves the named view/table.
+      colCfg: function() { return this.spec ? this.spec.config : ((typeof VIEWS !== 'undefined' && VIEWS[this.name]) || (typeof SCHEMA !== 'undefined' && SCHEMA[this.name]) || {}); },
       tblStyle: function() { return 'width:100%; font-size:' + this.fontSize + '; border-collapse:collapse'; },
       thStyle: function() { return 'text-align:left; padding:' + this.cellPad + '; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)'; },
       tdStyle: function() { return 'padding:' + this.cellPad; }
     },
     methods: Object.assign({}, ROOT_PROXY, {
+      // Per-row column visibility, evaluated against the EMBEDDED view's own entries (colCfg).
+      // Card/list layouts drop the field entirely; a table keeps the column and blanks the cell, which
+      // is the same split the primary grid makes.
+      colHidden: function(col, item) { return !!appInstance && appInstance.isColumnHidden(col, item, this.colCfg); },
+      colsFor: function(item) { var self = this; return this.cols.filter(function(c) { return !self.colHidden(c, item); }); },
       isArmed: function(item) { return appInstance.isArmed('erow:' + item.id); },
       addRow: function() { return appInstance.embedAddRow(this.type, this.name); },
       delRow: function(item) { return appInstance.embedDeleteRow(this.type, this.name, item); },
@@ -3593,32 +3606,32 @@ function createVueApp() {
       + '<template v-if="spec.inlineBlocks" v-for="(blk, bi) in spec.inlineBlocks" :key="\'ib\'+bi">'
       + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
       + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
+      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
       + '</template>'
       + '<template v-else>'
       + '<div v-if="header" style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t(\'tab.\' + spec.config.table) || spec.config.table }} ({{ rows.length }})</div>'
       + '<table v-if="roLayout===\'table\'" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
-      + '<div v-else-if="roLayout===\'card\'" style="display:grid; gap:6px"><div v-for="er in rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in cols" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span><list-value :col="ec" :value="er[ec]"></list-value></span></div></div>'
-      + '<div v-else class="d-flex align-center flex-wrap ga-1"><v-chip v-for="er in rows" :key="er.id" size="small" variant="tonal" color="secondary" label><span v-for="(ec, i) in cols" :key="ec">{{ er[ec] }}<span v-if="i < cols.length - 1" style="opacity:0.4"> · </span></span></v-chip></div>'
+      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
+      + '<div v-else-if="roLayout===\'card\'" style="display:grid; gap:6px"><div v-for="er in rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in colsFor(er)" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span><list-value :col="ec" :value="er[ec]"></list-value></span></div></div>'
+      + '<div v-else class="d-flex align-center flex-wrap ga-1"><v-chip v-for="er in rows" :key="er.id" size="small" variant="tonal" color="secondary" label><span v-for="(ec, i) in colsFor(er)" :key="ec">{{ er[ec] }}<span v-if="i < colsFor(er).length - 1" style="opacity:0.4"> · </span></span></v-chip></div>'
       + '</template>'
       + '</template>'
       // --- editable data (page / doc-leaf self path): list/card/table with data-cell + row controls ---
       + '<div v-else>'
       + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
       + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
-      + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]"></list-value><span v-if="i < cols.length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
+      + '<template v-slot:default><span v-for="(col, i) in colsFor(item)" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]"></list-value><span v-if="i < colsFor(item).length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
       + '<template v-slot:append><template v-if="canMutate"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></template></template>'
       + '</v-list-item></v-list>'
       + '<div v-else-if="layout===\'card\'" class="my-2">'
       + '<v-card v-for="(item, ri) in rows" :key="item.id || ri" variant="flat" class="ma-2 pa-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">'
-      + '<div v-for="col in cols" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8"><list-value :col="col" :value="item[col]"></list-value></span></div>'
+      + '<div v-for="col in colsFor(item)" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8"><list-value :col="col" :value="item[col]"></list-value></span></div>'
       + '<div v-if="canMutate" style="text-align:right"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></div>'
       + '</v-card></div>'
       + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
       + '<thead><tr><th v-for="c in cols" :key="c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
       + '<tbody><tr v-for="(item, ri) in rows" :key="item.id || ri"><td v-for="col in cols" :key="col">'
-      + '<data-cell :item="item" :col="col" :owner="name" :readonly="!!part" :embed="true"></data-cell>'
+      + '<data-cell v-if="!colHidden(col, item)" :item="item" :col="col" :owner="name" :readonly="!!part" :embed="true"></data-cell>'
       + '</td><td v-if="canMutate" style="white-space:nowrap">'
       + '<v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn>'
       + '<v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn>'

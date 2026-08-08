@@ -335,6 +335,10 @@ row when **every** field matches. Each field accepts a scalar (equality) or an o
 valid in a `filter` is valid in a `when` and vice-versa — `$or`/`$and`,
 `matchList`/`notMatchList`, equality, and the operators above. `notEmpty`/`empty` work
 on **computed** values, so you can show a column only when a computed result is present.
+Column `when`/`hideEmpty` are evaluated against the config that *owns* the column, so they apply
+inside a `{{view:x}}` / `{{table:x}}` embed and in an inline embed exactly as they do at top level —
+the embedded view's own entries decide, not the page hosting it.
+
 A `when` clause also works on an **embed** (inline, named-view, or markdown prose block) in a
 view's `columns`: the embed renders per-card only when the card's row matches — e.g. a markdown
 prose block placed above a column, shown only when a computed value is present:

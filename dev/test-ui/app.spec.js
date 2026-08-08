@@ -3161,6 +3161,45 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await expect(page.locator('[data-testid="pivot-view"]')).toBeVisible();  // renders in the DOM
   });
 
+  test("a conditional column's `when` applies inside a {{view:}} embed, not just top-level", async ({ page }) => {
+    // isColumnHidden read `currentConfig` — the HOSTING doc-view — so an embedded view's own column
+    // entries were never found and its `when`/`hideEmpty` silently did nothing. The gate now takes the
+    // config it is asked about, and embed-view passes its own.
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // A view with a per-row conditional column, and a doc-view that embeds it by token.
+      window.VIEWS.late_items = {
+        name: 'late_items', sources: ['tasks'], mode: 'join', layout: 'table',
+        columns: ['title', { name: 'status', when: { title: { ne: 'quiet' } } }]
+      };
+      window.VIEWS.late_page = { name: 'late_page', markdown: 'x' };
+      const loud = { id: 'a', title: 'loud', status: 'open' };
+      const quiet = { id: 'b', title: 'quiet', status: 'open' };
+      const embedCfg = window.VIEWS.late_items;
+      return {
+        // The embedded view's own entries decide, whichever config happens to be on screen.
+        embedLoud: app.isColumnHidden('status', loud, embedCfg),
+        embedQuiet: app.isColumnHidden('status', quiet, embedCfg),
+        // hideEmpty on the embedded config is honoured the same way.
+        emptyHidden: app.isColumnHidden('status', { id: 'c', title: 'x', status: '' },
+          { columns: [{ name: 'status', hideEmpty: true }] }),
+        // No config passed -> unchanged behaviour, the view on screen.
+        defaultsToCurrent: app.isColumnHidden('status', loud) === app.isColumnHidden('status', loud, app.currentConfig)
+      };
+    });
+    expect(r.embedLoud).toBe(false);   // condition met -> column shows
+    expect(r.embedQuiet).toBe(true);   // condition failed -> hidden, inside the embed too
+    expect(r.emptyHidden).toBe(true);
+    expect(r.defaultsToCurrent).toBe(true);
+  });
+
   test("read-only grant ('r'): visible and loaded, every cell read-only, no add/delete", async ({ page }) => {
     // Before per-table modes, "can't write it" was implied by "can't see it", so cell editing never had
     // to consult grants. A read-only grant breaks that implication — these are the gates that had to learn.
