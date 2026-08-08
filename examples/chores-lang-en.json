@@ -19,11 +19,10 @@
       "view.chore_points_week": "Points this week",
       "view.chore_spent_month": "Points spent",
       "view.doc_home": "Home",
-      "view.doc_rules": "House rules",
       "view.duty_schedule": "Weekly duty",
       "view.home_calendar": "Calendar",
       "view.reward_mine": "My rewards",
-      "view.reward_shop": "Reward shop",
+      "view.reward_shop": "Rewards & rules",
       "view.shop_open": "Shopping",
 
       "nav.Household": "Household",
@@ -33,6 +32,7 @@
       "field.added_by": "Added by",
       "field.balance": "Balance",
       "field.chore": "Chore",
+      "field.claim_status": "Status",
       "field.claimed_on": "Claimed",
       "field.cost": "Cost",
       "field.days_late": "Days late",
@@ -50,6 +50,7 @@
       "field.qty": "Qty",
       "field.reward": "Reward",
       "field.room": "Room",
+      "field.shop_status": "Status",
       "field.status": "Status",
       "field.total": "Total",
 

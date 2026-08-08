@@ -279,7 +279,7 @@
         "person": "Ann",
         "reward": "Ice cream",
         "claimed_on": "2026-08-06",
-        "status": "granted"
+        "claim_status": "granted"
       },
       {
         "id": "claim-2",
@@ -287,7 +287,7 @@
         "person": "Bob",
         "reward": "Pick the film",
         "claimed_on": "2026-08-04",
-        "status": "granted"
+        "claim_status": "granted"
       },
       {
         "id": "claim-3",
@@ -295,7 +295,7 @@
         "person": "Cara",
         "reward": "Stay up an hour",
         "claimed_on": "2026-08-08",
-        "status": "requested"
+        "claim_status": "requested"
       }
     ],
     "home_shopping": [
@@ -303,41 +303,41 @@
         "id": "shop-1",
         "item": "Washing-up liquid",
         "qty": "1",
-        "status": "needed",
         "added_by": "Ann",
-        "needed_by": "2026-08-04"
+        "needed_by": "2026-08-04",
+        "shop_status": "needed"
       },
       {
         "id": "shop-2",
         "item": "Bin bags",
         "qty": "2",
-        "status": "needed",
         "added_by": "Bob",
-        "needed_by": "2026-08-11"
+        "needed_by": "2026-08-11",
+        "shop_status": "needed"
       },
       {
         "id": "shop-3",
         "item": "Milk",
         "qty": "2 L",
-        "status": "in_cart",
         "added_by": "Cara",
-        "needed_by": "2026-08-09"
+        "needed_by": "2026-08-09",
+        "shop_status": "in_cart"
       },
       {
         "id": "shop-4",
         "item": "Cat food",
         "qty": "1 box",
-        "status": "needed",
         "added_by": "Dan",
-        "needed_by": "2026-08-07"
+        "needed_by": "2026-08-07",
+        "shop_status": "needed"
       },
       {
         "id": "shop-5",
         "item": "Kitchen roll",
         "qty": "4",
-        "status": "bought",
         "added_by": "Ann",
-        "needed_by": "2026-08-01"
+        "needed_by": "2026-08-01",
+        "shop_status": "bought"
       }
     ]
   },
