@@ -305,6 +305,17 @@ const server = http.createServer(async (req, res) => {
         if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
         return json(res, backend.getListUsers ? backend.getListUsers('local') : {});
       }
+      case 'getMyListValues': {
+        // Self-scoped: only the links naming the caller. Not admin-gated — it is their own identity, and
+        // it is what lets `@me` resolve to a curated value on a `userlink` list.
+        const all = backend.getListUsers ? backend.getListUsers('local') : {};
+        const mine = {};
+        Object.keys(all || {}).forEach(list => {
+          const links = all[list] || {};
+          Object.keys(links).forEach(val => { if (_mine(links[val]) && !(list in mine)) mine[list] = val; });
+        });
+        return json(res, mine);
+      }
       case 'setListUser': {
         // Admin-only: link (email set) or unlink (email empty) a list value to a registered user.
         if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);

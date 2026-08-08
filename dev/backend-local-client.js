@@ -23,6 +23,7 @@ backend = {
   putListItem: (folderId, listName, value) => _post('putListItem', { folderId, listName, value }),
   getListAvatars: () => _post('getListAvatars', {}),                                       // viewer-safe value->picture
   getListUserLinks: () => _post('getListUserLinks', {}),                                   // admin-only value->email
+  getMyListValues: () => _post('getMyListValues', {}),                                     // self-scoped list->myValue
   setListUser: (listName, value, email) => _post('setListUser', { listName, value, email }),
   moveRow: (tableId, rowData, fromTab, toTab) => _post('moveRow', { tableId, rowData, fromTab, toTab }),
   saveChangesets: (folderId, siteId, json) => _post('saveChangesets', { folderId, siteId, json }),

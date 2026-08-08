@@ -232,6 +232,21 @@ backend = {
       var out = {}; (rows || []).forEach(function(row) { var v = row.value; (out[v.list] || (out[v.list] = {}))[v.value] = v.email; }); return out;
     });
   },
+  // SELF-scoped mirror of the Firebase method: { listName: myValue }, the link that names ME. RLS lets a
+  // member read their own link (see the _list_users read predicate), so `@me` can resolve to a curated
+  // list value without exposing anyone else's mapping.
+  getMyListValues: function() {
+    var email = (_myEmail && _myEmail()) || '';
+    if (!email) return Promise.resolve({});
+    return StorageSupabase._all('_list_users').then(function(rows) {
+      var out = {};
+      (rows || []).forEach(function(row) {
+        var v = row.value;
+        if (v && String(v.email || '').toLowerCase() === email && v.list && !(v.list in out)) out[v.list] = v.value;
+      });
+      return out;
+    }).catch(function() { return {}; });
+  },
   setListUser: function(listName, value, email) {
     var self = this, id = self._linkDocId(listName, value);
     if (!email) return StorageSupabase.delete('_list_users', id);

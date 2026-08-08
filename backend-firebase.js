@@ -249,6 +249,17 @@ backend = {
       var out = {}; snap.forEach(function(d) { var v = d.data(); (out[v.list] || (out[v.list] = {}))[v.value] = v.email; }); return out;
     });
   },
+  // SELF-scoped: { listName: myValue } for every `userlink` list that names me. This is what lets `@me`
+  // resolve to a curated list value instead of my profile display name. The whole-collection read above
+  // is admin-only; this equality query is rules-provable against the caller's own email (see the
+  // _list_users read rule), so any member may run it and learns nothing but their own link.
+  getMyListValues: function() {
+    var email = _myEmail();
+    if (!email) return Promise.resolve({});
+    return _db.collection('_list_users').where('email', '==', email).get().then(function(snap) {
+      var out = {}; snap.forEach(function(d) { var v = d.data(); if (v.list && !(v.list in out)) out[v.list] = v.value; }); return out;
+    }).catch(function() { return {}; });   // never let a denied/missing link break boot
+  },
   // Admin-only: link (email set) or unlink (empty) a value. Caches the linked user's current shared flag so
   // the shared-only query stays rules-provable; a later share/unshare needs a re-link to refresh it.
   setListUser: function(listName, value, email) {

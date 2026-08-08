@@ -159,6 +159,7 @@ function createVueApp() {
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
       listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
       listUserLinks: {},        // admin only: raw { listName: { value: email } } links, for the Lookup editor
+      myListValues: {},         // self-scoped { listName: myValue } — what `@me` means on a userlink list
       periodOffset: 0,          // leaderboard ‹ › navigation: periods back from now (0 = current)
       importProgress: null,     // {done,total,icon,detail,errors,finished} while an import runs; null otherwise
       firestoreRules: '',
@@ -471,6 +472,11 @@ function createVueApp() {
         return needed > (this.windowWidth - 72);
       },
       useListLayout: function() { return this.currentConfig.layout === 'list'; },
+      // Add is offered wherever rows may be mutated, INCLUDING the read-only `list` layout: a table can
+      // declare layout:'list' as its only presentation, so gating Add on an editable layout would leave
+      // such a table with no way to create a row at all. The row lands and saves; it is just not
+      // editable from a list (see the `layout` note in SCHEMA.md — use table/card for data entry).
+      canAddRows: function() { return this.canMutateRows; },
       isReadonlyView: function() { return !this.currentSelfService && this.viewReadonly(this.currentTable); },
       embedConfigs: function() {
         var self = this;
@@ -888,7 +894,7 @@ function createVueApp() {
             self.tableMap = result.tableMap || {};
             self.languages = result.languages || [];
             self.listsCache = result.lists || {}; window._listsCache = self.listsCache;
-            self.loadListAvatars(); self.loadListUserLinks();   // user-linked-list avatars + admin editor links
+            self.loadListAvatars(); self.loadListUserLinks(); self.loadMyListValues();   // avatars + admin editor links + my own @me identity
             // Auto-seed lists (create missing list names + seed mandatory filter values): admin-only
             // maintenance. A restricted user's listsCache is already scoped to their own tables
             // server-side; seeding+saving here would add entries for tables they don't own, and
@@ -962,7 +968,7 @@ function createVueApp() {
           return backend.getLists(self.folderId).then(function(lists) {
             self.listsCache = lists || {}; window._listsCache = self.listsCache;
             if (self._seedSchemaLists()) backend.saveLists(self.folderId, self.listsCache);
-            self.loadListAvatars(); self.loadListUserLinks();   // user-linked-list avatars + admin editor links
+            self.loadListAvatars(); self.loadListUserLinks(); self.loadMyListValues();   // avatars + admin editor links + my own @me identity
           });
         }).then(function() {
           // Load users FIRST to know access restrictions
@@ -1560,7 +1566,7 @@ function createVueApp() {
           }
           // `defaultFrom` columns seed themselves on create and stay editable after (unlike owner).
           getDefaultCols(src).forEach(function(dc) {
-            if (cols.indexOf(dc.name) >= 0) row[dc.name] = self.defaultFromValue(dc.from);
+            if (cols.indexOf(dc.name) >= 0) row[dc.name] = self.defaultFromValue(dc.from, dc.name);
           });
           for (var pc in prefill) { if (cols.indexOf(pc) >= 0) row[pc] = prefill[pc]; }  // only columns the mirror actually has
           var cacheKey = tab === 'archive' ? aKey(src) : src;
@@ -1823,7 +1829,7 @@ function createVueApp() {
       },
       // Resolve a column's `defaultFrom` token to the value stamped on a new row. Unknown tokens stamp
       // blank rather than writing the token text, so a typo can't end up looking like data.
-      defaultFromValue: function(token) { return token === '@me' ? this.myDisplayName : ''; },
+      defaultFromValue: function(token, col) { return token === '@me' ? this.meValueFor(col) : ''; },
       // Row belongs to the current user (its owner column equals my email, case-insensitive).
       rowOwnedByMe: function(item, table) {
         var oc = getOwnerCol(table);
@@ -2666,6 +2672,13 @@ function createVueApp() {
       isUserLinkList: function(name) { return (((this.schemaData || {}).listSources) || {})[name] === 'userlink'; },
       // Admin only: the raw value -> email links, for the editor's current-selection display. Denied for
       // non-admins by the server/rules -> caught into {} (they never need it; rendering uses listAvatars).
+      // Self-scoped link lookup, loaded for EVERY member (unlike loadListUserLinks, which is admin-only):
+      // it is the caller's own identity and `@me` needs it before any view resolves.
+      loadMyListValues: function() {
+        var self = this;
+        if (typeof backend === 'undefined' || !backend.getMyListValues) return Promise.resolve();
+        return backend.getMyListValues().then(function(m) { self.myListValues = m || {}; }).catch(function() { self.myListValues = {}; });
+      },
       loadListUserLinks: function() {
         var self = this;
         if (typeof backend === 'undefined' || !backend.getListUserLinks) return Promise.resolve();
@@ -2683,7 +2696,7 @@ function createVueApp() {
         var self = this;
         if (typeof backend === 'undefined' || !backend.setListUser) return;
         backend.setListUser(list, value, email || '').then(function() {
-          self.loadListUserLinks(); self.loadListAvatars();
+          self.loadListUserLinks(); self.loadListAvatars(); self.loadMyListValues();
         }).catch(function(e) { self.notify((e && (e.error || e.message)) || self.t('msg.save_failed')); });
       },
       userDisplayName: function(u) { return this.profileName(u.key); },
@@ -2695,19 +2708,34 @@ function createVueApp() {
           self.profilesByEmail = Object.assign({}, self.profilesByEmail, patch);
         }).catch(function(e) { self.notify((e && e.message) || self.t('msg.save_failed')); });
       },
-      // Resolve the "@me" filter token to the current user's profile display name (as stored). An empty
-      // profile name -> a sentinel that matches nothing (the user has no assigned identity yet).
-      // Display-only client filter -- it never widens server-enforced access.
+      // What "@me" means for a given COLUMN. Two identity models, and the column's list decides which:
+      //   userlink list -> the curated value linked to my account (the household's own name for me),
+      //   otherwise     -> my profile display name (the value a `users`-backed list is populated from).
+      // Without the first branch, `@me` on a userlink list compared my profile name against a curated
+      // value and silently matched nothing whenever the two differed.
+      meValueFor: function(col) {
+        var list = col ? getColumnList(null, col) : null;
+        if (list && this.isUserLinkList(list)) return (this.myListValues || {})[list] || '';
+        return this.myDisplayName;
+      },
+      // Resolve the "@me" filter token. An empty identity -> a sentinel that matches nothing (the user has
+      // no assigned identity yet). Display-only client filter -- it never widens server-enforced access.
       resolveMeTokens: function(filter) {
         if (filter == null) return filter;
-        var me = this.myDisplayName || '\u0000__no_me__';
-        var walk = function(v) {
-          if (v === '@me') return me;
-          if (Array.isArray(v)) return v.map(walk);
-          if (v && typeof v === 'object') { var o = {}; Object.keys(v).forEach(function(k) { o[k] = walk(v[k]); }); return o; }
+        var self = this;
+        // `key` is the column the token sits under, so a userlink list resolves through its own mapping.
+        var walk = function(v, key) {
+          if (v === '@me') return self.meValueFor(key) || '\u0000__no_me__';
+          if (Array.isArray(v)) return v.map(function(x) { return walk(x, key); });
+          if (v && typeof v === 'object') {
+            var o = {};
+            // $or/$and carry no column of their own -> keep the enclosing key for their branches.
+            Object.keys(v).forEach(function(k) { o[k] = walk(v[k], k.charAt(0) === '$' ? key : k); });
+            return o;
+          }
           return v;
         };
-        return walk(filter);
+        return walk(filter, null);
       },
       // Shallow view clone with @me resolved in view.filter + view.groupBy.filter (returns the original
       // untouched when no @me token is present, to avoid needless churn).

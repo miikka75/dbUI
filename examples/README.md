@@ -120,8 +120,14 @@ Sweepy, Homey). It leans on a different part of dbUI than the bishopric schema:
   figure, by scoping one compute def per source table and negating the second
 
 `ref_chores` and `ref_rewards` ship empty — the chores a household cares about, and what a point is
-worth, are theirs to enter. The `members` list is user-backed (`listSources`), so it fills itself from
-the display names people share in their profile.
+worth, are theirs to enter.
+
+`members` is a **`userlink`** list: the household keeps calling people what it calls them ("Ann", not
+whatever she typed into her profile), and an admin links each value to an account in the Lookup tab.
+That link is what makes *My chores* and the `person` auto-fill follow the signed-in user, so it is
+worth doing straight after registering everyone — until a value is linked, `@me` matches nothing for
+that person. Switch `listSources` to `"users"` instead if you would rather the list populate itself
+from shared profile names and skip the linking step.
 
 **Sample data.** `chores-data.json` fills the catalogue (11 chores priced 1–5 points across five
 rooms), four rewards, a three-slot rota, fourteen logged chores, three reward claims and a shopping

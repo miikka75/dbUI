@@ -3161,6 +3161,77 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await expect(page.locator('[data-testid="pivot-view"]')).toBeVisible();  // renders in the DOM
   });
 
+  test('@me resolves through the user link on a userlink list, and to the profile name otherwise', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.myProfile = { name: 'Ann Smith', shared: true, picture: '' };   // profile name != curated value
+      app.myListValues = { members: 'Ann' };                              // the household calls her "Ann"
+      const asUsers = Object.assign({}, app.schemaData, { listSources: { members: 'users' } });
+      const asLink = Object.assign({}, app.schemaData, { listSources: { members: 'userlink' } });
+
+      app.schemaData = Object.freeze(asUsers);
+      const users = { me: app.meValueFor('person'), filter: app.resolveMeTokens({ person: '@me' }) };
+      app.schemaData = Object.freeze(asLink);
+      const link = {
+        me: app.meValueFor('person'),
+        filter: app.resolveMeTokens({ person: '@me' }),
+        nested: app.resolveMeTokens({ $or: [{ person: '@me' }, { person: 'Bob' }] }),
+        other: app.meValueFor('title'),          // a column on no userlink list -> profile name
+        stamp: app.defaultFromValue('@me', 'person')
+      };
+      app.myListValues = {};                     // linked to nothing yet
+      const unlinked = app.resolveMeTokens({ person: '@me' });
+      return { users, link, unlinked };
+    });
+    expect(r.users.me).toBe('Ann Smith');                        // users-backed list: the profile name
+    expect(r.users.filter).toEqual({ person: 'Ann Smith' });
+    expect(r.link.me).toBe('Ann');                               // userlink list: the curated value
+    expect(r.link.filter).toEqual({ person: 'Ann' });
+    expect(r.link.nested.$or[0]).toEqual({ person: 'Ann' });     // resolves inside $or, which owns no column
+    expect(r.link.nested.$or[1]).toEqual({ person: 'Bob' });
+    expect(r.link.other).toBe('Ann Smith');                      // non-userlink column is unaffected
+    expect(r.link.stamp).toBe('Ann');                            // defaultFrom stamps the same identity
+    // No link yet -> the sentinel, matching nothing, rather than silently matching a stranger's rows.
+    expect(r.unlinked.person).not.toBe('Ann');
+    expect(r.unlinked.person).not.toBe('Ann Smith');
+  });
+
+  test('list layout: Add stays available (a table may have no other layout), but renders no editor', async ({ page }) => {
+    // The trap behind "Add just makes an empty row": `list` renders values through list-value, which is
+    // read-only, so a row added there has to be edited somewhere else. Add is NOT suppressed — `layout`
+    // can be set on a TABLE, and then the list is its only presentation; removing Add would leave no way
+    // to create a row at all. Data-entry views should use table/card.
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      window.VIEWS.list_t = { name: 'list_t', sources: ['tickets'], mode: 'join', layout: 'list', columns: ['title'] };
+      app.selectTab('list_t');
+      await new Promise(r => setTimeout(r, 250));
+      const before = (app.currentData || []).length;
+      app.addRow();
+      await new Promise(r => setTimeout(r, 250));
+      return { add: app.canAddRows, list: app.useListLayout, grew: (app.currentData || []).length === before + 1 };
+    });
+    expect(r.list).toBe(true);
+    expect(r.add).toBe(true);    // still offered...
+    expect(r.grew).toBe(true);   // ...and it really does create the row
+    await expect(page.locator('.v-table')).toHaveCount(0);          // but there is no editing grid
+    await expect(page.locator('.v-list-item .cell-edit')).toHaveCount(0);
+  });
+
   test("a conditional column's `when` applies inside a {{view:}} embed, not just top-level", async ({ page }) => {
     // isColumnHidden read `currentConfig` — the HOSTING doc-view — so an embedded view's own column
     // entries were never found and its `when`/`hideEmpty` silently did nothing. The gate now takes the

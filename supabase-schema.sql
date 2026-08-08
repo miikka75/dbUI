@@ -179,7 +179,10 @@ returns boolean language sql stable security definer set search_path = public as
       (val ->> 'shared') = 'true' or key = public.app_email()
         or (not public.app_no_users() and public.app_role() = 'admin')
     when store = '_list_users' then
-      (val ->> 'shared') = 'true' or (not public.app_no_users() and public.app_role() = 'admin')
+      -- ...or the link that names ME: `@me` resolves through it on a `userlink` list, and it is the
+      -- caller's own identity, so this exposes no email they don't already have.
+      (val ->> 'shared') = 'true' or lower(val ->> 'email') = public.app_email()
+      or (not public.app_no_users() and public.app_role() = 'admin')
     when store = '_lists' then
       public.app_is_registered() and (
         public.app_no_users() or public.app_role() = 'admin' or public.app_list_allowed(val -> 'tables')

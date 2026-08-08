@@ -7,7 +7,7 @@
 
   "defaultLanguage": "English",
   "translatableLists": ["chore_status", "claim_status", "shop_status", "room"],
-  "listSources": { "members": "users" },
+  "listSources": { "members": "userlink" },
 
   "tables": {
     "ref_chores": {
@@ -229,7 +229,7 @@
       "name": "shop_open",
       "sources": ["home_shopping"],
       "mode": "join",
-      "layout": "list",
+      "layout": "table",
       "columns": [
         "item", "qty", "status", "needed_by",
         { "name": "days_late", "computed": { "daysSince": "needed_by" }, "when": { "days_late": { "gt": 0 } } }
@@ -253,7 +253,7 @@
       "name": "reward_mine",
       "sources": ["reward_claim"],
       "mode": "join",
-      "layout": "list",
+      "layout": "table",
       "defaultSort": "claimed_on",
       "columns": ["claimed_on", "reward", "status"],
       "icon": "mdi-gift-open"

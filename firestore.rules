@@ -129,6 +129,10 @@ service cloud.firestore {
     // world-readable via /_profiles, so this exposes nothing new. An unshared link is admin-only. Only
     // admins write. Same shape as /_profiles, so it never falls through to the data catch-all (which
     // excludes the whole `_` namespace anyway).
+    // A user may also read the link that names THEM (`email == myEmail()`), which is how `@me` resolves
+    // to a curated list value on a `userlink` list. That is the caller's own identity — no new exposure
+    // — and the constant comparison makes `.where('email','==',<my email>)` rules-provable, the same
+    // property that lets a non-admin run the shared-links query.
     match /_list_users/{id} {
       function validLink() {
         return request.resource.data.keys().hasOnly(['list', 'value', 'email', 'shared'])
@@ -137,7 +141,7 @@ service cloud.firestore {
           && request.resource.data.email is string && request.resource.data.email.size() <= 320
           && request.resource.data.shared is bool;
       }
-      allow read:           if request.auth != null && (resource.data.shared == true || (!noUsers() && role() == 'admin'));
+      allow read:           if request.auth != null && (resource.data.shared == true || resource.data.email == myEmail() || (!noUsers() && role() == 'admin'));
       allow create, update: if request.auth != null && (noUsers() || role() == 'admin') && validLink();
       allow delete:         if request.auth != null && (noUsers() || role() == 'admin');
     }

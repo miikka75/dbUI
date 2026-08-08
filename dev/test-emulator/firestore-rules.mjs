@@ -246,5 +246,19 @@ await ok("list of an 'r' table is NOT writable",
 await ok("list of an 'rw' table IS writable",
   assertSucceeds(setDoc(doc(mixed, '_lists/taskvalues'), { name: 'taskvalues', items: ['a', 'b'], tables: ['tasks'] })));
 
+// A member may read the link that names THEM — their own identity, and what lets `@me` resolve to a
+// curated value on a userlink list. The equality query must be rules-provable, like the shared-only one.
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), '_list_users/members~Vic'), { list: 'members', value: 'Vic', email: 'viewer@x.com', shared: false });
+});
+await ok('viewer CAN read the unshared link naming THEM',
+  assertSucceeds(getDoc(doc(viewer, '_list_users/members~Vic'))));
+await ok('viewer CAN query their own link by email (rules-provable)',
+  assertSucceeds(getDocs(query(collection(viewer, '_list_users'), where('email', '==', 'viewer@x.com')))));
+await ok("viewer still CANNOT read someone else's unshared link",
+  assertFails(getDoc(doc(viewer, '_list_users/people~Cara'))));
+await ok("viewer CANNOT query someone else's links",
+  assertFails(getDocs(query(collection(viewer, '_list_users'), where('email', '==', 'cara@x.com')))));
+
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);

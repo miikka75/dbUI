@@ -66,7 +66,7 @@ nav     ← navigation tree + layout, references views/tables by name
 | `sorted` | Sort dropdown items alphabetically |
 | `picker` | Input widget for a single `select` column: `"chips"` (selectable chips) or `"toggle"` (segmented buttons); omit for the default dropdown. Applies wherever the column is edited (any view). Deselecting the current value clears the cell. Ignored with `allowNew` (which needs free-text entry) and for `multiselect` (already chips). Same widget vocabulary as the `rsvp` view's `picker`. |
 | `syncFrom` | Mirror this column's value from another table |
-| `defaultFrom` | Seed the cell when a row is **created**. Only token: `"@me"` = the signed-in user's profile display name (blank when they have none, like the `@me` filter). Unlike `owner`, the value stays editable afterwards — use it so a self-service row is attributed to its author by default without hard-wiring it |
+| `defaultFrom` | Seed the cell when a row is **created**. Only token: `"@me"` = the signed-in user's identity, resolved exactly as the `@me` filter does for that column (a `userlink` list's curated value, else the profile display name) (blank when they have none, like the `@me` filter). Unlike `owner`, the value stays editable afterwards — use it so a self-service row is attributed to its author by default without hard-wiring it |
 | `table` | Reference table name (for `ref`) |
 | `valueCol` | Column used as value (for `ref`) |
 | `filterBy` | Filter ref options by another column (for `ref`) |
@@ -121,7 +121,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `columns` | array | Column names, embeds, conditional/computed columns (below) |
 | `filter` | object | Static row filter (see **filters**) |
 | `readonly` | boolean | Disable editing (report views) |
-| `layout` | string | `"table"`, `"card"`, or `"list"` |
+| `layout` | string | `"table"`, `"card"`, or `"list"`. **`list` is a reading layout**: compact single-line rows with values rendered read-only, so a row added there has no editor and must be filled in elsewhere. Add/delete/archive are still offered (a *table* may declare `list` as its only presentation), but use `table`/`card` for any view people actually enter data into |
 | `collapsed` | boolean | Cards start collapsed (accordion) |
 | `defaultSort` | string | Default sort column |
 | `hideEmpty` | boolean | Hide columns where all rows are empty |
@@ -177,7 +177,7 @@ A `filter` (on a view, an inline/named-view embed, or a conditional column) matc
 | `"col": "value"` | Fixed filter value known at schema design time |
 | `{ "$or": [ {"col":"a"}, {"col":"b"} ] }` | Fixed set of values (membership; array shorthand retired) |
 | `"col": { "matchList": "listName" }` | Filter should track a user-editable list (Lookup tab) |
-| `"col": "@me"` | Resolves to the signed-in user's **profile display name** (see **user profiles**). Empty profile name → matches nothing (fail-closed). Works in `filter`, `groupBy.filter`, calendar `sources[].filter`, rotation `filter`, and embeds. Display-only — never widens server-enforced access. |
+| `"col": "@me"` | Resolves to the signed-in user's identity **for that column**: on a `userlink` list, the curated value linked to their account; otherwise their **profile display name** (see **user profiles**). No identity → matches nothing (fail-closed). Works in `filter`, `groupBy.filter`, calendar `sources[].filter`, rotation `filter`, and embeds. Display-only — never widens server-enforced access. |
 | `"col": { "within": "@month" }` | Date column falls in the current period. Token: `@today`/`@week`/`@month`/`@year`, with an optional **back-offset** (`@month-1` = last month, `@week-2` = two weeks ago). Recomputed from *today* each render, so it **auto-resets** (a `@month` leaderboard rolls to the new month); weeks are Monday-start; unknown tokens match nothing. Ideal for a period-scoped `groupBy.filter` (e.g. this-month leaderboard). |
 
 ### aggregate views (groupBy + collect)
@@ -1088,6 +1088,32 @@ referencing it become **assignable to registered users** — no manual list upke
   injected are withdrawn when a user opts out.
 - Opting in is per-user (**Profile → share name**), so on a new deployment this list contains only its
   stored values until users share. Seed it if the column must be usable immediately.
+
+### `listSources: { "<listName>": "userlink" }` — curated names, linked accounts
+
+The other way to tie a list to real people, and the **opposite trade-off** from `"users"` (a list is one
+or the other — the key holds a single string). The list keeps its own **curated** values as the display
+name; an admin links each value to an account email in the Lookup tab. Design notes:
+[USER-LINKED-LISTS.md](USER-LINKED-LISTS.md).
+
+| | `"users"` | `"userlink"` |
+|---|---|---|
+| Where the name comes from | each user's profile | the list, curated by an admin |
+| A user renames their profile | the list value changes | nothing moves |
+| Setup | users tick *share my name* | an admin links each value once |
+| Extra | — | avatars, resolved live from the profile |
+
+**`@me` works in both**, resolving per column: on a `userlink` list it becomes the curated value linked
+to the caller's account, otherwise their profile display name. So a household can keep calling someone
+"Ann" while the account behind her is `ann@example.test`, and `{ "person": "@me" }` still finds her rows.
+A member who is linked to nothing resolves to the fail-closed sentinel and matches no rows — the same
+stance as an empty profile name.
+
+- The resolution needs the caller's **own** link, which they may read (`getMyListValues` — a rules-provable
+  equality query on their own email; see the `_list_users` read rule). The full value→email map stays
+  admin-only, and the avatar projection still never carries an email.
+- **Renaming a list value** migrates the link with it, but the identity is keyed by the old string — see
+  the fragile-case row in USER-LINKED-LISTS.md.
 
 ### Membership requests (self-service, admin-approved)
 An unregistered (but signed-in) user submits a request from the "not registered" banner: a **required**
