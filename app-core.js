@@ -4376,9 +4376,15 @@ function createVueApp() {
       },
       titleCol: function() { return colName(this.cfg.title || (this.view.columns || [])[0] || ''); },
       cardTitle: function(item) { var c = this.titleCol(); return c ? appInstance.displayValue(c, item[c]) : (item.id || ''); },
-      cardCols: function() {
+      // Per-ROW card face: a conditional column is dropped from the cards whose rows don't match, the
+      // same as a card-layout grid. Evaluated against this board's own view config, so `when`/`hideEmpty`
+      // behave here exactly as they do top-level and in an embed.
+      cardCols: function(item) {
         var self = this, title = this.titleCol();
-        return (this.view.columns || []).map(colName).filter(function(c) { return typeof c === 'string' && c && c !== title && c !== self.laneCol; });
+        return (this.view.columns || []).map(colName).filter(function(c) {
+          if (typeof c !== 'string' || !c || c === title || c === self.laneCol) return false;
+          return !(item && appInstance && appInstance.isColumnHidden(c, item, self.view));
+        });
       },
       cardColor: function(item) { return this.cfg.color ? Calendar.hashColor(String(item[this.cfg.color] || '')) : null; },
       toggleGroup: function(key) { this.collapsed[key] = !this.collapsed[key]; },
@@ -4440,7 +4446,7 @@ function createVueApp() {
       + '              <v-list-item-title>{{ opt.title }}</v-list-item-title></v-list-item></v-list></v-menu>'
       + '        </div>'
       + '        <template v-if="editing[item.id]"><div v-for="col in editCols()" :key="col" style="display:flex;align-items:center;gap:6px;margin-top:4px"><span style="font-size:0.72rem;opacity:0.6;min-width:82px;flex-shrink:0">{{ t(\'field.\'+col) || col }}</span><data-cell :item="item" :col="col" :owner="viewName"></data-cell></div></template>'
-      + '        <template v-else><div v-for="col in cardCols()" :key="col" style="font-size:0.78rem;opacity:0.85"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, item[col]) }}</div></template>'
+      + '        <template v-else><div v-for="col in cardCols(item)" :key="col" style="font-size:0.78rem;opacity:0.85"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, item[col]) }}</div></template>'
       + '      </div>'
       + '      <div v-if="!lane.items.length" style="opacity:0.4;font-size:0.78rem;padding:4px">—</div>'
       + '    </div>'
