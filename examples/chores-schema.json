@@ -16,8 +16,7 @@
   "translatableLists": [
     "chore_status",
     "claim_status",
-    "shop_status",
-    "room"
+    "shop_status"
   ],
   "listSources": {
     "members": "userlink"
@@ -26,13 +25,6 @@
     "ref_chores": {
       "isLookup": true,
       "columns": [
-        {
-          "name": "room",
-          "type": "select",
-          "list": "room",
-          "allowNew": true,
-          "sorted": true
-        },
         {
           "name": "chore",
           "type": "text"
@@ -535,7 +527,6 @@
         "lane": "shop_status",
         "lanes": [
           "needed",
-          "in_cart",
           "bought"
         ],
         "title": "item",
@@ -569,14 +560,7 @@
         }
       ],
       "filter": {
-        "$or": [
-          {
-            "shop_status": "needed"
-          },
-          {
-            "shop_status": "in_cart"
-          }
-        ]
+        "shop_status": "needed"
       }
     },
     {

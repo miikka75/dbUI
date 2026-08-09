@@ -10,7 +10,7 @@
       "tab.ref_rewards": "Reward catalogue",
       "tab.reward_claim": "Reward claims",
 
-      "view.chore_add": "Log a chore",
+      "view.chore_add": "Chores",
       "view.chore_balance": "Points balance",
       "view.chore_board": "Approvals",
       "view.chore_heatmap": "Who did what",
@@ -50,7 +50,6 @@
       "field.position": "Order",
       "field.qty": "Qty",
       "field.reward": "Reward",
-      "field.room": "Room",
       "field.shop_status": "Status",
       "field.status": "Status",
       "field.total": "Total",
@@ -64,7 +63,6 @@
       "list.claim_status.denied": "Denied",
 
       "list.shop_status.needed": "Needed",
-      "list.shop_status.in_cart": "In the trolley",
       "list.shop_status.bought": "Bought",
 
       "text.home_heading": "Our home",

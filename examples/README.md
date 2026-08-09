@@ -34,6 +34,11 @@ schema without touching it.
 Then start entering data: Settings → User Access to register yourself, the Lists tab to fill in the
 list values the schema declares, and the table tabs for rows.
 
+> **Approving a request grants nothing on its own.** Settings → Users → Approve registers the person as
+> an `editor` with an empty table list — the grants are the admin's next, separate decision, made with
+> the chips. So an approved user still sees no data until you tick something (or set them to `admin`).
+> Approving someone who was *already* registered overwrites whatever they had.
+>
 > On the **local dev server** the identity is the `?user=` query parameter, defaulting to `local@dev`.
 > Once any user exists the registry is enforced, so register `local@dev` too (or always browse with
 > `?user=<a registered address>`) — otherwise a plain `localhost:3000` visit is an unknown account and
@@ -129,7 +134,7 @@ Sweepy, Homey). It leans on a different part of dbUI than the bishopric schema:
 - a **signed cross-source aggregate** (`chore_balance`): points earned minus points spent, as one
   figure, by scoping one compute def per source table and negating the second
 
-`ref_chores` and `ref_rewards` ship empty — the chores a household cares about, and what a point is
+`ref_chores` and `ref_rewards` ship empty in the schema — the chores a household cares about, and what a point is
 worth, are theirs to enter.
 
 `members` is a **`userlink`** list: the household keeps calling people what it calls them ("Ann", not
