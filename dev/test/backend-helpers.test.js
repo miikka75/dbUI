@@ -128,3 +128,51 @@ describe('backend-helpers - pageAccessOf (restricted doc-view map)', () => {
     assert.deepEqual(H.pageAccessOf(schema), { sisainen: ['all'] });
   });
 });
+
+describe('backend-helpers - autoArchiveIds (age a terminal row out of the active partition)', () => {
+  const CFG = { column: 'status', values: ['approved', 'rejected'], days: 7 };
+  const NOW = new Date('2026-08-20T12:00:00Z');
+  const at = (iso) => iso;
+  const rows = [
+    { id: 'old-approved', status: 'approved', updated_at: at('2026-08-01T00:00:00Z') },
+    { id: 'old-rejected', status: 'rejected', updated_at: at('2026-08-05T00:00:00Z') },
+    { id: 'fresh-approved', status: 'approved', updated_at: at('2026-08-19T00:00:00Z') },
+    { id: 'old-but-open', status: 'logged', updated_at: at('2026-01-01T00:00:00Z') },
+    { id: 'no-timestamp', status: 'approved' }
+  ];
+
+  it('picks terminal rows that have been settled for at least `days`', () => {
+    assert.deepEqual(H.autoArchiveIds(rows, CFG, NOW), ['old-approved', 'old-rejected']);
+  });
+
+  it('leaves a row still in progress, however old, and one still being edited', () => {
+    const ids = H.autoArchiveIds(rows, CFG, NOW);
+    assert.equal(ids.includes('old-but-open'), false);    // wrong status: never ages out
+    assert.equal(ids.includes('fresh-approved'), false);  // right status, edited yesterday
+  });
+
+  it('a row with no/unparseable updated_at is left alone, not archived on sight', () => {
+    assert.equal(H.autoArchiveIds(rows, CFG, NOW).includes('no-timestamp'), false);
+    assert.deepEqual(H.autoArchiveIds([{ id: 'x', status: 'approved', updated_at: 'soon' }], CFG, NOW), []);
+  });
+
+  it('the boundary is inclusive: exactly `days` old qualifies', () => {
+    const exactly = [{ id: 'edge', status: 'approved', updated_at: '2026-08-13T12:00:00Z' }];
+    assert.deepEqual(H.autoArchiveIds(exactly, CFG, NOW), ['edge']);
+    const hairEarly = [{ id: 'edge', status: 'approved', updated_at: '2026-08-13T12:00:01Z' }];
+    assert.deepEqual(H.autoArchiveIds(hairEarly, CFG, NOW), []);
+  });
+
+  it('days: 0 archives as soon as the row is in a terminal state', () => {
+    const cfg0 = { column: 'status', values: ['approved'], days: 0 };
+    assert.deepEqual(H.autoArchiveIds([{ id: 'a', status: 'approved', updated_at: '2026-08-20T11:59:00Z' }], cfg0, NOW), ['a']);
+  });
+
+  it('a malformed or absent policy archives nothing', () => {
+    for (const bad of [null, {}, { column: 'status' }, { column: 'status', values: [] },
+                       { column: 'status', values: ['approved'], days: -1 },
+                       { column: 'status', values: ['approved'], days: 'soon' }]) {
+      assert.deepEqual(H.autoArchiveIds(rows, bad, NOW), [], JSON.stringify(bad));
+    }
+  });
+});

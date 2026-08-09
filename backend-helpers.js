@@ -62,6 +62,27 @@
       return doc;
     },
 
+    // Rows a table's `archiveAfter` policy has aged out of the ACTIVE partition:
+    //   "archiveAfter": { "column": "status", "values": ["approved","rejected"], "days": 7 }
+    // A row qualifies once `column` holds one of `values` AND the row has gone `days` without an edit.
+    // The clock is `updated_at`, which every write stamps -- so it is "settled for N days", not "N days
+    // since the status changed": correcting a note afterwards restarts it, which is the forgiving
+    // reading (a row someone is still touching is not finished with). Rows with no `updated_at` are
+    // left alone rather than archived on sight. Pure over (rows, cfg, now) so it is testable in Node
+    // and identical wherever it runs.
+    autoArchiveIds: function(rows, cfg, now) {
+      if (!cfg || !cfg.column || !Array.isArray(cfg.values) || !cfg.values.length) return [];
+      var days = Number(cfg.days);
+      if (!isFinite(days) || days < 0) return [];
+      var cutoff = (now instanceof Date ? now.getTime() : Date.parse(now)) - days * 86400000;
+      if (isNaN(cutoff)) return [];
+      return (rows || []).filter(function(r) {
+        if (!r || !r.id || cfg.values.indexOf(r[cfg.column]) < 0) return false;
+        var t = Date.parse(r.updated_at);
+        return !isNaN(t) && t <= cutoff;
+      }).map(function(r) { return r.id; });
+    },
+
     // Table names whose schema declares an `owner`-typed column -- the SELF-SERVICE set. An owner column
     // means each row belongs to a member (auto-stamped, read-only), so those are exactly the tables where
     // a member may create/edit/delete THEIR OWN row without a table grant (the RSVP/sign-up pattern,

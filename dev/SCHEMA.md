@@ -39,6 +39,32 @@ nav     ← navigation tree + layout, references views/tables by name
 `active` and `archive` partitions). Omit it for tables that are never archived.
 `isLookup: true` marks a reference/lookup table (managed in the Lookup tab, not the sidebar).
 
+### `archiveAfter` — file finished rows away on their own
+```json
+"chore_log": {
+  "archivable": true,
+  "columns": [ …, { "name": "updated_at", "type": "text", "hidden": true } ],
+  "archiveAfter": { "column": "status", "values": ["approved", "rejected"], "days": 7 }
+}
+```
+A row whose `column` holds one of `values` moves to the **archive** partition once it has gone `days`
+without an edit — so a log keeps showing the recent past and settles itself, with nobody filing rows by
+hand. Reversible from the archive tab like any other archived row.
+
+- **The clock is `updated_at`**, which every write stamps. So it means "finished and left alone for N
+  days", not "N days since the status changed": correcting a note restarts the countdown, which is the
+  forgiving reading — a row someone is still touching isn't done with. A row with no `updated_at` is
+  never swept.
+- **The table must DECLARE `updated_at`** (`type: "text"`, `hidden: true`). Columnar backends (dev
+  SQLite, Sheets) store only declared columns, so without it the timestamp is dropped and nothing ever
+  ages out. `validateSchema` rejects the combination rather than letting it fail silently — as it does
+  a missing `archivable`, an unknown `column`, empty `values`, or a negative `days`.
+- **Client-side and best-effort**: the sweep runs at load, only for someone who could archive by hand
+  anyway (write access to the whole mirror cluster), and does nothing on a read-only grant. There is no
+  server-side scheduler, so rows age out the next time somebody with rights opens the app — a
+  concurrent second run is harmless.
+- `days: 0` archives as soon as the row reaches a listed value.
+
 > **`id` is implicit** — every table gets an `id` column auto-injected (storage primary key +
 > join/archive match key). Do not declare it in `columns`.
 

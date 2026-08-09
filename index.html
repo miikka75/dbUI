@@ -205,10 +205,10 @@
       await loadScript('/vendor/vuetify.js').catch(function() { return loadScript('https://cdn.jsdelivr.net/npm/vuetify@4.0.7/dist/vuetify.min.js', 'sha384-wnK0Mlw0rYYNIBzsFn4aOQ595f/X6hleKb5nrU00buuLaFz5ZPqbwpF4QQTjcDZh'); });
       bootMark('vueLibsLoaded');
 
-      // Shared pure backend helpers (used by Firebase + Supabase + CRDT backends)
-      if (backendFile === '/backend-firebase.js' || backendFile === '/backend-supabase.js' || backendFile === '/backend-crdt.js' || backendFile === '/backend-crdt-local.js') {
-        await loadScript('/backend-helpers.js');
-      }
+      // Shared pure helpers. Loaded for EVERY backend: besides the store-name/schema-mirror utilities the
+      // Firebase/Supabase/CRDT adapters call, app-core itself uses them (the `archiveAfter` sweep), so
+      // gating this on the backend left BackendHelpers undefined on the local/Sheets paths.
+      await loadScript('/backend-helpers.js');
 
       if (backendFile === '/backend-oauth.js' || backendFile === '/backend-crdt.js') {
         await loadScript('https://accounts.google.com/gsi/client');
