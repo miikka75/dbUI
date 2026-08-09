@@ -64,6 +64,9 @@ hand. Reversible from the archive tab like any other archived row.
   server-side scheduler, so rows age out the next time somebody with rights opens the app — a
   concurrent second run is harmless.
 - `days: 0` archives as soon as the row reaches a listed value.
+- **Mind what totals the table feeds.** Archiving removes a row from every ordinary view, so a
+  leaderboard or balance over the same table needs `includeArchive: true` or it will quietly shed
+  points as rows age out — the chores example turns it on for exactly that reason.
 
 > **`id` is implicit** — every table gets an `id` column auto-injected (storage primary key +
 > join/archive match key). Do not declare it in `columns`.
@@ -148,6 +151,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `columns` | array | Column names, embeds, conditional/computed columns (below) |
 | `filter` | object | Static row filter (see **filters**) |
 | `readonly` | boolean | Disable editing (report views) |
+| `includeArchive` | boolean | Read the **archive** partition alongside the active one. A view sees only active rows by default, which is right for a worklist and wrong for a TOTAL: with `archiveAfter` in play, a sum that nets one thing against another goes wrong the moment either side ages out. Turn it on for balances, leaderboards and any cross-tab of history. Needs the archive preloaded (`preload_archive`, on by default) |
 | `layout` | string | `"table"`, `"card"`, or `"list"`. **`list` is a reading layout**: compact single-line rows with values rendered read-only, so a row added there has no editor and must be filled in elsewhere. Add/delete/archive are still offered (a *table* may declare `list` as its only presentation), but use `table`/`card` for any view people actually enter data into |
 | `collapsed` | boolean | Cards start collapsed (accordion) |
 | `defaultSort` | string | Default sort column |

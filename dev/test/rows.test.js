@@ -92,6 +92,24 @@ describe('rows.js — buildRows (union / join / filter)', () => {
     assert.equal(joined.author, 'me');         // merged in from notes
   });
 
+  it('includeArchive folds the archive partition in, so a total survives archiving', () => {
+    // Without it, `archiveAfter` silently drains a balance: the row leaves the active partition and
+    // its points leave the sum, while anything it was netted against stays.
+    const c = { log: [{ id: 'a', who: 'Ann', pts: 2 }], log__archive: [{ id: 'b', who: 'Ann', pts: 5 }] };
+    assert.deepEqual(Rows.buildRows({ sources: ['log'] }, c).map(r => r.id), ['a']);
+    assert.deepEqual(Rows.buildRows({ sources: ['log'], includeArchive: true }, c).map(r => r.id), ['a', 'b']);
+    const view = { groupBy: { column: 'who', from: ['who'] }, aggregate: { sum: 'pts' }, columns: ['who', 'total'] };
+    assert.equal(Rows.aggregateRows(view, Rows.buildRows({ sources: ['log'], includeArchive: true }, c))[0].total, 7);
+    assert.equal(Rows.aggregateRows(view, Rows.buildRows({ sources: ['log'] }, c))[0].total, 2);
+  });
+
+  it('archived rows still carry _source and obey the view filter', () => {
+    const c = { log: [{ id: 'a', s: 'on' }], log__archive: [{ id: 'b', s: 'off' }, { id: 'c', s: 'on' }] };
+    const rows = Rows.buildRows({ sources: ['log'], includeArchive: true, filter: { s: 'on' } }, c);
+    assert.deepEqual(rows.map(r => r.id), ['a', 'c']);
+    assert.deepEqual(rows.map(r => r._source), ['log', 'log']);   // the base name, not log__archive
+  });
+
   it('applies the view filter through condMatches', () => {
     const rows = Rows.buildRows({ sources: ['tasks', 'notes'], filter: { status: 'open' } }, cache);
     assert.deepEqual(rows.map(r => r.id), ['t1']);

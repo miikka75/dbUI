@@ -209,24 +209,8 @@
   "views": [
     {
       "name": "doc_home",
-      "markdown": "# {{t:text.home_heading}}\n\n{{t:text.home_intro}}\n\n## {{t:text.home_scoreboard}}\n\n{{view:chore_points_month}}\n\n{{view:chore_balance}}\n\n## {{t:text.home_mine}}\n\n{{view:chore_mine?}}\n\n## {{t:text.home_rota}}\n\n{{view:duty_schedule}}\n\n## {{t:text.home_shopping}}\n\n{{view:shop_todo?}}\n",
+      "markdown": "# {{t:text.home_heading}}\n\n{{t:text.home_intro}}\n\n{{t:text.rules_body}}\n\n## {{t:text.rules_points}}\n\n{{view:reward_shop}}\n",
       "icon": "mdi-home"
-    },
-    {
-      "name": "chore_add",
-      "sources": [
-        "chore_log"
-      ],
-      "mode": "join",
-      "defaultSort": "done_on",
-      "columns": [
-        "done_on",
-        "chore",
-        "person",
-        "note",
-        "status"
-      ],
-      "icon": "mdi-plus-circle"
     },
     {
       "name": "chore_mine",
@@ -267,7 +251,7 @@
         ],
         "title": "chore",
         "color": "person",
-        "addInLane": false
+        "addInLane": true
       },
       "icon": "mdi-check-decagram"
     },
@@ -313,7 +297,13 @@
         }
       },
       "readonly": true,
-      "icon": "mdi-trophy"
+      "icon": "mdi-trophy",
+      "includeArchive": true
+    },
+    {
+      "name": "doc_scoreboard",
+      "icon": "mdi-trophy",
+      "markdown": "## {{t:text.score_week}}\n\n{{view:chore_points_week}}\n\n## {{t:text.score_month}}\n\n{{view:chore_points_month}}\n\n## {{t:text.score_balance}}\n\n{{view:chore_balance}}\n\n## {{t:text.score_who}}\n\n{{view:chore_heatmap}}\n"
     },
     {
       "name": "chore_points_week",
@@ -357,51 +347,8 @@
         }
       },
       "readonly": true,
-      "icon": "mdi-trophy-variant"
-    },
-    {
-      "name": "chore_spent_month",
-      "sources": [
-        "reward_claim"
-      ],
-      "mode": "union",
-      "groupBy": {
-        "column": "person",
-        "from": [
-          "person"
-        ]
-      },
-      "compute": [
-        {
-          "name": "cost",
-          "computed": {
-            "lookup": {
-              "table": "ref_rewards",
-              "match": "reward",
-              "on": "reward",
-              "field": "cost",
-              "default": 0
-            }
-          }
-        }
-      ],
-      "aggregate": {
-        "sum": "cost",
-        "into": "total"
-      },
-      "columns": [
-        "person",
-        "total"
-      ],
-      "period": "month",
-      "filter": {
-        "claim_status": "granted",
-        "claimed_on": {
-          "within": "@month"
-        }
-      },
-      "readonly": true,
-      "icon": "mdi-cash-minus"
+      "icon": "mdi-trophy-variant",
+      "includeArchive": true
     },
     {
       "name": "chore_balance",
@@ -464,7 +411,8 @@
         ]
       },
       "readonly": true,
-      "icon": "mdi-scale-balance"
+      "icon": "mdi-scale-balance",
+      "includeArchive": true
     },
     {
       "name": "chore_heatmap",
@@ -475,7 +423,8 @@
         "aggregate": "count",
         "totals": "count"
       },
-      "icon": "mdi-grid"
+      "icon": "mdi-grid",
+      "includeArchive": true
     },
     {
       "name": "home_calendar",
@@ -615,8 +564,7 @@
         "reward",
         "cost"
       ],
-      "icon": "mdi-gift",
-      "markdown": "# {{t:text.rules_heading}}\n\n{{t:text.rules_body}}\n\n## {{t:text.rules_points}}\n\n{{self}}\n"
+      "icon": "mdi-gift"
     },
     {
       "name": "reward_mine",
@@ -641,46 +589,16 @@
         "view": "doc_home"
       },
       {
-        "view": "chore_add"
+        "view": "chore_board"
       },
       {
         "view": "chore_mine"
       },
       {
-        "group": "Scoreboard",
-        "icon": "mdi-trophy",
-        "items": [
-          {
-            "view": "chore_points_week"
-          },
-          {
-            "view": "chore_points_month"
-          },
-          {
-            "view": "chore_spent_month"
-          },
-          {
-            "view": "chore_balance"
-          },
-          {
-            "view": "chore_heatmap"
-          }
-        ]
+        "view": "doc_scoreboard"
       },
       {
-        "view": "chore_board"
-      },
-      {
-        "group": "Rewards",
-        "icon": "mdi-gift",
-        "items": [
-          {
-            "view": "reward_shop"
-          },
-          {
-            "view": "reward_mine"
-          }
-        ]
+        "view": "reward_mine"
       },
       {
         "view": "shop_open"
@@ -703,9 +621,9 @@
     ],
     "bottomNav": [
       "doc_home",
-      "chore_add",
+      "chore_board",
       "chore_mine",
-      "chore_points_week",
+      "doc_scoreboard",
       "shop_open"
     ]
   }

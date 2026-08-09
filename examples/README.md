@@ -132,8 +132,9 @@ Sweepy, Homey). It leans on a different part of dbUI than the bishopric schema:
   what the household buys rather than retyped, and anything new joins the list as it is typed
 - **`default`** on each status column, so a new row starts in the first state of its flow instead of
   outside every lane
-- a view that is **prose and its own grid at once** (`reward_shop`: the house rules, then `{{self}}`
-  renders the price list underneath) — one nav entry instead of a rules page duplicating the shop
+- **pages that compose views**: Home is instructions plus the reward price list, Scoreboard is one
+  page stacking week, month, balance and the heatmap — so the nav stays eight entries deep
+- **`includeArchive`** on every total, because `archiveAfter` would otherwise drain them as rows age out
 - **`defaultFrom: "@me"`** on `person`, so a logged chore is attributed to whoever logged it
 - **`daysSince` + an ordered comparison** on the shopping list — `days_late` appears only once an item
   is past its `needed_by` date

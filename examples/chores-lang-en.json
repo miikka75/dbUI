@@ -10,19 +10,18 @@
       "tab.ref_rewards": "Reward catalogue",
       "tab.reward_claim": "Reward claims",
 
-      "view.chore_add": "Chores",
       "view.chore_balance": "Points balance",
-      "view.chore_board": "Approvals",
+      "view.chore_board": "Chores",
       "view.chore_heatmap": "Who did what",
       "view.chore_mine": "My chores",
       "view.chore_points_month": "Points this month",
       "view.chore_points_week": "Points this week",
-      "view.chore_spent_month": "Points spent",
       "view.doc_home": "Home",
+      "view.doc_scoreboard": "Scoreboard",
       "view.duty_schedule": "Weekly duty",
       "view.home_calendar": "Calendar",
       "view.reward_mine": "My rewards",
-      "view.reward_shop": "Rewards & rules",
+      "view.reward_shop": "Reward shop",
       "view.shop_open": "Shopping",
       "view.shop_todo": "Still to buy",
 
@@ -67,12 +66,11 @@
 
       "text.home_heading": "Our home",
       "text.home_intro": "Log what you've done, watch the points add up, and check whose week it is.",
-      "text.home_scoreboard": "This month",
-      "text.home_mine": "My chores",
-      "text.home_rota": "Whose turn",
-      "text.home_shopping": "Shopping list",
+      "text.score_week": "This week",
+      "text.score_month": "This month",
+      "text.score_balance": "Points to spend",
+      "text.score_who": "Who did what",
 
-      "text.rules_heading": "How this works",
       "text.rules_body": "Log a chore when you finish it. A parent approves it, and only approved chores earn points. Points are worth whatever the reward shop says they're worth.",
       "text.rules_points": "The reward shop"
     }

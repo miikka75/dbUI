@@ -193,7 +193,12 @@
     var rows = [];
     var sources = cfg.sources || [];
     sources.forEach(function(src) {
+      // `includeArchive` folds the archive partition in beside the active one. A view reads only the
+      // active rows by default, which is right for a worklist and wrong for a TOTAL: archiving a row
+      // would silently remove it from the sum, so a balance that nets earned against spent goes wrong
+      // the moment either side ages out (see `archiveAfter`). Opt in wherever the history is the point.
       var srcRows = dataCache[src] || [];
+      if (cfg.includeArchive) srcRows = srcRows.concat(dataCache[src + '__archive'] || []);
       if (cfg.mode === 'join') {
         srcRows.forEach(function(r) { var e = rows.find(function(x) { return x.id === r.id; }); if (e) Object.assign(e, r); else rows.push(Object.assign({ _source: src }, r)); });
       } else {

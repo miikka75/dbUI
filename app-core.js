@@ -1160,6 +1160,8 @@ function createVueApp() {
         var v = VIEWS[name]; if (!v || !v.pivot) return { columns: [], rows: [] };
         var p = v.pivot, src = p.source;
         var rows = VIEWS[src] ? this.embedRows('view', src) : (this.dataCache[src] || []);
+        // Same reasoning as buildRows: a cross-tab counting history must see the archived rows too.
+        if (v.includeArchive && !VIEWS[src]) rows = rows.concat(this.dataCache[src + '__archive'] || []);
         return Pivot.build(rows, p);
       },
       isRsvpName: function(name) { return !!(VIEWS[name] && VIEWS[name].rsvp); },
