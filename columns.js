@@ -47,7 +47,14 @@
   function tableDefaultCols(schema, table) {
     var cols = schema[table] && schema[table].columns, out = [];
     if (!cols) return out;
-    for (var c in cols) { var d = cols[c]; if (d && typeof d === 'object' && d.defaultFrom) out.push({ name: c, from: d.defaultFrom }); }
+    for (var c in cols) {
+      var d = cols[c];
+      if (!d || typeof d !== 'object') continue;
+      // `defaultFrom` resolves a token per user (only '@me'); `default` is a literal the caller writes
+      // through unchanged. A column may carry either; the token wins if somebody sets both.
+      if (d.defaultFrom) out.push({ name: c, from: d.defaultFrom });
+      else if (d['default'] !== undefined) out.push({ name: c, value: d['default'] });
+    }
     return out;
   }
   // A table's `ref` column pointing at `targetTable` -> { name, valueCol }, else null. Used by the rsvp

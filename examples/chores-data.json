@@ -19,6 +19,18 @@
     "shop_status": [
       "needed",
       "bought"
+    ],
+    "shop_items": [
+      "Bin bags",
+      "Bread",
+      "Cat food",
+      "Coffee",
+      "Eggs",
+      "Kitchen roll",
+      "Milk",
+      "Toilet roll",
+      "Washing powder",
+      "Washing-up liquid"
     ]
   },
   "tables": {

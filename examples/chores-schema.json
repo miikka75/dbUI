@@ -77,7 +77,8 @@
           "name": "status",
           "type": "select",
           "list": "chore_status",
-          "picker": "toggle"
+          "picker": "toggle",
+          "default": "logged"
         },
         {
           "name": "note",
@@ -132,7 +133,8 @@
           "name": "claim_status",
           "type": "select",
           "list": "claim_status",
-          "picker": "toggle"
+          "picker": "toggle",
+          "default": "requested"
         }
       ]
     },
@@ -158,7 +160,10 @@
       "columns": [
         {
           "name": "item",
-          "type": "text"
+          "type": "select",
+          "list": "shop_items",
+          "allowNew": true,
+          "sorted": true
         },
         {
           "name": "qty",
@@ -168,7 +173,8 @@
           "name": "shop_status",
           "type": "select",
           "list": "shop_status",
-          "picker": "chips"
+          "picker": "chips",
+          "default": "needed"
         },
         {
           "name": "added_by",
@@ -179,8 +185,25 @@
         {
           "name": "needed_by",
           "type": "date"
+        },
+        {
+          "name": "created_at",
+          "type": "text",
+          "hidden": true
+        },
+        {
+          "name": "updated_at",
+          "type": "text",
+          "hidden": true
         }
-      ]
+      ],
+      "archiveAfter": {
+        "column": "shop_status",
+        "values": [
+          "bought"
+        ],
+        "days": 3
+      }
     }
   },
   "views": [

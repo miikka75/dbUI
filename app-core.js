@@ -1566,9 +1566,11 @@ function createVueApp() {
             row[oc] = self.currentUserEmail || '';
             row.rosterPublic = !(SCHEMA[src] && SCHEMA[src].privateRoster);
           }
-          // `defaultFrom` columns seed themselves on create and stay editable after (unlike owner).
+          // Seeded-on-create columns: a `defaultFrom` token resolved per user, or a literal `default`.
+          // Both stay editable afterwards (unlike owner), and an explicit prefill below overrides them.
           getDefaultCols(src).forEach(function(dc) {
-            if (cols.indexOf(dc.name) >= 0) row[dc.name] = self.defaultFromValue(dc.from, dc.name);
+            if (cols.indexOf(dc.name) < 0) return;
+            row[dc.name] = dc.from ? self.defaultFromValue(dc.from, dc.name) : dc.value;
           });
           for (var pc in prefill) { if (cols.indexOf(pc) >= 0) row[pc] = prefill[pc]; }  // only columns the mirror actually has
           var cacheKey = tab === 'archive' ? aKey(src) : src;
