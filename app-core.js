@@ -928,6 +928,7 @@ function createVueApp() {
               }
             });
           }).then(function() {
+            self._autoArchive();
             self.loadUsers();
           }).catch(function(err) {
             self.loading = false;
@@ -1018,6 +1019,7 @@ function createVueApp() {
           return chain;
         }).then(function() {
           self.loading = false;
+          self._autoArchive();
           self._autoSelectTab();
         }).catch(function(err) {
           self.loading = false;
@@ -2443,7 +2445,7 @@ function createVueApp() {
           var p = new URLSearchParams(location.search);
           self.currentUserEmail = p.get('user') || localStorage.getItem('test_user') || 'local@dev';
         }
-        var done = function() { self.usersLoaded = true; self.loading = false; self.loadMyProfile(); self.loadSharedProfiles(); self._overlayUserLists(); self._autoSelectTab(); };
+        var done = function() { self.usersLoaded = true; self.loading = false; self.loadMyProfile(); self.loadSharedProfiles(); self._overlayUserLists(); self._autoArchive(); self._autoSelectTab(); };
         // Legacy backends without getMyAccess: keep the full-map path (rules-free local/Drive).
         if (typeof backend_users.getMyAccess !== 'function') {
           backend_users.getUsers().then(function(u) {
@@ -2783,8 +2785,16 @@ function createVueApp() {
         this._saveGrants(u, AccessFeatures.buildGrants(feats, this.userViewFeatures(u), SCHEMA, VIEWS));
       },
       updateUserViewTables: function(u, selected) {
-        if (u.tables === 'all') return;   // full access already sees everything; nothing to add
-        this._saveGrants(u, AccessFeatures.buildGrants(this.userFeatures(u), selected, SCHEMA, VIEWS));
+        // Marking something view-only on a FULL-ACCESS user has to materialize 'all' into an explicit
+        // map — the sentinel cannot say "everything except this one". Everything not picked here stays
+        // editable, so the Tables column visibly fills with chips: the admin can see what 'all' became.
+        // (Consequence worth knowing: an enumerated grant no longer picks up tables added to the schema
+        // later, whereas 'all' does. Clearing every view chip puts the user back on the sentinel.)
+        if (u.tables === 'all' && !(selected || []).length) return;   // nothing picked -> stay on 'all'
+        var edit = u.tables === 'all'
+          ? grantFeatures().map(function(f) { return f.id; }).filter(function(id) { return selected.indexOf(id) < 0; })
+          : this.userFeatures(u);
+        this._saveGrants(u, AccessFeatures.buildGrants(edit, selected, SCHEMA, VIEWS));
       },
       // Clearing every chip means "no restriction" (the long-standing behaviour of the single row) —
       // an empty grant would otherwise lock the user out of an app they were just given access to.
@@ -3147,7 +3157,30 @@ function createVueApp() {
         this.currentData = this.currentData.filter(function(r) { return r.id !== itemId; });
         this.notify(this.t('msg.deleted'));
       },
-      _archiveInSources: function(sources, itemId) {
+      // Apply every table's `archiveAfter` policy once the cache is loaded: rows that have sat in a
+      // terminal state long enough move themselves to the archive, so a log stays the recent past
+      // without anyone filing it. Deliberately client-side and best-effort — there is no server-side
+      // scheduler — so it runs only for someone who could archive by hand anyway, and a concurrent
+      // second run is harmless (moveRow re-writes the same row into the same partition).
+      _autoArchive: function() {
+        var self = this, now = new Date();
+        // Grants decide whether we may write, so wait until they are known — before that
+        // userWritableTables reads as unrestricted and would sweep on a read-only user's behalf. Both
+        // boot paths and loadUsers' done() call this; whichever satisfies both preconditions last does
+        // the work, and a repeat run finds nothing left to move.
+        if (!this.usersLoaded) return;
+        Object.keys(SCHEMA).forEach(function(table) {
+          var cfg = SCHEMA[table] && SCHEMA[table].archiveAfter;
+          if (!cfg || !SCHEMA[table].archivable) return;
+          // Never write on someone's behalf who is not allowed to: the archive fans out over the whole
+          // mirror cluster, so require write access to all of it (self-service rows are the owner's own).
+          var writable = self.userWritableTables;
+          if (writable && !withMirrors([table]).every(function(t) { return writable.indexOf(t) >= 0; })) return;
+          var ids = BackendHelpers.autoArchiveIds(self.dataCache[table] || [], cfg, now);
+          ids.forEach(function(id) { self._archiveInSources(withMirrors([table]), id, true); });
+        });
+      },
+      _archiveInSources: function(sources, itemId, quiet) {
         var self = this;
         sources.forEach(function(source) {
           var schema = SCHEMA[source];
@@ -3160,7 +3193,7 @@ function createVueApp() {
           self.dataCache[aKey(source)].push(srcRow);
           backend.moveRow(self.tableMap[source], srcRow, 'active', 'archive');
         });
-        this.notify(this.t('msg.archived'));
+        if (!quiet) this.notify(this.t('msg.archived'));   // the auto sweep files rows silently
       },
       armDelete: function(key) {
         var self = this;
