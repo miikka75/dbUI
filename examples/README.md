@@ -126,6 +126,8 @@ Sweepy, Homey). It leans on a different part of dbUI than the bishopric schema:
   "raw table" nav entry for the same data
 - a **pivot** heatmap (person × chore) and a **multi-source calendar** that also overlays the rota
 - a **rotation** view for whose-week-it-is, over a `reorderable` roster table
+- **`archiveAfter`** on `chore_log`: once a chore is approved or rejected and a week has passed
+  without another edit, it files itself into the archive, so the log stays the recent past
 - a view that is **prose and its own grid at once** (`reward_shop`: the house rules, then `{{self}}`
   renders the price list underneath) — one nav entry instead of a rules page duplicating the shop
 - **`defaultFrom: "@me"`** on `person`, so a logged chore is attributed to whoever logged it

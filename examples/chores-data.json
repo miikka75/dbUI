@@ -298,7 +298,7 @@
         "item": "Bin bags",
         "qty": "2",
         "added_by": "Bob",
-        "needed_by": "2026-08-11",
+        "needed_by": "",
         "shop_status": "needed"
       },
       {
@@ -306,7 +306,7 @@
         "item": "Milk",
         "qty": "2 L",
         "added_by": "Cara",
-        "needed_by": "2026-08-09",
+        "needed_by": "",
         "shop_status": "needed"
       },
       {
@@ -322,7 +322,7 @@
         "item": "Kitchen roll",
         "qty": "4",
         "added_by": "Ann",
-        "needed_by": "2026-08-01",
+        "needed_by": "",
         "shop_status": "bought"
       }
     ]

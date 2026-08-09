@@ -82,8 +82,26 @@
         {
           "name": "note",
           "type": "text"
+        },
+        {
+          "name": "created_at",
+          "type": "text",
+          "hidden": true
+        },
+        {
+          "name": "updated_at",
+          "type": "text",
+          "hidden": true
         }
-      ]
+      ],
+      "archiveAfter": {
+        "column": "status",
+        "values": [
+          "approved",
+          "rejected"
+        ],
+        "days": 7
+      }
     },
     "reward_claim": {
       "archivable": true,
@@ -193,8 +211,6 @@
         "chore_log"
       ],
       "mode": "union",
-      "layout": "list",
-      "readonly": true,
       "defaultSort": "done_on",
       "columns": [
         "done_on",
