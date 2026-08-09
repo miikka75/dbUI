@@ -185,7 +185,6 @@
         "chore_log"
       ],
       "mode": "join",
-      "layout": "card",
       "defaultSort": "done_on",
       "columns": [
         "done_on",
@@ -225,7 +224,8 @@
       "columns": [
         "person",
         "done_on",
-        "note"
+        "note",
+        "owner"
       ],
       "board": {
         "lane": "status",
@@ -674,9 +674,6 @@
           },
           {
             "table": "duty_rotation"
-          },
-          {
-            "table": "chore_log"
           }
         ]
       }

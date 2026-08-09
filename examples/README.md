@@ -115,7 +115,8 @@ Sweepy, Homey). It leans on a different part of dbUI than the bishopric schema:
   **no table grant** (self-service; the Firestore rules are the enforcement)
 - **aggregate leaderboards** with `period` navigation — `chore_points_week` / `chore_points_month`
   sum each chore's catalogue `points` through a `lookup` computed column
-- **two boards**: the parent's approve/reject pass over `chore_log`, and the shopping list as
+- **two boards**: the parent's approve/reject pass over `chore_log` (whose cards carry the
+  auto-stamped `owner`, so *who logged it* is checked where it is approved), and the shopping list as
   needed → in the trolley → bought, so nothing is hidden behind a filter and there is no second
   "raw table" nav entry for the same data
 - a **pivot** heatmap (person × chore) and a **multi-source calendar** that also overlays the rota
