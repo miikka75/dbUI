@@ -260,5 +260,44 @@ await ok("viewer still CANNOT read someone else's unshared link",
 await ok("viewer CANNOT query someone else's links",
   assertFails(getDocs(query(collection(viewer, '_list_users'), where('email', '==', 'cara@x.com')))));
 
+// --- ownerWritable: bound an owner-scoped write to named COLUMNS -----------------------------------
+// The owner branch is otherwise all-or-nothing, so on a table with an approval column a member could
+// approve themselves. saveSchema mirrors { table: { cols, locked } }; `locked` carries each gated
+// column's create-time default so a create can be checked with one map diff.
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  await setDoc(doc(db, '_meta/ownerTables'), { tables: ['rsvps', 'chore_log', 'claims'] });
+  await setDoc(doc(db, '_meta/ownerWritable'), {
+    chore_log: { cols: ['chore', 'done_on', 'note', 'person'], locked: { status: 'logged' } }
+    // `claims` is deliberately absent -> unbounded, proving the feature is opt-in.
+  });
+  await setDoc(doc(db, 'chore_log__active/mine'), {
+    id: 'mine', owner: 'viewer@x.com', person: 'Vic', chore: 'Hoover', done_on: '2026-08-01',
+    note: '', status: 'logged', rosterPublic: true
+  });
+  await setDoc(doc(db, 'claims__active/free'), { id: 'free', owner: 'viewer@x.com', status: 'logged' });
+});
+const row = (over) => Object.assign({
+  id: 'mine', owner: 'viewer@x.com', person: 'Vic', chore: 'Hoover', done_on: '2026-08-01',
+  note: '', status: 'logged', rosterPublic: true
+}, over);
+
+await ok('owner CAN edit a listed column on their own row',
+  assertSucceeds(setDoc(doc(viewer, 'chore_log__active/mine'), row({ note: 'took ages' }))));
+await ok('owner CANNOT approve themselves (a gated column)',
+  assertFails(setDoc(doc(viewer, 'chore_log__active/mine'), row({ status: 'approved' }))));
+await ok('owner CANNOT sneak the gated column through alongside a legitimate edit',
+  assertFails(setDoc(doc(viewer, 'chore_log__active/mine'), row({ note: 'x', status: 'approved' }))));
+await ok('owner CAN create a row that starts at the gated default',
+  assertSucceeds(setDoc(doc(viewer, 'chore_log__active/new1'),
+    row({ id: 'new1', chore: 'Bins', status: 'logged' }))));
+await ok('owner CANNOT create a row that is already approved',
+  assertFails(setDoc(doc(viewer, 'chore_log__active/new2'),
+    row({ id: 'new2', chore: 'Bins', status: 'approved' }))));
+await ok('an ADMIN still approves it (the gate binds only the owner branch)',
+  assertSucceeds(setDoc(doc(admin, 'chore_log__active/mine'), row({ status: 'approved' }))));
+await ok('a table with no ownerWritable entry stays unbounded (opt-in)',
+  assertSucceeds(setDoc(doc(viewer, 'claims__active/free'), { id: 'free', owner: 'viewer@x.com', status: 'approved' })));
+
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);

@@ -62,6 +62,45 @@
       return doc;
     },
 
+    // Per-column write bounds for OWNER-scoped writes, mirrored to _meta/ownerWritable by saveSchema:
+    //   "chore_log": { "ownerWritable": ["chore", "done_on", "note", "person"] }
+    // The `owner` branch of the data rules is otherwise all-or-nothing — a member may rewrite every
+    // field of their own row, which on a table with an approval column means approving themselves. This
+    // says which fields that branch may touch; everything else on the table is LOCKED and must simply
+    // hold its create-time value.
+    //
+    // Shape per table: { cols: [...allowed], locked: { col: valueItMustHaveAtCreate } }.
+    //   - `locked` carries each gated column's declared `default` (or '' — what _createBlankRow writes
+    //     for a column with none), so a create can be checked with one map diff instead of a loop the
+    //     rules language does not have.
+    //   - `defaultFrom` columns are omitted from `locked`: they resolve per user at create time, so no
+    //     server-side rule can know what to expect. List them in `ownerWritable` if the owner sets them.
+    //   - Only tables that BOTH declare ownerWritable and have an owner column are emitted; anywhere
+    //     else the key would be inert and the rules should not pay to read it.
+    ownerWritableOf: function(schema) {
+      var tables = (schema && schema.tables) || {}, out = {};
+      var SYSTEM = ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic'];
+      for (var t in tables) {
+        var def = tables[t] || {}, list = def.ownerWritable;
+        if (!Array.isArray(list)) continue;
+        var cols = def.columns, defs = {};
+        if (Array.isArray(cols)) cols.forEach(function(c) { if (c && c.name) defs[c.name] = c; });
+        else for (var k in (cols || {})) defs[k] = cols[k];
+        var hasOwner = false;
+        for (var n in defs) { var d = defs[n]; if (d && typeof d === 'object' && d.type === 'owner') hasOwner = true; }
+        if (!hasOwner) continue;
+        var locked = {};
+        for (var c2 in defs) {
+          var d2 = defs[c2];
+          if (list.indexOf(c2) >= 0 || SYSTEM.indexOf(c2) >= 0) continue;
+          if (d2 && typeof d2 === 'object' && (d2.type === 'owner' || d2.defaultFrom)) continue;
+          locked[c2] = (d2 && typeof d2 === 'object' && d2['default'] !== undefined) ? d2['default'] : '';
+        }
+        out[t] = { cols: list.slice(), locked: locked };
+      }
+      return out;
+    },
+
     // Rows a table's `archiveAfter` policy has aged out of the ACTIVE partition:
     //   "archiveAfter": { "column": "status", "values": ["approved","rejected"], "days": 7 }
     // A row qualifies once `column` holds one of `values` AND the row has gone `days` without an edit.

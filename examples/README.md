@@ -166,6 +166,11 @@ Two things it deliberately does **not** contain:
   and `chore_points_week` / `chore_points_month` filter on the *current* period — so an old bundle
   ranks empty. Either bump the dates or use the ‹ › period arrows to step back to when they land.
 
+**Approval is a parent's job, and enforced as one.** `chore_log` names
+`ownerWritable: ["person", "chore", "done_on", "note"]`, so a member may log what they did and edit it
+afterwards, but `status` is not theirs — they cannot approve themselves, nor create a row that is
+already approved. An editor with a `chore_log` grant, or an admin, still approves normally.
+
 **Suggested access setup.** Parents `admin`. Everyone else `editor`, with *Can view* on `ref_chores`
 and `ref_rewards` (see what a chore is worth, can't rewrite it), *Tables* on `home_shopping`, and **no**
 grant on `chore_log` / `reward_claim` — those carry an `owner` column, so self-service lets each person

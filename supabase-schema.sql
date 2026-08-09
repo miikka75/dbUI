@@ -161,6 +161,44 @@ returns boolean language sql stable security definer set search_path = public as
   end
 $$;
 
+-- ownerWritable: bound an owner-scoped write to named COLUMNS. Mirrors firestore.rules
+-- ownerCreateOk/ownerUpdateOk. _meta/ownerWritable holds { table: { cols: [...], locked: {col: default} } };
+-- a table absent from it is unbounded, so the feature is opt-in and existing deployments do not change.
+--
+-- The baseline a write may differ from is looked up HERE rather than passed in: kv_update's WITH CHECK
+-- only sees the new row, so an update would otherwise be compared against the create-time defaults and
+-- an owner could not edit their own note once a parent had approved it. Being SECURITY DEFINER, this can
+-- read the stored row itself — present means update (compare against it), absent means insert (compare
+-- against the gated defaults), which is exactly the firestore.rules split.
+create or replace function public.app_owner_fields_ok(coll text, rowkey text, incoming jsonb)
+returns boolean language sql stable security definer set search_path = public as $$
+  with b as (
+    select value -> split_part(coll, '__', 1) as bound
+    from public.kv where store = '_meta' and key = 'ownerWritable'
+  ),
+  base as (
+    select coalesce(
+      (select value from public.kv where store = coll and key = rowkey),
+      (select bound -> 'locked' from b)
+    ) as baseline
+  )
+  select case
+    when (select bound from b) is null then true
+    else not exists (
+      select 1
+      from (
+        select key from jsonb_each(coalesce(incoming, '{}'::jsonb))
+        union
+        select key from jsonb_each(coalesce((select baseline from base), '{}'::jsonb))
+      ) k
+      where k.key <> all (array['id','owner','created_at','updated_at','rosterPublic'])
+        and not ((select bound -> 'cols' from b) ? k.key)
+        and coalesce(incoming ->> k.key, '') is distinct from
+            coalesce((select baseline from base) ->> k.key, '')
+    )
+  end
+$$;
+
 -- ---------- Row predicates (keep the policies below readable) ----------------------------------------
 -- READ gate. `val` is the existing row's value.
 create or replace function public.app_can_read(store text, key text, val jsonb)
@@ -227,7 +265,8 @@ returns boolean language sql stable security definer set search_path = public as
     when store like '\_%' then false
     else  -- data tables
       public.app_no_users() or public.app_role() = 'admin'
-      or ((val ->> 'owner') = public.app_email() and public.app_self_service(store))
+      or ((val ->> 'owner') = public.app_email() and public.app_self_service(store)
+          and public.app_owner_fields_ok(store, key, val))
       or (public.app_role() = 'editor' and public.app_has_table_write(store))
   end
 $$;

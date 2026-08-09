@@ -35,13 +35,15 @@ backend = {
     return StorageSupabase.getMeta('schema').then(function(d) { return BackendHelpers.unwrapSchemaDoc(d); });
   },
   saveSchema: function(folderId, schema) {
-    // Mirror two schema-derived facts the schema-blind RLS needs, kept in sync on every schema write:
-    // _meta/ownerTables (owner-column tables -> gates owner-create) and _meta/pageAccess (restricted
-    // doc-views -> gates _pages__active reads). Same contract as backend-firebase.js.
+    // Mirror the schema-derived facts the schema-blind RLS needs, kept in sync on every schema write:
+    // _meta/ownerTables (owner-column tables -> gates owner-create), _meta/pageAccess (restricted
+    // doc-views -> gates _pages__active reads) and _meta/ownerWritable (which columns an owner-scoped
+    // write may touch). Same contract as backend-firebase.js.
     return Promise.all([
       StorageSupabase.setMeta('schema', schema),
       StorageSupabase.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) }),
-      StorageSupabase.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema))
+      StorageSupabase.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema)),
+      StorageSupabase.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema))
     ]);
   },
   // Single doc-view body by name (RLS authorizes a single-row read of a restricted page by its own rule).

@@ -1088,6 +1088,38 @@ ref-pickers resolve, and every cell renders read-only; add/delete/archive contro
 - No grant at all still means no access (fail closed), and clearing every chip in the UI still means
   "no restriction" rather than locking the user out.
 
+### `ownerWritable` — which columns an owner may set
+
+The self-service rule above is **row-level**: a member may rewrite every field of their own row. On a
+table carrying a decision — an approval, a verdict, a paid flag — that means deciding it about
+themselves. A table can name the columns an owner-scoped write may touch:
+
+```json
+"chore_log": {
+  "columns": [ { "name": "owner", "type": "owner" }, …,
+               { "name": "status", "type": "select", "list": "chore_status", "default": "logged" } ],
+  "ownerWritable": ["person", "chore", "done_on", "note"]
+}
+```
+
+The owner logs what they did; `status` is not theirs to write. An **editor with a table grant, or an
+admin, is unaffected** — the bound applies only to the owner branch, which is what makes "anyone may
+log, only a parent may approve" expressible without a second table.
+
+- **Opt-in**: a table that names no `ownerWritable` keeps the old behaviour (owner writes the whole row).
+- **On create**, a gated column must hold its declared `default` — so a row cannot be *born* approved.
+  That is why `default` matters here: it is the value the rules expect to see.
+- `id`, `owner`, `created_at`, `updated_at` and `rosterPublic` are always permitted (identity and
+  bookkeeping every write stamps).
+- **`defaultFrom` columns cannot be gated** — they resolve per user at create time, so no server-side
+  rule can predict the value. List them in `ownerWritable` (as `person` is above) or leave them out of
+  the table.
+- **Enforced in both rules layers**, from a `_meta/ownerWritable` mirror written by `saveSchema`
+  (`BackendHelpers.ownerWritableOf`), the same denormalise-for-schema-blind-rules pattern as
+  `ownerTables` and `pageAccess`. The UI matches it: a gated cell renders read-only for its owner, and a
+  board whose lane column is gated offers that owner no drag and no move-menu — otherwise the write
+  would simply be refused and the card would snap back unexplained.
+
 ## user profiles, user-backed lists & membership (Firebase)
 
 These features are Firebase-backed (the local/dev backend mirrors them for tests). They build on the

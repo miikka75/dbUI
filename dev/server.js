@@ -160,6 +160,26 @@ const server = http.createServer(async (req, res) => {
       const base = tableId ? tableId.split('__')[0] : '';
       return writable.indexOf(base) >= 0;
     }
+    // Which columns an owner-scoped write may touch (mirrors firestore.rules ownerCreateOk/ownerUpdateOk).
+    // null = the table sets no bound. Read straight from the schema here; the rules layers read the
+    // _meta mirror because they cannot see the schema.
+    const OWNER_SYSTEM = ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic'];
+    // Same comparison the rules make: diff the incoming row against what it is allowed to differ from —
+    // the existing row on an update, the gated columns' create-time defaults on a create — and require
+    // every field that actually changes to be listed (or system bookkeeping).
+    function ownerFieldsOk(tableId, incoming, existing) {
+      const base = tableId ? tableId.split('__')[0] : '';
+      const bounds = BackendHelpers.ownerWritableOf(backend.getSchema('local') || {})[base];
+      if (!bounds) return true;
+      const baseline = existing || bounds.locked;
+      const keys = new Set([...Object.keys(incoming || {}), ...Object.keys(baseline || {})]);
+      for (const k of keys) {
+        if (bounds.cols.includes(k) || OWNER_SYSTEM.includes(k)) continue;
+        const a = incoming && incoming[k], b = baseline && baseline[k];
+        if (String(a === undefined ? '' : a) !== String(b === undefined ? '' : b)) return false;
+      }
+      return true;
+    }
     // Self-service (mirrors firestore.rules on the unauthenticated dev backend so the local demo behaves
     // like Firebase): a member with no WRITE grant on a table that declares an `owner` column may still
     // create/update/delete their own owned rows. Keyed on the writable set, not the readable one, so a
@@ -230,7 +250,8 @@ const server = http.createServer(async (req, res) => {
         const oc = selfServiceOwnerCol(body.tableId);
         const existing = oc ? _rowById(body.tableId, body.tab, body.data && body.data.id) : null;
         // Must stamp myself as owner AND (on update) not overwrite a row owned by someone else.
-        if (!oc || !_mine(body.data && body.data[oc]) || (existing && !_mine(existing[oc]))) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
+        if (!oc || !_mine(body.data && body.data[oc]) || (existing && !_mine(existing[oc]))
+            || !ownerFieldsOk(body.tableId, body.data, existing)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
         backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
       }
       case 'uploadFile': {

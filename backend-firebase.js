@@ -23,13 +23,15 @@ backend = {
     });
   },
   saveSchema: function(folderId, schema) {
-    // Mirror two schema-derived facts the schema-blind firestore rules need, kept in sync on every
-    // schema write: _meta/ownerTables (tables with an owner column -> gates owner-create) and
-    // _meta/pageAccess (restricted doc-views -> gates _pages__active reads; see pageAccessOf).
+    // Mirror the schema-derived facts the schema-blind firestore rules need, kept in sync on every
+    // schema write: _meta/ownerTables (tables with an owner column -> gates owner-create),
+    // _meta/pageAccess (restricted doc-views -> gates _pages__active reads; see pageAccessOf) and
+    // _meta/ownerWritable (which columns an owner-scoped write may touch; see ownerWritableOf).
     return Promise.all([
       StorageFirestore.setMeta('schema', schema),
       StorageFirestore.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) }),
-      StorageFirestore.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema))
+      StorageFirestore.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema)),
+      StorageFirestore.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema))
     ]);
   },
   // Single doc-view body by name. loadPage uses this (not the whole _pages__active collection) so that

@@ -176,3 +176,45 @@ describe('backend-helpers - autoArchiveIds (age a terminal row out of the active
     }
   });
 });
+
+describe('backend-helpers - ownerWritableOf (bound an owner-scoped write to columns)', () => {
+  const schema = { tables: {
+    chore_log: {
+      ownerWritable: ['chore', 'note', 'person'],
+      columns: [
+        { name: 'owner', type: 'owner' },
+        { name: 'person', type: 'select', defaultFrom: '@me' },
+        { name: 'chore', type: 'text' },
+        { name: 'note', type: 'text' },
+        { name: 'status', type: 'select', default: 'logged' },
+        { name: 'score', type: 'number' },
+        { name: 'updated_at', type: 'text', hidden: true }
+      ]
+    },
+    // declares the bound but has no owner column -> the key would be inert, so it is not emitted
+    no_owner: { ownerWritable: ['a'], columns: [{ name: 'a', type: 'text' }] },
+    // has an owner column but sets no bound -> unbounded, the historical behaviour
+    unbounded: { columns: [{ name: 'owner', type: 'owner' }, { name: 'x', type: 'text' }] }
+  } };
+
+  it('emits the allowlist plus every gated column with its create-time value', () => {
+    const m = H.ownerWritableOf(schema);
+    assert.deepEqual(m.chore_log.cols, ['chore', 'note', 'person']);
+    assert.deepEqual(m.chore_log.locked, { status: 'logged', score: '' });   // no default -> '' (what _createBlankRow writes)
+  });
+
+  it('omits owner, the system bookkeeping and defaultFrom columns from `locked`', () => {
+    const locked = H.ownerWritableOf(schema).chore_log.locked;
+    // owner/updated_at are system; person is defaultFrom, resolved per user, so no rule can predict it
+    for (const k of ['owner', 'updated_at', 'person']) assert.equal(k in locked, false, k);
+  });
+
+  it('only tables that both declare the bound AND have an owner column are emitted', () => {
+    assert.deepEqual(Object.keys(H.ownerWritableOf(schema)), ['chore_log']);
+  });
+
+  it('no tables, or a schema without any, yields an empty map', () => {
+    assert.deepEqual(H.ownerWritableOf({}), {});
+    assert.deepEqual(H.ownerWritableOf(null), {});
+  });
+});

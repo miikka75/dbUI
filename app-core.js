@@ -1816,7 +1816,9 @@ function createVueApp() {
       // MY rows, others stay read-only (owner/mirror/union-foreign columns are always read-only).
       cellReadonly: function(item, col, ownerId) {
         if (this.isReadonlyCell(item, col, ownerId)) return true;
-        if (this.currentSelfService && (!ownerId || ownerId === this.currentTable)) return !this.rowOwnedByMe(item, this.selfServeTable);
+        if (this.currentSelfService && (!ownerId || ownerId === this.currentTable)) {
+          return !this.rowOwnedByMe(item, this.selfServeTable) || !this.ownerCanWrite(this.selfServeTable, col);
+        }
         return this.viewReadonly(ownerId || this.currentTable);
       },
       // A table a restricted member may self-serve: it has an owner column, they have no grant on it, and
@@ -1836,6 +1838,19 @@ function createVueApp() {
       // Resolve a column's `defaultFrom` token to the value stamped on a new row. Unknown tokens stamp
       // blank rather than writing the token text, so a typo can't end up looking like data.
       defaultFromValue: function(token, col) { return token === '@me' ? this.meValueFor(col) : ''; },
+      // Columns an OWNER-scoped write may touch on a self-service table, per the table's `ownerWritable`
+      // (mirrored to _meta/ownerWritable for the rules — see BackendHelpers.ownerWritableOf). null = the
+      // table sets no bound, so the owner may write the whole row, which is the historical behaviour.
+      ownerWritableCols: function(table) {
+        var list = SCHEMA[table] && SCHEMA[table].ownerWritable;
+        return Array.isArray(list) ? list : null;
+      },
+      // Offer only what the server will accept: without this the UI shows an editor / a draggable card,
+      // the write is denied, and the value silently snaps back with no explanation.
+      ownerCanWrite: function(table, col) {
+        var list = this.ownerWritableCols(table);
+        return !list || list.indexOf(col) >= 0 || ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic'].indexOf(col) >= 0;
+      },
       // Row belongs to the current user (its owner column equals my email, case-insensitive).
       rowOwnedByMe: function(item, table) {
         var oc = getOwnerCol(table);
@@ -4336,6 +4351,14 @@ function createVueApp() {
       cfg: function() { return this.view.board || {}; },
       laneCol: function() { return this.cfg.lane; },
       canEdit: function() { return !this.embed && appInstance.canMutateRows; },
+      // Moving a card writes the lane column. On a self-service table that is an owner-scoped write, so
+      // a card is only movable if `ownerWritable` lets its owner set the lane — otherwise the drop would
+      // be refused by the rules and the card would snap back unexplained.
+      canMoveCards: function() {
+        var a = appInstance;
+        if (!a.currentSelfService) return true;
+        return a.ownerCanWrite(a.selfServeTable, this.laneCol);
+      },
       hasArchive: function() { return appInstance.hasArchive; },
       rows: function() { return this.embed ? (appInstance.boardRowsFor ? appInstance.boardRowsFor(this.viewName) : []) : (appInstance.currentData || []); },
       // A 2-D REF lane: when `board.lane` is a `ref` to a 2-column lookup, the lookup's two dimensions are the
@@ -4426,7 +4449,7 @@ function createVueApp() {
       cardColor: function(item) { return this.cfg.color ? Calendar.hashColor(String(item[this.cfg.color] || '')) : null; },
       toggleGroup: function(key) { this.collapsed[key] = !this.collapsed[key]; },
       // --- drag/drop (desktop) ---
-      onDragStart: function(item) { if (this.canEdit) this.dragId = item.id; },
+      onDragStart: function(item) { if (this.canEdit && this.canMoveCards) this.dragId = item.id; },
       onDragEnd: function() { this.dragId = null; this.overLane = null; },
       onDrop: function(laneKey) {
         if (!this.canEdit || this.dragId == null) return;
@@ -4436,7 +4459,7 @@ function createVueApp() {
         this.onDragEnd();
       },
       // --- mobile / a11y fallback: move via menu ---
-      moveTo: function(item, laneKey) { if (this.canEdit && String(item[this.laneCol] || '') !== laneKey) appInstance.saveField(item, this.laneCol, laneKey, this.viewName); },
+      moveTo: function(item, laneKey) { if (this.canEdit && this.canMoveCards && String(item[this.laneCol] || '') !== laneKey) appInstance.saveField(item, this.laneCol, laneKey, this.viewName); },
       laneMenuItems: function() { var self = this; return this.laneOrder.map(function(k) { return { value: k, title: self.laneLabel(k) }; }); },
       addInLane: function(laneKey) { appInstance.boardAddInLane(this.viewName, laneKey); },
       // Per-card row controls (mirror the grid's row-append buttons): archive files the card to the archive
@@ -4476,7 +4499,7 @@ function createVueApp() {
       + '          <v-btn v-if="canEdit" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="tOr(\'board.edit\',\'Edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
       + '          <v-btn v-if="canEdit && hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.archive\',\'Archive\')" @click="archItem(item)" :data-testid="\'board-arch-\'+item.id"></v-btn>'
       + '          <v-btn v-if="canEdit" :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" density="comfortable" :color="isDelArmed(item) ? \'error\' : undefined" :title="isDelArmed(item) ? tOr(\'board.confirm_delete\',\'Confirm delete?\') : tOr(\'board.delete\',\'Delete\')" @click="delItem(item)" :data-testid="\'board-del-\'+item.id"></v-btn>'
-      + '          <v-menu v-if="canEdit" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
+      + '          <v-menu v-if="canEdit && canMoveCards" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
       + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.move_to\',\'Move to\')" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
       + '            <v-list density="compact"><v-list-subheader>{{ tOr(\'board.move_to\',\'Move to\') }}</v-list-subheader>'
       + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value)" :active="String(item[laneCol]||\'\')===opt.value">'
