@@ -461,7 +461,8 @@
           }
         ],
         "defaultView": "month",
-        "weekStart": 1
+        "weekStart": 1,
+        "addTo": "chore_log"
       },
       "icon": "mdi-calendar-check"
     },

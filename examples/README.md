@@ -135,6 +135,7 @@ Sweepy, Homey). It leans on a different part of dbUI than the bishopric schema:
 - **pages that compose views**: Home is instructions plus the reward price list, Scoreboard is one
   page stacking week, month, balance and the heatmap — so the nav stays eight entries deep
 - **`includeArchive`** on every total, because `archiveAfter` would otherwise drain them as rows age out
+- **`calendar.addTo`**, so clicking a day on the two-source calendar logs a chore on that date
 - **`defaultFrom: "@me"`** on `person`, so a logged chore is attributed to whoever logged it
 - **`daysSince` + an ordered comparison** on the shopping list — `days_late` appears only once an item
   is past its `needed_by` date

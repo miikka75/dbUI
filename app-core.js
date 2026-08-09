@@ -382,7 +382,10 @@ function createVueApp() {
         // Find tables this user can access
         var u = this.currentUserEntry;
         if (!u) return {};
-        var userTables = u.tables === 'all' ? Object.keys(SCHEMA) : (u.tables || []);
+        // Through the shared reader, not the raw value: a grant may be 'all', a legacy array or a
+        // { table: mode } MAP, and only readableTables() normalizes all three. Reading `.tables` here
+        // directly meant a map-shaped grant reached .forEach and threw.
+        var userTables = AccessFeatures.readableTables(u.tables) || Object.keys(SCHEMA);
         // Find which lists are used by accessible tables
         var allowedLists = {};
         userTables.forEach(function(t) {
@@ -1061,29 +1064,51 @@ function createVueApp() {
       hashColor: function(key) { return Calendar.hashColor(key); },
       // Resolve a calendar view's source specs / rotation overlays (pure over VIEWS -> calendar.js).
       calSources: function(name) { return Calendar.sources(VIEWS, name); },
-      // Day-add is only offered when the calendar has exactly ONE source carrying a date column: a
-      // multi-source calendar has no unambiguous table to add the row to. Write access is checked
-      // across the whole mirror cluster, as addRow writes to all of it.
+      // The source a day-add creates in. One source -> that one. Several -> ambiguous, so the calendar
+      // must say which with `calendar.addTo: "<table>"`; without it day-add stays off rather than
+      // guessing which of several tables the click meant.
+      calAddSource: function(name) {
+        var srcs = this.calSources(name), cfg = (VIEWS[name] && VIEWS[name].calendar) || {};
+        if (cfg.addTo) return srcs.find(function(s) { return s && s.table === cfg.addTo; }) || null;
+        return srcs.length === 1 ? srcs[0] : null;
+      },
       canCalendarAdd: function(name) {
-        var srcs = this.calSources(name);
-        if (srcs.length !== 1) return false;
-        var s = srcs[0];
+        var s = this.calAddSource(name);
         if (!s || !s.table || !s.dateColumn || !SCHEMA[s.table]) return false;
         if (this.viewReadonly(name)) return false;
-        var allowed = this.userWritableTables;   // adding an event is a WRITE to the source table
+        // Adding writes the whole mirror cluster, so a grant must cover all of it — but a member with no
+        // grant at all may still own rows on a self-service table, and refusing them here was the only
+        // place that forgot it (the grid's Add button has allowed it all along via canMutateRows).
+        var allowed = this.userWritableTables;
         if (!allowed) return true;
-        return withMirrors([s.table]).every(function(t) { return allowed.indexOf(t) >= 0; });
+        if (withMirrors([s.table]).every(function(t) { return allowed.indexOf(t) >= 0; })) return true;
+        return this.canSelfServe(s.table);
       },
       // Create a row on `date` in that single source, then land on the source table. The calendar's
       // day panel is read-only (cal-event-row renders, never edits), so adding in place would strand
       // a blank row the user cannot fill in; the table is where it becomes editable.
       calendarAddOnDay: function(name, date) {
         if (!date || !this.canCalendarAdd(name)) return;
-        var s = this.calSources(name)[0], prefill = {};
+        var s = this.calAddSource(name), prefill = {};
         prefill[s.dateColumn] = date;                   // the point: prefill the clicked day
         this._createBlankRow(s.table, { prefill: prefill });
-        this.selectTab(s.table);
+        this.selectTab(this._gridFor(s.table));
         this.notify(this.t('msg.row_added'));
+      },
+      // Where to land after creating a row: the new row is blank but for its date, so the user needs a
+      // grid to fill in. Prefer somewhere they can actually navigate back to — a nav entry over this
+      // table — and fall back to the table itself, which may not be in the menu at all.
+      _gridFor: function(table) {
+        var hit = null;
+        (this.sidebarTabs || []).forEach(function(t) {
+          (t.children || [t]).forEach(function(e) {
+            if (hit || !e || e.divider || !e.id) return;
+            var v = VIEWS[e.id];
+            if (e.id === table) { hit = e.id; return; }
+            if (v && !v.markdown && !v.board && (v.sources || []).length === 1 && v.sources[0] === table && !v.readonly) hit = e.id;
+          });
+        });
+        return hit || table;
       },
       // Board: add a blank card pre-stamped with a lane value (like addRow, but prefilling board.lane so
       // the card lands in the clicked lane). Pushes into currentData so the board re-renders immediately.
@@ -2488,7 +2513,13 @@ function createVueApp() {
           } else {
             self.userList = [{ key: email, addr: email, role: a.role, tables: a.tables }]; done();
           }
-        }).catch(function() { self.selfUnregistered = true; self.userList = []; done(); });
+        }).catch(function(e) {
+          // A denied/failed access read means "not one of us" — but this also catches anything thrown by
+          // the success path above, which would then present as an unexplained "you are not registered".
+          // Say what actually happened rather than leaving a security-shaped symptom with no cause.
+          console.error('[loadUsers] access check failed:', (e && e.stack) || e);
+          self.selfUnregistered = true; self.userList = []; done();
+        });
       },
       _buildUserList: function(u) {
         var list = [];

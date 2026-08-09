@@ -802,6 +802,17 @@ appointment date and an expiry date):
 Per-source fields: `table` (req), `dateColumn` (req), `titleColumns` (opt), `filter` (opt, data-view
 grammar), `label` (opt — the type tag + colour key; defaults to the table's translated `tab.<table>`).
 
+### Adding on a day (`addTo`)
+Clicking a day and pressing **+** creates a row with that day prefilled in the source's `dateColumn`,
+then lands on a grid so it can be filled in. With one source that source is the target; with several,
+name it:
+```json
+"calendar": { "sources": [ … ], "addTo": "chore_log" }
+```
+Without `addTo` a multi-source calendar offers no **+**, rather than guessing which table the click
+meant. A name that isn't one of the sources is a load-time error. Offered to anyone who could add to
+that table by hand — including a member relying on **self-service**, who has no grant at all.
+
 ### Rotation duties (`rotationSources`)
 Overlay a **rotation view's** generated duties (e.g. `duty_rotation` turns) onto the calendar as
 **read-only** events. Rotation rows aren't stored — they're generated per date from the rosters +

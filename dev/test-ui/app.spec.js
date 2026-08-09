@@ -3161,6 +3161,37 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await expect(page.locator('[data-testid="pivot-view"]')).toBeVisible();  // renders in the DOM
   });
 
+  test('a MAP-shaped grant works everywhere a grant is read (regression: visibleLists threw)', async ({ page }) => {
+    // visibleLists read `u.tables` raw and called .forEach on it. A map-shaped grant therefore threw —
+    // inside loadUsers' promise, whose catch reports "not registered", so the user was told they had no
+    // account at all. Every grant read must go through the AccessFeatures normalizers.
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const a = window.appInstance;
+      a.usersLoaded = true;
+      a.currentUserEmail = 'kid@x.test';
+      const probe = (tables) => {
+        a.userList = [{ key: 'kid@x.test', addr: 'kid@x.test', role: 'editor', tables: tables }];
+        try { return { lists: Object.keys(a.visibleLists).length, readable: a.userAllowedTables.length }; }
+        catch (e) { return { threw: String(e && e.message) }; }
+      };
+      return { empty: probe({}), map: probe({ tasks: 'rw', notes: 'r' }), legacy: probe(['tasks']) };
+    });
+    expect(r.empty.threw).toBeUndefined();
+    expect(r.map.threw).toBeUndefined();
+    expect(r.legacy.threw).toBeUndefined();
+    expect(r.empty.readable).toBe(0);
+    expect(r.map.readable).toBe(2);
+    expect(r.map.lists).toBeGreaterThan(0);      // a map grant still resolves its tables' lists
+    expect(r.legacy.readable).toBe(1);
+  });
+
   test('@me resolves through the user link on a userlink list, and to the profile name otherwise', async ({ page }) => {
     test.setTimeout(20000);
     await page.request.post('/api/resetData');
