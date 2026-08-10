@@ -16,7 +16,11 @@
 //   - 'unsafe-inline' styles are required by Vuetify's runtime style injection.
 //   - Loopback http/ws entries keep the dev server + Firebase emulator modes working; they are
 //     unreachable third parties for production visitors.
-//   - Future Supabase backend: add https://*.supabase.co to connect-src when that lands.
+//   - Supabase mode (index.html -> /backend-supabase.js) talks to a per-project *.supabase.co host,
+//     wildcarded for the same reason the Google origins are: one URL connects the app to ANY project.
+//     wss: covers realtime if it is ever switched on. The SDK itself loads from jsdelivr, already in
+//     script-src. Without these the Supabase backend fails the moment the header stops being
+//     Report-Only — silently, since a blocked fetch looks like an empty database.
 (function(root) {
   var isNode = (typeof module !== 'undefined' && module.exports);
 
@@ -49,7 +53,7 @@
       "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
       "font-src 'self' data: https://cdn.jsdelivr.net",
       "img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*",
-      "connect-src 'self' blob: https://*.googleapis.com http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",   // blob: -> fetch of the runtime (Blob-URL) manifest
+      "connect-src 'self' blob: https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",   // blob: -> fetch of the runtime (Blob-URL) manifest
       "frame-src https://*.firebaseapp.com https://accounts.google.com",
       "manifest-src 'self' blob:",   // the runtime PWA manifest is a Blob URL
       "worker-src 'self'",

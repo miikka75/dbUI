@@ -25,13 +25,16 @@ backend = {
   saveSchema: function(folderId, schema) {
     // Mirror the schema-derived facts the schema-blind firestore rules need, kept in sync on every
     // schema write: _meta/ownerTables (tables with an owner column -> gates owner-create),
-    // _meta/pageAccess (restricted doc-views -> gates _pages__active reads; see pageAccessOf) and
-    // _meta/ownerWritable (which columns an owner-scoped write may touch; see ownerWritableOf).
+    // _meta/pageAccess (restricted doc-views -> gates _pages__active reads; see pageAccessOf),
+    // _meta/ownerWritable (which columns an owner-scoped write may touch; see ownerWritableOf) and
+    // _meta/listTables (which tables own each list -> lets the /_lists rule authorize a CREATE, where
+    // there is no existing doc to read the ownership label from; see listOwnershipMap).
     return Promise.all([
       StorageFirestore.setMeta('schema', schema),
       StorageFirestore.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) }),
       StorageFirestore.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema)),
-      StorageFirestore.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema))
+      StorageFirestore.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema)),
+      StorageFirestore.setMeta('listTables', listOwnershipMap((schema && schema.tables) || {}))
     ]);
   },
   // Single doc-view body by name. loadPage uses this (not the whole _pages__active collection) so that
@@ -82,13 +85,11 @@ backend = {
       var lists = r[2] || {};
       var allowed = r[3];
       // Boot loads granted tables PLUS the owner-column ones, which a member may reach without a grant
-      // at all (self-service). Skipping those left every self-service view empty until something else
-      // happened to fetch them; getTableData scopes each read to the slice the rules allow, so pulling
-      // them here costs a member their own rows + the public roster, never a denied request.
-      var selfServe = BackendHelpers.ownerTablesOf(parsed);
-      var names = Object.keys(tableMap).filter(function(t) {
-        return !allowed || allowed.indexOf(t) >= 0 || selfServe.indexOf(t) >= 0;
-      });
+      // at all (self-service) — see BackendHelpers.bootTableNames, shared with the Supabase and dev
+      // backends so the three boot sets cannot drift again. getTableData scopes each read to the slice
+      // the rules allow, so pulling them here costs a member their own rows + the public roster, never
+      // a denied request.
+      var names = BackendHelpers.bootTableNames(parsed, allowed);
       var jobs = [];
       names.forEach(function(name) {
         jobs.push(self.getTableData(name, 'active').then(function(res) { return { key: name, res: res }; }).catch(function() { return { key: name, res: { rows: [] } }; }));

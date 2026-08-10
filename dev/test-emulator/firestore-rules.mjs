@@ -283,6 +283,29 @@ await ok("list of an 'r' table is NOT writable",
 await ok("list of an 'rw' table IS writable",
   assertSucceeds(setDoc(doc(mixed, '_lists/taskvalues'), { name: 'taskvalues', items: ['a', 'b'], tables: ['tasks'] })));
 
+// CREATE is a separate question from update: there is no stored doc, so the ownership label in the
+// incoming write is an unverified CLAIM. The old `allow write` rule referenced resource.data on a
+// create and denied editors outright by evaluation error — which broke putListItem adding the first
+// value to an `allowNew` list, while the same editor on Supabase was allowed. Now the create is
+// authorized from the _meta/listTables mirror (saveSchema -> listOwnershipMap) and the claim is pinned.
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), '_meta/listTables'), { newtasklist: ['tasks'], newreflist: ['refdata'] });
+});
+await ok('editor CAN create a list the schema says an rw-granted table owns',
+  assertSucceeds(setDoc(doc(mixed, '_lists/newtasklist'), { name: 'newtasklist', items: ['x'], tables: ['tasks'] })));
+await ok("editor CANNOT create a list owned only by a table they may READ",
+  assertFails(setDoc(doc(mixed, '_lists/newreflist'), { name: 'newreflist', items: ['x'], tables: ['refdata'] })));
+await ok('editor CANNOT mint a list under a self-chosen ownership label (the claim is pinned to the mirror)',
+  assertFails(setDoc(doc(mixed, '_lists/newreflist'), { name: 'newreflist', items: ['x'], tables: ['tasks'] })));
+await ok('editor CANNOT create a list the schema does not own at all',
+  assertFails(setDoc(doc(mixed, '_lists/unknownlist'), { name: 'unknownlist', items: ['x'], tables: ['tasks'] })));
+await ok('admin creates a list regardless of the mirror',
+  assertSucceeds(setDoc(doc(admin, '_lists/adminlist'), { name: 'adminlist', items: [], tables: [] })));
+await ok('editor still CANNOT delete a list (pruning is the full-view holder\'s call)',
+  assertFails(deleteDoc(doc(mixed, '_lists/newtasklist'))));
+await ok('admin CAN delete a list',
+  assertSucceeds(deleteDoc(doc(admin, '_lists/adminlist'))));
+
 // A member may read the link that names THEM — their own identity, and what lets `@me` resolve to a
 // curated value on a userlink list. The equality query must be rules-provable, like the shared-only one.
 await testEnv.withSecurityRulesDisabled(async (ctx) => {

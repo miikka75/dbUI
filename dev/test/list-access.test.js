@@ -61,3 +61,48 @@ describe('Per-list access (owning tables + filtering)', () => {
     assert.deepEqual(accessibleListNames(schemaTables, ['projects'], Object.keys(allLists)).sort(), ['categories', 'labels']);
   });
 });
+
+const LA = require('../../list-access');
+
+describe('list-access - listOwnershipMap (the _meta/listTables mirror)', () => {
+  // The inverse of listOwningTables, mirrored by saveSchema so the schema-blind rules layers can
+  // authorize a _lists CREATE — where there is no stored doc to read an ownership label from, and the
+  // label in the incoming write is an unverified claim.
+  const tables = {
+    tasks:   { columns: [{ name: 'status', list: 'statuses' }, { name: 'who', list: 'people' }] },
+    notes:   { columns: { tag: { list: 'statuses' }, mood: { listSwitch: { list: 'moods' } } } },
+    plain:   { columns: [{ name: 'title', type: 'text' }] }
+  };
+
+  it('maps each referenced list to every table whose columns reference it', () => {
+    assert.deepEqual(LA.listOwnershipMap(tables), {
+      statuses: ['tasks', 'notes'],
+      people: ['tasks'],
+      moods: ['notes']
+    });
+  });
+
+  it('agrees with listOwningTables for every list it names', () => {
+    const map = LA.listOwnershipMap(tables);
+    for (const name of Object.keys(map)) {
+      assert.deepEqual(map[name], LA.listOwningTables(tables, name),
+        `mirror and per-list lookup disagree on "${name}" — the create rule pins one to the other`);
+    }
+  });
+
+  it('omits lists nothing references, and tables with no list columns', () => {
+    const map = LA.listOwnershipMap(tables);
+    assert.equal('unreferenced' in map, false);
+    assert.equal(Object.values(map).some((ts) => ts.includes('plain')), false);
+  });
+
+  it('does not repeat a table that references the same list twice', () => {
+    const dup = { t: { columns: [{ name: 'a', list: 'L' }, { name: 'b', list: 'L' }] } };
+    assert.deepEqual(LA.listOwnershipMap(dup), { L: ['t'] });
+  });
+
+  it('empty / missing schema is safe', () => {
+    assert.deepEqual(LA.listOwnershipMap({}), {});
+    assert.deepEqual(LA.listOwnershipMap(null), {});
+  });
+});

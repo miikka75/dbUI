@@ -32,6 +32,9 @@ jobs:
         cache-dependency-path: dev/package-lock.json
     - run: npm ci
     - run: npm run build --if-present
+    # Includes dev/test/supabase-rls.test.js, which executes the real supabase-schema.sql policies
+    # against PostgreSQL-in-WASM (@electric-sql/pglite). No service container, Docker or JVM needed —
+    # unlike the `rules` job below, it is just another unit test.
     - run: npm test
 
   # Security-rules suites against the Firebase emulators. These guard the access-control model —

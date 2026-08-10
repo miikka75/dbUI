@@ -119,14 +119,45 @@ service cloud.firestore {
     // change a list's ITEMS but not its `tables` ownership label — that determines who can see the list,
     // so re-stamping it stays an admin action (listAllowed() reads resource, so the editor branch is
     // update-only anyway; the equality just pins the field). Admins/bootstrap set `tables` freely.
+    // CREATE has no existing doc, so `resource` is null and both listWriteAllowed() and the
+    // re-stamp pin above evaluate against nothing — which denied every editor create outright. That is
+    // not an academic gap: putListItem on a list whose doc doesn't exist yet is a create (set with
+    // merge), so an editor adding the first value to an `allowNew` list was denied, while the same
+    // editor on Supabase was allowed. Authorize the create from _meta/listTables — the schema-derived
+    // ownership map (listOwnershipMap, mirrored by saveSchema) — rather than from the `tables` label the
+    // client writes into the doc, which on a create is an unverified claim: trusting it would let an
+    // editor mint a list under an ownership label of their choosing, hijacking the read audience of a
+    // list another table actually owns. The label is then PINNED to the mirror, so the stored doc says
+    // what the schema says. No mirror doc yet (rules deployed before the next schema save) -> no editor
+    // creates, and an admin still creates freely; the feature activates on the next saveSchema.
+    function listTablesMap() {
+      return exists(/databases/$(database)/documents/_meta/listTables)
+        ? get(/databases/$(database)/documents/_meta/listTables).data : {};
+    }
+    function listCreateAllowed(listName) {
+      let m = listTablesMap();
+      let u = userData();
+      return (listName in m)
+        && request.resource.data.tables == m[listName]
+        && (u.tables == 'all'
+            || ('rwTables' in u ? m[listName].hasAny(u.rwTables)
+                                : (u.tables is list && m[listName].hasAny(u.tables))));
+    }
     match /_lists/{listName} {
       allow read: if request.auth != null && isRegistered() && (
         noUsers() || role() == 'admin' || listAllowed()
       );
-      allow write: if request.auth != null && isRegistered() && (
+      allow create: if request.auth != null && isRegistered() && (
+        noUsers() || role() == 'admin' || (role() == 'editor' && listCreateAllowed(listName))
+      );
+      allow update: if request.auth != null && isRegistered() && (
         noUsers() || role() == 'admin' ||
         (role() == 'editor' && listWriteAllowed() && request.resource.data.tables == resource.data.tables)
       );
+      // Deleting a list is pruning, which only the full-view holder can judge (saveLists prunes only
+      // when _myTables() is null). Stated as its own rule rather than riding `write`, where the
+      // re-stamp pin referenced a null request.resource and denied editors by evaluation error.
+      allow delete: if request.auth != null && isRegistered() && (noUsers() || role() == 'admin');
     }
 
     // User-linked lists (Option C): each doc links a list VALUE to a registered user's email so a cell can

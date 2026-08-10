@@ -26,3 +26,66 @@ describe('deploy config — function region', () => {
     assert.equal(m[1], rewrite.function.region, 'update the fallback when the rewrite region changes');
   });
 });
+
+// Hosting serves the REPO ROOT ("public": "."), so the `ignore` list is the only thing standing
+// between a file dropped in the working tree and a world-readable URL. A data export bundle carries
+// the `tables` key -- actual rows -- so publishing one bypasses every rule in firestore.rules at once.
+// Guard both that the exclusions are there and that they don't over-reach onto the JSON the app must
+// actually be able to fetch at runtime.
+describe('deploy config — hosting ignore list', () => {
+  const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'firebase.json'), 'utf8'));
+  const ignore = cfg.hosting.ignore || [];
+
+  // Minimal gitignore-flavoured glob: `**` spans separators, `*` doesn't, and a pattern with no `/`
+  // matches the basename at any depth. Enough to answer "would firebase deploy skip this path".
+  const matches = (pattern, filePath) => {
+    const rx = pattern.split('**').map((seg) =>
+      seg.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')
+    ).join('.*');
+    const re = new RegExp('^' + rx + '$');
+    return re.test(filePath) || (!pattern.includes('/') && re.test(path.basename(filePath)));
+  };
+  const isIgnored = (filePath) => ignore.some((p) => matches(p, filePath));
+
+  it('hosting serves the repo root, which is what makes the ignore list load-bearing', () => {
+    assert.equal(cfg.hosting.public, '.');
+  });
+
+  for (const f of [
+    'drive-sync-export-2026-07-31.json',
+    'drive-sync-export-2026-07-31 (1).json',
+    'english-schema-import.json',
+    'english-translations-import.json',
+    'firebase-tehtavat-board-import.json',
+    'some-backup-export.json'
+  ]) {
+    it(`excludes the data bundle ${f}`, () => {
+      assert.ok(isIgnored(f), `${f} would be DEPLOYED PUBLICLY — add a pattern to firebase.json hosting.ignore`);
+    });
+  }
+
+  // The mirror image: an over-broad "*.json" would silently break boot, since these are fetched at
+  // runtime (index.html appUrl + initFirebase/initSupabase) rather than bundled.
+  for (const f of ['manifest.json', 'firebase-config.json', 'supabase-config.json']) {
+    it(`still serves ${f} (the app fetches it at runtime)`, () => {
+      assert.ok(!isIgnored(f), `${f} is fetched at boot and must stay deployable`);
+    });
+  }
+
+  it('.gitignore refuses the same bundles, so they never reach history either', () => {
+    const gi = fs.readFileSync(path.join(ROOT, '.gitignore'), 'utf8');
+    for (const p of ['drive-sync-export-*.json', '*-import.json', '*-export.json']) {
+      assert.ok(gi.includes(p), `.gitignore is missing ${p} (keep it in step with firebase.json)`);
+    }
+  });
+
+  // There are TWO publish paths for the repo root — Firebase Hosting (firebase.json `ignore`) and
+  // GitHub Pages (deploy-pages.yml's `rm -f` prune) — each with its own hand-maintained denylist and
+  // no reference to the other. Excluding a file from one only moves the leak to the other.
+  it('the GitHub Pages prune refuses the same bundles as the hosting ignore list', () => {
+    const wf = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'deploy-pages.yml'), 'utf8');
+    for (const p of ['drive-sync-export-*.json', '*-import.json', '*-export.json']) {
+      assert.ok(wf.includes(p), `deploy-pages.yml does not prune ${p} — Pages would publish it`);
+    }
+  });
+});

@@ -12,6 +12,14 @@ dev/profiles.json
 dev/data/
 dev/uploads/
 
+# Data exports / import bundles dropped in the repo root. These carry real ROW data (the `tables` key
+# of an export bundle), and firebase.json hosts the repo root — so an un-ignored one is both one
+# `git add -A` from history and one `firebase deploy` from being world-readable. The hosting `ignore`
+# list refuses them too; keep the two in step.
+/drive-sync-export-*.json
+/*-import.json
+/*-export.json
+
 # throwaway seed / test databases (see seed-demo.js)
 dev/seed-test-*.db
 dev/seed-test-*.db-wal

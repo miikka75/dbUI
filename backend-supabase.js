@@ -37,13 +37,16 @@ backend = {
   saveSchema: function(folderId, schema) {
     // Mirror the schema-derived facts the schema-blind RLS needs, kept in sync on every schema write:
     // _meta/ownerTables (owner-column tables -> gates owner-create), _meta/pageAccess (restricted
-    // doc-views -> gates _pages__active reads) and _meta/ownerWritable (which columns an owner-scoped
-    // write may touch). Same contract as backend-firebase.js.
+    // doc-views -> gates _pages__active reads), _meta/ownerWritable (which columns an owner-scoped
+    // write may touch) and _meta/listTables (which tables own each list -> authorizes a _lists CREATE,
+    // where there is no existing row to read the ownership label from). Same contract as
+    // backend-firebase.js — the two must mirror the SAME set or the rules layers diverge.
     return Promise.all([
       StorageSupabase.setMeta('schema', schema),
       StorageSupabase.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) }),
       StorageSupabase.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema)),
-      StorageSupabase.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema))
+      StorageSupabase.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema)),
+      StorageSupabase.setMeta('listTables', listOwnershipMap((schema && schema.tables) || {}))
     ]);
   },
   // Single doc-view body by name (RLS authorizes a single-row read of a restricted page by its own rule).
@@ -83,7 +86,10 @@ backend = {
         var languages = (r[1] && (r[1].list || [])) || [];
         var lists = r[2] || {};
         var allowed = r[3];
-        var names = Object.keys(tableMap).filter(function(t) { return !allowed || allowed.indexOf(t) >= 0; });
+        // Granted tables PLUS the owner-column (self-service) ones — the shared predicate, so this boot
+        // set matches Firebase's. RLS filters rather than denies, so an owner table read here returns
+        // exactly the caller's own rows + the public roster.
+        var names = BackendHelpers.bootTableNames(parsed, allowed);
         var jobs = [];
         names.forEach(function(name) {
           jobs.push(self.getTableData(name, 'active').then(function(res) { return { key: name, res: res }; }).catch(function() { return { key: name, res: { rows: [] } }; }));

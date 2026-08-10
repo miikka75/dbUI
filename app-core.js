@@ -1435,6 +1435,22 @@ function createVueApp() {
           if (view.compute) srcRows = resolveComputed(srcRows, view.compute, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
           var rows = resolveComputed(aggregateRows(vMe, srcRows), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
           self.currentData = rows;
+          // Rebuild currentData once a late-arriving table lands in dataCache. Declared here (rather
+          // than beside the rotation preload below) because the source preload needs it too.
+          var recomputeRotation = function() {
+            var vMe2 = self._viewWithMe(view);
+            var src2 = buildRows(vMe2, self.dataCache);
+            if (view.compute) src2 = resolveComputed(src2, view.compute, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
+            self.currentData = resolveComputed(aggregateRows(vMe2, src2), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
+          };
+          // Preload the view's OWN sources. Every other branch of loadTableData does this (calendar,
+          // rotation, pivot, rsvp via _ensureCached; a bare table lazily below), but the union/join
+          // branch rendered straight out of dataCache and assumed boot had filled it — so any table
+          // boot skipped left this view permanently empty rather than one frame late. That is precisely
+          // the self-service case: an owner-column table a member reaches without a grant.
+          // Archive mode reads the __archive partitions, which _ensureCached doesn't fetch — leave that
+          // path alone rather than have it load the wrong partition.
+          if (!self.viewingArchive) self._ensureCached(view.sources || [], recomputeRotation);
           // Load embed table data if not cached
           (view.columns || []).forEach(function(c) {
             var embedSources = [];
@@ -1455,15 +1471,10 @@ function createVueApp() {
               }
             });
           });
-          // Preload rotation-column dependencies (rotationTable + occurrenceSource), then recompute.
+          // Preload rotation-column dependencies (rotationTable + occurrenceSource), then recompute via
+          // recomputeRotation (declared above, shared with the source preload).
           // The occurrenceSource ARCHIVE partition is also loaded so the occurrence rank stays absolute
           // (archived turns still count) even when preload_archive is off — see resolveComputed.
-          var recomputeRotation = function() {
-            var vMe2 = self._viewWithMe(view);
-            var src2 = buildRows(vMe2, self.dataCache);
-            if (view.compute) src2 = resolveComputed(src2, view.compute, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
-            self.currentData = resolveComputed(aggregateRows(vMe2, src2), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
-          };
           (view.columns || []).forEach(function(c) {
             if (!c || typeof c !== 'object' || !c.computed || !c.computed.rotationTable) return;
             var comp = c.computed;
