@@ -102,6 +102,52 @@ describe('View access filtering', () => {
   });
 });
 
+describe('Sourceless views declare their inputs per-kind (viewImplicitTables)', () => {
+  // The nav gate unlocks a sourceless view on ANY of these tables. Before they were collected, the gate
+  // saw an empty input set and let every calendar/pivot/rsvp through to a user granted nothing it reads
+  // -- a tab that could only ever render empty. The REAL module function, not a copy of it.
+  const AF = require('../../access-features');
+
+  it('a calendar is unlocked by its per-source tables', () => {
+    const cal = { calendar: { sources: [{ table: 'chores', dateColumn: 'on' }, { table: 'shopping', dateColumn: 'by' }] } };
+    assert.deepEqual(AF.viewImplicitTables(cal, {}), ['chores', 'shopping']);
+  });
+  it("a calendar's rotation overlay pulls in the rotation view's own tables", () => {
+    const views = { duty: { rotation: { columns: [{ name: 'duty', rotationTable: 'duty_rota' }] } } };
+    const cal = { calendar: { sources: [{ table: 'chores' }], rotationSources: [{ view: 'duty' }] } };
+    assert.deepEqual(AF.viewImplicitTables(cal, views), ['chores', 'duty_rota']);
+  });
+  it('a rotation view still reports its rosters and computed helpers', () => {
+    const rot = { rotation: { rosters: ['team_a', 'team_b'], columns: [{ rotationTable: 'slots' }] } };
+    assert.deepEqual(AF.viewImplicitTables(rot, {}), ['team_a', 'team_b', 'slots']);
+  });
+  it('a pivot reports the table it cross-tabulates', () => {
+    assert.deepEqual(AF.viewImplicitTables({ pivot: { source: 'chore_log', row: 'p', column: 'c' } }, {}), ['chore_log']);
+  });
+  it('an rsvp reports BOTH the events and the responses table', () => {
+    const rsvp = { rsvp: { events: 'practices', responses: 'rsvps', dateColumn: 'date', statusColumn: 's' } };
+    assert.deepEqual(AF.viewImplicitTables(rsvp, {}), ['practices', 'rsvps']);
+  });
+  it('a plain data view reports nothing implicit — its `sources` already gate it', () => {
+    assert.deepEqual(AF.viewImplicitTables({ sources: ['tasks'] }, {}), []);
+  });
+  it('duplicates collapse, so one shared table cannot be double-counted', () => {
+    const views = { duty: { sources: ['chores'] } };
+    const cal = { calendar: { sources: [{ table: 'chores' }, { table: 'chores' }], rotationSources: [{ view: 'duty' }] } };
+    assert.deepEqual(AF.viewImplicitTables(cal, views), ['chores']);
+  });
+  it('a calendar pointing at a missing view is ignored, not fatal', () => {
+    const cal = { calendar: { sources: [{ table: 'chores' }], rotationSources: [{ view: 'nope' }] } };
+    assert.deepEqual(AF.viewImplicitTables(cal, {}), ['chores']);
+  });
+  it('two calendars overlaying each other terminate instead of recursing forever', () => {
+    const views = {};
+    views.a = { calendar: { sources: [{ table: 'ta' }], rotationSources: [{ view: 'b' }] } };
+    views.b = { calendar: { sources: [{ table: 'tb' }], rotationSources: [{ view: 'a' }] } };
+    assert.deepEqual(AF.viewImplicitTables(views.a, views), ['ta', 'tb']);
+  });
+});
+
 describe('Firebase role resolution', () => {
   it('empty user list returns admin (bootstrap)', () => {
     assert.equal(getFirebaseRole([], 'a@b.com'), 'admin');
@@ -345,6 +391,53 @@ describe('Permission features (primary chips + materialized closure)', () => {
   });
 });
 
+// Lifts a member out of app-core.js and runs it, so these assertions bind to the SHIPPED code rather
+// than a copy of it — a mirrored re-implementation is what let the `|| []` drift through last time.
+// Members sit at a fixed 6-space indent as `name: function(<args>) { ... },`.
+function appCoreFn(name) {
+  const fs = require('fs'), path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'app-core.js'), 'utf8');
+  const head = '      ' + name + ': function(';
+  const start = src.indexOf(head);
+  assert.ok(start >= 0, 'could not find ' + name + ' in app-core.js');
+  const argsEnd = src.indexOf(')', start);
+  const open = src.indexOf('{', argsEnd);
+  const end = src.indexOf('\n      },', start);
+  assert.ok(end > start, 'could not find the end of ' + name);
+  // The trailing newline matters: a body whose last line ends in a // comment would otherwise swallow
+  // the closing brace.
+  return new Function('AccessFeatures',
+    'return function(' + src.slice(start + head.length, argsEnd) + ') {' + src.slice(open + 1, end) + '\n};'
+  )(require('../../access-features'));
+}
+function runAppCore(name, ctx, ...args) { return appCoreFn(name).apply(ctx, args); }
+
+describe('canReachTable — the one reachability test every read gate shares', () => {
+  // Nav, the embed filter, the boot preload, _ensureCached and the calendar's per-source gate all ask
+  // this one question. They used to each re-derive it, and the copies disagreed: a grantless member got
+  // a self-service view in the menu whose embeds were filtered out and whose rows were never fetched.
+  const ctx = (allowed, selfServe) => ({
+    userAllowedTables: allowed,
+    canSelfServe: (t) => (selfServe || []).indexOf(t) >= 0
+  });
+
+  it('an unrestricted user reaches every table', () => {
+    assert.equal(runAppCore('canReachTable', ctx(null, []), 'anything'), true);
+  });
+  it('a granted table is reachable', () => {
+    assert.equal(runAppCore('canReachTable', ctx(['tasks'], []), 'tasks'), true);
+  });
+  it('a self-serviceable table is reachable with NO grant on it', () => {
+    assert.equal(runAppCore('canReachTable', ctx([], ['chore_log']), 'chore_log'), true);
+  });
+  it('an ungranted, non-self-service table is not reachable', () => {
+    assert.equal(runAppCore('canReachTable', ctx(['tasks'], ['chore_log']), 'secrets'), false);
+  });
+  it('a registered user with no grants and no self-service reaches nothing', () => {
+    assert.equal(runAppCore('canReachTable', ctx([], []), 'tasks'), false);
+  });
+});
+
 describe('Grant modes (r / rw) across the three stored shapes', () => {
   const AF = require('../../access-features');
   const BH = require('../../backend-helpers');
@@ -355,6 +448,33 @@ describe('Grant modes (r / rw) across the three stored shapes', () => {
     assert.equal(AF.grantMode('all', 'anything'), 'rw');
     assert.equal(AF.readableTables('all'), null);
     assert.equal(AF.writableTables('all'), null);
+  });
+
+  // REGRESSION: the reader's null sentinel has to survive the trip into app-core's userAllowedTables /
+  // userWritableTables. Those computeds once ended in `|| []`, which turned "unrestricted" into "no
+  // tables" and fail-closed every non-admin holding tables:'all' -- the shape addUser() writes and the
+  // one _saveGrants() falls back to when an admin clears every chip. Both rules layers read 'all' as
+  // full access, so the collapse showed up as a client-only empty nav.
+  //
+  // This runs the REAL computed bodies lifted out of app-core.js rather than a copy of them: a mirrored
+  // re-implementation is exactly what let the drift through last time -- the mirror stayed correct while
+  // the shipped code changed underneath it.
+  describe("a NON-ADMIN on 'all' stays unrestricted through the app-core gate", () => {
+    const asUser = (tables) => ({ selfUnregistered: false, isAdmin: false, currentUserEntry: { tables: tables } });
+
+    it("'all' reaches the gate as null (unrestricted), not as an empty list", () => {
+      assert.equal(runAppCore('userAllowedTables', asUser('all')), null);
+      assert.equal(runAppCore('userWritableTables', asUser('all')), null);
+    });
+    it('a registered user with no grants still fails closed', () => {
+      assert.deepEqual(runAppCore('userAllowedTables', asUser({})), []);
+      assert.deepEqual(runAppCore('userWritableTables', asUser({})), []);
+    });
+    it('a mode map still separates read from write', () => {
+      const u = asUser({ chores: 'rw', catalogue: 'r' });
+      assert.deepEqual(runAppCore('userAllowedTables', u), ['chores', 'catalogue']);
+      assert.deepEqual(runAppCore('userWritableTables', u), ['chores']);
+    });
   });
 
   it('a LEGACY array still means read+write on each name (no migration needed)', () => {

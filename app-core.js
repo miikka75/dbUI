@@ -58,6 +58,7 @@ function viewRosters(v) { return AccessFeatures.viewRosters(v); }
 function viewComputedHelpers(v) { return AccessFeatures.viewComputedHelpers(v); }
 function viewHelperTables(v) { return AccessFeatures.viewHelperTables(v); }
 function viewTables(v) { return AccessFeatures.viewTables(v); }
+function viewImplicitTables(v) { return AccessFeatures.viewImplicitTables(v, VIEWS); }
 function isPureMirror(t) { return AccessFeatures.isPureMirror(t, SCHEMA); }
 function satelliteTables() { return AccessFeatures.satelliteTables(SCHEMA, VIEWS); }
 function grantFeatures() { return AccessFeatures.grantFeatures(SCHEMA, VIEWS); }
@@ -227,16 +228,22 @@ function createVueApp() {
             if (typeof v.markdown === 'string' && !self.canAccessPage(v)) return false;
             // A source is reachable if granted OR self-serviceable (owner-column table): a member sees a
             // self-service table/view in nav without a table grant, scoped to their own rows by the rules.
-            if (!(v.sources || []).every(function(s) { return allowedTables.indexOf(s) >= 0 || self.canSelfServe(s); })) return false;
-            // sourceless rotation views are unlocked by ANY of their rosters — a roster you lack
-            // simply renders blank (per-roster access, e.g. team_b coordinator sees team_a empty).
+            if (!(v.sources || []).every(function(s) { return self.canReachTable(s); })) return false;
+            // A sourceless view (rotation/calendar/pivot/rsvp) is unlocked by ANY of the tables it reads
+            // — one you lack simply renders blank (per-roster access, e.g. team_b coordinator sees
+            // team_a empty). Those inputs are declared per-kind (rosters, calendar.sources,
+            // pivot.source, rsvp.events/responses), not in `sources`, so ask viewImplicitTables for the
+            // whole set: consulting rosters alone let a calendar or a pivot through to a user with no
+            // grant on anything it reads, handing them a tab that could only ever render empty.
+            // Self-service counts, exactly as it does for a declared source above — it is what keeps a
+            // grantless member's own calendar (where `addTo` lets them log a row) in their nav.
             if (!(v.sources && v.sources.length)) {
-              var rosters = viewRosters(v);
-              if (rosters.length) return rosters.some(function(t) { return allowedTables.indexOf(t) >= 0; });
+              var inputs = viewImplicitTables(v);
+              if (inputs.length) return inputs.some(function(t) { return self.canReachTable(t); });
             }
             return true;
           }
-          if (SCHEMA[id]) return allowedTables.indexOf(id) >= 0 || self.canSelfServe(id);
+          if (SCHEMA[id]) return self.canReachTable(id);
           return true;
         }
         var navCfg = self.navConfig;
@@ -366,7 +373,10 @@ function createVueApp() {
         if (this.isAdmin) return null; // null = unrestricted
         var u = this.currentUserEntry;
         if (!u) return [];             // FAIL CLOSED: registered users exist but we're not one -> no access
-        return AccessFeatures.readableTables(u.tables) || [];
+        // Pass the reader's null (= tables:'all', unrestricted) THROUGH. A `|| []` here would collapse
+        // that sentinel into "no tables" and fail an unrestricted non-admin closed -- the no-grant
+        // shapes already come back as [] from the reader, so there is nothing for a fallback to catch.
+        return AccessFeatures.readableTables(u.tables);
       },
       // Tables I may WRITE — the 'rw' subset. A read-only grant appears here as absent, which is what
       // turns its views read-only and (on an owner-column table) hands the row back to self-service.
@@ -375,7 +385,7 @@ function createVueApp() {
         if (this.isAdmin) return null;
         var u = this.currentUserEntry;
         if (!u) return [];
-        return AccessFeatures.writableTables(u.tables) || [];
+        return AccessFeatures.writableTables(u.tables);   // null = unrestricted; see userAllowedTables
       },
       visibleLists: function() {
         if (this.isAdmin) return this.listsCache;
@@ -495,15 +505,12 @@ function createVueApp() {
             else { lastCol = colName(c); }
           });
         }
-        // Filter out embeds whose sources include inaccessible tables
-        var allowed = self.userAllowedTables;
-        if (allowed) {
-          embeds = embeds.filter(function(e) {
-            var sources = e.sources || [];
-            return sources.every(function(s) { return allowed.indexOf(s) >= 0; });
-          });
-        }
-        return embeds;
+        // Drop embeds whose sources aren't reachable. Self-service counts, as it does for the nav gate
+        // and the preload: without it a grantless member opened a view they were entitled to and its
+        // inline embeds silently vanished, even though the rows behind them were theirs to read.
+        return embeds.filter(function(e) {
+          return (e.sources || []).every(function(s) { return self.canReachTable(s); });
+        });
       },
       embedItems: function() { var self = this; return this.embedConfigs.map(function(cfg) { return self.resolveEmbed(cfg); }); },
       hasMaster: function() {
@@ -1000,10 +1007,10 @@ function createVueApp() {
             }).catch(function() { self.usersLoaded = true; resolve(); });
           });
         }).then(function() {
-          // Preload data -- only tables user can access
-          var tables = Object.keys(self.tableMap);
-          var allowed = self.userAllowedTables;
-          if (allowed) tables = tables.filter(function(t) { return allowed.indexOf(t) >= 0; });
+          // Preload data -- only tables the user can reach. Self-serviceable tables are included: the
+          // member holds no grant on them but the backend scopes the read to their own rows, and
+          // leaving them out left every self-service view empty until something else fetched them.
+          var tables = Object.keys(self.tableMap).filter(function(t) { return self.canReachTable(t); });
           var chain = Promise.resolve();
           tables.forEach(function(name) {
             chain = chain.then(function() {
@@ -1137,10 +1144,12 @@ function createVueApp() {
       // Fail-closed per source: a table the user cannot read contributes nothing. When `window` is
       // given, rotationSources' generated duties are added (bounded to that window).
       calEventsFor: function(name, window) {
-        var self = this, out = {}, allowed = this.userAllowedTables;
+        var self = this, out = {};
         this.calSources(name).forEach(function(s) {
           if (!s || !s.table || !s.dateColumn) return;
-          if (allowed && allowed.indexOf(s.table) < 0) return;
+          // Reachability, not a bare grant: the calendar is in this member's nav BECAUSE one of its
+          // sources is self-serviceable, so gating events on grants alone rendered it permanently empty.
+          if (!self.canReachTable(s.table)) return;
           var rows = filterRows(self.dataCache[s.table] || [], self.resolveMeTokens(s.filter));
           var tag = s.label || self.t('tab.' + s.table);
           rows.forEach(function(r) {
@@ -1155,7 +1164,7 @@ function createVueApp() {
         if (window) this.calRotationSources(name).forEach(function(rs) {
           var v = VIEWS[rs.view]; if (!v || !v.rotation) return;
           var rv = v.rotation, rosters = rv.rosters || [];
-          if (allowed && rosters.length && !rosters.some(function(t) { return allowed.indexOf(t) >= 0; })) return; // per-roster access (fail-closed)
+          if (rosters.length && !rosters.some(function(t) { return self.canReachTable(t); })) return; // per-roster access (fail-closed)
           var range = self.rangeForView(rs.view);
           var fromStr = (!range.from || range.from === 'today') ? self._calToday() : range.from;
           var interval = rv.interval || 'weekly';
@@ -1352,12 +1361,12 @@ function createVueApp() {
       // `onLoad` (optional) runs after each table lands — used by views that must re-derive rows.
       // One implementation for the calendar/rotation/pivot/rsvp preload blocks in loadTableData.
       _ensureCached: function(tables, onLoad) {
-        var self = this, allowed = this.userAllowedTables;
+        var self = this;
         (tables || []).forEach(function(tbl) {
           // Reachable = granted OR self-serviceable (owner-column table: the backend returns only the
-          // member's own rows) — same reachability the sidebar's canAccess uses, so an rsvp view's
+          // member's own rows) — the same canReachTable the sidebar's canAccess uses, so an rsvp view's
           // responses table loads for a no-grant member instead of silently staying empty.
-          if (!tbl || self.dataCache[tbl] || (allowed && allowed.indexOf(tbl) < 0 && !self.canSelfServe(tbl))) return;
+          if (!tbl || self.dataCache[tbl] || !self.canReachTable(tbl)) return;
           backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
             self.dataCache[tbl] = parseTableResult(result).rows;
             if (onLoad) onLoad(tbl);
@@ -1427,7 +1436,6 @@ function createVueApp() {
           var rows = resolveComputed(aggregateRows(vMe, srcRows), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
           self.currentData = rows;
           // Load embed table data if not cached
-          var allowed = self.userAllowedTables;
           (view.columns || []).forEach(function(c) {
             var embedSources = [];
             if (isEmbed(c)) { embedSources = c.sources || []; }
@@ -1438,7 +1446,7 @@ function createVueApp() {
               if (erv) embedSources = embedSources.concat(erv.rosters || (erv.columns || []).map(function(rc) { return rc.rotationTable; }));
             }
             embedSources.forEach(function(tbl) {
-              if (allowed && allowed.indexOf(tbl) < 0) return;
+              if (!self.canReachTable(tbl)) return;
               if (tbl && !self.dataCache[tbl]) {
                 var embedTab = 'active';
                 backend.getTableData(self.tableMap[tbl], embedTab).then(function(result) {
@@ -1462,7 +1470,7 @@ function createVueApp() {
             var deps = [{ table: comp.rotationTable, part: 'active', key: comp.rotationTable }, { table: comp.occurrenceSource, part: 'active', key: comp.occurrenceSource }];
             if (comp.occurrenceSource) deps.push({ table: comp.occurrenceSource, part: 'archive', key: aKey(comp.occurrenceSource) });
             deps.forEach(function(dep) {
-              if (!dep.table || (allowed && allowed.indexOf(dep.table) < 0) || self.dataCache[dep.key]) return;
+              if (!dep.table || !self.canReachTable(dep.table) || self.dataCache[dep.key]) return;
               backend.getTableData(self.tableMap[dep.table], dep.part).then(function(result) {
                 self.dataCache[dep.key] = parseTableResult(result).rows;
                 recomputeRotation();
@@ -1859,6 +1867,15 @@ function createVueApp() {
         if (!allowed || !this.currentUserEmail || this.isUnregisteredUser) return false;
         if (!table || !getOwnerCol(table) || allowed.indexOf(table) >= 0) return false;
         return withMirrors([table]).length === 1;
+      },
+      // The single reachability test every READ gate asks: unrestricted, granted ('r' or 'rw'), or
+      // self-serviceable (an owner-column table whose rows the rules scope to me). Nav, embeds, the boot
+      // preload and _ensureCached all have to answer this the same way -- when they drifted, a view
+      // appeared in the menu with nothing behind it, or its data loaded for a view the menu had hidden.
+      canReachTable: function(table) {
+        var allowed = this.userAllowedTables;
+        if (!allowed) return true;                 // admin / unrestricted
+        return allowed.indexOf(table) >= 0 || this.canSelfServe(table);
       },
       // Resolve a column's `defaultFrom` token to the value stamped on a new row. Unknown tokens stamp
       // blank rather than writing the token text, so a typo can't end up looking like data.
