@@ -344,3 +344,68 @@ describe('Permission features (primary chips + materialized closure)', () => {
     assert.deepEqual(selectedFeatures(['ushers_turns'], schema, views), []);
   });
 });
+
+describe('Grant modes (r / rw) across the three stored shapes', () => {
+  const AF = require('../../access-features');
+  const BH = require('../../backend-helpers');
+  const schema = { chores: { columns: { a: 'text' } }, catalogue: { columns: { b: 'text' } }, shopping: { columns: { c: 'text' } } };
+  const views = {};
+
+  it("'all' is unrestricted: every table rw, and both name sets read null", () => {
+    assert.equal(AF.grantMode('all', 'anything'), 'rw');
+    assert.equal(AF.readableTables('all'), null);
+    assert.equal(AF.writableTables('all'), null);
+  });
+
+  it('a LEGACY array still means read+write on each name (no migration needed)', () => {
+    const legacy = ['chores', 'catalogue'];
+    assert.equal(AF.grantMode(legacy, 'chores'), 'rw');
+    assert.equal(AF.grantMode(legacy, 'shopping'), null);
+    assert.deepEqual(AF.readableTables(legacy), ['chores', 'catalogue']);
+    assert.deepEqual(AF.writableTables(legacy), ['chores', 'catalogue']);
+  });
+
+  it('a mode map separates read from write', () => {
+    const map = { chores: 'rw', catalogue: 'r' };
+    assert.equal(AF.grantMode(map, 'chores'), 'rw');
+    assert.equal(AF.grantMode(map, 'catalogue'), 'r');
+    assert.equal(AF.grantMode(map, 'shopping'), null);
+    assert.deepEqual(AF.readableTables(map), ['chores', 'catalogue']);   // 'r' is still visible
+    assert.deepEqual(AF.writableTables(map), ['chores']);                // ...but not writable
+  });
+
+  it('an unrecognized mode value is treated as rw, never as silent extra restriction', () => {
+    assert.equal(AF.grantMode({ chores: 'write' }, 'chores'), 'rw');
+    assert.equal(AF.grantMode({ chores: true }, 'chores'), 'rw');
+  });
+
+  it('no grant at all fails closed', () => {
+    assert.deepEqual(AF.readableTables(undefined), []);
+    assert.deepEqual(AF.writableTables(null), []);
+    assert.equal(AF.grantMode({}, 'chores'), null);
+  });
+
+  it('buildGrants merges the two chip rows, edit winning over view', () => {
+    assert.deepEqual(AF.buildGrants(['chores'], ['catalogue'], schema, views), { chores: 'rw', catalogue: 'r' });
+    assert.deepEqual(AF.buildGrants(['chores'], ['chores'], schema, views), { chores: 'rw' });
+    assert.deepEqual(AF.buildGrants([], ['catalogue'], schema, views), { catalogue: 'r' });
+  });
+
+  it('userGrantDoc denormalizes rwTables for a map — and only for a map', () => {
+    // The rules layers cannot filter a map, so the writable subset is materialized at write time.
+    assert.deepEqual(BH.userGrantDoc('k@x', 'editor', 'k@x', { chores: 'rw', catalogue: 'r' }),
+      { role: 'editor', user: 'k@x', tables: { chores: 'rw', catalogue: 'r' }, rwTables: ['chores'] });
+    // 'all' and legacy arrays carry no rwTables: their write gates fall back to plain membership.
+    assert.equal('rwTables' in BH.userGrantDoc('k@x', 'admin', 'k@x', 'all'), false);
+    assert.equal('rwTables' in BH.userGrantDoc('k@x', 'editor', 'k@x', ['chores']), false);
+    assert.equal(BH.userGrantDoc('k@x', 'editor', 'k@x', null).tables, 'all');
+  });
+
+  it('the chore-app shape: read the catalogue, self-serve the log', () => {
+    // A member granted 'r' on reference data and nothing on the owner-column table they log into.
+    const grant = { catalogue: 'r' };
+    assert.equal(AF.grantMode(grant, 'catalogue'), 'r');      // visible, not editable
+    assert.equal(AF.grantMode(grant, 'chores'), null);        // no grant -> self-service handles it
+    assert.deepEqual(AF.writableTables(grant), []);
+  });
+});

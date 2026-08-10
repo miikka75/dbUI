@@ -3161,6 +3161,229 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await expect(page.locator('[data-testid="pivot-view"]')).toBeVisible();  // renders in the DOM
   });
 
+  test('a MAP-shaped grant works everywhere a grant is read (regression: visibleLists threw)', async ({ page }) => {
+    // visibleLists read `u.tables` raw and called .forEach on it. A map-shaped grant therefore threw —
+    // inside loadUsers' promise, whose catch reports "not registered", so the user was told they had no
+    // account at all. Every grant read must go through the AccessFeatures normalizers.
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const a = window.appInstance;
+      a.usersLoaded = true;
+      a.currentUserEmail = 'kid@x.test';
+      const probe = (tables) => {
+        a.userList = [{ key: 'kid@x.test', addr: 'kid@x.test', role: 'editor', tables: tables }];
+        try { return { lists: Object.keys(a.visibleLists).length, readable: a.userAllowedTables.length }; }
+        catch (e) { return { threw: String(e && e.message) }; }
+      };
+      return { empty: probe({}), map: probe({ tasks: 'rw', notes: 'r' }), legacy: probe(['tasks']) };
+    });
+    expect(r.empty.threw).toBeUndefined();
+    expect(r.map.threw).toBeUndefined();
+    expect(r.legacy.threw).toBeUndefined();
+    expect(r.empty.readable).toBe(0);
+    expect(r.map.readable).toBe(2);
+    expect(r.map.lists).toBeGreaterThan(0);      // a map grant still resolves its tables' lists
+    expect(r.legacy.readable).toBe(1);
+  });
+
+  test('@me resolves through the user link on a userlink list, and to the profile name otherwise', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.myProfile = { name: 'Ann Smith', shared: true, picture: '' };   // profile name != curated value
+      app.myListValues = { members: 'Ann' };                              // the household calls her "Ann"
+      const asUsers = Object.assign({}, app.schemaData, { listSources: { members: 'users' } });
+      const asLink = Object.assign({}, app.schemaData, { listSources: { members: 'userlink' } });
+
+      app.schemaData = Object.freeze(asUsers);
+      const users = { me: app.meValueFor('person'), filter: app.resolveMeTokens({ person: '@me' }) };
+      app.schemaData = Object.freeze(asLink);
+      const link = {
+        me: app.meValueFor('person'),
+        filter: app.resolveMeTokens({ person: '@me' }),
+        nested: app.resolveMeTokens({ $or: [{ person: '@me' }, { person: 'Bob' }] }),
+        other: app.meValueFor('title'),          // a column on no userlink list -> profile name
+        stamp: app.defaultFromValue('@me', 'person')
+      };
+      app.myListValues = {};                     // linked to nothing yet
+      const unlinked = app.resolveMeTokens({ person: '@me' });
+      return { users, link, unlinked };
+    });
+    expect(r.users.me).toBe('Ann Smith');                        // users-backed list: the profile name
+    expect(r.users.filter).toEqual({ person: 'Ann Smith' });
+    expect(r.link.me).toBe('Ann');                               // userlink list: the curated value
+    expect(r.link.filter).toEqual({ person: 'Ann' });
+    expect(r.link.nested.$or[0]).toEqual({ person: 'Ann' });     // resolves inside $or, which owns no column
+    expect(r.link.nested.$or[1]).toEqual({ person: 'Bob' });
+    expect(r.link.other).toBe('Ann Smith');                      // non-userlink column is unaffected
+    expect(r.link.stamp).toBe('Ann');                            // defaultFrom stamps the same identity
+    // No link yet -> the sentinel, matching nothing, rather than silently matching a stranger's rows.
+    expect(r.unlinked.person).not.toBe('Ann');
+    expect(r.unlinked.person).not.toBe('Ann Smith');
+  });
+
+  test('list layout: Add stays available (a table may have no other layout), but renders no editor', async ({ page }) => {
+    // The trap behind "Add just makes an empty row": `list` renders values through list-value, which is
+    // read-only, so a row added there has to be edited somewhere else. Add is NOT suppressed — `layout`
+    // can be set on a TABLE, and then the list is its only presentation; removing Add would leave no way
+    // to create a row at all. Data-entry views should use table/card.
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      window.VIEWS.list_t = { name: 'list_t', sources: ['tickets'], mode: 'join', layout: 'list', columns: ['title'] };
+      app.selectTab('list_t');
+      await new Promise(r => setTimeout(r, 250));
+      const before = (app.currentData || []).length;
+      app.addRow();
+      await new Promise(r => setTimeout(r, 250));
+      return { add: app.canAddRows, list: app.useListLayout, grew: (app.currentData || []).length === before + 1 };
+    });
+    expect(r.list).toBe(true);
+    expect(r.add).toBe(true);    // still offered...
+    expect(r.grew).toBe(true);   // ...and it really does create the row
+    await expect(page.locator('.v-table')).toHaveCount(0);          // but there is no editing grid
+    await expect(page.locator('.v-list-item .cell-edit')).toHaveCount(0);
+  });
+
+  test("a conditional column's `when` applies inside a {{view:}} embed, not just top-level", async ({ page }) => {
+    // isColumnHidden read `currentConfig` — the HOSTING doc-view — so an embedded view's own column
+    // entries were never found and its `when`/`hideEmpty` silently did nothing. The gate now takes the
+    // config it is asked about, and embed-view passes its own.
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // A view with a per-row conditional column, and a doc-view that embeds it by token.
+      window.VIEWS.late_items = {
+        name: 'late_items', sources: ['tasks'], mode: 'join', layout: 'table',
+        columns: ['title', { name: 'status', when: { title: { ne: 'quiet' } } }]
+      };
+      window.VIEWS.late_page = { name: 'late_page', markdown: 'x' };
+      const loud = { id: 'a', title: 'loud', status: 'open' };
+      const quiet = { id: 'b', title: 'quiet', status: 'open' };
+      const embedCfg = window.VIEWS.late_items;
+      return {
+        // The embedded view's own entries decide, whichever config happens to be on screen.
+        embedLoud: app.isColumnHidden('status', loud, embedCfg),
+        embedQuiet: app.isColumnHidden('status', quiet, embedCfg),
+        // hideEmpty on the embedded config is honoured the same way.
+        emptyHidden: app.isColumnHidden('status', { id: 'c', title: 'x', status: '' },
+          { columns: [{ name: 'status', hideEmpty: true }] }),
+        // No config passed -> unchanged behaviour, the view on screen.
+        defaultsToCurrent: app.isColumnHidden('status', loud) === app.isColumnHidden('status', loud, app.currentConfig)
+      };
+    });
+    expect(r.embedLoud).toBe(false);   // condition met -> column shows
+    expect(r.embedQuiet).toBe(true);   // condition failed -> hidden, inside the embed too
+    expect(r.emptyHidden).toBe(true);
+    expect(r.defaultsToCurrent).toBe(true);
+  });
+
+  test("read-only grant ('r'): visible and loaded, every cell read-only, no add/delete", async ({ page }) => {
+    // Before per-table modes, "can't write it" was implied by "can't see it", so cell editing never had
+    // to consult grants. A read-only grant breaks that implication — these are the gates that had to learn.
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.currentUserEmail = 'kid@x.com';
+      app.usersLoaded = true;
+      // tickets editable; notes read-only; chore_log ungranted; rsvps read-only WITH an owner column.
+      // tasks is granted rw but MIRRORS notes (date/title syncFrom) — the cluster decides, not the table.
+      app.userList = [{ key: 'kid@x.com', addr: 'kid@x.com', role: 'editor',
+                        tables: { tickets: 'rw', tasks: 'rw', notes: 'r', rsvps: 'r' } }];
+      const seen = (t) => (app.userAllowedTables || []).indexOf(t) >= 0;
+      const writable = (t) => (app.userWritableTables || []).indexOf(t) >= 0;
+      const at = (tab, row, col) => { app.selectTab(tab); return { readonly: app.viewReadonly(tab), mutate: app.canMutateRows, cell: app.cellReadonly(row, col, tab) }; };
+      return {
+        sees: [seen('notes'), seen('tickets'), seen('chore_log')],
+        writes: [writable('notes'), writable('tickets')],
+        notes: at('notes', { id: 'n1' }, 'title'),
+        tickets: at('tickets', { id: 'k1' }, 'title'),
+        mirroredTasks: at('tasks', { id: 't1' }, 'status'),
+        // 'r' on an owner-column table still routes writes through self-service (own rows only);
+        // a table granted 'rw' does not.
+        selfServeReadOnlyOwnerTable: app.canSelfServe('rsvps'),
+        selfServeWritableTable: app.canSelfServe('tickets')
+      };
+    });
+    expect(r.sees).toEqual([true, true, false]);   // 'r' and 'rw' are both visible; ungranted is not
+    expect(r.writes).toEqual([false, true]);       // ...but only 'rw' is writable
+    expect(r.notes).toEqual({ readonly: true, mutate: false, cell: true });
+    expect(r.tickets).toEqual({ readonly: false, mutate: true, cell: false });
+    // A write fans out across the whole mirror cluster, so one 'r' member closes the lot: tasks is
+    // granted rw but syncs date/title from notes, which is read-only.
+    expect(r.mirroredTasks).toEqual({ readonly: true, mutate: false, cell: true });
+    expect(r.selfServeReadOnlyOwnerTable).toBe(true);
+    expect(r.selfServeWritableTable).toBe(false);
+  });
+
+  test('plain grid Add on an owner table stamps owner + rosterPublic (not just the rsvp writer)', async ({ page }) => {
+    // The rsvp writer always stamped rosterPublic; _createBlankRow did not. An owner-stamped row without
+    // the flag is readable only by its owner, so a shared leaderboard over a self-service table showed
+    // each member only their own rows. The policy now belongs to the table, not to one view kind.
+    test.setTimeout(20000);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DEMO } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.currentUserEmail = 'me@x.com';
+      app.myProfile = { name: 'Me Myself', shared: true, picture: '' };
+      const made = app._createBlankRow('rsvps', {});
+      // A table opting out of a public roster must NOT be stamped public.
+      window.SCHEMA.rsvps.privateRoster = true;
+      const priv = app._createBlankRow('rsvps', {});
+      delete window.SCHEMA.rsvps.privateRoster;
+      // A table with no owner column is untouched by either stamp.
+      const plain = app._createBlankRow('tasks', {});
+      return {
+        owner: made.owner, rosterPublic: made.rosterPublic,
+        privRosterPublic: priv.rosterPublic,
+        plainHasFlag: 'rosterPublic' in plain,
+        defaultFrom: app.defaultFromValue('@me'),
+        unknownToken: app.defaultFromValue('@nope')
+      };
+    });
+    expect(r.owner).toBe('me@x.com');
+    expect(r.rosterPublic).toBe(true);        // default: the roster is shared
+    expect(r.privRosterPublic).toBe(false);   // privateRoster tables opt out, per-row
+    expect(r.plainHasFlag).toBe(false);       // no owner column -> no roster policy to carry
+    expect(r.defaultFrom).toBe('Me Myself');  // defaultFrom:"@me" resolves to the profile display name
+    expect(r.unknownToken).toBe('');          // an unknown token stamps blank, never the token text
+  });
+
   test('rsvp view (my_rsvp): self-service response upserts an owner-stamped row + tallies', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });

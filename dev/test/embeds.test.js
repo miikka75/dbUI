@@ -47,6 +47,20 @@ describe('embeds.js — mdToHtml', () => {
 });
 
 describe('embeds.js — mdBlocks / docHasData / buildEmbedBlock', () => {
+  it('whitespace-only trailing prose yields NO block (it would render as a phantom embed)', () => {
+    const ctx = makeCtx();
+    // Both templates dispatch `v-if="blk.html" ... v-else <embed-view>`, so a block whose html renders
+    // empty is treated as an embed with no type/name — an empty grid plus a stray "Add" at the page end.
+    const blocks = Embeds.mdBlocks('# Title\n\n{{view:open}}\n', null, ctx);
+    assert.equal(blocks.length, 2);
+    assert.ok(blocks.every(b => b.html || b.embedType), 'every block must be renderable as html OR an embed');
+    assert.equal(blocks[1].embedName, 'open');
+    // Trailing blank lines / spaces alone, likewise.
+    assert.deepEqual(Embeds.mdBlocks('{{view:open}}   \n\n  ', null, ctx).map(b => b.embedName || 'html'), ['open']);
+    // Real trailing prose is still kept.
+    assert.deepEqual(Embeds.mdBlocks('{{view:open}}\n\nAfter', null, ctx).map(b => b.embedName || 'html'), ['open', 'html']);
+  });
+
   it('splits prose and embed tokens; unknown embeds become an inline note', () => {
     const ctx = makeCtx();
     const blocks = Embeds.mdBlocks('Intro\n\n{{view:open}}\n\nOutro\n\n{{table:nope}}', null, ctx);

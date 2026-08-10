@@ -79,7 +79,12 @@ if you want it deployed.
   therefore pre-checks registration via `getMyAccess()` so an unregistered user gets the request-access
   banner rather than a spurious "first boot".
 - The `_lists` editor-update policy is slightly looser than Firestore's (it can't compare old vs. new
-  `tables` in one `WITH CHECK`), but still requires the editor to have access to the list's tables.
+  `tables` in one `WITH CHECK`), but still requires the editor to have *write* access to the list's tables.
+- **Access modes** (`tables: { t: 'r' | 'rw' }`) mirror firestore.rules exactly. Reads go through
+  `app_has_table_access`, which is unchanged: `jsonb ? key` matches an array element *or* an object key,
+  so a legacy array grant and a mode map read identically and nothing needs migrating. Writes go through
+  the new `app_has_table_write` / `app_list_write_allowed`, which consult the denormalized `rwTables`
+  array and fall back to plain membership when it is absent.
 
 ## Testing
 

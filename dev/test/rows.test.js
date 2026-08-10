@@ -28,6 +28,26 @@ describe('rows.js — condMatches (the unified filter/when matcher)', () => {
     assert.equal(Rows.condMatches({ who: 'Ann' }, { who: { matchList: 'crew' } }), false); // no cache -> fail closed
   });
 
+  it('lt / gt / lte / gte order numbers numerically and ISO dates lexicographically', () => {
+    assert.equal(Rows.condMatches({ n: 9 }, { n: { lt: 10 } }), true);      // numeric, not "9" > "10"
+    assert.equal(Rows.condMatches({ n: '9' }, { n: { lt: '10' } }), true);  // numeric strings still numeric
+    assert.equal(Rows.condMatches({ n: 10 }, { n: { lte: 10 } }), true);
+    assert.equal(Rows.condMatches({ n: 10 }, { n: { lt: 10 } }), false);
+    assert.equal(Rows.condMatches({ n: 11 }, { n: { gte: 10, lte: 20 } }), true);  // combinable: a range
+    assert.equal(Rows.condMatches({ n: 21 }, { n: { gte: 10, lte: 20 } }), false);
+    assert.equal(Rows.condMatches({ d: '2026-08-01' }, { d: { lt: '2026-08-05' } }), true); // ISO dates order as strings
+    assert.equal(Rows.condMatches({ d: '2026-08-09' }, { d: { lt: '2026-08-05' } }), false);
+  });
+
+  it('an unset value is incomparable: it matches NO ordered filter, in either direction', () => {
+    // The trap this guards: Number('') === 0, so a blank would otherwise pass `lte: 0` and every
+    // `lt` on a positive bound — silently pulling undated rows into an "overdue" view.
+    ['lt', 'lte', 'gt', 'gte'].forEach((op) => {
+      assert.equal(Rows.condMatches({ n: '' }, { n: { [op]: 0 } }), false, op + ' on blank');
+      assert.equal(Rows.condMatches({}, { n: { [op]: 0 } }), false, op + ' on missing');
+    });
+  });
+
   it('within: relative period tokens computed from now', () => {
     const today = require('../../calendar').fmtDate(new Date());
     assert.equal(Rows.condMatches({ d: today }, { d: { within: '@today' } }), true);
@@ -70,6 +90,24 @@ describe('rows.js — buildRows (union / join / filter)', () => {
     assert.equal(rows.length, 2);              // t1 merged, n1 separate
     assert.equal(joined.status, 'open');       // from tasks
     assert.equal(joined.author, 'me');         // merged in from notes
+  });
+
+  it('includeArchive folds the archive partition in, so a total survives archiving', () => {
+    // Without it, `archiveAfter` silently drains a balance: the row leaves the active partition and
+    // its points leave the sum, while anything it was netted against stays.
+    const c = { log: [{ id: 'a', who: 'Ann', pts: 2 }], log__archive: [{ id: 'b', who: 'Ann', pts: 5 }] };
+    assert.deepEqual(Rows.buildRows({ sources: ['log'] }, c).map(r => r.id), ['a']);
+    assert.deepEqual(Rows.buildRows({ sources: ['log'], includeArchive: true }, c).map(r => r.id), ['a', 'b']);
+    const view = { groupBy: { column: 'who', from: ['who'] }, aggregate: { sum: 'pts' }, columns: ['who', 'total'] };
+    assert.equal(Rows.aggregateRows(view, Rows.buildRows({ sources: ['log'], includeArchive: true }, c))[0].total, 7);
+    assert.equal(Rows.aggregateRows(view, Rows.buildRows({ sources: ['log'] }, c))[0].total, 2);
+  });
+
+  it('archived rows still carry _source and obey the view filter', () => {
+    const c = { log: [{ id: 'a', s: 'on' }], log__archive: [{ id: 'b', s: 'off' }, { id: 'c', s: 'on' }] };
+    const rows = Rows.buildRows({ sources: ['log'], includeArchive: true, filter: { s: 'on' } }, c);
+    assert.deepEqual(rows.map(r => r.id), ['a', 'c']);
+    assert.deepEqual(rows.map(r => r._source), ['log', 'log']);   // the base name, not log__archive
   });
 
   it('applies the view filter through condMatches', () => {
@@ -172,6 +210,63 @@ describe('rows.js — resolveComputed', () => {
     Rows.resolveComputed(rows, cols, { dataCache: cache });
     assert.equal(rows[0].pts, 3);
     assert.equal(rows[1].pts, 0);
+  });
+
+  it('daysSince ages a date column against today (negative in the future, blank stays blank)', () => {
+    const cols = [{ name: 'age', computed: { daysSince: 'done' } }];
+    const rows = [{ done: '2026-08-01' }, { done: '' }, { done: '2026-08-10' }, { done: 'not-a-date' }];
+    Rows.resolveComputed(rows, cols, { todayDate: '2026-08-08' });
+    assert.equal(rows[0].age, 7);
+    assert.equal(rows[1].age, '');    // no date -> no age (not 0)
+    assert.equal(rows[2].age, -2);    // future date
+    assert.equal(rows[3].age, '');    // unparseable -> no age
+  });
+
+  it('daysSince + gte is an overdue filter that leaves undated rows out', () => {
+    const rows = [{ id: 'old', done: '2026-07-01' }, { id: 'fresh', done: '2026-08-07' }, { id: 'never', done: '' }];
+    Rows.resolveComputed(rows, [{ name: 'age', computed: { daysSince: 'done' } }], { todayDate: '2026-08-08' });
+    assert.deepEqual(Rows.filterRows(rows, { age: { gte: 14 } }).map(r => r.id), ['old']);
+  });
+
+  it('defaults to the real today when no todayDate is pinned', () => {
+    const today = require('../../calendar').fmtDate(new Date());
+    const rows = [{ done: today }];
+    Rows.resolveComputed(rows, [{ name: 'age', computed: { daysSince: 'done' } }], {});
+    assert.equal(rows[0].age, 0);
+  });
+
+  it('source scopes a compute def to one union source; scale negates it (earned minus spent)', () => {
+    const ctx = { dataCache: { chores: [{ chore: 'X', points: 5 }], rewards: [{ reward: 'R', cost: 7 }] } };
+    const compute = [
+      { name: 'delta', source: 'log', computed: { lookup: { table: 'chores', match: 'chore', field: 'points', default: 0 } } },
+      { name: 'delta', source: 'claim', scale: -1, computed: { lookup: { table: 'rewards', match: 'reward', field: 'cost', default: 0 } } }
+    ];
+    const rows = [
+      { _source: 'log', person: 'Ann', chore: 'X' }, { _source: 'log', person: 'Ann', chore: 'X' },
+      { _source: 'claim', person: 'Ann', reward: 'R' }, { _source: 'log', person: 'Bob', chore: 'X' }
+    ];
+    Rows.resolveComputed(rows, compute, ctx);
+    assert.deepEqual(rows.map(r => r.delta), [5, 5, -7, 5]);   // each def touched only its own source
+
+    const view = { groupBy: { column: 'person', from: ['person'] }, aggregate: { sum: 'delta', into: 'balance' }, columns: ['person', 'balance'] };
+    assert.deepEqual(Rows.aggregateRows(view, rows).map(r => [r.person, r.balance]), [['Bob', 5], ['Ann', 3]]);
+  });
+
+  it('a row matching no source-scoped def contributes nothing, not a zero', () => {
+    const ctx = { dataCache: { chores: [{ chore: 'X', points: 5 }] } };
+    const compute = [{ name: 'delta', source: 'log', computed: { lookup: { table: 'chores', match: 'chore', field: 'points', default: 0 } } }];
+    const rows = [{ _source: 'log', person: 'Ann', chore: 'X' }, { _source: 'other', person: 'Ann' }];
+    Rows.resolveComputed(rows, compute, ctx);
+    assert.equal('delta' in rows[1], false);
+    const view = { groupBy: { column: 'person', from: ['person'] }, aggregate: { sum: 'delta' }, columns: ['person', 'total'] };
+    assert.equal(Rows.aggregateRows(view, rows)[0].total, 5);
+  });
+
+  it('scale leaves a non-numeric computed value alone', () => {
+    globalThis._listsCache = { adults: ['Ann'] };
+    const rows = [{ a: 'Ann' }];
+    Rows.resolveComputed(rows, [{ name: 'grown', scale: -1, computed: { matchList: 'adults', fromColumns: ['a'] } }], {});
+    assert.equal(rows[0].grown, 'Ann');
   });
 
   it('matchList string collects list members; object form categorizes by list', () => {

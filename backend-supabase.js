@@ -35,13 +35,15 @@ backend = {
     return StorageSupabase.getMeta('schema').then(function(d) { return BackendHelpers.unwrapSchemaDoc(d); });
   },
   saveSchema: function(folderId, schema) {
-    // Mirror two schema-derived facts the schema-blind RLS needs, kept in sync on every schema write:
-    // _meta/ownerTables (owner-column tables -> gates owner-create) and _meta/pageAccess (restricted
-    // doc-views -> gates _pages__active reads). Same contract as backend-firebase.js.
+    // Mirror the schema-derived facts the schema-blind RLS needs, kept in sync on every schema write:
+    // _meta/ownerTables (owner-column tables -> gates owner-create), _meta/pageAccess (restricted
+    // doc-views -> gates _pages__active reads) and _meta/ownerWritable (which columns an owner-scoped
+    // write may touch). Same contract as backend-firebase.js.
     return Promise.all([
       StorageSupabase.setMeta('schema', schema),
       StorageSupabase.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) }),
-      StorageSupabase.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema))
+      StorageSupabase.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema)),
+      StorageSupabase.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema))
     ]);
   },
   // Single doc-view body by name (RLS authorizes a single-row read of a restricted page by its own rule).
@@ -125,7 +127,7 @@ backend = {
     var email = _myEmail();
     if (!email) return Promise.resolve([]);
     return StorageSupabase.get('_users', email).then(function(v) {
-      if (v) return (v.role === 'admin' || v.tables === 'all') ? null : (v.tables || []);
+      if (v) return (v.role === 'admin') ? null : AccessFeatures.readableTables(v.tables);
       // No per-user row: on Supabase /_users is authoritative (setUserRole always writes it), so a missing
       // row means either bootstrap (no users at all -> admin) or not-a-member (fail closed).
       return _noUsers().then(function(none) { return none ? null : []; });
@@ -231,6 +233,21 @@ backend = {
     return StorageSupabase._all('_list_users').then(function(rows) {
       var out = {}; (rows || []).forEach(function(row) { var v = row.value; (out[v.list] || (out[v.list] = {}))[v.value] = v.email; }); return out;
     });
+  },
+  // SELF-scoped mirror of the Firebase method: { listName: myValue }, the link that names ME. RLS lets a
+  // member read their own link (see the _list_users read predicate), so `@me` can resolve to a curated
+  // list value without exposing anyone else's mapping.
+  getMyListValues: function() {
+    var email = (_myEmail && _myEmail()) || '';
+    if (!email) return Promise.resolve({});
+    return StorageSupabase._all('_list_users').then(function(rows) {
+      var out = {};
+      (rows || []).forEach(function(row) {
+        var v = row.value;
+        if (v && String(v.email || '').toLowerCase() === email && v.list && !(v.list in out)) out[v.list] = v.value;
+      });
+      return out;
+    }).catch(function() { return {}; });
   },
   setListUser: function(listName, value, email) {
     var self = this, id = self._linkDocId(listName, value);
@@ -362,7 +379,7 @@ var backend_users = {
   },
   setUserRole: function(uid, role, user, tables) {
     var key = String(uid || '').toLowerCase();
-    var rec = { role: role, user: user || key, tables: tables || 'all' };
+    var rec = BackendHelpers.userGrantDoc(key, role, user, tables);
     // Source of truth = /_users/<key>; also mirror into the legacy _meta/users map so an admin importing
     // from / exporting to a Firestore deployment stays consistent.
     var patch = {}; patch[key] = rec;

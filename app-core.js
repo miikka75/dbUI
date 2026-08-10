@@ -48,6 +48,7 @@ function getColumnRef(table, col) { return Columns.columnRef(SCHEMA, table, col)
 function colIsMirror(tables, col, tableName) { return Columns.isMirror(tables, tableName, col); }
 function getTableMirrorSource(tables, tableName) { return Columns.tableMirrorSource(tables, tableName); }
 function getOwnerCol(table) { return Columns.tableOwnerCol(SCHEMA, table); } // table's type:'owner' column name, or null
+function getDefaultCols(table) { return Columns.tableDefaultCols(SCHEMA, table); } // [{name, from}] for `defaultFrom` columns
 
 // --- Permission "features" model: extracted to /access-features.js (AccessFeatures.*), a pure module
 //     over (schema, views) shared with the unit tests. These thin wrappers bind the app's global
@@ -158,6 +159,7 @@ function createVueApp() {
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
       listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
       listUserLinks: {},        // admin only: raw { listName: { value: email } } links, for the Lookup editor
+      myListValues: {},         // self-scoped { listName: myValue } — what `@me` means on a userlink list
       periodOffset: 0,          // leaderboard ‹ › navigation: periods back from now (0 = current)
       importProgress: null,     // {done,total,icon,detail,errors,finished} while an import runs; null otherwise
       firestoreRules: '',
@@ -357,20 +359,33 @@ function createVueApp() {
           return (a.key || '').toLowerCase().localeCompare((b.key || '').toLowerCase());
         });
       },
+      // Tables I may SEE (grant mode 'r' or 'rw'). This is the visibility set every nav/load/list gate
+      // uses; the write gates use userWritableTables below. null = unrestricted, [] = none.
       userAllowedTables: function() {
         if (this.selfUnregistered) return [];   // FAIL CLOSED: users exist but we're not one
         if (this.isAdmin) return null; // null = unrestricted
         var u = this.currentUserEntry;
         if (!u) return [];             // FAIL CLOSED: registered users exist but we're not one -> no access
-        if (u.tables === 'all') return null;
-        return u.tables || [];
+        return AccessFeatures.readableTables(u.tables) || [];
+      },
+      // Tables I may WRITE — the 'rw' subset. A read-only grant appears here as absent, which is what
+      // turns its views read-only and (on an owner-column table) hands the row back to self-service.
+      userWritableTables: function() {
+        if (this.selfUnregistered) return [];
+        if (this.isAdmin) return null;
+        var u = this.currentUserEntry;
+        if (!u) return [];
+        return AccessFeatures.writableTables(u.tables) || [];
       },
       visibleLists: function() {
         if (this.isAdmin) return this.listsCache;
         // Find tables this user can access
         var u = this.currentUserEntry;
         if (!u) return {};
-        var userTables = u.tables === 'all' ? Object.keys(SCHEMA) : (u.tables || []);
+        // Through the shared reader, not the raw value: a grant may be 'all', a legacy array or a
+        // { table: mode } MAP, and only readableTables() normalizes all three. Reading `.tables` here
+        // directly meant a map-shaped grant reached .forEach and threw.
+        var userTables = AccessFeatures.readableTables(u.tables) || Object.keys(SCHEMA);
         // Find which lists are used by accessible tables
         var allowedLists = {};
         userTables.forEach(function(t) {
@@ -401,6 +416,10 @@ function createVueApp() {
         });
         return chips;
       },
+      // Same chips for the view-only column, minus the 'all' sentinel — "view everything" is what a full
+      // access grant in the edit column already means, so offering it here would just be a second way to
+      // say it (and an ambiguous one, since it can't downgrade an existing rw grant to r).
+      viewGrantChips: function() { return this.grantFeatureChips.filter(function(c) { return c.id !== 'all'; }); },
       // Role dropdown options for the Users table: translatable label (role.<id>, shows the raw key
       // when untranslated) + the stored role VALUE (unchanged, so setUserRole keeps writing
       // 'admin'/'editor'/'viewer').
@@ -456,6 +475,11 @@ function createVueApp() {
         return needed > (this.windowWidth - 72);
       },
       useListLayout: function() { return this.currentConfig.layout === 'list'; },
+      // Add is offered wherever rows may be mutated, INCLUDING the read-only `list` layout: a table can
+      // declare layout:'list' as its only presentation, so gating Add on an editable layout would leave
+      // such a table with no way to create a row at all. The row lands and saves; it is just not
+      // editable from a list (see the `layout` note in SCHEMA.md — use table/card for data entry).
+      canAddRows: function() { return this.canMutateRows; },
       isReadonlyView: function() { return !this.currentSelfService && this.viewReadonly(this.currentTable); },
       embedConfigs: function() {
         var self = this;
@@ -500,9 +524,10 @@ function createVueApp() {
         if (VIEWS[this.currentTable]) return (VIEWS[this.currentTable].sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].archivable; });
         return SCHEMA[this.currentTable] && SCHEMA[this.currentTable].archivable;
       },
-      // Add/delete/archive/restore fan out across the whole mirror cluster; only allow if the user can access every table in it
+      // Add/delete/archive/restore fan out across the whole mirror cluster; only allow if the user can WRITE
+      // every table in it (a read-only grant on any member of the cluster closes the whole control).
       canMutateCurrent: function() {
-        var allowed = this.userAllowedTables;
+        var allowed = this.userWritableTables;
         if (!allowed) return true; // admin / unrestricted
         var view = VIEWS[this.currentTable];
         var base = view ? (view.sources || []) : [this.currentTable];
@@ -517,6 +542,10 @@ function createVueApp() {
       // own rows and edit/delete ONLY those. Mirrors the RSVP permission model into the plain data grid;
       // Firestore rules are the real enforcement (see _meta/ownerTables), this is the matching UI. ---
       myEmailLc: function() { return (this.currentUserEmail || '').toLowerCase(); },
+      // My profile display name — the identity `@me` filters resolve to and `defaultFrom: "@me"` stamps.
+      // '' when I haven't set one; each caller decides what that means (a filter matches nothing, a
+      // stamp writes blank).
+      myDisplayName: function() { return ((this.myProfile && this.myProfile.name) || '').trim(); },
       // The underlying owner table for the current view/table (a self-service view has one source).
       selfServeTable: function() { var v = VIEWS[this.currentTable]; return v ? (v.sources || [])[0] : this.currentTable; },
       // Is the current table/view self-serviceable by me right now?
@@ -581,7 +610,7 @@ function createVueApp() {
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
-         'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.add_user', 'settings.all',
+         'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.tables_view', 'settings.add_user', 'settings.all',
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset',
          'cal.today', 'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
@@ -868,7 +897,7 @@ function createVueApp() {
             self.tableMap = result.tableMap || {};
             self.languages = result.languages || [];
             self.listsCache = result.lists || {}; window._listsCache = self.listsCache;
-            self.loadListAvatars(); self.loadListUserLinks();   // user-linked-list avatars + admin editor links
+            self.loadListAvatars(); self.loadListUserLinks(); self.loadMyListValues();   // avatars + admin editor links + my own @me identity
             // Auto-seed lists (create missing list names + seed mandatory filter values): admin-only
             // maintenance. A restricted user's listsCache is already scoped to their own tables
             // server-side; seeding+saving here would add entries for tables they don't own, and
@@ -902,6 +931,7 @@ function createVueApp() {
               }
             });
           }).then(function() {
+            self._autoArchive();
             self.loadUsers();
           }).catch(function(err) {
             self.loading = false;
@@ -942,7 +972,7 @@ function createVueApp() {
           return backend.getLists(self.folderId).then(function(lists) {
             self.listsCache = lists || {}; window._listsCache = self.listsCache;
             if (self._seedSchemaLists()) backend.saveLists(self.folderId, self.listsCache);
-            self.loadListAvatars(); self.loadListUserLinks();   // user-linked-list avatars + admin editor links
+            self.loadListAvatars(); self.loadListUserLinks(); self.loadMyListValues();   // avatars + admin editor links + my own @me identity
           });
         }).then(function() {
           // Load users FIRST to know access restrictions
@@ -992,6 +1022,7 @@ function createVueApp() {
           return chain;
         }).then(function() {
           self.loading = false;
+          self._autoArchive();
           self._autoSelectTab();
         }).catch(function(err) {
           self.loading = false;
@@ -1033,29 +1064,51 @@ function createVueApp() {
       hashColor: function(key) { return Calendar.hashColor(key); },
       // Resolve a calendar view's source specs / rotation overlays (pure over VIEWS -> calendar.js).
       calSources: function(name) { return Calendar.sources(VIEWS, name); },
-      // Day-add is only offered when the calendar has exactly ONE source carrying a date column: a
-      // multi-source calendar has no unambiguous table to add the row to. Write access is checked
-      // across the whole mirror cluster, as addRow writes to all of it.
+      // The source a day-add creates in. One source -> that one. Several -> ambiguous, so the calendar
+      // must say which with `calendar.addTo: "<table>"`; without it day-add stays off rather than
+      // guessing which of several tables the click meant.
+      calAddSource: function(name) {
+        var srcs = this.calSources(name), cfg = (VIEWS[name] && VIEWS[name].calendar) || {};
+        if (cfg.addTo) return srcs.find(function(s) { return s && s.table === cfg.addTo; }) || null;
+        return srcs.length === 1 ? srcs[0] : null;
+      },
       canCalendarAdd: function(name) {
-        var srcs = this.calSources(name);
-        if (srcs.length !== 1) return false;
-        var s = srcs[0];
+        var s = this.calAddSource(name);
         if (!s || !s.table || !s.dateColumn || !SCHEMA[s.table]) return false;
         if (this.viewReadonly(name)) return false;
-        var allowed = this.userAllowedTables;
+        // Adding writes the whole mirror cluster, so a grant must cover all of it — but a member with no
+        // grant at all may still own rows on a self-service table, and refusing them here was the only
+        // place that forgot it (the grid's Add button has allowed it all along via canMutateRows).
+        var allowed = this.userWritableTables;
         if (!allowed) return true;
-        return withMirrors([s.table]).every(function(t) { return allowed.indexOf(t) >= 0; });
+        if (withMirrors([s.table]).every(function(t) { return allowed.indexOf(t) >= 0; })) return true;
+        return this.canSelfServe(s.table);
       },
       // Create a row on `date` in that single source, then land on the source table. The calendar's
       // day panel is read-only (cal-event-row renders, never edits), so adding in place would strand
       // a blank row the user cannot fill in; the table is where it becomes editable.
       calendarAddOnDay: function(name, date) {
         if (!date || !this.canCalendarAdd(name)) return;
-        var s = this.calSources(name)[0], prefill = {};
+        var s = this.calAddSource(name), prefill = {};
         prefill[s.dateColumn] = date;                   // the point: prefill the clicked day
         this._createBlankRow(s.table, { prefill: prefill });
-        this.selectTab(s.table);
+        this.selectTab(this._gridFor(s.table));
         this.notify(this.t('msg.row_added'));
+      },
+      // Where to land after creating a row: the new row is blank but for its date, so the user needs a
+      // grid to fill in. Prefer somewhere they can actually navigate back to — a nav entry over this
+      // table — and fall back to the table itself, which may not be in the menu at all.
+      _gridFor: function(table) {
+        var hit = null;
+        (this.sidebarTabs || []).forEach(function(t) {
+          (t.children || [t]).forEach(function(e) {
+            if (hit || !e || e.divider || !e.id) return;
+            var v = VIEWS[e.id];
+            if (e.id === table) { hit = e.id; return; }
+            if (v && !v.markdown && !v.board && (v.sources || []).length === 1 && v.sources[0] === table && !v.readonly) hit = e.id;
+          });
+        });
+        return hit || table;
       },
       // Board: add a blank card pre-stamped with a lane value (like addRow, but prefilling board.lane so
       // the card lands in the clicked lane). Pushes into currentData so the board re-renders immediately.
@@ -1132,6 +1185,8 @@ function createVueApp() {
         var v = VIEWS[name]; if (!v || !v.pivot) return { columns: [], rows: [] };
         var p = v.pivot, src = p.source;
         var rows = VIEWS[src] ? this.embedRows('view', src) : (this.dataCache[src] || []);
+        // Same reasoning as buildRows: a cross-tab counting history must see the archived rows too.
+        if (v.includeArchive && !VIEWS[src]) rows = rows.concat(this.dataCache[src + '__archive'] || []);
         return Pivot.build(rows, p);
       },
       isRsvpName: function(name) { return !!(VIEWS[name] && VIEWS[name].rsvp); },
@@ -1250,7 +1305,7 @@ function createVueApp() {
       embedSources: function(type, name) { return type === 'view' && VIEWS[name] ? (VIEWS[name].sources || []) : [name]; },
       canMutateEmbed: function(type, name) {
         if (this.viewReadonly(name)) return false;
-        var allowed = this.userAllowedTables;
+        var allowed = this.userWritableTables;   // embed row controls mutate the embedded tables
         if (!allowed) return true;
         return withMirrors(this.embedSources(type, name)).every(function(t) { return allowed.indexOf(t) >= 0; });
       },
@@ -1434,16 +1489,21 @@ function createVueApp() {
         }
       },
 
-      colHideEmpty: function(col) {
-        var cfg = this.currentConfig;
+      // Column visibility is a question about a CONFIG, not about whatever is on screen: an embed has to
+      // ask about the view it embeds. Both helpers take an optional config and default to the current
+      // one, so the primary grid's call sites are unchanged while embed-view can pass its own — without
+      // it, a `when`/`hideEmpty` column entry was silently ignored inside {{view:x}}, because the lookup
+      // ran against the hosting doc-view's columns, which never contain the embedded view's entries.
+      colHideEmpty: function(col, cfg) {
+        cfg = cfg || this.currentConfig;
         var arr = Array.isArray(cfg.columns) ? cfg.columns : [];
         var entry = arr.find(function(c) { return colName(c) === col; });
         if (entry && typeof entry === 'object' && typeof entry.hideEmpty === 'boolean') return entry.hideEmpty;
         return !!cfg.hideEmpty;
       },
-      isColumnHidden: function(col, item) {
-        var cfg = this.currentConfig;
-        if (this.colHideEmpty(col) && !item[col]) return true;
+      isColumnHidden: function(col, item, cfg) {
+        cfg = cfg || this.currentConfig;
+        if (this.colHideEmpty(col, cfg) && !item[col]) return true;
         var cols = cfg.columns;
         if (!cols || !Array.isArray(cols)) return false;
         // `when` clause on a column entry: { "name": col, "computed"?: {...}, "when": { <condition> } }
@@ -1522,7 +1582,23 @@ function createVueApp() {
           var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           var cols = getColumns(src);
           cols.forEach(function(c) { if (!row[c]) row[c] = ''; });
-          var oc = getOwnerCol(src); if (oc) row[oc] = self.currentUserEmail || '';   // stamp owner on create
+          // Stamp owner on create, and with it the table's roster policy. rosterPublic has to ride on the
+          // ROW because both rules layers are schema-blind (firestore.rules `resource.data.rosterPublic`,
+          // supabase app_can_read) — without it an owner-stamped row is readable only by its owner, so a
+          // shared leaderboard over a self-service table would show each member only themselves. This is
+          // the same policy the rsvp writer applies (saveRsvp); it belongs on every owner table, not just
+          // the one view kind that happened to implement it first.
+          var oc = getOwnerCol(src);
+          if (oc) {
+            row[oc] = self.currentUserEmail || '';
+            row.rosterPublic = !(SCHEMA[src] && SCHEMA[src].privateRoster);
+          }
+          // Seeded-on-create columns: a `defaultFrom` token resolved per user, or a literal `default`.
+          // Both stay editable afterwards (unlike owner), and an explicit prefill below overrides them.
+          getDefaultCols(src).forEach(function(dc) {
+            if (cols.indexOf(dc.name) < 0) return;
+            row[dc.name] = dc.from ? self.defaultFromValue(dc.from, dc.name) : dc.value;
+          });
           for (var pc in prefill) { if (cols.indexOf(pc) >= 0) row[pc] = prefill[pc]; }  // only columns the mirror actually has
           var cacheKey = tab === 'archive' ? aKey(src) : src;
           if (!self.dataCache[cacheKey]) self.dataCache[cacheKey] = [];
@@ -1743,27 +1819,62 @@ function createVueApp() {
         if (!view || view.mode !== 'union' || !item._source) return false;
         return !(SCHEMA[item._source] && SCHEMA[item._source].columns && SCHEMA[item._source].columns[col]);
       },
-      // Is a view/table read-only as a whole (config flag, viewer role, or aggregate)
-      viewReadonly: function(id) { var v = VIEWS[id], cfg = VIEWS[id] || SCHEMA[id] || {}; return !!cfg.readonly || this.currentUserRole === 'viewer' || !!(v && v.groupBy && v.collect); },
+      // Is a view/table read-only as a whole (config flag, viewer role, aggregate, or a read-only grant)
+      viewReadonly: function(id) {
+        var v = VIEWS[id], cfg = VIEWS[id] || SCHEMA[id] || {};
+        if (!!cfg.readonly || this.currentUserRole === 'viewer' || !!(v && v.groupBy && v.collect)) return true;
+        return !this.grantAllowsWrite(id);
+      },
+      // Does my grant permit writing everything behind this view/table? Before per-table modes this was
+      // implied — a table you couldn't write was a table you couldn't see — so cell editing never had to
+      // ask. A read-only grant breaks that implication: the table is visible and must stay uneditable.
+      grantAllowsWrite: function(id) {
+        var writable = this.userWritableTables;
+        if (!writable) return true;                       // admin / unrestricted: skip the work entirely
+        var v = VIEWS[id];
+        var base = v ? (v.sources || []) : (SCHEMA[id] ? [id] : []);
+        if (!base.length) return true;                    // sourceless (rotation/calendar): nothing to write
+        return withMirrors(base).every(function(t) { return writable.indexOf(t) >= 0; });
+      },
       // Shared gate for whether a data cell renders read-only (ownerId defaults to currentTable).
       // On a self-service table the viewer-role blanket-readonly yields to per-row ownership: I may edit
       // MY rows, others stay read-only (owner/mirror/union-foreign columns are always read-only).
       cellReadonly: function(item, col, ownerId) {
         if (this.isReadonlyCell(item, col, ownerId)) return true;
-        if (this.currentSelfService && (!ownerId || ownerId === this.currentTable)) return !this.rowOwnedByMe(item, this.selfServeTable);
+        if (this.currentSelfService && (!ownerId || ownerId === this.currentTable)) {
+          return !this.rowOwnedByMe(item, this.selfServeTable) || !this.ownerCanWrite(this.selfServeTable, col);
+        }
         return this.viewReadonly(ownerId || this.currentTable);
       },
       // A table a restricted member may self-serve: it has an owner column, they have no grant on it, and
       // it isn't part of a mirror cluster (adds fan out across the cluster -> keep self-service to simple
       // single-table owned rows). Admin/unrestricted (allowed == null) use full access, not self-service.
       canSelfServe: function(table) {
-        var allowed = this.userAllowedTables;
-        // Must be a REGISTERED member with an identity. userAllowedTables is [] for both "registered, no
+        // Keyed on the WRITABLE set: a read-only grant on an owner-column table still routes writes
+        // through self-service, giving "see every row, change only my own" — the shared-log policy.
+        var allowed = this.userWritableTables;
+        // Must be a REGISTERED member with an identity. userWritableTables is [] for both "registered, no
         // grants" and "not a member (fail closed)" -- isUnregisteredUser separates them so self-service
         // never opens a table to a non-member.
         if (!allowed || !this.currentUserEmail || this.isUnregisteredUser) return false;
         if (!table || !getOwnerCol(table) || allowed.indexOf(table) >= 0) return false;
         return withMirrors([table]).length === 1;
+      },
+      // Resolve a column's `defaultFrom` token to the value stamped on a new row. Unknown tokens stamp
+      // blank rather than writing the token text, so a typo can't end up looking like data.
+      defaultFromValue: function(token, col) { return token === '@me' ? this.meValueFor(col) : ''; },
+      // Columns an OWNER-scoped write may touch on a self-service table, per the table's `ownerWritable`
+      // (mirrored to _meta/ownerWritable for the rules — see BackendHelpers.ownerWritableOf). null = the
+      // table sets no bound, so the owner may write the whole row, which is the historical behaviour.
+      ownerWritableCols: function(table) {
+        var list = SCHEMA[table] && SCHEMA[table].ownerWritable;
+        return Array.isArray(list) ? list : null;
+      },
+      // Offer only what the server will accept: without this the UI shows an editor / a draggable card,
+      // the write is denied, and the value silently snaps back with no explanation.
+      ownerCanWrite: function(table, col) {
+        var list = this.ownerWritableCols(table);
+        return !list || list.indexOf(col) >= 0 || ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic'].indexOf(col) >= 0;
       },
       // Row belongs to the current user (its owner column equals my email, case-insensitive).
       rowOwnedByMe: function(item, table) {
@@ -2378,7 +2489,7 @@ function createVueApp() {
           var p = new URLSearchParams(location.search);
           self.currentUserEmail = p.get('user') || localStorage.getItem('test_user') || 'local@dev';
         }
-        var done = function() { self.usersLoaded = true; self.loading = false; self.loadMyProfile(); self.loadSharedProfiles(); self._overlayUserLists(); self._autoSelectTab(); };
+        var done = function() { self.usersLoaded = true; self.loading = false; self.loadMyProfile(); self.loadSharedProfiles(); self._overlayUserLists(); self._autoArchive(); self._autoSelectTab(); };
         // Legacy backends without getMyAccess: keep the full-map path (rules-free local/Drive).
         if (typeof backend_users.getMyAccess !== 'function') {
           backend_users.getUsers().then(function(u) {
@@ -2402,7 +2513,13 @@ function createVueApp() {
           } else {
             self.userList = [{ key: email, addr: email, role: a.role, tables: a.tables }]; done();
           }
-        }).catch(function() { self.selfUnregistered = true; self.userList = []; done(); });
+        }).catch(function(e) {
+          // A denied/failed access read means "not one of us" — but this also catches anything thrown by
+          // the success path above, which would then present as an unexplained "you are not registered".
+          // Say what actually happened rather than leaving a security-shaped symptom with no cause.
+          console.error('[loadUsers] access check failed:', (e && e.stack) || e);
+          self.selfUnregistered = true; self.userList = []; done();
+        });
       },
       _buildUserList: function(u) {
         var list = [];
@@ -2607,6 +2724,13 @@ function createVueApp() {
       isUserLinkList: function(name) { return (((this.schemaData || {}).listSources) || {})[name] === 'userlink'; },
       // Admin only: the raw value -> email links, for the editor's current-selection display. Denied for
       // non-admins by the server/rules -> caught into {} (they never need it; rendering uses listAvatars).
+      // Self-scoped link lookup, loaded for EVERY member (unlike loadListUserLinks, which is admin-only):
+      // it is the caller's own identity and `@me` needs it before any view resolves.
+      loadMyListValues: function() {
+        var self = this;
+        if (typeof backend === 'undefined' || !backend.getMyListValues) return Promise.resolve();
+        return backend.getMyListValues().then(function(m) { self.myListValues = m || {}; }).catch(function() { self.myListValues = {}; });
+      },
       loadListUserLinks: function() {
         var self = this;
         if (typeof backend === 'undefined' || !backend.getListUserLinks) return Promise.resolve();
@@ -2624,7 +2748,7 @@ function createVueApp() {
         var self = this;
         if (typeof backend === 'undefined' || !backend.setListUser) return;
         backend.setListUser(list, value, email || '').then(function() {
-          self.loadListUserLinks(); self.loadListAvatars();
+          self.loadListUserLinks(); self.loadListAvatars(); self.loadMyListValues();
         }).catch(function(e) { self.notify((e && (e.error || e.message)) || self.t('msg.save_failed')); });
       },
       userDisplayName: function(u) { return this.profileName(u.key); },
@@ -2636,19 +2760,34 @@ function createVueApp() {
           self.profilesByEmail = Object.assign({}, self.profilesByEmail, patch);
         }).catch(function(e) { self.notify((e && e.message) || self.t('msg.save_failed')); });
       },
-      // Resolve the "@me" filter token to the current user's profile display name (as stored). An empty
-      // profile name -> a sentinel that matches nothing (the user has no assigned identity yet).
-      // Display-only client filter -- it never widens server-enforced access.
+      // What "@me" means for a given COLUMN. Two identity models, and the column's list decides which:
+      //   userlink list -> the curated value linked to my account (the household's own name for me),
+      //   otherwise     -> my profile display name (the value a `users`-backed list is populated from).
+      // Without the first branch, `@me` on a userlink list compared my profile name against a curated
+      // value and silently matched nothing whenever the two differed.
+      meValueFor: function(col) {
+        var list = col ? getColumnList(null, col) : null;
+        if (list && this.isUserLinkList(list)) return (this.myListValues || {})[list] || '';
+        return this.myDisplayName;
+      },
+      // Resolve the "@me" filter token. An empty identity -> a sentinel that matches nothing (the user has
+      // no assigned identity yet). Display-only client filter -- it never widens server-enforced access.
       resolveMeTokens: function(filter) {
         if (filter == null) return filter;
-        var me = ((this.myProfile && this.myProfile.name) || '').trim() || '\u0000__no_me__';
-        var walk = function(v) {
-          if (v === '@me') return me;
-          if (Array.isArray(v)) return v.map(walk);
-          if (v && typeof v === 'object') { var o = {}; Object.keys(v).forEach(function(k) { o[k] = walk(v[k]); }); return o; }
+        var self = this;
+        // `key` is the column the token sits under, so a userlink list resolves through its own mapping.
+        var walk = function(v, key) {
+          if (v === '@me') return self.meValueFor(key) || '\u0000__no_me__';
+          if (Array.isArray(v)) return v.map(function(x) { return walk(x, key); });
+          if (v && typeof v === 'object') {
+            var o = {};
+            // $or/$and carry no column of their own -> keep the enclosing key for their branches.
+            Object.keys(v).forEach(function(k) { o[k] = walk(v[k], k.charAt(0) === '$' ? key : k); });
+            return o;
+          }
           return v;
         };
-        return walk(filter);
+        return walk(filter, null);
       },
       // Shallow view clone with @me resolved in view.filter + view.groupBy.filter (returns the original
       // untouched when no @me token is present, to avoid needless churn).
@@ -2686,17 +2825,45 @@ function createVueApp() {
       periodPrev: function() { this.periodOffset++; this.loadTableData(); },                 // older
       periodNext: function() { if (this.periodOffset > 0) { this.periodOffset--; this.loadTableData(); } }, // newer (not past present)
       periodToday: function() { if (this.periodOffset !== 0) { this.periodOffset = 0; this.loadTableData(); } },
+      // Grants are edited as TWO chip rows — what the user may change, and what they may only look at —
+      // which merge into one stored { table: 'r' | 'rw' } map. Each handler re-reads the other row's
+      // current selection so editing one never silently drops the other.
       updateUserTables: function(u, selected) {
         var prev = u.tables === 'all' ? ['all'] : this.userFeatures(u);
         var feats = this._resolveTableSelection(selected, prev);   // 'all' or array of FEATURE ids
-        var tables = feats === 'all' ? 'all' : expandFeatureGrants(feats); // materialize closure -> table names
-        if (Array.isArray(tables) && !tables.length) tables = 'all';
-        backend_users.setUserRole(u.key, u.role, u.addr, tables).then(this.loadUsers.bind(this));
+        if (feats === 'all') return this._saveGrants(u, 'all');
+        this._saveGrants(u, AccessFeatures.buildGrants(feats, this.userViewFeatures(u), SCHEMA, VIEWS));
+      },
+      updateUserViewTables: function(u, selected) {
+        // Marking something view-only on a FULL-ACCESS user has to materialize 'all' into an explicit
+        // map — the sentinel cannot say "everything except this one". Everything not picked here stays
+        // editable, so the Tables column visibly fills with chips: the admin can see what 'all' became.
+        // (Consequence worth knowing: an enumerated grant no longer picks up tables added to the schema
+        // later, whereas 'all' does. Clearing every view chip puts the user back on the sentinel.)
+        if (u.tables === 'all' && !(selected || []).length) return;   // nothing picked -> stay on 'all'
+        var edit = u.tables === 'all'
+          ? grantFeatures().map(function(f) { return f.id; }).filter(function(id) { return selected.indexOf(id) < 0; })
+          : this.userFeatures(u);
+        this._saveGrants(u, AccessFeatures.buildGrants(edit, selected, SCHEMA, VIEWS));
+      },
+      // Clearing every chip means "no restriction" (the long-standing behaviour of the single row) —
+      // an empty grant would otherwise lock the user out of an app they were just given access to.
+      _saveGrants: function(u, tables) {
+        if (tables !== 'all' && !Object.keys(tables).length) tables = 'all';
+        return backend_users.setUserRole(u.key, u.role, u.addr, tables).then(this.loadUsers.bind(this));
       },
       userFeatures: function(u) {
-        // Stored table list -> selected feature ids (chip selection state).
+        // Stored grant -> selected feature ids for the EDIT row (features fully covered at 'rw').
         if (!u || u.tables === 'all') return ['all'];
-        return selectedFeatures(u.tables || []);
+        return selectedFeatures(AccessFeatures.writableTables(u.tables) || []);
+      },
+      userViewFeatures: function(u) {
+        // The VIEW row shows what is readable but NOT writable — otherwise every edit grant would also
+        // light up here and un-ticking it would read as revoking sight, not revoking write.
+        if (!u || u.tables === 'all') return [];
+        var write = selectedFeatures(AccessFeatures.writableTables(u.tables) || []);
+        return selectedFeatures(AccessFeatures.readableTables(u.tables) || [])
+          .filter(function(f) { return write.indexOf(f) < 0; });
       },
       _resolveTableSelection: function(selected, prev) {
         if (selected.indexOf('all') >= 0 && prev.indexOf('all') < 0) return 'all';
@@ -3040,7 +3207,30 @@ function createVueApp() {
         this.currentData = this.currentData.filter(function(r) { return r.id !== itemId; });
         this.notify(this.t('msg.deleted'));
       },
-      _archiveInSources: function(sources, itemId) {
+      // Apply every table's `archiveAfter` policy once the cache is loaded: rows that have sat in a
+      // terminal state long enough move themselves to the archive, so a log stays the recent past
+      // without anyone filing it. Deliberately client-side and best-effort — there is no server-side
+      // scheduler — so it runs only for someone who could archive by hand anyway, and a concurrent
+      // second run is harmless (moveRow re-writes the same row into the same partition).
+      _autoArchive: function() {
+        var self = this, now = new Date();
+        // Grants decide whether we may write, so wait until they are known — before that
+        // userWritableTables reads as unrestricted and would sweep on a read-only user's behalf. Both
+        // boot paths and loadUsers' done() call this; whichever satisfies both preconditions last does
+        // the work, and a repeat run finds nothing left to move.
+        if (!this.usersLoaded) return;
+        Object.keys(SCHEMA).forEach(function(table) {
+          var cfg = SCHEMA[table] && SCHEMA[table].archiveAfter;
+          if (!cfg || !SCHEMA[table].archivable) return;
+          // Never write on someone's behalf who is not allowed to: the archive fans out over the whole
+          // mirror cluster, so require write access to all of it (self-service rows are the owner's own).
+          var writable = self.userWritableTables;
+          if (writable && !withMirrors([table]).every(function(t) { return writable.indexOf(t) >= 0; })) return;
+          var ids = BackendHelpers.autoArchiveIds(self.dataCache[table] || [], cfg, now);
+          ids.forEach(function(id) { self._archiveInSources(withMirrors([table]), id, true); });
+        });
+      },
+      _archiveInSources: function(sources, itemId, quiet) {
         var self = this;
         sources.forEach(function(source) {
           var schema = SCHEMA[source];
@@ -3053,7 +3243,7 @@ function createVueApp() {
           self.dataCache[aKey(source)].push(srcRow);
           backend.moveRow(self.tableMap[source], srcRow, 'active', 'archive');
         });
-        this.notify(this.t('msg.archived'));
+        if (!quiet) this.notify(this.t('msg.archived'));   // the auto sweep files rows silently
       },
       armDelete: function(key) {
         var self = this;
@@ -3472,11 +3662,19 @@ function createVueApp() {
       hasArchive: function() { return !this.part && appInstance && appInstance.embedHasArchive(this.type, this.name); },
       layout: function() { return appInstance ? appInstance.embedViewLayout(this.type, this.name) : 'table'; },
       roLayout: function() { return (this.spec && this.spec.config.layout) || 'table'; },
+      // The config whose column entries govern THIS embed's per-row visibility: an inline/named-view
+      // embed carries its own spec.config, a {{view:x}}/{{table:x}} token resolves the named view/table.
+      colCfg: function() { return this.spec ? this.spec.config : ((typeof VIEWS !== 'undefined' && VIEWS[this.name]) || (typeof SCHEMA !== 'undefined' && SCHEMA[this.name]) || {}); },
       tblStyle: function() { return 'width:100%; font-size:' + this.fontSize + '; border-collapse:collapse'; },
       thStyle: function() { return 'text-align:left; padding:' + this.cellPad + '; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)'; },
       tdStyle: function() { return 'padding:' + this.cellPad; }
     },
     methods: Object.assign({}, ROOT_PROXY, {
+      // Per-row column visibility, evaluated against the EMBEDDED view's own entries (colCfg).
+      // Card/list layouts drop the field entirely; a table keeps the column and blanks the cell, which
+      // is the same split the primary grid makes.
+      colHidden: function(col, item) { return !!appInstance && appInstance.isColumnHidden(col, item, this.colCfg); },
+      colsFor: function(item) { var self = this; return this.cols.filter(function(c) { return !self.colHidden(c, item); }); },
       isArmed: function(item) { return appInstance.isArmed('erow:' + item.id); },
       addRow: function() { return appInstance.embedAddRow(this.type, this.name); },
       delRow: function(item) { return appInstance.embedDeleteRow(this.type, this.name, item); },
@@ -3519,32 +3717,32 @@ function createVueApp() {
       + '<template v-if="spec.inlineBlocks" v-for="(blk, bi) in spec.inlineBlocks" :key="\'ib\'+bi">'
       + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
       + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
+      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
       + '</template>'
       + '<template v-else>'
       + '<div v-if="header" style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t(\'tab.\' + spec.config.table) || spec.config.table }} ({{ rows.length }})</div>'
       + '<table v-if="roLayout===\'table\'" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
-      + '<div v-else-if="roLayout===\'card\'" style="display:grid; gap:6px"><div v-for="er in rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in cols" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span><list-value :col="ec" :value="er[ec]"></list-value></span></div></div>'
-      + '<div v-else class="d-flex align-center flex-wrap ga-1"><v-chip v-for="er in rows" :key="er.id" size="small" variant="tonal" color="secondary" label><span v-for="(ec, i) in cols" :key="ec">{{ er[ec] }}<span v-if="i < cols.length - 1" style="opacity:0.4"> · </span></span></v-chip></div>'
+      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
+      + '<div v-else-if="roLayout===\'card\'" style="display:grid; gap:6px"><div v-for="er in rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in colsFor(er)" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span><list-value :col="ec" :value="er[ec]"></list-value></span></div></div>'
+      + '<div v-else class="d-flex align-center flex-wrap ga-1"><v-chip v-for="er in rows" :key="er.id" size="small" variant="tonal" color="secondary" label><span v-for="(ec, i) in colsFor(er)" :key="ec">{{ er[ec] }}<span v-if="i < colsFor(er).length - 1" style="opacity:0.4"> · </span></span></v-chip></div>'
       + '</template>'
       + '</template>'
       // --- editable data (page / doc-leaf self path): list/card/table with data-cell + row controls ---
       + '<div v-else>'
       + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
       + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
-      + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]"></list-value><span v-if="i < cols.length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
+      + '<template v-slot:default><span v-for="(col, i) in colsFor(item)" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]"></list-value><span v-if="i < colsFor(item).length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
       + '<template v-slot:append><template v-if="canMutate"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></template></template>'
       + '</v-list-item></v-list>'
       + '<div v-else-if="layout===\'card\'" class="my-2">'
       + '<v-card v-for="(item, ri) in rows" :key="item.id || ri" variant="flat" class="ma-2 pa-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">'
-      + '<div v-for="col in cols" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8"><list-value :col="col" :value="item[col]"></list-value></span></div>'
+      + '<div v-for="col in colsFor(item)" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8"><list-value :col="col" :value="item[col]"></list-value></span></div>'
       + '<div v-if="canMutate" style="text-align:right"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></div>'
       + '</v-card></div>'
       + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
       + '<thead><tr><th v-for="c in cols" :key="c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
       + '<tbody><tr v-for="(item, ri) in rows" :key="item.id || ri"><td v-for="col in cols" :key="col">'
-      + '<data-cell :item="item" :col="col" :owner="name" :readonly="!!part" :embed="true"></data-cell>'
+      + '<data-cell v-if="!colHidden(col, item)" :item="item" :col="col" :owner="name" :readonly="!!part" :embed="true"></data-cell>'
       + '</td><td v-if="canMutate" style="white-space:nowrap">'
       + '<v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn>'
       + '<v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn>'
@@ -4184,6 +4382,14 @@ function createVueApp() {
       cfg: function() { return this.view.board || {}; },
       laneCol: function() { return this.cfg.lane; },
       canEdit: function() { return !this.embed && appInstance.canMutateRows; },
+      // Moving a card writes the lane column. On a self-service table that is an owner-scoped write, so
+      // a card is only movable if `ownerWritable` lets its owner set the lane — otherwise the drop would
+      // be refused by the rules and the card would snap back unexplained.
+      canMoveCards: function() {
+        var a = appInstance;
+        if (!a.currentSelfService) return true;
+        return a.ownerCanWrite(a.selfServeTable, this.laneCol);
+      },
       hasArchive: function() { return appInstance.hasArchive; },
       rows: function() { return this.embed ? (appInstance.boardRowsFor ? appInstance.boardRowsFor(this.viewName) : []) : (appInstance.currentData || []); },
       // A 2-D REF lane: when `board.lane` is a `ref` to a 2-column lookup, the lookup's two dimensions are the
@@ -4261,14 +4467,20 @@ function createVueApp() {
       },
       titleCol: function() { return colName(this.cfg.title || (this.view.columns || [])[0] || ''); },
       cardTitle: function(item) { var c = this.titleCol(); return c ? appInstance.displayValue(c, item[c]) : (item.id || ''); },
-      cardCols: function() {
+      // Per-ROW card face: a conditional column is dropped from the cards whose rows don't match, the
+      // same as a card-layout grid. Evaluated against this board's own view config, so `when`/`hideEmpty`
+      // behave here exactly as they do top-level and in an embed.
+      cardCols: function(item) {
         var self = this, title = this.titleCol();
-        return (this.view.columns || []).map(colName).filter(function(c) { return typeof c === 'string' && c && c !== title && c !== self.laneCol; });
+        return (this.view.columns || []).map(colName).filter(function(c) {
+          if (typeof c !== 'string' || !c || c === title || c === self.laneCol) return false;
+          return !(item && appInstance && appInstance.isColumnHidden(c, item, self.view));
+        });
       },
       cardColor: function(item) { return this.cfg.color ? Calendar.hashColor(String(item[this.cfg.color] || '')) : null; },
       toggleGroup: function(key) { this.collapsed[key] = !this.collapsed[key]; },
       // --- drag/drop (desktop) ---
-      onDragStart: function(item) { if (this.canEdit) this.dragId = item.id; },
+      onDragStart: function(item) { if (this.canEdit && this.canMoveCards) this.dragId = item.id; },
       onDragEnd: function() { this.dragId = null; this.overLane = null; },
       onDrop: function(laneKey) {
         if (!this.canEdit || this.dragId == null) return;
@@ -4278,7 +4490,7 @@ function createVueApp() {
         this.onDragEnd();
       },
       // --- mobile / a11y fallback: move via menu ---
-      moveTo: function(item, laneKey) { if (this.canEdit && String(item[this.laneCol] || '') !== laneKey) appInstance.saveField(item, this.laneCol, laneKey, this.viewName); },
+      moveTo: function(item, laneKey) { if (this.canEdit && this.canMoveCards && String(item[this.laneCol] || '') !== laneKey) appInstance.saveField(item, this.laneCol, laneKey, this.viewName); },
       laneMenuItems: function() { var self = this; return this.laneOrder.map(function(k) { return { value: k, title: self.laneLabel(k) }; }); },
       addInLane: function(laneKey) { appInstance.boardAddInLane(this.viewName, laneKey); },
       // Per-card row controls (mirror the grid's row-append buttons): archive files the card to the archive
@@ -4318,14 +4530,14 @@ function createVueApp() {
       + '          <v-btn v-if="canEdit" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="tOr(\'board.edit\',\'Edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
       + '          <v-btn v-if="canEdit && hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.archive\',\'Archive\')" @click="archItem(item)" :data-testid="\'board-arch-\'+item.id"></v-btn>'
       + '          <v-btn v-if="canEdit" :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" density="comfortable" :color="isDelArmed(item) ? \'error\' : undefined" :title="isDelArmed(item) ? tOr(\'board.confirm_delete\',\'Confirm delete?\') : tOr(\'board.delete\',\'Delete\')" @click="delItem(item)" :data-testid="\'board-del-\'+item.id"></v-btn>'
-      + '          <v-menu v-if="canEdit" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
+      + '          <v-menu v-if="canEdit && canMoveCards" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
       + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.move_to\',\'Move to\')" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
       + '            <v-list density="compact"><v-list-subheader>{{ tOr(\'board.move_to\',\'Move to\') }}</v-list-subheader>'
       + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value)" :active="String(item[laneCol]||\'\')===opt.value">'
       + '              <v-list-item-title>{{ opt.title }}</v-list-item-title></v-list-item></v-list></v-menu>'
       + '        </div>'
       + '        <template v-if="editing[item.id]"><div v-for="col in editCols()" :key="col" style="display:flex;align-items:center;gap:6px;margin-top:4px"><span style="font-size:0.72rem;opacity:0.6;min-width:82px;flex-shrink:0">{{ t(\'field.\'+col) || col }}</span><data-cell :item="item" :col="col" :owner="viewName"></data-cell></div></template>'
-      + '        <template v-else><div v-for="col in cardCols()" :key="col" style="font-size:0.78rem;opacity:0.85"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, item[col]) }}</div></template>'
+      + '        <template v-else><div v-for="col in cardCols(item)" :key="col" style="font-size:0.78rem;opacity:0.85"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, item[col]) }}</div></template>'
       + '      </div>'
       + '      <div v-if="!lane.items.length" style="opacity:0.4;font-size:0.78rem;padding:4px">—</div>'
       + '    </div>'

@@ -1,0 +1,78 @@
+{
+  "languages": [ { "code": "en", "name": "English" } ],
+  "translations": {
+    "en": {
+      "app.title": "Our Home",
+      "tab.chore_log": "Chore log",
+      "tab.duty_rotation": "Duty rota",
+      "tab.home_shopping": "Shopping list",
+      "tab.ref_chores": "Chore catalogue",
+      "tab.ref_rewards": "Reward catalogue",
+      "tab.reward_claim": "Reward claims",
+
+      "view.chore_balance": "Points balance",
+      "view.chore_board": "Chores",
+      "view.chore_heatmap": "Who did what",
+      "view.chore_mine": "My chores",
+      "view.chore_points_month": "Points this month",
+      "view.chore_points_week": "Points this week",
+      "view.doc_home": "Home",
+      "view.doc_scoreboard": "Scoreboard",
+      "view.duty_schedule": "Weekly duty",
+      "view.home_calendar": "Calendar",
+      "view.reward_mine": "My rewards",
+      "view.reward_shop": "Reward shop",
+      "view.shop_open": "Shopping",
+      "view.shop_todo": "Still to buy",
+
+      "nav.Household": "Household",
+      "nav.Rewards": "Rewards",
+      "nav.Scoreboard": "Scoreboard",
+
+      "field.added_by": "Added by",
+      "field.balance": "Balance",
+      "field.chore": "Chore",
+      "field.claim_status": "Status",
+      "field.claimed_on": "Claimed",
+      "field.cost": "Cost",
+      "field.days_late": "Days late",
+      "field.done_on": "Done",
+      "field.duty": "On duty",
+      "field.item": "Item",
+      "field.needed_by": "Needed by",
+      "field.note": "Note",
+      "field.owner": "Logged by",
+      "field.people": "People",
+      "field.period": "Week of",
+      "field.person": "Person",
+      "field.points": "Points",
+      "field.position": "Order",
+      "field.qty": "Qty",
+      "field.reward": "Reward",
+      "field.shop_status": "Status",
+      "field.status": "Status",
+      "field.total": "Total",
+
+      "list.chore_status.logged": "Logged",
+      "list.chore_status.approved": "Approved",
+      "list.chore_status.rejected": "Rejected",
+
+      "list.claim_status.requested": "Requested",
+      "list.claim_status.granted": "Granted",
+      "list.claim_status.denied": "Denied",
+
+      "list.shop_status.needed": "Needed",
+      "list.shop_status.bought": "Bought",
+
+      "text.home_heading": "Our home",
+      "text.home_intro": "Log what you've done, watch the points add up, and check whose week it is.",
+      "text.score_week": "This week",
+      "text.score_month": "This month",
+      "text.score_balance": "Points to spend",
+      "text.score_who": "Who did what",
+
+      "text.rules_body": "Log a chore when you finish it. A parent approves it, and only approved chores earn points. Points are worth whatever the reward shop says they're worth.",
+      "text.rules_points": "The reward shop"
+    }
+  }
+}

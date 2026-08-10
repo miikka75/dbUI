@@ -85,7 +85,24 @@ returns boolean language sql stable security definer set search_path = public as
   end
 $$;
 
--- listAllowed(): the user's grants overlap a list row's owning `tables`.
+-- Write access to a table. Mirrors firestore.rules hasTableWrite: a grant map { t: 'r' | 'rw' } only
+-- permits writes where the mode is 'rw', and the writable subset is denormalized to `rwTables` at grant
+-- time because neither rules layer can filter a map. No `rwTables` key -> a pre-split doc (or a legacy
+-- array grant), so fall back to plain membership and every existing grant keeps working.
+create or replace function public.app_has_table_write(coll text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select case
+    when public.app_no_users() then true
+    when public.app_user_data() is null then false
+    when public.app_user_data() -> 'tables' = '"all"'::jsonb then true
+    when public.app_user_data() ? 'rwTables' then
+      (public.app_user_data() -> 'rwTables') ? split_part(coll, '__', 1)
+    else (public.app_user_data() -> 'tables') ? split_part(coll, '__', 1)
+  end
+$$;
+
+-- listAllowed(): the user's grants overlap a list row's owning `tables`. The `?` operator matches an
+-- array element OR an object key, so this reads a legacy array grant and a mode map identically.
 create or replace function public.app_list_allowed(row_tables jsonb)
 returns boolean language sql stable security definer set search_path = public as $$
   select case
@@ -95,6 +112,23 @@ returns boolean language sql stable security definer set search_path = public as
     else exists (
       select 1 from jsonb_array_elements_text(coalesce(row_tables, '[]'::jsonb)) e
       where (public.app_user_data() -> 'tables') ? e
+    )
+  end
+$$;
+
+-- Writing a list needs WRITE access to an owning table, not merely sight of it.
+create or replace function public.app_list_write_allowed(row_tables jsonb)
+returns boolean language sql stable security definer set search_path = public as $$
+  select case
+    when public.app_is_admin() then true
+    when public.app_user_data() is null then false
+    when public.app_user_data() -> 'tables' = '"all"'::jsonb then true
+    else exists (
+      select 1 from jsonb_array_elements_text(coalesce(row_tables, '[]'::jsonb)) e
+      where case
+        when public.app_user_data() ? 'rwTables' then (public.app_user_data() -> 'rwTables') ? e
+        else (public.app_user_data() -> 'tables') ? e
+      end
     )
   end
 $$;
@@ -127,6 +161,44 @@ returns boolean language sql stable security definer set search_path = public as
   end
 $$;
 
+-- ownerWritable: bound an owner-scoped write to named COLUMNS. Mirrors firestore.rules
+-- ownerCreateOk/ownerUpdateOk. _meta/ownerWritable holds { table: { cols: [...], locked: {col: default} } };
+-- a table absent from it is unbounded, so the feature is opt-in and existing deployments do not change.
+--
+-- The baseline a write may differ from is looked up HERE rather than passed in: kv_update's WITH CHECK
+-- only sees the new row, so an update would otherwise be compared against the create-time defaults and
+-- an owner could not edit their own note once a parent had approved it. Being SECURITY DEFINER, this can
+-- read the stored row itself — present means update (compare against it), absent means insert (compare
+-- against the gated defaults), which is exactly the firestore.rules split.
+create or replace function public.app_owner_fields_ok(coll text, rowkey text, incoming jsonb)
+returns boolean language sql stable security definer set search_path = public as $$
+  with b as (
+    select value -> split_part(coll, '__', 1) as bound
+    from public.kv where store = '_meta' and key = 'ownerWritable'
+  ),
+  base as (
+    select coalesce(
+      (select value from public.kv where store = coll and key = rowkey),
+      (select bound -> 'locked' from b)
+    ) as baseline
+  )
+  select case
+    when (select bound from b) is null then true
+    else not exists (
+      select 1
+      from (
+        select key from jsonb_each(coalesce(incoming, '{}'::jsonb))
+        union
+        select key from jsonb_each(coalesce((select baseline from base), '{}'::jsonb))
+      ) k
+      where k.key <> all (array['id','owner','created_at','updated_at','rosterPublic'])
+        and not ((select bound -> 'cols' from b) ? k.key)
+        and coalesce(incoming ->> k.key, '') is distinct from
+            coalesce((select baseline from base) ->> k.key, '')
+    )
+  end
+$$;
+
 -- ---------- Row predicates (keep the policies below readable) ----------------------------------------
 -- READ gate. `val` is the existing row's value.
 create or replace function public.app_can_read(store text, key text, val jsonb)
@@ -145,7 +217,10 @@ returns boolean language sql stable security definer set search_path = public as
       (val ->> 'shared') = 'true' or key = public.app_email()
         or (not public.app_no_users() and public.app_role() = 'admin')
     when store = '_list_users' then
-      (val ->> 'shared') = 'true' or (not public.app_no_users() and public.app_role() = 'admin')
+      -- ...or the link that names ME: `@me` resolves through it on a `userlink` list, and it is the
+      -- caller's own identity, so this exposes no email they don't already have.
+      (val ->> 'shared') = 'true' or lower(val ->> 'email') = public.app_email()
+      or (not public.app_no_users() and public.app_role() = 'admin')
     when store = '_lists' then
       public.app_is_registered() and (
         public.app_no_users() or public.app_role() = 'admin' or public.app_list_allowed(val -> 'tables')
@@ -184,14 +259,15 @@ returns boolean language sql stable security definer set search_path = public as
     when store = '_list_users' then public.app_no_users() or public.app_role() = 'admin'
     when store = '_lists' then
       public.app_no_users() or public.app_role() = 'admin'
-      or (public.app_role() = 'editor' and public.app_list_allowed(val -> 'tables'))
+      or (public.app_role() = 'editor' and public.app_list_write_allowed(val -> 'tables'))
     when store = '_pages__active' then
       public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor'
     when store like '\_%' then false
     else  -- data tables
       public.app_no_users() or public.app_role() = 'admin'
-      or ((val ->> 'owner') = public.app_email() and public.app_self_service(store))
-      or (public.app_role() = 'editor' and public.app_has_table_access(store))
+      or ((val ->> 'owner') = public.app_email() and public.app_self_service(store)
+          and public.app_owner_fields_ok(store, key, val))
+      or (public.app_role() = 'editor' and public.app_has_table_write(store))
   end
 $$;
 
@@ -208,14 +284,14 @@ returns boolean language sql stable security definer set search_path = public as
     when store = '_list_users' then public.app_no_users() or public.app_role() = 'admin'
     when store = '_lists' then
       public.app_no_users() or public.app_role() = 'admin'
-      or (public.app_role() = 'editor' and public.app_list_allowed(val -> 'tables'))
+      or (public.app_role() = 'editor' and public.app_list_write_allowed(val -> 'tables'))
     when store = '_pages__active' then
       public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor'
     when store like '\_%' then false
     else  -- data tables: edit own owned row, or table editor
       public.app_no_users() or public.app_role() = 'admin'
       or ((val ->> 'owner') = public.app_email() and public.app_self_service(store))
-      or (public.app_role() = 'editor' and public.app_has_table_access(store))
+      or (public.app_role() = 'editor' and public.app_has_table_write(store))
   end
 $$;
 
@@ -233,14 +309,14 @@ returns boolean language sql stable security definer set search_path = public as
     when store = '_list_users' then public.app_no_users() or public.app_role() = 'admin'
     when store = '_lists' then
       public.app_no_users() or public.app_role() = 'admin'
-      or (public.app_role() = 'editor' and public.app_list_allowed(val -> 'tables'))
+      or (public.app_role() = 'editor' and public.app_list_write_allowed(val -> 'tables'))
     when store = '_pages__active' then
       public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor'
     when store like '\_%' then false
     else  -- data tables
       public.app_no_users() or public.app_role() = 'admin'
       or ((val ->> 'owner') = public.app_email() and public.app_self_service(store))
-      or (public.app_role() = 'editor' and public.app_has_table_access(store))
+      or (public.app_role() = 'editor' and public.app_has_table_write(store))
   end
 $$;
 

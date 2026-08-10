@@ -41,6 +41,22 @@
     for (var c in cols) { if (columnType(schema, table, c) === 'owner') return c; }
     return null;
   }
+  // Columns carrying a `defaultFrom` token -> [{ name, from }]. The token is resolved by the caller
+  // (only '@me' = my profile display name today) and stamped on row CREATE only, so the value stays
+  // editable afterwards — unlike an `owner` column, which is auto-stamped and then read-only.
+  function tableDefaultCols(schema, table) {
+    var cols = schema[table] && schema[table].columns, out = [];
+    if (!cols) return out;
+    for (var c in cols) {
+      var d = cols[c];
+      if (!d || typeof d !== 'object') continue;
+      // `defaultFrom` resolves a token per user (only '@me'); `default` is a literal the caller writes
+      // through unchanged. A column may carry either; the token wins if somebody sets both.
+      if (d.defaultFrom) out.push({ name: c, from: d.defaultFrom });
+      else if (d['default'] !== undefined) out.push({ name: c, value: d['default'] });
+    }
+    return out;
+  }
   // A table's `ref` column pointing at `targetTable` -> { name, valueCol }, else null. Used by the rsvp
   // view to derive the response<->event link (linkColumn = name, eventKey = valueCol) from a ref column.
   function tableRefCol(schema, table, targetTable) {
@@ -109,7 +125,8 @@
 
   var C = {
     columnType: columnType, columnList: columnList, columnRef: columnRef,
-    isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol, tableRefCol: tableRefCol,
+    isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol,
+    tableDefaultCols: tableDefaultCols, tableRefCol: tableRefCol,
     colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate, colIsNumber: colIsNumber,
     colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted,
     colIsImage: colIsImage, colIsUrl: colIsUrl, colPicker: colPicker,

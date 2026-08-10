@@ -69,7 +69,11 @@
     var parts = md.split(/\{\{\s*(view|table)\s*:\s*([^\s@?{}:]+(?:@[^\s?{}:]+)?\??)\s*\}\}/);
     var blocks = [], i = 0;
     while (i < parts.length) {
-      if (parts[i]) blocks.push({ html: mdToHtml(parts[i]) });
+      // Guard on the RENDERED html, not the raw text: whitespace-only prose (the newline after a closing
+      // {{view:x}}, say) renders to '' and would be pushed as a block with a falsy `html`. Both templates
+      // dispatch with `v-if="blk.html" … v-else <embed-view>`, so such a block fell through to the embed
+      // branch with no type/name — a phantom empty grid plus an "Add" button at the end of the page.
+      if (parts[i]) { var _h = mdToHtml(parts[i]); if (_h) blocks.push({ html: _h }); }
       if (i + 2 < parts.length) {
         var type = parts[i + 1], raw = parts[i + 2];
         var optional = raw.charAt(raw.length - 1) === '?'; if (optional) raw = raw.slice(0, -1);

@@ -284,7 +284,7 @@
     </v-main>
 
     <!-- FAB: floating add button on mobile -->
-    <v-btn v-if="mobile && canMutateRows && isDataView" icon="mdi-plus" color="primary" size="large" style="position:fixed; bottom:72px; right:16px; z-index:100" elevation="4" @click="addRow"></v-btn>
+    <v-btn v-if="mobile && canAddRows && isDataView" icon="mdi-plus" color="primary" size="large" style="position:fixed; bottom:72px; right:16px; z-index:100" elevation="4" @click="addRow"></v-btn>
 
     <!-- Bottom navigation for mobile -->
     <v-bottom-navigation v-if="mobile && !loading && navLayout !== 'tabs'" :model-value="currentTable" @update:model-value="selectTab($event)" grow>
@@ -388,7 +388,7 @@
             </tbody>
             </template>
           </v-table>
-          <v-btn v-if="a.canMutateRows && !a.mobile" variant="text" prepend-icon="mdi-plus" @click="a.addRow" class="ma-2">{{ a.t('btn.add') }} {{ a.t((a.currentConfig.sources ? 'view.' : 'tab.') + a.currentTable) }}</v-btn>
+          <v-btn v-if="a.canAddRows && !a.mobile" variant="text" prepend-icon="mdi-plus" @click="a.addRow" class="ma-2">{{ a.t('btn.add') }} {{ a.t((a.currentConfig.sources ? 'view.' : 'tab.') + a.currentTable) }}</v-btn>
           <!-- Text entries and embedded rows -->
           <template v-for="(ei, eidx) in a.embedItems" :key="'bemb'+eidx">
           <div v-if="!ei.config.afterColumn && a.embedVisible(ei)" class="pa-3" style="border-top: 1px solid rgb(var(--v-theme-outline), 0.2)">
@@ -635,13 +635,16 @@
             </template>
             <v-table v-if="a.userList.length" density="compact">
               <template v-slot:default>
-              <thead><tr><th>{{ a.t('settings.user_id') }}</th><th>{{ a.t('settings.name') }}</th><th>{{ a.t('settings.role') }}</th><th>{{ a.t('settings.tables') }}</th><th></th></tr></thead>
+              <thead><tr><th>{{ a.t('settings.user_id') }}</th><th>{{ a.t('settings.name') }}</th><th>{{ a.t('settings.role') }}</th><th>{{ a.t('settings.tables') }}</th><th>{{ a.t('settings.tables_view') }}</th><th></th></tr></thead>
               <tbody>
                 <tr v-for="u in a.sortedUserList" :key="u.key">
                   <td><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="a.renameUser(u, $event.target.textContent.trim())">{{ u.key.indexOf('_new_') === 0 ? '' : u.key }}</span></td>
                   <td><div class="d-flex align-center" style="gap:8px"><user-avatar :email="u.key" :name="a.userDisplayName(u)" :size="28"></user-avatar><span class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="a.renameUserProfile(u, $event.target.textContent)">{{ a.userDisplayName(u) }}</span></div></td>
                   <td><v-select :model-value="u.role" :name="'role-' + u.key" :items="a.roleItems" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="max-width:120px" @update:model-value="a.setUserRole(u.key, $event, u.addr, u.tables)"></v-select></td>
                   <td><v-select :model-value="a.userFeatures(u)" :items="a.grantFeatureChips" item-title="label" item-value="id" multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:180px;max-width:320px" @update:model-value="a.updateUserTables(u, $event)"></v-select></td>
+                  <!-- View-only grants: readable, never writable. Disabled while the user has full access,
+                       which already implies sight of every table. -->
+                  <td><v-select :model-value="a.userViewFeatures(u)" :items="a.viewGrantChips" item-title="label" item-value="id" multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:180px;max-width:320px" @update:model-value="a.updateUserViewTables(u, $event)"></v-select></td>
                   <td><v-btn :icon="a.isArmed('user:'+u.key) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('user:'+u.key) ? 'error' : ''" @click="a.isArmed('user:'+u.key) ? a.removeUser(u.key) : a.armDelete('user:'+u.key)"></v-btn></td>
                 </tr>
               </tbody>

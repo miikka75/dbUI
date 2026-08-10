@@ -23,13 +23,15 @@ backend = {
     });
   },
   saveSchema: function(folderId, schema) {
-    // Mirror two schema-derived facts the schema-blind firestore rules need, kept in sync on every
-    // schema write: _meta/ownerTables (tables with an owner column -> gates owner-create) and
-    // _meta/pageAccess (restricted doc-views -> gates _pages__active reads; see pageAccessOf).
+    // Mirror the schema-derived facts the schema-blind firestore rules need, kept in sync on every
+    // schema write: _meta/ownerTables (tables with an owner column -> gates owner-create),
+    // _meta/pageAccess (restricted doc-views -> gates _pages__active reads; see pageAccessOf) and
+    // _meta/ownerWritable (which columns an owner-scoped write may touch; see ownerWritableOf).
     return Promise.all([
       StorageFirestore.setMeta('schema', schema),
       StorageFirestore.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) }),
-      StorageFirestore.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema))
+      StorageFirestore.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema)),
+      StorageFirestore.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema))
     ]);
   },
   // Single doc-view body by name. loadPage uses this (not the whole _pages__active collection) so that
@@ -133,13 +135,13 @@ backend = {
     var email = _myEmail();
     if (!email) return Promise.resolve([]);
     return _db.collection('_users').doc(email).get().then(function(d) {
-      if (d.exists) { var v = d.data(); return (v.role === 'admin' || v.tables === 'all') ? null : (v.tables || []); }
+      if (d.exists) { var v = d.data(); return (v.role === 'admin') ? null : AccessFeatures.readableTables(v.tables); }
       // No per-user doc yet: bootstrap (no users) or un-migrated -> consult the legacy _meta/users map.
       return _db.collection('_meta').doc('users').get().then(function(doc) {
         if (!doc.exists) return null;                 // bootstrap
         var u = doc.data()[email];
         if (!u) return [];                            // registered but not me
-        return (u.role === 'admin' || u.tables === 'all') ? null : (u.tables || []);
+        return (u.role === 'admin') ? null : AccessFeatures.readableTables(u.tables);
       }).catch(function() { return []; });            // map read denied -> fail closed
     }).catch(function() { return []; });
   },
@@ -248,6 +250,17 @@ backend = {
     return _db.collection('_list_users').get().then(function(snap) {
       var out = {}; snap.forEach(function(d) { var v = d.data(); (out[v.list] || (out[v.list] = {}))[v.value] = v.email; }); return out;
     });
+  },
+  // SELF-scoped: { listName: myValue } for every `userlink` list that names me. This is what lets `@me`
+  // resolve to a curated list value instead of my profile display name. The whole-collection read above
+  // is admin-only; this equality query is rules-provable against the caller's own email (see the
+  // _list_users read rule), so any member may run it and learns nothing but their own link.
+  getMyListValues: function() {
+    var email = _myEmail();
+    if (!email) return Promise.resolve({});
+    return _db.collection('_list_users').where('email', '==', email).get().then(function(snap) {
+      var out = {}; snap.forEach(function(d) { var v = d.data(); if (v.list && !(v.list in out)) out[v.list] = v.value; }); return out;
+    }).catch(function() { return {}; });   // never let a denied/missing link break boot
   },
   // Admin-only: link (email set) or unlink (empty) a value. Caches the linked user's current shared flag so
   // the shared-only query stays rules-provable; a later share/unshare needs a re-link to refresh it.
@@ -397,7 +410,7 @@ var backend_users = {
   },
   setUserRole: function(uid, role, user, tables) {
     var key = String(uid || '').toLowerCase();
-    var doc = { role: role, user: user || key, tables: tables || 'all' };
+    var doc = BackendHelpers.userGrantDoc(key, role, user, tables);
     // Source of truth = /_users/<key>; also mirror into the legacy _meta/users map so a rules
     // rollback keeps working during the transition.
     return Promise.all([

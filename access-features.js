@@ -88,6 +88,46 @@
     return Object.keys(S);
   }
 
+  // --- Grant shapes -------------------------------------------------------------------------------
+  // A user's stored `tables` value has three accepted shapes. Everything that asks "what may this user
+  // do with table X" goes through grantMode, so the shapes are normalized in exactly one place:
+  //   'all'                       unrestricted — every table, read+write
+  //   ['tasks','notes']           LEGACY: read+write on each. Still honored; never written anymore.
+  //   { tasks:'rw', notes:'r' }   per-table mode. 'r' = read but not write (reference data an editor
+  //                               should see and not change); anything else stored is treated as 'rw'.
+  // Both rules layers can read the legacy and the map shape with the SAME membership test (Firestore
+  // `x in map` matches keys; Postgres `jsonb ? k` matches array elements or object keys), which is why
+  // no migration is needed — only the write checks had to learn the difference.
+  function grantMode(tables, table) {
+    if (tables === 'all') return 'rw';
+    if (Array.isArray(tables)) return tables.indexOf(table) >= 0 ? 'rw' : null;
+    if (tables && typeof tables === 'object') {
+      if (!Object.prototype.hasOwnProperty.call(tables, table)) return null;
+      return tables[table] === 'r' ? 'r' : 'rw';
+    }
+    return null;
+  }
+  function _namesByMode(tables, wantWrite) {
+    if (tables === 'all') return null;                                  // null = unrestricted
+    if (Array.isArray(tables)) return tables.slice();                   // legacy: every grant is rw
+    if (tables && typeof tables === 'object') {
+      return Object.keys(tables).filter(function(t) { return !wantWrite || grantMode(tables, t) === 'rw'; });
+    }
+    return [];                                                          // no grants (fail closed)
+  }
+  // Tables this user may SEE (r or rw) / may WRITE (rw only). null = unrestricted, [] = none.
+  function readableTables(tables) { return _namesByMode(tables, false); }
+  function writableTables(tables) { return _namesByMode(tables, true); }
+
+  // Two selected-feature lists (edit chips, view chips) -> the stored `tables` map. Edit wins where a
+  // feature appears in both, and each list expands through the same closure the single-list grant used.
+  function buildGrants(editFeatureIds, viewFeatureIds, schema, views) {
+    var out = {};
+    expandFeatureGrants(viewFeatureIds, schema, views).forEach(function(t) { out[t] = 'r'; });
+    expandFeatureGrants(editFeatureIds, schema, views).forEach(function(t) { out[t] = 'rw'; });
+    return out;
+  }
+
   // Reverse: which feature ids are fully covered by a stored table list (for chip selection state).
   function selectedFeatures(tableList, schema, views) {
     var have = {}; (tableList || []).forEach(function(t) { have[t] = true; });
@@ -100,7 +140,9 @@
     viewRosters: viewRosters, viewComputedHelpers: viewComputedHelpers, viewHelperTables: viewHelperTables,
     viewTables: viewTables, isPureMirror: isPureMirror, satelliteTables: satelliteTables,
     grantFeatures: grantFeatures, featureClosure: featureClosure,
-    expandFeatureGrants: expandFeatureGrants, selectedFeatures: selectedFeatures
+    expandFeatureGrants: expandFeatureGrants, selectedFeatures: selectedFeatures,
+    grantMode: grantMode, readableTables: readableTables, writableTables: writableTables,
+    buildGrants: buildGrants
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = AF;
   else root.AccessFeatures = AF;

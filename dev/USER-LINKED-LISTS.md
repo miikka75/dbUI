@@ -52,6 +52,7 @@ is not gated by the flag — any existing link projects an avatar — the flag o
 |---|---|
 | **Avatar change** | ✅ Resolved live from the profile; never stored. Updates everywhere instantly. |
 | **User renames their profile** | ✅ No effect on the roster — display is the list value; only the avatar follows the account. |
+| **`@me` on a linked list** | ✅ Resolves to the caller's linked value, not their profile name — so a filter like `{"person": "@me"}` and a `defaultFrom: "@me"` column both work when the two differ. Linked to nothing → fail-closed sentinel, matching no rows. |
 | **List value renamed** | ⚠️ The one fragile case: the link (and existing data cells) are keyed by the old string. The list-value rename handler must migrate the `listUsers` key (and data cells) atomically. |
 | **Linked user un-shares** | Non-admins lose the avatar (name-only); admins still see the link. |
 | **Linked account deleted** | Avatar doesn't resolve → name-only; editor flags "linked user missing". |
@@ -61,8 +62,12 @@ is not gated by the flag — any existing link projects an avatar — the flag o
 
 - **Editing a link:** admin-only (needs the user roster, which non-admins can't read).
   The Lookup editor's "linked user" picker is shown to admins only.
-- **Reading the email link:** admin-only; non-admins receive only `value → picture`
-  for shared linked users. No email ever reaches a non-admin.
+- **Reading the email link:** admin-only for the *whole* map; non-admins receive only
+  `value → picture` for shared linked users. No email ever reaches a non-admin —
+  **except their own**: `getMyListValues()` returns `{ list: myValue }` for the links that
+  name the caller, which is how `@me` resolves to a curated value. It is a rules-provable
+  equality query on the caller's own email (`.where('email','==',me)`), the same property
+  that makes the shared-only query safe, and it discloses nothing they didn't already know.
 - **Seeing the avatar:** a non-admin sees it only when the linked profile is readable
   (the user shared, or the viewer is admin). Otherwise the cell is name-only. The
   **name** is list data, already gated by table access — never by profile sharing.

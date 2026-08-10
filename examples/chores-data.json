@@ -1,0 +1,347 @@
+{
+  "lists": {
+    "members": [
+      "Ann",
+      "Bob",
+      "Cara",
+      "Dan"
+    ],
+    "chore_status": [
+      "logged",
+      "approved",
+      "rejected"
+    ],
+    "claim_status": [
+      "requested",
+      "granted",
+      "denied"
+    ],
+    "shop_status": [
+      "needed",
+      "bought"
+    ],
+    "shop_items": [
+      "Bin bags",
+      "Bread",
+      "Cat food",
+      "Coffee",
+      "Eggs",
+      "Kitchen roll",
+      "Milk",
+      "Toilet roll",
+      "Washing powder",
+      "Washing-up liquid"
+    ]
+  },
+  "tables": {
+    "ref_chores": [
+      {
+        "id": "chore-dishes",
+        "chore": "Wash up",
+        "points": 2
+      },
+      {
+        "id": "chore-dishwash",
+        "chore": "Empty dishwasher",
+        "points": 1
+      },
+      {
+        "id": "chore-bins",
+        "chore": "Take out bins",
+        "points": 1
+      },
+      {
+        "id": "chore-cook",
+        "chore": "Cook dinner",
+        "points": 4
+      },
+      {
+        "id": "chore-bathroom",
+        "chore": "Clean bathroom",
+        "points": 4
+      },
+      {
+        "id": "chore-hoover",
+        "chore": "Hoover",
+        "points": 3
+      },
+      {
+        "id": "chore-dust",
+        "chore": "Dust + tidy",
+        "points": 2
+      },
+      {
+        "id": "chore-beds",
+        "chore": "Change bedding",
+        "points": 3
+      },
+      {
+        "id": "chore-laundry",
+        "chore": "Laundry load",
+        "points": 2
+      },
+      {
+        "id": "chore-lawn",
+        "chore": "Mow the lawn",
+        "points": 5
+      },
+      {
+        "id": "chore-plants",
+        "chore": "Water plants",
+        "points": 1
+      },
+      {
+        "id": "chore-shopping",
+        "chore": "Go shopping",
+        "points": 3
+      }
+    ],
+    "ref_rewards": [
+      {
+        "id": "reward-icecream",
+        "reward": "Ice cream",
+        "cost": 4
+      },
+      {
+        "id": "reward-film",
+        "reward": "Pick the film",
+        "cost": 8
+      },
+      {
+        "id": "reward-lateup",
+        "reward": "Stay up an hour",
+        "cost": 10
+      },
+      {
+        "id": "reward-daytrip",
+        "reward": "Choose a day out",
+        "cost": 25
+      }
+    ],
+    "duty_rotation": [
+      {
+        "id": "duty-1",
+        "position": 1,
+        "people": [
+          "Ann"
+        ]
+      },
+      {
+        "id": "duty-2",
+        "position": 2,
+        "people": [
+          "Bob",
+          "Dan"
+        ]
+      },
+      {
+        "id": "duty-3",
+        "position": 3,
+        "people": [
+          "Cara"
+        ]
+      }
+    ],
+    "chore_log": [
+      {
+        "id": "log-01",
+        "owner": "ann@example.test",
+        "person": "Ann",
+        "chore": "Wash up",
+        "done_on": "2026-08-07",
+        "status": "approved",
+        "note": ""
+      },
+      {
+        "id": "log-02",
+        "owner": "ann@example.test",
+        "person": "Ann",
+        "chore": "Mow the lawn",
+        "done_on": "2026-08-05",
+        "status": "approved",
+        "note": "Front and back"
+      },
+      {
+        "id": "log-03",
+        "owner": "ann@example.test",
+        "person": "Ann",
+        "chore": "Laundry load",
+        "done_on": "2026-08-03",
+        "status": "approved",
+        "note": ""
+      },
+      {
+        "id": "log-04",
+        "owner": "bob@example.test",
+        "person": "Bob",
+        "chore": "Hoover",
+        "done_on": "2026-08-07",
+        "status": "approved",
+        "note": "Upstairs too"
+      },
+      {
+        "id": "log-05",
+        "owner": "bob@example.test",
+        "person": "Bob",
+        "chore": "Take out bins",
+        "done_on": "2026-08-08",
+        "status": "logged",
+        "note": "Waiting to be checked"
+      },
+      {
+        "id": "log-06",
+        "owner": "bob@example.test",
+        "person": "Bob",
+        "chore": "Clean bathroom",
+        "done_on": "2026-08-04",
+        "status": "approved",
+        "note": ""
+      },
+      {
+        "id": "log-07",
+        "owner": "cara@example.test",
+        "person": "Cara",
+        "chore": "Wash up",
+        "done_on": "2026-08-06",
+        "status": "approved",
+        "note": ""
+      },
+      {
+        "id": "log-08",
+        "owner": "cara@example.test",
+        "person": "Cara",
+        "chore": "Empty dishwasher",
+        "done_on": "2026-08-06",
+        "status": "approved",
+        "note": ""
+      },
+      {
+        "id": "log-09",
+        "owner": "cara@example.test",
+        "person": "Cara",
+        "chore": "Water plants",
+        "done_on": "2026-08-02",
+        "status": "rejected",
+        "note": "Only the front ones"
+      },
+      {
+        "id": "log-10",
+        "owner": "dan@example.test",
+        "person": "Dan",
+        "chore": "Cook dinner",
+        "done_on": "2026-08-06",
+        "status": "approved",
+        "note": "Pasta"
+      },
+      {
+        "id": "log-11",
+        "owner": "dan@example.test",
+        "person": "Dan",
+        "chore": "Dust + tidy",
+        "done_on": "2026-08-02",
+        "status": "approved",
+        "note": ""
+      },
+      {
+        "id": "log-12",
+        "owner": "ann@example.test",
+        "person": "Ann",
+        "chore": "Change bedding",
+        "done_on": "2026-07-10",
+        "status": "approved",
+        "note": ""
+      },
+      {
+        "id": "log-13",
+        "owner": "bob@example.test",
+        "person": "Bob",
+        "chore": "Mow the lawn",
+        "done_on": "2026-07-15",
+        "status": "approved",
+        "note": ""
+      },
+      {
+        "id": "log-14",
+        "owner": "cara@example.test",
+        "person": "Cara",
+        "chore": "Hoover",
+        "done_on": "2026-07-21",
+        "status": "approved",
+        "note": ""
+      }
+    ],
+    "reward_claim": [
+      {
+        "id": "claim-1",
+        "owner": "ann@example.test",
+        "person": "Ann",
+        "reward": "Ice cream",
+        "claimed_on": "2026-08-06",
+        "claim_status": "granted"
+      },
+      {
+        "id": "claim-2",
+        "owner": "bob@example.test",
+        "person": "Bob",
+        "reward": "Pick the film",
+        "claimed_on": "2026-08-04",
+        "claim_status": "granted"
+      },
+      {
+        "id": "claim-3",
+        "owner": "cara@example.test",
+        "person": "Cara",
+        "reward": "Stay up an hour",
+        "claimed_on": "2026-08-08",
+        "claim_status": "requested"
+      }
+    ],
+    "home_shopping": [
+      {
+        "id": "shop-1",
+        "item": "Washing-up liquid",
+        "qty": "1",
+        "added_by": "Ann",
+        "needed_by": "2026-08-04",
+        "shop_status": "needed"
+      },
+      {
+        "id": "shop-2",
+        "item": "Bin bags",
+        "qty": "2",
+        "added_by": "Bob",
+        "needed_by": "",
+        "shop_status": "needed"
+      },
+      {
+        "id": "shop-3",
+        "item": "Milk",
+        "qty": "2 L",
+        "added_by": "Cara",
+        "needed_by": "",
+        "shop_status": "needed"
+      },
+      {
+        "id": "shop-4",
+        "item": "Cat food",
+        "qty": "1 box",
+        "added_by": "Dan",
+        "needed_by": "2026-08-07",
+        "shop_status": "needed"
+      },
+      {
+        "id": "shop-5",
+        "item": "Kitchen roll",
+        "qty": "4",
+        "added_by": "Ann",
+        "needed_by": "",
+        "shop_status": "bought"
+      }
+    ]
+  },
+  "config": {
+    "rotationAnchors": {
+      "duty_schedule": "2026-08-03"
+    }
+  }
+}

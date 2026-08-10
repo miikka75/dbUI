@@ -118,6 +118,20 @@ function validateSchema() {
   var errors = [];
   var allCols = {};
   for (var t in SCHEMA) { for (var c in SCHEMA[t].columns) allCols[c] = t; }
+  // `archiveAfter` is easy to write and easy to have silently do nothing: it needs somewhere to move
+  // rows TO (an archivable table) and a clock to measure (`updated_at`, which a columnar backend only
+  // persists when the table declares it). Both are load-time detectable, so say so rather than let the
+  // sweep find no eligible rows forever.
+  for (var at in SCHEMA) {
+    var aa = SCHEMA[at] && SCHEMA[at].archiveAfter;
+    if (!aa) continue;
+    var acols = SCHEMA[at].columns || {};
+    if (!SCHEMA[at].archivable) errors.push('table "' + at + '": `archiveAfter` needs `archivable: true` (there is no archive partition to move rows into)');
+    if (!aa.column || !(aa.column in acols)) errors.push('table "' + at + '": `archiveAfter.column` "' + (aa.column || '') + '" is not a column of the table');
+    if (!Array.isArray(aa.values) || !aa.values.length) errors.push('table "' + at + '": `archiveAfter.values` must be a non-empty array of the values that count as finished');
+    if (!isFinite(Number(aa.days)) || Number(aa.days) < 0) errors.push('table "' + at + '": `archiveAfter.days` must be a non-negative number');
+    if (!('updated_at' in acols)) errors.push('table "' + at + '": `archiveAfter` measures from `updated_at`, so the table must declare that column (`{ "name": "updated_at", "type": "text", "hidden": true }`)');
+  }
   for (var v in VIEWS) {
     var view = VIEWS[v];
     // Check sources exist
@@ -177,6 +191,11 @@ function validateSchema() {
       if (cvv.source && cvv.sources) errors.push('calendar "' + v + '": use `source` OR `sources`, not both');
       if (cvv.defaultView && ['month', 'week', 'list'].indexOf(cvv.defaultView) < 0) errors.push('calendar "' + v + '" defaultView must be month/week/list');
       var csrcs = cvv.sources || [{ table: cvv.source, dateColumn: cvv.dateColumn, titleColumns: cvv.titleColumns }];
+      // `addTo` names which source a day-add creates in (needed once there are several). A name that is
+      // not one of them silently leaves the button off, so say so.
+      if (cvv.addTo && !csrcs.some(function(s) { return s && s.table === cvv.addTo; })) {
+        errors.push('calendar "' + v + '": addTo "' + cvv.addTo + '" is not one of its sources');
+      }
       csrcs.forEach(function(s) {
         if (!s || !s.table) { errors.push('calendar "' + v + '": each source needs a table'); return; }
         if (!SCHEMA[s.table]) { errors.push('calendar "' + v + '" references non-existent table "' + s.table + '"'); return; }

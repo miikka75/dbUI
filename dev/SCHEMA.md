@@ -39,6 +39,35 @@ nav     ← navigation tree + layout, references views/tables by name
 `active` and `archive` partitions). Omit it for tables that are never archived.
 `isLookup: true` marks a reference/lookup table (managed in the Lookup tab, not the sidebar).
 
+### `archiveAfter` — file finished rows away on their own
+```json
+"chore_log": {
+  "archivable": true,
+  "columns": [ …, { "name": "updated_at", "type": "text", "hidden": true } ],
+  "archiveAfter": { "column": "status", "values": ["approved", "rejected"], "days": 7 }
+}
+```
+A row whose `column` holds one of `values` moves to the **archive** partition once it has gone `days`
+without an edit — so a log keeps showing the recent past and settles itself, with nobody filing rows by
+hand. Reversible from the archive tab like any other archived row.
+
+- **The clock is `updated_at`**, which every write stamps. So it means "finished and left alone for N
+  days", not "N days since the status changed": correcting a note restarts the countdown, which is the
+  forgiving reading — a row someone is still touching isn't done with. A row with no `updated_at` is
+  never swept.
+- **The table must DECLARE `updated_at`** (`type: "text"`, `hidden: true`). Columnar backends (dev
+  SQLite, Sheets) store only declared columns, so without it the timestamp is dropped and nothing ever
+  ages out. `validateSchema` rejects the combination rather than letting it fail silently — as it does
+  a missing `archivable`, an unknown `column`, empty `values`, or a negative `days`.
+- **Client-side and best-effort**: the sweep runs at load, only for someone who could archive by hand
+  anyway (write access to the whole mirror cluster), and does nothing on a read-only grant. There is no
+  server-side scheduler, so rows age out the next time somebody with rights opens the app — a
+  concurrent second run is harmless.
+- `days: 0` archives as soon as the row reaches a listed value.
+- **Mind what totals the table feeds.** Archiving removes a row from every ordinary view, so a
+  leaderboard or balance over the same table needs `includeArchive: true` or it will quietly shed
+  points as rows age out — the chores example turns it on for exactly that reason.
+
 > **`id` is implicit** — every table gets an `id` column auto-injected (storage primary key +
 > join/archive match key). Do not declare it in `columns`.
 
@@ -66,6 +95,8 @@ nav     ← navigation tree + layout, references views/tables by name
 | `sorted` | Sort dropdown items alphabetically |
 | `picker` | Input widget for a single `select` column: `"chips"` (selectable chips) or `"toggle"` (segmented buttons); omit for the default dropdown. Applies wherever the column is edited (any view). Deselecting the current value clears the cell. Ignored with `allowNew` (which needs free-text entry) and for `multiselect` (already chips). Same widget vocabulary as the `rsvp` view's `picker`. |
 | `syncFrom` | Mirror this column's value from another table |
+| `default` | A literal seeded into the cell when a row is **created** (`"default": "logged"`), then freely editable. Use it so a new row starts in a sensible state — a status column that begins blank leaves the row outside every lane and filter that names a value. Prefer an explicit value over "whatever is first in the list": list order is data and can be reordered |
+| `defaultFrom` | Seed the cell when a row is **created**. Only token: `"@me"` = the signed-in user's identity, resolved exactly as the `@me` filter does for that column (a `userlink` list's curated value, else the profile display name) (blank when they have none, like the `@me` filter). Takes precedence over `default` if both are set. Unlike `owner`, the value stays editable afterwards — use it so a self-service row is attributed to its author by default without hard-wiring it |
 | `table` | Reference table name (for `ref`) |
 | `valueCol` | Column used as value (for `ref`) |
 | `filterBy` | Filter ref options by another column (for `ref`) |
@@ -120,7 +151,8 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `columns` | array | Column names, embeds, conditional/computed columns (below) |
 | `filter` | object | Static row filter (see **filters**) |
 | `readonly` | boolean | Disable editing (report views) |
-| `layout` | string | `"table"`, `"card"`, or `"list"` |
+| `includeArchive` | boolean | Read the **archive** partition alongside the active one. A view sees only active rows by default, which is right for a worklist and wrong for a TOTAL: with `archiveAfter` in play, a sum that nets one thing against another goes wrong the moment either side ages out. Turn it on for balances, leaderboards and any cross-tab of history. Needs the archive preloaded (`preload_archive`, on by default) |
+| `layout` | string | `"table"`, `"card"`, or `"list"`. **`list` is a reading layout**: compact single-line rows with values rendered read-only, so a row added there has no editor and must be filled in elsewhere. Add/delete/archive are still offered (a *table* may declare `list` as its only presentation), but use `table`/`card` for any view people actually enter data into |
 | `collapsed` | boolean | Cards start collapsed (accordion) |
 | `defaultSort` | string | Default sort column |
 | `hideEmpty` | boolean | Hide columns where all rows are empty |
@@ -165,7 +197,8 @@ A `filter` (on a view, an inline/named-view embed, or a conditional column) matc
 - **`$or` / `$and`** = explicit logical groups, nestable:
   `{ "$and": [ { "city": "X" }, { "$or": [ {"status":"open"}, {"status":"in_progress"} ] } ] }`.
 - **Value operators** (also usable in column `when` / conditional columns — same engine):
-  `{ "col": { "notEmpty": true } }`, `{ "empty": true }`, `{ "ne": v }`.
+  `{ "col": { "notEmpty": true } }`, `{ "empty": true }`, `{ "ne": v }`,
+  and the ordered comparisons `{ "lt": v }` / `{ "gt": v }` / `{ "lte": v }` / `{ "gte": v }`.
   `notEmpty`/`empty` work on **computed** values too. Row filters and column/embed conditions share
   one matcher (`condMatches`), so **every operator above works in `filter`, `when`, and embed `when`.**
 
@@ -175,7 +208,7 @@ A `filter` (on a view, an inline/named-view embed, or a conditional column) matc
 | `"col": "value"` | Fixed filter value known at schema design time |
 | `{ "$or": [ {"col":"a"}, {"col":"b"} ] }` | Fixed set of values (membership; array shorthand retired) |
 | `"col": { "matchList": "listName" }` | Filter should track a user-editable list (Lookup tab) |
-| `"col": "@me"` | Resolves to the signed-in user's **profile display name** (see **user profiles**). Empty profile name → matches nothing (fail-closed). Works in `filter`, `groupBy.filter`, calendar `sources[].filter`, rotation `filter`, and embeds. Display-only — never widens server-enforced access. |
+| `"col": "@me"` | Resolves to the signed-in user's identity **for that column**: on a `userlink` list, the curated value linked to their account; otherwise their **profile display name** (see **user profiles**). No identity → matches nothing (fail-closed). Works in `filter`, `groupBy.filter`, calendar `sources[].filter`, rotation `filter`, and embeds. Display-only — never widens server-enforced access. |
 | `"col": { "within": "@month" }` | Date column falls in the current period. Token: `@today`/`@week`/`@month`/`@year`, with an optional **back-offset** (`@month-1` = last month, `@week-2` = two weeks ago). Recomputed from *today* each render, so it **auto-resets** (a `@month` leaderboard rolls to the new month); weeks are Monday-start; unknown tokens match nothing. Ideal for a period-scoped `groupBy.filter` (e.g. this-month leaderboard). |
 
 ### aggregate views (groupBy + collect)
@@ -214,6 +247,27 @@ Instead of `collect`, use `aggregate` to produce one **numeric** row per group, 
 - **`view.compute`**: an array of computed defs resolved on the **source rows before grouping** — so an
   aggregate can `sum` a *looked-up* (or otherwise computed) per-row value, not just a stored column.
   These are preparation-only (not displayed); the displayed columns are `columns`.
+- **Signed totals across two tables** (`source` + `scale` on a compute def): in a **union** view each row
+  is tagged with its origin table, and `"source": "<table>"` restricts a def to those rows while
+  `"scale": -1` negates its result. Two defs writing the **same** output column — one per table, one
+  negated — let a single `aggregate.sum` produce a *balance* (earned minus spent), which one `sum` over
+  one table cannot. Rows no def matched leave the column unset and contribute nothing (not a zero).
+  `scale` is ignored for non-numeric results.
+
+  ```json
+  { "name": "balance", "sources": ["chore_log", "reward_claim"], "mode": "union",
+    "groupBy": { "column": "person", "from": ["person"] },
+    "compute": [
+      { "name": "delta", "source": "chore_log",
+        "computed": { "lookup": { "table": "ref_chores", "match": "chore", "field": "points", "default": 0 } } },
+      { "name": "delta", "source": "reward_claim", "scale": -1,
+        "computed": { "lookup": { "table": "ref_rewards", "match": "reward", "field": "cost", "default": 0 } } }
+    ],
+    "aggregate": { "sum": "delta", "into": "balance" },
+    "columns": ["person", "balance"] }
+  ```
+  The two tables usually have different date/status column names, so scope such a view with `$or`
+  (`{ "$or": [ {"status":"approved"}, {"status":"granted"} ] }`) rather than a flat equality.
 
 ##### Worked example — chores with per-chore points → ranked leaderboard
 The demo schema (`dev/schema.json`) wires this up: a `chores` ref table holds each chore's point value,
@@ -275,6 +329,15 @@ A column with `computed` derives its value from other columns at render time (no
   ```
   General-purpose — chore→points, member→role/phone, room→capacity, category→colour, etc. Pairs with
   `view.compute` + `aggregate.sum` to total a looked-up value (see **Leaderboard totals**).
+- **Age of a row** (`daysSince`): whole days from a date column to today, as a **number** (negative for a
+  future date, `""` when the date is blank or unparseable):
+  ```json
+  { "name": "days_late", "computed": { "daysSince": "needed_by" }, "when": { "days_late": { "gt": 0 } } }
+  ```
+  Recomputed every render and never stored, so an "overdue" view re-evaluates as the day rolls over.
+  Pair it with the ordered operators above for due/overdue/stale filters. Note this ages **one row's own
+  date** — "when was this chore last done by anyone" would need a max-per-group, which aggregates don't
+  feed back into a lookup.
 - Computed columns are read-only (no cell editor renders for them).
 - They appear in the view's visible columns and in card/table layout.
 
@@ -295,6 +358,7 @@ row when **every** field matches. Each field accepts a scalar (equality) or an o
 | `{ "f": { "notEmpty": true } }` | `row.f` is truthy (set) |
 | `{ "f": { "empty": true } }` | `row.f` is falsy (blank) |
 | `{ "f": { "ne": v } }` | `row.f !== v` |
+| `{ "f": { "lt": v } }` / `gt` / `lte` / `gte` | ordered comparison. **Numeric** when both sides parse as numbers (`9 < 10`, not `"9" > "10"`), otherwise a string compare — which orders `YYYY-MM-DD` dates correctly, so no separate date operator is needed. Combinable in one object for a range: `{ "gte": 10, "lte": 20 }`. A **blank or missing value is incomparable** and matches *no* ordered filter in either direction (fail-closed — otherwise `Number('') === 0` would quietly pull undated rows into an "overdue" view) |
 | `{ "$or": [...] }` / `{ "$and": [...] }` | logical groups (membership via `$or` of equalities) |
 | `{ "f": { "matchList": "L" } }` / `notMatchList` | value in / not in named list |
 
@@ -302,6 +366,10 @@ row when **every** field matches. Each field accepts a scalar (equality) or an o
 valid in a `filter` is valid in a `when` and vice-versa — `$or`/`$and`,
 `matchList`/`notMatchList`, equality, and the operators above. `notEmpty`/`empty` work
 on **computed** values, so you can show a column only when a computed result is present.
+Column `when`/`hideEmpty` are evaluated against the config that *owns* the column, so they apply
+inside a `{{view:x}}` / `{{table:x}}` embed and in an inline embed exactly as they do at top level —
+the embedded view's own entries decide, not the page hosting it.
+
 A `when` clause also works on an **embed** (inline, named-view, or markdown prose block) in a
 view's `columns`: the embed renders per-card only when the card's row matches — e.g. a markdown
 prose block placed above a column, shown only when a computed value is present:
@@ -734,6 +802,17 @@ appointment date and an expiry date):
 Per-source fields: `table` (req), `dateColumn` (req), `titleColumns` (opt), `filter` (opt, data-view
 grammar), `label` (opt — the type tag + colour key; defaults to the table's translated `tab.<table>`).
 
+### Adding on a day (`addTo`)
+Clicking a day and pressing **+** creates a row with that day prefilled in the source's `dateColumn`,
+then lands on a grid so it can be filled in. With one source that source is the target; with several,
+name it:
+```json
+"calendar": { "sources": [ … ], "addTo": "chore_log" }
+```
+Without `addTo` a multi-source calendar offers no **+**, rather than guessing which table the click
+meant. A name that isn't one of the sources is a load-time error. Offered to anyone who could add to
+that table by hand — including a member relying on **self-service**, who has no grant at all.
+
 ### Rotation duties (`rotationSources`)
 Overlay a **rotation view's** generated duties (e.g. `duty_rotation` turns) onto the calendar as
 **read-only** events. Rotation rows aren't stored — they're generated per date from the rosters +
@@ -973,6 +1052,15 @@ table — the `rsvp` view is one presentation of it; a plain data grid over an o
   available; per-row edit/delete is gated on ownership (their own rows are editable, others render
   read-only, the `owner` column is always read-only). Admins/editors with a grant manage all rows as
   before.
+- **Who can READ the rows** is the separate `owner` / `rosterPublic` axis. Every owner-stamped row
+  created through the app carries `rosterPublic: true` unless the table sets **`privateRoster: true`**,
+  in which case each row is visible only to its owner and to organizers (a table grant) — the flag has
+  to ride on the row because both rules layers are schema-blind. Leave it off for a shared log whose
+  totals everyone should see (a chore leaderboard); switch it on for genuinely private submissions.
+  Rows written before this behaviour existed carry no flag and stay owner-private until re-saved.
+- **Read-only grant + `owner` column** is the other useful combination: `{ "<table>": "r" }` lets a
+  member see every row while writes still route through self-service, so they change only their own.
+  See **Access modes** below.
 - **How the rules know**: Firestore rules are schema-blind, so `saveSchema` mirrors the set of
   owner-column tables to `_meta/ownerTables` (`BackendHelpers.ownerTablesOf`). The data rules allow
   owner-create **only** on a table in that set — otherwise a member could inject owner-stamped rows into
@@ -984,6 +1072,64 @@ table — the `rsvp` view is one presentation of it; a plain data grid over an o
   security boundary, but **mirrors** owner-scoped reads/writes for a self-service table so the local demo
   behaves like Firebase: a non-granted member reads their own rows (+ `rosterPublic`) and may create /
   edit / delete only their own owned rows.
+
+## Access modes (`r` / `rw`)
+
+A user's grant (`_users/<email>.tables`) is one of three shapes, all still accepted:
+
+| Stored value | Means |
+|---|---|
+| `"all"` | every table, read + write |
+| `["tasks", "notes"]` | **legacy** — read + write on each. Nothing writes this shape any more; existing grants keep working untouched |
+| `{ "tasks": "rw", "ref_chores": "r" }` | per-table mode. `"r"` = **visible but not editable** |
+
+`"r"` is for reference data a member must see and must not change — a chore catalogue with point
+values, a price list, a status vocabulary. The table appears in the nav, its rows load, its lists and
+ref-pickers resolve, and every cell renders read-only; add/delete/archive controls are hidden.
+
+- **Edited in Settings → Users** as two chip columns: *Tables* (can edit) and *Can view*. They merge
+  into the one stored map, with edit winning where a feature is in both.
+- **Enforced server-side.** Reads use plain membership, which both rules languages satisfy for either
+  container (`x in <map>` matches keys; `jsonb ? k` matches array elements *or* object keys) — which is
+  exactly why no stored grant needed migrating. Writes consult a denormalized **`rwTables`** list saved
+  next to the grant, since neither rules layer can filter a map (same trick as `_meta/ownerTables`).
+  A user doc without `rwTables` predates the split and falls back to membership.
+- **Lists follow the table.** Editing a list requires *write* access to an owning table; a read-only
+  grant sees the list and cannot change it.
+- No grant at all still means no access (fail closed), and clearing every chip in the UI still means
+  "no restriction" rather than locking the user out.
+
+### `ownerWritable` — which columns an owner may set
+
+The self-service rule above is **row-level**: a member may rewrite every field of their own row. On a
+table carrying a decision — an approval, a verdict, a paid flag — that means deciding it about
+themselves. A table can name the columns an owner-scoped write may touch:
+
+```json
+"chore_log": {
+  "columns": [ { "name": "owner", "type": "owner" }, …,
+               { "name": "status", "type": "select", "list": "chore_status", "default": "logged" } ],
+  "ownerWritable": ["person", "chore", "done_on", "note"]
+}
+```
+
+The owner logs what they did; `status` is not theirs to write. An **editor with a table grant, or an
+admin, is unaffected** — the bound applies only to the owner branch, which is what makes "anyone may
+log, only a parent may approve" expressible without a second table.
+
+- **Opt-in**: a table that names no `ownerWritable` keeps the old behaviour (owner writes the whole row).
+- **On create**, a gated column must hold its declared `default` — so a row cannot be *born* approved.
+  That is why `default` matters here: it is the value the rules expect to see.
+- `id`, `owner`, `created_at`, `updated_at` and `rosterPublic` are always permitted (identity and
+  bookkeeping every write stamps).
+- **`defaultFrom` columns cannot be gated** — they resolve per user at create time, so no server-side
+  rule can predict the value. List them in `ownerWritable` (as `person` is above) or leave them out of
+  the table.
+- **Enforced in both rules layers**, from a `_meta/ownerWritable` mirror written by `saveSchema`
+  (`BackendHelpers.ownerWritableOf`), the same denormalise-for-schema-blind-rules pattern as
+  `ownerTables` and `pageAccess`. The UI matches it: a gated cell renders read-only for its owner, and a
+  board whose lane column is gated offers that owner no drag and no move-menu — otherwise the write
+  would simply be refused and the card would snap back unexplained.
 
 ## user profiles, user-backed lists & membership (Firebase)
 
@@ -1016,6 +1162,32 @@ referencing it become **assignable to registered users** — no manual list upke
   injected are withdrawn when a user opts out.
 - Opting in is per-user (**Profile → share name**), so on a new deployment this list contains only its
   stored values until users share. Seed it if the column must be usable immediately.
+
+### `listSources: { "<listName>": "userlink" }` — curated names, linked accounts
+
+The other way to tie a list to real people, and the **opposite trade-off** from `"users"` (a list is one
+or the other — the key holds a single string). The list keeps its own **curated** values as the display
+name; an admin links each value to an account email in the Lookup tab. Design notes:
+[USER-LINKED-LISTS.md](USER-LINKED-LISTS.md).
+
+| | `"users"` | `"userlink"` |
+|---|---|---|
+| Where the name comes from | each user's profile | the list, curated by an admin |
+| A user renames their profile | the list value changes | nothing moves |
+| Setup | users tick *share my name* | an admin links each value once |
+| Extra | — | avatars, resolved live from the profile |
+
+**`@me` works in both**, resolving per column: on a `userlink` list it becomes the curated value linked
+to the caller's account, otherwise their profile display name. So a household can keep calling someone
+"Ann" while the account behind her is `ann@example.test`, and `{ "person": "@me" }` still finds her rows.
+A member who is linked to nothing resolves to the fail-closed sentinel and matches no rows — the same
+stance as an empty profile name.
+
+- The resolution needs the caller's **own** link, which they may read (`getMyListValues` — a rules-provable
+  equality query on their own email; see the `_list_users` read rule). The full value→email map stays
+  admin-only, and the avatar projection still never carries an email.
+- **Renaming a list value** migrates the link with it, but the identity is keyed by the old string — see
+  the fragile-case row in USER-LINKED-LISTS.md.
 
 ### Membership requests (self-service, admin-approved)
 An unregistered (but signed-in) user submits a request from the "not registered" banner: a **required**

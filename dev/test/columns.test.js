@@ -64,3 +64,40 @@ describe('columns.js — image/url column scanners', () => {
     assert.equal(Columns.columnType(schema, 'gallery', 'photo'), 'image');
   });
 });
+
+describe('columns.js — tableDefaultCols (seed-on-create columns)', () => {
+  const schema = {
+    log: { columns: {
+      person: { type: 'select', list: 'members', defaultFrom: '@me' },
+      status: { type: 'select', list: 'st', default: 'logged' },
+      count:  { type: 'number', default: 0 },
+      flag:   { type: 'text', default: '' },
+      plain:  { type: 'text' },
+      both:   { type: 'text', defaultFrom: '@me', default: 'ignored' }
+    } },
+    bare: { columns: { a: 'text' } }
+  };
+
+  it('reports the token columns and the literal ones, distinguished by shape', () => {
+    const byName = Object.fromEntries(Columns.tableDefaultCols(schema, 'log').map(d => [d.name, d]));
+    assert.deepEqual(byName.person, { name: 'person', from: '@me' });
+    assert.deepEqual(byName.status, { name: 'status', value: 'logged' });
+  });
+
+  it('falsy literals are defaults too — 0 and "" are values, not "unset"', () => {
+    const byName = Object.fromEntries(Columns.tableDefaultCols(schema, 'log').map(d => [d.name, d]));
+    assert.deepEqual(byName.count, { name: 'count', value: 0 });
+    assert.deepEqual(byName.flag, { name: 'flag', value: '' });
+  });
+
+  it('a column with neither is absent; the token wins when both are set', () => {
+    const names = Columns.tableDefaultCols(schema, 'log').map(d => d.name);
+    assert.equal(names.includes('plain'), false);
+    assert.deepEqual(Columns.tableDefaultCols(schema, 'log').find(d => d.name === 'both'), { name: 'both', from: '@me' });
+  });
+
+  it('a table with no defaults, or no such table, yields []', () => {
+    assert.deepEqual(Columns.tableDefaultCols(schema, 'bare'), []);
+    assert.deepEqual(Columns.tableDefaultCols(schema, 'nope'), []);
+  });
+});

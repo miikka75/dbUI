@@ -10,7 +10,10 @@ schema, and a schema's labels carry no UI prose.
 |------|------------|
 | `bishopric-schema.json` | structure: tables, columns, views, nav, list *names* — plus the `ref_statuses` lookup rows the schema depends on |
 | `bishopric-lang-en.json` / `-fi.json` | labels for **this schema**: `tab.*`, `field.*`, `view.*`, `list.*`, `text.*` |
-| `app-lang-en.json` / `-fi.json` | the **app's own UI**: buttons, messages, settings, calendar. Schema-independent |
+| `chores-schema.json` | a household chore tracker — points, approvals, rewards, a weekly rota and a shopping list |
+| `chores-lang-en.json` | labels for the chores schema |
+| `chores-data.json` | optional **sample rows** for the chores schema — a household of four, a chore catalogue, a fortnight of logged chores, rewards and a shopping list |
+| `app-lang-en.json` / `-fi.json` | the **app's own UI**: buttons, messages, settings, calendar. Schema-independent — the browser-tab title lives in the *schema* bundle (`app.title`), since it names the deployment |
 
 ## Import order
 
@@ -24,8 +27,22 @@ Settings → **Import JSON**, one file at a time:
 Translations **merge** into the language, so steps 2 and 3 combine rather than overwrite, in either
 order. Add a second language any time by importing the other pair.
 
+`chores-data.json` is a fourth, optional step for the chores schema: import it last for a database
+that already has something in it. It is the same bundle shape Export produces, so it layers onto the
+schema without touching it.
+
 Then start entering data: Settings → User Access to register yourself, the Lists tab to fill in the
 list values the schema declares, and the table tabs for rows.
+
+> **Approving a request grants nothing on its own.** Settings → Users → Approve registers the person as
+> an `editor` with an empty table list — the grants are the admin's next, separate decision, made with
+> the chips. So an approved user still sees no data until you tick something (or set them to `admin`).
+> Approving someone who was *already* registered overwrites whatever they had.
+>
+> On the **local dev server** the identity is the `?user=` query parameter, defaulting to `local@dev`.
+> Once any user exists the registry is enforced, so register `local@dev` too (or always browse with
+> `?user=<a registered address>`) — otherwise a plain `localhost:3000` visit is an unknown account and
+> fails closed with "not registered for this database", showing no data.
 
 Re-importing later updates in place — rows are matched by `id`, so a schema-only re-import never
 disturbs data you've already entered.
@@ -93,3 +110,73 @@ one schema:
 
 The doc-view text is placeholder prose, and the people-lists are empty — no real congregation's roster
 or wording is in here.
+
+## What chores-schema.json exercises
+
+A household chore tracker, built to sit next to the commercial apps in the category (OurHome, OurFlat,
+Sweepy, Homey). It leans on a different part of dbUI than the bishopric schema:
+
+- an **`owner` column** on `chore_log` / `reward_claim`, so a family member logs their own rows with
+  **no table grant** (self-service; the Firestore rules are the enforcement)
+- **aggregate leaderboards** with `period` navigation — `chore_points_week` / `chore_points_month`
+  sum each chore's catalogue `points` through a `lookup` computed column
+- **two boards**: the parent's approve/reject pass over `chore_log` (whose cards carry the
+  auto-stamped `owner`, so *who logged it* is checked where it is approved), and the shopping list as
+  needed → in the trolley → bought, so nothing is hidden behind a filter and there is no second
+  "raw table" nav entry for the same data
+- a **pivot** heatmap (person × chore) and a **multi-source calendar** that also overlays the rota
+- a **rotation** view for whose-week-it-is, over a `reorderable` roster table
+- **`archiveAfter`** on `chore_log` and `home_shopping`: an approved/rejected chore files itself
+  after a week, a bought shopping item after three days, so neither list becomes a wall
+- **a growing item list**: `item` is a `select` with `allowNew`, so the weekly shop is picked from
+  what the household buys rather than retyped, and anything new joins the list as it is typed
+- **`default`** on each status column, so a new row starts in the first state of its flow instead of
+  outside every lane
+- **pages that compose views**: Home is instructions plus the reward price list, Scoreboard is one
+  page stacking week, month, balance and the heatmap — so the nav stays eight entries deep
+- **`includeArchive`** on every total, because `archiveAfter` would otherwise drain them as rows age out
+- **`calendar.addTo`**, so clicking a day on the two-source calendar logs a chore on that date
+- **`defaultFrom: "@me"`** on `person`, so a logged chore is attributed to whoever logged it
+- **`daysSince` + an ordered comparison** on the shopping list — `days_late` appears only once an item
+  is past its `needed_by` date
+- a **signed cross-source aggregate** (`chore_balance`): points earned minus points spent, as one
+  figure, by scoping one compute def per source table and negating the second
+
+`ref_chores` and `ref_rewards` ship empty in the schema — the chores a household cares about, and what a point is
+worth, are theirs to enter.
+
+`members` is a **`userlink`** list: the household keeps calling people what it calls them ("Ann", not
+whatever she typed into her profile), and an admin links each value to an account in the Lookup tab.
+That link is what makes *My chores* and the `person` auto-fill follow the signed-in user, so it is
+worth doing straight after registering everyone — until a value is linked, `@me` matches nothing for
+that person. Switch `listSources` to `"users"` instead if you would rather the list populate itself
+from shared profile names and skip the linking step.
+
+**Sample data.** `chores-data.json` fills the catalogue (11 chores priced 1–5 points across five
+rooms), four rewards, a three-slot rota, fourteen logged chores, three reward claims and a shopping
+list — enough for every view to show something real: the leaderboards rank, the balance nets earned
+against spent, the heatmap has a grid and the shopping list has one genuinely overdue item.
+
+Two things it deliberately does **not** contain:
+
+- **User accounts.** Roles and table grants are per-deployment security data, not portable content —
+  the importer has no branch for them by design. The bundle seeds the `members` *list* and stamps a
+  plausible `owner` email on each row so the data reads like a household; register the real people in
+  Settings → User Access.
+- **Fresh dates.** `done_on` / `claimed_on` are written relative to the day the bundle was generated,
+  and `chore_points_week` / `chore_points_month` filter on the *current* period — so an old bundle
+  ranks empty. Either bump the dates or use the ‹ › period arrows to step back to when they land.
+
+**Approval is a parent's job, and enforced as one.** `chore_log` names
+`ownerWritable: ["person", "chore", "done_on", "note"]`, so a member may log what they did and edit it
+afterwards, but `status` is not theirs — they cannot approve themselves, nor create a row that is
+already approved. An editor with a `chore_log` grant, or an admin, still approves normally.
+
+**Suggested access setup.** Parents `admin`. Everyone else `editor`, with *Can view* on `ref_chores`
+and `ref_rewards` (see what a chore is worth, can't rewrite it), *Tables* on `home_shopping`, and **no**
+grant on `chore_log` / `reward_claim` — those carry an `owner` column, so self-service lets each person
+log their own and nobody else's, while `rosterPublic` keeps the leaderboard shared.
+
+**Still not expressible**: recurring/scheduled chores and Tody-style aging ("this chore hasn't been
+done in three weeks") — `daysSince` ages a row's own date, and there is no max-per-group that feeds
+back into a lookup. Reminders and push notifications have no foundation in the app at all.
