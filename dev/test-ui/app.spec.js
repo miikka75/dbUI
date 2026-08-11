@@ -415,6 +415,44 @@ test.describe('image/url column types', () => {
     await expect.poll(styleOf, { timeout: 4000 }).not.toContain('background-image');
   });
 
+  test('a background set in an earlier session is FETCHED on a fresh load, on a doc view too', async ({ page }) => {
+    test.setTimeout(25000);
+    // The gap this closes: the upload path caches the data URI in-session, so checking the style right
+    // after uploading proves nothing about a later visit. And the fetch used to hang off loadTableData,
+    // which selectTab calls only for the data-ish kinds — a doc view goes to loadPage, the system screens
+    // to neither. So a background on any of those never appeared again after a reload. Seed the stored
+    // state directly (as an earlier session would have left it) and load the app cold.
+    const SCH = {
+      defaultLanguage: 'en',
+      tables: { docs: { columns: [{ name: 'title', type: 'text' }] } },
+      views: [{ table: 'docs' }, { name: 'welcome', markdown: '# Welcome' }],
+      nav: { items: [{ view: 'welcome' }, { table: 'docs' }] }
+    };
+    const png = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/wAALCAABAAEBAREA/8QAFAABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AJUAB//Z';
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    // Stored state from "last time": the bytes in _assets, the reference in the folder config.
+    await page.request.post('/api/putRow', { data: { tableId: '_assets', tab: 'active', data: { id: 'bg_welcome', src: png } } });
+    await page.request.post('/api/setFolderConfig', { data: { folderId: 'local', config: { mode: 'local', backgrounds: { welcome: { image: 'asset:bg_welcome', fit: 'cover', opacity: 0.5 } } } } });
+
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 8000 });
+
+    // `welcome` is the landing view, so this is the first paint — nothing has been cached in this session.
+    const styleOf = () => page.locator('.v-main .v-card').first().getAttribute('style');
+    await expect.poll(styleOf, { timeout: 6000 }).toContain('background-image');
+    expect(await styleOf()).toContain('data:image/jpeg;base64,');
+    expect(await page.evaluate(() => Object.keys(window.appInstance.assetCache))).toContain('bg_welcome');
+
+    // And still there after navigating away to a data view and back (loadPage path, not loadTableData).
+    await page.evaluate(() => window.appInstance.selectTab('docs'));
+    await page.waitForTimeout(300);
+    await page.evaluate(() => window.appInstance.selectTab('welcome'));
+    await expect.poll(styleOf, { timeout: 4000 }).toContain('data:image/jpeg;base64,');
+  });
+
   test('a stored javascript:/data:text/html cell value renders an EMPTY href, not the payload', async ({ page }) => {
     test.setTimeout(20000);
     await openGallery(page, { dropUploader: true });

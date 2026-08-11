@@ -1455,7 +1455,6 @@ function createVueApp() {
 
       loadTableData: function() {
         var self = this;
-        this._refreshBgAsset();   // before the per-kind early returns below, and needs no rows
         var view = VIEWS[this.currentTable];
         if (view) {
           // Calendar view: load each distinct source table (deduped); the grid/panel read from
@@ -2913,8 +2912,10 @@ function createVueApp() {
           want.forEach(function(id) { done(id, byId[id]); });
         }).catch(function() { want.forEach(function(id) { done(id, ''); }); });
       },
-      // The open view's background asset. Needs no rows, so loadTableData can call it up front — which
-      // matters because loadTableData returns early per view kind (calendar/rotation/pivot/rsvp/board).
+      // The open view's background asset. Driven by a watcher on currentTable (see below), NOT from
+      // loadTableData: selectTab only calls that for the data-ish kinds, sending a doc view to loadPage
+      // and the system screens to neither — so a background on any of those was never fetched, and one
+      // set in an earlier session simply never appeared.
       _refreshBgAsset: function() {
         var bg = this.backgroundForView(this.currentTable);
         if (bg && bg.image) this.ensureAssets([bg.image]);
@@ -3774,6 +3775,12 @@ function createVueApp() {
     },
 
     watch: {
+      // Screen changed -> fetch the bytes of its background asset, if it has one. Watching currentTable
+      // (rather than hooking a load path) is what makes this work on EVERY kind: selectTab routes doc
+      // views to loadPage and the system screens to nothing at all, so anything hung off loadTableData
+      // covers only some of the screens a background can be set on. `immediate` covers the first paint,
+      // where currentTable is already set by the time the watcher is registered.
+      currentTable: { immediate: true, handler: function() { this._refreshBgAsset(); } },
       // Rows on screen changed -> fetch any stored-asset bytes their image cells point at. A watcher
       // rather than a loadTableData call because every view kind fills currentData by its own path.
       currentData: function() { this._refreshRowAssets(); },
