@@ -70,6 +70,26 @@ if you want it deployed.
 | `request.auth.token.email` | `auth.jwt() ->> 'email'` |
 | `noUsers()` bootstrap = admin | `app_no_users()` (+ the `app_no_users` RPC for the client) |
 | Firebase Storage download URL | Public `uploads` bucket public URL |
+| `storage.rules` (registration + own-email folder + 10 MB + `image/*`) | `uploads_insert/update/delete` policies + bucket `file_size_limit` / `allowed_mime_types` |
+| `validProfile` / `validLink` / `validRequest` | `app_valid_shape(store, key, value)` |
+
+**Testing the RLS**
+
+`dev/test/supabase-rls.test.js` loads this file's policies into PostgreSQL-in-WASM
+(`@electric-sql/pglite`) and executes them — 73 assertions covering the same access matrix as the
+Firestore emulator suite. It is a plain unit test: `npm test` in `dev/` runs it, with no Docker,
+service container or JVM, so it gates CI in the existing `build` job.
+
+It shims `auth.jwt()` as a read of the `request.jwt.claims` GUC (Supabase's own definition) and drops
+to `set role authenticated` so RLS actually applies. Two limits worth knowing: the `storage.*` policies
+are stripped (stock Postgres has no `storage` schema — `dev/test/rules-parity.test.js` guards those
+statically instead), and because the harness's definer is a superuser it validates the *design* rather
+than proving your project's role attributes.
+
+Remember that RLS **filters** where Firestore **denies**: a forbidden `SELECT` returns zero rows and a
+forbidden `UPDATE`/`DELETE` reports zero affected rows — neither raises. Only a `WITH CHECK` violation
+errors. The suite's helpers encode that, and it is the single easiest thing to get wrong when adding a
+case.
 
 **Parity notes**
 
@@ -79,7 +99,16 @@ if you want it deployed.
   therefore pre-checks registration via `getMyAccess()` so an unregistered user gets the request-access
   banner rather than a spurious "first boot".
 - The `_lists` editor-update policy is slightly looser than Firestore's (it can't compare old vs. new
-  `tables` in one `WITH CHECK`), but still requires the editor to have *write* access to the list's tables.
+  `tables` in one `WITH CHECK`), but still requires the editor to have *write* access to the list's
+  tables — and both layers now authorize a list **create** from the `_meta/listTables` mirror, pinning
+  the stored ownership label to what the schema says rather than to what the writer claims.
+- Uploads are **not** open to any signed-in account. `authenticated` means any Google account on the
+  internet and the project config travels in shareable links, so every write policy calls
+  `app_is_registered()` and scopes the object to `<my-email>/…`. Re-run `supabase-schema.sql` after
+  upgrading: the bucket upsert is `on conflict do update`, so it applies the size/MIME limits to a
+  bucket an earlier version created without them.
+- If you enforce a CSP, `connect-src` must include `https://*.supabase.co` (and `wss://` for realtime).
+  `/csp.js` already does; a blocked fetch looks exactly like an empty database.
 - **Access modes** (`tables: { t: 'r' | 'rw' }`) mirror firestore.rules exactly. Reads go through
   `app_has_table_access`, which is unchanged: `jsonb ? key` matches an array element *or* an object key,
   so a legacy array grant and a mode map read identically and nothing needs migrating. Writes go through

@@ -122,6 +122,12 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 
 -- Writing a list needs WRITE access to an owning table, not merely sight of it.
+-- The no-mirror fallback carries the SAME array guard as app_has_table_write above (and as
+-- firestore.rules listWriteAllowed): a grant written before the r/rw split is a legacy ARRAY, since the
+-- map shape arrived with the very change that introduced rwTables. Without the guard a mirror-less MAP
+-- -- hand-written, or produced by anything that skipped BackendHelpers.userGrantDoc -- would have every
+-- one of its 'r' entries silently promoted to 'rw' for list writes, which is the one thing the split
+-- exists to prevent. Restricting the fallback to an array is lossless for real legacy data.
 create or replace function public.app_list_write_allowed(row_tables jsonb)
 returns boolean language sql stable security definer set search_path = public as $$
   select case
@@ -132,9 +138,60 @@ returns boolean language sql stable security definer set search_path = public as
       select 1 from jsonb_array_elements_text(coalesce(row_tables, '[]'::jsonb)) e
       where case
         when public.app_user_data() ? 'rwTables' then (public.app_user_data() -> 'rwTables') ? e
-        else (public.app_user_data() -> 'tables') ? e
+        when jsonb_typeof(public.app_user_data() -> 'tables') = 'array' then
+          (public.app_user_data() -> 'tables') ? e
+        else false
       end
     )
+  end
+$$;
+
+-- listCreateAllowed(): authorize CREATING a _lists row. On an insert there is no stored row, so the
+-- `tables` ownership label in the incoming value is an unverified CLAIM — trusting it would let an
+-- editor mint a list under an ownership label of their choosing and hijack the read audience of a list
+-- another table actually owns. Answer from _meta/listTables instead: the schema-derived ownership map
+-- (list-access.js listOwnershipMap, mirrored by saveSchema), and pin the claimed label to it.
+-- Missing mirror -> no editor creates (admins still create freely); it activates on the next schema save.
+-- Mirrors firestore.rules listCreateAllowed exactly.
+create or replace function public.app_list_create_allowed(listname text, claimed jsonb)
+returns boolean language sql stable security definer set search_path = public as $$
+  with m as (
+    select value -> listname as owners from public.kv where store = '_meta' and key = 'listTables'
+  )
+  select case
+    when (select owners from m) is null then false          -- no mirror, or a list the schema doesn't own
+    when claimed is distinct from (select owners from m) then false   -- the stored label must be the true one
+    when public.app_user_data() -> 'tables' = '"all"'::jsonb then true
+    else exists (
+      select 1 from jsonb_array_elements_text((select owners from m)) e
+      where case
+        when public.app_user_data() ? 'rwTables' then (public.app_user_data() -> 'rwTables') ? e
+        when jsonb_typeof(public.app_user_data() -> 'tables') = 'array' then
+          (public.app_user_data() -> 'tables') ? e
+        else false
+      end
+    )
+  end
+$$;
+
+-- The _lists branch of app_can_create serves BOTH the INSERT policy and the UPDATE policy's WITH CHECK,
+-- and those are different questions:
+--   INSERT — no stored row, so the ownership label is an unverified claim: authorize from the mirror.
+--   UPDATE — there IS a stored row, so the question is firestore.rules': does the editor have write
+--            access through the label, and is the label UNCHANGED (re-stamping ownership decides who
+--            can see the list, so it stays an admin action, exactly as the rules pin
+--            request.resource.data.tables == resource.data.tables).
+-- Routing updates through the create rule instead denies every edit of a list that predates the mirror
+-- — which is every existing deployment until the next saveSchema. (Found by dev/test/supabase-rls.test.js
+-- on its first run; the mirror was introduced without this split.)
+create or replace function public.app_list_editor_ok(rowkey text, claimed jsonb)
+returns boolean language sql stable security definer set search_path = public as $$
+  select case
+    when exists (select 1 from public.kv where store = '_lists' and key = rowkey) then
+      claimed is not distinct from
+        (select value -> 'tables' from public.kv where store = '_lists' and key = rowkey)
+      and public.app_list_write_allowed(claimed)
+    else public.app_list_create_allowed(rowkey, claimed)
   end
 $$;
 
@@ -204,6 +261,42 @@ returns boolean language sql stable security definer set search_path = public as
   end
 $$;
 
+-- ---------- Document-shape validation ----------------------------------------------------------------
+-- Mirrors firestore.rules' validProfile / validLink / validRequest. These stores are SELF-WRITABLE (a
+-- member writes their own profile and their own access request), so "who" is only half the gate: without
+-- a shape check an authenticated caller can park arbitrary extra keys and unbounded values in a row that
+-- an admin's approval UI then renders. Postgres makes this MORE important than Firestore, not less --
+-- jsonb tolerates ~1GB where Firestore rejects the document at 1MB, so the picture cap is the only thing
+-- bounding an avatar upload.
+--
+-- Written as one function keyed on `store` so app_can_create (which is also the UPDATE with-check) has a
+-- single call site, and so a store with no shape rules falls through to `true` explicitly rather than by
+-- omission. Key-set checks use `not exists (... where k <> all(...))`: bool_and over an empty key set is
+-- NULL, not true, which would deny an empty document instead of allowing it.
+create or replace function public.app_valid_shape(store text, key text, val jsonb)
+returns boolean language sql immutable as $$
+  select case
+    when store = '_profiles' then
+      not exists (select 1 from jsonb_object_keys(val) k where k <> all (array['name','shared','picture']))
+      and jsonb_typeof(val -> 'name') = 'string'
+      and length(val ->> 'name') <= 100
+      and (not (val ? 'shared')  or jsonb_typeof(val -> 'shared') = 'boolean')
+      and (not (val ? 'picture') or (jsonb_typeof(val -> 'picture') = 'string' and length(val ->> 'picture') <= 350000))
+    when store = '_list_users' then
+      not exists (select 1 from jsonb_object_keys(val) k where k <> all (array['list','value','email','shared']))
+      and jsonb_typeof(val -> 'list')  = 'string' and length(val ->> 'list')  <= 200
+      and jsonb_typeof(val -> 'value') = 'string' and length(val ->> 'value') <= 500
+      and jsonb_typeof(val -> 'email') = 'string' and length(val ->> 'email') <= 320
+      and jsonb_typeof(val -> 'shared') = 'boolean'
+    when store = '_access_requests' then
+      not exists (select 1 from jsonb_object_keys(val) k where k <> all (array['email','name','note','ts']))
+      and (not (val ? 'name') or (jsonb_typeof(val -> 'name') = 'string' and length(val ->> 'name') <= 100))
+      and (not (val ? 'note') or (jsonb_typeof(val -> 'note') = 'string' and length(val ->> 'note') <= 500))
+      and (not (val ? 'ts')   or jsonb_typeof(val -> 'ts') = 'number')
+    else true   -- _meta / _users / _lists / _pages__active / data tables: gated by role, not by shape
+  end
+$$;
+
 -- ---------- Row predicates (keep the policies below readable) ----------------------------------------
 -- READ gate. `val` is the existing row's value.
 create or replace function public.app_can_read(store text, key text, val jsonb)
@@ -257,15 +350,24 @@ returns boolean language sql stable security definer set search_path = public as
     when public.app_email() is null then false
     when store = '_meta' then public.app_no_users() or public.app_role() = 'admin'
     when store = '_users' then public.app_no_users() or public.app_role() = 'admin'
+    -- Shape gates mirror firestore.rules exactly, including WHO they bind: validProfile/validLink apply
+    -- to the admin write too, validRequest only to the SELF-create (an admin editing a request is
+    -- trusted there and here).
     when store = '_access_requests' then
-      (key = public.app_email() and (val ->> 'email') = public.app_email())
+      (key = public.app_email() and (val ->> 'email') = public.app_email()
+        and public.app_valid_shape(store, key, val))
       or (not public.app_no_users() and public.app_role() = 'admin')
     when store = '_profiles' then
-      key = public.app_email() or (not public.app_no_users() and public.app_role() = 'admin')
-    when store = '_list_users' then public.app_no_users() or public.app_role() = 'admin'
+      (key = public.app_email() or (not public.app_no_users() and public.app_role() = 'admin'))
+      and public.app_valid_shape(store, key, val)
+    when store = '_list_users' then
+      (public.app_no_users() or public.app_role() = 'admin')
+      and public.app_valid_shape(store, key, val)
+    -- INSERT is authorized from the schema mirror; UPDATE (which re-checks here as its WITH CHECK) from
+    -- the stored label plus the no-re-stamp pin. app_list_editor_ok tells the two apart.
     when store = '_lists' then
       public.app_no_users() or public.app_role() = 'admin'
-      or (public.app_role() = 'editor' and public.app_list_write_allowed(val -> 'tables'))
+      or (public.app_role() = 'editor' and public.app_list_editor_ok(key, val -> 'tables'))
     when store = '_pages__active' then
       public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor'
     when store like '\_%' then false
@@ -350,21 +452,71 @@ create policy kv_delete on public.kv
   using (public.app_can_delete(store, key, value));
 
 -- ---------- Storage bucket for image uploads (optional; needed only if you use image columns) --------
--- Creates a PUBLIC bucket `uploads`; any signed-in user may upload, everyone may read (parity with the
--- Firebase download-URL behavior). Adjust if you need stricter rules.
-insert into storage.buckets (id, name, public)
-values ('uploads', 'uploads', true)
-on conflict (id) do nothing;
+-- Mirrors storage.rules (the Firebase Storage gate) condition for condition. Uploads land at
+-- `<lowercased-user-email>/<ts>_<name>` (backend-supabase uploadFile), so the first path segment IS the
+-- owner, exactly as it is on Firebase.
+--
+-- READ is public, and deliberately so: the row stores getPublicUrl(), and Firebase's stored download URL
+-- carries an access token that renders regardless of its read rule -- so "anyone holding the URL can
+-- fetch the image" is the behaviour on BOTH backends. Everything else is gated.
+--
+-- WRITE requires REGISTRATION, not merely a signed-in session. With the Google provider enabled,
+-- "authenticated" means any Google account on the internet, and the project config is distributed by
+-- shareable links by design -- so a registration-less bucket is free image hosting for strangers (this
+-- is finding S1 in CODE_REVIEW.md, and it applies verbatim here). app_is_registered() is SECURITY
+-- DEFINER over public.kv, so it answers the same question the kv policies do.
+--
+-- Size and MIME limits live on the BUCKET rather than in a policy: storage.objects.metadata is populated
+-- by the storage service as part of the upload, so a WITH CHECK on it is not a dependable gate, whereas
+-- file_size_limit / allowed_mime_types are enforced by the service before the row is ever written.
+-- `do update` (not `do nothing`) so re-running this script applies the limits to a bucket created by an
+-- earlier version -- which is exactly the deployment that has none.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('uploads', 'uploads', true, 10485760,
+        array['image/png','image/jpeg','image/gif','image/webp','image/avif','image/bmp'])
+on conflict (id) do update
+  set public             = excluded.public,
+      file_size_limit    = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
 
 drop policy if exists uploads_read on storage.objects;
 drop policy if exists uploads_write on storage.objects;
+drop policy if exists uploads_insert on storage.objects;
+drop policy if exists uploads_update on storage.objects;
+drop policy if exists uploads_delete on storage.objects;
 
 create policy uploads_read on storage.objects
   for select using (bucket_id = 'uploads');
 
-create policy uploads_write on storage.objects
+-- A registered member may write ONLY inside their own email folder. Without the foldername check any
+-- authenticated caller could write (and, with update, replace) another member's object.
+create policy uploads_insert on storage.objects
   for insert to authenticated
-  with check (bucket_id = 'uploads');
+  with check (
+    bucket_id = 'uploads'
+    and public.app_is_registered()
+    and (storage.foldername(name))[1] = public.app_email()
+  );
+
+create policy uploads_update on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'uploads'
+    and public.app_is_registered()
+    and (storage.foldername(name))[1] = public.app_email()
+  )
+  with check (
+    bucket_id = 'uploads'
+    and (storage.foldername(name))[1] = public.app_email()
+  );
+
+create policy uploads_delete on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'uploads'
+    and public.app_is_registered()
+    and (storage.foldername(name))[1] = public.app_email()
+  );
 
 -- =====================================================================================================
 -- Bootstrap note: while no members exist (no _meta/users doc and no _users rows), ANY signed-in Google

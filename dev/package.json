@@ -16,6 +16,7 @@
     "test:all": "npm test && npm run test:rules && npm run test:storage-rules && npm run test:e2e-firebase && npm run test:ui"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.4",
     "@firebase/rules-unit-testing": "^5.0.1",
     "@playwright/test": "1.56.0",
     "better-sqlite3": "^12.11.1",

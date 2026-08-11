@@ -185,18 +185,34 @@ const server = http.createServer(async (req, res) => {
     // create/update/delete their own owned rows. Keyed on the writable set, not the readable one, so a
     // read-only grant on an owner table gives the useful combination: see every row, write only my own.
     // Returns that table's owner column name, or null if the caller may write it anyway / it has none.
-    function selfServiceOwnerCol(tableId) {
+    // A table's `owner` column name, whoever is asking (both stored column shapes). Split out of
+    // selfServiceOwnerCol so the boot path can ask the plain question -- "does this table have an owner
+    // column" -- without the writable-set answer folded in.
+    function ownerColOf(tableId) {
       const base = tableId ? tableId.split('__')[0] : '';
-      const allowed = getWritableTables();
-      if (!allowed || allowed.indexOf(base) >= 0) return null;      // unrestricted or writable -> normal path
       const cols = (((backend.getSchema('local') || {}).tables || {})[base] || {}).columns;
       if (!cols) return null;
       if (Array.isArray(cols)) { const o = cols.find(c => c && c.type === 'owner'); return o ? o.name : null; }
       for (const n in cols) { const d = cols[n]; if (d && typeof d === 'object' && d.type === 'owner') return n; }
       return null;
     }
+    function selfServiceOwnerCol(tableId) {
+      const base = tableId ? tableId.split('__')[0] : '';
+      const allowed = getWritableTables();
+      if (!allowed || allowed.indexOf(base) >= 0) return null;      // unrestricted or writable -> normal path
+      return ownerColOf(tableId);
+    }
     const _mine = (v) => String(v == null ? '' : v).toLowerCase() === String(userEmail || '').toLowerCase();
     const _rowById = (tableId, tab, id) => ((backend.getTableData(tableId, tab) || {}).rows || []).find(r => r.id === id);
+    // The self-service read slice: my own owned rows plus the ones flagged public. Mirrors the two
+    // rules-provable Firestore queries (_scopedRead) and the Supabase read predicate, and is what the
+    // getTableData route already returns for an ungranted owner table -- boot has to say the same thing.
+    function scopeToOwnRows(tableId, data) {
+      const oc = ownerColOf(tableId);
+      if (!oc) return { headers: (data && data.headers) || [], rows: [] };   // no owner column -> nothing readable
+      const rows = ((data && data.rows) || []).filter(r => _mine(r[oc]) || r.rosterPublic === true);
+      return Object.assign({}, data, { rows });
+    }
 
     try {
     switch (route) {
@@ -218,11 +234,24 @@ const server = http.createServer(async (req, res) => {
         const allowedB = getAllowedTables(); // null => unrestricted (admin / no users)
         const listsB = filterLists(backend.getLists('local'), tablesB, allowedB);
         const dataB = {};
-        Object.keys(tableMapB).forEach(name => {
-          if (allowedB && allowedB.indexOf(name) < 0) return; // skip tables the user can't access
-          try { dataB[name] = backend.getTableData(tableMapB[name], 'active'); } catch (e) {}
+        // Granted tables PLUS the owner-column (self-service) ones — the shared predicate, so this boot
+        // set matches Firebase's and Supabase's. A self-service table the caller has no READ grant on
+        // comes back as their own rows + the public roster, exactly as the getTableData route scopes it;
+        // without that slice, boot would hand a grantless member the whole table.
+        const namesB = BackendHelpers.bootTableNames(schemaB, allowedB);
+        const scopedB = (name) => !!(allowedB && allowedB.indexOf(name) < 0);
+        namesB.forEach(name => {
+          try {
+            const d = backend.getTableData(tableMapB[name], 'active');
+            dataB[name] = scopedB(name) ? scopeToOwnRows(name, d) : d;
+          } catch (e) {}
           const def = tablesB[name];
-          if (def && def.archivable) { try { dataB[name + '__archive'] = backend.getTableData(tableMapB[name], 'archive'); } catch (e) {} }
+          if (def && def.archivable) {
+            try {
+              const a = backend.getTableData(tableMapB[name], 'archive');
+              dataB[name + '__archive'] = scopedB(name) ? scopeToOwnRows(name, a) : a;
+            } catch (e) {}
+          }
         });
         return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), tableMap: tableMapB, languages: languagesB, lists: listsB, data: dataB });
       }
