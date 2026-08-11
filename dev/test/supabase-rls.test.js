@@ -419,6 +419,53 @@ describe('supabase RLS — _profiles shape validation', () => {
 });
 
 // ==================================================================================================
+// Stored image assets: view backgrounds / image-cell bytes kept as data URIs in the database, so a
+// deployment with no storage bucket (Firebase Storage needs the Blaze plan) can still hold an upload.
+// Mirrors firestore.rules' _assets__active block. The cap matters MORE here than on Firestore: jsonb
+// takes ~1GB where a Firestore document is refused at 1MB, so app_valid_shape is the only bound.
+describe('supabase RLS — _assets shape validation and visibility', () => {
+  const DATA_URI = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+  const asset = (over) => Object.assign({ id: 'bg_home', src: DATA_URI }, over);
+
+  it('an editor CAN write an asset', async () => {
+    await as('editor@x.com');
+    assert.equal(await tryInsert('_assets__active', 'bg_home', asset()), 'ok');
+  });
+  it('an admin CAN write an asset', async () => {
+    await as('admin@x.com');
+    assert.equal(await tryInsert('_assets__active', 'bg_admin', asset({ id: 'bg_admin' })), 'ok');
+  });
+  it('a viewer CANNOT write an asset', async () => {
+    await as('viewer@x.com');
+    assert.equal(await tryInsert('_assets__active', 'bg_evil', asset({ id: 'bg_evil' })), 'denied');
+  });
+  it('every registered user CAN read an asset (decoration; the referencing row keeps its own gate)', async () => {
+    await as('viewer@x.com');
+    assert.equal(await canRead('_assets__active', 'bg_home'), true);
+  });
+  it('an oversized src is rejected (jsonb would otherwise take a gigabyte)', async () => {
+    await as('editor@x.com');
+    assert.equal(await tryInsert('_assets__active', 'bg_huge', asset({ id: 'bg_huge', src: 'x'.repeat(900001) })), 'denied');
+  });
+  it('an src just under the cap is accepted', async () => {
+    await as('editor@x.com');
+    assert.equal(await tryInsert('_assets__active', 'bg_big', asset({ id: 'bg_big', src: 'x'.repeat(900000) })), 'ok');
+  });
+  it('extra keys are rejected (shape is exactly { id, src })', async () => {
+    await as('editor@x.com');
+    assert.equal(await tryInsert('_assets__active', 'bg_extra', asset({ id: 'bg_extra', markdown: 'x' })), 'denied');
+  });
+  it('a non-string src is rejected', async () => {
+    await as('editor@x.com');
+    assert.equal(await tryInsert('_assets__active', 'bg_num', asset({ id: 'bg_num', src: 42 })), 'denied');
+  });
+  it('an over-cap UPDATE is rejected too (the WITH CHECK re-runs the shape test)', async () => {
+    await as('editor@x.com');
+    assert.equal(await tryUpdate('_assets__active', 'bg_home', asset({ src: 'x'.repeat(900001) })), 'denied');
+  });
+});
+
+// ==================================================================================================
 describe('supabase RLS — _access_requests shape validation', () => {
   const req = (over) => Object.assign({ email: 'stranger@x.com', name: 'Sam', note: 'hi', ts: 1 }, over);
 

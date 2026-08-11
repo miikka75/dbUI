@@ -162,6 +162,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `access` | string[] | **Doc-views only.** Restrict the page to users granted at least one of these tables (see "Restricting a page to some users" below). Omit = visible to all registered users |
 | `rotation` | object | Makes this a **rotationView** (third view kind) — a generated rotating-roster table (see below) |
 | `obscureNames` | boolean \| string[] | Display-only privacy: abbreviate person names to "First L." in this view. `true` = all list/multiselect columns (or all area columns of a rotationView); an array = exactly those columns. Stored data is untouched |
+| `background` | object | Background image for this view's card (see **background images** below). Works on **every** view kind |
 
 A view's `columns` may contain, besides plain column names:
 - **Conditional column** `{ "name": "<col>", "when": { <cond> } }` — show the column only on rows
@@ -181,6 +182,59 @@ A view's `columns` may contain, besides plain column names:
 - **Per-column hideEmpty** `{ "name": "<col>", "hideEmpty": true|false }` — override the view-level
   `hideEmpty` for a specific column. `false` forces the column to always show (even when empty);
   `true` hides it when empty even if the view shows empties. Works in both table and card layout.
+
+### background images
+
+Any view kind can carry a background image on its card:
+
+```json
+{ "name": "frontPage", "markdown": "# Welcome",
+  "background": { "image": "asset:bg_frontPage", "fit": "cover", "position": "top", "opacity": 0.45 } }
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `image` | string | **Required.** Either an `http(s)` URL / raster `data:` URI, or `asset:<id>` — a reference to a row in the `_assets` store (see **where the bytes live**) |
+| `fit` | string | `cover` (default, fill and crop), `contain` (fit whole, may letterbox), `tile` (natural size, repeated), or `width` (scale to `width`% of the card, aspect ratio preserved) |
+| `width` | number | 1–100, only with `fit: "width"`: the percentage of the card's width to scale to. Height follows the image's own ratio |
+| `position` | string | `center` (default), `top`, `bottom`, `left`, `right`, or a corner pair (`"top left"`). With `cover` this decides **which part survives the crop** |
+| `opacity` | number | 0–1, default `0.5`. `1` = untouched image, `0` = invisible |
+| `fixed` | boolean | Pin the image to the viewport (parallax). **Unreliable on iOS Safari** — off by default |
+
+**`opacity` is emulated, deliberately.** CSS has no `background-image-opacity`, and element `opacity`
+would fade the view's content along with the image. So a translucent scrim is stacked over the image
+inside the same `background-image` list, coloured with the theme's own `surface` token — which means
+the fade follows the light/dark toggle and body text keeps its contrast for free.
+
+Backgrounds never print: the print path builds its own HTML rather than cloning the view.
+
+#### Where the bytes live
+
+Three tiers, and only the middle one can be unavailable:
+
+1. **An external URL** — put it straight in `image`. Always works, costs nothing, but leaks each
+   viewer's IP/referer to that host and breaks if the host does.
+2. **A storage bucket** (`backend.uploadFile` → Firebase/Supabase Storage, the dev file store).
+   Best for many or large images: CDN-served with real HTTP caching. Firebase Storage requires the
+   **Blaze** plan, so this tier is simply absent on a free project.
+3. **The database** — `asset:<id>`, resolving to an `_assets` row holding a raster `data:` URI.
+   Needs no bucket at all and syncs through whatever transport the deployment already uses. Capped at
+   **900000** characters (below Firestore's 1 MiB document limit) and enforced in every access layer;
+   uploads are downscaled client-side until they fit.
+
+An upload from **Settings → Backgrounds** prefers tier 2 and falls back to tier 3 — including when
+Storage is present but *unbilled*, where the upload fails at runtime rather than being absent. The
+same applies to `image` columns, so an image column works on every backend.
+
+Asset ids are deterministic for backgrounds (`bg_<viewName>`), so replacing one overwrites in place
+rather than orphaning the old bytes.
+
+#### Schema default vs. runtime override
+
+`views[x].background` is the **shipped default**. The Settings editor writes to the synced folder
+config instead (`appConfig.backgrounds[<view>]`, same shape), which is merged over the schema value —
+so swapping a picture never rewrites the schema document. Asset bytes and the config both travel in
+the export bundle, so a background survives an export/import round-trip.
 
 ### filters
 A `filter` (on a view, an inline/named-view embed, or a conditional column) matches rows:

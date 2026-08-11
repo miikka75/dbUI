@@ -55,6 +55,12 @@ backend = {
       .then(function(d) { return d ? { markdown: d.markdown || '' } : null; })
       .catch(function() { return null; });
   },
+  // Single stored asset by id (view background / image-cell bytes). Mirrors backend-firebase getAsset.
+  getAsset: function(id) {
+    return StorageSupabase.get('_assets__active', id)
+      .then(function(d) { return d ? { src: d.src || '' } : null; })
+      .catch(function() { return null; });
+  },
   validateFolder: function(id) { return Promise.resolve({ valid: true, name: 'Supabase' }); },
   getFolderConfig: function(folderId) {
     return StorageSupabase.getMeta('config').then(function(d) { return d || null; });

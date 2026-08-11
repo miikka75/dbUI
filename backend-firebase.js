@@ -46,6 +46,15 @@ backend = {
       .then(function(d) { return d ? { markdown: d.markdown || '' } : null; })
       .catch(function() { return null; });
   },
+  // Single stored asset (a view background / an image cell's bytes) by id. Same single-doc reasoning as
+  // getPage, plus one of its own: _assets is a system store no table grant ever names, so the collection
+  // read in getTableData goes through _scopedRead and comes back EMPTY for a non-admin. Ask for the one
+  // document instead. Returns { src } or null (missing / denied).
+  getAsset: function(id) {
+    return StorageFirestore.get('_assets__active', id)
+      .then(function(d) { return d ? { src: d.src || '' } : null; })
+      .catch(function() { return null; });
+  },
   validateFolder: function(id) {
     return Promise.resolve({ valid: true, name: 'Firebase' });
   },

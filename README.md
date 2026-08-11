@@ -338,13 +338,17 @@ markdown documents and their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens
 
 ```json
 {
-  "icon":  "data: URI | path | URL (favicon + PWA icon)",
+  "icons": { "favicon": "https://…", "appleTouch": "https://…", "png512": "https://…" },
   "theme": { "light": { "primary": "#..." }, "dark": { "primary": "#..." } },
   "tables": { "...": { "columns": [ ... ], "archivable": true } },
   "views":  [ { "name": "...", "sources": [ ... ], "columns": [ ... ] } ],
   "nav":    { "layout": "drawer", "items": [ ... ], "bottomNav": [ ... ] }
 }
 ```
+
+> `icons` values must be **absolute `http(s)` URLs**, not `data:` URIs — see the per-database icon
+> section above for why the PWA install icon in particular cannot be a renderer-minted URL. (A view's
+> `background` image is a different mechanism and *does* accept in-database bytes; see SCHEMA.md.)
 
 > `nav` is **required**; `views` are flat (hierarchy lives in `nav`). Each view is one **kind**, chosen
 > by which field it carries: a **data view** (`sources`/`columns`), a **document** (`markdown`), a

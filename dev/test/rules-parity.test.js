@@ -55,6 +55,10 @@ describe('rules parity — document-shape bounds', () => {
   const CAPS = [
     ['_profiles name', 100],
     ['_profiles picture', 350000],
+    // Stored image assets (view backgrounds / image-cell bytes as data URIs — the no-bucket tier).
+    // Below Firestore's 1048576-byte document limit; Postgres would take far more, so on Supabase this
+    // cap is the ONLY bound on an upload.
+    ['_assets src', 900000],
     ['_list_users list', 200],
     ['_list_users value', 500],
     ['_list_users email', 320],
@@ -80,8 +84,8 @@ describe('rules parity — document-shape bounds', () => {
     });
   }
 
-  it('Supabase validates the same three self-writable stores Firestore does', () => {
-    for (const store of ['_profiles', '_list_users', '_access_requests']) {
+  it('Supabase validates the same shape-checked stores Firestore does', () => {
+    for (const store of ['_profiles', '_list_users', '_access_requests', '_assets__active']) {
       assert.ok(
         new RegExp(`when store = '${store}' then`).test(SQL.slice(SQL.indexOf('app_valid_shape'))),
         `app_valid_shape has no branch for ${store}`

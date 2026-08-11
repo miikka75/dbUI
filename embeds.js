@@ -39,6 +39,31 @@
     return safeUrl(s);
   }
 
+  // --- Asset references (the bucket-free image tier) ------------------------------------------------
+  // An image address stored in the schema / folder config / a row is ONE string: either an http(s) URL,
+  // or `asset:<id>` pointing at an _assets__active row whose `src` holds a raster data: URI. The second
+  // form is what lets a deployment with no storage bucket (Firebase Spark, where uploadFile's put()
+  // fails at runtime) still hold an uploaded image -- the same trade the profile avatar already makes.
+  // The id charset is deliberately narrow: it becomes a document id / jsonb key on every backend.
+  function isAssetRef(v) { return /^asset:[\w.-]+$/.test(String(v || '')); }
+  function assetId(v) { return isAssetRef(v) ? String(v).slice(6) : ''; }
+
+  // A CSS `url("…")` token for a background-image, or '' when the address isn't a safe image source.
+  // safeImgSrc returns the ORIGINAL string (not the URL-normalized one), so a value that satisfies
+  // new URL() can still carry `"` or `)` -- which would close the url() token and append further
+  // declarations. Percent-escape those (plus \ and newlines) so the token can only ever be one URL.
+  // Callers must still bind through a Vue style OBJECT (el.style.setProperty parses a single
+  // declaration) rather than concatenating a style="…" attribute.
+  // NB: encodeURIComponent is NOT usable as the escaper here -- it leaves the unreserved marks
+  // !'()*-._~ alone, so `)` would pass straight through and close the url() token. Percent-encode the
+  // dangerous characters explicitly instead.
+  function safeCssUrl(u) {
+    var s = safeImgSrc(u);
+    if (!s) return '';
+    var pct = function(c) { return '%' + c.charCodeAt(0).toString(16).toUpperCase(); };
+    return 'url("' + s.replace(/["'()\\\r\n]/g, pct) + '")';
+  }
+
   // Tiny markdown -> HTML for pages (headings, bold/italic, lists, links, paragraphs). Embed tokens are
   // split out before this runs. (Moved from schema-loader.js; location is browser-only, so guard.)
   function mdToHtml(md) {
@@ -184,8 +209,9 @@
   var M = {
     mdToHtml: mdToHtml, buildEmbedBlock: buildEmbedBlock, mdBlocks: mdBlocks, docHasData: docHasData,
     resolveEmbed: resolveEmbed, embedCols: embedCols, embedRows: embedRows,
-    embedRowsForItem: embedRowsForItem, embedWhenOk: embedWhenOk, embedVisible: embedVisible, safeUrl: safeUrl, safeImgSrc: safeImgSrc
+    embedRowsForItem: embedRowsForItem, embedWhenOk: embedWhenOk, embedVisible: embedVisible, safeUrl: safeUrl, safeImgSrc: safeImgSrc,
+    isAssetRef: isAssetRef, assetId: assetId, safeCssUrl: safeCssUrl
   };
   if (isNode) module.exports = M;
-  else { root.Embeds = M; root.mdToHtml = mdToHtml; root.safeUrl = safeUrl; root.safeImgSrc = safeImgSrc; } // bare globals: mdToHtml (pageBlocks-era + tests), safeUrl/safeImgSrc (ROOT_PROXY)
+  else { root.Embeds = M; root.mdToHtml = mdToHtml; root.safeUrl = safeUrl; root.safeImgSrc = safeImgSrc; root.isAssetRef = isAssetRef; root.safeCssUrl = safeCssUrl; } // bare globals: mdToHtml (pageBlocks-era + tests), safeUrl/safeImgSrc (ROOT_PROXY), isAssetRef/safeCssUrl (validateSchema + background style)
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));

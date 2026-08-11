@@ -146,6 +146,11 @@ const server = http.createServer(async (req, res) => {
       return Object.assign({}, data, { rows });
     }
     function canWritePages() { const u = userRecord(); return !backend._users || !!(u && (u.role === 'admin' || u.role === 'editor')); }
+    // Stored image assets (_assets) mirror firestore.rules' _assets__active block: any REGISTERED user
+    // reads (decoration; the referencing row stays gated by its own access), admins/editors write. Needs
+    // the same carve-out _pages does — hasTableAccess('_assets'), which no grant ever satisfies, would
+    // deny every read. Read/write reuse the page predicates: identical role tests on both sides.
+    function assetsTable(tableId) { return (tableId ? tableId.split('__')[0] : '') === '_assets'; }
     function checkTableAccess(tableId) {
       const allowed = getAllowedTables();
       if (!allowed) return true;
@@ -264,6 +269,10 @@ const server = http.createServer(async (req, res) => {
           if (canReadPages()) return json(res, filterPages(backend.getTableData(body.tableId, body.tab) || { headers: [], rows: [] }));
           return json(res, { error: 'Access denied' }, 403);
         }
+        if (assetsTable(body.tableId)) {
+          if (canReadPages()) return json(res, backend.getTableData(body.tableId, body.tab) || { headers: [], rows: [] });
+          return json(res, { error: 'Access denied' }, 403);
+        }
         if (checkTableAccess(body.tableId)) return json(res, backend.getTableData(body.tableId, body.tab));
         const oc = selfServiceOwnerCol(body.tableId);                 // self-service: own rows + public roster only
         if (!oc) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
@@ -273,6 +282,15 @@ const server = http.createServer(async (req, res) => {
       case 'putRow': {
         if (pagesTable(body.tableId)) {
           if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
+          backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
+        }
+        if (assetsTable(body.tableId)) {
+          if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
+          // Same 900000-char cap the two production rule layers enforce, so a payload that would be
+          // rejected in production doesn't quietly succeed in dev (where the cap is the only bound).
+          if (typeof (body.data && body.data.src) !== 'string' || body.data.src.length > 900000) {
+            return json(res, { error: 'Asset too large' }, 400);
+          }
           backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
         }
         if (checkTableWrite(body.tableId)) { backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true }); }

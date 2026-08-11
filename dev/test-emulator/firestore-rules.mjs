@@ -96,6 +96,30 @@ await ok('viewer CANNOT write a _pages__active doc',
 await ok('editor CAN write a _pages__active doc',
   assertSucceeds(setDoc(doc(editor, '_pages__active/home'), { id: 'home', markdown: '# Edited' })));
 
+// --- _assets (stored image bytes: view backgrounds / image cells as data URIs — the no-bucket tier).
+// Readable by every registered user (decoration; the referencing row keeps its own gate), writable by
+// editors/admins, and SHAPE-PINNED so the store can't become a general blob dump. Cap is 900000, matching
+// supabase-schema.sql's app_valid_shape (rules-parity.test.js compares the two cap multisets). ---
+const dataUri = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+await ok('editor CAN write an _assets__active doc',
+  assertSucceeds(setDoc(doc(editor, '_assets__active/bg_home'), { id: 'bg_home', src: dataUri })));
+await ok('admin CAN write an _assets__active doc',
+  assertSucceeds(setDoc(doc(admin, '_assets__active/bg_admin'), { id: 'bg_admin', src: dataUri })));
+await ok('viewer (no grants) CAN read an _assets__active doc',
+  assertSucceeds(getDoc(doc(viewer, '_assets__active/bg_home'))));
+await ok('viewer CANNOT write an _assets__active doc',
+  assertFails(setDoc(doc(viewer, '_assets__active/bg_home'), { id: 'bg_home', src: dataUri })));
+await ok('an over-cap asset is REJECTED (the only bound on an upload here)',
+  assertFails(setDoc(doc(editor, '_assets__active/bg_huge'), { id: 'bg_huge', src: 'd'.repeat(900001) })));
+await ok('an asset just under the cap is accepted',
+  assertSucceeds(setDoc(doc(editor, '_assets__active/bg_big'), { id: 'bg_big', src: 'd'.repeat(900000) })));
+await ok('an extra key is REJECTED (shape is exactly { id, src })',
+  assertFails(setDoc(doc(editor, '_assets__active/bg_extra'), { id: 'bg_extra', src: dataUri, script: '<script>' })));
+await ok('a non-string src is REJECTED',
+  assertFails(setDoc(doc(editor, '_assets__active/bg_num'), { id: 'bg_num', src: 42 })));
+await ok('editor CAN delete an asset (delete carries no resource, so the shape test must not gate it)',
+  assertSucceeds(deleteDoc(doc(editor, '_assets__active/bg_big'))));
+
 // --- Per-page access: a doc-view with `access:[tables]` (mirrored to _meta/pageAccess by saveSchema)
 // is readable only by users granted a listed table (admins/unrestricted always). editor grants 'tasks';
 // viewer grants nothing. Seed pageAccess + two restricted pages + an untagged one. ---

@@ -238,11 +238,13 @@ test.describe('image/url column types', () => {
     test.setTimeout(20000);
     await openGallery(page);
 
-    // The local dev backend exposes uploadFile -> the image cell shows an upload button, not a URL field.
+    // The local dev backend exposes uploadFile -> the image cell shows an upload button. The paste-a-URL
+    // field is offered TOO, at every storage tier: pointing at an externally hosted image stays a valid
+    // choice whether or not a blob store exists, so the uploader sits beside it rather than replacing it.
     await expect(page.locator('.mdi-camera-plus')).toBeVisible();
     // Placeholder is i18n-keyed (t('img.url')); derive the rendered text so the selector survives translation.
     const imgUrlPlaceholder = await page.evaluate(() => window.appInstance.t('img.url'));
-    await expect(page.locator(`input[placeholder="${imgUrlPlaceholder}"]`)).toHaveCount(0);
+    await expect(page.locator(`input[placeholder="${imgUrlPlaceholder}"]`)).toBeVisible();
 
     // Pick a real PNG -> uploadFile POSTs it to the dev server, which stores it and returns a URL.
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -295,12 +297,15 @@ test.describe('image/url column types', () => {
     await expect(page.locator('.v-list-item', { hasText: 'Widget' })).toBeVisible();
   });
 
-  test('image degrades to a paste-a-URL field on a backend without uploadFile; url renders a link', async ({ page }) => {
+  test('without uploadFile the image cell keeps BOTH the asset uploader and the paste-a-URL field', async ({ page }) => {
     test.setTimeout(20000);
     await openGallery(page, { dropUploader: true });
 
-    // No uploadFile -> image cell is a URL field (no upload button); url column has its own input.
-    await expect(page.locator('.mdi-camera-plus, .mdi-image-edit')).toHaveCount(0);
+    // No blob store, but putRow exists -> the file can still be stored, as an _assets data URI. So the
+    // upload button stays (this used to be a paste-a-URL-only dead end, which is what made an image
+    // column unusable on a free Firebase project), and the URL field stays too: an external URL is a
+    // legitimate third option, not something the uploader replaces.
+    await expect(page.locator('.mdi-camera-plus, .mdi-image-edit')).toHaveCount(1);
     // Placeholder is i18n-keyed (t('img.url')); derive the rendered text so the selector survives translation.
     const imgUrlPlaceholder = await page.evaluate(() => window.appInstance.t('img.url'));
     await expect(page.locator(`input[placeholder="${imgUrlPlaceholder}"]`)).toBeVisible();
@@ -319,6 +324,95 @@ test.describe('image/url column types', () => {
       const s = await (await page.request.post('/api/getTableData', { data: { tableId: 'gallery', tab: 'active' } })).json();
       return (s.rows[0] || {}).link;
     }, { timeout: 4000 }).toBe('https://example.com/y');
+  });
+
+  test('with no blob store, an uploaded image lands in _assets and the row holds asset:<id>', async ({ page }) => {
+    test.setTimeout(20000);
+    await openGallery(page, { dropUploader: true });
+
+    // A real PNG through the same picker the bucket path uses. With uploadFile gone, saveAsset downscales
+    // it to a data URI and writes _assets; the ROW holds only the reference, never the bytes.
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    await page.locator('input[type=file]').setInputFiles({ name: 'pic.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+
+    // Row value is a reference of the documented shape (putRow is fire-and-forget, so poll for it).
+    const readPhoto = async () => {
+      const s = await (await page.request.post('/api/getTableData', { data: { tableId: 'gallery', tab: 'active' } })).json();
+      return (s.rows[0] || {}).photo || '';
+    };
+    await expect.poll(readPhoto, { timeout: 6000 }).toMatch(/^asset:img_\d+_[a-z0-9]+$/);
+    const stored = await readPhoto();
+
+    // The bytes are in _assets, as a raster data URI within the cap both rule layers enforce.
+    const assets = await (await page.request.post('/api/getTableData', { data: { tableId: '_assets', tab: 'active' } })).json();
+    const row = (assets.rows || []).find((r) => r.id === stored.slice(6));
+    expect(row, 'no _assets row for ' + stored).toBeTruthy();
+    expect(row.src).toMatch(/^data:image\/jpeg;base64,/);   // _resizeImageFile re-encodes to JPEG
+    expect(row.src.length).toBeLessThanOrEqual(900000);
+
+    // The cell renders the resolved data URI — and NOT wrapped in a link, since an asset has no href.
+    const thumb = page.locator('img.cell-thumb');
+    await expect(thumb).toBeVisible({ timeout: 5000 });
+    expect(await thumb.getAttribute('src')).toBe(row.src);
+    expect(await thumb.evaluate((el) => !!el.closest('a'))).toBe(false);
+
+    // It survives a reload: the value came from the database, not from memory.
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => window.appInstance.selectTab('gallery'));
+    await expect(page.locator('img.cell-thumb')).toBeVisible({ timeout: 6000 });
+    expect(await page.locator('img.cell-thumb').getAttribute('src')).toBe(row.src);
+  });
+
+  test('Settings background: upload paints the view card, persists to folder config, honours fit/opacity', async ({ page }) => {
+    test.setTimeout(25000);
+    await openGallery(page, { dropUploader: true });
+
+    // Upload through the Settings -> Backgrounds row for the `gallery` screen. The section is collapsed by
+    // default (it is one row per screen, and expanded it would push the rest of Settings out of view).
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="bg-section-toggle"]').click();
+    await page.waitForSelector('[data-testid="bg-upload-gallery"]', { state: 'visible', timeout: 6000 });
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    await page.locator('[data-testid="bg-row"] input[type=file]').first()
+      .setInputFiles({ name: 'hero.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+    await expect(page.locator('[data-testid="bg-thumb-gallery"]')).toBeVisible({ timeout: 6000 });
+
+    // Stored as a REFERENCE in the synced folder config; the bytes are an _assets row keyed bg_<view>.
+    await expect.poll(async () => {
+      const cfg = await (await page.request.post('/api/getFolderConfig', { data: { folderId: 'local' } })).json();
+      return ((cfg.backgrounds || {}).gallery || {}).image || '';
+    }, { timeout: 6000 }).toBe('asset:bg_gallery');
+    const assets = await (await page.request.post('/api/getTableData', { data: { tableId: '_assets', tab: 'active' } })).json();
+    const asset = (assets.rows || []).find((r) => r.id === 'bg_gallery');
+    expect(asset, 'no _assets row for bg_gallery').toBeTruthy();
+
+    // The view card carries it: the resolved data URI plus the theme-colored scrim, cover by default.
+    await page.evaluate(() => window.appInstance.selectTab('gallery'));
+    const styleOf = () => page.locator('.v-main .v-card').first().getAttribute('style');
+    await expect.poll(styleOf, { timeout: 6000 }).toContain('background-image');
+    let style = await styleOf();
+    expect(style).toContain('data:image/jpeg;base64,');
+    expect(style).toContain('linear-gradient');            // the opacity scrim (CSS has no bg-image opacity)
+    expect(style).toContain('--v-theme-surface');          // scrim tracks the theme, so contrast survives dark mode
+    expect(style).toContain('cover');
+
+    // fit + opacity + position feed through to real CSS. Note the browser NORMALIZES what it serializes:
+    // `40% auto` collapses to `40%` (a lone value is the width, height auto — which is exactly the
+    // aspect-preserving scale we want), and `top left` reorders to `left top`.
+    await page.evaluate(() => window.appInstance.saveViewBackground('gallery', { fit: 'width', width: 40, opacity: 0.2, position: 'top left' }));
+    await expect.poll(styleOf, { timeout: 4000 }).toContain('background-size: 40%');
+    style = await styleOf();
+    expect(style).toContain('background-position: left top');
+    expect(style).toMatch(/rgba\(var\(--v-theme-surface\),\s*0\.8\)/);   // scrim alpha = 1 - opacity
+
+    // Clearing drops the whole entry rather than leaving an empty one behind.
+    await page.evaluate(() => window.appInstance.saveViewBackground('gallery', { image: '' }));
+    await expect.poll(async () => {
+      const cfg = await (await page.request.post('/api/getFolderConfig', { data: { folderId: 'local' } })).json();
+      return (cfg.backgrounds || {}).gallery === undefined;
+    }, { timeout: 4000 }).toBe(true);
+    await expect.poll(styleOf, { timeout: 4000 }).not.toContain('background-image');
   });
 
   test('a stored javascript:/data:text/html cell value renders an EMPTY href, not the payload', async ({ page }) => {
@@ -2901,6 +2995,28 @@ test.describe('calendar view', () => {
     expect(joined).toContain('cal_bad1');
     expect(joined.toLowerCase()).toContain('must be a date column');
     expect(joined).toContain('non-existent table');
+  });
+
+  test('validateSchema flags a bad view background (bad source, fit, opacity, position)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      window.VIEWS.bg_bad1 = { name: 'bg_bad1', sources: ['tasks'], columns: ['title'], background: { image: 'javascript:alert(1)' } };
+      window.VIEWS.bg_bad2 = { name: 'bg_bad2', sources: ['tasks'], columns: ['title'], background: { image: 'https://e.com/a.png', fit: 'strech', opacity: 4, position: 'middle' } };
+      window.VIEWS.bg_bad3 = { name: 'bg_bad3', sources: ['tasks'], columns: ['title'], background: 'https://e.com/a.png' }; // not an object
+      // Both accepted address forms, all modes valid -> no error at all.
+      window.VIEWS.bg_ok1 = { name: 'bg_ok1', sources: ['tasks'], columns: ['title'], background: { image: 'asset:bg_ok1', fit: 'width', width: 60, opacity: 0.4, position: 'top left' } };
+      window.VIEWS.bg_ok2 = { name: 'bg_ok2', sources: ['tasks'], columns: ['title'], background: { image: 'data:image/png;base64,iVBORw0KGgo=', fit: 'tile' } };
+      const errs = window.validateSchema();
+      ['bg_bad1', 'bg_bad2', 'bg_bad3', 'bg_ok1', 'bg_ok2'].forEach((n) => { delete window.VIEWS[n]; });
+      return { joined: errs.join(' | '), ok: errs.filter((e) => e.indexOf('bg_ok') >= 0) };
+    });
+    expect(r.joined).toContain('bg_bad1');
+    expect(r.joined).toContain('not a usable image source');
+    expect(r.joined).toContain('cover/contain/tile/width');   // bad fit
+    expect(r.joined).toContain('between 0 and 1');            // bad opacity
+    expect(r.joined).toContain('background.position');        // bad position
+    expect(r.joined).toContain('must be an object');          // bg_bad3
+    expect(r.ok).toEqual([]);                                 // asset: ref, data: URI and every mode accepted
   });
 
   test('validateSchema requires the rsvp responses table to have a ref to the events table', async ({ page }) => {
