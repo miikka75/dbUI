@@ -236,6 +236,11 @@ config instead (`appConfig.backgrounds[<view>]`, same shape), which is merged ov
 so swapping a picture never rewrites the schema document. Asset bytes and the config both travel in
 the export bundle, so a background survives an export/import round-trip.
 
+Because the config *overrides* rather than replaces, **removing** a background on a view that declares
+one in the schema stores an explicit `{ "image": "" }` — the override meaning "none". Dropping the
+override entirely (the restore button in Settings) is what brings the schema default back. On a view
+with no schema default the entry is simply deleted, so the config collects no meaningless tombstones.
+
 ### filters
 A `filter` (on a view, an inline/named-view embed, or a conditional column) matches rows:
 - **Flat object** = AND of equality: `{ "status": "open", "city": "X" }` -> `status==open AND city==X`.

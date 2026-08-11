@@ -504,7 +504,8 @@
       "bg.fit_cover": "Fill",
       "bg.fit_contain": "Fit whole",
       "bg.fit_tile": "Tile",
-      "bg.fit_width": "Scale to width"
+      "bg.fit_width": "Scale to width",
+      "bg.restore": "Restore default background"
     },
     "es": {
       "app.title": "Demo de Equipo",
@@ -644,7 +645,8 @@
       "bg.fit_cover": "Rellenar",
       "bg.fit_contain": "Ajustar completo",
       "bg.fit_tile": "Mosaico",
-      "bg.fit_width": "Escalar al ancho"
+      "bg.fit_width": "Escalar al ancho",
+      "bg.restore": "Restaurar fondo predeterminado"
     },
     "sv": {
       "app.title": "Team-demo",
@@ -784,7 +786,8 @@
       "bg.fit_cover": "Fyll",
       "bg.fit_contain": "Anpassa helt",
       "bg.fit_tile": "Upprepa",
-      "bg.fit_width": "Skala till bredd"
+      "bg.fit_width": "Skala till bredd",
+      "bg.restore": "Återställ standardbakgrund"
     }
   },
   "config": {

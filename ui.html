@@ -612,7 +612,10 @@
                        :title="a.backgroundForView(tgt.id).image ? a.t('bg.replace') : a.t('bg.upload')"
                        :data-testid="'bg-upload-' + tgt.id"
                        @click="$refs['bgFile_' + tgt.id][0].click()"></v-btn>
-                <v-btn v-if="a.backgroundForView(tgt.id).image" size="x-small" variant="text" icon="mdi-close" :title="a.t('bg.remove')" @click="a.saveViewBackground(tgt.id, { image: '' })"></v-btn>
+                <v-btn v-if="a.backgroundForView(tgt.id).image" size="x-small" variant="text" icon="mdi-close" :title="a.t('bg.remove')" :data-testid="'bg-remove-' + tgt.id" @click="a.saveViewBackground(tgt.id, { image: '' })"></v-btn>
+                <!-- Only for a view whose SCHEMA declares a background that the config is currently hiding:
+                     removing it stores a tombstone, and this drops that override to bring the default back. -->
+                <v-btn v-if="a.backgroundHidden(tgt.id)" size="x-small" variant="text" icon="mdi-restore" :title="a.t('bg.restore')" :data-testid="'bg-restore-' + tgt.id" @click="a.restoreViewBackground(tgt.id)"></v-btn>
               </div>
               <!-- Rendering controls appear only once there is an image to render. -->
               <div v-if="a.backgroundForView(tgt.id).image" class="d-flex align-center flex-wrap mt-1 ml-2" style="gap:10px 14px">
@@ -623,13 +626,17 @@
                               :label="a.t('bg.width')" type="number" min="1" max="100" suffix="%"
                               density="compact" variant="outlined" hide-details style="max-width:110px"
                               @change="a.saveViewBackground(tgt.id, { width: Number($event.target.value) })"></v-text-field>
-                <!-- 3x3 background-position grid: visual, so no translated label per value. -->
+                <!-- 3x3 background-position grid: visual, so no translated label per value (the cell's
+                     `title` carries the CSS keyword). Unselected cells need a resting FILL, not just a
+                     faint outline — with a transparent background the grid read as one lone square and
+                     didn't look like a control at all. -->
                 <div>
                   <span class="card-field-label">{{ a.t('bg.position') }}</span>
-                  <div v-for="(row, ri) in a.bgPositionGrid" :key="ri" class="d-flex" style="gap:2px">
-                    <div v-for="p in row" :key="p" @click="a.saveViewBackground(tgt.id, { position: p })" :title="p"
-                         style="width:14px; height:14px; border-radius:3px; cursor:pointer; border:1px solid rgb(var(--v-theme-outline),0.3)"
-                         :style="{ background: (a.backgroundForView(tgt.id).position || 'center') === p ? 'rgb(var(--v-theme-primary))' : 'transparent' }"></div>
+                  <div class="bg-pos-grid" :data-testid="'bg-position-' + tgt.id">
+                    <div v-for="(row, ri) in a.bgPositionGrid" :key="ri" class="d-flex" style="gap:3px">
+                      <div v-for="p in row" :key="p" class="bg-pos-cell" :class="{ 'bg-pos-cell--on': (a.backgroundForView(tgt.id).position || 'center') === p }"
+                           :title="p" @click="a.saveViewBackground(tgt.id, { position: p })"></div>
+                    </div>
                   </div>
                 </div>
                 <div style="min-width:150px">

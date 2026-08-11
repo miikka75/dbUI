@@ -680,7 +680,7 @@ function createVueApp() {
          'btn.edit', 'btn.preview', 'btn.save', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
-         'bg.upload', 'bg.replace', 'bg.remove', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
+         'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
          'bg.fit', 'bg.fit_cover', 'bg.fit_contain', 'bg.fit_tile', 'bg.fit_width',
          'msg.saved', 'msg.save_failed', 'msg.upload_failed', 'msg.choose_image', 'msg.image_too_large', 'msg.image_read_failed', 'msg.image_invalid', 'msg.image_process_failed',
          'msg.row_added', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.synced', 'msg.sync_failed',
@@ -2489,11 +2489,37 @@ function createVueApp() {
       // Admin: set/clear a view's background in the synced folder config (NOT the schema — no full schema
       // rewrite to swap a picture). Same write path as the rotation controls: optimistic locally for
       // everyone, written through to the DB only by an admin, with a notice if the rule denies it.
+      // Clearing needs care because the config OVERRIDES the schema rather than replacing it: simply
+      // dropping the entry restores whatever `views[x].background` declares, so on a view with a
+      // schema-declared background the remove button looked like it had failed. So an empty image is kept
+      // as an explicit `{ image: '' }` TOMBSTONE — the override that means "none" — and the entry is only
+      // deleted when there is no schema default for it to override (which keeps the config free of
+      // tombstones that say nothing). restoreViewBackground deletes it to bring the default back.
       saveViewBackground: function(viewName, patch) {
         var cfg = Object.assign({}, this.appConfig || {});
         cfg.backgrounds = Object.assign({}, cfg.backgrounds || {});
         var next = Object.assign({}, cfg.backgrounds[viewName], patch);
-        if (!next.image) delete cfg.backgrounds[viewName]; else cfg.backgrounds[viewName] = next;
+        if (!next.image && !this.schemaBackground(viewName)) delete cfg.backgrounds[viewName];
+        else if (!next.image) cfg.backgrounds[viewName] = { image: '' };   // tombstone: hide the schema default
+        else cfg.backgrounds[viewName] = next;
+        cfg.mode = this.mode;
+        this._saveFolderConfig(cfg, viewName);
+      },
+      // The schema's declared background for a view, if any (what a tombstone hides / restore brings back).
+      schemaBackground: function(viewName) {
+        var v = VIEWS[viewName];
+        return (v && v.background && v.background.image) ? v.background : null;
+      },
+      // Is this view's background currently a tombstone hiding a schema default?
+      backgroundHidden: function(viewName) {
+        var ov = ((this.appConfig && this.appConfig.backgrounds) || {})[viewName];
+        return !!(ov && !ov.image && this.schemaBackground(viewName));
+      },
+      // Drop the override entirely, so the schema-declared background applies again.
+      restoreViewBackground: function(viewName) {
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.backgrounds = Object.assign({}, cfg.backgrounds || {});
+        delete cfg.backgrounds[viewName];
         cfg.mode = this.mode;
         this._saveFolderConfig(cfg, viewName);
       },
@@ -2917,8 +2943,15 @@ function createVueApp() {
       // and the system screens to neither — so a background on any of those was never fetched, and one
       // set in an earlier session simply never appeared.
       _refreshBgAsset: function() {
+        var self = this;
         var bg = this.backgroundForView(this.currentTable);
         if (bg && bg.image) this.ensureAssets([bg.image]);
+        // Settings is the one screen that displays OTHER views' backgrounds (a thumbnail per row), so it
+        // needs all of their bytes, not just its own. Without this every row for a view not yet visited
+        // this session showed the "no background" placeholder even though one was set.
+        if (this.currentTable === '__settings') {
+          this.ensureAssets(this.backgroundTargets.map(function(t) { return self.backgroundForView(t.id).image; }).filter(Boolean));
+        }
       },
       // Asset refs held by cells in the rows now on screen. Driven by a watcher on currentData rather than
       // from loadTableData, so it covers every view kind's load path without touching each.

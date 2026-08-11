@@ -389,7 +389,7 @@ test.describe('image/url column types', () => {
 
     // The view card carries it: the resolved data URI plus the theme-colored scrim, cover by default.
     await page.evaluate(() => window.appInstance.selectTab('gallery'));
-    const styleOf = () => page.locator('.v-main .v-card').first().getAttribute('style');
+    const styleOf = async () => (await page.locator('.v-main .v-card').first().getAttribute('style')) || '';   // attribute is REMOVED when there is no background
     await expect.poll(styleOf, { timeout: 6000 }).toContain('background-image');
     let style = await styleOf();
     expect(style).toContain('data:image/jpeg;base64,');
@@ -441,7 +441,7 @@ test.describe('image/url column types', () => {
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 8000 });
 
     // `welcome` is the landing view, so this is the first paint — nothing has been cached in this session.
-    const styleOf = () => page.locator('.v-main .v-card').first().getAttribute('style');
+    const styleOf = async () => (await page.locator('.v-main .v-card').first().getAttribute('style')) || '';   // attribute is REMOVED when there is no background
     await expect.poll(styleOf, { timeout: 6000 }).toContain('background-image');
     expect(await styleOf()).toContain('data:image/jpeg;base64,');
     expect(await page.evaluate(() => Object.keys(window.appInstance.assetCache))).toContain('bg_welcome');
@@ -451,6 +451,94 @@ test.describe('image/url column types', () => {
     await page.waitForTimeout(300);
     await page.evaluate(() => window.appInstance.selectTab('welcome'));
     await expect.poll(styleOf, { timeout: 4000 }).toContain('data:image/jpeg;base64,');
+  });
+
+  test('removing a SCHEMA-declared background actually clears it, and restore brings it back', async ({ page }) => {
+    test.setTimeout(25000);
+    // The config OVERRIDES the schema rather than replacing it, so deleting the entry just reinstated
+    // whatever `views[x].background` declares — the remove button looked broken on exactly the views that
+    // ship a default. Removing now stores an `{ image: '' }` tombstone; restore drops it.
+    const tile = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const SCH = {
+      defaultLanguage: 'en',
+      tables: { docs: { columns: [{ name: 'title', type: 'text' }] } },
+      views: [{ table: 'docs' }, { name: 'welcome', markdown: '# Welcome', background: { image: tile, fit: 'tile' } }],
+      nav: { items: [{ view: 'welcome' }, { table: 'docs' }] }
+    };
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 8000 });
+
+    const styleOf = async () => (await page.locator('.v-main .v-card').first().getAttribute('style')) || '';   // attribute is REMOVED when there is no background
+    const cfgBg = async () => {
+      const c = await (await page.request.post('/api/getFolderConfig', { data: { folderId: 'local' } })).json();
+      return ((c || {}).backgrounds || {}).welcome;   // the dev backend returns null when no config exists yet
+    };
+    // The schema default paints the landing view with no config entry at all.
+    await expect.poll(styleOf, { timeout: 6000 }).toContain('background-image');
+    expect(await cfgBg()).toBeUndefined();
+
+    // Remove it from Settings -> Backgrounds.
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="bg-section-toggle"]').click();
+    await page.locator('[data-testid="bg-remove-welcome"]').click();
+    await expect.poll(cfgBg, { timeout: 4000 }).toEqual({ image: '' });   // tombstone, not a deleted entry
+
+    // It is really gone from the view, not restored by the schema default.
+    await page.evaluate(() => window.appInstance.selectTab('welcome'));
+    await expect.poll(styleOf, { timeout: 4000 }).not.toContain('background-image');
+
+    // Restore is offered only in this state, and drops the override.
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await expect(page.locator('[data-testid="bg-restore-welcome"]')).toBeVisible();
+    await page.locator('[data-testid="bg-restore-welcome"]').click();
+    await expect.poll(cfgBg, { timeout: 4000 }).toBeUndefined();
+    await page.evaluate(() => window.appInstance.selectTab('welcome'));
+    await expect.poll(styleOf, { timeout: 4000 }).toContain('background-image');
+
+    // A view with NO schema default keeps a clean config: removing deletes rather than tombstoning.
+    await page.evaluate(() => {
+      window.appInstance.saveViewBackground('docs', { image: 'https://example.com/x.png' });
+      window.appInstance.saveViewBackground('docs', { image: '' });
+    });
+    await expect.poll(async () => {
+      const c = await (await page.request.post('/api/getFolderConfig', { data: { folderId: 'local' } })).json();
+      return ((c || {}).backgrounds || {}).docs === undefined;
+    }, { timeout: 4000 }).toBe(true);
+  });
+
+  test('Settings shows thumbnails for views not visited this session', async ({ page }) => {
+    test.setTimeout(25000);
+    // Settings is the only screen that renders OTHER views' backgrounds, so it needs their bytes too.
+    // `docs` is the landing view here and has no background; `welcome` does, and is never opened — so its
+    // thumbnail can only appear if the Settings screen fetches it, not as a side effect of visiting it.
+    // A REAL decodable 1x1 PNG: the thumbnail is asserted visible, and a broken image would lay out with a
+    // zero-width box (cell-thumb fixes only the height) and read as hidden for reasons unrelated to the fix.
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const SCH = {
+      defaultLanguage: 'en',
+      tables: { docs: { columns: [{ name: 'title', type: 'text' }] } },
+      views: [{ table: 'docs' }, { name: 'welcome', markdown: '# Welcome' }],
+      nav: { items: [{ table: 'docs' }, { view: 'welcome' }] }   // docs first -> it is the landing view
+    };
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.request.post('/api/putRow', { data: { tableId: '_assets', tab: 'active', data: { id: 'bg_welcome', src: png } } });
+    await page.request.post('/api/setFolderConfig', { data: { folderId: 'local', config: { mode: 'local', backgrounds: { welcome: { image: 'asset:bg_welcome' } } } } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 8000 });
+    expect(await page.evaluate(() => window.appInstance.currentTable)).toBe('docs');
+
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="bg-section-toggle"]').click();
+    const thumb = page.locator('[data-testid="bg-thumb-welcome"]');
+    await expect(thumb).toBeVisible({ timeout: 6000 });
+    expect(await thumb.getAttribute('src')).toBe(png);
   });
 
   test('a stored javascript:/data:text/html cell value renders an EMPTY href, not the payload', async ({ page }) => {
