@@ -546,7 +546,9 @@ function createVueApp() {
         if (layout === 'card' || layout === 'list') return true;
         if (layout === 'table') return false;
         if (this.windowWidth < 600) return true;
-        var needed = this.visibleCols.length * 130 + 100;
+        // declaredCols, NOT visibleCols: visibleCols applies hideEmpty only in table mode and so reads
+        // this computed back — see declaredCols for the cycle that split fixes.
+        var needed = this.declaredCols.length * 130 + 100;
         return needed > (this.windowWidth - 72);
       },
       useListLayout: function() { return this.currentConfig.layout === 'list'; },
@@ -631,19 +633,27 @@ function createVueApp() {
       // Doc-view bodies are writable by admins/editors (mirrors the _pages__active rule / dev-server
       // gate); viewers get a read-only page with no Edit button instead of a save that would 403.
       canEditPages: function() { return this.isAdmin || this.currentUserRole === 'editor'; },
-      visibleCols: function() {
+      // The columns the SCHEMA declares for this screen, before any data-dependent filtering. Split out of
+      // visibleCols to break a genuine dependency cycle: the auto card/table decision is made from how
+      // many columns there are, while hideEmpty drops columns only in table mode — so useCardLayout wanted
+      // visibleCols and visibleCols wanted useCardLayout. Reading either one first re-entered the other
+      // mid-evaluation; whichever way Vue resolved that, one of them saw a bogus value, and entering
+      // through visibleCols recursed until the stack blew. Deciding layout from the DECLARED count is also
+      // the more stable rule: the layout no longer flips as rows are added or emptied.
+      declaredCols: function() {
         var self = this;
         if (!this.currentTable) return [];
         var view = VIEWS[this.currentTable];
-        var cols;
-        if (view) { cols = (view.columns || []).filter(function(c) { return !isEmbed(c) && !isViewEmbed(c); }).map(function(c) { return colName(c); }); }
-        else {
-          cols = getColumns(this.currentTable).filter(function(c) {
-            if (c === 'id') return false;
-            var def = SCHEMA[self.currentTable].columns[c];
-            return !(def && typeof def === 'object' && def.hidden);
-          });
-        }
+        if (view) return (view.columns || []).filter(function(c) { return !isEmbed(c) && !isViewEmbed(c); }).map(function(c) { return colName(c); });
+        return getColumns(this.currentTable).filter(function(c) {
+          if (c === 'id') return false;
+          var def = SCHEMA[self.currentTable].columns[c];
+          return !(def && typeof def === 'object' && def.hidden);
+        });
+      },
+      visibleCols: function() {
+        var self = this;
+        var cols = this.declaredCols;
         // hideEmpty (table mode): drop a column when empty across all rows -- view default, overridable per-column via {name, hideEmpty}
         if (!this.useCardLayout && this.sortedData.length) {
           var data = this.sortedData;
@@ -2912,17 +2922,15 @@ function createVueApp() {
       // Asset refs held by cells in the rows now on screen. Driven by a watcher on currentData rather than
       // from loadTableData, so it covers every view kind's load path without touching each.
       //
-      // Deliberately scans row VALUES instead of resolving which columns are images. Reading visibleCols
-      // here would be fatal: visibleCols reads useCardLayout, which reads visibleCols back (app-core
-      // ~541/645). That cycle survives today only because the template evaluates useCardLayout first and
-      // caches it — a read from this watcher lands EARLIER and recurses until the stack blows. Matching on
-      // the value also means any future asset-bearing column type is covered for free.
+      // Resolves image columns from declaredCols, NOT visibleCols: which columns hold images is a schema
+      // question, and visibleCols additionally answers a presentation one (hideEmpty in table mode) that
+      // nothing here needs. It is also the read that originally exposed the computed cycle — reading
+      // visibleCols from this watcher while a grid rendered blew the stack (see declaredCols).
       _refreshRowAssets: function() {
-        var refs = [];
-        (this.currentData || []).forEach(function(r) {
-          if (!r) return;
-          for (var k in r) { if (isAssetRef(r[k])) refs.push(r[k]); }
-        });
+        var self = this, refs = [];
+        var imgCols = (this.declaredCols || []).filter(function(c) { return self.colIsImage(c); });
+        if (!imgCols.length) return;
+        (this.currentData || []).forEach(function(r) { imgCols.forEach(function(c) { if (r && r[c]) refs.push(r[c]); }); });
         if (refs.length) this.ensureAssets(refs);
       },
       // Admin: every user's display name, for the Users management table (own name uses
