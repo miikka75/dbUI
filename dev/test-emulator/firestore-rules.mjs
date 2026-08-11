@@ -214,8 +214,22 @@ await ok('map grant: an ungranted table stays unreadable',
   assertFails(getDoc(doc(mixed, 'secrets__active/s1'))));
 await ok('legacy array grant still reads AND writes (no migration)',
   assertSucceeds(setDoc(doc(editor, 'tasks__active/t1'), { id: 't1', title: 'editor edit' })));
-await ok('a map grant with no rwTables mirror falls back to membership (pre-split doc)',
-  assertSucceeds(setDoc(doc(premig, 'refdata__active/ref1'), { id: 'ref1', label: 'still writable' })));
+// The no-rwTables fallback covers grants written before the split — which are legacy LISTS, because the
+// map shape arrived WITH rwTables. A map missing the mirror is therefore not a pre-split doc but a
+// malformed one, and must not silently promote its 'r' entries to 'rw'.
+await ok('a MAP grant with no rwTables mirror does NOT get write on an r table',
+  assertFails(setDoc(doc(premig, 'refdata__active/ref1'), { id: 'ref1', label: 'still writable' })));
+await ok('a LEGACY LIST grant with no rwTables mirror still writes (the real pre-split shape)',
+  assertSucceeds(setDoc(doc(editor, 'tasks__active/t1'), { id: 't1', title: 'legacy write' })));
+
+// Per-page access has to understand the SAME three grant shapes the table gates do. Every grant the
+// access UI writes today is a map (buildGrants), so a page gate that only handles the legacy list
+// locks map-grant users out of pages they hold a listed table for. `staff_handbook` is gated on
+// ['tasks'] and `mixed` holds tasks:'rw'.
+await ok('map grant: a page gated on a table I hold IS readable',
+  assertSucceeds(getDoc(doc(mixed, '_pages__active/staff_handbook'))));
+await ok('map grant: a page gated on a table I lack stays unreadable',
+  assertFails(getDoc(doc(mixed, '_pages__active/board_notes'))));
 
 // A read-only grant on an OWNER-column table is the chore-log shape: see every row, write only my own.
 await testEnv.withSecurityRulesDisabled(async (ctx) => {
@@ -233,6 +247,29 @@ await ok('read-only grant on an owner table: CAN create my own owner-stamped row
   assertSucceeds(setDoc(doc(kid, 'chore_log__active/mine'), { id: 'mine', owner: 'kid@x.com', chore: 'bins' })));
 await ok("read-only grant on an owner table: CANNOT edit a sibling's row",
   assertFails(setDoc(doc(kid, 'chore_log__active/sib'), { id: 'sib', owner: 'other@x.com', chore: 'stolen' })));
+
+// --- Self-service READS have to be expressible as a QUERY, not just a per-document get. Rules are not
+// filters, so what matters is which constraints make the read rule provable — this is the contract the
+// Firestore backend's scoped read is written against (backend-firebase _scopedRead). A member with NO
+// grant at all is the sign-up/RSVP case. ---
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  await setDoc(doc(db, 'rsvps__active/v-own'),    { id: 'v-own',    owner: 'viewer@x.com', rosterPublic: true,  s: 'coming' });
+  await setDoc(doc(db, 'rsvps__active/pub'),      { id: 'pub',      owner: 'ann@x.com',    rosterPublic: true,  s: 'out' });
+  await setDoc(doc(db, 'rsvps__active/priv'),     { id: 'priv',     owner: 'ann@x.com',    rosterPublic: false, s: 'maybe' });
+});
+await ok('grantless member: an UNCONSTRAINED collection read is still denied (rules are not filters)',
+  assertFails(getDocs(collection(viewer, 'rsvps__active'))));
+await ok('grantless member: an owner-scoped query IS allowed',
+  assertSucceeds(getDocs(query(collection(viewer, 'rsvps__active'), where('owner', '==', 'viewer@x.com')))));
+await ok('grantless member: a rosterPublic query IS allowed (the shared-log read)',
+  assertSucceeds(getDocs(query(collection(viewer, 'rsvps__active'), where('rosterPublic', '==', true)))));
+await ok("grantless member: cannot query someone else's private rows",
+  assertFails(getDocs(query(collection(viewer, 'rsvps__active'), where('owner', '==', 'ann@x.com')))));
+await ok('grantless member: a private row stays unreadable per-document',
+  assertFails(getDoc(doc(viewer, 'rsvps__active/priv'))));
+await ok('a GRANTED user still reads the whole collection unconstrained',
+  assertSucceeds(getDocs(collection(kid, 'chore_log__active'))));
 
 // Lists follow the same split: sight of an owning table is not permission to edit its list.
 await testEnv.withSecurityRulesDisabled(async (ctx) => {

@@ -81,7 +81,14 @@ backend = {
       var languages = (r[1] !== DENIED && r[1] && (r[1].list || [])) || [];
       var lists = r[2] || {};
       var allowed = r[3];
-      var names = Object.keys(tableMap).filter(function(t) { return !allowed || allowed.indexOf(t) >= 0; });
+      // Boot loads granted tables PLUS the owner-column ones, which a member may reach without a grant
+      // at all (self-service). Skipping those left every self-service view empty until something else
+      // happened to fetch them; getTableData scopes each read to the slice the rules allow, so pulling
+      // them here costs a member their own rows + the public roster, never a denied request.
+      var selfServe = BackendHelpers.ownerTablesOf(parsed);
+      var names = Object.keys(tableMap).filter(function(t) {
+        return !allowed || allowed.indexOf(t) >= 0 || selfServe.indexOf(t) >= 0;
+      });
       var jobs = [];
       names.forEach(function(name) {
         jobs.push(self.getTableData(name, 'active').then(function(res) { return { key: name, res: res }; }).catch(function() { return { key: name, res: { rows: [] } }; }));
@@ -105,9 +112,35 @@ backend = {
       return d ? (d.list || []) : [];
     });
   },
+  // Read a table the caller may not hold a blanket grant on. Rules are not filters: with no table
+  // grant, the read rule is provable only from a constraint on `owner` or `rosterPublic`, so an
+  // unconstrained collection read is DENIED — the whole self-service read (RSVP, sign-ups, a shared
+  // chore log) used to fail and get swallowed into an empty table. Ask for exactly the two slices the
+  // rules can prove and merge them: my own rows, plus the rows marked public.
+  _scopedRead: function(store, tableId) {
+    return this._myTables().then(function(tabs) {
+      if (tabs === null || tabs.indexOf(tableId) >= 0) return StorageFirestore.getAll(store); // granted: whole collection
+      var me = _myEmail();
+      if (!me) return [];
+      return Promise.all([
+        StorageFirestore.getWhere(store, 'owner', '==', me),
+        StorageFirestore.getWhere(store, 'rosterPublic', '==', true)
+      ]).then(function(parts) {
+        var seen = {}, rows = [];
+        parts.forEach(function(part) {
+          (part || []).forEach(function(r) {
+            var k = r && r.id;
+            if (k == null || seen[k]) return;        // a row that is BOTH mine and public arrives twice
+            seen[k] = true; rows.push(r);
+          });
+        });
+        return rows;
+      }).catch(function() { return []; });           // fail closed, never surface a denied read as an error
+    });
+  },
   getTableData: function(tableId, tab) {
     var store = _storeName(tableId, tab);
-    return StorageFirestore.getAll(store).then(function(rows) {
+    return this._scopedRead(store, tableId).then(function(rows) {
       return { headers: BackendHelpers.deriveHeaders(rows), rows: rows };
     });
   },
@@ -132,6 +165,14 @@ backend = {
   // prune, since their list map is partial. Migration is additive (legacy _meta/lists is kept). ---
   _myTables: function() {
     // null = unrestricted (admin or no users); [] = known-but-no-access; [..] = restricted set.
+    // Memoized: every scoped table read asks, and the answer is one registry doc that only changes when
+    // an admin re-grants (setUserRole clears it). Without this a boot reading N tables costs N extra
+    // round-trips for a value that cannot change between them.
+    if (this._myTablesPromise) return this._myTablesPromise;
+    this._myTablesPromise = this._loadMyTables();
+    return this._myTablesPromise;
+  },
+  _loadMyTables: function() {
     var email = _myEmail();
     if (!email) return Promise.resolve([]);
     return _db.collection('_users').doc(email).get().then(function(d) {
@@ -411,6 +452,7 @@ var backend_users = {
   setUserRole: function(uid, role, user, tables) {
     var key = String(uid || '').toLowerCase();
     var doc = BackendHelpers.userGrantDoc(key, role, user, tables);
+    backend._myTablesPromise = null;   // re-granting invalidates the memoized read scope
     // Source of truth = /_users/<key>; also mirror into the legacy _meta/users map so a rules
     // rollback keeps working during the transition.
     return Promise.all([

@@ -26,10 +26,16 @@ service cloud.firestore {
       let table = collection.split('__')[0];
       return userData().tables == 'all' || table in userData().tables;
     }
+    // The no-`rwTables` fallback is for grants written BEFORE the split — and those are legacy LISTS,
+    // since the map shape arrived with the very change that introduced rwTables. Restricting the
+    // fallback to a list is therefore lossless for real legacy data, and closes a map without the
+    // mirror (hand-edited, or written by something that skipped userGrantDoc) silently promoting every
+    // 'r' grant to 'rw'. listWriteAllowed below already fails closed the same way.
     function hasTableWrite(collection) {
       let table = collection.split('__')[0];
       let u = userData();
-      return u.tables == 'all' || ('rwTables' in u ? table in u.rwTables : table in u.tables);
+      return u.tables == 'all'
+        || ('rwTables' in u ? table in u.rwTables : (u.tables is list && table in u.tables));
     }
     function listAllowed() {
       let t = userData().tables;
@@ -161,11 +167,17 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/_meta/pageAccess)
         ? get(/databases/$(database)/documents/_meta/pageAccess).data : {};
     }
+    // Reads the SAME three grant shapes the table gates do. `hasAny` is a list/set method: calling it
+    // on a map-shaped grant is not a false result but an evaluation ERROR, which denies the read — so
+    // gating on the legacy list alone locked out every grant the access UI writes today (buildGrants
+    // returns a map). Split by type exactly like listAllowed above.
     function pageAllowed(doc) {
       let pa = pageAccessMap();
+      let t = userData().tables;
       return !(doc in pa)                                   // untagged page -> all registered
-        || userData().tables == 'all'
-        || userData().tables.hasAny(pa[doc]);               // grant on any listed table
+        || t == 'all'
+        || (t is list && t.hasAny(pa[doc]))                 // grant on any listed table
+        || (t is map && t.keys().hasAny(pa[doc]));
     }
     match /_pages__active/{doc} {
       allow read:  if request.auth != null && isRegistered() && (
@@ -229,11 +241,19 @@ service cloud.firestore {
       // denormalized onto each row) — members self-serve without a table grant and read only their own,
       // while a public roster is readable by all and organizers (table grant) / admins read every row.
       // Non-owner rows keep the plain per-table gate.
+      // Written as a FLAT disjunction of field comparisons, not a ternary on `'owner' in resource.data`.
+      // Rules are not filters: a collection query is allowed only if the rule is provable from the
+      // query's own constraints, and `'owner' in resource.data` is a per-document test no constraint can
+      // prove -- so the ternary form denied every list read by a member without a table grant, which is
+      // exactly the self-service case ("see the rows I own"). Flat, a client constraining on `owner` or
+      // `rosterPublic` proves the matching disjunct. `.get(field, default)` keeps a document that lacks
+      // the field from erroring the whole expression, which is what the ternary was guarding against.
+      // Note this makes `rosterPublic: true` mean "public row" on its own rather than only on an
+      // owner-stamped one; the app stamps the two together (see app-core _createBlankRow).
       allow read: if base(collection) && (
-        noUsers() || role() == 'admin' ||
-        (('owner' in resource.data)
-          ? (resource.data.owner == myEmail() || resource.data.rosterPublic == true || hasTableAccess(collection))
-          : hasTableAccess(collection))
+        noUsers() || role() == 'admin' || hasTableAccess(collection) ||
+        resource.data.get('owner', '') == myEmail() ||
+        resource.data.get('rosterPublic', false) == true
       );
       allow create: if base(collection) && (
         noUsers() || role() == 'admin' ||

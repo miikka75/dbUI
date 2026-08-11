@@ -839,6 +839,11 @@ anchor — so the calendar generates them on demand for the visible window and d
 ### Access & i18n
 - **Fail-closed per source**: a source whose table the signed-in user cannot read contributes no
   events. A restricted user sees only the event types they're permitted.
+- **Nav visibility**: the calendar itself appears for a user who can reach **≥1** of its sources —
+  including via **self-service** (an `owner`-column table they hold no grant on), which is what keeps
+  an `addTo` calendar in a grantless member's menu. Reachable by none of them, it is hidden rather
+  than offered as a tab that could only render empty. The same ANY-of rule covers every view kind that
+  names its inputs outside `sources` (rotation rosters, `pivot.source`, `rsvp.events`/`responses`).
 - **Labels**: chrome uses `cal.*` translation keys (`cal.today`/`cal.month`/`cal.week`/`cal.list`/
   `cal.undated`/`cal.no_events`/`cal.items`), and period navigation uses `period.*` — like every other
   string these show the **key** until translated (no built-in English), so define them per language (the
@@ -1072,6 +1077,14 @@ table — the `rsvp` view is one presentation of it; a plain data grid over an o
   security boundary, but **mirrors** owner-scoped reads/writes for a self-service table so the local demo
   behaves like Firebase: a non-granted member reads their own rows (+ `rosterPublic`) and may create /
   edit / delete only their own owned rows.
+- **Reads must be expressible as a QUERY.** Firestore rules are not filters: a rule testing document
+  fields authorizes a collection read only when the query constrains those same fields, so a member with
+  no grant cannot read the collection at all — they ask for `owner == me` and `rosterPublic == true` and
+  get the union (`backend-firebase._scopedRead`). Two consequences for schema authors: the read gate is a
+  flat disjunction (`grant OR my row OR public row`) rather than a test of whether `owner` is present, so
+  `rosterPublic: true` marks a row public on its own; and a **grantless** member sees only those two
+  slices, never a third condition someone might expect to work. Supabase RLS filters rows natively and so
+  has no such restriction, but its policy is written to the same shape deliberately.
 
 ## Access modes (`r` / `rw`)
 

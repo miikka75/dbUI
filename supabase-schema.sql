@@ -97,7 +97,12 @@ returns boolean language sql stable security definer set search_path = public as
     when public.app_user_data() -> 'tables' = '"all"'::jsonb then true
     when public.app_user_data() ? 'rwTables' then
       (public.app_user_data() -> 'rwTables') ? split_part(coll, '__', 1)
-    else (public.app_user_data() -> 'tables') ? split_part(coll, '__', 1)
+    -- No mirror = a grant written before the split, which is a legacy ARRAY: the map shape arrived with
+    -- the same change that introduced rwTables. Restricting the fallback to an array keeps every real
+    -- legacy grant working while stopping a mirror-less map from promoting its 'r' entries to 'rw'.
+    when jsonb_typeof(public.app_user_data() -> 'tables') = 'array' then
+      (public.app_user_data() -> 'tables') ? split_part(coll, '__', 1)
+    else false
   end
 $$;
 
@@ -231,15 +236,16 @@ returns boolean language sql stable security definer set search_path = public as
       )
     when store like '\_%' then false   -- any other system store: deny (fail-safe; add its own rule)
     else  -- data tables
+      -- Flat disjunction, matching the firestore.rules read gate exactly (see the note there): a grant,
+      -- OR my own owner-stamped row, OR a row flagged public. RLS genuinely filters, so the shape is a
+      -- free choice here -- it is written this way so the two layers say the same thing and cannot drift
+      -- into different answers for the same row. `->>` on a missing key is NULL, never an error, so no
+      -- key-presence guard is needed.
       public.app_is_registered() and (
-        public.app_no_users() or public.app_role() = 'admin' or (
-          case when val ? 'owner'
-            then (val ->> 'owner') = public.app_email()
-                 or (val ->> 'rosterPublic') = 'true'
-                 or public.app_has_table_access(store)
-            else public.app_has_table_access(store)
-          end
-        )
+        public.app_no_users() or public.app_role() = 'admin'
+        or public.app_has_table_access(store)
+        or (val ->> 'owner') = public.app_email()
+        or (val ->> 'rosterPublic') = 'true'
       )
   end
 $$;

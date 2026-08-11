@@ -24,6 +24,36 @@
   function viewHelperTables(v) { return viewRosters(v).concat(viewComputedHelpers(v)); }
   function viewTables(v) { return ((v && v.sources) || []).concat(viewHelperTables(v)); }
 
+  // Every table a SOURCELESS view actually reads. The presentation kinds (calendar/pivot/rsvp) name
+  // their inputs per-kind rather than in `sources`, so a gate that only consults `sources` + rosters
+  // sees nothing to check and lets the view through to anyone. Deliberately NOT folded into
+  // viewHelperTables: that one feeds featureClosure, and widening it would change what a grant chip
+  // materializes. This is a read-side question only ("what would this view try to load"), and the nav
+  // gate unlocks on ANY of the answers -- an input you lack renders blank, per the roster rule.
+  function viewImplicitTables(v, views, _seen) {
+    if (!v) return [];
+    var out = viewHelperTables(v);
+    if (v.calendar) {
+      (v.calendar.sources || []).forEach(function(s) { if (s && s.table) out.push(s.table); });
+      // A calendar may overlay a rotation VIEW's generated duties; that view's own tables are just as
+      // much this calendar's inputs. `seen` guards a schema that points two calendars at each other.
+      var seen = _seen || {};
+      (v.calendar.rotationSources || []).forEach(function(r) {
+        var n = r && r.view;
+        if (!n || seen[n]) return;
+        seen[n] = true;
+        var rv = (views || {})[n];
+        if (rv) out = out.concat(viewTables(rv), viewImplicitTables(rv, views, seen));
+      });
+    }
+    if (v.pivot && v.pivot.source) out.push(v.pivot.source);
+    if (v.rsvp) {
+      if (v.rsvp.events) out.push(v.rsvp.events);
+      if (v.rsvp.responses) out.push(v.rsvp.responses);
+    }
+    return out.filter(function(t, i) { return t && out.indexOf(t) === i; });
+  }
+
   // A "pure mirror" has only synced columns (+ implicit id) and no content of its own — it rides with
   // its master and is never granted directly. A mirror that ALSO has own data columns is a real feature.
   function isPureMirror(t, schema) {
@@ -138,7 +168,8 @@
 
   var AF = {
     viewRosters: viewRosters, viewComputedHelpers: viewComputedHelpers, viewHelperTables: viewHelperTables,
-    viewTables: viewTables, isPureMirror: isPureMirror, satelliteTables: satelliteTables,
+    viewTables: viewTables, viewImplicitTables: viewImplicitTables,
+    isPureMirror: isPureMirror, satelliteTables: satelliteTables,
     grantFeatures: grantFeatures, featureClosure: featureClosure,
     expandFeatureGrants: expandFeatureGrants, selectedFeatures: selectedFeatures,
     grantMode: grantMode, readableTables: readableTables, writableTables: writableTables,
