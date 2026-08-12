@@ -1,14 +1,20 @@
 node_modules/
-dev/local.db
-dev/local.db-wal
-dev/local.db-shm
+# Any dev-server SQLite database, not just the default one: APP_DB=<name>.db runs an isolated instance
+# (see dev/server.js), and every such file holds real row data.
+dev/*.db
+dev/*.db-wal
+dev/*.db-shm
 test-results/
 playwright-report/
 
-# dev-server runtime persistence (real user/role/profile/request data — never commit)
+# dev-server runtime persistence (real user/role/profile/request data — never commit). The `*.` forms
+# are the per-database sidecars an isolated APP_DB instance writes (chores-demo.db -> chores-demo.users.json).
 dev/users.json
 dev/access-requests.json
 dev/profiles.json
+dev/*.users.json
+dev/*.access-requests.json
+dev/*.profiles.json
 dev/data/
 dev/uploads/
 
@@ -20,10 +26,6 @@ dev/uploads/
 /*-import.json
 /*-export.json
 
-# throwaway seed / test databases (see seed-demo.js)
-dev/seed-test-*.db
-dev/seed-test-*.db-wal
-dev/seed-test-*.db-shm
 
 
 # firebase emulator logs

@@ -49,6 +49,20 @@ date-relative rows with `node seed-import.js --regen`.
 
 **Reset**: delete `dev/local.db` + browser `localStorage.clear(); location.reload()`
 
+**A second, isolated instance.** `PORT` alone is *not* isolation — every dev server shares
+`dev/local.db`, so a reset on one wipes the other. Point `APP_DB` at another file to get a genuinely
+separate database, and its user registry / requests / profiles follow it as
+`<name>.users.json` and friends:
+
+```bash
+APP_DB=chores-demo.db PORT=3200 node server.js     # own DB + own sidecars, dev/local.db untouched
+APP_DB=:memory: PORT=3100 node server.js           # throwaway (what the E2E suite uses)
+```
+
+The startup banner prints the database actually in use, so you can confirm which one you are on. To
+load an example schema into it, import a bundle from `examples/` via Settings → Import JSON (see
+[examples/README.md](examples/README.md)).
+
 ## Quick Start (Apps Script)
 
 See `apps-script/DEPLOY.md` for deployment guide.
