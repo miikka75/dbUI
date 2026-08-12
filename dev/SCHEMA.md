@@ -222,6 +222,12 @@ Three tiers, and only the middle one can be unavailable:
    **900000** characters (below Firestore's 1 MiB document limit) and enforced in every access layer;
    uploads are downscaled client-side until they fit.
 
+**Transparency is preserved.** An uploaded image is re-encoded to fit the cap, and the format follows
+the source: a transparent PNG becomes WebP (alpha intact, and usually smaller than JPEG for
+graphic-style art), an opaque photo becomes JPEG. So a logo with a transparent background works as a
+`fit: "width"` watermark and lets the card surface show through. SVG is not accepted as an image
+source anywhere — it can carry script.
+
 An upload from **Settings → Backgrounds** prefers tier 2 and falls back to tier 3 — including when
 Storage is present but *unbilled*, where the upload fails at runtime rather than being absent. The
 same applies to `image` columns, so an image column works on every backend.

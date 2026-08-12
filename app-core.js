@@ -2848,9 +2848,27 @@ function createVueApp() {
         this.myProfile.picture = '';
         this.saveMyProfile();
       },
+      // Does anything on this canvas carry partial or full transparency? Decides the encoder below.
+      // Breaks on the first non-opaque pixel, so an opaque photo is the only case that scans in full.
+      // If the pixels can't be read at all (a tainted canvas — not reachable from a FileReader data URL,
+      // but cheap to be safe about) assume alpha: the alpha-capable encoder is the lossless choice.
+      _canvasHasAlpha: function(ctx, w, h) {
+        try {
+          var d = ctx.getImageData(0, 0, w, h).data;
+          for (var i = 3; i < d.length; i += 4) { if (d[i] < 255) return true; }
+          return false;
+        } catch (e) { return true; }
+      },
       // Downscale an image File to a data-URL whose longest side is <= max, preserving aspect ratio.
-      // `quality` is the JPEG quality (default 0.85 — the avatar setting); _fitImageToCap steps it down
-      // to land a larger image (a view background) under ASSET_CAP.
+      // `quality` is the encoder quality (default 0.85 — the avatar setting); _fitImageToCap steps it
+      // down to land a larger image (a view background) under ASSET_CAP.
+      //
+      // The output format FOLLOWS THE SOURCE. JPEG has no alpha channel, and a canvas starts as
+      // transparent BLACK — so re-encoding a transparent PNG as JPEG turned every transparent pixel
+      // opaque black, which is how a logo watermark became a black slab. Transparency therefore switches
+      // the encoder to WebP, which carries alpha and is typically smaller than JPEG for graphic-style
+      // images; a browser that won't encode WebP returns PNG instead, which also keeps alpha. Opaque
+      // photos still take JPEG, where it is the better trade. safeImgSrc already admits all three.
       _resizeImageFile: function(file, max, quality) {
         var self = this;
         var q = (typeof quality === 'number') ? quality : 0.85;
@@ -2866,8 +2884,10 @@ function createVueApp() {
               var canvas = document.createElement('canvas');
               canvas.width = cw; canvas.height = ch;
               try {
-                canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
-                resolve(canvas.toDataURL('image/jpeg', q));
+                var ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, cw, ch);
+                var type = self._canvasHasAlpha(ctx, cw, ch) ? 'image/webp' : 'image/jpeg';
+                resolve(canvas.toDataURL(type, q));
               } catch (err) { reject(new Error(self.t('msg.image_process_failed'))); }
             };
             img.src = String(reader.result || '');
@@ -2882,7 +2902,8 @@ function createVueApp() {
 
       // Downscale `file` until its data URI fits ASSET_CAP, trading resolution then quality. Rejects with
       // msg.image_too_large when even the smallest step is too big (a pathological source, since 900px at
-      // q0.6 is tens of KB for any real photo).
+      // q0.6 is tens of KB for any real photo). Note the quality steps do nothing on a browser that falls
+      // back to PNG for a transparent source (PNG is lossless) — there the resolution steps do the work.
       _fitImageToCap: function(file, cap) {
         var self = this, limit = cap || ASSET_CAP;
         var steps = [{ max: 1600, q: 0.8 }, { max: 1600, q: 0.65 }, { max: 1200, q: 0.65 }, { max: 900, q: 0.6 }];

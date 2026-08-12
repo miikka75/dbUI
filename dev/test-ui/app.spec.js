@@ -541,6 +541,57 @@ test.describe('image/url column types', () => {
     expect(await thumb.getAttribute('src')).toBe(png);
   });
 
+  test('an uploaded image with transparency keeps its alpha (not re-encoded to opaque black)', async ({ page }) => {
+    test.setTimeout(25000);
+    // Re-encoding to JPEG dropped the alpha channel, and a canvas starts as transparent BLACK — so a
+    // transparent PNG came back as an opaque black slab, which is what a logo watermark turned into.
+    // 4x4 RGBA: left half opaque red, right half fully transparent. Below the 1600px ceiling, so the
+    // pixel grid survives the resize untouched and can be sampled by coordinate.
+    const rgba = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAE0lEQVR42mN4K+P0H4QZYIB0AQC20hJRzHsr0AAAAABJRU5ErkJggg==';
+    await openGallery(page, { dropUploader: true });   // no bucket -> the _assets path, which re-encodes
+
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="bg-section-toggle"]').click();
+    await page.waitForSelector('[data-testid="bg-upload-gallery"]', { state: 'visible', timeout: 6000 });
+    await page.locator('[data-testid="bg-row"]:has([data-testid="bg-upload-gallery"]) input[type=file]')
+      .setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: Buffer.from(rgba.split(',')[1], 'base64') });
+    await expect(page.locator('[data-testid="bg-thumb-gallery"]')).toBeVisible({ timeout: 10000 });
+
+    const assets = await (await page.request.post('/api/getTableData', { data: { tableId: '_assets', tab: 'active' } })).json();
+    const row = (assets.rows || []).find((r) => r.id === 'bg_gallery');
+    expect(row, 'no _assets row for bg_gallery').toBeTruthy();
+    // An alpha-capable encoder, never JPEG.
+    expect(row.src).toMatch(/^data:image\/(webp|png);base64,/);
+
+    // Decode what was stored and read the actual pixels back.
+    const px = await page.evaluate(async (src) => {
+      const img = new Image();
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = src; });
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const at = (x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+      return { w: img.width, h: img.height, opaqueSide: at(0, 0), clearSide: at(img.width - 1, 0) };
+    }, row.src);
+
+    expect(px.w).toBe(4);                 // no resize at this size, so coordinates still mean something
+    expect(px.opaqueSide[3]).toBe(255);   // the red half stayed opaque
+    expect(px.clearSide[3]).toBe(0);      // the transparent half is still fully transparent
+    // The bug was alpha 255 with RGB 0,0,0 — opaque black. Alpha 0 is the whole assertion: the RGB
+    // channels under a fully transparent pixel are meaningless (premultiplication zeroes them) and
+    // nothing composites them, so they are deliberately NOT checked.
+
+    // An OPAQUE source still takes JPEG, which is the better trade for a photo.
+    const opaque = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    await page.locator('[data-testid="bg-row"]:has([data-testid="bg-upload-gallery"]) input[type=file]')
+      .setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from(opaque, 'base64') });
+    await expect.poll(async () => {
+      const a = await (await page.request.post('/api/getTableData', { data: { tableId: '_assets', tab: 'active' } })).json();
+      const r = (a.rows || []).find((x) => x.id === 'bg_gallery');
+      return r ? r.src.slice(0, r.src.indexOf(';')) : '';
+    }, { timeout: 8000 }).toBe('data:image/jpeg');
+  });
+
   test('a stored javascript:/data:text/html cell value renders an EMPTY href, not the payload', async ({ page }) => {
     test.setTimeout(20000);
     await openGallery(page, { dropUploader: true });
