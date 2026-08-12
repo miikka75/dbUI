@@ -293,6 +293,14 @@ returns boolean language sql immutable as $$
       and (not (val ? 'name') or (jsonb_typeof(val -> 'name') = 'string' and length(val ->> 'name') <= 100))
       and (not (val ? 'note') or (jsonb_typeof(val -> 'note') = 'string' and length(val ->> 'note') <= 500))
       and (not (val ? 'ts')   or jsonb_typeof(val -> 'ts') = 'number')
+    -- Stored image assets (view backgrounds / image-cell bytes as data URIs, the no-bucket tier). Not
+    -- self-writable -- admins/editors only -- but shape-checked anyway for the same reason the avatar is:
+    -- jsonb would happily take a gigabyte, so the cap is the only thing bounding an upload here. Mirrors
+    -- firestore.rules' _assets__active block; rules-parity.test.js compares the cap multisets.
+    when store = '_assets__active' then
+      not exists (select 1 from jsonb_object_keys(val) k where k <> all (array['id','src']))
+      and jsonb_typeof(val -> 'src') = 'string'
+      and length(val ->> 'src') <= 900000
     else true   -- _meta / _users / _lists / _pages__active / data tables: gated by role, not by shape
   end
 $$;
@@ -327,6 +335,9 @@ returns boolean language sql stable security definer set search_path = public as
       public.app_is_registered() and (
         public.app_no_users() or public.app_role() = 'admin' or public.app_page_allowed(key)
       )
+    -- Stored image assets: readable by every registered user (decoration; the row or view that REFERENCES
+    -- an asset stays gated by its own rule, which is what controls seeing the image in context).
+    when store = '_assets__active' then public.app_is_registered()
     when store like '\_%' then false   -- any other system store: deny (fail-safe; add its own rule)
     else  -- data tables
       -- Flat disjunction, matching the firestore.rules read gate exactly (see the note there): a grant,
@@ -370,6 +381,9 @@ returns boolean language sql stable security definer set search_path = public as
       or (public.app_role() = 'editor' and public.app_list_editor_ok(key, val -> 'tables'))
     when store = '_pages__active' then
       public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor'
+    when store = '_assets__active' then
+      (public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor')
+      and public.app_valid_shape(store, key, val)
     when store like '\_%' then false
     else  -- data tables
       public.app_no_users() or public.app_role() = 'admin'
@@ -395,6 +409,8 @@ returns boolean language sql stable security definer set search_path = public as
       or (public.app_role() = 'editor' and public.app_list_write_allowed(val -> 'tables'))
     when store = '_pages__active' then
       public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor'
+    when store = '_assets__active' then
+      public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor'
     when store like '\_%' then false
     else  -- data tables: edit own owned row, or table editor
       public.app_no_users() or public.app_role() = 'admin'
@@ -419,6 +435,8 @@ returns boolean language sql stable security definer set search_path = public as
       public.app_no_users() or public.app_role() = 'admin'
       or (public.app_role() = 'editor' and public.app_list_write_allowed(val -> 'tables'))
     when store = '_pages__active' then
+      public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor'
+    when store = '_assets__active' then
       public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor'
     when store like '\_%' then false
     else  -- data tables

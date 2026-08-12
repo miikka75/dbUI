@@ -203,3 +203,48 @@ describe('embeds.js — safeImgSrc (img src: http(s) + raster data image)', () =
     assert.equal(Embeds.safeImgSrc('javascript:alert(1)'), '');
   });
 });
+
+describe('embeds.js — asset references (the no-bucket image tier)', () => {
+  it('recognizes asset:<id> and extracts the id', () => {
+    assert.equal(Embeds.isAssetRef('asset:bg_frontPage'), true);
+    assert.equal(Embeds.assetId('asset:bg_frontPage'), 'bg_frontPage');
+    assert.equal(Embeds.isAssetRef('asset:img_1720000000000_a1b2c3'), true);
+  });
+  it('rejects anything that is not a bare asset id', () => {
+    // The id becomes a document id / jsonb key on every backend, so the charset stays narrow.
+    for (const bad of ['asset:', 'asset:a/b', 'asset:a b', 'asset:../x', 'https://e.com/a.png', '', null, undefined]) {
+      assert.equal(Embeds.isAssetRef(bad), false, String(bad));
+    }
+    assert.equal(Embeds.assetId('https://e.com/a.png'), '');
+  });
+});
+
+describe('embeds.js — safeCssUrl (background-image url() token)', () => {
+  it('wraps a safe image source in a url() token', () => {
+    assert.equal(Embeds.safeCssUrl('https://cdn.example.com/a.png'), 'url("https://cdn.example.com/a.png")');
+    const png = 'data:image/png;base64,iVBORw0KGgo=';
+    assert.equal(Embeds.safeCssUrl(png), 'url("' + png + '")');
+  });
+  it('inherits safeImgSrc\'s rejections (svg, html, javascript:)', () => {
+    assert.equal(Embeds.safeCssUrl('data:image/svg+xml,<svg onload=alert(1)>'), '');
+    assert.equal(Embeds.safeCssUrl('javascript:alert(1)'), '');
+    assert.equal(Embeds.safeCssUrl(''), '');
+  });
+  it('cannot be broken out of to append further CSS declarations', () => {
+    // safeImgSrc returns the ORIGINAL string, so a URL that satisfies new URL() may still carry a quote
+    // or a paren. Neither may survive into the token or the value could close url() and add declarations.
+    // (Regression: encodeURIComponent leaves `)` untouched — it is an unreserved mark — so it is NOT a
+    // usable escaper here. The paren assertion below is what caught that.)
+    const out = Embeds.safeCssUrl('https://e.com/a.png");background-color:red;');
+    assert.ok(out.startsWith('url("') && out.endsWith('")'), out);
+    const inner = out.slice(5, -2);
+    assert.equal(inner.includes('"'), false, 'a quote survived: ' + out);
+    assert.equal(inner.includes(')'), false, 'a paren survived: ' + out);
+    assert.equal(inner.includes('('), false, 'a paren survived: ' + out);
+    assert.equal(inner.includes('\\'), false, 'a backslash survived: ' + out);
+  });
+  it('strips newlines (a raw newline also terminates a declaration)', () => {
+    const out = Embeds.safeCssUrl('https://e.com/a.png\n:hover{}');
+    assert.equal(out.includes('\n'), false, out);
+  });
+});

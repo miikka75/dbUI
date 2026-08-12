@@ -34,25 +34,30 @@ const CSP_POLICY = process.env.CSP === '1' ? (() => {
 
 // No auto-init -- schema must be imported explicitly
 
+// The registry/requests/profiles live in JSON files beside the database, and they must travel WITH it:
+// APP_DB used to isolate only the SQLite file, so a second instance on its own DB still read and (on
+// resetData) overwrote the real dev users.json — the registration you were running as. A custom APP_DB
+// now derives its own sidecars (chores-demo.db -> chores-demo.users.json). Defaults and the in-memory
+// test paths are unchanged.
+function sidecarPath(name) {
+  if (APP_DB === ':memory:') return path.join(__dirname, 'test-ui', '.test-' + name + '.json');
+  if (DB_PATH) return DB_PATH.replace(/\.db$/i, '') + '.' + name + '.json';
+  return path.join(__dirname, name + '.json');
+}
+
 // Persist users to file. In isolated (in-memory test) mode use a throwaway path so resetData/test
 // runs never overwrite the real dev users.json.
-const USERS_PATH = (APP_DB === ':memory:')
-  ? path.join(__dirname, 'test-ui', '.test-users.json')
-  : path.join(__dirname, 'users.json');
+const USERS_PATH = sidecarPath('users');
 if (fs.existsSync(USERS_PATH)) backend._users = JSON.parse(fs.readFileSync(USERS_PATH, 'utf8'));
 function saveUsers() { fs.writeFileSync(USERS_PATH, JSON.stringify(backend._users || {}, null, 2)); }
 
 // Membership requests (self-service; admin approves). Isolated file in in-memory test mode.
-const REQ_PATH = (APP_DB === ':memory:')
-  ? path.join(__dirname, 'test-ui', '.test-access-requests.json')
-  : path.join(__dirname, 'access-requests.json');
+const REQ_PATH = sidecarPath('access-requests');
 if (fs.existsSync(REQ_PATH)) backend._accessRequests = JSON.parse(fs.readFileSync(REQ_PATH, 'utf8'));
 function saveRequests() { fs.writeFileSync(REQ_PATH, JSON.stringify(backend._accessRequests || {}, null, 2)); }
 
 // Opt-in display-name profiles. Isolated file in in-memory test mode.
-const PROF_PATH = (APP_DB === ':memory:')
-  ? path.join(__dirname, 'test-ui', '.test-profiles.json')
-  : path.join(__dirname, 'profiles.json');
+const PROF_PATH = sidecarPath('profiles');
 if (fs.existsSync(PROF_PATH)) backend._profiles = JSON.parse(fs.readFileSync(PROF_PATH, 'utf8'));
 function saveProfiles() { fs.writeFileSync(PROF_PATH, JSON.stringify(backend._profiles || {}, null, 2)); }
 
@@ -146,6 +151,11 @@ const server = http.createServer(async (req, res) => {
       return Object.assign({}, data, { rows });
     }
     function canWritePages() { const u = userRecord(); return !backend._users || !!(u && (u.role === 'admin' || u.role === 'editor')); }
+    // Stored image assets (_assets) mirror firestore.rules' _assets__active block: any REGISTERED user
+    // reads (decoration; the referencing row stays gated by its own access), admins/editors write. Needs
+    // the same carve-out _pages does — hasTableAccess('_assets'), which no grant ever satisfies, would
+    // deny every read. Read/write reuse the page predicates: identical role tests on both sides.
+    function assetsTable(tableId) { return (tableId ? tableId.split('__')[0] : '') === '_assets'; }
     function checkTableAccess(tableId) {
       const allowed = getAllowedTables();
       if (!allowed) return true;
@@ -264,6 +274,10 @@ const server = http.createServer(async (req, res) => {
           if (canReadPages()) return json(res, filterPages(backend.getTableData(body.tableId, body.tab) || { headers: [], rows: [] }));
           return json(res, { error: 'Access denied' }, 403);
         }
+        if (assetsTable(body.tableId)) {
+          if (canReadPages()) return json(res, backend.getTableData(body.tableId, body.tab) || { headers: [], rows: [] });
+          return json(res, { error: 'Access denied' }, 403);
+        }
         if (checkTableAccess(body.tableId)) return json(res, backend.getTableData(body.tableId, body.tab));
         const oc = selfServiceOwnerCol(body.tableId);                 // self-service: own rows + public roster only
         if (!oc) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
@@ -273,6 +287,15 @@ const server = http.createServer(async (req, res) => {
       case 'putRow': {
         if (pagesTable(body.tableId)) {
           if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
+          backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
+        }
+        if (assetsTable(body.tableId)) {
+          if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
+          // Same 900000-char cap the two production rule layers enforce, so a payload that would be
+          // rejected in production doesn't quietly succeed in dev (where the cap is the only bound).
+          if (typeof (body.data && body.data.src) !== 'string' || body.data.src.length > 900000) {
+            return json(res, { error: 'Asset too large' }, 400);
+          }
           backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
         }
         if (checkTableWrite(body.tableId)) { backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true }); }
@@ -457,5 +480,9 @@ if (!_loopback && process.env.ALLOW_INSECURE_HOST !== '1') {
 }
 server.listen(PORT, HOST, () => {
   console.log('Local dev server: http://' + HOST + ':' + PORT + (_loopback ? '' : '  [INSECURE: unauthenticated, exposed off-host]'));
-  console.log('Storage backend: ' + (USE_FS ? 'JSON files (dev/data/)' : 'SQLite (dev/local.db)'));
+  // Print the database ACTUALLY in use, not the default: with APP_DB set this line was still claiming
+  // dev/local.db, which is the one thing you check when you are running an isolated instance on purpose.
+  console.log('Storage backend: ' + (USE_FS
+    ? 'JSON files (dev/data/)'
+    : 'SQLite (' + (APP_DB === ':memory:' ? ':memory:' : path.relative(STATIC_DIR, DB_PATH || path.join(__dirname, 'local.db')).replace(/\\/g, '/')) + ')'));
 });

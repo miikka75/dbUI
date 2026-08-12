@@ -268,8 +268,10 @@
         </div>
 
         <!-- Every screen renders through the top-level kind registry (VIEW_KINDS -> component). :key
-             remounts on view change so self-stated components (calendar) re-init their local state. -->
-        <component v-if="viewComponent" :is="viewComponent" :key="currentTable"></component>
+             remounts on view change so self-stated components (calendar) re-init their local state.
+             :style carries the view's optional background image: every kind's template has a SINGLE root
+             element, so Vue's attribute fallthrough merges it onto that card — one binding for all kinds. -->
+        <component v-if="viewComponent" :is="viewComponent" :key="currentTable" :style="viewBackground"></component>
 
         <!-- Data view dispatches via VIEW_KINDS.data (<component :is="viewComponent"> above);
              markup lives in the #data-view-tpl template at the end of this file. -->
@@ -585,6 +587,68 @@
               </div>
             </div>
             <v-btn size="small" variant="text" prepend-icon="mdi-restore" @click="a.resetTheme()" class="mt-1">{{ a.t('settings.theme_reset') }}</v-btn>
+            <v-divider class="my-4"></v-divider>
+            <!-- Per-view background images. Written to the SYNCED FOLDER CONFIG (appConfig.backgrounds),
+                 not the schema, so swapping a picture doesn't rewrite the schema doc; the schema's own
+                 `views[x].background` stays the shipped default that this overrides. The bytes go to the
+                 _assets table as a data URI (no Storage bucket needed) via saveAsset. Rendering modes:
+                 `fit` (cover/contain/tile/width) + a 3x3 position grid + an opacity scrim. -->
+            <!-- Collapsed by default: one row per navigable screen is tall, and expanded it would push the
+                 profile/users sections below it out of view (which also stops v-img, an intersection-loaded
+                 component, from rendering the avatar at all). -->
+            <p class="text-subtitle-2 mb-2" style="cursor:pointer" data-testid="bg-section-toggle"
+               @click="a.settings._collapseBackgrounds = !a.settings._collapseBackgrounds">
+              <v-icon size="small">{{ a.settings._collapseBackgrounds ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
+              {{ a.t('settings.backgrounds') }}
+            </p>
+            <div v-for="tgt in a.backgroundTargets" v-show="!a.settings._collapseBackgrounds" :key="tgt.id" class="mb-3" data-testid="bg-row">
+              <div class="d-flex align-center flex-wrap" style="gap:8px">
+                <img v-if="a.assetSrc(a.backgroundForView(tgt.id).image)" :src="a.assetSrc(a.backgroundForView(tgt.id).image)" class="cell-thumb" alt="" :data-testid="'bg-thumb-' + tgt.id">
+                <div v-else class="cell-thumb d-flex align-center justify-center" style="width:96px; opacity:0.35; font-size:0.6rem">—</div>
+                <span style="flex:1 1 120px; min-width:0; font-size:0.85rem">{{ tgt.title }}</span>
+                <input type="file" accept="image/*" :ref="'bgFile_' + tgt.id" style="display:none" @change="a.uploadViewBackground(tgt.id, $event)">
+                <v-btn size="x-small" variant="text" :loading="a.bgBusy === tgt.id"
+                       :icon="a.backgroundForView(tgt.id).image ? 'mdi-image-edit' : 'mdi-image-plus'"
+                       :title="a.backgroundForView(tgt.id).image ? a.t('bg.replace') : a.t('bg.upload')"
+                       :data-testid="'bg-upload-' + tgt.id"
+                       @click="$refs['bgFile_' + tgt.id][0].click()"></v-btn>
+                <v-btn v-if="a.backgroundForView(tgt.id).image" size="x-small" variant="text" icon="mdi-close" :title="a.t('bg.remove')" :data-testid="'bg-remove-' + tgt.id" @click="a.saveViewBackground(tgt.id, { image: '' })"></v-btn>
+                <!-- Only for a view whose SCHEMA declares a background that the config is currently hiding:
+                     removing it stores a tombstone, and this drops that override to bring the default back. -->
+                <v-btn v-if="a.backgroundHidden(tgt.id)" size="x-small" variant="text" icon="mdi-restore" :title="a.t('bg.restore')" :data-testid="'bg-restore-' + tgt.id" @click="a.restoreViewBackground(tgt.id)"></v-btn>
+              </div>
+              <!-- Rendering controls appear only once there is an image to render. -->
+              <div v-if="a.backgroundForView(tgt.id).image" class="d-flex align-center flex-wrap mt-1 ml-2" style="gap:10px 14px">
+                <v-select :model-value="a.backgroundForView(tgt.id).fit || 'cover'" :items="a.bgFitItems" :label="a.t('bg.fit')"
+                          density="compact" variant="outlined" hide-details style="max-width:150px"
+                          @update:model-value="a.saveViewBackground(tgt.id, { fit: $event })"></v-select>
+                <v-text-field v-if="a.backgroundForView(tgt.id).fit === 'width'" :model-value="a.backgroundForView(tgt.id).width || 50"
+                              :label="a.t('bg.width')" type="number" min="1" max="100" suffix="%"
+                              density="compact" variant="outlined" hide-details style="max-width:110px"
+                              @change="a.saveViewBackground(tgt.id, { width: Number($event.target.value) })"></v-text-field>
+                <!-- 3x3 background-position grid: visual, so no translated label per value (the cell's
+                     `title` carries the CSS keyword). Unselected cells need a resting FILL, not just a
+                     faint outline — with a transparent background the grid read as one lone square and
+                     didn't look like a control at all. -->
+                <div>
+                  <span class="card-field-label">{{ a.t('bg.position') }}</span>
+                  <div class="bg-pos-grid" :data-testid="'bg-position-' + tgt.id">
+                    <div v-for="(row, ri) in a.bgPositionGrid" :key="ri" class="d-flex" style="gap:3px">
+                      <div v-for="p in row" :key="p" class="bg-pos-cell" :class="{ 'bg-pos-cell--on': (a.backgroundForView(tgt.id).position || 'center') === p }"
+                           :title="p" @click="a.saveViewBackground(tgt.id, { position: p })"></div>
+                    </div>
+                  </div>
+                </div>
+                <div style="min-width:150px">
+                  <span class="card-field-label">{{ a.t('bg.opacity') }}</span>
+                  <v-slider :model-value="a.backgroundForView(tgt.id).opacity == null ? 0.5 : a.backgroundForView(tgt.id).opacity"
+                            :min="0" :max="1" :step="0.05" density="compact" hide-details
+                            @end="a.saveViewBackground(tgt.id, { opacity: $event })"></v-slider>
+                </div>
+                <v-checkbox :model-value="!!a.backgroundForView(tgt.id).fixed" :label="a.t('bg.fixed')" density="compact" hide-details
+                            @update:model-value="a.saveViewBackground(tgt.id, { fixed: !!$event })"></v-checkbox>
+              </div>
+            </div>
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.share') }}</p>
             <v-text-field :model-value="a.shareLink" name="share-link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="a.copyText(a.shareLink)"></v-text-field>

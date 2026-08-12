@@ -238,11 +238,13 @@ test.describe('image/url column types', () => {
     test.setTimeout(20000);
     await openGallery(page);
 
-    // The local dev backend exposes uploadFile -> the image cell shows an upload button, not a URL field.
+    // The local dev backend exposes uploadFile -> the image cell shows an upload button. The paste-a-URL
+    // field is offered TOO, at every storage tier: pointing at an externally hosted image stays a valid
+    // choice whether or not a blob store exists, so the uploader sits beside it rather than replacing it.
     await expect(page.locator('.mdi-camera-plus')).toBeVisible();
     // Placeholder is i18n-keyed (t('img.url')); derive the rendered text so the selector survives translation.
     const imgUrlPlaceholder = await page.evaluate(() => window.appInstance.t('img.url'));
-    await expect(page.locator(`input[placeholder="${imgUrlPlaceholder}"]`)).toHaveCount(0);
+    await expect(page.locator(`input[placeholder="${imgUrlPlaceholder}"]`)).toBeVisible();
 
     // Pick a real PNG -> uploadFile POSTs it to the dev server, which stores it and returns a URL.
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -295,12 +297,15 @@ test.describe('image/url column types', () => {
     await expect(page.locator('.v-list-item', { hasText: 'Widget' })).toBeVisible();
   });
 
-  test('image degrades to a paste-a-URL field on a backend without uploadFile; url renders a link', async ({ page }) => {
+  test('without uploadFile the image cell keeps BOTH the asset uploader and the paste-a-URL field', async ({ page }) => {
     test.setTimeout(20000);
     await openGallery(page, { dropUploader: true });
 
-    // No uploadFile -> image cell is a URL field (no upload button); url column has its own input.
-    await expect(page.locator('.mdi-camera-plus, .mdi-image-edit')).toHaveCount(0);
+    // No blob store, but putRow exists -> the file can still be stored, as an _assets data URI. So the
+    // upload button stays (this used to be a paste-a-URL-only dead end, which is what made an image
+    // column unusable on a free Firebase project), and the URL field stays too: an external URL is a
+    // legitimate third option, not something the uploader replaces.
+    await expect(page.locator('.mdi-camera-plus, .mdi-image-edit')).toHaveCount(1);
     // Placeholder is i18n-keyed (t('img.url')); derive the rendered text so the selector survives translation.
     const imgUrlPlaceholder = await page.evaluate(() => window.appInstance.t('img.url'));
     await expect(page.locator(`input[placeholder="${imgUrlPlaceholder}"]`)).toBeVisible();
@@ -319,6 +324,272 @@ test.describe('image/url column types', () => {
       const s = await (await page.request.post('/api/getTableData', { data: { tableId: 'gallery', tab: 'active' } })).json();
       return (s.rows[0] || {}).link;
     }, { timeout: 4000 }).toBe('https://example.com/y');
+  });
+
+  test('with no blob store, an uploaded image lands in _assets and the row holds asset:<id>', async ({ page }) => {
+    test.setTimeout(20000);
+    await openGallery(page, { dropUploader: true });
+
+    // A real PNG through the same picker the bucket path uses. With uploadFile gone, saveAsset downscales
+    // it to a data URI and writes _assets; the ROW holds only the reference, never the bytes.
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    await page.locator('input[type=file]').setInputFiles({ name: 'pic.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+
+    // Row value is a reference of the documented shape (putRow is fire-and-forget, so poll for it).
+    const readPhoto = async () => {
+      const s = await (await page.request.post('/api/getTableData', { data: { tableId: 'gallery', tab: 'active' } })).json();
+      return (s.rows[0] || {}).photo || '';
+    };
+    await expect.poll(readPhoto, { timeout: 6000 }).toMatch(/^asset:img_\d+_[a-z0-9]+$/);
+    const stored = await readPhoto();
+
+    // The bytes are in _assets, as a raster data URI within the cap both rule layers enforce.
+    const assets = await (await page.request.post('/api/getTableData', { data: { tableId: '_assets', tab: 'active' } })).json();
+    const row = (assets.rows || []).find((r) => r.id === stored.slice(6));
+    expect(row, 'no _assets row for ' + stored).toBeTruthy();
+    expect(row.src).toMatch(/^data:image\/jpeg;base64,/);   // _resizeImageFile re-encodes to JPEG
+    expect(row.src.length).toBeLessThanOrEqual(900000);
+
+    // The cell renders the resolved data URI — and NOT wrapped in a link, since an asset has no href.
+    const thumb = page.locator('img.cell-thumb');
+    await expect(thumb).toBeVisible({ timeout: 5000 });
+    expect(await thumb.getAttribute('src')).toBe(row.src);
+    expect(await thumb.evaluate((el) => !!el.closest('a'))).toBe(false);
+
+    // It survives a reload: the value came from the database, not from memory.
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => window.appInstance.selectTab('gallery'));
+    await expect(page.locator('img.cell-thumb')).toBeVisible({ timeout: 6000 });
+    expect(await page.locator('img.cell-thumb').getAttribute('src')).toBe(row.src);
+  });
+
+  test('Settings background: upload paints the view card, persists to folder config, honours fit/opacity', async ({ page }) => {
+    test.setTimeout(25000);
+    await openGallery(page, { dropUploader: true });
+
+    // Upload through the Settings -> Backgrounds row for the `gallery` screen. The section is collapsed by
+    // default (it is one row per screen, and expanded it would push the rest of Settings out of view).
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="bg-section-toggle"]').click();
+    await page.waitForSelector('[data-testid="bg-upload-gallery"]', { state: 'visible', timeout: 6000 });
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    await page.locator('[data-testid="bg-row"] input[type=file]').first()
+      .setInputFiles({ name: 'hero.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+    await expect(page.locator('[data-testid="bg-thumb-gallery"]')).toBeVisible({ timeout: 6000 });
+
+    // Stored as a REFERENCE in the synced folder config; the bytes are an _assets row keyed bg_<view>.
+    await expect.poll(async () => {
+      const cfg = await (await page.request.post('/api/getFolderConfig', { data: { folderId: 'local' } })).json();
+      return ((cfg.backgrounds || {}).gallery || {}).image || '';
+    }, { timeout: 6000 }).toBe('asset:bg_gallery');
+    const assets = await (await page.request.post('/api/getTableData', { data: { tableId: '_assets', tab: 'active' } })).json();
+    const asset = (assets.rows || []).find((r) => r.id === 'bg_gallery');
+    expect(asset, 'no _assets row for bg_gallery').toBeTruthy();
+
+    // The view card carries it: the resolved data URI plus the theme-colored scrim, cover by default.
+    await page.evaluate(() => window.appInstance.selectTab('gallery'));
+    const styleOf = async () => (await page.locator('.v-main .v-card').first().getAttribute('style')) || '';   // attribute is REMOVED when there is no background
+    await expect.poll(styleOf, { timeout: 6000 }).toContain('background-image');
+    let style = await styleOf();
+    expect(style).toContain('data:image/jpeg;base64,');
+    expect(style).toContain('linear-gradient');            // the opacity scrim (CSS has no bg-image opacity)
+    expect(style).toContain('--v-theme-surface');          // scrim tracks the theme, so contrast survives dark mode
+    expect(style).toContain('cover');
+
+    // fit + opacity + position feed through to real CSS. Note the browser NORMALIZES what it serializes:
+    // `40% auto` collapses to `40%` (a lone value is the width, height auto — which is exactly the
+    // aspect-preserving scale we want), and `top left` reorders to `left top`.
+    await page.evaluate(() => window.appInstance.saveViewBackground('gallery', { fit: 'width', width: 40, opacity: 0.2, position: 'top left' }));
+    await expect.poll(styleOf, { timeout: 4000 }).toContain('background-size: 40%');
+    style = await styleOf();
+    expect(style).toContain('background-position: left top');
+    expect(style).toMatch(/rgba\(var\(--v-theme-surface\),\s*0\.8\)/);   // scrim alpha = 1 - opacity
+
+    // Clearing drops the whole entry rather than leaving an empty one behind.
+    await page.evaluate(() => window.appInstance.saveViewBackground('gallery', { image: '' }));
+    await expect.poll(async () => {
+      const cfg = await (await page.request.post('/api/getFolderConfig', { data: { folderId: 'local' } })).json();
+      return (cfg.backgrounds || {}).gallery === undefined;
+    }, { timeout: 4000 }).toBe(true);
+    await expect.poll(styleOf, { timeout: 4000 }).not.toContain('background-image');
+  });
+
+  test('a background set in an earlier session is FETCHED on a fresh load, on a doc view too', async ({ page }) => {
+    test.setTimeout(25000);
+    // The gap this closes: the upload path caches the data URI in-session, so checking the style right
+    // after uploading proves nothing about a later visit. And the fetch used to hang off loadTableData,
+    // which selectTab calls only for the data-ish kinds — a doc view goes to loadPage, the system screens
+    // to neither. So a background on any of those never appeared again after a reload. Seed the stored
+    // state directly (as an earlier session would have left it) and load the app cold.
+    const SCH = {
+      defaultLanguage: 'en',
+      tables: { docs: { columns: [{ name: 'title', type: 'text' }] } },
+      views: [{ table: 'docs' }, { name: 'welcome', markdown: '# Welcome' }],
+      nav: { items: [{ view: 'welcome' }, { table: 'docs' }] }
+    };
+    const png = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/wAALCAABAAEBAREA/8QAFAABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AJUAB//Z';
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    // Stored state from "last time": the bytes in _assets, the reference in the folder config.
+    await page.request.post('/api/putRow', { data: { tableId: '_assets', tab: 'active', data: { id: 'bg_welcome', src: png } } });
+    await page.request.post('/api/setFolderConfig', { data: { folderId: 'local', config: { mode: 'local', backgrounds: { welcome: { image: 'asset:bg_welcome', fit: 'cover', opacity: 0.5 } } } } });
+
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 8000 });
+
+    // `welcome` is the landing view, so this is the first paint — nothing has been cached in this session.
+    const styleOf = async () => (await page.locator('.v-main .v-card').first().getAttribute('style')) || '';   // attribute is REMOVED when there is no background
+    await expect.poll(styleOf, { timeout: 6000 }).toContain('background-image');
+    expect(await styleOf()).toContain('data:image/jpeg;base64,');
+    expect(await page.evaluate(() => Object.keys(window.appInstance.assetCache))).toContain('bg_welcome');
+
+    // And still there after navigating away to a data view and back (loadPage path, not loadTableData).
+    await page.evaluate(() => window.appInstance.selectTab('docs'));
+    await page.waitForTimeout(300);
+    await page.evaluate(() => window.appInstance.selectTab('welcome'));
+    await expect.poll(styleOf, { timeout: 4000 }).toContain('data:image/jpeg;base64,');
+  });
+
+  test('removing a SCHEMA-declared background actually clears it, and restore brings it back', async ({ page }) => {
+    test.setTimeout(25000);
+    // The config OVERRIDES the schema rather than replacing it, so deleting the entry just reinstated
+    // whatever `views[x].background` declares — the remove button looked broken on exactly the views that
+    // ship a default. Removing now stores an `{ image: '' }` tombstone; restore drops it.
+    const tile = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const SCH = {
+      defaultLanguage: 'en',
+      tables: { docs: { columns: [{ name: 'title', type: 'text' }] } },
+      views: [{ table: 'docs' }, { name: 'welcome', markdown: '# Welcome', background: { image: tile, fit: 'tile' } }],
+      nav: { items: [{ view: 'welcome' }, { table: 'docs' }] }
+    };
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 8000 });
+
+    const styleOf = async () => (await page.locator('.v-main .v-card').first().getAttribute('style')) || '';   // attribute is REMOVED when there is no background
+    const cfgBg = async () => {
+      const c = await (await page.request.post('/api/getFolderConfig', { data: { folderId: 'local' } })).json();
+      return ((c || {}).backgrounds || {}).welcome;   // the dev backend returns null when no config exists yet
+    };
+    // The schema default paints the landing view with no config entry at all.
+    await expect.poll(styleOf, { timeout: 6000 }).toContain('background-image');
+    expect(await cfgBg()).toBeUndefined();
+
+    // Remove it from Settings -> Backgrounds.
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="bg-section-toggle"]').click();
+    await page.locator('[data-testid="bg-remove-welcome"]').click();
+    await expect.poll(cfgBg, { timeout: 4000 }).toEqual({ image: '' });   // tombstone, not a deleted entry
+
+    // It is really gone from the view, not restored by the schema default.
+    await page.evaluate(() => window.appInstance.selectTab('welcome'));
+    await expect.poll(styleOf, { timeout: 4000 }).not.toContain('background-image');
+
+    // Restore is offered only in this state, and drops the override.
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await expect(page.locator('[data-testid="bg-restore-welcome"]')).toBeVisible();
+    await page.locator('[data-testid="bg-restore-welcome"]').click();
+    await expect.poll(cfgBg, { timeout: 4000 }).toBeUndefined();
+    await page.evaluate(() => window.appInstance.selectTab('welcome'));
+    await expect.poll(styleOf, { timeout: 4000 }).toContain('background-image');
+
+    // A view with NO schema default keeps a clean config: removing deletes rather than tombstoning.
+    await page.evaluate(() => {
+      window.appInstance.saveViewBackground('docs', { image: 'https://example.com/x.png' });
+      window.appInstance.saveViewBackground('docs', { image: '' });
+    });
+    await expect.poll(async () => {
+      const c = await (await page.request.post('/api/getFolderConfig', { data: { folderId: 'local' } })).json();
+      return ((c || {}).backgrounds || {}).docs === undefined;
+    }, { timeout: 4000 }).toBe(true);
+  });
+
+  test('Settings shows thumbnails for views not visited this session', async ({ page }) => {
+    test.setTimeout(25000);
+    // Settings is the only screen that renders OTHER views' backgrounds, so it needs their bytes too.
+    // `docs` is the landing view here and has no background; `welcome` does, and is never opened — so its
+    // thumbnail can only appear if the Settings screen fetches it, not as a side effect of visiting it.
+    // A REAL decodable 1x1 PNG: the thumbnail is asserted visible, and a broken image would lay out with a
+    // zero-width box (cell-thumb fixes only the height) and read as hidden for reasons unrelated to the fix.
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const SCH = {
+      defaultLanguage: 'en',
+      tables: { docs: { columns: [{ name: 'title', type: 'text' }] } },
+      views: [{ table: 'docs' }, { name: 'welcome', markdown: '# Welcome' }],
+      nav: { items: [{ table: 'docs' }, { view: 'welcome' }] }   // docs first -> it is the landing view
+    };
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.request.post('/api/putRow', { data: { tableId: '_assets', tab: 'active', data: { id: 'bg_welcome', src: png } } });
+    await page.request.post('/api/setFolderConfig', { data: { folderId: 'local', config: { mode: 'local', backgrounds: { welcome: { image: 'asset:bg_welcome' } } } } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 8000 });
+    expect(await page.evaluate(() => window.appInstance.currentTable)).toBe('docs');
+
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="bg-section-toggle"]').click();
+    const thumb = page.locator('[data-testid="bg-thumb-welcome"]');
+    await expect(thumb).toBeVisible({ timeout: 6000 });
+    expect(await thumb.getAttribute('src')).toBe(png);
+  });
+
+  test('an uploaded image with transparency keeps its alpha (not re-encoded to opaque black)', async ({ page }) => {
+    test.setTimeout(25000);
+    // Re-encoding to JPEG dropped the alpha channel, and a canvas starts as transparent BLACK — so a
+    // transparent PNG came back as an opaque black slab, which is what a logo watermark turned into.
+    // 4x4 RGBA: left half opaque red, right half fully transparent. Below the 1600px ceiling, so the
+    // pixel grid survives the resize untouched and can be sampled by coordinate.
+    const rgba = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAE0lEQVR42mN4K+P0H4QZYIB0AQC20hJRzHsr0AAAAABJRU5ErkJggg==';
+    await openGallery(page, { dropUploader: true });   // no bucket -> the _assets path, which re-encodes
+
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="bg-section-toggle"]').click();
+    await page.waitForSelector('[data-testid="bg-upload-gallery"]', { state: 'visible', timeout: 6000 });
+    await page.locator('[data-testid="bg-row"]:has([data-testid="bg-upload-gallery"]) input[type=file]')
+      .setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: Buffer.from(rgba.split(',')[1], 'base64') });
+    await expect(page.locator('[data-testid="bg-thumb-gallery"]')).toBeVisible({ timeout: 10000 });
+
+    const assets = await (await page.request.post('/api/getTableData', { data: { tableId: '_assets', tab: 'active' } })).json();
+    const row = (assets.rows || []).find((r) => r.id === 'bg_gallery');
+    expect(row, 'no _assets row for bg_gallery').toBeTruthy();
+    // An alpha-capable encoder, never JPEG.
+    expect(row.src).toMatch(/^data:image\/(webp|png);base64,/);
+
+    // Decode what was stored and read the actual pixels back.
+    const px = await page.evaluate(async (src) => {
+      const img = new Image();
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = src; });
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const at = (x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+      return { w: img.width, h: img.height, opaqueSide: at(0, 0), clearSide: at(img.width - 1, 0) };
+    }, row.src);
+
+    expect(px.w).toBe(4);                 // no resize at this size, so coordinates still mean something
+    expect(px.opaqueSide[3]).toBe(255);   // the red half stayed opaque
+    expect(px.clearSide[3]).toBe(0);      // the transparent half is still fully transparent
+    // The bug was alpha 255 with RGB 0,0,0 — opaque black. Alpha 0 is the whole assertion: the RGB
+    // channels under a fully transparent pixel are meaningless (premultiplication zeroes them) and
+    // nothing composites them, so they are deliberately NOT checked.
+
+    // An OPAQUE source still takes JPEG, which is the better trade for a photo.
+    const opaque = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    await page.locator('[data-testid="bg-row"]:has([data-testid="bg-upload-gallery"]) input[type=file]')
+      .setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from(opaque, 'base64') });
+    await expect.poll(async () => {
+      const a = await (await page.request.post('/api/getTableData', { data: { tableId: '_assets', tab: 'active' } })).json();
+      const r = (a.rows || []).find((x) => x.id === 'bg_gallery');
+      return r ? r.src.slice(0, r.src.indexOf(';')) : '';
+    }, { timeout: 8000 }).toBe('data:image/jpeg');
   });
 
   test('a stored javascript:/data:text/html cell value renders an EMPTY href, not the payload', async ({ page }) => {
@@ -2901,6 +3172,28 @@ test.describe('calendar view', () => {
     expect(joined).toContain('cal_bad1');
     expect(joined.toLowerCase()).toContain('must be a date column');
     expect(joined).toContain('non-existent table');
+  });
+
+  test('validateSchema flags a bad view background (bad source, fit, opacity, position)', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      window.VIEWS.bg_bad1 = { name: 'bg_bad1', sources: ['tasks'], columns: ['title'], background: { image: 'javascript:alert(1)' } };
+      window.VIEWS.bg_bad2 = { name: 'bg_bad2', sources: ['tasks'], columns: ['title'], background: { image: 'https://e.com/a.png', fit: 'strech', opacity: 4, position: 'middle' } };
+      window.VIEWS.bg_bad3 = { name: 'bg_bad3', sources: ['tasks'], columns: ['title'], background: 'https://e.com/a.png' }; // not an object
+      // Both accepted address forms, all modes valid -> no error at all.
+      window.VIEWS.bg_ok1 = { name: 'bg_ok1', sources: ['tasks'], columns: ['title'], background: { image: 'asset:bg_ok1', fit: 'width', width: 60, opacity: 0.4, position: 'top left' } };
+      window.VIEWS.bg_ok2 = { name: 'bg_ok2', sources: ['tasks'], columns: ['title'], background: { image: 'data:image/png;base64,iVBORw0KGgo=', fit: 'tile' } };
+      const errs = window.validateSchema();
+      ['bg_bad1', 'bg_bad2', 'bg_bad3', 'bg_ok1', 'bg_ok2'].forEach((n) => { delete window.VIEWS[n]; });
+      return { joined: errs.join(' | '), ok: errs.filter((e) => e.indexOf('bg_ok') >= 0) };
+    });
+    expect(r.joined).toContain('bg_bad1');
+    expect(r.joined).toContain('not a usable image source');
+    expect(r.joined).toContain('cover/contain/tile/width');   // bad fit
+    expect(r.joined).toContain('between 0 and 1');            // bad opacity
+    expect(r.joined).toContain('background.position');        // bad position
+    expect(r.joined).toContain('must be an object');          // bg_bad3
+    expect(r.ok).toEqual([]);                                 // asset: ref, data: URI and every mode accepted
   });
 
   test('validateSchema requires the rsvp responses table to have a ref to the events table', async ({ page }) => {

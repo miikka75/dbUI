@@ -217,6 +217,29 @@ service cloud.firestore {
       allow write: if request.auth != null && (noUsers() || role() == 'admin' || role() == 'editor');
     }
 
+    // Stored image assets: a view background or an image cell's bytes, kept as a raster data: URI in the
+    // DATABASE for deployments with no Storage bucket (Firebase Storage requires the Blaze plan, so on a
+    // free project uploadFile's put() fails at runtime). Same trade the _profiles avatar already makes.
+    //
+    // Read by every registered user: these are decoration, and an asset is displayed wherever the view or
+    // row that references it is displayed — the referencing row stays gated by its own rules, which is what
+    // actually controls who sees the image in context. Written by admins/editors, like page bodies.
+    //
+    // The shape is pinned so this can't become a general blob dump: exactly { id, src } (putRow persists
+    // the id inside the row, hence both keys), src a string within the cap. The cap must stay in step with
+    // supabase-schema.sql's app_valid_shape — rules-parity.test.js compares the two size-cap multisets.
+    // 900000 < Firestore's 1048576-byte document limit, leaving room for the rest of the document.
+    match /_assets__active/{doc} {
+      allow read:  if request.auth != null && isRegistered();
+      // create/update (not `write`): a delete carries no request.resource, so a shape test on it would
+      // ERROR rather than pass. Split like the _meta block does, so each verb tests only what exists.
+      allow create, update: if request.auth != null && (noUsers() || role() == 'admin' || role() == 'editor')
+                   && request.resource.data.keys().hasOnly(['id', 'src'])
+                   && request.resource.data.src is string
+                   && request.resource.data.src.size() <= 900000;
+      allow delete: if request.auth != null && (noUsers() || role() == 'admin' || role() == 'editor');
+    }
+
     // Data tables (never _meta or _lists). Read needs table access. Writes split into create/update/delete
     // so OWNER-SCOPED self-service rows work: a registered member may create/edit/delete ONLY their own
     // row (one carrying `owner == their email`), no table-editor grant required — this backs the RSVP /

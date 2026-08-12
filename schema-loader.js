@@ -145,6 +145,22 @@ function validateSchema() {
       if (!Array.isArray(view.access)) errors.push('doc-view "' + v + '": `access` must be an array of table names');
       else view.access.forEach(function(t) { if (t !== 'all' && !SCHEMA[t]) errors.push('doc-view "' + v + '": `access` references non-existent table "' + t + '"'); });
     }
+    // A view background is presentation, so nothing downstream fails loudly when it is malformed -- the
+    // image just silently doesn't appear. Check it here instead. `image` is either an `asset:<id>`
+    // reference (bytes in the _assets table, the no-bucket tier) or a URL safeImgSrc accepts; both
+    // predicates come from embeds.js, which loads before this fragment (see index.html appModulesReady).
+    if (view.background !== undefined) {
+      var bgv = view.background;
+      if (!bgv || typeof bgv !== 'object' || Array.isArray(bgv)) errors.push('View "' + v + '": `background` must be an object, e.g. { "image": "https://…", "fit": "cover" }');
+      else {
+        if (typeof bgv.image !== 'string' || !bgv.image) errors.push('View "' + v + '": `background.image` must be a non-empty string (an https URL or "asset:<id>")');
+        else if (!isAssetRef(bgv.image) && !safeImgSrc(bgv.image)) errors.push('View "' + v + '": `background.image` "' + bgv.image + '" is not a usable image source (http(s) URL, raster data: URI, or "asset:<id>")');
+        if (bgv.fit !== undefined && ['cover', 'contain', 'tile', 'width'].indexOf(bgv.fit) < 0) errors.push('View "' + v + '": `background.fit` must be one of cover/contain/tile/width');
+        if (bgv.fit === 'width' && bgv.width !== undefined && !(Number(bgv.width) >= 1 && Number(bgv.width) <= 100)) errors.push('View "' + v + '": `background.width` must be a percentage between 1 and 100');
+        if (bgv.opacity !== undefined && !(Number(bgv.opacity) >= 0 && Number(bgv.opacity) <= 1)) errors.push('View "' + v + '": `background.opacity` must be a number between 0 and 1');
+        if (bgv.position !== undefined && ['center', 'top', 'bottom', 'left', 'right', 'top left', 'top right', 'bottom left', 'bottom right'].indexOf(bgv.position) < 0) errors.push('View "' + v + '": `background.position` must be one of center/top/bottom/left/right or a corner pair like "top left"');
+      }
+    }
     // Check columns exist in at least one source (skip aggregate views)
     if (!view.groupBy) (view.columns || []).forEach(function(c) {
       if (isEmbed(c) || isViewEmbed(c) || isText(c) || (c && typeof c === 'object' && c.computed)) return;

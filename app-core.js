@@ -86,6 +86,33 @@ function mergeImportedConfig(currentConfig, importedConfig, mode) {
   return merged;
 }
 
+// --- Stored assets (the bucket-free image tier) ---
+// Max length of an _assets row's `src` data-URI string. Firestore rejects a document over 1048576
+// bytes outright, so the cap sits below that with room for the rest of the doc; Supabase's jsonb
+// would take far more, but both rule layers declare the SAME number (rules-parity.test.js compares
+// the multiset of size caps across firestore.rules and supabase-schema.sql, so a value raised on one
+// side only fails there rather than in production on one backend). _fitImageToCap re-encodes until an
+// image fits, so this bound is what decides achievable background quality (~1600px JPEG).
+var ASSET_CAP = 900000;
+
+// --- View background rendering modes ---
+// `fit` names an intent instead of exposing raw CSS: an enum keeps validateSchema able to reject a
+// typo, keeps the Settings picker a fixed list, and keeps arbitrary strings out of the style object.
+//   cover   fill the card, cropping overflow      (hero / backdrop photo — the default)
+//   contain fit entirely inside, may letterbox    (a diagram or logo shown whole)
+//   tile    natural size, repeated                (small texture / pattern)
+//   width   `<n>% auto` — scales to a percentage of the card's WIDTH with the image's own aspect
+//           ratio preserved, height following from it (centered watermark). `width` supplies n.
+var BG_FITS = {
+  cover:   { size: 'cover',   repeat: 'no-repeat' },
+  contain: { size: 'contain', repeat: 'no-repeat' },
+  tile:    { size: 'auto',    repeat: 'repeat' },
+  width:   { size: null,      repeat: 'no-repeat' }   // size computed from `width`
+};
+// background-position allowlist. With `cover` this is what decides which part of the image survives
+// the crop, so a short card can still show a photo's subject rather than its middle.
+var BG_POSITIONS = ['center', 'top', 'bottom', 'left', 'right', 'top left', 'top right', 'bottom left', 'bottom right'];
+
 var app; // Vue app instance
 var appInstance; // Mounted root component proxy
 var backend; // Set by backend adapter loaded after this file
@@ -196,7 +223,10 @@ function createVueApp() {
       syncing: false,
       snackbar: false,
       snackText: '',
-      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false },
+      // _collapseBackgrounds starts COLLAPSED (unlike the others): the section is one row per navigable
+      // screen, so expanded by default it pushes everything below it off-screen — which also stops
+      // Vuetify's v-img from ever rendering the profile avatar, since v-img loads on intersection.
+      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false, _collapseBackgrounds: true },
       appConfig: null,
       saveTimers: {},
       pendingDelete: null,
@@ -207,6 +237,9 @@ function createVueApp() {
       pageEditing: false,
       pageEditText: '',
       pageCache: {},
+      assetCache: {},   // { '<assetId>': dataUri | '' } — '' is a cached MISS (missing/denied), so render never re-requests
+      _assetPending: {},// in-flight asset reads, so a repeated render can't queue the same fetch twice
+      bgBusy: '',       // view name whose background upload is in flight (Settings spinner)
       expandedCard: null,
       listSwitchOverrides: {}, // {itemId_col: true} — tracks which cells are toggled to alt list
     }; },
@@ -279,6 +312,34 @@ function createVueApp() {
           { key: 'on-surface', label: 'Text' }, { key: 'error', label: 'Error' }, { key: 'success', label: 'Success' }
         ];
       },
+      // Screens a background can be set on: the navigable tabs, flattened (groups contribute their
+      // children, not themselves), minus the system screens. Titles come from sidebarTabs already
+      // translated, so the Settings list needs no key of its own per view.
+      backgroundTargets: function() {
+        var out = [];
+        (this.sidebarTabs || []).forEach(function(t) {
+          if (!t || t.divider) return;
+          if (t.children) { t.children.forEach(function(c) { if (c && c.id) out.push({ id: c.id, title: c.title }); }); return; }
+          if (String(t.id).slice(0, 4) === 'grp:' || String(t.id).slice(0, 2) === '__') return;
+          out.push({ id: t.id, title: t.title });
+        });
+        return out;
+      },
+      // `fit` options for the Settings picker (see BG_FITS for what each maps to). Keys are spelled out
+      // rather than built as 'bg.fit_' + k: the translation-keys drift guard scans for literal t('…')
+      // arguments, and a concatenation would register the useless partial key 'bg.fit_' instead.
+      bgFitItems: function() {
+        return [
+          { value: 'cover',   title: this.t('bg.fit_cover') },
+          { value: 'contain', title: this.t('bg.fit_contain') },
+          { value: 'tile',    title: this.t('bg.fit_tile') },
+          { value: 'width',   title: this.t('bg.fit_width') }
+        ];
+      },
+      // background-position as a 3x3 grid of cells, so the picker is visual and needs no label per value.
+      bgPositionGrid: function() {
+        return [['top left', 'top', 'top right'], ['left', 'center', 'right'], ['bottom left', 'bottom', 'bottom right']];
+      },
       // Single classifier for the current view's kind + the top-level component registry dispatch.
       // Every kind maps to a component in VIEW_KINDS; an unclassified view returns null (nothing renders).
       viewKind: function() {
@@ -296,6 +357,10 @@ function createVueApp() {
         return null;
       },
       viewComponent: function() { return (window.VIEW_KINDS || {})[this.viewKind] || null; },
+      // Background for the open view, bound onto the dispatched component in ui.html. Every view kind's
+      // template has a single root element, so Vue's attribute fallthrough merges this onto that card —
+      // one binding covers all eight kinds instead of a per-template change.
+      viewBackground: function() { return this.backgroundStyleFor(this.currentTable); },
       // Calendar rendering state (mode/anchor/selection + derived cells) lives in the calendar-view
       // component now; the root keeps only the pure model helpers (calEventsFor, _calCells*, _calWindowFor).
       rotationViewCols: function() { return this.rotationColsFor(this.currentTable, this.currentData || []); },
@@ -481,7 +546,9 @@ function createVueApp() {
         if (layout === 'card' || layout === 'list') return true;
         if (layout === 'table') return false;
         if (this.windowWidth < 600) return true;
-        var needed = this.visibleCols.length * 130 + 100;
+        // declaredCols, NOT visibleCols: visibleCols applies hideEmpty only in table mode and so reads
+        // this computed back — see declaredCols for the cycle that split fixes.
+        var needed = this.declaredCols.length * 130 + 100;
         return needed > (this.windowWidth - 72);
       },
       useListLayout: function() { return this.currentConfig.layout === 'list'; },
@@ -566,19 +633,27 @@ function createVueApp() {
       // Doc-view bodies are writable by admins/editors (mirrors the _pages__active rule / dev-server
       // gate); viewers get a read-only page with no Edit button instead of a save that would 403.
       canEditPages: function() { return this.isAdmin || this.currentUserRole === 'editor'; },
-      visibleCols: function() {
+      // The columns the SCHEMA declares for this screen, before any data-dependent filtering. Split out of
+      // visibleCols to break a genuine dependency cycle: the auto card/table decision is made from how
+      // many columns there are, while hideEmpty drops columns only in table mode — so useCardLayout wanted
+      // visibleCols and visibleCols wanted useCardLayout. Reading either one first re-entered the other
+      // mid-evaluation; whichever way Vue resolved that, one of them saw a bogus value, and entering
+      // through visibleCols recursed until the stack blew. Deciding layout from the DECLARED count is also
+      // the more stable rule: the layout no longer flips as rows are added or emptied.
+      declaredCols: function() {
         var self = this;
         if (!this.currentTable) return [];
         var view = VIEWS[this.currentTable];
-        var cols;
-        if (view) { cols = (view.columns || []).filter(function(c) { return !isEmbed(c) && !isViewEmbed(c); }).map(function(c) { return colName(c); }); }
-        else {
-          cols = getColumns(this.currentTable).filter(function(c) {
-            if (c === 'id') return false;
-            var def = SCHEMA[self.currentTable].columns[c];
-            return !(def && typeof def === 'object' && def.hidden);
-          });
-        }
+        if (view) return (view.columns || []).filter(function(c) { return !isEmbed(c) && !isViewEmbed(c); }).map(function(c) { return colName(c); });
+        return getColumns(this.currentTable).filter(function(c) {
+          if (c === 'id') return false;
+          var def = SCHEMA[self.currentTable].columns[c];
+          return !(def && typeof def === 'object' && def.hidden);
+        });
+      },
+      visibleCols: function() {
+        var self = this;
+        var cols = this.declaredCols;
         // hideEmpty (table mode): drop a column when empty across all rows -- view default, overridable per-column via {name, hideEmpty}
         if (!this.useCardLayout && this.sortedData.length) {
           var data = this.sortedData;
@@ -604,6 +679,9 @@ function createVueApp() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
          'btn.edit', 'btn.preview', 'btn.save', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
+         // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
+         'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
+         'bg.fit', 'bg.fit_cover', 'bg.fit_contain', 'bg.fit_tile', 'bg.fit_width',
          'msg.saved', 'msg.save_failed', 'msg.upload_failed', 'msg.choose_image', 'msg.image_too_large', 'msg.image_read_failed', 'msg.image_invalid', 'msg.image_process_failed',
          'msg.row_added', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.synced', 'msg.sync_failed',
          'msg.load_failed', 'msg.request_failed', 'msg.approve_failed', 'msg.import_complete',
@@ -617,6 +695,7 @@ function createVueApp() {
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
+         'settings.backgrounds',
          'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.tables_view', 'settings.add_user', 'settings.all',
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset',
@@ -2361,6 +2440,103 @@ function createVueApp() {
         cfg.mode = this.mode;
         this._saveFolderConfig(cfg, viewName);
       },
+      // --- Per-view background image -------------------------------------------------------------------
+      // Two layers, like rangeForView: the schema declares a default (`views[x].background`, shipped with
+      // the deployment) and the synced folder config overrides it per view (`appConfig.backgrounds[x]`,
+      // editable in Settings without rewriting the schema doc). `image` is one string: an http(s) URL or
+      // an `asset:<id>` reference resolved through _assets.
+      backgroundForView: function(name) {
+        var v = VIEWS[name];
+        var base = (v && v.background) || {};
+        var ov = ((this.appConfig && this.appConfig.backgrounds) || {})[name] || {};
+        return Object.assign({}, base, ov);
+      },
+      // The style object bound onto the view card.
+      //
+      // `opacity` is faked, because it has to be: CSS has no background-image-opacity, and element
+      // `opacity` would fade the view's CONTENT along with the image. So a scrim — a flat translucent
+      // layer — is stacked over the image inside the same background-image list. Using the theme's own
+      // `surface` color for it means the fade follows the light/dark toggle and body text keeps its
+      // contrast for free. Scrim alpha is 1 - opacity, so opacity 1 = untouched image, 0 = invisible.
+      //
+      // `fit` is a small enum rather than raw CSS: four named intents cover what people actually want,
+      // stay checkable in validateSchema, and keep arbitrary strings out of the style object. `width`
+      // is the aspect-preserving one — `<n>% auto` scales to a fraction of the container's WIDTH and
+      // lets height follow the image's own ratio (a centered watermark/logo).
+      //
+      // Object form is required, not cosmetic: Vue applies it via el.style.setProperty, which parses
+      // exactly one declaration, so a hostile URL cannot append further CSS (see safeCssUrl).
+      backgroundStyleFor: function(name) {
+        var bg = this.backgroundForView(name);
+        var url = bg && bg.image ? safeCssUrl(this.assetSrc(bg.image)) : '';
+        if (!url) return null;
+        var op = (bg.opacity == null) ? 0.5 : Math.max(0, Math.min(1, Number(bg.opacity)));
+        var scrim = 'rgba(var(--v-theme-surface),' + (1 - op) + ')';
+        var fit = BG_FITS[bg.fit] ? bg.fit : 'cover';
+        var size = fit === 'width'
+          ? (Math.max(1, Math.min(100, Number(bg.width) || 50)) + '% auto')
+          : BG_FITS[fit].size;
+        return {
+          backgroundImage: 'linear-gradient(' + scrim + ',' + scrim + '),' + url,
+          backgroundSize: size,
+          backgroundPosition: BG_POSITIONS.indexOf(bg.position) >= 0 ? bg.position : 'center',
+          backgroundRepeat: BG_FITS[fit].repeat,
+          // `fixed` pins the image to the viewport (a parallax "window" effect). Known to be unreliable
+          // on iOS Safari — it degrades to scroll or jumps — so it stays opt-in rather than the default.
+          backgroundAttachment: bg.fixed ? 'fixed' : 'scroll'
+        };
+      },
+      // Admin: set/clear a view's background in the synced folder config (NOT the schema — no full schema
+      // rewrite to swap a picture). Same write path as the rotation controls: optimistic locally for
+      // everyone, written through to the DB only by an admin, with a notice if the rule denies it.
+      // Clearing needs care because the config OVERRIDES the schema rather than replacing it: simply
+      // dropping the entry restores whatever `views[x].background` declares, so on a view with a
+      // schema-declared background the remove button looked like it had failed. So an empty image is kept
+      // as an explicit `{ image: '' }` TOMBSTONE — the override that means "none" — and the entry is only
+      // deleted when there is no schema default for it to override (which keeps the config free of
+      // tombstones that say nothing). restoreViewBackground deletes it to bring the default back.
+      saveViewBackground: function(viewName, patch) {
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.backgrounds = Object.assign({}, cfg.backgrounds || {});
+        var next = Object.assign({}, cfg.backgrounds[viewName], patch);
+        if (!next.image && !this.schemaBackground(viewName)) delete cfg.backgrounds[viewName];
+        else if (!next.image) cfg.backgrounds[viewName] = { image: '' };   // tombstone: hide the schema default
+        else cfg.backgrounds[viewName] = next;
+        cfg.mode = this.mode;
+        this._saveFolderConfig(cfg, viewName);
+      },
+      // The schema's declared background for a view, if any (what a tombstone hides / restore brings back).
+      schemaBackground: function(viewName) {
+        var v = VIEWS[viewName];
+        return (v && v.background && v.background.image) ? v.background : null;
+      },
+      // Is this view's background currently a tombstone hiding a schema default?
+      backgroundHidden: function(viewName) {
+        var ov = ((this.appConfig && this.appConfig.backgrounds) || {})[viewName];
+        return !!(ov && !ov.image && this.schemaBackground(viewName));
+      },
+      // Drop the override entirely, so the schema-declared background applies again.
+      restoreViewBackground: function(viewName) {
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.backgrounds = Object.assign({}, cfg.backgrounds || {});
+        delete cfg.backgrounds[viewName];
+        cfg.mode = this.mode;
+        this._saveFolderConfig(cfg, viewName);
+      },
+      // Settings: pick a file for a view's background -> store it as the asset `bg_<view>` and point at it.
+      uploadViewBackground: function(viewName, ev) {
+        var self = this, input = ev && ev.target, file = input && input.files && input.files[0];
+        if (input) input.value = '';            // reset so re-picking the same file fires @change again
+        if (!file) return;
+        this.bgBusy = viewName;
+        this.saveAsset('bg_' + viewName, file).then(function(ref) {
+          self.bgBusy = '';
+          self.saveViewBackground(viewName, { image: ref });
+        }).catch(function(e) {
+          self.bgBusy = '';
+          self.notify((e && e.message) || self.t('msg.upload_failed'));
+        });
+      },
       // Per-view range override (periods + optional fixed start) in synced folder config
       // rotationRanges[viewName], merged over the schema rotation.range default — mirrors the per-view
       // anchor. A blank/removed `from` rolls from "today"; clearing `periods` falls back to the schema default.
@@ -2672,9 +2848,30 @@ function createVueApp() {
         this.myProfile.picture = '';
         this.saveMyProfile();
       },
+      // Does anything on this canvas carry partial or full transparency? Decides the encoder below.
+      // Breaks on the first non-opaque pixel, so an opaque photo is the only case that scans in full.
+      // If the pixels can't be read at all (a tainted canvas — not reachable from a FileReader data URL,
+      // but cheap to be safe about) assume alpha: the alpha-capable encoder is the lossless choice.
+      _canvasHasAlpha: function(ctx, w, h) {
+        try {
+          var d = ctx.getImageData(0, 0, w, h).data;
+          for (var i = 3; i < d.length; i += 4) { if (d[i] < 255) return true; }
+          return false;
+        } catch (e) { return true; }
+      },
       // Downscale an image File to a data-URL whose longest side is <= max, preserving aspect ratio.
-      _resizeImageFile: function(file, max) {
+      // `quality` is the encoder quality (default 0.85 — the avatar setting); _fitImageToCap steps it
+      // down to land a larger image (a view background) under ASSET_CAP.
+      //
+      // The output format FOLLOWS THE SOURCE. JPEG has no alpha channel, and a canvas starts as
+      // transparent BLACK — so re-encoding a transparent PNG as JPEG turned every transparent pixel
+      // opaque black, which is how a logo watermark became a black slab. Transparency therefore switches
+      // the encoder to WebP, which carries alpha and is typically smaller than JPEG for graphic-style
+      // images; a browser that won't encode WebP returns PNG instead, which also keeps alpha. Opaque
+      // photos still take JPEG, where it is the better trade. safeImgSrc already admits all three.
+      _resizeImageFile: function(file, max, quality) {
         var self = this;
+        var q = (typeof quality === 'number') ? quality : 0.85;
         return new Promise(function(resolve, reject) {
           var reader = new FileReader();
           reader.onerror = function() { reject(new Error(self.t('msg.image_read_failed'))); };
@@ -2687,14 +2884,109 @@ function createVueApp() {
               var canvas = document.createElement('canvas');
               canvas.width = cw; canvas.height = ch;
               try {
-                canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
-                resolve(canvas.toDataURL('image/jpeg', 0.85));
+                var ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, cw, ch);
+                var type = self._canvasHasAlpha(ctx, cw, ch) ? 'image/webp' : 'image/jpeg';
+                resolve(canvas.toDataURL(type, q));
               } catch (err) { reject(new Error(self.t('msg.image_process_failed'))); }
             };
             img.src = String(reader.result || '');
           };
           reader.readAsDataURL(file);
         });
+      },
+
+      // --- Stored assets: an image kept IN THE DATABASE as a data URI, for deployments with no blob
+      // store (Firebase Spark, where Storage needs the Blaze plan). Same trade the profile avatar makes.
+      // Rows live in _assets__active as { id, src }; a referring value is the string 'asset:<id>'.
+
+      // Downscale `file` until its data URI fits ASSET_CAP, trading resolution then quality. Rejects with
+      // msg.image_too_large when even the smallest step is too big (a pathological source, since 900px at
+      // q0.6 is tens of KB for any real photo). Note the quality steps do nothing on a browser that falls
+      // back to PNG for a transparent source (PNG is lossless) — there the resolution steps do the work.
+      _fitImageToCap: function(file, cap) {
+        var self = this, limit = cap || ASSET_CAP;
+        var steps = [{ max: 1600, q: 0.8 }, { max: 1600, q: 0.65 }, { max: 1200, q: 0.65 }, { max: 900, q: 0.6 }];
+        var attempt = function(i) {
+          if (i >= steps.length) return Promise.reject(new Error(self.t('msg.image_too_large')));
+          return self._resizeImageFile(file, steps[i].max, steps[i].q).then(function(dataUrl) {
+            return dataUrl.length <= limit ? dataUrl : attempt(i + 1);
+          });
+        };
+        return attempt(0);
+      },
+      // Store a picked file as the asset `id`, resolving to the reference to save on the row / in config.
+      // Deterministic ids (bg_<view>) overwrite in place, so replacing a background leaves no orphan.
+      saveAsset: function(id, file) {
+        var self = this;
+        if (!backend.putRow) return Promise.reject(new Error(self.t('msg.save_failed')));
+        if (!/^image\//.test((file && file.type) || '')) return Promise.reject(new Error(self.t('msg.choose_image')));
+        return this._fitImageToCap(file, ASSET_CAP).then(function(src) {
+          return Promise.resolve(backend.putRow('_assets', { id: id, src: src }, 'active')).then(function() {
+            self.assetCache[id] = src;               // show it immediately, no round-trip
+            return 'asset:' + id;
+          });
+        });
+      },
+      // Resolved src for an image address. PURE cache read: render must not start a fetch, so misses come
+      // back '' and ensureAssets (called from loadTableData) is what fills the cache. A plain URL passes
+      // through the same <img src> gate the image cells use.
+      assetSrc: function(ref) {
+        if (!isAssetRef(ref)) return safeImgSrc(ref);
+        var v = this.assetCache[Embeds.assetId(ref)];
+        return v ? safeImgSrc(v) : '';
+      },
+      // Fetch any not-yet-cached asset refs. Single-doc reads where the backend offers getAsset (see
+      // backend-firebase: _assets is a system store no grant names, so the collection read returns []
+      // for non-admins); otherwise one collection read fills every miss at once. Misses cache as ''.
+      ensureAssets: function(refs) {
+        var self = this;
+        var want = (refs || []).filter(isAssetRef).map(function(r) { return Embeds.assetId(r); })
+          .filter(function(id) { return !(id in self.assetCache) && !self._assetPending[id]; });
+        if (!want.length) return Promise.resolve();
+        want.forEach(function(id) { self._assetPending[id] = true; });
+        var done = function(id, src) { self.assetCache[id] = src || ''; delete self._assetPending[id]; };
+        if (backend.getAsset) {
+          return Promise.all(want.map(function(id) {
+            return Promise.resolve(backend.getAsset(id))
+              .then(function(a) { done(id, a && a.src); })
+              .catch(function() { done(id, ''); });
+          }));
+        }
+        return Promise.resolve(backend.getTableData('_assets', 'active')).then(function(d) {
+          var byId = {};
+          ((d && d.rows) || []).forEach(function(r) { if (r && r.id) byId[r.id] = r.src || ''; });
+          want.forEach(function(id) { done(id, byId[id]); });
+        }).catch(function() { want.forEach(function(id) { done(id, ''); }); });
+      },
+      // The open view's background asset. Driven by a watcher on currentTable (see below), NOT from
+      // loadTableData: selectTab only calls that for the data-ish kinds, sending a doc view to loadPage
+      // and the system screens to neither — so a background on any of those was never fetched, and one
+      // set in an earlier session simply never appeared.
+      _refreshBgAsset: function() {
+        var self = this;
+        var bg = this.backgroundForView(this.currentTable);
+        if (bg && bg.image) this.ensureAssets([bg.image]);
+        // Settings is the one screen that displays OTHER views' backgrounds (a thumbnail per row), so it
+        // needs all of their bytes, not just its own. Without this every row for a view not yet visited
+        // this session showed the "no background" placeholder even though one was set.
+        if (this.currentTable === '__settings') {
+          this.ensureAssets(this.backgroundTargets.map(function(t) { return self.backgroundForView(t.id).image; }).filter(Boolean));
+        }
+      },
+      // Asset refs held by cells in the rows now on screen. Driven by a watcher on currentData rather than
+      // from loadTableData, so it covers every view kind's load path without touching each.
+      //
+      // Resolves image columns from declaredCols, NOT visibleCols: which columns hold images is a schema
+      // question, and visibleCols additionally answers a presentation one (hideEmpty in table mode) that
+      // nothing here needs. It is also the read that originally exposed the computed cycle — reading
+      // visibleCols from this watcher while a grid rendered blew the stack (see declaredCols).
+      _refreshRowAssets: function() {
+        var self = this, refs = [];
+        var imgCols = (this.declaredCols || []).filter(function(c) { return self.colIsImage(c); });
+        if (!imgCols.length) return;
+        (this.currentData || []).forEach(function(r) { imgCols.forEach(function(c) { if (r && r[c]) refs.push(r[c]); }); });
+        if (refs.length) this.ensureAssets(refs);
       },
       // Admin: every user's display name, for the Users management table (own name uses
       // myProfile/saveMyProfile above instead -- this is for viewing/editing OTHER users' names).
@@ -2984,8 +3276,17 @@ function createVueApp() {
           self.notify(self.t('msg.exported'));
         };
         chain.then(function() {
-          return Promise.resolve(backend.getTableData('_pages', 'active')).then(function(d) {
+          // _pages and _assets are SYSTEM stores, so neither is in `tables` above (that map is built from
+          // Object.keys(SCHEMA)) — each needs an explicit read to reach the bundle. Assets carry the actual
+          // image bytes as data URIs; without them an import lands with `asset:` references resolving to
+          // nothing, i.e. a blank background and broken thumbnails.
+          return Promise.all([
+            Promise.resolve(backend.getTableData('_pages', 'active')).catch(function() { return null; }),
+            Promise.resolve(backend.getTableData('_assets', 'active')).catch(function() { return null; })
+          ]).then(function(res) {
+            var d = res[0], da = res[1];
             var pages = (d && d.rows || []).filter(function(r) { return r.id && r.markdown; });
+            var assets = (da && da.rows || []).filter(function(r) { return r.id && r.src; }).map(function(r) { return { id: r.id, src: r.src }; });
             // Export columns as the documented array-of-objects form (strip runtime-injected id; restore order + name).
             var schema = JSON.parse(JSON.stringify(self.schemaData));
             if (schema.tables) Object.keys(schema.tables).forEach(function(t) {
@@ -3000,7 +3301,10 @@ function createVueApp() {
               }
             });
             convertViewFilters(schema.views);   // emit array-IN filters as explicit $or (forward-deprecation)
-            download(schema, pages.length ? { pages: pages } : {});
+            var extras = {};
+            if (pages.length) extras.pages = pages;
+            if (assets.length) extras.assets = assets;
+            download(schema, extras);
           }).catch(function() {
             var schema = JSON.parse(JSON.stringify(self.schemaData));
             if (schema.tables) Object.keys(schema.tables).forEach(function(t) { var c = schema.tables[t].columns; if (c) { delete c.id; } delete schema.tables[t].partition; delete schema.tables[t].archivePartition; });
@@ -3039,6 +3343,11 @@ function createVueApp() {
             var langCodes = imported.translations ? Object.keys(imported.translations) : [];
             var pages = (imported.pages && Array.isArray(imported.pages))
               ? imported.pages.filter(function(p) { return p.id && p.markdown; }) : [];
+            // Stored image assets (view backgrounds / image-cell bytes as data URIs). Over-cap entries are
+            // dropped here rather than attempted: both production rule layers reject them, so importing one
+            // would only produce a failure row in the progress report.
+            var assets = (imported.assets && Array.isArray(imported.assets))
+              ? imported.assets.filter(function(a) { return a && a.id && typeof a.src === 'string' && a.src.length <= ASSET_CAP; }) : [];
 
             // Progress + failure state. Two things were wrong before: the run gave no sign of life for the
             // ~minute it takes on a real database, and — worse — the whole thing was ONE serial promise
@@ -3048,7 +3357,7 @@ function createVueApp() {
             var prog = {
               active: true, done: 0, icon: 'mdi-timer-sand', detail: '', errors: [], finished: false,
               total: (imported.schema ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
-                   + langCodes.length + pages.length + (imported.config ? 1 : 0) + 1
+                   + langCodes.length + pages.length + assets.length + (imported.config ? 1 : 0) + 1
             };
             self.importProgress = prog;
             prog = self.importProgress;   // Vue hands back a reactive proxy; mutate THAT or the UI never updates
@@ -3111,6 +3420,11 @@ function createVueApp() {
             pages.forEach(function(page) {
               chain = chain.then(step('mdi-file-document-outline', page.id, function() {
                 return backend.putRow('_pages', { id: page.id, markdown: page.markdown }, 'active');
+              }));
+            });
+            assets.forEach(function(asset) {
+              chain = chain.then(step('mdi-image-outline', asset.id, function() {
+                return backend.putRow('_assets', { id: asset.id, src: asset.src }, 'active');
               }));
             });
             // Restore portable folder config (rotationAnchors, rotationRanges, any future portable key),
@@ -3515,6 +3829,15 @@ function createVueApp() {
     },
 
     watch: {
+      // Screen changed -> fetch the bytes of its background asset, if it has one. Watching currentTable
+      // (rather than hooking a load path) is what makes this work on EVERY kind: selectTab routes doc
+      // views to loadPage and the system screens to nothing at all, so anything hung off loadTableData
+      // covers only some of the screens a background can be set on. `immediate` covers the first paint,
+      // where currentTable is already set by the time the watcher is registered.
+      currentTable: { immediate: true, handler: function() { this._refreshBgAsset(); } },
+      // Rows on screen changed -> fetch any stored-asset bytes their image cells point at. A watcher
+      // rather than a loadTableData call because every view kind fills currentData by its own path.
+      currentData: function() { this._refreshRowAssets(); },
       loading: function(v) {
         // Boot-time marker for perf measurement: record ms from navigation to first ready state.
         if (!v && typeof window !== 'undefined' && window.__bootMs == null) {
@@ -3620,6 +3943,13 @@ function createVueApp() {
     // <img src>) also allows a raster data:image. Both share embeds.js so mdToHtml and the cells agree.
     safeHref: function(u) { return (typeof safeUrl === 'function') ? safeUrl(u) : ''; },
     safeImg: function(u) { return (typeof safeImgSrc === 'function') ? safeImgSrc(u) : ''; },
+    // Any image cell value -> a usable <img src>. An `asset:<id>` reference (a file stored IN the
+    // database, for deployments with no bucket) resolves through the asset cache; anything else is a
+    // plain URL and goes through safeImg. Use this, not safeImg, wherever a cell value is rendered.
+    imgSrc: function(u) { return appInstance ? appInstance.assetSrc(u) : ''; },
+    // Asset-backed values have no meaningful href (safeUrl rejects data:), so the cell drops the
+    // "open in a new tab" wrapper for them rather than emitting an <a> with an empty href.
+    isAsset: function(u) { return (typeof isAssetRef === 'function') ? isAssetRef(u) : false; },
     toDateStr: toDateStr
   };
 
@@ -3818,25 +4148,42 @@ function createVueApp() {
       toggleListSwitch: function(col, item) { return appInstance.toggleListSwitch(col, item); },
       save: function(item, col, val) { return appInstance.saveField(item, col, val, this.owner); },
       addToListOnBlur: function(item, col) { return appInstance.addToListOnBlur(item, col); },
-      // image column: upload the picked file to the backend blob store (Firebase Storage), then save the
-      // returned URL onto the row (the row holds the URL, never the bytes). Transient per-cell status.
+      // image column: store the picked file and save a REFERENCE onto the row (never the bytes inline).
+      // Two sinks, tried in order:
+      //   1. the backend blob store (Firebase/Supabase Storage, the dev file store) -> row holds a URL;
+      //   2. the _assets table -> row holds 'asset:<id>', a data URI kept in the database.
+      // The fallback fires on absence AND on rejection, and the rejection half is the load-bearing one:
+      // canUploadFiles() is a CAPABILITY check, not an availability one — backend-firebase exposes
+      // uploadFile whenever Storage initialized, so on a Spark project (Storage needs Blaze) the presence
+      // test passes and the put() fails at runtime. Without the catch, that user could never attach a file.
       uploadImage: function(item, col, ev) {
         var self = this, file = ev.target.files && ev.target.files[0];
         ev.target.value = '';                 // reset so re-picking the same file fires change again
         if (!file) return;
         this.uploadErr = ''; this.uploading = true;
-        appInstance.uploadFile(file, { table: this.owner || appInstance.currentTable, col: col, rowId: item.id }).then(function(url) {
-          self.uploading = false; self.save(item, col, url);
+        var table = this.owner || appInstance.currentTable;
+        var toAsset = function() {
+          var id = 'img_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+          return appInstance.saveAsset(id, file);
+        };
+        var stored = appInstance.canUploadFiles()
+          ? appInstance.uploadFile(file, { table: table, col: col, rowId: item.id }).catch(toAsset)
+          : toAsset();
+        stored.then(function(ref) {
+          self.uploading = false; self.save(item, col, ref);
         }).catch(function(e) {
           self.uploading = false; self.uploadErr = (e && e.message) || self.t('msg.upload_failed');
         });
       }
     }),
     data: function() { return { uploading: false, uploadErr: '' }; },
-    computed: { canUpload: function() { return appInstance.canUploadFiles(); } },
+    // An upload button appears whenever the file can be stored SOMEWHERE — a blob store, or the _assets
+    // table via putRow. Only a backend that can do neither falls back to the paste-a-URL field.
+    computed: { canUpload: function() { return appInstance.canUploadFiles() || !!(typeof backend !== 'undefined' && backend && backend.putRow); } },
     template: ''
       + '<span v-if="cellRO(item, col)" :style="{ opacity: embed ? 0.4 : 0.75 }">'
-      +   '<a v-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="safeImg(item[col])" class="cell-thumb" alt=""></a>'
+      +   '<img v-if="colIsImage(col) && item[col] && isAsset(item[col])" :src="imgSrc(item[col])" class="cell-thumb" alt="">'
+      +   '<a v-else-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="imgSrc(item[col])" class="cell-thumb" alt=""></a>'
       +   '<a v-else-if="colIsUrl(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop>{{ item[col] }}</a>'
       +   '<template v-else><list-value :col="col" :value="item[col]"></list-value></template>'
       + '</span>'
@@ -3857,13 +4204,18 @@ function createVueApp() {
       + '</v-autocomplete>'
       + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
       + '<div v-else-if="colIsImage(col)" class="d-flex align-center" style="gap:6px;min-width:0">'
-      +   '<a v-if="item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="safeImg(item[col])" class="cell-thumb" alt=""></a>'
+      +   '<img v-if="item[col] && isAsset(item[col])" :src="imgSrc(item[col])" class="cell-thumb" alt="">'
+      +   '<a v-else-if="item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="imgSrc(item[col])" class="cell-thumb" alt=""></a>'
       +   '<template v-if="canUpload">'
       +     '<input type="file" accept="image/*" ref="imgInput" style="display:none" @change="uploadImage(item, col, $event)">'
       +     '<v-btn size="x-small" variant="text" :loading="uploading" :icon="item[col] ? \'mdi-image-edit\' : \'mdi-camera-plus\'" :title="item[col] ? t(\'img.replace\') : t(\'img.upload\')" @click="$refs.imgInput.click()"></v-btn>'
       +     '<v-btn v-if="item[col]" size="x-small" variant="text" icon="mdi-close" :title="t(\'img.remove\')" @click="save(item, col, \'\')"></v-btn>'
       +   '</template>'
-      +   '<input v-else type="url" :value="item[col] || \'\'" @change="save(item, col, $event.target.value)" :placeholder="t(\'img.url\')" spellcheck="false" style="border:none;background:transparent;color:inherit;font:inherit;flex:1;min-width:60px">'
+      // The paste-a-URL field stays available ALONGSIDE the upload button, not as its fallback: an external
+      // URL (a CDN, a shared drive) is a legitimate third way to hold the image, and uploading is now
+      // almost always possible (blob store or _assets), which would otherwise have hidden this field for
+      // good. Suppressed only for an asset-backed value, where 'asset:<id>' is nothing a user can edit.
+      +   '<input v-if="!isAsset(item[col])" type="url" :value="item[col] || \'\'" @change="save(item, col, $event.target.value)" :placeholder="t(\'img.url\')" spellcheck="false" style="border:none;background:transparent;color:inherit;font:inherit;flex:1;min-width:60px">'
       +   '<v-icon v-if="uploadErr" size="x-small" color="error" :title="uploadErr">mdi-alert-circle</v-icon>'
       + '</div>'
       + '<div v-else-if="colIsUrl(col)" class="d-flex align-center" style="gap:4px;min-width:0">'
@@ -4015,7 +4367,8 @@ function createVueApp() {
       + '<v-list density="compact">'
       + '<v-list-item v-for="item in rows" :key="item.id" class="px-2">'
       + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" class="d-inline-flex align-center" style="font-size:0.85rem">'
-      +   '<a v-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="safeImg(item[col])" class="cell-thumb" alt=""></a>'
+      +   '<img v-if="colIsImage(col) && item[col] && isAsset(item[col])" :src="imgSrc(item[col])" class="cell-thumb" alt="">'
+      +   '<a v-else-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="imgSrc(item[col])" class="cell-thumb" alt=""></a>'
       +   '<list-value v-else :col="col" :value="item[col]"></list-value>'
       +   '<span v-if="i < cols.length - 1" style="opacity:0.3; margin:0 6px">·</span>'
       + '</span></template>'

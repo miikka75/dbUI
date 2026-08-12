@@ -55,6 +55,13 @@ html, body { margin: 0; padding: 0; height: 100%; background: #1a1a1a; }
 /* rsvp roster: each person is an inline avatar + name chip; groups wrap without splitting a person */
 .rsvp-roster-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .rsvp-person { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+/* background-position picker (Settings -> Backgrounds): a 3x3 grid standing in for the nine keyword
+   positions. Every cell carries a resting fill so the grid reads as a control — an outline-only cell was
+   effectively invisible, leaving just the selected square visible and nothing to suggest it was clickable. */
+.bg-pos-grid { display: inline-flex; flex-direction: column; gap: 3px; padding: 3px; border-radius: 5px; background: rgb(var(--v-theme-on-surface), 0.05); }
+.bg-pos-cell { width: 15px; height: 15px; border-radius: 3px; cursor: pointer; background: rgb(var(--v-theme-on-surface), 0.16); transition: background 0.15s; }
+.bg-pos-cell:hover { background: rgb(var(--v-theme-on-surface), 0.34); }
+.bg-pos-cell--on, .bg-pos-cell--on:hover { background: rgb(var(--v-theme-primary)); }
 /* image-column thumbnail (data-cell): fixed-height preview that links to the full image */
 .cell-thumb { height: 36px; max-width: 96px; object-fit: cover; border-radius: 4px; border: 1px solid rgb(var(--v-theme-outline), 0.3); display: block; }
 td { vertical-align: middle; padding: 4px 8px !important; }

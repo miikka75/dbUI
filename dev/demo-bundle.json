@@ -491,7 +491,21 @@
       "list.ticket_stages.in_progress": "In progress",
       "list.ticket_stages.in_review": "In review",
       "list.ticket_stages.shipped": "Shipped",
-      "list.ticket_stages.wont_fix": "Won't fix"
+      "list.ticket_stages.wont_fix": "Won't fix",
+      "settings.backgrounds": "Background images",
+      "bg.upload": "Add background",
+      "bg.replace": "Replace background",
+      "bg.remove": "Remove background",
+      "bg.opacity": "Opacity",
+      "bg.position": "Position",
+      "bg.width": "Width",
+      "bg.fixed": "Fixed while scrolling",
+      "bg.fit": "Fit",
+      "bg.fit_cover": "Fill",
+      "bg.fit_contain": "Fit whole",
+      "bg.fit_tile": "Tile",
+      "bg.fit_width": "Scale to width",
+      "bg.restore": "Restore default background"
     },
     "es": {
       "app.title": "Demo de Equipo",
@@ -618,7 +632,21 @@
       "list.ticket_stages.in_progress": "En progreso",
       "list.ticket_stages.in_review": "En revisión",
       "list.ticket_stages.shipped": "Entregado",
-      "list.ticket_stages.wont_fix": "No se corrige"
+      "list.ticket_stages.wont_fix": "No se corrige",
+      "settings.backgrounds": "Imágenes de fondo",
+      "bg.upload": "Añadir fondo",
+      "bg.replace": "Reemplazar fondo",
+      "bg.remove": "Quitar fondo",
+      "bg.opacity": "Opacidad",
+      "bg.position": "Posición",
+      "bg.width": "Anchura",
+      "bg.fixed": "Fijo al desplazar",
+      "bg.fit": "Ajuste",
+      "bg.fit_cover": "Rellenar",
+      "bg.fit_contain": "Ajustar completo",
+      "bg.fit_tile": "Mosaico",
+      "bg.fit_width": "Escalar al ancho",
+      "bg.restore": "Restaurar fondo predeterminado"
     },
     "sv": {
       "app.title": "Team-demo",
@@ -745,7 +773,21 @@
       "list.ticket_stages.in_progress": "Pågår",
       "list.ticket_stages.in_review": "Granskas",
       "list.ticket_stages.shipped": "Levererad",
-      "list.ticket_stages.wont_fix": "Åtgärdas ej"
+      "list.ticket_stages.wont_fix": "Åtgärdas ej",
+      "settings.backgrounds": "Bakgrundsbilder",
+      "bg.upload": "Lägg till bakgrund",
+      "bg.replace": "Byt bakgrund",
+      "bg.remove": "Ta bort bakgrund",
+      "bg.opacity": "Opacitet",
+      "bg.position": "Position",
+      "bg.width": "Bredd",
+      "bg.fixed": "Fast vid rullning",
+      "bg.fit": "Anpassning",
+      "bg.fit_cover": "Fyll",
+      "bg.fit_contain": "Anpassa helt",
+      "bg.fit_tile": "Upprepa",
+      "bg.fit_width": "Skala till bredd",
+      "bg.restore": "Återställ standardbakgrund"
     }
   },
   "config": {
