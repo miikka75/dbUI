@@ -39,6 +39,47 @@ synchronous — the local-client HTTP adapter wraps it in Promises).
 | `readFile(folderId, name)` / `writeFile` / `deleteFile` | CRDT transport layer | Generic named-file store. |
 | `saveChangesets` / `loadChangesets` | CRDT sync | |
 | `getFileModifiedTime(folderId, name)` | CRDT cache invalidation | |
+| `subscribeTable(tableId, partition, onChange)` | Live sync between clients | Returns an **unsubscribe function**. Absent = no live updates (manual refresh only); implemented by Firebase, Supabase and the dev-server backends. See **Live sync** below. |
+
+## Live sync (`subscribeTable`)
+
+Without it, a client shows the data it fetched at boot until the user hits refresh or reloads —
+nothing pushes another client's writes. A backend that can push implements:
+
+```js
+subscribeTable(tableId, partition, onChange) -> function unsubscribe
+onChange({ type: 'put' | 'delete', id: <rowId>, row: <full row | null> })
+```
+
+Rules for an implementation:
+
+- **`row` is the whole row as stored, not the change.** Subscribers apply it as that row's new state.
+  With partial writes (see below) this means re-reading or using the transport's post-image, never
+  echoing the request payload.
+- **Deliver only what the caller could have read.** The subscription is a read path and must carry the
+  same access scoping as `getTableData` — `backend-firebase.js` mirrors `_scopedRead`'s constrained
+  queries (Firestore rules are not filters, so an unconstrained listener for a self-service member is
+  denied outright and silently never fires); the dev server filters each event per subscriber.
+- **One transport, many tables.** Supabase multiplexes every store over one `kv` realtime channel and
+  the dev client over one `EventSource`; only Firestore needs a listener per collection.
+- Errors degrade to "no live updates". Never throw out of a change callback.
+
+The client side is `live-sync.js` (pure reconciler) plus `_liveWatch`/`_liveHeld`/`_liveFlush` in
+`app-core.js`. Subscriptions are opened for the tables of the view being opened and kept for the
+session; changes arriving while a cell is focused or a save is in flight are queued and applied on
+blur, because the inline cell renders straight off the cached row object and has no draft buffer.
+
+### Partial writes
+
+`putRow` **merges** — this is pinned for every backend by the `putRow merge semantics` suite in
+`dev/test/backend-conformance.test.js`. Cell edits therefore send only `{ id, <changed col>,
+updated_at }`, so two clients editing different columns of one row no longer overwrite each other.
+
+Consequences for a backend or server that gates writes: judge the **merged** row, not the payload. The
+owner column that authorizes a self-service write lives on the stored row, not in the patch. Firestore
+gets this for free (`request.resource.data` is the merged document under `set(…, {merge: true})`),
+Supabase merges server-side via the `app_kv_merge` RPC, and `dev/server.js` builds the merged row
+explicitly before its ownership and `ownerWritable` checks.
 
 ## Notes
 

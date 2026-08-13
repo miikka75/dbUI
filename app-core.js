@@ -229,6 +229,13 @@ function createVueApp() {
       settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false, _collapseBackgrounds: true },
       appConfig: null,
       saveTimers: {},
+      // Live sync (see the _live* methods). _liveSubs maps a store name -> its unsubscribe function, so
+      // a table is subscribed at most once per session; _liveState is LiveSync's pending-change queue.
+      // Both are plain bookkeeping — nothing renders them — but they sit here rather than on the raw
+      // instance so a reset/reload path can find and tear them down.
+      _liveSubs: {},
+      _liveState: null,
+      _liveRebuildTimer: null,
       pendingDelete: null,
       pendingDeleteTimer: null,
       currentRefTable: null,
@@ -1326,7 +1333,12 @@ function createVueApp() {
         }
         if (mine) {
           mine[cfg.statusColumn] = status; mine.rosterPublic = pub; mine.updated_at = new Date().toISOString();
-          backend.putRow(this.tableMap[table], mine, 'active');
+          // Update = the status (plus the roster policy the read rule needs), never the whole response
+          // row: an RSVP table is exactly where concurrent edits happen, and the owner/link columns are
+          // already correct on the stored row.
+          var patch = { id: mine.id, rosterPublic: pub, updated_at: mine.updated_at };
+          patch[cfg.statusColumn] = status;
+          backend.putRow(this.tableMap[table], patch, 'active');
         } else {
           var row = { id: this.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           getColumns(table).forEach(function(c) { if (!(c in row)) row[c] = ''; });
@@ -1441,6 +1453,12 @@ function createVueApp() {
       // One implementation for the calendar/rotation/pivot/rsvp preload blocks in loadTableData.
       _ensureCached: function(tables, onLoad) {
         var self = this;
+        // Whatever this view needs cached is also what it needs kept LIVE. Watching here (rather than
+        // per branch of loadTableData) means every derived kind — calendar, rotation, pivot, rsvp,
+        // union/join — subscribes through the same list it already preloads, and cannot drift from it.
+        // Note this runs before the skip-if-cached test below on purpose: an already-cached table still
+        // needs a subscription.
+        self._liveWatch(tables, 'active');
         (tables || []).forEach(function(tbl) {
           // Reachable = granted OR self-serviceable (owner-column table: the backend returns only the
           // member's own rows) — the same canReachTable the sidebar's canAccess uses, so an rsvp view's
@@ -1451,6 +1469,92 @@ function createVueApp() {
             if (onLoad) onLoad(tbl);
           }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
         });
+      },
+
+      // --- Live sync ------------------------------------------------------------------------------
+      // A backend that can push (Firebase onSnapshot, Supabase realtime, the dev server's SSE stream)
+      // exposes the OPTIONAL subscribeTable(tableId, tab, onChange) -> unsubscribe. Backends without it
+      // (OAuth/Sheets, CRDT/Drive, Apps Script) simply never get here and keep the manual refresh
+      // button, which is why every entry point below is guarded rather than assumed.
+      //
+      // Scope: the tables of whatever view is open, subscribed on first sight and kept for the rest of
+      // the session. On Firestore a listener bills a read per document in its FIRST snapshot, so
+      // re-subscribing on every navigation would quietly multiply the bill; keeping them costs one
+      // extra full read per table per session and nothing for a table the user never opens.
+      _liveWatch: function(tables, tab) {
+        var self = this;
+        // `backend` is an implicit global assigned by whichever adapter loaded, and app-core is created
+        // BEFORE that script runs — so this is a typeof test, not a truthiness one (matching canUpload's
+        // guard further down). LiveSync is absent in the Apps Script deployment, which ships no
+        // live-sync.js and no push-capable backend either.
+        if (typeof LiveSync === 'undefined' || typeof backend === 'undefined' || !backend
+            || typeof backend.subscribeTable !== 'function') return;
+        (tables || []).forEach(function(tbl) {
+          if (!tbl || !self.canReachTable(tbl)) return;
+          var store = BackendHelpers.storeName(tbl, tab || 'active');
+          if (self._liveSubs[store]) return;                 // already watched — subscribe once per session
+          self._liveSubs[store] = backend.subscribeTable(self.tableMap[tbl] || tbl, tab || 'active', function(change) {
+            self._liveApply(store, change);
+          }) || function() {};
+        });
+      },
+
+      // Drop every subscription. Called by the two paths that discard the whole dataset before the
+      // page reloads — import and reset — where the reload can be up to a second away and every wiped
+      // or re-imported row would otherwise arrive as a live change against a doomed dataCache. The
+      // other reload paths are immediate, so the page is gone before a listener could fire.
+      _liveUnwatchAll: function() {
+        var self = this;
+        Object.keys(self._liveSubs || {}).forEach(function(store) {
+          try { self._liveSubs[store](); } catch (e) {}
+        });
+        self._liveSubs = {};
+        self._liveState = null;
+        clearTimeout(self._liveRebuildTimer);
+      },
+
+      // True while a local edit is in flight, in which case remote changes are queued instead of
+      // applied. Two conditions, both deliberately COARSE — they hold back every row, not just the one
+      // being edited:
+      //   (a) focus is in an editable element. The inline cell has no draft buffer: the contenteditable
+      //       span renders {{ item[col] }} straight off the cached row object, so assigning to that row
+      //       mid-keystroke repaints the text under the caret.
+      //   (b) a saveField debounce is still pending. Its payload is built when the timer fires, from
+      //       the live row — applying a remote change first would send someone else's value back as if
+      //       the user had typed it.
+      // The cost of being coarse is that updates pause while a cell has focus, which is seconds, and
+      // the benefit is that no per-row or per-cell plumbing has to exist in any template.
+      _liveHeld: function() {
+        var el = document.activeElement;
+        if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName || ''))) return true;
+        return Object.keys(this.saveTimers || {}).length > 0;
+      },
+
+      _liveApply: function(store, change) {
+        var self = this;
+        if (!self._liveState) self._liveState = LiveSync.createState();
+        var rowsFor = function(cacheKey) { return self.dataCache[cacheKey]; };
+        var r = LiveSync.queueOrApply(self._liveState, store, change, self._liveHeld(), rowsFor);
+        if (r.applied) self._liveRebuild();
+      },
+
+      // Drain whatever was held back. Called on focusout and after each save timer fires — i.e. at
+      // exactly the two moments _liveHeld can go false.
+      _liveFlush: function() {
+        var self = this;
+        if (!self._liveState || !self._liveState.order.length || self._liveHeld()) return;
+        var rowsFor = function(cacheKey) { return self.dataCache[cacheKey]; };
+        if (LiveSync.flush(self._liveState, rowsFor).length) self._liveRebuild();
+      },
+
+      // dataCache is mutated in place, but currentData and every derived view (calendar cells, rotation
+      // turns, pivot grid, rsvp roster) are DERIVED — they only exist after loadTableData runs. Debounce
+      // it: a remote client saving five columns arrives as five changes, and recomputing a rotation five
+      // times to show one edit is the difference between live sync and a stuttering page.
+      _liveRebuild: function() {
+        var self = this;
+        clearTimeout(self._liveRebuildTimer);
+        self._liveRebuildTimer = setTimeout(function() { self.loadTableData(); }, 150);
       },
 
       loadTableData: function() {
@@ -1560,7 +1664,9 @@ function createVueApp() {
             var deps = [{ table: comp.rotationTable, part: 'active', key: comp.rotationTable }, { table: comp.occurrenceSource, part: 'active', key: comp.occurrenceSource }];
             if (comp.occurrenceSource) deps.push({ table: comp.occurrenceSource, part: 'archive', key: aKey(comp.occurrenceSource) });
             deps.forEach(function(dep) {
-              if (!dep.table || !self.canReachTable(dep.table) || self.dataCache[dep.key]) return;
+              if (!dep.table) return;
+              self._liveWatch([dep.table], dep.part);   // a computed column is only as live as its inputs
+              if (!self.canReachTable(dep.table) || self.dataCache[dep.key]) return;
               backend.getTableData(self.tableMap[dep.table], dep.part).then(function(result) {
                 self.dataCache[dep.key] = parseTableResult(result).rows;
                 recomputeRotation();
@@ -1571,6 +1677,10 @@ function createVueApp() {
           var key = self.viewingArchive ? aKey(self.currentTable) : self.currentTable;
           var tableDef = SCHEMA[self.currentTable];
           if (!tableDef) return;
+          // Bare table: the one branch that doesn't route through _ensureCached, so it watches its own
+          // partition here — and it is the only place `archive` is ever watched, since that is the only
+          // partition a user can have open.
+          self._liveWatch([self.currentTable], self.viewingArchive ? 'archive' : 'active');
           if (!self.dataCache[key]) {
             var tab = self.viewingArchive ? 'archive' : 'active';
             backend.getTableData(self.tableMap[self.currentTable], tab).then(function(result) {
@@ -1638,31 +1748,55 @@ function createVueApp() {
         // Update cache
         var cacheKey = this.viewingArchive ? aKey(source) : source;
         var cached = this.dataCache[cacheKey];
+        // Does this table already hold the row? Unknown (table not cached) counts as yes — the user is
+        // editing it, so it exists somewhere. This decides partial-vs-whole below.
+        var isNewRow = false;
         if (cached) {
           var cr = cached.find(function(r) { return r.id === item.id; });
           if (cr) { cr[col] = value; cr.updated_at = item.updated_at; }
           else {
             // Row doesn't exist in this table's cache — create it
+            isNewRow = true;
             var newRow = { id: item.id, created_at: item.created_at || new Date().toISOString(), updated_at: item.updated_at };
             getColumns(source).forEach(function(c) { newRow[c] = (c === col) ? value : (item[c] || ''); });
             cached.push(newRow);
           }
         }
-        // Save — only send columns owned by the target table
+        // Save. A cell edit writes ONLY the column it changed (plus updated_at). Every backend merges a
+        // partial putRow onto the stored row — Firestore set(…, {merge:true}), Supabase _merge, and the
+        // SQLite/FS backends pinned by the "putRow merge semantics" suite in backend-conformance.test.js
+        // — so this is the contract, not a shortcut. Sending the whole row (what this used to do) meant
+        // two people editing different columns of the same row clobbered each other: each write carried
+        // its author's stale copy of every column they hadn't touched. Invisible while nothing synced;
+        // routine once it does.
+        // The exception is a row THIS table has never seen (the cache-miss branch above — e.g. a mirror
+        // with no counterpart row yet). That is a create, and a create has to carry every column.
         var timerKey = source + ':' + item.id + ':' + col;
         clearTimeout((self.saveTimers || {})[timerKey]);
         if (!self.saveTimers) self.saveTimers = {};
         self.saveTimers[timerKey] = setTimeout(function() {
-          var row = {};
-          getColumns(source).forEach(function(c) { row[c] = item[c] || ''; });
-          row.id = item.id;
-          row[col] = value;
+          // Drop the key before anything else: _liveHeld treats a lingering timer entry as "an edit is
+          // still in flight" and would hold remote changes back forever.
+          delete self.saveTimers[timerKey];
+          var row;
+          if (isNewRow) {
+            row = {};
+            getColumns(source).forEach(function(c) { row[c] = item[c] || ''; });
+            row.id = item.id;
+            row[col] = value;
+            if (!row.created_at) row.created_at = new Date().toISOString();
+          } else {
+            row = { id: item.id };
+            row[col] = value;
+          }
           row.updated_at = new Date().toISOString();
-          if (!row.created_at) row.created_at = new Date().toISOString();
           backend.putRow(self.tableMap[source], row, tab);
-          // Propagate to mirror tables if this column is mirrored
-          self.propagateMirror(item.id, source, row);
+          // Propagate to mirror tables if this column is mirrored. This takes the LIVE row, not the
+          // payload: `row` is now a partial, and propagateMirror reads every synced column off it —
+          // given the partial it would blank each one it couldn't find.
+          self.propagateMirror(item.id, source, item);
           self.notify(self.t('msg.saved'));
+          self._liveFlush();      // the write is out; let anything held during the edit land
         }, 300);
       },
 
@@ -2104,8 +2238,8 @@ function createVueApp() {
         if (i < 0 || j < 0 || j >= group.length) return;
         var b = group[j], pa = item.position, pb = b.position, now = new Date().toISOString();
         item.position = pb; b.position = pa; item.updated_at = b.updated_at = now;
-        backend.putRow(self.tableMap[table], item, 'active');
-        backend.putRow(self.tableMap[table], b, 'active');
+        backend.putRow(self.tableMap[table], { id: item.id, position: item.position, updated_at: now }, 'active');
+        backend.putRow(self.tableMap[table], { id: b.id, position: b.position, updated_at: now }, 'active');
       },
       // Move a whole group up/down (swap it with the adjacent group), then renumber every row sequentially.
       moveRefGroup: function(parentVal, dir) {
@@ -2116,7 +2250,7 @@ function createVueApp() {
         var t = order[i]; order[i] = order[j]; order[j] = t;
         var pos = 1, now = new Date().toISOString();
         order.forEach(function(g) { (grouped[g] || []).forEach(function(r) {
-          if (Number(r.position) !== pos) { r.position = String(pos); r.updated_at = now; backend.putRow(self.tableMap[table], r, 'active'); }
+          if (Number(r.position) !== pos) { r.position = String(pos); r.updated_at = now; backend.putRow(self.tableMap[table], { id: r.id, position: r.position, updated_at: now }, 'active'); }
           pos++;
         }); });
       },
@@ -2137,8 +2271,14 @@ function createVueApp() {
         var timerKey = refTable + ':' + item.id;
         clearTimeout(self.saveTimers[timerKey]);
         self.saveTimers[timerKey] = setTimeout(function() {
+          // Drop the key (as saveField does): a leftover entry reads as "an edit is still in flight" to
+          // _liveHeld, which would hold every remote change back for the rest of the session.
+          delete self.saveTimers[timerKey];
+          // Whole row on purpose, unlike saveField: a lookup rename cascades through propagateRefChange
+          // above, so the row this writes is the one the editor just rebuilt in full.
           backend.putRow(self.tableMap[refTable], item, 'active');
           self.notify(self.t('msg.saved'));
+          self._liveFlush();
         }, 500);
       },
       addRefRow: function() {
@@ -2621,7 +2761,9 @@ function createVueApp() {
           if (Number(r.position) !== np) {
             r.position = String(np); // keep as string — sortedData sorts via localeCompare (number would throw)
             r.updated_at = new Date().toISOString();
-            backend.putRow(self.tableMap[table], r, 'active');
+            // position-only write: reordering says nothing about the row's other columns, so it must not
+            // carry (and overwrite with) our copy of them.
+            backend.putRow(self.tableMap[table], { id: r.id, position: r.position, updated_at: r.updated_at }, 'active');
           }
         });
       },
@@ -2638,9 +2780,15 @@ function createVueApp() {
           var mTab = self.viewingArchive ? 'archive' : 'active';
           var mr = (self.dataCache[mKey] || []).find(function(r) { return r.id === id; });
           if (mr) {
-            var mch = false;
-            synced.forEach(function(c) { if (mr[c] !== rowData[c]) { mr[c] = rowData[c] || ''; mch = true; } });
-            if (mch) { mr.updated_at = new Date().toISOString(); backend.putRow(self.tableMap[mt], mr, mTab); }
+            // Write only the mirrored columns, not the whole mirror row — a mirror carries columns of
+            // its own that this edit has nothing to say about, and shipping our cached copy of them is
+            // exactly the cross-client clobber saveField now avoids.
+            var patch = { id: id };
+            synced.forEach(function(c) { if (mr[c] !== rowData[c]) { mr[c] = rowData[c] || ''; patch[c] = mr[c]; } });
+            if (Object.keys(patch).length > 1) {
+              mr.updated_at = patch.updated_at = new Date().toISOString();
+              backend.putRow(self.tableMap[mt], patch, mTab);
+            }
           }
         }
         // Upstream: master table(s) this sourceTable mirrors from
@@ -2652,9 +2800,12 @@ function createVueApp() {
           var stTab = self.viewingArchive ? 'archive' : 'active';
           var stRow = (self.dataCache[stKey] || []).find(function(r) { return r.id === id; });
           if (stRow) {
-            var ch = false;
-            upTargets[st].forEach(function(c) { if (stRow[c] !== rowData[c]) { stRow[c] = rowData[c] || ''; ch = true; } });
-            if (ch) { stRow.updated_at = new Date().toISOString(); backend.putRow(self.tableMap[st], stRow, stTab); }
+            var upPatch = { id: id };   // mirrored columns only — same reasoning as the downstream branch
+            upTargets[st].forEach(function(c) { if (stRow[c] !== rowData[c]) { stRow[c] = rowData[c] || ''; upPatch[c] = stRow[c]; } });
+            if (Object.keys(upPatch).length > 1) {
+              stRow.updated_at = upPatch.updated_at = new Date().toISOString();
+              backend.putRow(self.tableMap[st], upPatch, stTab);
+            }
           }
         });
       },
@@ -2666,6 +2817,8 @@ function createVueApp() {
       },
       resetApp: function() {
         localStorage.clear();
+        this._liveUnwatchAll();   // same reason as finishImportReload: the data is about to be wiped
+
         function done() {
           // Clear server-side data if a local server is available, then reload
           fetch(_u('/api/resetData'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' })
@@ -3480,6 +3633,10 @@ function createVueApp() {
       // dialog's "Reload" button can trigger it after a partial import the user has read.
       finishImportReload: function() {
         this.importProgress = null;
+        // Drop the listeners first: an import rewrites whole tables, and the reload below can be up to a
+        // second away (the CRDT push paths). Without this, every imported row arrives as a live change
+        // against a dataCache that is about to be thrown away.
+        this._liveUnwatchAll();
         if (typeof _pushChanges === 'function') { _pushChanges().then(function() { location.reload(); }); }
         else if (typeof CrdtEngine !== 'undefined') { CrdtEngine.pushChanges().then(function() { setTimeout(function() { location.reload(); }, 100); }); }
         else { location.reload(); }
@@ -3875,6 +4032,11 @@ function createVueApp() {
     mounted: function() {
       var self = this;
       window.addEventListener('resize', function() { self.mobile = window.innerWidth < 768; self.windowWidth = window.innerWidth; });
+      // Remote changes that arrived while a cell had focus are held (see _liveHeld); leaving the cell is
+      // one of the two moments that can end. Deferred a tick because focusout fires BEFORE focus lands on
+      // the next element — checking activeElement synchronously would see the outgoing cell (or <body>)
+      // and flush straight into the cell the user just tabbed into.
+      document.addEventListener('focusout', function() { setTimeout(function() { self._liveFlush(); }, 0); });
       document.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
           var el = e.target;
