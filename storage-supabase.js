@@ -30,11 +30,34 @@ function createSupabaseStorage(sb) {
       .then(_unwrap);
   }
 
-  // Shallow top-level merge (Firestore set(value, { merge: true })). Read-modify-write: per-doc payloads
-  // are small, so the extra round-trip is negligible and keeps merge semantics exact.
+  // Shallow top-level merge (Firestore set(value, { merge: true })), client side: read, combine, write.
+  // Correct in isolation, but the read and the write are two round-trips — two clients patching
+  // different columns of the same row inside that window each write back their own stale copy of the
+  // other's column. That is the fallback now; _serverMerge below is the path that actually runs.
   function _merge(store, key, patch) {
     return _row(store, key).then(function(existing) {
       return _replace(store, key, Object.assign({}, existing || {}, patch || {}));
+    });
+  }
+
+  // Server-side merge via the app_kv_merge RPC (supabase-schema.sql): ONE atomic
+  // `value = value || patch` statement, so a concurrent patch of a different column merges instead of
+  // racing. SECURITY INVOKER, so the kv policies gate it exactly as a direct upsert.
+  var _noMergeRpc = false;   // set once if the project hasn't got the function; avoids retrying per write
+  function _missingFunction(err) {
+    // PostgREST reports an unknown RPC as PGRST202; older gateways just 404 with a text message.
+    return !!err && (err.code === 'PGRST202' || err.status === 404 || /could not find|does not exist/i.test(err.message || ''));
+  }
+  function _serverMerge(store, key, patch) {
+    if (_noMergeRpc || typeof sb.rpc !== 'function') return _merge(store, key, patch);
+    return sb.rpc('app_kv_merge', { p_store: store, p_key: key, p_patch: patch || {} }).then(function(res) {
+      if (res && res.error) {
+        // A project created before live sync shipped simply hasn't re-run supabase-schema.sql. Degrade
+        // to the client-side merge rather than failing the write outright.
+        if (_missingFunction(res.error)) { _noMergeRpc = true; return _merge(store, key, patch); }
+        throw res.error;
+      }
+      return null;
     });
   }
 
@@ -44,7 +67,7 @@ function createSupabaseStorage(sb) {
     ensureStore: function() { return Promise.resolve(); },
     get: function(store, key) { return _row(store, key); },
     // Firestore's put() merges; mirror that so partial row/meta updates don't drop fields.
-    put: function(store, key, value) { return _merge(store, key, value); },
+    put: function(store, key, value) { return _serverMerge(store, key, value); },
     delete: function(store, key) {
       return sb.from(TABLE).delete().eq('store', store).eq('key', key).then(_unwrap);
     },

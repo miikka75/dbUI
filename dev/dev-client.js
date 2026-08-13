@@ -1,12 +1,50 @@
 // dev-client.js -- Shared dev-server client helpers (_post + backend_users).
 // Loaded before backend-local-client.js and backend-crdt-local.js. Dev-server only.
+function _devUser() {
+  return (new URLSearchParams(location.search)).get('user') || localStorage.getItem('test_user') || 'local@dev';
+}
+
 function _post(route, body) {
-  var user = (new URLSearchParams(location.search)).get('user') || localStorage.getItem('test_user') || 'local@dev';
   return fetch('/api/' + route, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-User': user },
+    headers: { 'Content-Type': 'application/json', 'X-User': _devUser() },
     body: JSON.stringify(body)
   }).then(function(r) { if (!r.ok) return r.json().then(function(e) { return Promise.reject(e); }); return r.json(); });
+}
+
+// --- Live sync over the dev server's SSE stream (the local counterpart of Firestore onSnapshot /
+// Supabase realtime). ONE EventSource for the whole app, with a store -> handlers dispatch map: the
+// server already filters each event by what that subscriber may read, so everything arriving here is
+// fair game and only needs routing. Attached as backend.subscribeTable by the dev backend entry file.
+var _devEvents = null;
+var _devHandlers = {};          // store name -> [onChange, ...]
+
+function _devEnsureEvents() {
+  if (_devEvents || typeof EventSource === 'undefined') return;
+  _devEvents = new EventSource('/api/events?user=' + encodeURIComponent(_devUser()));
+  _devEvents.onmessage = function(e) {
+    var msg;
+    try { msg = JSON.parse(e.data); } catch (err) { return; }
+    var handlers = _devHandlers[msg.store];
+    if (!handlers || !handlers.length) return;
+    var change = { type: msg.value ? 'put' : 'delete', id: msg.key, row: msg.value || null };
+    handlers.slice().forEach(function(fn) { try { fn(change); } catch (err) {} });
+  };
+  // EventSource reconnects by itself (the server sends a retry hint), so an error is not fatal and the
+  // handler map survives it — deliberately not torn down here.
+  _devEvents.onerror = function() {};
+}
+
+function _devSubscribeTable(tableId, tab, onChange) {
+  var store = (tableId || '').split('__')[0] + '__' + (tab || 'active');
+  if (!_devHandlers[store]) _devHandlers[store] = [];
+  _devHandlers[store].push(onChange);
+  _devEnsureEvents();
+  return function() {
+    var arr = _devHandlers[store] || [];
+    var i = arr.indexOf(onChange);
+    if (i >= 0) arr.splice(i, 1);
+  };
 }
 
 // Image-column upload for the dev backends: read the file as base64 and POST it to the dev server, which

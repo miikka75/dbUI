@@ -30,5 +30,6 @@ backend = {
   loadChangesets: (folderId, excludeSiteId) => _post('loadChangesets', { folderId, excludeSiteId })
 };
 if (typeof _devUploadFile === 'function') backend.uploadFile = _devUploadFile; // image-column upload (dev store)
+if (typeof _devSubscribeTable === 'function') backend.subscribeTable = _devSubscribeTable; // live sync (SSE)
 
 init();

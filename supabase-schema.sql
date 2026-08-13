@@ -469,6 +469,55 @@ create policy kv_delete on public.kv
   for delete to authenticated
   using (public.app_can_delete(store, key, value));
 
+-- ---------- Realtime (live sync between clients) ------------------------------------------------------
+-- The app subscribes to kv changes so one client's write appears in another's open view immediately
+-- (backend-supabase.js subscribeTable -> live-sync.js). That needs kv in the realtime publication.
+-- Guarded rather than a bare `alter publication ... add table`, which errors when the table is already
+-- a member -- this file promises to be re-runnable.
+-- Two guards, both needed: the publication itself only exists on Supabase (a plain Postgres, including
+-- the pglite instance the RLS tests run against, has no supabase_realtime), and adding a table that is
+-- already a member is an error rather than a no-op.
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+     and not exists (
+       select 1 from pg_publication_tables
+       where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'kv'
+     ) then
+    alter publication supabase_realtime add table public.kv;
+  end if;
+end $$;
+
+-- SECURITY NOTE -- what a realtime subscriber can see:
+--   INSERT / UPDATE events ARE filtered by the kv_select policy above, per subscriber. A member
+--   receives exactly the rows they could have fetched themselves, so realtime opens no read path that
+--   the initial load did not already allow.
+--   DELETE events are NOT filtered by RLS (a Postgres limitation, not a configuration choice: the row
+--   is gone, so the policy has nothing left to evaluate). They carry the REPLICA IDENTITY, which here
+--   is the default -- the primary key (store, key) and nothing else. So a subscriber can learn that
+--   some row id under some store was deleted, never its contents. The client treats a delete for a row
+--   it never cached as a no-op (live-sync.js applyChange).
+--   Do NOT set `replica identity full` on kv: that would put the deleted row's full jsonb value into
+--   an unfiltered broadcast.
+
+-- Server-side shallow merge, the Postgres counterpart of Firestore's set(..., { merge: true }).
+-- StorageSupabase.put used to do this as a client-side read-modify-write, which reintroduced the very
+-- clobber that partial writes exist to prevent: two clients patching different columns of one row
+-- within the same round-trip each wrote back their own stale copy of the other's column. `value || patch`
+-- is a single atomic statement, so the second write merges onto the first instead of racing it.
+-- SECURITY INVOKER (the default): this runs as the caller, so kv_insert/kv_update still gate it exactly
+-- as a direct upsert would -- it is a concurrency fix, NOT a privilege bypass.
+create or replace function public.app_kv_merge(p_store text, p_key text, p_patch jsonb)
+returns void language plpgsql as $$
+begin
+  insert into public.kv (store, key, value, updated_at)
+  values (p_store, p_key, p_patch, now())
+  on conflict (store, key)
+  do update set value = public.kv.value || excluded.value, updated_at = now();
+end $$;
+
+grant execute on function public.app_kv_merge(text, text, jsonb) to authenticated;
+
 -- ---------- Storage bucket for image uploads (optional; needed only if you use image columns) --------
 -- Mirrors storage.rules (the Firebase Storage gate) condition for condition. Uploads land at
 -- `<lowercased-user-email>/<ts>_<name>` (backend-supabase uploadFile), so the first path segment IS the

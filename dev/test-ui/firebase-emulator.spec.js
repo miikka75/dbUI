@@ -244,3 +244,84 @@ test('user-linked lists: avatar projection over Firestore — admin sees all lin
   expect(JSON.stringify(viewerProj)).not.toContain('@');                         // never an email
   await expectNoCspViolations(page);
 });
+
+test('live sync: a write in one client reaches another through onSnapshot, unscoped and scoped', async ({ page, browser }) => {
+  // The only end-to-end proof that backend-firebase subscribeTable works against real Firestore rules.
+  // Both halves matter: the granted case (one unconstrained listener) and the self-service case, where
+  // rules are not filters so the listener has to carry the same owner/rosterPublic constraints
+  // _scopedRead uses — an unconstrained listener there is denied outright and simply never fires.
+  test.setTimeout(90000);
+  const OWNER_SCHEMA = {
+    defaultLanguage: 'en',
+    tables: {
+      notes: { columns: [{ name: 'title', type: 'text' }] },
+      signups: { ownerWritable: ['status'], columns: [{ name: 'owner', type: 'owner' }, { name: 'status', type: 'text' }] }
+    },
+    views: [],
+    nav: { items: [{ table: 'notes' }, { table: 'signups' }] }
+  };
+
+  await seed(page);
+  await page.goto('/');
+  await signIn(page, 'admin@test.com');
+  await page.waitForFunction(() => appInstance.isAdmin === true);
+  await page.evaluate((schema) => backend.saveSchema('', schema), OWNER_SCHEMA);
+  await page.reload();
+  await signIn(page, 'admin@test.com');
+  await page.click('text=tab.notes');
+  await page.waitForFunction(() => !!appInstance.dataCache.notes);
+
+  // A second, independent client on the same table.
+  const ctxB = await browser.newContext();
+  try {
+    const pageB = await ctxB.newPage();
+    await seed(pageB);
+    await pageB.goto('/');
+    await signIn(pageB, 'admin@test.com');
+    // No click needed: the app auto-selects the first table on boot, which is what subscribes it.
+    await pageB.waitForFunction(() => appInstance.currentTable === 'notes' && !!appInstance.dataCache.notes);
+    await pageB.waitForFunction(() => !!(appInstance._liveSubs || {})['notes__active']);
+
+    // Granted table: client A writes, client B's cache updates with no refetch of its own.
+    await page.evaluate(() => backend.putRow('notes', { id: 'n1', title: 'FromA' }, 'active'));
+    await expect.poll(async () => pageB.evaluate(
+      () => ((appInstance.dataCache.notes || []).find(r => r.id === 'n1') || {}).title
+    ), { timeout: 15000 }).toBe('FromA');
+
+    // A partial write merges on the stored row and arrives as a merged row, not a patch.
+    await page.evaluate(() => backend.putRow('notes', { id: 'n1', title: 'PatchedByA' }, 'active'));
+    await expect.poll(async () => pageB.evaluate(
+      () => ((appInstance.dataCache.notes || []).find(r => r.id === 'n1') || {}).title
+    ), { timeout: 15000 }).toBe('PatchedByA');
+
+    // A delete propagates too.
+    await page.evaluate(() => backend.deleteRow('notes', 'n1', 'active'));
+    await expect.poll(async () => pageB.evaluate(
+      () => (appInstance.dataCache.notes || []).some(r => r.id === 'n1')
+    ), { timeout: 15000 }).toBe(false);
+
+    // Self-service half: a member with NO grant on `signups` subscribes through the two constrained
+    // queries. Their own row must reach them live.
+    await page.evaluate(() => backend_users.setUserRole('member@test.com', 'viewer', 'member@test.com', {}));
+    const ctxC = await browser.newContext();
+    try {
+      const pageC = await ctxC.newPage();
+      await seed(pageC);
+      await pageC.goto('/');
+      await signIn(pageC, 'member@test.com');
+      await pageC.evaluate(() => appInstance._liveWatch(['signups'], 'active'));
+      // The member writes their own owner-stamped row from a plain backend call; the listener they
+      // opened on the same table has to deliver it back.
+      await pageC.evaluate(() => {
+        if (!appInstance.dataCache.signups) appInstance.dataCache.signups = [];
+        return backend.putRow('signups', { id: 's1', owner: 'member@test.com', status: 'yes', rosterPublic: true }, 'active');
+      });
+      await expect.poll(async () => pageC.evaluate(
+        () => ((appInstance.dataCache.signups || []).find(r => r.id === 's1') || {}).status
+      ), { timeout: 15000 }).toBe('yes');
+    } finally { await ctxC.close(); }
+
+    await expectNoCspViolations(pageB);
+  } finally { await ctxB.close(); }
+  await expectNoCspViolations(page);
+});

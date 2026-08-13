@@ -179,3 +179,41 @@ describe('rules parity — the upload bucket is gated the same way on both backe
       're-running the script must apply limits to a bucket created before they existed');
   });
 });
+
+describe('rules parity — a partial write is judged on the MERGED row, on every layer', () => {
+  // A cell edit sends only the column it changed (app-core saveField), so the owner column a
+  // self-service write is judged by lives on the STORED row, not in the payload. Firestore has this for
+  // free (request.resource.data is the merged document under set({merge:true})) and Supabase computes
+  // the merge server-side; the dev server had to be taught it explicitly. If any layer regressed to
+  // judging the raw payload, self-service members would hit 403s on one backend only.
+  it('dev/server.js gates putRow on existing-merged-with-payload', () => {
+    const i = SERVER.indexOf("case 'putRow'");
+    assert.ok(i > 0, "the putRow route moved");
+    const body = SERVER.slice(i, i + 2200);
+    assert.match(body, /const merged = Object\.assign\(\{\}, existing \|\| \{\}, body\.data \|\| \{\}\)/,
+      'dev server no longer builds the merged row');
+    assert.match(body, /_mine\(merged\[oc\]\)/, 'ownership is not judged on the merged row');
+    assert.match(body, /ownerFieldsOk\(body\.tableId, merged, existing\)/,
+      'the ownerWritable bound is not judged on the merged row');
+  });
+
+  it('Supabase merges server-side rather than read-modify-write, so concurrent patches cannot clobber', () => {
+    assert.match(SQL, /create or replace function public\.app_kv_merge/,
+      'the app_kv_merge RPC is missing — StorageSupabase.put falls back to a racy client-side merge');
+    assert.match(SQL, /do update set value = public\.kv\.value \|\| excluded\.value/,
+      'app_kv_merge does not merge onto the stored value');
+    // SECURITY INVOKER (the default) is load-bearing: a DEFINER merge would bypass the kv policies and
+    // turn a concurrency fix into a write-anything hole.
+    const i = SQL.indexOf('create or replace function public.app_kv_merge');
+    assert.ok(!/security definer/i.test(SQL.slice(i, i + 500)), 'app_kv_merge must NOT be security definer');
+  });
+
+  it('kv is published for realtime, and only under both guards', () => {
+    assert.match(SQL, /alter publication supabase_realtime add table public\.kv/,
+      'kv is not published — Supabase clients would get no live updates');
+    assert.match(SQL, /select 1 from pg_publication where pubname = 'supabase_realtime'/,
+      'the publication-exists guard is gone; the script would fail on plain Postgres');
+    assert.match(SQL, /select 1 from pg_publication_tables/,
+      'the already-a-member guard is gone; the script would stop being idempotent');
+  });
+});

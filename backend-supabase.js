@@ -15,6 +15,30 @@ var SUPABASE_BUCKET = 'uploads';
 
 function _storeName(table, tab) { return BackendHelpers.storeName(table, tab); }
 
+// --- Realtime (see backend.subscribeTable) -----------------------------------------------------------
+var _sbChannel = null;          // the ONE postgres_changes channel over `kv`
+var _sbHandlers = {};           // store name -> [onChange, ...]
+
+// Fan a kv row change out to whoever subscribed to that store. `value` is the whole row document, which
+// is exactly the shape getTableData returns, so subscribers need no second read.
+function _sbDispatch(payload) {
+  var rec = payload && (payload.new && payload.new.store ? payload.new : payload.old);
+  if (!rec || !rec.store || !rec.key) return;
+  var handlers = _sbHandlers[rec.store];
+  if (!handlers || !handlers.length) return;
+  var isDelete = payload.eventType === 'DELETE';
+  var change = { type: isDelete ? 'delete' : 'put', id: rec.key, row: isDelete ? null : (rec.value || null) };
+  if (!isDelete && !change.row) return;
+  handlers.slice().forEach(function(fn) { try { fn(change); } catch (e) {} });
+}
+
+function _ensureRealtime() {
+  if (_sbChannel || !_sb) return;
+  _sbChannel = _sb.channel('kv-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'kv' }, _sbDispatch)
+    .subscribe();
+}
+
 // The signed-in user's lowercased email ('' when signed out) — auth first, app state as fallback.
 function _myEmail() {
   return (((_sbUser && _sbUser.email)
@@ -124,6 +148,27 @@ backend = {
   putRow: function(tableId, data, tab) {
     if (!data.id) return Promise.resolve();
     return StorageSupabase.put(_storeName(tableId, tab), data.id, data);
+  },
+  // Live updates (optional backend method — see live-sync.js and app-core's _liveWatch). Every store
+  // is a slice of the SAME `kv` table, so this is one channel with a store -> handlers dispatch map
+  // rather than a channel (and a WebSocket subscription) per table.
+  //
+  // No filter is applied: RLS filters postgres_changes per subscriber, so a member receives exactly
+  // the INSERT/UPDATE events they could have read themselves — the same gate as the initial fetch,
+  // enforced in the same place. DELETE events are the documented exception (see supabase-schema.sql):
+  // they are broadcast unfiltered and carry only the primary key, (store, key). A delete for a row the
+  // client never cached is a no-op in the reconciler, so this leaks the fact that some row id under
+  // some store was removed, and nothing about its contents.
+  subscribeTable: function(tableId, tab, onChange) {
+    var store = _storeName(tableId, tab);
+    if (!_sbHandlers[store]) _sbHandlers[store] = [];
+    _sbHandlers[store].push(onChange);
+    _ensureRealtime();
+    return function() {
+      var arr = _sbHandlers[store] || [];
+      var i = arr.indexOf(onChange);
+      if (i >= 0) arr.splice(i, 1);
+    };
   },
   deleteRow: function(tableId, id, tab) { return StorageSupabase.delete(_storeName(tableId, tab), id); },
   moveRow: function(tableId, rowData, fromTab, toTab) {

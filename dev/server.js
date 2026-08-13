@@ -74,6 +74,66 @@ function json(res, data, status) {
   res.end(JSON.stringify(data));
 }
 
+// --- Identity + read scope, hoisted out of the request handler ---------------------------------------
+// These answer "who is this user" and "what may they SEE" from the registry alone. They live out here
+// because the SSE broadcaster below has no request in hand — only a long-lived subscriber and the email
+// it connected with — and asking the same functions the routes ask is the only way the live stream and
+// getTableData cannot drift into two different answers. The in-request wrappers bind them to X-User.
+function userRecordFor(email) {
+  if (!backend._users) return undefined;
+  return Object.values(backend._users).find(v => v.user === email)
+    || backend._users[email] || backend._users[(email || '').toLowerCase()];
+}
+function allowedTablesFor(email) {
+  if (!backend._users) return null;            // no users = no restrictions
+  const u = userRecordFor(email);
+  if (!u) return [];                           // unknown user = no access
+  if (u.role === 'admin' || u.tables === 'all') return null;  // null = unrestricted
+  return AccessFeatures.readableTables(u.tables) || [];
+}
+function ownerColNameOf(base) {
+  const cols = (((backend.getSchema('local') || {}).tables || {})[base] || {}).columns;
+  if (!cols) return null;
+  if (Array.isArray(cols)) { const o = cols.find(c => c && c.type === 'owner'); return o ? o.name : null; }
+  for (const n in cols) { const d = cols[n]; if (d && typeof d === 'object' && d.type === 'owner') return n; }
+  return null;
+}
+
+// --- Live sync: an SSE stream of row changes ---------------------------------------------------------
+// The production backends push through Firestore onSnapshot / Supabase realtime; the dev server's
+// equivalent is this. Every mutating route calls broadcast(), which fans the change out to the
+// subscribers ALLOWED TO SEE IT — a live stream that ignored the access model would be a read channel
+// around it, which is precisely the mistake this file exists to not make (see the DEV-ONLY note below:
+// the identity is trusted, not authenticated, but the SHAPE of the gate still has to match production).
+const sseClients = new Set();   // { res, email }
+
+// Would this subscriber have received this row from getTableData? Mirrors, in order: the grant check,
+// the _pages/_assets registered-user carve-out, and the self-service slice (own rows + public roster).
+function canSeeRow(email, store, value) {
+  const base = store ? store.split('__')[0] : '';
+  const allowed = allowedTablesFor(email);
+  if (!allowed) return true;                                        // admin / unrestricted
+  if (allowed.indexOf(base) >= 0) return true;                      // granted
+  if (base === '_pages' || base === '_assets') return !!userRecordFor(email);
+  const oc = ownerColNameOf(base);
+  if (!oc || !value) return false;                                  // fail closed
+  return String(value[oc] || '').toLowerCase() === String(email || '').toLowerCase()
+    || value.rosterPublic === true;
+}
+
+// `value` is the row after the write, or null for a delete. Deletes pass the row as it was JUST BEFORE
+// removal (the routes read it first) — without it there is nothing left to evaluate ownership against,
+// and a restricted member would stop seeing deletions of rows they could see perfectly well.
+function broadcast(store, key, value, priorValue) {
+  if (!sseClients.size || !store || !key) return;
+  const payload = JSON.stringify({ store, key, value: value === undefined ? null : value });
+  for (const c of Array.from(sseClients)) {
+    if (!canSeeRow(c.email, store, value || priorValue || null)) continue;
+    try { c.res.write('data: ' + payload + '\n\n'); }
+    catch (e) { sseClients.delete(c); }
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   // CORS: only allow loopback origins (same-origin needs no ACAO). Blocks cross-site drive-by requests.
   const origin = req.headers.origin;
@@ -86,6 +146,30 @@ const server = http.createServer(async (req, res) => {
   }
 
   const url = new URL(req.url, 'http://localhost');
+
+  // Live-sync stream. GET, not POST, and identity arrives as ?user= rather than X-User: EventSource
+  // cannot set headers. Same trusted-not-authenticated model as every other route here (loopback bind),
+  // and the same source the dev client already reads its identity from (dev/dev-client.js).
+  if (url.pathname === '/api/events') {
+    const h = {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no'
+    };
+    if (allowOrigin) h['Access-Control-Allow-Origin'] = allowOrigin;
+    res.writeHead(200, h);
+    res.write('retry: 2000\n\n');                 // EventSource reconnects on its own; pace it
+    const client = { res, email: url.searchParams.get('user') || 'local@dev' };
+    sseClients.add(client);
+    // Comment frames keep the connection from being reaped by an idle timeout; they are ignored by
+    // EventSource. unref() so a live subscriber can't hold the process open (the test suite starts and
+    // stops this server in-process).
+    const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch (e) {} }, 25000);
+    if (ping.unref) ping.unref();
+    req.on('close', () => { clearInterval(ping); sseClients.delete(client); });
+    return;
+  }
 
   // API routes
   if (url.pathname.startsWith('/api/')) {
@@ -100,20 +184,12 @@ const server = http.createServer(async (req, res) => {
     const userEmail = req.headers['x-user'] || 'local@dev';
     // The one lookup for "who is this user" — previously getAllowedTables and getMyAccess each rolled
     // their own with different fallbacks (getMyAccess also tried key lookups), a latent access split.
-    function userRecord() {
-      if (!backend._users) return undefined;
-      return Object.values(backend._users).find(v => v.user === userEmail)
-        || backend._users[userEmail] || backend._users[(userEmail || '').toLowerCase()];
-    }
+    // Bound to this request's identity; the implementations are hoisted to module scope so the SSE
+    // broadcaster asks the same questions (see userRecordFor / allowedTablesFor above).
+    function userRecord() { return userRecordFor(userEmail); }
     // Tables the caller may SEE. Mirrors firestore.rules hasTableAccess: a grant map { t:'r'|'rw' } is
     // read-visible on every key, exactly as the rules' `x in <map>` membership test is.
-    function getAllowedTables() {
-      if (!backend._users) return null; // no users = no restrictions
-      const u = userRecord();
-      if (!u) return []; // unknown user = no access
-      if (u.role === 'admin' || u.tables === 'all') return null; // null = unrestricted
-      return AccessFeatures.readableTables(u.tables) || [];
-    }
+    function getAllowedTables() { return allowedTablesFor(userEmail); }
     // Tables the caller may WRITE — the 'rw' subset. Mirrors hasTableWrite / app_has_table_write.
     function getWritableTables() {
       if (!backend._users) return null;
@@ -214,6 +290,17 @@ const server = http.createServer(async (req, res) => {
     }
     const _mine = (v) => String(v == null ? '' : v).toLowerCase() === String(userEmail || '').toLowerCase();
     const _rowById = (tableId, tab, id) => ((backend.getTableData(tableId, tab) || {}).rows || []).find(r => r.id === id);
+    const _store = (tableId, tab) => BackendHelpers.storeName((tableId || '').split('__')[0], tab || 'active');
+    // Answer the caller AND tell the live subscribers. Broadcasts the STORED row, re-read after the
+    // write, never the request payload: a partial putRow's patch is not a row, and a subscriber applies
+    // what it receives as that row's new state — handing it the patch would be fine for the columns it
+    // names and silently wrong about nothing else, but re-reading costs a dev-server map lookup and
+    // removes the question entirely.
+    function putOk(b) {
+      const id = b.data && b.data.id;
+      if (id) broadcast(_store(b.tableId, b.tab), id, _rowById(b.tableId, b.tab, id) || b.data);
+      return json(res, { ok: true });
+    }
     // The self-service read slice: my own owned rows plus the ones flagged public. Mirrors the two
     // rules-provable Firestore queries (_scopedRead) and the Supabase read predicate, and is what the
     // getTableData route already returns for an ungranted owner table -- boot has to say the same thing.
@@ -287,7 +374,7 @@ const server = http.createServer(async (req, res) => {
       case 'putRow': {
         if (pagesTable(body.tableId)) {
           if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
-          backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
+          backend.putRow(body.tableId, body.data, body.tab); return putOk(body);
         }
         if (assetsTable(body.tableId)) {
           if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
@@ -296,15 +383,23 @@ const server = http.createServer(async (req, res) => {
           if (typeof (body.data && body.data.src) !== 'string' || body.data.src.length > 900000) {
             return json(res, { error: 'Asset too large' }, 400);
           }
-          backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
+          backend.putRow(body.tableId, body.data, body.tab); return putOk(body);
         }
-        if (checkTableWrite(body.tableId)) { backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true }); }
+        if (checkTableWrite(body.tableId)) { backend.putRow(body.tableId, body.data, body.tab); return putOk(body); }
         const oc = selfServiceOwnerCol(body.tableId);
         const existing = oc ? _rowById(body.tableId, body.tab, body.data && body.data.id) : null;
+        // Gate the MERGED row, not the submitted payload. putRow merges (the pinned conformance
+        // contract), so a cell edit now sends only { id, <col>, updated_at } — the owner column it must
+        // be judged on lives on the stored row, not in the patch. Judging the patch alone would 403
+        // every partial write by a self-service member while the production layers, which see
+        // `request.resource.data` AFTER the merge, allow it. This keeps the three gates saying the same
+        // thing; it is parity, not a loosening (a create still has no existing row to inherit from, so
+        // it must still carry the owner itself).
+        const merged = Object.assign({}, existing || {}, body.data || {});
         // Must stamp myself as owner AND (on update) not overwrite a row owned by someone else.
-        if (!oc || !_mine(body.data && body.data[oc]) || (existing && !_mine(existing[oc]))
-            || !ownerFieldsOk(body.tableId, body.data, existing)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
-        backend.putRow(body.tableId, body.data, body.tab); return json(res, { ok: true });
+        if (!oc || !_mine(merged[oc]) || (existing && !_mine(existing[oc]))
+            || !ownerFieldsOk(body.tableId, merged, existing)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
+        backend.putRow(body.tableId, body.data, body.tab); return putOk(body);
       }
       case 'uploadFile': {
         // Dev-only file store for the image column (the local counterpart of Firebase Storage): write the
@@ -320,15 +415,23 @@ const server = http.createServer(async (req, res) => {
         return json(res, { url: 'http://' + host + '/uploads/' + fname });
       }
       case 'deleteRow': {
+        // The row is read BEFORE the delete in every branch — broadcast needs it to decide who was
+        // allowed to see it, and after the delete there is nothing left to ask.
+        const prior = _rowById(body.tableId, body.tab, body.id);
+        const delOk = () => {
+          const deleted = backend.deleteRow(body.tableId, body.id, body.tab);
+          broadcast(_store(body.tableId, body.tab), body.id, null, prior);
+          return json(res, { deleted });
+        };
         if (pagesTable(body.tableId)) {
           if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
-          return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
+          return delOk();
         }
-        if (checkTableWrite(body.tableId)) return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
+        if (checkTableWrite(body.tableId)) return delOk();
         const oc = selfServiceOwnerCol(body.tableId);
-        const existing = oc ? _rowById(body.tableId, body.tab, body.id) : null;   // may delete only my own owned row
+        const existing = oc ? prior : null;   // may delete only my own owned row
         if (!oc || !existing || !_mine(existing[oc])) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
-        return json(res, { deleted: backend.deleteRow(body.tableId, body.id, body.tab) });
+        return delOk();
       }
       case 'getTranslations': return json(res, backend.getTranslations(body.folderId || 'local', body.langCode));
       case 'updateTranslations': backend.updateTranslations(body.folderId || 'local', body.langCode, body.updates); return json(res, { ok: true });
@@ -396,7 +499,19 @@ const server = http.createServer(async (req, res) => {
         backend.saveListUsers('local', LU.setLink(cur, body.listName, body.value, body.email || ''));
         return json(res, { ok: true });
       }
-      case 'moveRow': if (!checkTableWrite(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); } backend.moveRow(body.tableId, body.rowData, body.fromTab, body.toTab); return json(res, { ok: true });
+      case 'moveRow': {
+        if (!checkTableWrite(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
+        const moved = body.rowData || {};
+        const priorMove = _rowById(body.tableId, body.fromTab, moved.id);
+        backend.moveRow(body.tableId, moved, body.fromTab, body.toTab);
+        // An archive/unarchive is a delete from one partition and a put into the other — two stores, so
+        // two events. A client watching only the active partition (the usual case) sees the row leave.
+        if (moved.id) {
+          broadcast(_store(body.tableId, body.fromTab), moved.id, null, priorMove);
+          broadcast(_store(body.tableId, body.toTab), moved.id, _rowById(body.tableId, body.toTab, moved.id) || moved);
+        }
+        return json(res, { ok: true });
+      }
       case 'saveChangesets': backend.saveChangesets('local', body.siteId, body.json); return json(res, { ok: true });
       case 'loadChangesets': return json(res, backend.loadChangesets('local', body.excludeSiteId));
       case 'readFile': return json(res, { data: backend.readFile('local', body.name) });

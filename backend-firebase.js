@@ -154,6 +154,61 @@ backend = {
       return { headers: BackendHelpers.deriveHeaders(rows), rows: rows };
     });
   },
+  // Live updates (optional backend method — see live-sync.js and app-core's _liveWatch). Emits
+  // { type:'put'|'delete', id, row } for every change another client makes to this partition.
+  //
+  // The query shape MIRRORS _scopedRead and has to: rules are not filters, so a listener without a
+  // table grant is provable only when it constrains `owner` / `rosterPublic`. An unconstrained
+  // onSnapshot for that user is denied outright — the listener would simply never fire, which is the
+  // silent-empty-table failure _scopedRead was written to avoid, only harder to notice.
+  subscribeTable: function(tableId, tab, onChange) {
+    var store = _storeName(tableId, tab);
+    var unsubs = [], stopped = false;
+    // Which of the queries currently matches each doc id. In the two-query (self-service) case a doc
+    // leaving ONE query fires 'removed' there while it is still visible through the other — e.g. a row
+    // whose rosterPublic flips false is still mine. Emitting a delete on that would make the row vanish
+    // from a user who can still see it, so a delete is emitted only once the id has left both queries.
+    var presence = {};
+    function onSnap(qi, snap) {
+      snap.docChanges().forEach(function(c) {
+        var id = c.doc.id;
+        var at = presence[id] || (presence[id] = {});
+        if (c.type === 'removed') {
+          delete at[qi];
+          if (Object.keys(at).length) return;          // still matched by the other query — not a delete
+          delete presence[id];
+          onChange({ type: 'delete', id: id, row: null });
+        } else {
+          at[qi] = true;
+          onChange({ type: 'put', id: id, row: c.doc.data() });
+        }
+      });
+    }
+    this._myTables().then(function(tabs) {
+      if (stopped) return;
+      var queries;
+      if (tabs === null || tabs.indexOf(tableId) >= 0) {
+        queries = [_db.collection(store)];
+      } else {
+        var me = _myEmail();
+        if (!me) return;
+        queries = [
+          _db.collection(store).where('owner', '==', me),
+          _db.collection(store).where('rosterPublic', '==', true)
+        ];
+      }
+      queries.forEach(function(q, qi) {
+        // Errors are swallowed for the same reason _scopedRead's are: a denied read must degrade to
+        // "no live updates", never to an exception thrown out of a snapshot callback.
+        unsubs.push(q.onSnapshot(function(snap) { onSnap(qi, snap); }, function() {}));
+      });
+    }).catch(function() {});
+    return function() {
+      stopped = true;
+      unsubs.forEach(function(u) { try { u(); } catch (e) {} });
+      unsubs = [];
+    };
+  },
   putRow: function(tableId, data, tab) {
     if (!data.id) return Promise.resolve();
     return StorageFirestore.put(_storeName(tableId, tab), data.id, data);
