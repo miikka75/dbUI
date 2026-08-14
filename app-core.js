@@ -149,13 +149,19 @@ function createVueApp() {
   var vuetify = Vuetify.createVuetify({
     theme: {
       defaultTheme: localStorage.getItem('app_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+      // `outline` is NOT one of Vuetify's own theme colors (it carries `--v-border-color` instead), but the
+      // app's styles and templates ask for `rgb(var(--v-theme-outline), a)` in ~15 places — separators,
+      // card frames, the editable-cell box. An undefined var makes each of those declarations invalid, and
+      // an invalid declaration is dropped, so every one of those borders silently never painted. Defining
+      // the color here is what makes them render; it is load-bearing, not decoration.
       themes: {
-        light: { colors: { primary: '#4285f4', secondary: '#5cbbf6', surface: '#ffffff', background: '#f5f5f5' } },
+        light: { colors: { primary: '#4285f4', secondary: '#5cbbf6', surface: '#ffffff', background: '#f5f5f5', outline: '#79747e' } },
         dark: {
           dark: true,
           // Explicit bright text colors + higher emphasis so column text stands out from the dark
           // surface/background (Vuetify's derived defaults rendered too dim against #2a2a2a/#1a1a1a).
-          colors: { primary: '#8ab4f8', secondary: '#5cbbf6', surface: '#2a2a2a', background: '#1a1a1a', 'on-surface': '#f1f3f4', 'on-background': '#f1f3f4' },
+          // The outline lightens to stay visible against those same dark surfaces.
+          colors: { primary: '#8ab4f8', secondary: '#5cbbf6', surface: '#2a2a2a', background: '#1a1a1a', 'on-surface': '#f1f3f4', 'on-background': '#f1f3f4', outline: '#938f99' },
           variables: { 'high-emphasis-opacity': 0.96, 'medium-emphasis-opacity': 0.78 }
         }
       }
@@ -660,6 +666,18 @@ function createVueApp() {
           cols = cols.filter(function(c) { return !self.colHideEmpty(c) || data.some(function(r) { return r[c]; }); });
         }
         return cols;
+      },
+      // Table mode: the visible columns that hold no value in any row, by the same emptiness test
+      // hideEmpty uses above. These are NOT dropped — an empty column is exactly where the first value
+      // gets typed, and hideEmpty is the opt-in for removing one outright. They are only marked, so the
+      // stylesheet can stop them claiming a proportional share of the table's spare width (.col-empty).
+      emptyCols: function() {
+        var out = {}, data = this.sortedData;
+        if (this.useCardLayout || !data.length) return out;
+        this.visibleCols.forEach(function(c) {
+          if (!data.some(function(r) { return r[c]; })) out[c] = true;
+        });
+        return out;
       },
       tableHeaders: function() {
         var self = this;
@@ -4913,12 +4931,25 @@ function createVueApp() {
       + '          <v-btn v-if="canEdit" :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" density="comfortable" :color="isDelArmed(item) ? \'error\' : undefined" :title="isDelArmed(item) ? tOr(\'board.confirm_delete\',\'Confirm delete?\') : tOr(\'board.delete\',\'Delete\')" @click="delItem(item)" :data-testid="\'board-del-\'+item.id"></v-btn>'
       + '          <v-menu v-if="canEdit && canMoveCards" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
       + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.move_to\',\'Move to\')" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
-      + '            <v-list density="compact"><v-list-subheader>{{ tOr(\'board.move_to\',\'Move to\') }}</v-list-subheader>'
+      // No heading over the lane list: the menu opens from a button that already carries "move to" as its
+      // tooltip, and every item in it is a lane, so the header only restated the question. `board.move_to`
+      // stays in use as that tooltip.
+      + '            <v-list density="compact">'
       + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value)" :active="String(item[laneCol]||\'\')===opt.value">'
       + '              <v-list-item-title>{{ opt.title }}</v-list-item-title></v-list-item></v-list></v-menu>'
       + '        </div>'
-      + '        <template v-if="editing[item.id]"><div v-for="col in editCols()" :key="col" style="display:flex;align-items:center;gap:6px;margin-top:4px"><span style="font-size:0.72rem;opacity:0.6;min-width:82px;flex-shrink:0">{{ t(\'field.\'+col) || col }}</span><data-cell :item="item" :col="col" :owner="viewName"></data-cell></div></template>'
-      + '        <template v-else><div v-for="col in cardCols(item)" :key="col" style="font-size:0.78rem;opacity:0.85"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span>{{ displayValue(col, item[col]) }}</div></template>'
+      // Field face (both modes): one <v-field> per column — the SAME component v-text-field wraps its
+      // input in, so the card gets Vuetify's real notched outline with the field name floated into the
+      // gap in the top-left border, identical to the profile fields in Settings. `active` keeps the label
+      // floated (there is no focus/blur cycle to float it, and an empty value must still show its name).
+      // Only the slot content differs between modes: an editor in edit mode, plain text in read mode.
+      // The slot content IS the field's input area, so it has to carry the slot's own props — those
+      // supply the `v-field__input` class the outline's height and the label's float offset are measured
+      // against. Dropping them collapses the box and pushes the value out through its bottom border.
+      + '        <template v-if="editing[item.id]"><v-field v-for="col in editCols()" :key="col" class="field-box" variant="outlined" active :label="t(\'field.\'+col) || col">'
+      + '          <template v-slot:default="{ props: fp }"><div v-bind="fp" class="field-box-value"><data-cell :item="item" :col="col" :owner="viewName"></data-cell></div></template></v-field></template>'
+      + '        <template v-else><v-field v-for="col in cardCols(item)" :key="col" class="field-box" variant="outlined" active :label="t(\'field.\'+col) || col">'
+      + '          <template v-slot:default="{ props: fp }"><div v-bind="fp" class="field-box-value">{{ displayValue(col, item[col]) }}</div></template></v-field></template>'
       + '      </div>'
       + '      <div v-if="!lane.items.length" style="opacity:0.4;font-size:0.78rem;padding:4px">—</div>'
       + '    </div>'

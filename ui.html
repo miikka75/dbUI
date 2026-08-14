@@ -321,10 +321,14 @@
               <!-- First visible field always shown + expand toggle -->
               <div class="d-flex align-center" @click="a.currentConfig.collapsed ? (a.expandedCard = a.expandedCard === item.id ? null : item.id) : null" :style="a.currentConfig.collapsed ? 'cursor:pointer' : ''">
                 <div style="flex:1">
-                  <div v-if="a.visibleCols.length" class="card-field mb-2">
-                    <span class="card-field-label">{{ a.t('field.' + a.visibleCols[0]) || a.visibleCols[0] }}</span>
-                    <span style="opacity:0.9"><list-value :col="a.visibleCols[0]" :value="item[a.visibleCols[0]]" :size="28"></list-value></span>
-                  </div>
+                  <!-- Same outlined field as a kanban card (and Settings -> Profile): the label floats into
+                       the notch instead of sitting in a gutter beside the value. -->
+                  <v-field v-if="a.visibleCols.length" class="field-box field-box--roomy" variant="outlined" active
+                           :label="a.t('field.' + a.visibleCols[0]) || a.visibleCols[0]">
+                    <template v-slot:default="{ props: fp }"><div v-bind="fp" class="field-box-value">
+                      <list-value :col="a.visibleCols[0]" :value="item[a.visibleCols[0]]" :size="28"></list-value>
+                    </div></template>
+                  </v-field>
                 </div>
                 <v-icon v-if="a.currentConfig.collapsed" size="small">{{ a.expandedCard === item.id || (!a.currentConfig.collapsed) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
               </div>
@@ -337,10 +341,12 @@
               </div>
               </template>
               <template v-for="col in a.visibleCols.slice(1)" :key="col">
-              <div v-if="!a.isColumnHidden(col, item)" class="card-field mb-2">
-                <span class="card-field-label">{{ a.t('field.' + col) || col }}</span>
-                <data-cell :item="item" :col="col"></data-cell>
-              </div>
+              <v-field v-if="!a.isColumnHidden(col, item)" class="field-box field-box--roomy" variant="outlined" active
+                       :label="a.t('field.' + col) || col">
+                <template v-slot:default="{ props: fp }"><div v-bind="fp" class="field-box-value">
+                  <data-cell :item="item" :col="col"></data-cell>
+                </div></template>
+              </v-field>
               <!-- Inline text/embed after this column -->
               <template v-for="(ei, eidx) in a.embedItems" :key="'emb'+col+eidx">
               <div v-if="ei.config.afterColumn === col && a.embedWhenOk(ei, item) && a.embedVisible(ei, item)" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
@@ -362,16 +368,16 @@
           <v-table v-else-if="a.visibleCols.length" density="compact" hover>
             <template v-slot:default>
             <thead><tr>
-              <th v-for="col in a.visibleCols" :key="col" @click="a.toggleSort(col)" style="cursor:pointer">{{ a.t('field.' + col) || col }}</th>
+              <th v-for="col in a.visibleCols" :key="col" :class="{ 'col-empty': a.emptyCols[col] }" :title="a.t('field.' + col) || col" @click="a.toggleSort(col)" style="cursor:pointer">{{ a.t('field.' + col) || col }}</th>
               <th v-if="a.isUnionView">{{ a.t('field.source') }}</th>
-              <th></th>
+              <th class="col-actions"></th>
             </tr></thead>
             <tbody>
               <template v-for="item in a.sortedData" :key="item.id">
               <tr>
-                <td v-for="col in a.visibleCols" :key="col"><data-cell :item="item" :col="col"></data-cell></td>
+                <td v-for="col in a.visibleCols" :key="col" :class="{ 'col-empty': a.emptyCols[col] }"><data-cell :item="item" :col="col"></data-cell></td>
                 <td v-if="a.isUnionView"><v-chip size="x-small" variant="tonal" color="secondary">{{ item._source }}</v-chip></td>
-                <td style="white-space:nowrap">
+                <td class="col-actions" style="white-space:nowrap">
                   <v-btn v-if="a.isReorderable" icon="mdi-arrow-up" size="small" variant="text" :disabled="a.sortedData.indexOf(item) === 0" @click="a.moveRowPosition(item, -1)"></v-btn>
                   <v-btn v-if="a.isReorderable" icon="mdi-arrow-down" size="small" variant="text" :disabled="a.sortedData.indexOf(item) === a.sortedData.length - 1" @click="a.moveRowPosition(item, 1)"></v-btn>
                   <v-btn v-if="!a.viewingArchive && a.hasArchive && a.canMutateRows && a.canMutateRow(item)" icon="mdi-archive-outline" size="small" variant="text" class="mr-2" @click="a.archiveRow(item)"></v-btn>
