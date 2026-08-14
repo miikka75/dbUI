@@ -65,14 +65,31 @@ html, body { margin: 0; padding: 0; height: 100%; background: #1a1a1a; }
 /* image-column thumbnail (data-cell): fixed-height preview that links to the full image */
 .cell-thumb { height: 36px; max-width: 96px; object-fit: cover; border-radius: 4px; border: 1px solid rgb(var(--v-theme-outline), 0.3); display: block; }
 td { vertical-align: middle; padding: 4px 8px !important; }
+/* A table at width:100% hands its SURPLUS width to every column in proportion to that column's own
+   max-content width — so a column with nothing in it still claimed its cut, and claimed the same
+   percentage no matter how narrow the window got. An explicit tiny width opts a column out of that
+   share-out: it settles at its own min-content (its header) and the surplus goes to the columns that
+   have something to show. Marked per render by `emptyCols`, so a column widens again the moment it
+   holds a value; dropping such a column entirely stays the separate, opt-in `hideEmpty`.
+   The row-button column opts out the same way and always: it holds fixed-size icons, so any share of the
+   surplus it took was padding. It also has to opt out for the all-columns-empty case (a fresh table with
+   one blank row) — as the only column still absorbing, it would otherwise take ALL the spare width and
+   push every field into a huddle on the left. */
+.v-table th.col-empty, .v-table td.col-empty, .v-table th.col-actions, .v-table td.col-actions { width: 1%; }
+/* Once a column is down to min-content, its floor is its own HEADER: one long word (a Finnish compound
+   like "Musiikkiesitys") holds a column open by itself with nothing under it. So an empty column's header
+   may clip. Truncation beats the alternatives here — letting it wrap mid-word costs three header lines and
+   reads as broken, and the name matters least on the column that has nothing in it. The full name stays on
+   hover (th `title`), and the column returns to its natural width the moment it holds a value. */
+.v-table th.col-empty { max-width: 6em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 input[type="date"] { border: 1px solid rgb(var(--v-theme-outline), 0.3); border-radius: 4px; padding: 6px 10px; min-height: 32px; background: transparent; color: inherit; font: inherit; }
 input[type="date"]:focus { outline: none; border-color: rgb(var(--v-theme-primary)); }
-/* Card view field rows: stacked "overline" label on narrow/mobile (the cramped case); inline
-   label+value gutter on wide screens (≥600px) where horizontal space is plentiful. */
+/* Standalone "overline" label, kept for controls that pair a caption with something that is not a field
+   (the Settings background position grid and opacity slider). The row-card layouts that used to pair it
+   with a value now use .field-box instead. */
 .card-field-label { display: block; font-size: 0.6rem; letter-spacing: 0.05em; text-transform: uppercase; opacity: 0.55; line-height: 1.5; }
 @media (min-width: 600px) {
-  .card-field { display: flex; align-items: baseline; }
-  .card-field-label { flex: 0 0 auto; min-width: 110px; padding-right: 8px; font-size: 0.75rem; letter-spacing: normal; text-transform: none; opacity: 0.6; }
+  .card-field-label { min-width: 110px; padding-right: 8px; font-size: 0.75rem; letter-spacing: normal; text-transform: none; opacity: 0.6; }
 }
 /* Board (kanban) lanes: fixed-width columns that scroll horizontally on desktop; on mobile they stack
    full-width so a phase row never needs a horizontal scrollbar (the page scrolls vertically instead).
@@ -83,4 +100,36 @@ input[type="date"]:focus { outline: none; border-color: rgb(var(--v-theme-primar
   .board-lane-row { flex-direction: column; overflow-x: visible; }
   .board-lane { flex: 1 1 auto; min-width: 0; width: 100%; }
 }
+/* One row's field, shared by the kanban card and the card layout: a real <v-field variant="outlined">, so
+   the notched outline and the floated top-left label come from Vuetify itself and match Settings -> Profile
+   exactly. Only spacing and the nested editor need styling here — the notch sizes itself off the label, so
+   capping the label's width here would shrink the notch it is measured against and truncate a name that
+   had room.
+   Density comes from `.v-input--density-*` ANCESTOR selectors, so a bare v-field (no v-input around it)
+   inherits none of it and silently runs on the default 56px height and 16px bottom padding — which is what
+   left a wide gap between a value and the line under it. The scale is therefore set here outright. The
+   floated label needs no size of its own — it is 0.75em, so it follows this font-size down. */
+.field-box.v-field {
+  --v-input-control-height: 30px;
+  --v-field-padding-top: 2px; --v-field-padding-bottom: 2px;
+  --v-field-padding-start: 10px; --v-field-padding-end: 10px;
+  font-size: 0.8rem; margin-top: 6px;
+}
+/* The card layout runs a size up from the kanban's: it is a full-width primary reading surface, not a
+   240px lane, and its rows are what the screen is for. Same control, one step roomier. */
+.field-box--roomy.v-field { --v-input-control-height: 38px; --v-field-padding-start: 12px; --v-field-padding-end: 12px; font-size: 0.875rem; margin-top: 8px; }
+.field-box-value { min-width: 0; overflow-wrap: anywhere; }
+/* The outer field supplies the frame, so a data-cell editor NESTED inside it drops its own resting
+   padding and min-height — a compact v-field's 40px floor applied twice would double every card's
+   height. Scoped through a second `.v-field` so these never hit the outer field's own parts. */
+.field-box .v-field .v-field__input { padding: 0; min-height: 0; }
+/* v-input and v-field each hard-set their own size, so a list/ref editor would sit at full size inside a
+   shrunken card field while a plain text column (a contenteditable, which inherits) came out small — the
+   same card showing two type sizes. Both are re-pointed at the card's scale, and the native <input> with
+   them (url/date columns): an input does not inherit type from its parent on its own. */
+.field-box .v-input, .field-box .v-field, .field-box input { font-size: inherit; }
+.field-box .v-field .v-field__append-inner, .field-box .v-field .v-field__prepend-inner { padding-top: 0; align-items: center; }
+.field-box .editable-cell { border: none; border-radius: 0; padding: 0; min-width: 0; min-height: 0; }
+.field-box .editable-cell:focus { background: transparent; }
+.field-box input[type="date"] { border: none; padding: 0; min-height: 0; }
 </style>
