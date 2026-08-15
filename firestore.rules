@@ -30,7 +30,7 @@ service cloud.firestore {
     // since the map shape arrived with the very change that introduced rwTables. Restricting the
     // fallback to a list is therefore lossless for real legacy data, and closes a map without the
     // mirror (hand-edited, or written by something that skipped userGrantDoc) silently promoting every
-    // 'r' grant to 'rw'. listWriteAllowed below already fails closed the same way.
+    // 'r' grant to 'rw'.
     function hasTableWrite(collection) {
       let table = collection.split('__')[0];
       let u = userData();
@@ -41,14 +41,6 @@ service cloud.firestore {
       let t = userData().tables;
       return t == 'all' || (t is list && t.hasAny(resource.data.tables))
                         || (t is map && t.keys().hasAny(resource.data.tables));
-    }
-    // Writing a list needs WRITE access to an owning table, not merely sight of it — otherwise a
-    // read-only grant would let that table's lists be edited, which is the opposite of the point.
-    function listWriteAllowed() {
-      let u = userData();
-      return u.tables == 'all'
-        || ('rwTables' in u ? resource.data.tables.hasAny(u.rwTables)
-                            : (u.tables is list && u.tables.hasAny(resource.data.tables)));
     }
 
     // Meta: read by registered. `lists` and `users` docs are admin-only reads (users holds every
@@ -114,45 +106,56 @@ service cloud.firestore {
       allow delete:         if request.auth != null && (myEmail() == email || (!noUsers() && role() == 'admin'));
     }
 
-    // Per-list storage: each list is its own doc carrying its owning `tables`. Read/write gated on
-    // whether the user has access to any owning table (admins/bootstrap unrestricted). An editor may
-    // change a list's ITEMS but not its `tables` ownership label — that determines who can see the list,
-    // so re-stamping it stays an admin action (listAllowed() reads resource, so the editor branch is
-    // update-only anyway; the equality just pins the field). Admins/bootstrap set `tables` freely.
-    // CREATE has no existing doc, so `resource` is null and both listWriteAllowed() and the
-    // re-stamp pin above evaluate against nothing — which denied every editor create outright. That is
-    // not an academic gap: putListItem on a list whose doc doesn't exist yet is a create (set with
-    // merge), so an editor adding the first value to an `allowNew` list was denied, while the same
-    // editor on Supabase was allowed. Authorize the create from _meta/listTables — the schema-derived
-    // ownership map (listOwnershipMap, mirrored by saveSchema) — rather than from the `tables` label the
-    // client writes into the doc, which on a create is an unverified claim: trusting it would let an
-    // editor mint a list under an ownership label of their choosing, hijacking the read audience of a
-    // list another table actually owns. The label is then PINNED to the mirror, so the stored doc says
-    // what the schema says. No mirror doc yet (rules deployed before the next schema save) -> no editor
-    // creates, and an admin still creates freely; the feature activates on the next saveSchema.
+    // Per-list storage: each list is its own doc carrying its owning `tables`. READ is gated on access to
+    // any owning table (admins/bootstrap unrestricted). WRITE is admin-only except for the lists the
+    // schema opens — see listUserWritable below. Whoever writes, the `tables` ownership LABEL is
+    // pinned: it decides who can see the list, so re-stamping it stays an admin action. On an update the
+    // pin is `request.resource.data.tables == resource.data.tables`; on a CREATE there is no stored doc
+    // to compare against — `resource` is null — so the label is an unverified claim and is pinned to
+    // _meta/listTables instead (the schema-derived ownership map, listOwnershipMap, mirrored by
+    // saveSchema). Without that, a non-admin could mint a list under an ownership label of their
+    // choosing and hijack the read audience of a list another table actually owns. This matters in
+    // practice: putListItem on a list whose doc doesn't exist yet IS a create (set with merge).
     function listTablesMap() {
       return exists(/databases/$(database)/documents/_meta/listTables)
         ? get(/databases/$(database)/documents/_meta/listTables).data : {};
     }
-    function listCreateAllowed(listName) {
+    // Editing a list is editing SHARED VOCABULARY — the member names, the status words every view reads
+    // — so it is admin-only unless the schema names the list in `userWritableLists` (mirrored to
+    // _meta/listWritable), which marks the free-form vocabularies any registered user maintains as they
+    // work. A table grant is deliberately NOT consulted: a list belongs to every table whose columns
+    // reference it, so keying on the grant handed one rw table every list its columns touched.
+    // No mirror doc -> no list is user-writable, which is the safe default: a deployment that has not
+    // re-saved its schema cannot silently keep the old behaviour.
+    function listUserWritable(listName) {
+      return exists(/databases/$(database)/documents/_meta/listWritable)
+        && get(/databases/$(database)/documents/_meta/listWritable).data.lists.hasAny([listName]);
+    }
+    // The ownership label on a CREATE is an unverified claim (there is no stored doc to compare against),
+    // so pin it to the schema-derived mirror: the list must be one the schema knows, and the label must
+    // be exactly what the schema says. No mirror doc yet -> no non-admin creates, and the feature
+    // activates on the next saveSchema.
+    function listLabelPinned(listName) {
       let m = listTablesMap();
-      let u = userData();
-      return (listName in m)
-        && request.resource.data.tables == m[listName]
-        && (u.tables == 'all'
-            || ('rwTables' in u ? m[listName].hasAny(u.rwTables)
-                                : (u.tables is list && m[listName].hasAny(u.tables))));
+      return (listName in m) && request.resource.data.tables == m[listName];
     }
     match /_lists/{listName} {
       allow read: if request.auth != null && isRegistered() && (
         noUsers() || role() == 'admin' || listAllowed()
       );
+      // Editing a list is admin-only, EXCEPT the lists the schema opens (userWritableLists): those are
+      // free-form vocabularies any registered user maintains as they work. A table grant is deliberately
+      // not consulted — a list belongs to every table whose columns reference it, so keying on the grant
+      // handed one rw table every list its columns touched (`members` via home_shopping.added_by).
+      // The ownership LABEL is still pinned either way: to the schema mirror on create (where the label
+      // is an unverified claim) and to its stored value on update, so nobody mints or re-points a list
+      // under a label of their choosing and hijacks another list's read audience.
       allow create: if request.auth != null && isRegistered() && (
-        noUsers() || role() == 'admin' || (role() == 'editor' && listCreateAllowed(listName))
+        noUsers() || role() == 'admin' || (listUserWritable(listName) && listLabelPinned(listName))
       );
       allow update: if request.auth != null && isRegistered() && (
         noUsers() || role() == 'admin' ||
-        (role() == 'editor' && listWriteAllowed() && request.resource.data.tables == resource.data.tables)
+        (listUserWritable(listName) && request.resource.data.tables == resource.data.tables)
       );
       // Deleting a list is pruning, which only the full-view holder can judge (saveLists prunes only
       // when _myTables() is null). Stated as its own rule rather than riding `write`, where the
@@ -284,11 +287,27 @@ service cloud.firestore {
         || request.resource.data.diff(ownerBounds(coll).locked).affectedKeys()
              .hasOnly(ownerBounds(coll).cols.concat(ownerSystemCols()));
     }
-    // UPDATE: only listed columns may actually change value.
+    // `ownerWritableWhile: {col: value|[values]}` -> mirrored as whileCol + whileVals. The owner branch
+    // reaches a STORED row only while it still holds one of those values: "you may fix your entry until
+    // it is approved". An empty whileCol (the default) means no state gate. Read off `resource.data`,
+    // never `request.resource.data`, so an owner cannot slip past by sending a compliant state along
+    // with their edit.
+    // A mirror written BEFORE this feature has no `whileCol` key at all, and reading a missing property
+    // is an evaluation ERROR in rules (not undefined) — which denied every owner write on any deployment
+    // that had not re-saved its schema. Probe with `in` first: absent = no gate, the pre-feature
+    // behaviour. (Caught by dev/test-emulator/firestore-rules.mjs on its first run.)
+    function ownerStateOk(coll) {
+      return !ownerBounded(coll)
+        || !('whileCol' in ownerBounds(coll))
+        || ownerBounds(coll).whileCol == ''
+        || (resource.data[ownerBounds(coll).whileCol] in ownerBounds(coll).whileVals);
+    }
+    // UPDATE: the row must still be in an owner-writable state, and only listed columns may change value.
     function ownerUpdateOk(coll) {
       return !ownerBounded(coll)
-        || request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(ownerBounds(coll).cols.concat(ownerSystemCols()));
+        || (ownerStateOk(coll)
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(ownerBounds(coll).cols.concat(ownerSystemCols())));
     }
     match /{collection}/{doc} {
       // Read: owner-stamped rows are private to their owner UNLESS marked rosterPublic (a per-table policy
@@ -323,7 +342,7 @@ service cloud.firestore {
       );
       allow delete: if base(collection) && (
         noUsers() || role() == 'admin' ||
-        (resource.data.owner == myEmail() && selfServiceTable(collection)) || // delete my own owned row (self-service tables only)
+        (resource.data.owner == myEmail() && selfServiceTable(collection) && ownerStateOk(collection)) || // delete my own owned row (self-service tables only, and only while it is still owner-writable)
         (role() == 'editor' && hasTableWrite(collection))
       );
     }

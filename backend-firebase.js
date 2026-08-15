@@ -28,13 +28,15 @@ backend = {
     // _meta/pageAccess (restricted doc-views -> gates _pages__active reads; see pageAccessOf),
     // _meta/ownerWritable (which columns an owner-scoped write may touch; see ownerWritableOf) and
     // _meta/listTables (which tables own each list -> lets the /_lists rule authorize a CREATE, where
-    // there is no existing doc to read the ownership label from; see listOwnershipMap).
+    // there is no existing doc to read the ownership label from; see listOwnershipMap) and
+    // _meta/listWritable (which lists a NON-ADMIN may add to at all; see userWritableListsOf).
     return Promise.all([
       StorageFirestore.setMeta('schema', schema),
       StorageFirestore.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) }),
       StorageFirestore.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema)),
       StorageFirestore.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema)),
-      StorageFirestore.setMeta('listTables', listOwnershipMap((schema && schema.tables) || {}))
+      StorageFirestore.setMeta('listTables', listOwnershipMap((schema && schema.tables) || {})),
+      StorageFirestore.setMeta('listWritable', BackendHelpers.userWritableListsOf(schema))
     ]);
   },
   // Single doc-view body by name. loadPage uses this (not the whole _pages__active collection) so that

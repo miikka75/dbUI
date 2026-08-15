@@ -299,13 +299,22 @@ await ok('a GRANTED user still reads the whole collection unconstrained',
 await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(ctx.firestore(), '_lists/refvalues'), { name: 'refvalues', items: ['a'], tables: ['refdata'] });
   await setDoc(doc(ctx.firestore(), '_lists/taskvalues'), { name: 'taskvalues', items: ['a'], tables: ['tasks'] });
+  // Editing a list is admin-only unless the schema opens it (userWritableLists -> _meta/listWritable).
+  // `lockedvalues` is owned by the SAME rw table as taskvalues but is not opened, which is what shows the
+  // allowlist doing the work rather than the table grant alone.
+  await setDoc(doc(ctx.firestore(), '_lists/lockedvalues'), { name: 'lockedvalues', items: ['a'], tables: ['tasks'] });
+  await setDoc(doc(ctx.firestore(), '_meta/listWritable'), { lists: ['taskvalues', 'newtasklist'] });
 });
-await ok("list of an 'r' table is readable",
+await ok("a list the schema does not open is readable",
   assertSucceeds(getDoc(doc(mixed, '_lists/refvalues'))));
-await ok("list of an 'r' table is NOT writable",
+await ok("...but not writable",
   assertFails(setDoc(doc(mixed, '_lists/refvalues'), { name: 'refvalues', items: ['a', 'b'], tables: ['refdata'] })));
-await ok("list of an 'rw' table IS writable",
+await ok("a list the schema OPENS is writable by a non-admin",
   assertSucceeds(setDoc(doc(mixed, '_lists/taskvalues'), { name: 'taskvalues', items: ['a', 'b'], tables: ['tasks'] })));
+await ok("a list the schema does NOT open stays admin-only, whatever the table grant",
+  assertFails(setDoc(doc(mixed, '_lists/lockedvalues'), { name: 'lockedvalues', items: ['a', 'b'], tables: ['tasks'] })));
+await ok('...and an admin still edits that same list',
+  assertSucceeds(setDoc(doc(admin, '_lists/lockedvalues'), { name: 'lockedvalues', items: ['a', 'b'], tables: ['tasks'] })));
 
 // CREATE is a separate question from update: there is no stored doc, so the ownership label in the
 // incoming write is an unverified CLAIM. The old `allow write` rule referenced resource.data on a
@@ -315,9 +324,9 @@ await ok("list of an 'rw' table IS writable",
 await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(ctx.firestore(), '_meta/listTables'), { newtasklist: ['tasks'], newreflist: ['refdata'] });
 });
-await ok('editor CAN create a list the schema says an rw-granted table owns',
+await ok('a non-admin CAN create an opened list (label pinned to the schema mirror)',
   assertSucceeds(setDoc(doc(mixed, '_lists/newtasklist'), { name: 'newtasklist', items: ['x'], tables: ['tasks'] })));
-await ok("editor CANNOT create a list owned only by a table they may READ",
+await ok("a non-admin CANNOT create a list the schema does not open",
   assertFails(setDoc(doc(mixed, '_lists/newreflist'), { name: 'newreflist', items: ['x'], tables: ['refdata'] })));
 await ok('editor CANNOT mint a list under a self-chosen ownership label (the claim is pinned to the mirror)',
   assertFails(setDoc(doc(mixed, '_lists/newreflist'), { name: 'newreflist', items: ['x'], tables: ['tasks'] })));

@@ -327,16 +327,27 @@ describe('supabase RLS — _lists', () => {
     await seed('_lists', 'refvalues',  { name: 'refvalues',  items: ['a'], tables: ['refdata'] });
     await seed('_lists', 'taskvalues', { name: 'taskvalues', items: ['a'], tables: ['tasks'] });
     await seed('_meta', 'listTables', { newtasklist: ['tasks'], newreflist: ['refdata'] });
+    // Editing a list is admin-only unless the schema opens it (userWritableLists -> _meta/listWritable).
+    // `taskvalues`/`newtasklist` are opened; `lockedvalues` is owned by an rw table but NOT opened, which
+    // is what proves the allowlist is doing the work rather than the table grant alone.
+    await seed('_lists', 'lockedvalues', { name: 'lockedvalues', items: ['a'], tables: ['tasks'] });
+    await seed('_meta', 'listWritable', { lists: ['taskvalues', 'newtasklist'] });
   });
 
-  it("a list owned by an 'r' table is readable but not writable", async () => {
+  it("a list the schema does not open is readable but not writable", async () => {
     await as('mixed@x.com');
     assert.equal(await canRead('_lists', 'refvalues'), true);
     assert.equal(await tryUpdate('_lists', 'refvalues', { name: 'refvalues', items: ['a', 'b'], tables: ['refdata'] }), 'denied');
   });
-  it("a list owned by an 'rw' table IS writable", async () => {
+  it("a list the schema OPENS is writable by a non-admin", async () => {
     await as('mixed@x.com');
     assert.equal(await tryUpdate('_lists', 'taskvalues', { name: 'taskvalues', items: ['a', 'b'], tables: ['tasks'] }), 'ok');
+  });
+  it("a list the schema does NOT open stays admin-only, whatever the table grant", async () => {
+    await as('mixed@x.com');   // rw on `tasks`, which owns lockedvalues — and that is deliberately not enough
+    assert.equal(await tryUpdate('_lists', 'lockedvalues', { name: 'lockedvalues', items: ['a', 'b'], tables: ['tasks'] }), 'denied');
+    await as('admin@x.com');
+    assert.equal(await tryUpdate('_lists', 'lockedvalues', { name: 'lockedvalues', items: ['a', 'b'], tables: ['tasks'] }), 'ok');
   });
   it('an editor CANNOT re-stamp a list\'s ownership label on update', async () => {
     await as('mixed@x.com');
@@ -350,11 +361,11 @@ describe('supabase RLS — _lists', () => {
 
   // CREATE has no stored row, so the ownership label in the write is an unverified CLAIM — authorized
   // from the _meta/listTables mirror instead, with the claim pinned to it.
-  it('editor CAN create a list the schema says an rw-granted table owns', async () => {
+  it('a non-admin CAN create an opened list, with the ownership label pinned to the schema', async () => {
     await as('mixed@x.com');
     assert.equal(await tryInsert('_lists', 'newtasklist', { name: 'newtasklist', items: ['x'], tables: ['tasks'] }), 'ok');
   });
-  it('editor CANNOT create a list owned only by a table they may READ', async () => {
+  it('a non-admin CANNOT create a list the schema does not open', async () => {
     await as('mixed@x.com');
     assert.equal(await tryInsert('_lists', 'newreflist', { name: 'newreflist', items: ['x'], tables: ['refdata'] }), 'denied');
   });

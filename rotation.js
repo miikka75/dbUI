@@ -10,7 +10,17 @@
   // fmtDate comes from calendar.js: require() in Node; the global it set in the browser (loaded first).
   var fmtDate = (typeof module !== 'undefined' && module.exports) ? require('./calendar').fmtDate : root.fmtDate;
 
-  function resolveByOccurrence(rotationRows, sourceRows, currentRow, sortKey) {
+  // The roster column a slot's value is read from. Roster tables were born holding PEOPLE (a duty
+  // roster), so `people` is the historical name and stays the default; a roster that holds anything
+  // else — a person's task set, a location, a shift — names its own column and points `valueCol` at
+  // it. A missing column yields [] rather than undefined, so a typo renders as an empty cell instead
+  // of leaking `undefined` into the grid (validateSchema rejects the typo at load anyway).
+  function cellValue(cell, valueCol) {
+    var v = cell[valueCol || 'people'];
+    return v == null ? [] : v;
+  }
+
+  function resolveByOccurrence(rotationRows, sourceRows, currentRow, sortKey, valueCol) {
     if (!rotationRows || !rotationRows.length || !currentRow) return [];
     var sorted = (sourceRows || []).slice().sort(function(a, b) {
       var av = sortKey ? String(a[sortKey] || '') : '', bv = sortKey ? String(b[sortKey] || '') : '';
@@ -20,7 +30,7 @@
     var index = sorted.findIndex(function(r) { return r.id === currentRow.id; });
     if (index === -1) return [];
     var cells = sortRosterRows(rotationRows);
-    return cells[index % cells.length].people;
+    return cellValue(cells[index % cells.length], valueCol);
   }
 
   // Order roster rows by their `position` (the 1..n value the arrow-button reorder writes). Rows with an
@@ -39,12 +49,12 @@
 
   // Calendar mode: position = whole intervals elapsed between anchorDate and targetDate. Looping via
   // negative-safe modulo. Independent of whether any row exists for a given interval.
-  function resolveByCalendar(rotationRows, targetDate, anchorDate, interval) {
+  function resolveByCalendar(rotationRows, targetDate, anchorDate, interval, valueCol) {
     if (!rotationRows || !rotationRows.length || !targetDate || !anchorDate) return [];
     var elapsed = wholeIntervalsBetween(anchorDate, targetDate, interval);
     var cells = sortRosterRows(rotationRows);
     var index = ((elapsed % cells.length) + cells.length) % cells.length;
-    return cells[index].people;
+    return cellValue(cells[index], valueCol);
   }
 
   // Resolve the calendar anchor (the date of slot position 0). A literal `anchorDate` on the column
@@ -115,6 +125,9 @@
   //       `rotateEvery` may be a list of summed swap sources: a positive int n (rotate every n periods)
   //       or "cycle" (rotate once per full roster cycle so EVEN-length rosters alternate slots). E.g.
   //       [1,"cycle"] = per-period swap AND per-cycle swap. A scalar is shorthand for a 1-element list.
+  // Either form reads each roster row's `people` column unless `valueCol` names another (form (a)
+  // per-column, form (b) once for all rosters) — see cellValue. Slots are just column names, so
+  // slots-as-PEOPLE + rosters-of-TASKS gives the transpose: a period x person matrix of task lists.
   function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor, rangeOverride, rotateEveryOverride) {
     var rv = view && view.rotation; if (!rv) return [];
     var range = rangeOverride || rv.range || {}; // DB-backed per-view range override (folder config) wins over schema
@@ -156,7 +169,7 @@
         });
         slots.forEach(function(slot, k) {
           var rosterName = N ? rosters[(((k + s) % N) + N) % N] : null;
-          row[slot] = resolveByCalendar(dataCache[rosterName] || [], target, anchor, interval);
+          row[slot] = resolveByCalendar(dataCache[rosterName] || [], target, anchor, interval, rv.valueCol);
         });
         out.push(row);
       }
@@ -168,7 +181,7 @@
     for (i = 0; i < periods; i++) {
       target = addIntervals(from, i, stepInterval);
       row = { id: 'rv' + i, _period: target };
-      cols.forEach(function(c) { var rot = dataCache[c.rotationTable] || []; row[c.name] = resolveByCalendar(rot, target, resolveAnchorDate(c, rotationAnchor), c.interval); });
+      cols.forEach(function(c) { var rot = dataCache[c.rotationTable] || []; row[c.name] = resolveByCalendar(rot, target, resolveAnchorDate(c, rotationAnchor), c.interval, c.valueCol); });
       out.push(row);
     }
     return out;

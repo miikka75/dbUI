@@ -2332,7 +2332,7 @@ test.describe('v3 page body stored on server', () => {
     await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
     await page.waitForTimeout(150);
     // edit + save
-    await page.locator('.v-card button:has-text("Edit")').click();
+    await page.locator('.v-card [data-testid="page-edit"]').click();
     await page.locator('.v-card textarea').first().fill('# Edited on server');
     await page.locator('.v-card button:has-text("Save")').click();
     await page.waitForTimeout(200);
@@ -4708,6 +4708,542 @@ test.describe('rotationView (third view kind, e2e)', () => {
     });
     expect(r.anchored).toEqual({ a: ['B0'], b: ['A0'] });  // week 1 from anchor -> swapped (abs=1)
     expect(r.shifted).toEqual(r.anchored);                 // window start does NOT reshuffle the assignment
+  });
+
+  // A rotation generates its rows, so its `sources` are empty and every write gate used to conclude
+  // "nothing to write here" — handing a read-only member the toolbar that re-aims the SHARED rotation
+  // config. The rosters are the rotation, so write access to them is the real question.
+  test('rotation toolbar is gated on write access to the rosters, not on its empty sources', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.rota_w = { name: 'rota_w', rotation: {
+        slots: ['area_a', 'area_b'], rosters: ['W_a', 'W_b'], advanceBy: 'calendar', interval: 'weekly'
+      } };
+      app.currentTable = 'rota_w';
+      app.usersLoaded = true;
+      const out = {};
+      app.userList = []; app.selfUnregistered = false;             // admin / unrestricted
+      out.admin = app.canMutateCurrent;
+      app.currentUserEmail = 'u@x.com';
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: { W_a: 'r', W_b: 'r' } }];
+      out.readOnlyGrant = app.canMutateCurrent;                    // sees the schedule, cannot re-aim it
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: { W_a: 'rw', W_b: 'rw' } }];
+      out.writeGrant = app.canMutateCurrent;
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: { W_a: 'rw', W_b: 'r' } }];
+      out.partialWrite = app.canMutateCurrent;                     // one read-only roster closes it
+      out.base = app.writeBaseFor('rota_w');
+      return out;
+    });
+    expect(r.admin).toBe(true);
+    expect(r.readOnlyGrant).toBe(false);
+    expect(r.writeGrant).toBe(true);
+    expect(r.partialWrite).toBe(false);
+    expect(r.base).toEqual(['W_a', 'W_b']);
+  });
+
+  // The person x task matrix: slots ARE the people, each roster holds that person's task sets, and
+  // `mineOnly` hands one shared view two faces — the whole matrix to an admin, one column to a member.
+  test('mineOnly narrows the slots to the viewer own; admins keep the whole matrix; no identity fails closed', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.rota_mine = { name: 'rota_mine', mineOnly: { list: 'members' }, rotation: {
+        slots: ['ann', 'bob'], rosters: ['T_ann', 'T_bob'],
+        advanceBy: 'calendar', interval: 'weekly', valueCol: 'tasks',
+        range: { from: '2026-01-01', periods: 2 }
+      } };
+      app.appConfig = Object.assign({}, app.appConfig, { rotationAnchors: { rota_mine: '2026-01-01' } });
+      app.dataCache['T_ann'] = [{ id: 'a1', position: 1, tasks: ['dishes', 'trash'] }];
+      app.dataCache['T_bob'] = [{ id: 'b1', position: 1, tasks: ['laundry'] }];
+      app.schemaData = Object.assign({}, app.schemaData || {},
+        { listSources: Object.assign({}, (app.schemaData || {}).listSources, { members: 'userlink' }) });
+      const rows = app.rotationRowsFor('rota_mine');
+      const out = { tasks: { ann: rows[0].ann, bob: rows[0].bob } };  // valueCol read a non-`people` column
+      app.usersLoaded = true;
+      app.userList = []; app.selfUnregistered = false;                // admin / unrestricted
+      out.admin = app.rotationColsFor('rota_mine', rows);
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: ['T_ann', 'T_bob'] }];
+      app.currentUserEmail = 'u@x.com';
+      app.myListValues = { members: 'Bob' };   // userlink: the household's own name for this account
+      out.mine = app.rotationColsFor('rota_mine', rows);
+      app.myListValues = {};                   // linked to nothing yet
+      out.noIdentity = app.rotationColsFor('rota_mine', rows);
+      return out;
+    });
+    expect(r.tasks).toEqual({ ann: ['dishes', 'trash'], bob: ['laundry'] });
+    expect(r.admin).toEqual(['_period', 'ann', 'bob']);  // unrestricted -> the admin matrix
+    expect(r.mine).toEqual(['_period', 'bob']);          // slot "bob" matches list value "Bob" case-insensitively
+    expect(r.noIdentity).toEqual(['_period']);           // unresolvable identity shows nothing, not everything
+  });
+});
+
+test.describe('board cards on a self-service table', () => {
+  // A read-only grant on an owner-column table routes writes through self-service: see every row, touch
+  // only your own, and only the columns `ownerWritable` names. The GRID has always honoured that per row;
+  // the board asked one view-level question and so offered edit/archive/delete on everyone's cards, and a
+  // per-lane `+` that would stamp a lane value the member may not write.
+  test('per-card controls follow row ownership, and the lane `+` follows ownerWritable', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    // SCHEMA is a plain global, not part of Vue's reactive graph, so `ownerWritable` has to be in place
+    // BEFORE the board component first evaluates canMoveCards — hence a fresh page per case rather than
+    // a flip in the middle. (That is the same reload-on-schema-change assumption columns.js memoizes on.)
+    const setup = async (ownerWritable) => {
+      await page.goto('/');
+      await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+      return page.evaluate((ow) => {
+        const app = window.appInstance;
+        window.VIEWS.signup_board = { name: 'signup_board', sources: ['signups'], mode: 'join',
+          columns: ['dish'], board: { lane: 'dish', lanes: ['Pie', 'Salad'], addInLane: true } };
+        window.SCHEMA.signups.ownerWritable = ow;
+        app.usersLoaded = true;
+        app.userList = [{ key: 'mel@x.com', role: 'editor', tables: ['notes'] }];  // no grant on signups
+        app.currentUserEmail = 'mel@x.com';
+        app.dataCache['signups'] = [
+          { id: 's1', owner: 'mel@x.com', dish: 'Pie' },     // mine
+          { id: 's2', owner: 'ann@x.com', dish: 'Salad' }    // someone else's
+        ];
+        app.selectTab('signup_board');
+        return app.currentSelfService;
+      }, ownerWritable);
+    };
+    const seen = () => page.evaluate(() => {
+      const has = (id) => !!document.querySelector('[data-testid="' + id + '"]');
+      return {
+        mineEdit: has('board-edit-s1'), theirsEdit: has('board-edit-s2'),
+        mineDel: has('board-del-s1'), theirsDel: has('board-del-s2'),
+        mineMove: has('board-move-s1'), addPie: has('board-add-Pie'),
+        mineDraggable: (document.querySelector('[data-testid="board-card-s1"]') || {}).draggable === true
+      };
+    });
+
+    // ownerWritable: [] -> the owner may write nothing, so the lane is locked.
+    expect(await setup([])).toBe(true);
+    await page.waitForSelector('[data-testid="board-card-s1"]', { timeout: 5000 });
+    const locked = await seen();
+    expect(locked.mineEdit).toBe(true);       // my own card stays mine to edit
+    expect(locked.theirsEdit).toBe(false);    // the regression: every card carried these controls
+    expect(locked.mineDel).toBe(true);
+    expect(locked.theirsDel).toBe(false);
+    expect(locked.mineMove).toBe(false);      // may not re-lane -> no move menu
+    expect(locked.mineDraggable).toBe(false); // ...and no drag
+    expect(locked.addPie).toBe(false);        // `+` would stamp dish='Pie', which they may not write
+
+    // ownerWritable: ['dish'] -> the lane IS theirs to set, so movement and per-lane add come back.
+    await setup(['dish']);
+    await page.waitForSelector('[data-testid="board-card-s1"]', { timeout: 5000 });
+    const open = await seen();
+    expect(open.mineMove).toBe(true);
+    expect(open.mineDraggable).toBe(true);
+    expect(open.addPie).toBe(true);
+    expect(open.theirsEdit).toBe(false);      // ownership still governs the other card
+  });
+});
+
+test.describe('a `@me` view with no linked identity', () => {
+  // `@me` resolves to a match-nothing sentinel when the viewer has no identity, so the grid renders
+  // empty AND an added row is stamped with that empty identity and filtered straight back out — it looks
+  // like "Add does nothing" while real orphan rows pile up unseen. An admin account hits this routinely:
+  // it manages the household without being a member of it.
+  test('says so and stops offering Add, instead of writing rows that vanish', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // over `notes` (a MASTER): `tasks` is a syncFrom mirror detail, which is never addable anyway.
+      window.VIEWS.mine_v = { name: 'mine_v', sources: ['notes'], mode: 'join', columns: ['title'], filter: { author: '@me' } };
+      window.VIEWS.mine_or = { name: 'mine_or', sources: ['notes'], mode: 'join', columns: ['title'],
+        filter: { $or: [{ author: '@me' }, { author: '@me' }] } };   // $or carries no column of its own
+      window.VIEWS.plain_v = { name: 'plain_v', sources: ['notes'], mode: 'join', columns: ['title'] };
+      app.usersLoaded = true;
+      app.userList = []; app.selfUnregistered = false;
+      app.currentUserEmail = 'nobody@x.com';
+      app.myListValues = {}; app.myProfile = { name: '', shared: false };   // no display name, no list link
+      app.selectTab('mine_v');
+      const noIdentity = { cols: app.meFilterColsFor('mine_v'), missing: app.identityMissing, canAdd: app.canAddRows,
+                           embedAdd: app.canMutateEmbed('view', 'mine_v') };
+      const viaOr = app.viewIdentityMissing('mine_or');
+      app.selectTab('plain_v');
+      const unfiltered = { missing: app.identityMissing, canAdd: app.canAddRows };
+      // ...and once an identity exists, everything comes back
+      app.myProfile = { name: 'Nobody', shared: true };
+      app.selectTab('mine_v');
+      const withIdentity = { missing: app.identityMissing, canAdd: app.canAddRows };
+      return { noIdentity, viaOr, unfiltered, withIdentity };
+    });
+    expect(r.noIdentity.cols).toEqual(['author']);
+    expect(r.noIdentity.missing).toBe(true);
+    expect(r.noIdentity.canAdd).toBe(false);    // the orphan-row trap
+    expect(r.noIdentity.embedAdd).toBe(false);  // ...closed in embeds too
+    expect(r.viaOr).toBe(true);                 // the walk descends $or without losing the column
+    expect(r.unfiltered).toEqual({ missing: false, canAdd: true });   // a view without @me is untouched
+    expect(r.withIdentity).toEqual({ missing: false, canAdd: true });
+  });
+});
+
+test.describe('a `list:` may name a lookup TABLE', () => {
+  // One catalogue can back both a `ref` column (which carries the row's other fields) and a plain
+  // select/multiselect that only needs the name — instead of maintaining a second free-string list
+  // beside it whose values nothing can score.
+  test('options come from the lookup rows, and it is not editable as a list', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // `cities` is the fixture's lookup table (state + city); its first visible column is the value.
+      app.dataCache['cities'] = [
+        { id: 'c1', state: 'CA', city: 'Davis' },
+        { id: 'c2', state: 'CA', city: 'Napa' },
+        { id: 'c3', state: 'CA', city: 'Davis' }   // duplicate -> collapsed
+      ];
+      app.schemaData = Object.assign({}, app.schemaData || {}, { userWritableLists: ['cities'] });
+      return {
+        values: app.lookupListValues('cities'),
+        notALookup: app.lookupListValues('status'),      // a real list -> null, so listsCache still wins
+        // even named in userWritableLists, a lookup is maintained in the Lookup editor, not as a list
+        editable: app.canEditList('cities'),
+        addable: app.canAddToList('cities')
+      };
+    });
+    expect(r.values).toEqual(['CA']);        // first VISIBLE column of the lookup, deduped
+    expect(r.notALookup).toBe(null);
+    expect(r.editable).toBe(false);
+    expect(r.addable).toBe(false);
+  });
+
+  test('a lookup-backed name is not materialized as an empty list', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // tasks.city is a `ref` to `cities`; point a plain list column at the same lookup TABLE.
+      window.SCHEMA.tasks.columns.cityname = { type: 'select', list: 'cities' };
+      app.listsCache = { status: ['open'] };
+      app._seedSchemaLists();
+      const out = { minted: Object.keys(app.listsCache).indexOf('cities') >= 0,
+                    realListsKept: Object.keys(app.listsCache).indexOf('assigned_to') >= 0 };
+      delete window.SCHEMA.tasks.columns.cityname;
+      return out;
+    });
+    expect(r.minted).toBe(false);      // would otherwise appear in the Lists tab as an empty duplicate
+    expect(r.realListsKept).toBe(true);
+  });
+});
+
+test.describe('Lookup (ref-table) editor follows the r/rw grant', () => {
+  // The Lookup editor had no permission gate at all: seeing a ref table meant getting an editable grid,
+  // so a member with `r` on a catalogue was offered edits the server then refused, silently.
+  test("an 'r' grant renders the ref editor read-only; 'rw' and admin keep it editable", async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.dataCache['cities'] = [{ id: 'c1', state: 'CA', city: 'Davis' }];
+      app.currentRefTable = 'cities';
+      app.usersLoaded = true;
+      app.userList = []; app.selfUnregistered = false;                     // admin
+      const admin = { edit: app.canEditCurrentRef, cellRO: app.isReadonlyRefCell({ id: 'c1', city: 'Davis' }, 'city') };
+      app.currentUserEmail = 'u@x.com';
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: { tasks: 'rw', cities: 'r' } }];
+      const readOnly = { edit: app.canEditCurrentRef, cellRO: app.isReadonlyRefCell({ id: 'c1', city: 'Davis' }, 'city') };
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: { tasks: 'rw', cities: 'rw' } }];
+      const writable = { edit: app.canEditCurrentRef, cellRO: app.isReadonlyRefCell({ id: 'c1', city: 'Davis' }, 'city') };
+      // the write paths refuse too, not just the rendering
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: { cities: 'r' } }];
+      const before = (app.dataCache['cities'][0] || {}).city;
+      app.saveRefField(app.dataCache['cities'][0], 'city', 'Tampered');
+      return { admin, readOnly, writable, unchanged: app.dataCache['cities'][0].city === before };
+    });
+    expect(r.admin).toEqual({ edit: true, cellRO: false });
+    expect(r.readOnly).toEqual({ edit: false, cellRO: true });   // the gap: was editable
+    expect(r.writable).toEqual({ edit: true, cellRO: false });
+    expect(r.unchanged).toBe(true);
+  });
+});
+
+test.describe('list editing is admin-only (userWritableLists)', () => {
+  // A list is shared vocabulary — member names, the status words every view resolves through
+  // list.<list>.<value>. An editor with rw on ONE table used to inherit write access to every list that
+  // table's columns touch, so a shopping-list grant also opened `members`.
+  test('every list is admin-only except the ones the schema opens — and a table grant is not the question', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.schemaData = Object.assign({}, app.schemaData || {}, { userWritableLists: ['assigned_to'] });
+      app.usersLoaded = true;
+      app.userList = []; app.selfUnregistered = false;      // admin
+      const asAdmin = { open: app.canEditList('assigned_to'), closed: app.canEditList('status') };
+      app.currentUserEmail = 'u@x.com';
+      // rw on `tasks` — which owns BOTH lists. Under the old model that opened `status` too.
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: { tasks: 'rw', notes: 'r' } }];
+      const withGrant = { open: app.canEditList('assigned_to'), closed: app.canEditList('status'), unknown: app.canEditList('nope') };
+      // ...and with NO rw anywhere, the opened list is still editable: the allowlist alone decides.
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: { tasks: 'r' } }];
+      const noGrant = { open: app.canEditList('assigned_to'), closed: app.canEditList('status') };
+      return { asAdmin, withGrant, noGrant, addMatchesEdit: app.canAddToList('assigned_to') === app.canEditList('assigned_to') };
+    });
+    expect(r.asAdmin).toEqual({ open: true, closed: true });
+    expect(r.withGrant.open).toBe(true);
+    expect(r.withGrant.closed).toBe(false);   // the leak: an rw table used to open every list it touches
+    expect(r.withGrant.unknown).toBe(false);
+    expect(r.noGrant).toEqual({ open: true, closed: false });
+    expect(r.addMatchesEdit).toBe(true);      // the allowNew path asks the same question
+  });
+
+  test('the mutation methods refuse a closed list, not just the buttons', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.schemaData = Object.assign({}, app.schemaData || {}, { userWritableLists: ['assigned_to'] });
+      app.usersLoaded = true;
+      app.currentUserEmail = 'u@x.com';
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: { tasks: 'rw' } }];
+      app.listsCache = { status: ['open', 'done'], assigned_to: ['Mel'] };
+      app.updateListItem2('status', 0, 'TAMPERED');
+      app.addListItem2('status');
+      const closedUntouched = JSON.stringify(app.listsCache.status) === JSON.stringify(['open', 'done']);
+      app.addListItem2('assigned_to');
+      return { closedUntouched, openedGrew: app.listsCache.assigned_to.length === 2 };
+    });
+    expect(r.closedUntouched).toBe(true);
+    expect(r.openedGrew).toBe(true);
+  });
+});
+
+test.describe('owner column is immutable through a VIEW', () => {
+  // isReadonlyCell resolved a non-union view to the VIEW's own name, which is not a table — so every
+  // schema lookup keyed on it missed and an `owner` column listed in a view rendered EDITABLE. A member
+  // could re-stamp who logged a row and, by handing it to somebody else, lock themselves out of it.
+  test('an owner column stays read-only when the cell is rendered under a view id', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.sv_join = { name: 'sv_join', sources: ['signups'], mode: 'join', columns: ['dish', 'owner'] };
+      window.VIEWS.sv_union = { name: 'sv_union', sources: ['signups'], mode: 'union', columns: ['dish', 'owner'] };
+      app.usersLoaded = true;
+      app.userList = [];                       // admin: nothing else can be making this read-only
+      app.currentUserEmail = 'mel@x.com';
+      const row = { id: 'o1', owner: 'mel@x.com', dish: 'Pie' };
+      app.dataCache['signups'] = [row];
+      app.selectTab('sv_join');
+      return {
+        // the id the lookups now resolve to, for each shape
+        tableJoin: app.tableForCol('sv_join', row, 'owner'),
+        tableUnion: app.tableForCol('sv_union', Object.assign({ _source: 'signups' }, row), 'owner'),
+        tableBare: app.tableForCol('signups', row, 'owner'),
+        ownerViaView: app.cellReadonly(row, 'owner', 'sv_join'),
+        ownerViaUnion: app.cellReadonly(Object.assign({ _source: 'signups' }, row), 'owner', 'sv_union'),
+        ownerViaTable: app.cellReadonly(row, 'owner', 'signups'),
+        dishStillEditable: app.cellReadonly(row, 'dish', 'sv_join')
+      };
+    });
+    expect(r.tableJoin).toBe('signups');    // was 'sv_join' -> every SCHEMA lookup missed
+    expect(r.tableUnion).toBe('signups');
+    expect(r.tableBare).toBe('signups');
+    expect(r.ownerViaView).toBe(true);      // the regression
+    expect(r.ownerViaUnion).toBe(true);
+    expect(r.ownerViaTable).toBe(true);
+    expect(r.dishStillEditable).toBe(false);
+  });
+
+  // `combined` joins tasks+notes, and tasks.date/tasks.title are MIRRORS of notes (syncFrom). Resolving
+  // such a column to the first source that declares it lands on the mirror side and freezes a column the
+  // join exists to edit — which then re-rendered the row as text and resurrected an archived row through
+  // an unmount-time write. The master (non-mirror) side has to win.
+  test('a column declared on both a master and its mirror resolves to the master', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      const row = { id: 'c1', title: 'T', date: '2026-01-01', status: 'open', content: 'body' };
+      return {
+        title: app.tableForCol('combined', row, 'title'),     // in BOTH; tasks' copy is syncFrom notes
+        date: app.tableForCol('combined', row, 'date'),
+        status: app.tableForCol('combined', row, 'status'),   // tasks only
+        content: app.tableForCol('combined', row, 'content'), // notes only
+        unknown: app.tableForCol('combined', row, 'nope'),    // no source owns it -> resolve nothing
+        titleEditable: !app.cellReadonly(row, 'title', 'combined'),
+        contentEditable: !app.cellReadonly(row, 'content', 'combined')
+      };
+    });
+    expect(r.title).toBe('notes');      // the master, not the mirror
+    expect(r.date).toBe('notes');
+    expect(r.status).toBe('tasks');
+    expect(r.content).toBe('notes');
+    expect(r.unknown).toBe('combined'); // unchanged fallback: nothing to look up
+    expect(r.titleEditable).toBe(true); // the regression froze this
+    expect(r.contentEditable).toBe(true);
+  });
+});
+
+test.describe('board card `hideEmpty`', () => {
+  // A card face is a stack of labelled boxes, so an empty one is pure noise. `hideEmpty` drops it PER
+  // CARD (isColumnHidden takes the row) — but only from the READ face: edit mode derives its editors
+  // from editCols, which ignores it, or a field you needed to fill in would be the one field missing.
+  test('empty fields drop out of the read face and come back in edit mode', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      window.VIEWS.hb = { name: 'hb', sources: ['tickets'], mode: 'join', columns: ['title', 'assignee'],
+        hideEmpty: true, board: { lane: 'status', lanes: ['open'], title: 'title' } };
+      app.dataCache['tickets'] = [
+        { id: 'f1', title: 'Full', status: 'open', assignee: 'Mel' },
+        { id: 'e1', title: 'Empty', status: 'open', assignee: '' }
+      ];
+      app.selectTab('hb');
+      await new Promise(res => setTimeout(res, 500));
+      const labels = (id) => [...document.querySelectorAll('[data-testid="board-card-' + id + '"] .v-field-label')].map(e => e.textContent.trim());
+      const read = { full: labels('f1'), empty: labels('e1') };
+      document.querySelector('[data-testid="board-edit-e1"]').click();
+      await new Promise(res => setTimeout(res, 500));
+      return { read, editEmpty: labels('e1') };
+    });
+    expect(r.read.full).toContain('field.assignee');      // has a value -> shown
+    expect(r.read.empty).not.toContain('field.assignee'); // empty on THIS card -> dropped
+    expect(r.editEmpty).toContain('field.assignee');      // ...but always editable
+    expect(r.editEmpty).toContain('field.title');
+  });
+});
+
+test.describe('board card editing', () => {
+  // A board names its heading column in `board.title`, and schemas commonly do NOT repeat it in
+  // `columns` (it is the card's face, not a field). Edit mode derived its editors from `columns` alone,
+  // so the title had no editor anywhere: `+` in a lane produced a blank card that could never be named.
+  test('edit mode offers the board title column, even when `columns` omits it', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      // `title: 'title'` is NOT in columns — the chore_board shape.
+      window.VIEWS.tk_board = { name: 'tk_board', sources: ['tickets'], mode: 'join',
+        columns: ['assignee'], board: { lane: 'status', lanes: ['open', 'done'], title: 'title', addInLane: true } };
+      app.dataCache['tickets'] = [{ id: 'k1', title: 'Fix it', status: 'open', assignee: 'Mel' }];
+      app.selectTab('tk_board');
+      await new Promise(res => setTimeout(res, 400));
+      document.querySelector('[data-testid="board-edit-k1"]').click();
+      await new Promise(res => setTimeout(res, 400));
+      const labels = [...document.querySelectorAll('[data-testid="board-card-k1"] .v-field-label')].map(e => e.textContent.trim());
+      return { labels, editable: !app.cellReadonly(app.dataCache['tickets'][0], 'title', 'tk_board') };
+    });
+    expect(r.labels).toContain('field.title');    // the title now has an editor...
+    expect(r.labels).toContain('field.assignee'); // ...alongside the declared columns
+    expect(r.labels).not.toContain('field.status'); // the lane stays a drag/move action
+    expect(r.labels[0]).toBe('field.title');      // and leads, being the card's primary field
+    expect(r.editable).toBe(true);
+  });
+});
+
+test.describe('ownerWritableWhile (owner edits stop at a state)', () => {
+  // `ownerWritable` bounds WHICH columns an owner may rewrite; ownership itself never expired, so a
+  // member could keep editing — and deleting — their own row after it was approved.
+  test('an owner may edit/delete their row only while it is in a listed state', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.SCHEMA.signups.ownerWritable = ['dish'];
+      window.SCHEMA.signups.ownerWritableWhile = { dish: 'draft' };   // editable only while dish=='draft'
+      app.usersLoaded = true;
+      app.userList = [{ key: 'mel@x.com', role: 'editor', tables: ['notes'] }];
+      app.currentUserEmail = 'mel@x.com';
+      app.dataCache['signups'] = [
+        { id: 'd1', owner: 'mel@x.com', dish: 'draft' },   // mine, still open
+        { id: 'd2', owner: 'mel@x.com', dish: 'final' },   // mine, ruled on -> frozen
+        { id: 'd3', owner: 'ann@x.com', dish: 'draft' }    // not mine
+      ];
+      const [open, frozen, theirs] = app.dataCache['signups'];
+      app.selectTab('signups');
+      const out = {
+        selfService: app.currentSelfService,
+        openRow: { mutate: app.canMutateRow(open), cellRO: app.cellReadonly(open, 'dish') },
+        frozenRow: { mutate: app.canMutateRow(frozen), cellRO: app.cellReadonly(frozen, 'dish') },
+        theirRow: { mutate: app.canMutateRow(theirs), cellRO: app.cellReadonly(theirs, 'dish') }
+      };
+      // An admin is never bound by the owner branch — approval has to stay possible.
+      app.userList = [];
+      out.adminFrozen = { mutate: app.canMutateRow(frozen), cellRO: app.cellReadonly(frozen, 'dish') };
+      delete window.SCHEMA.signups.ownerWritable; delete window.SCHEMA.signups.ownerWritableWhile;
+      return out;
+    });
+    expect(r.selfService).toBe(true);
+    expect(r.openRow).toEqual({ mutate: true, cellRO: false });    // still mine to fix
+    expect(r.frozenRow).toEqual({ mutate: false, cellRO: true });  // ruled on -> out of my hands
+    expect(r.theirRow).toEqual({ mutate: false, cellRO: true });
+    expect(r.adminFrozen).toEqual({ mutate: true, cellRO: false });
+  });
+});
+
+test.describe('self-service inside an embed', () => {
+  // An embed asked only "may I write the source table?", so the read-only grant that MAKES a table
+  // self-service took the Add button away — while the very same view opened top-level kept it.
+  test('an embedded self-service view keeps Add, and gates rows by ownership + state', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.SCHEMA.signups.ownerWritable = ['dish'];
+      window.SCHEMA.signups.ownerWritableWhile = { dish: 'draft' };
+      window.VIEWS.signup_list = { name: 'signup_list', sources: ['signups'], mode: 'join', columns: ['dish'] };
+      window.VIEWS.signup_page = { name: 'signup_page', markdown: '## Mine\n\n{{view:signup_list}}\n' };
+      app.usersLoaded = true;
+      app.userList = [{ key: 'mel@x.com', role: 'editor', tables: ['notes'] }];
+      app.currentUserEmail = 'mel@x.com';
+      app.dataCache['signups'] = [
+        { id: 'd1', owner: 'mel@x.com', dish: 'draft' },
+        { id: 'd2', owner: 'mel@x.com', dish: 'final' },
+        { id: 'd3', owner: 'ann@x.com', dish: 'draft' }
+      ];
+      const [open, frozen, theirs] = app.dataCache['signups'];
+      app.selectTab('signup_page');
+      const out = {
+        selfServeTable: app.embedSelfServeTable('view', 'signup_list'),
+        canMutate: app.canMutateEmbed('view', 'signup_list'),           // the Add button
+        rowOpen: app.canMutateEmbedRow('view', 'signup_list', open),
+        rowFrozen: app.canMutateEmbedRow('view', 'signup_list', frozen),
+        rowTheirs: app.canMutateEmbedRow('view', 'signup_list', theirs),
+        // cells resolve against the EMBED's source, not currentTable (which is the doc-view)
+        cellOpen: app.cellReadonly(open, 'dish', 'signup_list'),
+        cellFrozen: app.cellReadonly(frozen, 'dish', 'signup_list'),
+        cellTheirs: app.cellReadonly(theirs, 'dish', 'signup_list')
+      };
+      delete window.SCHEMA.signups.ownerWritable; delete window.SCHEMA.signups.ownerWritableWhile;
+      return out;
+    });
+    expect(r.selfServeTable).toBe('signups');
+    expect(r.canMutate).toBe(true);      // the regression: a read-only grant silently removed Add
+    expect(r.rowOpen).toBe(true);
+    expect(r.rowFrozen).toBe(false);
+    expect(r.rowTheirs).toBe(false);
+    expect(r.cellOpen).toBe(false);      // editable in the embed, as it is top-level
+    expect(r.cellFrozen).toBe(true);
+    expect(r.cellTheirs).toBe(true);
+  });
+});
+
+test.describe('nav adminOnly', () => {
+  test('adminOnly hides a group (and its whole branch) from non-admins, admins keep it', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.schemaData = Object.assign({}, app.schemaData || {}, { nav: { items: [
+        { view: 'combined' },
+        { group: 'Admin', adminOnly: true, items: [{ table: 'crew_rotation' }] },
+        { table: 'tasks', adminOnly: true },
+        { table: 'notes' }
+      ] } });
+      app.usersLoaded = true;
+      const ids = () => app.sidebarTabs.filter(t => !t.divider).map(t => t.id);
+      app.userList = []; app.selfUnregistered = false;   // admin
+      const admin = ids();
+      app.currentUserEmail = 'u@x.com';
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: ['tasks', 'notes', 'crew_rotation', 'chore_log'] }];
+      return { admin, member: ids() };
+    });
+    expect(r.admin).toContain('grp:Admin');
+    expect(r.admin).toContain('tasks');
+    // Granted the tables outright, yet neither the branch nor the flagged leaf is in their menu.
+    expect(r.member).not.toContain('grp:Admin');
+    expect(r.member).not.toContain('tasks');
+    expect(r.member).toContain('notes');
   });
 });
 

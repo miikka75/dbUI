@@ -62,7 +62,7 @@ backend = {
     // Mirror the schema-derived facts the schema-blind RLS needs, kept in sync on every schema write:
     // _meta/ownerTables (owner-column tables -> gates owner-create), _meta/pageAccess (restricted
     // doc-views -> gates _pages__active reads), _meta/ownerWritable (which columns an owner-scoped
-    // write may touch) and _meta/listTables (which tables own each list -> authorizes a _lists CREATE,
+    // write may touch), _meta/listTables (which tables own each list -> authorizes a _lists CREATE,
     // where there is no existing row to read the ownership label from). Same contract as
     // backend-firebase.js — the two must mirror the SAME set or the rules layers diverge.
     return Promise.all([
@@ -70,7 +70,8 @@ backend = {
       StorageSupabase.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) }),
       StorageSupabase.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema)),
       StorageSupabase.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema)),
-      StorageSupabase.setMeta('listTables', listOwnershipMap((schema && schema.tables) || {}))
+      StorageSupabase.setMeta('listTables', listOwnershipMap((schema && schema.tables) || {})),
+      StorageSupabase.setMeta('listWritable', BackendHelpers.userWritableListsOf(schema))
     ]);
   },
   // Single doc-view body by name (RLS authorizes a single-row read of a restricted page by its own rule).

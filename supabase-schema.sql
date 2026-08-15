@@ -121,29 +121,17 @@ returns boolean language sql stable security definer set search_path = public as
   end
 $$;
 
--- Writing a list needs WRITE access to an owning table, not merely sight of it.
--- The no-mirror fallback carries the SAME array guard as app_has_table_write above (and as
--- firestore.rules listWriteAllowed): a grant written before the r/rw split is a legacy ARRAY, since the
--- map shape arrived with the very change that introduced rwTables. Without the guard a mirror-less MAP
--- -- hand-written, or produced by anything that skipped BackendHelpers.userGrantDoc -- would have every
--- one of its 'r' entries silently promoted to 'rw' for list writes, which is the one thing the split
--- exists to prevent. Restricting the fallback to an array is lossless for real legacy data.
-create or replace function public.app_list_write_allowed(row_tables jsonb)
+-- Editing a list is editing SHARED VOCABULARY (member names, the status words every view reads), so it
+-- is admin-only unless the schema names the list in `userWritableLists`, mirrored to
+-- _meta/listWritable. Mirrors firestore.rules listUserWritable, and gates every editor branch on
+-- _lists (create/update/delete) ON TOP of the owning-table check below. No mirror row -> no list is
+-- editor-writable: the safe default, so a deployment that has not re-saved its schema cannot silently
+-- keep the old permissive behaviour.
+create or replace function public.app_list_user_writable(listname text)
 returns boolean language sql stable security definer set search_path = public as $$
-  select case
-    when public.app_is_admin() then true
-    when public.app_user_data() is null then false
-    when public.app_user_data() -> 'tables' = '"all"'::jsonb then true
-    else exists (
-      select 1 from jsonb_array_elements_text(coalesce(row_tables, '[]'::jsonb)) e
-      where case
-        when public.app_user_data() ? 'rwTables' then (public.app_user_data() -> 'rwTables') ? e
-        when jsonb_typeof(public.app_user_data() -> 'tables') = 'array' then
-          (public.app_user_data() -> 'tables') ? e
-        else false
-      end
-    )
-  end
+  select coalesce(
+    (select (value -> 'lists') ? listname from public.kv where store = '_meta' and key = 'listWritable'),
+    false)
 $$;
 
 -- listCreateAllowed(): authorize CREATING a _lists row. On an insert there is no stored row, so the
@@ -161,16 +149,7 @@ returns boolean language sql stable security definer set search_path = public as
   select case
     when (select owners from m) is null then false          -- no mirror, or a list the schema doesn't own
     when claimed is distinct from (select owners from m) then false   -- the stored label must be the true one
-    when public.app_user_data() -> 'tables' = '"all"'::jsonb then true
-    else exists (
-      select 1 from jsonb_array_elements_text((select owners from m)) e
-      where case
-        when public.app_user_data() ? 'rwTables' then (public.app_user_data() -> 'rwTables') ? e
-        when jsonb_typeof(public.app_user_data() -> 'tables') = 'array' then
-          (public.app_user_data() -> 'tables') ? e
-        else false
-      end
-    )
+    else true
   end
 $$;
 
@@ -190,7 +169,6 @@ returns boolean language sql stable security definer set search_path = public as
     when exists (select 1 from public.kv where store = '_lists' and key = rowkey) then
       claimed is not distinct from
         (select value -> 'tables' from public.kv where store = '_lists' and key = rowkey)
-      and public.app_list_write_allowed(claimed)
     else public.app_list_create_allowed(rowkey, claimed)
   end
 $$;
@@ -378,7 +356,8 @@ returns boolean language sql stable security definer set search_path = public as
     -- the stored label plus the no-re-stamp pin. app_list_editor_ok tells the two apart.
     when store = '_lists' then
       public.app_no_users() or public.app_role() = 'admin'
-      or (public.app_role() = 'editor' and public.app_list_editor_ok(key, val -> 'tables'))
+      or (public.app_is_registered() and public.app_list_user_writable(key)
+          and public.app_list_editor_ok(key, val -> 'tables'))
     when store = '_pages__active' then
       public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor'
     when store = '_assets__active' then
@@ -390,6 +369,24 @@ returns boolean language sql stable security definer set search_path = public as
       or ((val ->> 'owner') = public.app_email() and public.app_self_service(store)
           and public.app_owner_fields_ok(store, key, val))
       or (public.app_role() = 'editor' and public.app_has_table_write(store))
+  end
+$$;
+
+-- ownerWritableWhile: does the owner branch still reach this STORED row? _meta/ownerWritable carries the
+-- gate as whileCol + whileVals (a single column and a value list — neither rules language can loop over a
+-- map). Empty whileCol, or a table absent from the mirror, means no gate. Mirrors firestore.rules
+-- ownerStateOk, and like it this is asked of the OLD row (USING), never the incoming one — otherwise an
+-- owner could send a compliant state alongside the edit and unlock their own approved row.
+create or replace function public.app_owner_state_ok(coll text, oldval jsonb)
+returns boolean language sql stable security definer set search_path = public as $$
+  with b as (
+    select value -> split_part(coll, '__', 1) as bound
+    from public.kv where store = '_meta' and key = 'ownerWritable'
+  )
+  select case
+    when (select bound from b) is null then true
+    when coalesce((select bound ->> 'whileCol' from b), '') = '' then true
+    else (select bound -> 'whileVals' from b) ? coalesce(oldval ->> (select bound ->> 'whileCol' from b), '')
   end
 $$;
 
@@ -406,15 +403,19 @@ returns boolean language sql stable security definer set search_path = public as
     when store = '_list_users' then public.app_no_users() or public.app_role() = 'admin'
     when store = '_lists' then
       public.app_no_users() or public.app_role() = 'admin'
-      or (public.app_role() = 'editor' and public.app_list_write_allowed(val -> 'tables'))
+      -- Opened lists (userWritableLists) are editable by any registered user; the ownership label is
+      -- pinned separately by app_list_editor_ok in the WITH CHECK. A table grant is deliberately not
+      -- consulted — see app_list_user_writable.
+      or (public.app_is_registered() and public.app_list_user_writable(key))
     when store = '_pages__active' then
       public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor'
     when store = '_assets__active' then
       public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor'
     when store like '\_%' then false
-    else  -- data tables: edit own owned row, or table editor
+    else  -- data tables: edit own owned row (while it is still owner-writable), or table editor
       public.app_no_users() or public.app_role() = 'admin'
-      or ((val ->> 'owner') = public.app_email() and public.app_self_service(store))
+      or ((val ->> 'owner') = public.app_email() and public.app_self_service(store)
+          and public.app_owner_state_ok(store, val))
       or (public.app_role() = 'editor' and public.app_has_table_write(store))
   end
 $$;
@@ -432,8 +433,9 @@ returns boolean language sql stable security definer set search_path = public as
       key = public.app_email() or (not public.app_no_users() and public.app_role() = 'admin')
     when store = '_list_users' then public.app_no_users() or public.app_role() = 'admin'
     when store = '_lists' then
+      -- Deleting the DOC prunes a whole list, which only a full-view holder can judge: admin only,
+      -- exactly as firestore.rules states it. Removing a VALUE is an update, handled above.
       public.app_no_users() or public.app_role() = 'admin'
-      or (public.app_role() = 'editor' and public.app_list_write_allowed(val -> 'tables'))
     when store = '_pages__active' then
       public.app_no_users() or public.app_role() = 'admin' or public.app_role() = 'editor'
     when store = '_assets__active' then
@@ -441,7 +443,10 @@ returns boolean language sql stable security definer set search_path = public as
     when store like '\_%' then false
     else  -- data tables
       public.app_no_users() or public.app_role() = 'admin'
-      or ((val ->> 'owner') = public.app_email() and public.app_self_service(store))
+      -- Deleting my own row stops where editing it stops: ownerWritableWhile freezes an approved row
+      -- against both. `val` IS the stored row here (a delete policy's USING sees the existing row).
+      or ((val ->> 'owner') = public.app_email() and public.app_self_service(store)
+          and public.app_owner_state_ok(store, val))
       or (public.app_role() = 'editor' and public.app_has_table_write(store))
   end
 $$;

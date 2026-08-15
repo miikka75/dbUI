@@ -48,6 +48,82 @@ describe('rules parity — owner-writable system columns', () => {
   });
 });
 
+describe('rules parity — ownerWritableWhile (the owner-branch state gate)', () => {
+  // `ownerWritable` says which columns an owner may rewrite; `ownerWritableWhile` says until when. It is
+  // the half that stops a member editing (or deleting) their own row after it was approved, so a layer
+  // that never learned it leaves exactly that hole open on one backend.
+  it('backend-helpers.js mirrors it as whileCol + whileVals', () => {
+    assert.match(HELPERS, /whileCol:\s*whileCol/, 'ownerWritableOf must emit whileCol');
+    assert.match(HELPERS, /whileVals:\s*whileVals/, 'ownerWritableOf must emit whileVals');
+    assert.match(HELPERS, /ownerRowInState:\s*function/, 'the shared predicate must exist');
+  });
+  it('firestore.rules gates owner UPDATE and DELETE on it', () => {
+    assert.match(RULES, /function ownerStateOk\(coll\)/, 'firestore.rules needs ownerStateOk');
+    assert.match(RULES, /ownerStateOk\(coll\)[\s\S]{0,200}?affectedKeys/, 'ownerUpdateOk must consult ownerStateOk');
+    assert.match(RULES, /selfServiceTable\(collection\) && ownerStateOk\(collection\)\) \|\| \/\/ delete/,
+      'the owner DELETE branch must consult ownerStateOk');
+  });
+  it('supabase-schema.sql gates owner UPDATE and DELETE on it', () => {
+    assert.match(SQL, /create or replace function public\.app_owner_state_ok/, 'supabase needs app_owner_state_ok');
+    const uses = (SQL.match(/public\.app_owner_state_ok\(store, val\)/g) || []).length;
+    assert.equal(uses, 2, 'app_can_update AND app_can_delete must both call it (found ' + uses + ')');
+  });
+  it('dev/server.js gates owner update and delete on it', () => {
+    assert.match(SERVER, /BackendHelpers\.ownerRowInState\(bounds, existing\)/, 'the update path must consult it');
+    assert.match(SERVER, /BackendHelpers\.ownerRowInState\(dBounds, existing\)/, 'the delete path must consult it');
+  });
+  it('a mirror written BEFORE the feature does not deny every owner write', () => {
+    // Reading a missing property is an evaluation ERROR in Firestore rules, not undefined — so without
+    // the `in` probe, ownerUpdateOk threw on every deployment whose _meta/ownerWritable predates this.
+    // Supabase gets it for free (`->> 'whileCol'` on a missing key is NULL, coalesced to '').
+    assert.match(RULES, /!\('whileCol' in ownerBounds\(coll\)\)/,
+      'ownerStateOk must probe for whileCol before reading it');
+    assert.match(SQL, /coalesce\(\(select bound ->> 'whileCol' from b\), ''\) = '' then true/,
+      'app_owner_state_ok must treat a missing whileCol as "no gate"');
+  });
+  it('every layer reads the STORED row, never the incoming one', () => {
+    // Reading the incoming row would let an owner send a compliant state alongside the edit and unlock
+    // their own approved row — the one mistake that makes this feature decorative.
+    assert.match(RULES, /resource\.data\[ownerBounds\(coll\)\.whileCol\]/);
+    assert.doesNotMatch(RULES, /request\.resource\.data\[ownerBounds\(coll\)\.whileCol\]/);
+    assert.match(SQL, /oldval ->> \(select bound ->> 'whileCol' from b\)/);
+  });
+});
+
+describe('rules parity — userWritableLists (list editing is admin-only by default)', () => {
+  // A list is shared vocabulary, so writing one is admin-only unless the schema opens it. A layer that
+  // never learned the allowlist keeps handing every editor with one rw table the run of every list those
+  // columns touch — `members` included.
+  it('backend-helpers.js emits the allowlist mirror', () => {
+    assert.match(HELPERS, /userWritableListsOf:\s*function/, 'the mirror generator must exist');
+    assert.match(HELPERS, /userWritableLists/, 'it must read the schema key');
+  });
+  it('firestore.rules gates the non-admin branch of _lists create and update', () => {
+    assert.match(RULES, /function listUserWritable\(listName\)/, 'firestore.rules needs listUserWritable');
+    const uses = (RULES.match(/listUserWritable\(listName\)/g) || []).length;
+    assert.equal(uses, 3, 'declaration + create + update should reference it (found ' + uses + ')');
+    assert.doesNotMatch(RULES, /listUserWritable\(listName\) && list(Create|Write)Allowed/,
+      'the table-grant conjunction should be gone — the allowlist alone authorizes');
+  });
+  it('supabase-schema.sql gates the non-admin branch of _lists create and update', () => {
+    assert.match(SQL, /create or replace function public\.app_list_user_writable/, 'supabase needs app_list_user_writable');
+    const uses = (SQL.match(/public\.app_list_user_writable\(key\)/g) || []).length;
+    assert.equal(uses, 2, 'create and update must each call it; delete is admin-only (found ' + uses + ')');
+    assert.doesNotMatch(SQL, /app_list_write_allowed/, 'the table-grant helper should be gone');
+  });
+  it('dev/server.js gates putListItem and saveLists', () => {
+    const uses = (SERVER.match(/BackendHelpers\.userWritableListsOf\(/g) || []).length;
+    assert.equal(uses, 2, 'both list write paths must consult it (found ' + uses + ')');
+  });
+  it('an absent mirror fails CLOSED in both rules layers', () => {
+    // A deployment that has not re-saved its schema must not keep the old permissive behaviour.
+    assert.match(RULES, /exists\(\/databases\/\$\(database\)\/documents\/_meta\/listWritable\)\s*\n?\s*&&/,
+      'firestore.rules must require the mirror to exist, not default to permissive');
+    assert.match(SQL, /coalesce\(\s*\n?\s*\(select \(value -> 'lists'\) \? listname[\s\S]{0,120}?false\)/,
+      'supabase must default to false when the mirror row is absent');
+  });
+});
+
 describe('rules parity — document-shape bounds', () => {
   // Each self-writable store's field caps. Firestore enforces them in validProfile/validLink/
   // validRequest; Supabase in app_valid_shape. A cap raised on one side only means the stricter
@@ -97,20 +173,23 @@ describe('rules parity — document-shape bounds', () => {
 describe('rules parity — the r/rw write fallback fails closed', () => {
   // A grant with no `rwTables` mirror predates the r/rw split, and those are legacy ARRAYS. Both write
   // gates in each layer must restrict the fallback to an array, or a mirror-less MAP silently promotes
-  // its 'r' entries to 'rw'. This guard exists because app_list_write_allowed was missing the check
-  // that app_has_table_write right above it had.
-  it('firestore.rules guards both hasTableWrite and listWriteAllowed', () => {
+  // its 'r' entries to 'rw'. (The list twins of these gates are gone — list writes no longer key on
+  // a table grant at all — so only the table-write gates remain to guard.)
+  it('firestore.rules guards hasTableWrite', () => {
     const fn = (name) => RULES.slice(RULES.indexOf('function ' + name), RULES.indexOf('function ' + name) + 400);
     assert.match(fn('hasTableWrite'), /is list/, 'hasTableWrite fallback is not array-guarded');
-    assert.match(fn('listWriteAllowed'), /is list/, 'listWriteAllowed fallback is not array-guarded');
+    // listWriteAllowed is gone: list writes key on `userWritableLists`, not on a table grant, so the
+    // legacy-grant fallback has nothing left to get wrong there.
+    assert.doesNotMatch(RULES, /function listWriteAllowed/, 'listWriteAllowed should be gone');
   });
 
-  it('supabase-schema.sql guards both app_has_table_write and app_list_write_allowed', () => {
+  it('supabase-schema.sql guards app_has_table_write', () => {
     const fn = (name) => SQL.slice(SQL.indexOf('function public.' + name), SQL.indexOf('function public.' + name) + 900);
     assert.match(fn('app_has_table_write'), /jsonb_typeof\([\s\S]*?'tables'\s*\)\s*=\s*'array'/,
       'app_has_table_write fallback is not array-guarded');
-    assert.match(fn('app_list_write_allowed'), /jsonb_typeof\([\s\S]*?'tables'\s*\)\s*=\s*'array'/,
-      'app_list_write_allowed fallback is not array-guarded — a mirror-less map would promote r to rw');
+    // app_list_write_allowed is gone with its Firestore twin: list writes key on `userWritableLists`,
+    // not on a table grant, so there is no legacy-grant fallback left to get wrong.
+    assert.doesNotMatch(SQL, /app_list_write_allowed/, 'app_list_write_allowed should be gone');
   });
 });
 
@@ -136,11 +215,11 @@ describe('rules parity — both backends mirror the same schema-derived facts', 
 
   it('the mirrored set is the one the rules layers actually read', () => {
     const keys = mirrorKeys(FIREBASE);
-    for (const k of ['schema', 'ownerTables', 'pageAccess', 'ownerWritable', 'listTables']) {
+    for (const k of ['schema', 'ownerTables', 'pageAccess', 'ownerWritable', 'listTables', 'listWritable']) {
       assert.ok(keys.includes(k), `saveSchema no longer mirrors _meta/${k}`);
     }
     // Each non-schema mirror must be consulted by BOTH rules layers, or it is dead weight in one.
-    for (const k of ['ownerTables', 'pageAccess', 'ownerWritable', 'listTables']) {
+    for (const k of ['ownerTables', 'pageAccess', 'ownerWritable', 'listTables', 'listWritable']) {
       assert.ok(RULES.includes('_meta/' + k), `firestore.rules never reads _meta/${k}`);
       assert.ok(SQL.includes("key = '" + k + "'"), `supabase-schema.sql never reads _meta/${k}`);
     }

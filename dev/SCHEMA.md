@@ -155,13 +155,14 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `layout` | string | `"table"`, `"card"`, or `"list"`. **`list` is a reading layout**: compact single-line rows with values rendered read-only, so a row added there has no editor and must be filled in elsewhere. Add/delete/archive are still offered (a *table* may declare `list` as its only presentation), but use `table`/`card` for any view people actually enter data into |
 | `collapsed` | boolean | Cards start collapsed (accordion) |
 | `defaultSort` | string | Default sort column |
-| `hideEmpty` | boolean | Hide columns where all rows are empty |
+| `hideEmpty` | boolean | Hide empty columns. **Table** layout drops a column empty across *all* rows; **card / board** layouts drop it per row, so each card shows only the fields it has (edit mode still shows every field, or the one you needed to fill in would be the one missing). Override per column with `{ "name": col, "hideEmpty": false }` |
 | `icon` | string | MDI icon for the sidebar |
 | `printable` | `"view"` \| `"cards"` \| `["view","cards"]` | Opt-in print buttons. `"view"` = view toolbar print only; `"cards"` = per-card buttons only; `["view","cards"]` = both. **Off by default** — omit to hide all print buttons. Note: per-card buttons only render in `card`/`list` layout, so `"cards"` on a `table` layout shows nothing. Applies to views and tables |
 | `markdown` | string | Makes this a **document** view (see below) instead of a data grid |
 | `access` | string[] | **Doc-views only.** Restrict the page to users granted at least one of these tables (see "Restricting a page to some users" below). Omit = visible to all registered users |
 | `rotation` | object | Makes this a **rotationView** (third view kind) — a generated rotating-roster table (see below) |
 | `obscureNames` | boolean \| string[] | Display-only privacy: abbreviate person names to "First L." in this view. `true` = all list/multiselect columns (or all area columns of a rotationView); an array = exactly those columns. Stored data is untouched |
+| `mineOnly` | boolean \| `{list}` | **rotationViews only.** Show a viewer only the slot column that *is* them, so one shared view is the whole matrix for an admin and a single column for a member (see "Per-person views" below). `{ "list": "<listName>" }` resolves identity through that list; `true` uses the profile display name. An object, not a bare string, so it cannot be misread as the column array `obscureNames` takes. Display-only |
 | `background` | object | Background image for this view's card (see **background images** below). Works on **every** view kind |
 
 A view's `columns` may contain, besides plain column names:
@@ -460,8 +461,9 @@ multiselect column (the group for that slot — variable size, not capped):
 }
 ```
 
-> The slot's group column **must be named `people`** — the resolver reads `cells[i].people`
-> (hardcoded coupling). Slots are ordered by the `position` column. Set `"reorderable": true` on the
+> The slot's group column defaults to **`people`** — the resolver reads `cells[i].people` unless the
+> spec sets **`valueCol`**, which points it at any other column (for a roster of tasks, shifts, or
+> locations rather than people). Slots are ordered by the `position` column. Set `"reorderable": true` on the
 > table to get **up/down arrow buttons** in the grid that move a slot and auto-renumber `position`
 > (like the Lists tab) — no manual renumbering needed. Set `position` to `hidden: true` to drop it
 > from the grid entirely — only `people` shows and order is controlled **only** by the arrows.
@@ -520,7 +522,8 @@ multiselect column (the group for that slot — variable size, not capped):
 - **Dependency preload**: `rotationTable` (and `occurrenceSource`) are auto-loaded into the data cache
   before resolution — they need not appear in the view's `sources`.
 - **Validation** (load-time): `rotationTable` must exist; `advanceBy` must be `occurrence` or
-  `calendar`; occurrence needs a resolvable `occurrenceSource`; calendar needs a **valid `interval`**.
+  `calendar`; occurrence needs a resolvable `occurrenceSource`; calendar needs a **valid `interval`**;
+  an explicit `valueCol` must be a real column of the `rotationTable`.
   The anchor is runtime data (global config or a literal `anchorDate`), so it is not statically validated.
 
 ## markdown (documents)
@@ -608,6 +611,7 @@ rotates over time — see "Rotating assignment").
 | Field | Description |
 |-------|-------------|
 | `rotationView.columns` | One entry per rotation, each a **calendar-mode** spec (`name`, `rotationTable`, `advanceBy: "calendar"`, `interval`). The anchor is the **per-view** `rotationAnchors[<viewName>]` (folder config, edited inline on the view); a literal `anchorDate` on a column overrides it. Resolved independently per generated row. |
+| `valueCol` | Which roster column supplies a cell's value. Defaults to **`people`** (roster tables were born holding people). Set it when a roster holds something else — tasks, a location, a shift. Allowed per column here, or once on the `rotation` in the `slots`/`rosters` form. Also accepted on a rotation **computed column**. |
 | `range.from` | `"today"` for a rolling window (recomputed each open) **or** a literal `YYYY-MM-DD` for a fixed window (printing/sharing). |
 | `range.periods` | A **count of intervals** to generate rows for (not an end date) — matches how calendar resolution counts elapsed intervals. |
 | `layout` | `"table"` (minimum supported). |
@@ -622,6 +626,10 @@ rotates over time — see "Rotating assignment").
 - **Read-only & recomputed**: a `rotation` is a pure function of *(rotation-table contents, range)*
   at render time. There is no snapshot — editing a slot table changes what every past *and* future
   period resolves to on the next render. This is intended, not a gap.
+- **Who may reshape it**: the generated rows are never editable, but the view's toolbar (start date,
+  window, `rotateEvery`) rewrites the **shared** folder config. That toolbar is gated on **write access
+  to the rosters** — a member holding an `'r'` grant on them sees the schedule and cannot re-aim it.
+  Persisting to the database stays admin-only on top of that.
 - **Dependency preload**: each `rotationTable` is fetched into the data cache before generation.
 - **Nav**: reference it by `name` like any view; it gets a default `mdi-calendar-clock` icon.
 - **Validation** (load-time): each column's `rotationTable` must exist, `advanceBy` may only be
@@ -685,10 +693,65 @@ tables), with one shared `interval`/`advanceBy` and a `rotateEvery`:
   load** (some slots would be unstaffed/double-booked).
 - **Validation**: every `rosters` table must exist; `advanceBy` (if set) must be `calendar`; `interval`
   must be valid; `rosters.length` must be `>= slots.length`; every `rotateEvery` element must be a
-  non-negative integer or `"cycle"`.
+  non-negative integer or `"cycle"`; an explicit `valueCol` must be a real column of every roster table.
 - **Embedding**: a data view can embed a rotationView via a `{ "view": "<rotationViewName>" }` column —
   it renders the generated period table inline (date + slot columns), e.g. a cleaning schedule shown
   inside a program view.
+
+#### The transpose: a person × task matrix (`slots` as people, `valueCol`)
+A slot is just an output column, so nothing requires it to be a place. Name the **slots after the
+people** and point each at a roster holding **that person's task sets**, and the same engine produces
+the transpose of a duty rota: rows are periods, columns are people, and each cell is that person's
+list of tasks for the period. Cells are already lists (a roster's value column is normally a
+`multiselect`), so "several tasks each" needs nothing extra.
+
+```json
+{
+  "name": "duty_matrix",
+  "mineOnly": { "list": "members" },
+  "rotation": {
+    "slots":   ["ann", "bob", "cara"],
+    "rosters": ["tasks_ann", "tasks_bob", "tasks_cara"],
+    "valueCol": "tasks",
+    "interval": "weekly",
+    "range": { "from": "today", "periods": 8 }
+  },
+  "layout": "table"
+}
+```
+
+Each roster is an ordinary `reorderable` table of `position` + a `tasks` multiselect, one row per
+rotation step. The **row count is the cadence**:
+- **1 row** → that person's tasks never change (the member clock mods by 1).
+- **N rows** → their tasks cycle through the N sets, one step per period.
+- Rosters keep independent lengths, so one person can be on a fixed chore while another alternates.
+- Adding `rotateEvery` on top hands whole task *sets* from one person to the next each period — the
+  cross-person rotation. Name the rosters for the **sets** rather than the people when you do, since
+  `tasks_ann` no longer stays Ann's.
+
+Note that `slots` are schema literals: each person is a `slots` entry plus a `field.<slot>` translation
+key, so adding a member is a schema edit, not a data edit. Slot columns that are empty in every period
+can be dropped with the view-level `hideEmpty`.
+
+#### Per-person views (`mineOnly`)
+`mineOnly` on a rotationView narrows its slot columns to the **one that is the viewer**, so a single
+view serves both audiences: an **admin / unrestricted** viewer is exempt and sees the whole matrix,
+while a member sees only their own column.
+- `mineOnly: { "list": "<listName>" }` resolves identity the same way the `@me` filter token does — on a
+  `userlink` list, the curated value linked to their account; otherwise their profile display name.
+  `mineOnly: true` skips the list and always uses the profile display name. The list form is an
+  OBJECT deliberately: `obscureNames` sits in the same config and takes an array of COLUMNS, so a bare
+  string or array here would read as columns to anyone who learned that one. Load-time validation says
+  so rather than guessing.
+- Slot names are matched against that identity **case-insensitively**, so a `bob` slot matches a
+  member-list value of `"Bob"`.
+- **Fails closed**: a viewer whose identity can't be resolved (not linked to a list value yet) sees no
+  slot columns rather than all of them.
+- Applies wherever the rotation renders — the view itself, a `{{view:x}}` embed, the print output, and
+  the generated duty events a calendar picks up via `rotationSources`.
+- **Display-only**, exactly like `@me` and `obscureNames`: the rosters are still fetched and the
+  periods still generated client-side. Real secrecy is a per-roster-table grant (each person's roster
+  as its own table, granted only to them) — `mineOnly` is about a legible view, not a security boundary.
 
 #### Per-person slot coverage — roster length (L) vs rotation cadence (R)
 The two clocks can **alias**, which decides whether a given person eventually works *every* slot or
@@ -1109,6 +1172,69 @@ In the **Languages** tab these keys are grouped under their own collapsible **Li
 from **App** and **Schema**) so they're easy to find. A value with no translation falls back to the raw
 value, so opting a list in is non-breaking.
 
+### A `list:` may name a lookup TABLE
+
+A `select`/`multiselect` column's `list:` normally names a list (a bare array of strings). It may
+instead name a **lookup table** (`isLookup: true`), and then the options are that table's rows:
+
+```json
+"tasks_ann": {
+  "columns": [ { "name": "tasks", "type": "multiselect", "list": "ref_chores", "sorted": true } ]
+}
+```
+
+Use it when a catalogue already exists and a second column only needs the *name* from it. In the chores
+example the rotation rosters read `ref_chores`, so every rostered task is a chore the scoreboard can
+price — before, a parallel free-string list held task names that nothing could score.
+
+- **The option value is the lookup's first visible column** (its name column — the same one a `ref`
+  column's `valueCol` defaults to). The rest of the row stays reference data: `ref_chores.points` is
+  what the scoreboard's `lookup` computed column reads.
+- **Values are deduped** across rows and translate through `list.<table>.<value>`, the same keys
+  `translatableLists` exposes when it names a lookup table.
+- **Not editable as a list**: no `allowNew`, and the Lists editor ignores it. A lookup table is
+  maintained in the **Lookup** tab, under its own r/rw table grant — which is the point, since adding a
+  chore there means giving it a points value.
+- Reads still need access to the lookup table itself, like any other table.
+
+## Who may edit a list (`userWritableLists`)
+
+Editing a list is editing **shared vocabulary**: the member names, the status words every view resolves
+through `list.<list>.<value>`, a board's lane labels. So the **Lists editor is admin-only**, and so is
+every list write by default — a non-admin sees list values but cannot rename, add or delete them.
+
+Individual lists opt back out with a top-level array, for the ones that are just free-form vocabularies
+an ordinary user maintains as they work:
+
+```json
+{ "translatableLists": ["chore_status"],
+  "userWritableLists": ["shop_items"],
+  "tables": { … } }
+```
+
+- **What it opens**: adding, renaming, reordering and removing that list's VALUES — from the Lists
+  editor and from an `allowNew` cell alike. The Lists editor is per list: an opened list is editable,
+  every other list renders read-only in the same screen.
+- **Who**: any REGISTERED user. A table grant is deliberately not part of the question — see below.
+- **Still admin-only**: deleting the list itself (pruning a whole vocabulary), and every list the
+  schema does not name.
+- **Absent or empty = admin-only**, which is the safe default: a deployment that never declares it
+  cannot silently keep a permissive behaviour.
+- **Why an allowlist and not the table grant**: a list belongs to *every* table whose columns reference
+  it. Keying on the grant meant a member with `rw` on one table (`home_shopping`) inherited write access
+  to every list those columns touch — including `members`, which `home_shopping.added_by` also uses.
+  The allowlist says exactly what it means.
+- **The ownership label is always pinned**, whoever writes: to the `_meta/listTables` mirror on create
+  (where the label is an unverified claim) and to its stored value on update. Re-stamping it decides who
+  can *see* the list, so it stays an admin action.
+- **Validation** rejects a name no column references, since a typo would fail silently (the list would
+  just stay admin-only).
+- **Enforced in all four layers** from a `_meta/listWritable` mirror written by `saveSchema`
+  (`BackendHelpers.userWritableListsOf`): `firestore.rules` (`listUserWritable`), 
+  `supabase-schema.sql` (`app_list_user_writable`), `dev/server.js` (`putListItem` + `saveLists`),
+  and the UI (`canEditList`, which drives both the Lists editor and the `allowNew` combobox so neither
+  offers a write the server will refuse).
+
 ## Self-service tables (Firebase)
 
 Any table that declares an **`owner` column** is a **self-service** table: a registered member may
@@ -1209,6 +1335,37 @@ log, only a parent may approve" expressible without a second table.
   board whose lane column is gated offers that owner no drag and no move-menu — otherwise the write
   would simply be refused and the card would snap back unexplained.
 
+### `ownerWritableWhile` — until when an owner may set them
+
+`ownerWritable` bounds *which* fields an owner may rewrite, but ownership never expires: they could
+still edit (or delete) their entry the day after a parent approved it. `ownerWritableWhile` adds the
+missing half — the owner branch reaches a row only **while it is still in one of the listed states**:
+
+```json
+"chore_log": {
+  "ownerWritable": ["person", "chore", "done_on", "note"],
+  "ownerWritableWhile": { "status": "logged" }
+}
+```
+
+"You may fix your entry until it is ruled on." Once `status` leaves `logged` the row is frozen for its
+owner — every column, plus delete and archive — while an editor with a grant, or an admin, is
+unaffected as always.
+
+- **One column, one or more values**: `{ "status": "logged" }` or `{ "status": ["logged", "rejected"] }`
+  (the second lets a rejected entry be corrected and resubmitted). More than one column is rejected at
+  load: the mirror is a single column plus a value list because neither rules language can loop over a
+  map.
+- **Creates always pass** — a new row is by definition in its own starting state, and `ownerWritable`'s
+  `locked` map already stops a row being *born* approved.
+- **Read off the stored row, never the incoming one**, in all four layers — otherwise an owner could
+  send a compliant state alongside the edit and unlock their own approved row.
+- **Inert without `ownerWritable`** (nothing bounds an owner write to begin with); validation says so.
+- **Enforced in all four layers** from the same `_meta/ownerWritable` mirror, which carries the gate as
+  `whileCol` + `whileVals`: `firestore.rules` (`ownerStateOk`), `supabase-schema.sql`
+  (`app_owner_state_ok`), `dev/server.js` (`ownerFieldsOk` + the delete gate), and the UI
+  (`ownerRowWritable`, feeding `cellReadonly` / `canMutateRow`).
+
 ## user profiles, user-backed lists & membership (Firebase)
 
 These features are Firebase-backed (the local/dev backend mirrors them for tests). They build on the
@@ -1290,6 +1447,12 @@ from the authenticated session — never asked for.
 - Item kinds: `{view}`, `{table}`, or `{group, items:[...]}` (one level). A `{view}` may point
   at a data view or a view with `markdown`.
 - Each item: optional `icon`, `title`. Access-filtered (a view needs all its sources).
+- **`adminOnly`** (boolean, optional) — hide the entry from non-admins. On a `{group}` it hides the
+  whole branch. Use it for admin-facing plumbing (the tables behind a rotation, reference data) that
+  members read *through* another view but never need in their own menu. It is **tidiness, not access
+  control**: what a member may read or write is decided by their table grants, and an entry hidden
+  here is still reachable if something else links to it. Pair it with a read-only (`'r'`) grant when
+  the point is that members must not change the data.
 - System tabs (Lookup / Languages / Settings) are appended automatically.
 - **`bottomNav`** (string[], optional) — **mobile only**: view/table ids shown in the bottom
   navigation bar, in this order. More than 5 → the first 4 plus a "⋯ More" button that opens the

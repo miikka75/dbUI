@@ -396,6 +396,10 @@
             </tbody>
             </template>
           </v-table>
+          <!-- `@me` view with no linked identity: an empty grid here is a configuration fact, not "no data". -->
+          <div v-if="a.identityMissing" class="pa-3 d-flex align-center" style="gap:8px; opacity:0.7; font-size:0.85rem">
+            <v-icon size="small">mdi-account-question-outline</v-icon><span>{{ a.t('msg.no_identity') }}</span>
+          </div>
           <v-btn v-if="a.canAddRows && !a.mobile" variant="text" prepend-icon="mdi-plus" @click="a.addRow" class="ma-2">{{ a.t('btn.add') }} {{ a.t((a.currentConfig.sources ? 'view.' : 'tab.') + a.currentTable) }}</v-btn>
           <!-- Text entries and embedded rows -->
           <template v-for="(ei, eidx) in a.embedItems" :key="'bemb'+eidx">
@@ -465,12 +469,12 @@
                 </v-list-item>
               </template>
               <v-list-item v-for="(val, i) in items" :key="i">
-                <span v-if="!a.canEditLists || a.isLockedValue(name, val)" style="opacity:0.7">{{ a.t('list.' + name + '.' + val) !== ('list.' + name + '.' + val) ? a.t('list.' + name + '.' + val) : val }}</span>
+                <span v-if="!a.canEditList(name) || a.isLockedValue(name, val)" style="opacity:0.7">{{ a.t('list.' + name + '.' + val) !== ('list.' + name + '.' + val) ? a.t('list.' + name + '.' + val) : val }}</span>
                 <span v-else class="editable-cell" contenteditable @blur="a.updateListItem2(name, i, $event.target.textContent)" @keydown.enter.prevent="a.focusNextListItem($event)" @keydown.home.stop @keydown.end.stop>{{ val }}</span>
                 <template v-slot:append>
                   <v-icon v-if="a.isTranslatableList(name)" size="x-small" style="opacity:0.35">mdi-translate</v-icon>
-                  <v-icon v-if="a.isLockedValue(name, val)" size="x-small" style="opacity:0.4" title="Used by a schema filter">mdi-lock-outline</v-icon>
-                  <template v-if="a.canEditLists">
+                  <v-icon v-if="a.isLockedValue(name, val)" size="x-small" style="opacity:0.4" :title="a.t('list.locked_value')">mdi-lock-outline</v-icon>
+                  <template v-if="a.canEditList(name)">
                     <list-user-picker v-if="a.isAdmin && a.isUserLinkList(name)" :list="name" :value="val"></list-user-picker>
                     <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="i === 0" @click="a.moveListItem(name, i, -1)"></v-btn>
                     <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="i === items.length - 1" @click="a.moveListItem(name, i, 1)"></v-btn>
@@ -479,7 +483,7 @@
                   </template>
                 </template>
               </v-list-item>
-              <v-list-item v-if="a.canEditLists">
+              <v-list-item v-if="a.canEditList(name)">
                 <v-btn variant="text" size="small" prepend-icon="mdi-plus" @click="a.addListItem2(name)">{{ a.t('btn.add') }} {{ name }}</v-btn>
               </v-list-item>
             </v-list-group>
@@ -503,16 +507,16 @@
                 <v-list-group v-for="(children, parent) in a.refGroupedData" :key="parent" :value="parent">
                   <template v-slot:activator="{ props }">
                     <v-list-item v-bind="props">
-                      <span v-if="a.isLockedRefValue(parent)" class="editable-cell" style="opacity:0.7" @click.stop>{{ a.refValueLabel(parent) }}</span>
+                      <span v-if="!a.canEditCurrentRef || a.isLockedRefValue(parent)" class="editable-cell" style="opacity:0.7" @click.stop>{{ a.refValueLabel(parent) }}</span>
                       <span v-else class="editable-cell" contenteditable @click.stop @keydown.home.stop @keydown.end.stop @blur="a.renameRefParent(parent, $event.target.textContent)">{{ parent }}</span>
                       <template v-slot:append>
                         <v-icon v-if="a.isTranslatableRefTable() && parent" size="x-small" style="opacity:0.35" class="mr-1">mdi-translate</v-icon>
-                        <v-icon v-if="a.refParentLocked(parent)" size="x-small" style="opacity:0.4" class="mr-1" title="Contains a value used by a schema filter">mdi-lock-outline</v-icon>
+                        <v-icon v-if="a.refParentLocked(parent)" size="x-small" style="opacity:0.4" class="mr-1" :title="a.t('list.locked_group')">mdi-lock-outline</v-icon>
                         <template v-if="a.refReorderable">
                           <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="a.refGroupAtEdge(parent,-1)" @click.stop="a.moveRefGroup(parent,-1)"></v-btn>
                           <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="a.refGroupAtEdge(parent,1)" @click.stop="a.moveRefGroup(parent,1)"></v-btn>
                         </template>
-                        <v-btn v-if="!a.refParentLocked(parent)" :icon="a.isArmed('refp:'+parent) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed('refp:'+parent) ? 'error' : ''" @click.stop="a.deleteRefParent(parent)" class="mr-2"></v-btn>
+                        <v-btn v-if="a.canEditCurrentRef && !a.refParentLocked(parent)" :icon="a.isArmed('refp:'+parent) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed('refp:'+parent) ? 'error' : ''" @click.stop="a.deleteRefParent(parent)" class="mr-2"></v-btn>
                         <v-icon>mdi-chevron-down</v-icon>
                       </template>
                     </v-list-item>
@@ -522,20 +526,20 @@
                     <span v-else class="editable-cell ref-child" contenteditable @keydown.home.stop @keydown.end.stop @blur="a.saveRefField(item, a.refChildCol, $event.target.textContent)">{{ item[a.refChildCol] || '' }}</span>
                     <template v-slot:append>
                       <v-icon v-if="a.isTranslatableRefTable()" size="x-small" style="opacity:0.35">mdi-translate</v-icon>
-                      <v-icon v-if="a.isLockedRefRow(item)" size="x-small" style="opacity:0.4" title="Used by a schema filter">mdi-lock-outline</v-icon>
+                      <v-icon v-if="a.isLockedRefRow(item)" size="x-small" style="opacity:0.4" :title="a.t('list.locked_value')">mdi-lock-outline</v-icon>
                       <template v-if="a.refReorderable">
                         <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="a.refChildAtEdge(item,-1)" @click="a.moveRefChild(item,-1)"></v-btn>
                         <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="a.refChildAtEdge(item,1)" @click="a.moveRefChild(item,1)"></v-btn>
                       </template>
-                      <v-btn v-if="!a.isLockedRefRow(item)" :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn>
+                      <v-btn v-if="a.canEditCurrentRef && !a.isLockedRefRow(item)" :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn>
                     </template>
                   </v-list-item>
                   <v-list-item>
-                    <v-btn variant="text" size="small" prepend-icon="mdi-plus" @click="a.addRefChild(parent)">{{ a.t('btn.add') }} {{ a.refChildCol }}</v-btn>
+                    <v-btn v-if="a.canEditCurrentRef" variant="text" size="small" prepend-icon="mdi-plus" @click="a.addRefChild(parent)">{{ a.t('btn.add') }} {{ a.refChildCol }}</v-btn>
                   </v-list-item>
                 </v-list-group>
               </v-list>
-              <v-btn variant="text" prepend-icon="mdi-plus" @click="a.addRefParent()" class="ma-2">{{ a.t('btn.add') }} {{ a.refParentCol }}</v-btn>
+              <v-btn v-if="a.canEditCurrentRef" variant="text" prepend-icon="mdi-plus" @click="a.addRefParent()" class="ma-2">{{ a.t('btn.add') }} {{ a.refParentCol }}</v-btn>
             </div>
             </template>
             <!-- Flat mode when not this table -->
@@ -553,12 +557,12 @@
                       <span v-if="a.isReadonlyRefCell(item, col)" class="editable-cell" style="opacity:0.7">{{ a.refValueLabel(item[col]) }}</span>
                       <span v-else class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="a.saveRefField(item, col, $event.target.textContent)">{{ item[col] || '' }}</span>
                     </td>
-                    <td><v-icon v-if="a.isTranslatableRefTable()" size="x-small" style="opacity:0.35">mdi-translate</v-icon><v-icon v-if="a.isLockedRefRow(item)" size="x-small" style="opacity:0.4" title="Used by a schema filter">mdi-lock-outline</v-icon><v-btn v-else :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn></td>
+                    <td><v-icon v-if="a.isTranslatableRefTable()" size="x-small" style="opacity:0.35">mdi-translate</v-icon><v-icon v-if="a.isLockedRefRow(item)" size="x-small" style="opacity:0.4" :title="a.t('list.locked_value')">mdi-lock-outline</v-icon><v-btn v-else-if="a.canEditCurrentRef" :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn></td>
                   </tr>
                 </tbody>
                 </template>
               </v-table>
-              <v-btn variant="text" prepend-icon="mdi-plus" @click="a.addRefRow" class="ma-2">{{ a.t('btn.add') }} {{ a.t('tab.' + a.currentTable) }}</v-btn>
+              <v-btn v-if="a.canEditCurrentRef" variant="text" prepend-icon="mdi-plus" @click="a.addRefRow" class="ma-2">{{ a.t('btn.add') }} {{ a.t('tab.' + a.currentTable) }}</v-btn>
             </div>
             </template>
             </v-list-group>
