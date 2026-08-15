@@ -33,6 +33,41 @@ describe('translation keys', () => {
       'offer them and they stay raw in every language: ' + missing.join(', '));
   });
 
+  // tOr()'s fallback exists for keys whose default is the DATA being labelled (a column or list value,
+  // which reads better raw than as `field.chore_name`) — so every legitimate call builds its key by
+  // concatenation. A tOr() on a FULLY LITERAL key is always static UI prose with a hardcoded English
+  // default, which renders English on an untranslated deployment instead of showing the key. That hides
+  // the gap: the string looks finished, so nobody ever translates it. Those must use t().
+  it('tOr() is never called with a fully literal key — static prose belongs to t()', () => {
+    const literal = [];
+    for (const [src, file] of [[appCore, 'app-core.js'], [ui, 'ui.html']]) {
+      for (const m of src.matchAll(/\btOr\(\s*\\?'([a-z][a-z0-9_.]*)\\?'\s*,/gi)) literal.push(file + ': ' + m[1]);
+    }
+    assert.deepEqual(literal, [],
+      'these tOr() calls hardcode an English default for a static key, so an untranslated deployment ' +
+      'silently shows English instead of the key: ' + literal.join(', '));
+  });
+
+  // The shipped example packs are the only complete app-UI translation anyone starts from. A key added
+  // to staticTranslationKeys() but not to them imports as a raw key on a fresh deployment, and nobody
+  // notices until they open the Languages editor and find a blank row.
+  it('the example app-lang packs cover every static key, in every language they ship', () => {
+    // app.title names the deployment, so it belongs to the schema bundle, not the app-UI pack.
+    const expected = [...STATIC].filter(k => k !== 'app.title').sort();
+    for (const file of ['app-lang-en.json', 'app-lang-fi.json']) {
+      const pack = JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', file), 'utf8'));
+      for (const code of Object.keys(pack.translations)) {
+        const have = pack.translations[code];
+        assert.deepEqual(expected.filter(k => !(k in have)), [],
+          file + ' [' + code + '] is missing app-UI keys the app asks for');
+        assert.deepEqual(Object.keys(have).filter(k => !STATIC.has(k)).sort(), [],
+          file + ' [' + code + '] carries keys the app never asks for');
+        assert.deepEqual(Object.keys(have).filter(k => !String(have[k]).trim()), [],
+          file + ' [' + code + '] has empty translations');
+      }
+    }
+  });
+
   // _untranslatableCol is a pure helper; pull it out of the source rather than booting the whole app.
   const untranslatable = (() => {
     const src = appCore.match(/function _untranslatableCol\(cols, name\) \{[\s\S]*?\n\}/);

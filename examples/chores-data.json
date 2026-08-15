@@ -4,7 +4,8 @@
       "Ann",
       "Bob",
       "Cara",
-      "Dan"
+      "Dan",
+      "Parent"
     ],
     "chore_status": [
       "logged",
@@ -118,27 +119,69 @@
         "cost": 25
       }
     ],
-    "duty_rotation": [
+    "tasks_ann": [
       {
-        "id": "duty-1",
+        "id": "ta-1",
         "position": 1,
-        "people": [
-          "Ann"
+        "tasks": [
+          "Wash up",
+          "Take out bins"
         ]
       },
       {
-        "id": "duty-2",
+        "id": "ta-2",
         "position": 2,
-        "people": [
-          "Bob",
-          "Dan"
+        "tasks": [
+          "Hoover"
+        ]
+      }
+    ],
+    "tasks_bob": [
+      {
+        "id": "tb-1",
+        "position": 1,
+        "tasks": [
+          "Laundry load",
+          "Clean bathroom"
+        ]
+      }
+    ],
+    "tasks_cara": [
+      {
+        "id": "tc-1",
+        "position": 1,
+        "tasks": [
+          "Water plants"
         ]
       },
       {
-        "id": "duty-3",
+        "id": "tc-2",
+        "position": 2,
+        "tasks": [
+          "Dust + tidy"
+        ]
+      },
+      {
+        "id": "tc-3",
         "position": 3,
-        "people": [
-          "Cara"
+        "tasks": [
+          "Change bedding"
+        ]
+      }
+    ],
+    "tasks_dan": [
+      {
+        "id": "td-1",
+        "position": 1,
+        "tasks": [
+          "Empty dishwasher"
+        ]
+      },
+      {
+        "id": "td-2",
+        "position": 2,
+        "tasks": [
+          "Mow the lawn"
         ]
       }
     ],
@@ -150,7 +193,9 @@
         "chore": "Wash up",
         "done_on": "2026-08-07",
         "status": "approved",
-        "note": ""
+        "note": "",
+        "created_at": "2026-08-07T09:00:00.000Z",
+        "updated_at": "2026-08-07T18:30:00.000Z"
       },
       {
         "id": "log-02",
@@ -159,7 +204,9 @@
         "chore": "Mow the lawn",
         "done_on": "2026-08-05",
         "status": "approved",
-        "note": "Front and back"
+        "note": "Front and back",
+        "created_at": "2026-08-05T09:00:00.000Z",
+        "updated_at": "2026-08-05T18:30:00.000Z"
       },
       {
         "id": "log-03",
@@ -168,7 +215,9 @@
         "chore": "Laundry load",
         "done_on": "2026-08-03",
         "status": "approved",
-        "note": ""
+        "note": "",
+        "created_at": "2026-08-03T09:00:00.000Z",
+        "updated_at": "2026-08-03T18:30:00.000Z"
       },
       {
         "id": "log-04",
@@ -177,7 +226,9 @@
         "chore": "Hoover",
         "done_on": "2026-08-07",
         "status": "approved",
-        "note": "Upstairs too"
+        "note": "Upstairs too",
+        "created_at": "2026-08-07T09:00:00.000Z",
+        "updated_at": "2026-08-07T18:30:00.000Z"
       },
       {
         "id": "log-05",
@@ -186,7 +237,9 @@
         "chore": "Take out bins",
         "done_on": "2026-08-08",
         "status": "logged",
-        "note": "Waiting to be checked"
+        "note": "Waiting to be checked",
+        "created_at": "2026-08-08T09:00:00.000Z",
+        "updated_at": "2026-08-08T18:30:00.000Z"
       },
       {
         "id": "log-06",
@@ -195,7 +248,9 @@
         "chore": "Clean bathroom",
         "done_on": "2026-08-04",
         "status": "approved",
-        "note": ""
+        "note": "",
+        "created_at": "2026-08-04T09:00:00.000Z",
+        "updated_at": "2026-08-04T18:30:00.000Z"
       },
       {
         "id": "log-07",
@@ -204,7 +259,9 @@
         "chore": "Wash up",
         "done_on": "2026-08-06",
         "status": "approved",
-        "note": ""
+        "note": "",
+        "created_at": "2026-08-06T09:00:00.000Z",
+        "updated_at": "2026-08-06T18:30:00.000Z"
       },
       {
         "id": "log-08",
@@ -213,7 +270,9 @@
         "chore": "Empty dishwasher",
         "done_on": "2026-08-06",
         "status": "approved",
-        "note": ""
+        "note": "",
+        "created_at": "2026-08-06T09:00:00.000Z",
+        "updated_at": "2026-08-06T18:30:00.000Z"
       },
       {
         "id": "log-09",
@@ -222,7 +281,9 @@
         "chore": "Water plants",
         "done_on": "2026-08-02",
         "status": "rejected",
-        "note": "Only the front ones"
+        "note": "Only the front ones",
+        "created_at": "2026-08-02T09:00:00.000Z",
+        "updated_at": "2026-08-02T18:30:00.000Z"
       },
       {
         "id": "log-10",
@@ -231,7 +292,9 @@
         "chore": "Cook dinner",
         "done_on": "2026-08-06",
         "status": "approved",
-        "note": "Pasta"
+        "note": "Pasta",
+        "created_at": "2026-08-06T09:00:00.000Z",
+        "updated_at": "2026-08-06T18:30:00.000Z"
       },
       {
         "id": "log-11",
@@ -240,7 +303,9 @@
         "chore": "Dust + tidy",
         "done_on": "2026-08-02",
         "status": "approved",
-        "note": ""
+        "note": "",
+        "created_at": "2026-08-02T09:00:00.000Z",
+        "updated_at": "2026-08-02T18:30:00.000Z"
       },
       {
         "id": "log-12",
@@ -249,7 +314,9 @@
         "chore": "Change bedding",
         "done_on": "2026-07-10",
         "status": "approved",
-        "note": ""
+        "note": "",
+        "created_at": "2026-07-10T09:00:00.000Z",
+        "updated_at": "2026-07-10T18:30:00.000Z"
       },
       {
         "id": "log-13",
@@ -258,7 +325,9 @@
         "chore": "Mow the lawn",
         "done_on": "2026-07-15",
         "status": "approved",
-        "note": ""
+        "note": "",
+        "created_at": "2026-07-15T09:00:00.000Z",
+        "updated_at": "2026-07-15T18:30:00.000Z"
       },
       {
         "id": "log-14",
@@ -267,7 +336,9 @@
         "chore": "Hoover",
         "done_on": "2026-07-21",
         "status": "approved",
-        "note": ""
+        "note": "",
+        "created_at": "2026-07-21T09:00:00.000Z",
+        "updated_at": "2026-07-21T18:30:00.000Z"
       }
     ],
     "reward_claim": [
@@ -303,7 +374,9 @@
         "qty": "1",
         "added_by": "Ann",
         "needed_by": "2026-08-04",
-        "shop_status": "needed"
+        "shop_status": "needed",
+        "created_at": "2026-08-04T09:00:00.000Z",
+        "updated_at": "2026-08-04T18:30:00.000Z"
       },
       {
         "id": "shop-2",
@@ -327,7 +400,9 @@
         "qty": "1 box",
         "added_by": "Dan",
         "needed_by": "2026-08-07",
-        "shop_status": "needed"
+        "shop_status": "needed",
+        "created_at": "2026-08-07T09:00:00.000Z",
+        "updated_at": "2026-08-07T18:30:00.000Z"
       },
       {
         "id": "shop-5",
@@ -341,7 +416,7 @@
   },
   "config": {
     "rotationAnchors": {
-      "duty_schedule": "2026-08-03"
+      "duty_matrix": "2026-08-03"
     }
   }
 }

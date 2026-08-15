@@ -217,6 +217,37 @@ describe('backend-helpers - ownerWritableOf (bound an owner-scoped write to colu
     assert.deepEqual(H.ownerWritableOf({}), {});
     assert.deepEqual(H.ownerWritableOf(null), {});
   });
+
+  // ownerWritableWhile: the owner branch reaches a row only while it is still in one of these states.
+  // Mirrored as ONE column + a value list because neither rules language can loop over a map.
+  it('mirrors ownerWritableWhile as whileCol + whileVals (absent -> no gate)', () => {
+    assert.deepEqual(H.ownerWritableOf(schema).chore_log.whileCol, '');
+    assert.deepEqual(H.ownerWritableOf(schema).chore_log.whileVals, []);
+    const gated = { tables: { chore_log: Object.assign({}, schema.tables.chore_log, { ownerWritableWhile: { status: 'logged' } }) } };
+    assert.deepEqual(H.ownerWritableOf(gated).chore_log.whileCol, 'status');
+    assert.deepEqual(H.ownerWritableOf(gated).chore_log.whileVals, ['logged']);
+    const list = { tables: { chore_log: Object.assign({}, schema.tables.chore_log, { ownerWritableWhile: { status: ['logged', 'rejected'] } }) } };
+    assert.deepEqual(H.ownerWritableOf(list).chore_log.whileVals, ['logged', 'rejected']);
+    // a gate naming a column the table does not have is dropped rather than half-applied
+    const bogus = { tables: { chore_log: Object.assign({}, schema.tables.chore_log, { ownerWritableWhile: { nope: 'x' } }) } };
+    assert.deepEqual(H.ownerWritableOf(bogus).chore_log.whileCol, '');
+  });
+});
+
+describe('backend-helpers - ownerRowInState (the shared while-gate predicate)', () => {
+  const gated = { whileCol: 'status', whileVals: ['logged'] };
+  it('a create (no stored row) always passes — it is in its own starting state', () => {
+    assert.equal(H.ownerRowInState(gated, null), true);
+  });
+  it('passes while the STORED row is in a listed state, and freezes once it leaves', () => {
+    assert.equal(H.ownerRowInState(gated, { status: 'logged' }), true);
+    assert.equal(H.ownerRowInState(gated, { status: 'approved' }), false);
+    assert.equal(H.ownerRowInState(gated, {}), false);            // missing -> '' -> not listed
+  });
+  it('no gate (or no bounds at all) never freezes anything', () => {
+    assert.equal(H.ownerRowInState({ whileCol: '', whileVals: [] }, { status: 'approved' }), true);
+    assert.equal(H.ownerRowInState(null, { status: 'approved' }), true);
+  });
 });
 
 describe('backend-helpers - bootTableNames', () => {

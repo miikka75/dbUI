@@ -300,10 +300,10 @@
         var occSrc = comp.occurrenceSource
           ? (cache[comp.occurrenceSource] || []).concat(cache[comp.occurrenceSource + '__archive'] || [])
           : rows;
-        r[d.name] = Rot.resolveByOccurrence(rot, occSrc, r, comp.occurrenceSort);
+        r[d.name] = Rot.resolveByOccurrence(rot, occSrc, r, comp.occurrenceSort, comp.valueCol);
       } else if (comp.advanceBy === 'calendar') {
         var target = comp.dateField ? r[comp.dateField] : (ctx && ctx.todayDate);
-        r[d.name] = Rot.resolveByCalendar(rot, target, Rot.resolveAnchorDate(comp, ctx && ctx.rotationAnchor), comp.interval);
+        r[d.name] = Rot.resolveByCalendar(rot, target, Rot.resolveAnchorDate(comp, ctx && ctx.rotationAnchor), comp.interval, comp.valueCol);
       } else {
         r[d.name] = [];
       }

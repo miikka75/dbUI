@@ -122,6 +122,24 @@ function validateSchema() {
   // rows TO (an archivable table) and a clock to measure (`updated_at`, which a columnar backend only
   // persists when the table declares it). Both are load-time detectable, so say so rather than let the
   // sweep find no eligible rows forever.
+  // `ownerWritableWhile` freezes an owner's own row once it leaves the listed states. It is mirrored to
+  // the two rules layers as ONE column + a value list, so more than one key cannot be enforced there —
+  // reject it here rather than silently apply a random one. It is also inert without `ownerWritable`
+  // (nothing bounds an owner write in the first place), which is the mistake worth naming.
+  for (var ot in SCHEMA) {
+    var gate = SCHEMA[ot] && SCHEMA[ot].ownerWritableWhile;
+    if (gate === undefined) continue;
+    var ocols = SCHEMA[ot].columns || {};
+    if (!gate || typeof gate !== 'object' || Array.isArray(gate)) { errors.push('table "' + ot + '": `ownerWritableWhile` must be an object like { "status": "logged" }'); continue; }
+    var gk = Object.keys(gate);
+    if (gk.length !== 1) errors.push('table "' + ot + '": `ownerWritableWhile` takes exactly one column (got ' + gk.length + ') — the rules layers check one column against a value list');
+    gk.forEach(function(k) {
+      if (!(k in ocols)) errors.push('table "' + ot + '": `ownerWritableWhile` column "' + k + '" is not a column of the table');
+      var vals = Array.isArray(gate[k]) ? gate[k] : [gate[k]];
+      if (!vals.length || vals.some(function(v) { return v === null || typeof v === 'object'; })) errors.push('table "' + ot + '": `ownerWritableWhile.' + k + '` must be a value or a non-empty list of values');
+    });
+    if (!Array.isArray(SCHEMA[ot].ownerWritable)) errors.push('table "' + ot + '": `ownerWritableWhile` has no effect without `ownerWritable` (nothing bounds an owner-scoped write to begin with)');
+  }
   for (var at in SCHEMA) {
     var aa = SCHEMA[at] && SCHEMA[at].archiveAfter;
     if (!aa) continue;
@@ -168,6 +186,12 @@ function validateSchema() {
       var found = (view.sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].columns && SCHEMA[s].columns[col]; });
       if (!found) errors.push('View "' + v + '": column "' + col + '" not found in sources [' + (view.sources || []).join(', ') + ']');
     });
+    // An explicit `valueCol` must name a real column on the roster table it reads, or every cell
+    // silently renders empty (the resolvers fall back to [] for a missing column). Only checked when
+    // set — the `people` default is left alone so existing rosters keep loading unchanged.
+    function badValueCol(table, valueCol) {
+      return valueCol && SCHEMA[table] && SCHEMA[table].columns && !SCHEMA[table].columns[valueCol];
+    }
     // Rotation computed columns: trigger must be declared and references must resolve.
     (view.columns || []).forEach(function(c) {
       if (!c || typeof c !== 'object' || !c.computed || !c.computed.rotationTable) return;
@@ -176,6 +200,7 @@ function validateSchema() {
       if (comp.advanceBy !== 'occurrence' && comp.advanceBy !== 'calendar') errors.push('View "' + v + '": rotation column "' + nm + '" needs advanceBy "occurrence" or "calendar"');
       if (comp.advanceBy === 'occurrence' && comp.occurrenceSource && !SCHEMA[comp.occurrenceSource]) errors.push('View "' + v + '": rotation column "' + nm + '" occurrenceSource "' + comp.occurrenceSource + '" not found');
       if (comp.advanceBy === 'calendar' && !isValidInterval(comp.interval)) errors.push('View "' + v + '": calendar rotation column "' + nm + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
+      if (badValueCol(comp.rotationTable, comp.valueCol)) errors.push('View "' + v + '": rotation column "' + nm + '": valueCol "' + comp.valueCol + '" is not a column of rotationTable "' + comp.rotationTable + '"');
     });
     // rotationView (third view kind): calendar-mode columns only.
     if (view.rotation) {
@@ -183,7 +208,10 @@ function validateSchema() {
       if (rvv.slots && rvv.rosters) {
         if (rvv.advanceBy && rvv.advanceBy !== 'calendar') errors.push('rotationView "' + v + '" supports advanceBy "calendar" only (use a data view for occurrence mode)');
         if (!isValidInterval(rvv.interval)) errors.push('rotationView "' + v + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
-        (rvv.rosters || []).forEach(function(t3) { if (!SCHEMA[t3]) errors.push('rotationView "' + v + '" references non-existent roster table "' + t3 + '"'); });
+        (rvv.rosters || []).forEach(function(t3) {
+          if (!SCHEMA[t3]) errors.push('rotationView "' + v + '" references non-existent roster table "' + t3 + '"');
+          else if (badValueCol(t3, rvv.valueCol)) errors.push('rotationView "' + v + '": valueCol "' + rvv.valueCol + '" is not a column of roster table "' + t3 + '"');
+        });
         if ((rvv.rosters || []).length < (rvv.slots || []).length) errors.push('rotationView "' + v + '": fewer rosters (' + (rvv.rosters || []).length + ') than slots (' + (rvv.slots || []).length + ') — some slots would be unstaffed or double-booked each period');
         if (rvv.rotateEvery != null) {
           var _re = Array.isArray(rvv.rotateEvery) ? rvv.rotateEvery : [rvv.rotateEvery];
@@ -198,7 +226,19 @@ function validateSchema() {
         if (!c || !SCHEMA[c.rotationTable]) errors.push('rotationView "' + v + '" column "' + nm + '" references non-existent rotationTable "' + (c && c.rotationTable) + '"');
         if (c && c.advanceBy && c.advanceBy !== 'calendar') errors.push('rotationView "' + v + '" column "' + nm + '" supports advanceBy "calendar" only (use a data view for occurrence mode)');
         if (!c || !isValidInterval(c.interval)) errors.push('rotationView "' + v + '" column "' + nm + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
+        if (c && badValueCol(c.rotationTable, c.valueCol)) errors.push('rotationView "' + v + '" column "' + nm + '": valueCol "' + c.valueCol + '" is not a column of rotationTable "' + c.rotationTable + '"');
       });
+      }
+      // `mineOnly` sits on the VIEW (beside hideEmpty/obscureNames), not inside `rotation` — putting it
+      // in the wrong place would silently show everyone the whole matrix, so name the mistake.
+      if (rvv.mineOnly != null) errors.push('rotationView "' + v + '": `mineOnly` belongs on the view, not inside `rotation`');
+      if (view.mineOnly != null) {
+        var _mo = view.mineOnly;
+        // A BARE STRING is rejected on purpose: `obscureNames` sits in the same config and takes an
+        // array of COLUMNS, so a loose string/array here would read as columns to anyone who learned
+        // that one. The list form says which key it is.
+        if (typeof _mo === 'string' || Array.isArray(_mo)) errors.push('View "' + v + '": `mineOnly` takes true or { "list": "' + (Array.isArray(_mo) ? '<listName>' : _mo) + '" } — a bare string reads like the column array `obscureNames` takes');
+        else if (_mo !== true && (typeof _mo !== 'object' || typeof _mo.list !== 'string' || !_mo.list)) errors.push('View "' + v + '": `mineOnly` must be true, or { "list": "<listName>" } naming the list that identifies a slot');
       }
     }
     // Calendar view (fourth view kind): validate source(s) + date columns.
@@ -285,6 +325,19 @@ function validateRefs(schema) {
   var errs = [], tables = schema.tables || {}, views = {};
   (Array.isArray(schema.views) ? schema.views : []).forEach(function(v) { if (v && v.name) views[v.name] = v; });
   var hasView = function(n) { return !!views[n]; }, hasTable = function(n) { return !!tables[n]; };
+  // `userWritableLists` opens named lists to non-admins (list editing is otherwise admin-only). A typo
+  // here fails SILENTLY — the list simply stays admin-only — so check the names against the lists that
+  // columns actually reference. Same check shape as the nav/view dangling-reference walks below.
+  if (schema.userWritableLists !== undefined) {
+    if (!Array.isArray(schema.userWritableLists)) errs.push('`userWritableLists` must be an array of list names');
+    else {
+      var known = listOwnershipMap(tables);
+      schema.userWritableLists.forEach(function(n) {
+        if (typeof n !== 'string' || !n) errs.push('`userWritableLists` entries must be list names');
+        else if (!(n in known)) errs.push('`userWritableLists` -> no column references a list named "' + n + '"');
+      });
+    }
+  }
   Object.keys(views).forEach(function(n) {
     var v = views[n];
     (v.sources || []).forEach(function(s) { if (!hasTable(s)) errs.push('View "' + n + '" -> missing table "' + s + '"'); });
@@ -303,6 +356,9 @@ function validateRefs(schema) {
   (function walk(items) { (items || []).forEach(function(it) {
     if (it.view && !hasView(it.view) && !hasTable(it.view)) errs.push('Nav -> missing view "' + it.view + '"');
     if (it.table && !hasTable(it.table)) errs.push('Nav -> missing table "' + it.table + '"');
+    // A truthy non-boolean (e.g. "admin") would hide the entry too, but silently reads as a role name
+    // rather than the flag it is — say so rather than let it look like it does something finer.
+    if (it.adminOnly !== undefined && typeof it.adminOnly !== 'boolean') errs.push('Nav -> `adminOnly` must be true or false (got ' + JSON.stringify(it.adminOnly) + ')');
     if (it.items) walk(it.items);
   }); })(schema.nav && schema.nav.items);
   return errs;
@@ -312,6 +368,11 @@ function validateRefs(schema) {
 function buildNavTabs(navItems, t, canAccess, opts) {
   var tabs = [];
   function navTab(it) {
+    // `adminOnly` hides an entry (a group and everything under it, or a single view/table) from
+    // non-admins. This is TIDINESS, not access control -- what a member may read or write is decided by
+    // their table grants, and this only keeps admin-facing plumbing out of their menu. Put it on the
+    // group to hide the whole branch.
+    if (it.adminOnly && !opts.isAdmin) return null;
     if (it.group) { var ch = (it.items || []).map(navTab).filter(Boolean); return ch.length ? { id: 'grp:' + it.group, title: t('nav.' + it.group) || it.group, icon: it.icon || 'mdi-folder', children: ch } : null; }
     var gid = it.view || it.table;
     if (!gid || !canAccess(gid)) return null;

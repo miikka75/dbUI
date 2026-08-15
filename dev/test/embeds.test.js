@@ -24,7 +24,9 @@ function makeCtx(over) {
     t: k => '',
     viewWithMe: v => v,
     anchorForView: () => '2026-01-01',
-    rotationRowsFor: () => [{ id: 'rv0', _period: '2026-01-01', area: ['A'] }]
+    rotationRowsFor: () => [{ id: 'rv0', _period: '2026-01-01', area: ['A'] }],
+    // Root-side slot narrowing (mineOnly/hideEmpty) lives in app-core; the stub just shapes the contract.
+    rotationColsFor: (n, rows, cfg) => ['_period'].concat(((cfg && cfg.rotation) || {}).slots || [])
   }, over || {});
 }
 

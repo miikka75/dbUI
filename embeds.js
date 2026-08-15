@@ -3,7 +3,8 @@
 // embed cols/rows readers. Extracted from the app-core root so the resolution logic gets Node tests.
 //
 // Every function is pure over an explicit `ctx` built by the root (app-core `_embedCtx()`):
-//   { views, schema, getColumns, dataCache, currentTable, t, viewWithMe, anchorForView, rotationRowsFor }
+//   { views, schema, getColumns, dataCache, currentTable, t, viewWithMe, anchorForView, rotationRowsFor,
+//     rotationColsFor }
 // The root keeps thin same-named wrappers, so components/templates/tests are unchanged.
 //   Browser: <script src="/embeds.js"> after columns.js + rows.js (needs their globals). Exposes
 //            Embeds.* plus mdToHtml as a bare global (schema-loader-era callers + the XSS test).
@@ -137,8 +138,9 @@
     if (cfg.rotation) { // rotationView embed (a {view:x} where x is a rotationView) -> generate period rows
       var anchorName = cfg.view || cfg.name || ctx.currentTable;
       var rrows = ctx.rotationRowsFor(anchorName, cfg.rotation);
-      var slotNames = cfg.rotation.slots ? cfg.rotation.slots.slice() : (cfg.rotation.columns || []).map(function(c) { return c.name; });
-      return { config: cfg, kind: 'rotation', name: anchorName, columns: ['_period'].concat(slotNames), rows: rrows };
+      // Columns come from the root's rotationColsFor so the mineOnly / hideEmpty narrowing that the
+      // on-screen view applies also reaches the print path (which renders from spec.columns).
+      return { config: cfg, kind: 'rotation', name: anchorName, columns: ctx.rotationColsFor(anchorName, rrows, cfg), rows: rrows };
     }
     var raw = cfg.columns || (cfg.view && ctx.views[cfg.view] ? ctx.views[cfg.view].columns : []);
     var columns = raw.map(function(c) { return Cols.colName(c); });

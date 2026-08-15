@@ -93,12 +93,18 @@ input[type="date"]:focus { outline: none; border-color: rgb(var(--v-theme-primar
 }
 /* Board (kanban) lanes: fixed-width columns that scroll horizontally on desktop; on mobile they stack
    full-width so a phase row never needs a horizontal scrollbar (the page scrolls vertically instead).
-   Collapsible phase headers (laneGroups) stay the mechanism for taming a long lifecycle. */
-.board-lane-row { display: flex; gap: 10px; overflow-x: auto; padding: 8px; align-items: flex-start; }
-.board-lane { flex: 0 0 240px; min-width: 240px; border-radius: 8px; padding: 6px; background: rgb(var(--v-theme-on-surface), 0.04); box-sizing: border-box; }
+   Collapsible phase headers (laneGroups) stay the mechanism for taming a long lifecycle.
+   The lane IS the drop target, so its box has to be a target worth aiming at. `align-items: stretch`
+   (the flex default we previously overrode with flex-start) levels every lane in a row to the tallest,
+   and `min-height` gives a row of short lanes a floor — otherwise a lane shrank to its content and
+   dropping a card into an empty column meant hitting the ~30px header strip, which is the fiddliness
+   this fixes. Stacked on mobile, stretch governs WIDTH instead and the floor is dropped, so a column of
+   empty lanes doesn't turn into a column of empty boxes. */
+.board-lane-row { display: flex; gap: 10px; overflow-x: auto; padding: 8px; align-items: stretch; }
+.board-lane { flex: 0 0 240px; min-width: 240px; min-height: 140px; border-radius: 8px; padding: 6px; background: rgb(var(--v-theme-on-surface), 0.04); box-sizing: border-box; }
 @media (max-width: 599.98px) {
   .board-lane-row { flex-direction: column; overflow-x: visible; }
-  .board-lane { flex: 1 1 auto; min-width: 0; width: 100%; }
+  .board-lane { flex: 1 1 auto; min-width: 0; width: 100%; min-height: 0; }
 }
 /* One row's field, shared by the kanban card and the card layout: a real <v-field variant="outlined">, so
    the notched outline and the floated top-left label come from Vuetify itself and match Settings -> Profile

@@ -5,7 +5,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 // Per-list access model — shared module (also loaded by the browser app + backend-local), no more copies.
-const { listOwningTables, filterLists } = require('../list-access');
+const { filterLists } = require('../list-access');
 const AccessFeatures = require('../access-features');
 const BackendHelpers = require('../backend-helpers');
 // User-linked lists (Option C): pure link/projection logic, shared with the browser app.
@@ -257,6 +257,10 @@ const server = http.createServer(async (req, res) => {
       const base = tableId ? tableId.split('__')[0] : '';
       const bounds = BackendHelpers.ownerWritableOf(backend.getSchema('local') || {})[base];
       if (!bounds) return true;
+      // `ownerWritableWhile`: once the STORED row leaves its editable states the owner branch stops
+      // reaching it at all — no field of it, not even a listed one. Checked against `existing`, so the
+      // owner cannot escape the gate by sending a compliant new state in the same write.
+      if (!BackendHelpers.ownerRowInState(bounds, existing)) return false;
       const baseline = existing || bounds.locked;
       const keys = new Set([...Object.keys(incoming || {}), ...Object.keys(baseline || {})]);
       for (const k of keys) {
@@ -430,7 +434,10 @@ const server = http.createServer(async (req, res) => {
         if (checkTableWrite(body.tableId)) return delOk();
         const oc = selfServiceOwnerCol(body.tableId);
         const existing = oc ? prior : null;   // may delete only my own owned row
-        if (!oc || !existing || !_mine(existing[oc])) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
+        // ...and only while it is still in an owner-writable state: an approved row is out of my hands,
+        // so deleting it must be refused for exactly the reason editing it is.
+        const dBounds = BackendHelpers.ownerWritableOf(backend.getSchema('local') || {})[String(body.tableId || '').split('__')[0]];
+        if (!oc || !existing || !_mine(existing[oc]) || !BackendHelpers.ownerRowInState(dBounds, existing)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
         return delOk();
       }
       case 'getTranslations': return json(res, backend.getTranslations(body.folderId || 'local', body.langCode));
@@ -446,25 +453,26 @@ const server = http.createServer(async (req, res) => {
         return json(res, filterLists(backend.getLists('local'), schemaTables, allowed));
       }
       case 'saveLists': {
-        const allowedW = getWritableTables();   // list WRITES need rw on an owning table
-        if (!allowedW) { backend.saveLists('local', body.lists); return json(res, { ok: true }); }
-        // Restricted user: merge their (owned) lists over the existing set — never drop lists they
-        // can't see (their submitted map is a filtered subset). Also ignore writes to lists they don't own.
-        const schemaTablesW = (backend.getSchema('local') || {}).tables || {};
+        if (isAdminReq()) { backend.saveLists('local', body.lists); return json(res, { ok: true }); }
+        // A non-admin may write ONLY the lists the schema opens (`userWritableLists`) — editing a list
+        // is editing shared vocabulary, so it is admin-only by default. A table grant is deliberately
+        // NOT part of the question: a list belongs to every table whose columns reference it, so keying
+        // on the grant handed one rw table every list its columns touched. See userWritableListsOf.
+        // Merge over the existing set rather than replacing it: their submitted map is a filtered subset,
+        // so a plain save would drop every list they cannot see.
+        const openW = BackendHelpers.userWritableListsOf(backend.getSchema('local') || {}).lists;
         const merged = backend.getLists('local');
         const submitted = body.lists || {};
-        Object.keys(submitted).forEach(name => {
-          if (listOwningTables(schemaTablesW, name).some(t => allowedW.indexOf(t) >= 0)) merged[name] = submitted[name];
-        });
+        Object.keys(submitted).forEach(name => { if (openW.includes(name)) merged[name] = submitted[name]; });
         backend.saveLists('local', merged);
         return json(res, { ok: true });
       }
       case 'putListItem': {
         // Per-list access: a list is writable if ANY of its owning tables is granted (same ownership
         // model as saveLists above) — the list NAME is not a table id, so checkTableAccess was wrong here.
-        const allowedLi = getWritableTables();  // list WRITES need rw on an owning table
-        const schemaTablesLi = (backend.getSchema('local') || {}).tables || {};
-        if (allowedLi && !listOwningTables(schemaTablesLi, body.listName).some(t => allowedLi.indexOf(t) >= 0)) {
+        // Admin-only unless the schema opens this list to everyone (userWritableLists).
+        const openLi = BackendHelpers.userWritableListsOf(backend.getSchema('local') || {}).lists;
+        if (!isAdminReq() && !openLi.includes(body.listName)) {
           return json(res, { error: 'Access denied' }, 403);
         }
         backend.putListItem('local', body.listName, body.value); return json(res, { ok: true });

@@ -166,7 +166,7 @@ test('zero-grant viewer: sees the EDITED page body (not the schema seed), no edi
   await expect(viewer.locator('text=EDITED-BODY')).toBeVisible({ timeout: 15000 });
   await expect(viewer.locator('text=SEED-BODY')).toHaveCount(0);
   // No edit controls for a viewer (canEditPages gate).
-  await expect(viewer.locator('button:has-text("Edit")')).toHaveCount(0);
+  await expect(viewer.locator('[data-testid="page-edit"]')).toHaveCount(0);
   // Per-page access: secret_page is gated on the `notes` grant, which this viewer lacks -> not in nav.
   expect(tabs).not.toContain('secret_page');
   await expectNoCspViolations(viewer);

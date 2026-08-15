@@ -49,6 +49,15 @@ function colIsMirror(tables, col, tableName) { return Columns.isMirror(tables, t
 function getTableMirrorSource(tables, tableName) { return Columns.tableMirrorSource(tables, tableName); }
 function getOwnerCol(table) { return Columns.tableOwnerCol(SCHEMA, table); } // table's type:'owner' column name, or null
 function getDefaultCols(table) { return Columns.tableDefaultCols(SCHEMA, table); } // [{name, from}] for `defaultFrom` columns
+// Owner-write bounds for one table, from the SAME generator the two rules layers read (so the UI can
+// never offer an edit the write layers will refuse). Memoized on SCHEMA's identity: _normalizeSchema
+// rebinds SCHEMA to a fresh object on every load, so a new schema invalidates this by construction —
+// the same self-invalidating trick columns.js's WeakMap uses.
+var _ownerBoundsKey = null, _ownerBoundsAll = null;
+function ownerBoundsFor(table) {
+  if (_ownerBoundsKey !== SCHEMA) { _ownerBoundsKey = SCHEMA; _ownerBoundsAll = BackendHelpers.ownerWritableOf({ tables: SCHEMA }); }
+  return _ownerBoundsAll[table] || null;
+}
 
 // --- Permission "features" model: extracted to /access-features.js (AccessFeatures.*), a pure module
 //     over (schema, views) shared with the unit tests. These thin wrappers bind the app's global
@@ -569,7 +578,8 @@ function createVueApp() {
       // declare layout:'list' as its only presentation, so gating Add on an editable layout would leave
       // such a table with no way to create a row at all. The row lands and saves; it is just not
       // editable from a list (see the `layout` note in SCHEMA.md — use table/card for data entry).
-      canAddRows: function() { return this.canMutateRows; },
+      identityMissing: function() { return this.viewIdentityMissing(this.currentTable); },
+      canAddRows: function() { return this.canMutateRows && !this.identityMissing; },
       isReadonlyView: function() { return !this.currentSelfService && this.viewReadonly(this.currentTable); },
       embedConfigs: function() {
         var self = this;
@@ -617,7 +627,9 @@ function createVueApp() {
         var allowed = this.userWritableTables;
         if (!allowed) return true; // admin / unrestricted
         var view = VIEWS[this.currentTable];
-        var base = view ? (view.sources || []) : [this.currentTable];
+        // Views go through writeBaseFor (which answers with a rotation's rosters); a bare table is itself,
+        // unconditionally — keeping the old fallback so a non-schema id can't slip through as "nothing to write".
+        var base = view ? this.writeBaseFor(this.currentTable) : [this.currentTable];
         var cluster = withMirrors(base); // full mirror cluster (both directions)
         return cluster.every(function(t) { return allowed.indexOf(t) >= 0; });
       },
@@ -642,7 +654,17 @@ function createVueApp() {
         return this.canSelfServe(this.currentTable);
       },
       // List values are editable only by recognized writable roles (admin/editor); visibleLists already scopes WHICH lists
-      canEditLists: function() { return this.isAdmin || this.currentUserRole === 'editor'; },
+      // Editing a list is editing SHARED VOCABULARY — member names, the status words every view resolves
+      // through list.<list>.<value>, a board's lane labels — so it is ADMIN-ONLY, and a rename there
+      // rewrites every stored row that used the old value. Individual lists opt out via the schema's
+      // `userWritableLists`: those are free-form vocabularies an ordinary user maintains as they work
+      // (a shopping list), and for them any REGISTERED user may add, rename and reorder values.
+      userWritableLists: function() {
+        return BackendHelpers.userWritableListsOf(this.schemaData || {}).lists;
+      },
+      // True when at least one list is editable — the Lists editor's own affordances are per list
+      // (canEditList), this only answers "is any of this editable at all".
+      canEditLists: function() { return this.isAdmin || this.userWritableLists.length > 0; },
       // Doc-view bodies are writable by admins/editors (mirrors the _pages__active rule / dev-server
       // gate); viewers get a read-only page with no Edit button instead of a save that would 403.
       canEditPages: function() { return this.isAdmin || this.currentUserRole === 'editor'; },
@@ -708,7 +730,7 @@ function createVueApp() {
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
          'bg.fit', 'bg.fit_cover', 'bg.fit_contain', 'bg.fit_tile', 'bg.fit_width',
          'msg.saved', 'msg.save_failed', 'msg.upload_failed', 'msg.choose_image', 'msg.image_too_large', 'msg.image_read_failed', 'msg.image_invalid', 'msg.image_process_failed',
-         'msg.row_added', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.synced', 'msg.sync_failed',
+         'msg.row_added', 'msg.no_identity', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.synced', 'msg.sync_failed',
          'msg.load_failed', 'msg.request_failed', 'msg.approve_failed', 'msg.import_complete',
          'msg.group_added', 'msg.item_added', 'msg.translation_saved', 'msg.language_added', 'msg.language_renamed', 'msg.language_exists',
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
@@ -729,7 +751,7 @@ function createVueApp() {
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
-         'list.link_user', 'list.unlink_user',
+         'list.link_user', 'list.unlink_user', 'list.locked_value', 'list.locked_group',
          'lang.app', 'lang.schema', 'lang.lists'].sort();
       },
       schemaTranslationKeys: function() {
@@ -841,6 +863,12 @@ function createVueApp() {
         });
         return all.filter(function(k) { return used[k]; });
       },
+      // The Lookup editor had NO permission gate: any user who could SEE a ref table got an editable
+      // grid, so a member holding `ref_rewards: 'r'` was offered the reward catalogue to edit and the
+      // write was then refused by the server with nothing said. Reference data is exactly what an 'r'
+      // grant is for — see it, don't change it — so the editor follows the same viewReadonly gate the
+      // data grid does (config `readonly`, viewer role, or no rw grant on the table).
+      canEditCurrentRef: function() { return !!this.currentRefTable && !this.viewReadonly(this.currentRefTable); },
       refTableCols: function() {
         if (!this.currentRefTable) return [];
         var cols = (SCHEMA[this.currentRefTable] && SCHEMA[this.currentRefTable].columns) || {};
@@ -895,7 +923,10 @@ function createVueApp() {
 
     methods: {
       t: function(key) { return this.strings[key] || key; },
-      tOr: function(key, fallback) { return this.strings[key] || fallback; }, // translated label or a built-in English default
+      // Only for keys whose fallback is the DATA the key labels — a column/view/list value, which reads
+      // far better raw ("chore_name") than as a key ("field.chore_name"). Static UI prose must use t(),
+      // so an untranslated string shows as its key and is visibly a gap rather than silently English.
+      tOr: function(key, fallback) { return this.strings[key] || fallback; },
 
       toggleTheme: function() {
         this.theme = this.theme === 'dark' ? 'light' : 'dark';
@@ -1275,7 +1306,11 @@ function createVueApp() {
           var periods = self._periodsToCover(fromStr, window.toExclusive, interval);
           if (!periods) return;
           var rows = buildRotationViewRows(v, self.dataCache, self._calToday(), self.anchorForView(rs.view), { from: fromStr, periods: Math.min(periods, 520) }, self.rotateEveryForView(rs.view));
-          var slots = rv.slots || [], tag = rs.label || self.tOr('tab.' + rs.view, rs.view);
+          // Honor the rotation's own mineOnly here too — an overlay that showed every slot would hand
+          // back exactly what the narrowed view withholds.
+          var mine = self.mineOnlySlot(v);
+          var slots = (rv.slots || []).filter(function(s) { return mine === null || String(s).toLowerCase() === mine; });
+          var tag = rs.label || self.tOr('tab.' + rs.view, rs.view);
           rows.forEach(function(r) {
             if (r._period < window.from || r._period >= window.toExclusive) return; // clip to visible grid
             slots.forEach(function(slot) {
@@ -1405,7 +1440,8 @@ function createVueApp() {
           t: function(k) { return self.t(k); },
           viewWithMe: function(v) { return self._viewWithMe(v); },
           anchorForView: function(n) { return self.anchorForView(n); },
-          rotationRowsFor: function(n, rv) { return self.rotationRowsFor(n, rv); }
+          rotationRowsFor: function(n, rv) { return self.rotationRowsFor(n, rv); },
+          rotationColsFor: function(n, rows, cfg) { return self.rotationColsFor(n, rows, cfg); }
         };
       },
       buildEmbedBlock: function(type, name, part) { return Embeds.buildEmbedBlock(type, name, part, this._embedCtx()); },
@@ -1421,11 +1457,32 @@ function createVueApp() {
       embedVisible: function(ei, item) { return Embeds.embedVisible(ei, item); },
       // Embed row controls — operate on the active partition across the mirror cluster (dataCache is reactive)
       embedSources: function(type, name) { return type === 'view' && VIEWS[name] ? (VIEWS[name].sources || []) : [name]; },
+      // The embed's self-service table, mirroring `selfServeTable` for the top-level grid: a single
+      // source with an owner column the viewer holds no WRITE grant on. Without this an embed asked only
+      // "may I write the source table?", so a member whose read-only grant makes the table self-service
+      // saw the embed lose its Add button — while the very same view, opened top-level, kept it.
+      embedSelfServeTable: function(type, name) {
+        var srcs = this.embedSources(type, name);
+        return (srcs.length === 1 && this.canSelfServe(srcs[0])) ? srcs[0] : null;
+      },
       canMutateEmbed: function(type, name) {
-        if (this.viewReadonly(name)) return false;
+        // Same trap as the top-level grid: an embed of a `@me` view the viewer has no identity for would
+        // offer Add, write an orphan, and drop it from the list again.
+        if (type === 'view' && this.viewIdentityMissing(name)) return false;
+        var selfServe = this.embedSelfServeTable(type, name);
+        if (this.viewReadonly(name) && !selfServe) return false;
+        if (selfServe) return true;              // add opens; per-row/per-column bounds gate the rest
         var allowed = this.userWritableTables;   // embed row controls mutate the embedded tables
         if (!allowed) return true;
         return withMirrors(this.embedSources(type, name)).every(function(t) { return allowed.indexOf(t) >= 0; });
+      },
+      // Per-ROW gate inside an embed (the grid's canMutateRow, resolved against the EMBED's own source
+      // rather than currentTable): my row, still in an owner-writable state. Non-self-service embeds are
+      // unaffected — every row answers true, exactly as before.
+      canMutateEmbedRow: function(type, name, item) {
+        var t = this.embedSelfServeTable(type, name);
+        if (!t) return true;
+        return this.rowOwnedByMe(item, t) && this.ownerRowWritable(item, t);
       },
       embedHasArchive: function(type, name) { return this.embedSources(type, name).some(function(s) { return SCHEMA[s] && SCHEMA[s].archivable; }); },
       embedAddRow: function(type, name) {
@@ -1453,13 +1510,17 @@ function createVueApp() {
       // mandatory filter values. Returns true when a filter VALUE was seeded (callers persist via
       // saveLists then). One implementation for the bootData and sequential boot paths — they had
       // drifted into two hand-copied blocks (one with a leftover implicit global).
+      //   A `list:` naming a LOOKUP TABLE is skipped: its options are the table's rows, so minting an
+      // empty list under the same name would shadow nothing but would surface the catalogue in the Lists
+      // tab as a second, always-empty copy of itself.
       _seedSchemaLists: function() {
         var lists = this.listsCache;
+        var isLookupName = function(n) { return !!(SCHEMA[n] && SCHEMA[n].isLookup); };
         Object.keys(SCHEMA).forEach(function(t) {
           Object.keys(SCHEMA[t].columns).forEach(function(c) {
             var def = SCHEMA[t].columns[c];
-            if (def && typeof def === 'object' && def.list && !lists[def.list]) lists[def.list] = [];
-            if (def && typeof def === 'object' && def.listSwitch && def.listSwitch.list && !lists[def.listSwitch.list]) lists[def.listSwitch.list] = [];
+            if (def && typeof def === 'object' && def.list && !lists[def.list] && !isLookupName(def.list)) lists[def.list] = [];
+            if (def && typeof def === 'object' && def.listSwitch && def.listSwitch.list && !lists[def.listSwitch.list] && !isLookupName(def.listSwitch.list)) lists[def.listSwitch.list] = [];
           });
         });
         return _seedListValues(lists);
@@ -1934,10 +1995,34 @@ function createVueApp() {
       },
       colIsList: function(col) { return Columns.colIsList(SCHEMA, col); },
       colIsMultiselect: function(col) { return Columns.colIsMultiselect(SCHEMA, col); },
+      // A `list:` may name a LOOKUP TABLE instead of a list, and then its options are that table's rows.
+      // One catalogue can then back both a `ref` column (which carries the row's other fields — a chore's
+      // points) and a plain select/multiselect that only needs the name, instead of maintaining a second
+      // free-string list beside it that nothing can score. `translatableLists` already accepts a lookup
+      // table name for the same reason. The option VALUE is the lookup's first visible column (its name
+      // column, the same one `ref.valueCol` defaults to); the rest of the row is reference data.
+      lookupListValues: function(name) {
+        if (!name || !SCHEMA[name] || !SCHEMA[name].isLookup) return null;
+        var scols = SCHEMA[name].columns || {};
+        var valueCol = getColumns(name).filter(function(c) {
+          if (c === 'id' || c === 'created_at' || c === 'updated_at') return false;
+          var d = scols[c];
+          return !(d && typeof d === 'object' && d.hidden);
+        })[0];
+        if (!valueCol) return [];
+        var seen = {}, out = [];
+        (this.dataCache[name] || []).forEach(function(r) {
+          var v = r[valueCol];
+          if (v == null || v === '' || seen[v]) return;
+          seen[v] = 1; out.push(v);
+        });
+        return out;
+      },
       getListOptions: function(col, altList) {
         var self = this;
         var listName = altList || this.colIsList(col);
-        var items = listName && this.listsCache[listName] ? this.listsCache[listName] : [];
+        var fromLookup = this.lookupListValues(listName);
+        var items = fromLookup || (listName && this.listsCache[listName] ? this.listsCache[listName] : []);
         var result = items.map(function(v) {
           var translated = self.t('list.' + listName + '.' + v);
           return { title: translated !== ('list.' + listName + '.' + v) ? translated : v, value: v };
@@ -2022,12 +2107,25 @@ function createVueApp() {
       // value shows its translated label; everything else is editable (raw). The translate icon is a separate,
       // purely informational badge (see the editor templates).
       isLockedRefValue: function(val) { var lv = this.lockedListValues[this.currentRefTable]; return !!(lv && val != null && lv[val]); },
-      isReadonlyRefCell: function(item, col) { return this.isLockedRefValue(item && item[col]); },
+      isReadonlyRefCell: function(item, col) { return !this.canEditCurrentRef || this.isLockedRefValue(item && item[col]); },
       // Whether a plain list is opted into `translatableLists` (its values have list.<list>.<value> labels).
       // Used only to show the translate badge in the Lists editor — values stay editable unless filter-pinned.
       isTranslatableList: function(name) { return (((this.schemaData && this.schemaData.translatableLists) || []).indexOf(name) >= 0); },
       colAllowNew: function(col) { return Columns.colAllowNew(SCHEMA, col); },
       colIsSorted: function(col) { return Columns.colIsSorted(SCHEMA, col); },
+      // May I change this list — add, rename, reorder, remove a value? Admin: any list. Everyone else:
+      // only the lists the schema opens, and a TABLE GRANT IS NOT PART OF THE QUESTION. It deliberately
+      // is not: a list belongs to every table whose columns reference it, so keying on the grant meant
+      // one rw table (home_shopping) handed over every list its columns touched — `members` included.
+      // The allowlist says what it means, and the same predicate runs in the dev server and both rules
+      // layers, so the editor never offers a write the server will refuse.
+      canEditList: function(listName) {
+        // A lookup-backed "list" is a TABLE — it is maintained in the Lookup editor (which has its own
+        // r/rw gate), never through the list write path, so no list rule applies to it.
+        if (SCHEMA[listName] && SCHEMA[listName].isLookup) return false;
+        return this.isAdmin || this.userWritableLists.indexOf(listName) >= 0;
+      },
+      canAddToList: function(listName) { return this.canEditList(listName); },
       addToListOnBlur: function(item, col) {
         var value = item[col];
         if (!value) return;
@@ -2038,6 +2136,10 @@ function createVueApp() {
         var sw = this.colListSwitch(col);
         if (sw && sw.list && this.isAltList(col, item)) listName = sw.list;
         if (!listName || !this.listsCache[listName]) return;
+        // Adding a value is a list WRITE. Admin-only unless the schema opens this list to members —
+        // otherwise the value went into listsCache, the server refused the putListItem, and the option
+        // vanished on the next reload with nothing said.
+        if (!this.canAddToList(listName)) return;
         var self = this, vals = Array.isArray(value) ? value : [value];
         vals.forEach(function(v) {
           if (v && self.listsCache[listName].indexOf(v) === -1) {
@@ -2056,11 +2158,30 @@ function createVueApp() {
         if (VIEWS[table]) return false;
         return colIsMirror(SCHEMA, col, table);
       },
+      // Which TABLE a view's column actually belongs to. A union row carries `_source`; otherwise ask the
+      // view's own sources which one declares the column (a join view spans several). Falls back to the
+      // id itself, so a bare table is unchanged.
+      //   This used to resolve any NON-UNION view to the view's own name — which is not a table, so every
+      // schema lookup keyed on it silently missed. An `owner` column listed in a view therefore rendered
+      // EDITABLE (chore_board lists it as "Logged by"), letting a member re-stamp who logged a row and,
+      // by handing it to someone else, lock themselves out of their own card. Mirror (`syncFrom`) columns
+      // were missing their read-only treatment the same way.
+      tableForCol: function(ownerId, item, col) {
+        var view = VIEWS && VIEWS[ownerId];
+        if (!view) return ownerId;
+        if (item && item._source && SCHEMA[item._source]) return item._source;
+        var srcs = (view.sources || []).filter(function(t) { return SCHEMA[t] && SCHEMA[t].columns && SCHEMA[t].columns[col]; });
+        if (!srcs.length) return ownerId;      // no source owns it -> resolve nothing, as before
+        // Prefer a source where the column is NOT mirrored. A join spanning a master and its mirror
+        // declares the column on both sides, and it is editable through the MASTER (the write syncs
+        // outward); resolving to the mirror would freeze a column the view exists to edit.
+        for (var i = 0; i < srcs.length; i++) { if (!colIsMirror(SCHEMA, col, srcs[i])) return srcs[i]; }
+        return srcs[0];
+      },
       isReadonlyCell: function(item, col, ownerId) {
         ownerId = ownerId || this.currentTable;
         var view = VIEWS && VIEWS[ownerId];
-        // Resolve the underlying table for this row/column (union rows carry _source)
-        var table = (view && view.mode === 'union' && item._source) ? item._source : ownerId;
+        var table = this.tableForCol(ownerId, item, col);
         // syncFrom (mirror) columns are synced from a master -> read-only in the detail table
         if (table && SCHEMA[table] && colIsMirror(SCHEMA, col, table)) return true;
         // owner columns are auto-stamped with the current user's email and immutable
@@ -2081,18 +2202,40 @@ function createVueApp() {
       grantAllowsWrite: function(id) {
         var writable = this.userWritableTables;
         if (!writable) return true;                       // admin / unrestricted: skip the work entirely
-        var v = VIEWS[id];
-        var base = v ? (v.sources || []) : (SCHEMA[id] ? [id] : []);
-        if (!base.length) return true;                    // sourceless (rotation/calendar): nothing to write
+        var base = this.writeBaseFor(id);
+        if (!base.length) return true;                    // sourceless (calendar/pivot/doc): nothing to write
         return withMirrors(base).every(function(t) { return writable.indexOf(t) >= 0; });
+      },
+      // The tables whose WRITE access governs a view or table. A data view answers with its `sources`,
+      // a bare table with itself — and a rotationView with its ROSTERS. A rotation generates its rows,
+      // so it used to answer with an empty `sources` and every write gate concluded "nothing to write
+      // here, allow it" — which handed a read-only member the toolbar that rewrites the shared rotation
+      // config (anchor / window / rotateEvery) for the whole deployment. The rosters ARE the rotation,
+      // so the honest question is whether the viewer may write them.
+      writeBaseFor: function(id) {
+        var v = VIEWS[id];
+        if (v && v.rotation) {
+          var rv = v.rotation;
+          return rv.rosters ? rv.rosters.slice()
+            : (rv.columns || []).map(function(c) { return c && c.rotationTable; }).filter(Boolean);
+        }
+        return v ? (v.sources || []) : (SCHEMA[id] ? [id] : []);
       },
       // Shared gate for whether a data cell renders read-only (ownerId defaults to currentTable).
       // On a self-service table the viewer-role blanket-readonly yields to per-row ownership: I may edit
       // MY rows, others stay read-only (owner/mirror/union-foreign columns are always read-only).
       cellReadonly: function(item, col, ownerId) {
         if (this.isReadonlyCell(item, col, ownerId)) return true;
-        if (this.currentSelfService && (!ownerId || ownerId === this.currentTable)) {
-          return !this.rowOwnedByMe(item, this.selfServeTable) || !this.ownerCanWrite(this.selfServeTable, col);
+        // Which self-service table governs this cell: the open grid's own, or — when `ownerId` names an
+        // EMBEDDED view/table — that embed's source. Without the second case an embedded self-service
+        // view rendered every cell read-only while the same view opened top-level stayed editable.
+        var st = (!ownerId || ownerId === this.currentTable)
+          ? (this.currentSelfService ? this.selfServeTable : null)
+          : this.embedSelfServeTable(VIEWS[ownerId] ? 'view' : 'table', ownerId);
+        if (st) {
+          return !this.rowOwnedByMe(item, st)
+            || !this.ownerRowWritable(item, st)     // out of its editable state -> frozen
+            || !this.ownerCanWrite(st, col);
         }
         return this.viewReadonly(ownerId || this.currentTable);
       },
@@ -2135,6 +2278,14 @@ function createVueApp() {
         var list = this.ownerWritableCols(table);
         return !list || list.indexOf(col) >= 0 || ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic'].indexOf(col) >= 0;
       },
+      // `ownerWritableWhile: { <col>: <value|[values]> }` — an owner-scoped write reaches a row only
+      // while it is still in one of those states. `ownerWritable` says WHICH fields; this says UNTIL
+      // WHEN. Without it a member could keep editing (or delete) their entry after it was approved,
+      // because ownership never expires. The predicate is BackendHelpers.ownerRowInState, the same one
+      // the dev server runs, so the UI offers exactly what the write layers will accept.
+      ownerRowWritable: function(item, table) {
+        return BackendHelpers.ownerRowInState(ownerBoundsFor(table || this.currentTable), item);
+      },
       // Row belongs to the current user (its owner column equals my email, case-insensitive).
       rowOwnedByMe: function(item, table) {
         var oc = getOwnerCol(table);
@@ -2142,7 +2293,13 @@ function createVueApp() {
       },
       // Per-row mutate gate for the row-control column: normal tables defer to canMutateRows (table-level);
       // a self-service table restricts delete/archive to my own rows.
-      canMutateRow: function(item) { return !this.currentSelfService || this.rowOwnedByMe(item, this.selfServeTable); },
+      // Delete / archive / (board) card controls. Self-service adds two conditions to "may I write here":
+      // the row is mine, AND it is still in a state my owner-grant reaches — approving a row takes it out
+      // of my hands entirely, which is the point of an approval.
+      canMutateRow: function(item) {
+        if (!this.currentSelfService) return true;
+        return this.rowOwnedByMe(item, this.selfServeTable) && this.ownerRowWritable(item, this.selfServeTable);
+      },
       getRefOptions: function(col, item) {
         var ref = null;
         for (var t in SCHEMA) { ref = getColumnRef(t, col); if (ref) break; }
@@ -2191,9 +2348,10 @@ function createVueApp() {
 
       // Reference table editing (hierarchical)
       renameRefParent: function(oldParent, newParent) {
+        if (!this.canEditCurrentRef) return;
         newParent = (newParent || '').trim();
         if (newParent === oldParent) return;
-        if (this.isLockedRefValue(oldParent)) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot rename')); return; }  // a filter-pinned group value can't be renamed
+        if (this.isLockedRefValue(oldParent)) { this.notify(this.t('msg.locked')); return; }  // a filter-pinned group value can't be renamed
         var self = this;
         var table = self.currentRefTable;
         var parentCol = self.refParentCol;
@@ -2208,7 +2366,8 @@ function createVueApp() {
         self.notify(self.t('msg.renamed'));
       },
       deleteRefParent: function(parent) {
-        if (this.refParentLocked(parent)) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot delete')); return; }
+        if (!this.canEditCurrentRef) return;
+        if (this.refParentLocked(parent)) { this.notify(this.t('msg.locked')); return; }
         var key = 'refp:' + parent;
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
         var self = this;
@@ -2222,6 +2381,7 @@ function createVueApp() {
       },
       addRefParent: function() {
         var self = this;
+        if (!self.canEditCurrentRef) return;
         // All three ref-table add paths ride the shared blank-row factory (_createBlankRow) — they
         // used to hand-roll row creation, the exact drift its comment warns about.
         self._createBlankRow(self.currentRefTable);
@@ -2237,6 +2397,7 @@ function createVueApp() {
       },
       addRefChild: function(parentValue) {
         var self = this;
+        if (!self.canEditCurrentRef) return;
         var prefill = {}; prefill[self.refParentCol] = parentValue;
         self._createBlankRow(self.currentRefTable, { prefill: prefill });
         self.notify(self.t('msg.item_added'));
@@ -2250,7 +2411,7 @@ function createVueApp() {
       _refGroupRows: function(parentVal) { var pc = this.refParentCol; return this.refTableData.filter(function(r) { return r[pc] === parentVal; }); },
       // Move a child value up/down WITHIN its group (swap position with the adjacent same-group sibling).
       moveRefChild: function(item, dir) {
-        if (!this.refReorderable) return;
+        if (!this.refReorderable || !this.canEditCurrentRef) return;
         var self = this, table = this.currentRefTable, group = this._refGroupRows(item[this.refParentCol]);
         var i = group.findIndex(function(r) { return r.id === item.id; }), j = i + dir;
         if (i < 0 || j < 0 || j >= group.length) return;
@@ -2261,7 +2422,7 @@ function createVueApp() {
       },
       // Move a whole group up/down (swap it with the adjacent group), then renumber every row sequentially.
       moveRefGroup: function(parentVal, dir) {
-        if (!this.refReorderable) return;
+        if (!this.refReorderable || !this.canEditCurrentRef) return;
         var self = this, table = this.currentRefTable, grouped = this.refGroupedData;
         var order = Object.keys(grouped), i = order.indexOf(parentVal), j = i + dir;
         if (i < 0 || j < 0 || j >= order.length) return;
@@ -2275,9 +2436,10 @@ function createVueApp() {
       refChildAtEdge: function(item, dir) { var g = this._refGroupRows(item[this.refParentCol]), i = g.findIndex(function(r) { return r.id === item.id; }); return dir < 0 ? i <= 0 : i >= g.length - 1; },
       refGroupAtEdge: function(parentVal, dir) { var o = Object.keys(this.refGroupedData), i = o.indexOf(parentVal); return dir < 0 ? i <= 0 : i >= o.length - 1; },
       saveRefField: function(item, col, value) {
+        if (!this.canEditCurrentRef) return;   // 'r' grant: the cell renders read-only, this guards the path
         if (item[col] === value) return;
         var lv = this.lockedListValues[this.currentRefTable];
-        if (lv && lv[item[col]]) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot rename')); return; }  // renaming a pinned value breaks the filter
+        if (lv && lv[item[col]]) { this.notify(this.t('msg.locked')); return; }  // renaming a pinned value breaks the filter
         var oldVal = item[col];
         item[col] = value;
         item.updated_at = new Date().toISOString();
@@ -2301,12 +2463,14 @@ function createVueApp() {
       },
       addRefRow: function() {
         var self = this;
+        if (!self.canEditCurrentRef) return;
         self._createBlankRow(self.currentRefTable);
         self.notify(self.t('msg.row_added'));
         self.focusLastEditable('.v-main .v-card .v-table tbody tr:last-child .editable-cell');
       },
       deleteRefRow: function(item) {
-        if (this.isLockedRefRow(item)) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot delete')); return; }
+        if (!this.canEditCurrentRef) return;
+        if (this.isLockedRefRow(item)) { this.notify(this.t('msg.locked')); return; }
         var key = 'ref:' + item.id;
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
         var table = this.currentRefTable;
@@ -2410,6 +2574,7 @@ function createVueApp() {
 
       // Lists
       addListItem2: function(name) {
+        if (!this.canEditList(name)) return;
         this.listsCache[name].push('');
         this.saveLists();
         this.$nextTick(function() {
@@ -2424,8 +2589,9 @@ function createVueApp() {
         });
       },
       updateListItem2: function(name, i, value) {
+        if (!this.canEditList(name)) return;
         var oldVal = this.listsCache[name][i];
-        if (this.isLockedValue(name, oldVal)) { this.notify(this.tOr('msg.locked', 'Used by a filter — cannot rename')); return; }  // filter-pinned value can't be renamed
+        if (this.isLockedValue(name, oldVal)) { this.notify(this.t('msg.locked')); return; }  // filter-pinned value can't be renamed
         this.listsCache[name][i] = value;
         this.saveLists();
         // Rename propagation: text is stored in rows, so rewrite the old value -> new value across
@@ -2464,6 +2630,7 @@ function createVueApp() {
         if (next) { var s = next.querySelector('[contenteditable]'); if (s) s.focus(); }
       },
       removeListItem2: function(name, i) {
+        if (!this.canEditList(name)) return;
         var key = 'list_' + name + '_' + i;
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
         this.pendingDelete = null;
@@ -2475,6 +2642,7 @@ function createVueApp() {
         if (oldVal) { this.propagateListChange(name, oldVal, null); this.migrateListUserLink(name, oldVal, null); }
       },
       moveListItem: function(name, i, dir) {
+        if (!this.canEditList(name)) return;
         var arr = this.listsCache[name]; var j = i + dir;
         var tmp = arr[i]; arr.splice(i, 1, arr[j]); arr.splice(j, 1, tmp);
         this.saveLists();
@@ -2736,17 +2904,41 @@ function createVueApp() {
         return buildRotationViewRows({ rotation: rv }, this.dataCache, this._calToday(),
           this.anchorForView(name), this.rangeForView(name), this.rotateEveryForView(name));
       },
-      // Slot columns for a named rotationView (['_period', ...slots]); drops all-empty slots when hideEmpty.
-      rotationColsFor: function(name, rows) {
-        var v = VIEWS[name];
-        if (!v || !v.rotation) return [];
-        var rv = v.rotation;
+      // Slot columns for a rotationView (['_period', ...slots]); narrowed to my own slot when mineOnly,
+      // then all-empty slots dropped when hideEmpty. `cfg` overrides the named view for an inline embed
+      // config (which carries its own rotation/hideEmpty/mineOnly), mirroring rotationRowsFor's rotationDef.
+      rotationColsFor: function(name, rows, cfg) {
+        var v = cfg || VIEWS[name];
+        var rv = v && v.rotation;
+        if (!rv) return [];
         var names = rv.slots ? rv.slots.slice() : (rv.columns || []).map(function(c) { return c.name; });
+        var mine = this.mineOnlySlot(v);
+        if (mine !== null) names = names.filter(function(n) { return String(n).toLowerCase() === mine; });
         if (v.hideEmpty) {
           var rs = rows || [];
           names = names.filter(function(n) { return rs.some(function(r) { var val = r[n]; return Array.isArray(val) ? val.length : !!val; }); });
         }
         return ['_period'].concat(names);
+      },
+      // A view's `mineOnly` narrows a rotation to the signed-in user's OWN slot, so everyone opens the
+      // same shared matrix and sees only their column of it. `mineOnly: "<list>"` resolves my identity
+      // through that list (a userlink list maps my account to the household's own name for me);
+      // `true` falls back to the profile display name. Slots match case-insensitively, since a slot
+      // name is a schema identifier and the list value is human-entered.
+      //   Admin / unrestricted viewers are exempt -> the full matrix, which is the admin view.
+      //   An identity we cannot resolve yields '' -> matches no slot -> fails CLOSED.
+      // Returns null when the filter does not apply (no mineOnly, or an exempt viewer).
+      // Display-only, exactly like the `@me` filter token: the roster rows are still fetched and the
+      // periods still generated client-side. Real secrecy is a per-roster-table grant (canReachTable).
+      mineOnlySlot: function(view) {
+        var mo = view && view.mineOnly;
+        if (!mo) return null;
+        if (!this.userAllowedTables) return null;   // admin / unrestricted -> whole matrix
+        // `true` resolves identity through the profile display name; `{ list: "<name>" }` through that
+        // list's userlink mapping. The list form is an OBJECT, not a bare string, so it cannot be read
+        // as the column array `obscureNames` takes right beside it in the same view config.
+        var list = (mo && typeof mo === 'object') ? mo.list : null;
+        return String(this.meValueForList(list) || '').toLowerCase();
       },
       // Save the rotateEvery override. opts = { every: n, cycle: bool } -> composed into a summed
       // array (n>0 contributes a per-period swap, cycle contributes the per-cycle swap). opts === null
@@ -3257,7 +3449,33 @@ function createVueApp() {
       // Without the first branch, `@me` on a userlink list compared my profile name against a curated
       // value and silently matched nothing whenever the two differed.
       meValueFor: function(col) {
-        var list = col ? getColumnList(null, col) : null;
+        return this.meValueForList(col ? getColumnList(null, col) : null);
+      },
+      // The columns a view's filter compares against `@me` (walking $or/$and, which carry no column of
+      // their own — the same traversal resolveMeTokens does).
+      meFilterColsFor: function(name) {
+        var v = VIEWS[name], out = [];
+        var walk = function(node, key) {
+          if (node === '@me') { if (key) out.push(key); return; }
+          if (Array.isArray(node)) return node.forEach(function(x) { walk(x, key); });
+          if (node && typeof node === 'object') Object.keys(node).forEach(function(k) { walk(node[k], k.charAt(0) === '$' ? key : k); });
+        };
+        if (v) { walk(v.filter, null); walk(v.groupBy && v.groupBy.filter, null); }
+        return out;
+      },
+      // A view filtered on `@me` that the viewer has NO identity for. It resolves to a match-nothing
+      // sentinel, so the grid renders empty — and adding there writes a row stamped with that same empty
+      // identity, which the filter then removes from the view. The row is real and orphaned: it looks
+      // like "Add does nothing" while rows pile up unseen. So say what is wrong and stop offering Add.
+      // An admin account is the usual case: it manages the household without being a member of it.
+      viewIdentityMissing: function(name) {
+        var self = this, cols = this.meFilterColsFor(name);
+        return cols.length > 0 && cols.every(function(c) { return !self.meValueFor(c); });
+      },
+      // The same identity resolution keyed by LIST rather than by column, for the callers that have no
+      // column to ask about (a rotation view's slots are column NAMES, not cells). meValueFor is the
+      // column-shaped wrapper.
+      meValueForList: function(list) {
         if (list && this.isUserLinkList(list)) return (this.myListValues || {})[list] || '';
         return this.myDisplayName;
       },
@@ -4214,9 +4432,12 @@ function createVueApp() {
       colHidden: function(col, item) { return !!appInstance && appInstance.isColumnHidden(col, item, this.colCfg); },
       colsFor: function(item) { var self = this; return this.cols.filter(function(c) { return !self.colHidden(c, item); }); },
       isArmed: function(item) { return appInstance.isArmed('erow:' + item.id); },
+      // Per-row control gate. On a self-service embed `canMutate` only means "the Add button is open";
+      // whether THIS row may be archived/deleted is ownership + state, exactly as in the primary grid.
+      canMutateRow: function(item) { return this.canMutate && appInstance.canMutateEmbedRow(this.type, this.name, item); },
       addRow: function() { return appInstance.embedAddRow(this.type, this.name); },
-      delRow: function(item) { return appInstance.embedDeleteRow(this.type, this.name, item); },
-      archRow: function(item) { return appInstance.embedArchiveRow(this.type, this.name, item); },
+      delRow: function(item) { if (this.canMutateRow(item)) return appInstance.embedDeleteRow(this.type, this.name, item); },
+      archRow: function(item) { if (this.canMutateRow(item)) return appInstance.embedArchiveRow(this.type, this.name, item); },
       // Inline doc-view editing — mirrors the root togglePageEdit/savePage, but scoped to THIS embed's
       // page (this.name) and its local editing/docDraft state. Save writes the gated _pages body that
       // both this embed and the standalone page read, so the two stay in sync.
@@ -4241,7 +4462,7 @@ function createVueApp() {
       + '<rsvp-view v-else-if="kind===\'rsvp\'" :name="calName" :embed="true"></rsvp-view>'
       + '<template v-else-if="kind===\'doc\'">'
       + '<div v-if="canEditDoc" class="d-flex align-center"><v-spacer></v-spacer>'
-      + '<v-btn size="x-small" variant="text" :prepend-icon="editing ? \'mdi-eye\' : \'mdi-pencil\'" @click="toggleDocEdit()">{{ editing ? t(\'btn.preview\') : t(\'btn.edit\') }}</v-btn>'
+      + '<v-btn size="x-small" variant="text" density="comfortable" :icon="editing ? \'mdi-eye\' : \'mdi-pencil\'" :title="editing ? t(\'btn.preview\') : t(\'btn.edit\')" @click="toggleDocEdit()" data-testid="doc-edit"></v-btn>'
       + '<v-btn v-if="editing" size="x-small" color="primary" variant="text" prepend-icon="mdi-content-save" @click="saveDoc()">{{ t(\'btn.save\') }}</v-btn>'
       + '</div>'
       + '<v-textarea v-if="editing" :model-value="docDraft" @update:model-value="docDraft = $event" auto-grow variant="outlined" density="compact" hide-details placeholder="# Markdown"></v-textarea>'
@@ -4270,21 +4491,21 @@ function createVueApp() {
       + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
       + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
       + '<template v-slot:default><span v-for="(col, i) in colsFor(item)" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]"></list-value><span v-if="i < colsFor(item).length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
-      + '<template v-slot:append><template v-if="canMutate"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></template></template>'
+      + '<template v-slot:append><template v-if="canMutateRow(item)"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></template></template>'
       + '</v-list-item></v-list>'
       + '<div v-else-if="layout===\'card\'" class="my-2">'
       + '<v-card v-for="(item, ri) in rows" :key="item.id || ri" variant="flat" class="ma-2 pa-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">'
       + '<div v-for="col in colsFor(item)" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8"><list-value :col="col" :value="item[col]"></list-value></span></div>'
-      + '<div v-if="canMutate" style="text-align:right"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></div>'
+      + '<div v-if="canMutateRow(item)" style="text-align:right"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></div>'
       + '</v-card></div>'
       + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
       + '<thead><tr><th v-for="c in cols" :key="c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
       + '<tbody><tr v-for="(item, ri) in rows" :key="item.id || ri"><td v-for="col in cols" :key="col">'
       + '<data-cell v-if="!colHidden(col, item)" :item="item" :col="col" :owner="name" :readonly="!!part" :embed="true"></data-cell>'
-      + '</td><td v-if="canMutate" style="white-space:nowrap">'
+      + '</td><td v-if="canMutate" style="white-space:nowrap"><template v-if="canMutateRow(item)">'
       + '<v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn>'
       + '<v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn>'
-      + '</td></tr></tbody>'
+      + '</template></td></tr></tbody>'
       + '</template></v-table>'
       + '<v-btn v-if="canMutate" variant="text" size="small" prepend-icon="mdi-plus" @click="addRow">{{ t(\'btn.add\') || \'Add\' }}</v-btn>'
       + '</div>'
@@ -4951,6 +5172,14 @@ function createVueApp() {
         if (!a.currentSelfService) return true;
         return a.ownerCanWrite(a.selfServeTable, this.laneCol);
       },
+      // The lane a member who may NOT write the lane column would land in by adding — the column's own
+      // `default`. On such a board the per-lane `+` is offered there and nowhere else (see canAddInLane),
+      // because adding into a lane STAMPS that lane value.
+      defaultLane: function() {
+        var lc = this.laneCol;
+        var d = getDefaultCols((this.view.sources || [])[0]).filter(function(x) { return x.name === lc; })[0];
+        return (d && d.value !== undefined) ? String(d.value) : '';
+      },
       hasArchive: function() { return appInstance.hasArchive; },
       rows: function() { return this.embed ? (appInstance.boardRowsFor ? appInstance.boardRowsFor(this.viewName) : []) : (appInstance.currentData || []); },
       // A 2-D REF lane: when `board.lane` is a `ref` to a 2-column lookup, the lookup's two dimensions are the
@@ -5018,7 +5247,20 @@ function createVueApp() {
       (this.cfg.laneGroups || []).forEach(function(g, gi) { if (g.collapsed) self.collapsed['g' + gi] = true; });
     },
     methods: Object.assign({}, ROOT_PROXY, {
-      laneLabel: function(k) { return k === '' ? appInstance.tOr('board.unassigned', '—') : appInstance.displayValue(this.laneCol, k); },
+      // Per-CARD permission. `canEdit` is the view-level gate; on a self-service table it is true for a
+      // member who owns SOME rows, which is not a licence over everyone else's. The grid has always asked
+      // canMutateRow per row (see ui.html) — the board did not, so a member saw pencil/archive/delete on
+      // every card in the lane, including other people's. Non-self-service boards are unaffected
+      // (canMutateRow is true for every row there).
+      canEditCard: function(item) { return this.canEdit && appInstance.canMutateRow(item); },
+      // Adding into a lane stamps that lane value, so it asks the same question as moving a card there.
+      // A member who may not write the lane column still gets the `+`, but only on the lane the column's
+      // own default would put them in — the one lane value they are allowed to write.
+      canAddInLane: function(laneKey) {
+        if (!this.canEdit || !this.cfg.addInLane) return false;
+        return this.canMoveCards || laneKey === this.defaultLane;
+      },
+      laneLabel: function(k) { return k === '' ? appInstance.t('board.unassigned') : appInstance.displayValue(this.laneCol, k); },
       // Phase-header label. A ref lane's group is the lookup's parent VALUE, localized through the lookup
       // table's namespace (list.<table>.<value>); a laneGroups phase uses its authored board.group.<label>.
       groupLabel: function(g) {
@@ -5041,7 +5283,7 @@ function createVueApp() {
       cardColor: function(item) { return this.cfg.color ? Calendar.hashColor(String(item[this.cfg.color] || '')) : null; },
       toggleGroup: function(key) { this.collapsed[key] = !this.collapsed[key]; },
       // --- drag/drop (desktop) ---
-      onDragStart: function(item) { if (this.canEdit && this.canMoveCards) this.dragId = item.id; },
+      onDragStart: function(item) { if (this.canEditCard(item) && this.canMoveCards) this.dragId = item.id; },
       onDragEnd: function() { this.dragId = null; this.overLane = null; },
       onDrop: function(laneKey) {
         if (!this.canEdit || this.dragId == null) return;
@@ -5051,19 +5293,30 @@ function createVueApp() {
         this.onDragEnd();
       },
       // --- mobile / a11y fallback: move via menu ---
-      moveTo: function(item, laneKey) { if (this.canEdit && this.canMoveCards && String(item[this.laneCol] || '') !== laneKey) appInstance.saveField(item, this.laneCol, laneKey, this.viewName); },
+      moveTo: function(item, laneKey) { if (this.canEditCard(item) && this.canMoveCards && String(item[this.laneCol] || '') !== laneKey) appInstance.saveField(item, this.laneCol, laneKey, this.viewName); },
       laneMenuItems: function() { var self = this; return this.laneOrder.map(function(k) { return { value: k, title: self.laneLabel(k) }; }); },
       addInLane: function(laneKey) { appInstance.boardAddInLane(this.viewName, laneKey); },
       // Per-card row controls (mirror the grid's row-append buttons): archive files the card to the archive
       // partition (reversible via restore); delete uses the app's armed-confirm (keyed row:<id>) — first click
       // arms for 3s and swaps the icon, the second removes the row.
-      archItem: function(item) { if (this.canEdit) appInstance.archiveRow(item); },
+      archItem: function(item) { if (this.canEditCard(item)) appInstance.archiveRow(item); },
       isDelArmed: function(item) { return appInstance.isArmed('row:' + item.id); },
-      delItem: function(item) { if (this.canEdit) appInstance.deleteRow(item); },
+      delItem: function(item) { if (this.canEditCard(item)) appInstance.deleteRow(item); },
       // Inline card editing: a pencil flips one card into edit mode, where every field except the lane
       // column (that stays a drag/move-menu action, so it honors archiveOn) becomes a shared `data-cell`
       // editor writing back through saveField — the same widgets and persistence as the table grid.
-      editCols: function() { var self = this; return (this.view.columns || []).map(colName).filter(function(c) { return typeof c === 'string' && c && c !== self.laneCol; }); },
+      // Edit mode must be able to set the card's TITLE. The title is deliberately absent from the card
+      // FACE (it is the heading), and a schema commonly names it only in `board.title`, never in
+      // `columns` — chore_board is exactly that shape. Deriving the editors from `columns` alone then
+      // left the title with no editor anywhere on the board, so a card added in a lane could never be
+      // given the one field that names it: you got a blank card you could not fill in. It leads, being
+      // the card's primary field. The lane column stays out — that is the drag / move-menu action.
+      editCols: function() {
+        var self = this, title = this.titleCol();
+        var cols = (this.view.columns || []).map(colName).filter(function(c) { return typeof c === 'string' && c && c !== self.laneCol; });
+        if (title && title !== this.laneCol && cols.indexOf(title) < 0) cols.unshift(title);
+        return cols;
+      },
       toggleEdit: function(item) { this.editing[item.id] = !this.editing[item.id]; }
     }),
     template: ''
@@ -5079,20 +5332,20 @@ function createVueApp() {
       + '         @dragover.prevent="canEdit && (overLane=lane.key)" @dragleave="overLane=null" @drop="onDrop(lane.key)" :data-testid="\'board-lane-\'+lane.key">'
       + '      <div style="display:flex;align-items:center;gap:6px;font-weight:600;font-size:0.85rem;padding:2px 4px 6px">'
       + '        <span>{{ laneLabel(lane.key) }}</span><span style="opacity:0.5;font-weight:400">{{ lane.count }}</span>'
-      + '        <template v-if="canEdit && cfg.addInLane"><v-spacer></v-spacer>'
-      + '        <v-btn icon="mdi-plus" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.add_in_lane\',\'Add\')" @click="addInLane(lane.key)" :data-testid="\'board-add-\'+lane.key"></v-btn></template>'
+      + '        <template v-if="canAddInLane(lane.key)"><v-spacer></v-spacer>'
+      + '        <v-btn icon="mdi-plus" size="x-small" variant="text" density="comfortable" :title="t(\'board.add_in_lane\')" @click="addInLane(lane.key)" :data-testid="\'board-add-\'+lane.key"></v-btn></template>'
       + '      </div>'
       + '      <div v-for="item in lane.items" :key="item.id"'
-      + '           :draggable="canEdit && !editing[item.id] ? \'true\' : \'false\'" @dragstart="onDragStart(item)" @dragend="onDragEnd"'
-      + '           :style="\'background:rgb(var(--v-theme-surface));border:1px solid rgb(var(--v-theme-outline),0.15);border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:\'+(canEdit && !editing[item.id] ?\'grab\':\'default\')+(cardColor(item)?\';border-left:3px solid \'+cardColor(item):\'\')"'
+      + '           :draggable="canEditCard(item) && canMoveCards && !editing[item.id] ? \'true\' : \'false\'" @dragstart="onDragStart(item)" @dragend="onDragEnd"'
+      + '           :style="\'background:rgb(var(--v-theme-surface));border:1px solid rgb(var(--v-theme-outline),0.15);border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:\'+(canEditCard(item) && canMoveCards && !editing[item.id] ?\'grab\':\'default\')+(cardColor(item)?\';border-left:3px solid \'+cardColor(item):\'\')"'
       + '           :data-testid="\'board-card-\'+item.id">'
       + '        <div style="display:flex;align-items:flex-start;gap:4px">'
       + '          <div style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
-      + '          <v-btn v-if="canEdit" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="tOr(\'board.edit\',\'Edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
-      + '          <v-btn v-if="canEdit && hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.archive\',\'Archive\')" @click="archItem(item)" :data-testid="\'board-arch-\'+item.id"></v-btn>'
-      + '          <v-btn v-if="canEdit" :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" density="comfortable" :color="isDelArmed(item) ? \'error\' : undefined" :title="isDelArmed(item) ? tOr(\'board.confirm_delete\',\'Confirm delete?\') : tOr(\'board.delete\',\'Delete\')" @click="delItem(item)" :data-testid="\'board-del-\'+item.id"></v-btn>'
-      + '          <v-menu v-if="canEdit && canMoveCards" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
-      + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :title="tOr(\'board.move_to\',\'Move to\')" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
+      + '          <v-btn v-if="canEditCard(item)" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="t(\'board.edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
+      + '          <v-btn v-if="canEditCard(item) && hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" density="comfortable" :title="t(\'board.archive\')" @click="archItem(item)" :data-testid="\'board-arch-\'+item.id"></v-btn>'
+      + '          <v-btn v-if="canEditCard(item)" :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" density="comfortable" :color="isDelArmed(item) ? \'error\' : undefined" :title="isDelArmed(item) ? t(\'board.confirm_delete\') : t(\'board.delete\')" @click="delItem(item)" :data-testid="\'board-del-\'+item.id"></v-btn>'
+      + '          <v-menu v-if="canEditCard(item) && canMoveCards" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
+      + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :title="t(\'board.move_to\')" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
       // No heading over the lane list: the menu opens from a button that already carries "move to" as its
       // tooltip, and every item in it is a lane, so the header only restated the question. `board.move_to`
       // stays in use as that tooltip.
@@ -5125,7 +5378,7 @@ function createVueApp() {
     template: ''
       + '<v-card variant="outlined" class="pa-4">'
       + '<div v-if="a.canEditPages" class="d-flex align-center mb-2"><v-spacer></v-spacer>'
-      + '<v-btn size="small" variant="text" :prepend-icon="a.pageEditing ? \'mdi-eye\' : \'mdi-pencil\'" @click="a.togglePageEdit()">{{ a.pageEditing ? a.t(\'btn.preview\') : a.t(\'btn.edit\') }}</v-btn>'
+      + '<v-btn size="small" variant="text" density="comfortable" :icon="a.pageEditing ? \'mdi-eye\' : \'mdi-pencil\'" :title="a.pageEditing ? a.t(\'btn.preview\') : a.t(\'btn.edit\')" @click="a.togglePageEdit()" data-testid="page-edit"></v-btn>'
       + '<v-btn v-if="a.pageEditing" size="small" color="primary" prepend-icon="mdi-content-save" @click="a.savePage()" class="ml-2">{{ a.t(\'btn.save\') }}</v-btn></div>'
       + '<v-textarea v-if="a.pageEditing" :model-value="a.pageEditText" @update:model-value="a.pageEditText = $event" auto-grow variant="outlined" density="compact" placeholder="# Markdown — embed views with {{view:name}} or {{table:name}}"></v-textarea>'
       + '<template v-else v-for="(blk, bi) in a.pageBlocks" :key="bi">'

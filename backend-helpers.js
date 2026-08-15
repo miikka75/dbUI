@@ -69,7 +69,14 @@
     // says which fields that branch may touch; everything else on the table is LOCKED and must simply
     // hold its create-time value.
     //
-    // Shape per table: { cols: [...allowed], locked: { col: valueItMustHaveAtCreate } }.
+    // A table may ALSO declare `ownerWritableWhile: { <col>: <value|[values]> }` — the owner branch then
+    // applies only while the row still sits in one of those states. It is the "you may fix your entry
+    // until it is approved" rule: without it, `ownerWritable` bounds WHICH fields an owner may rewrite
+    // but never stops them rewriting a row after somebody signed it off. Mirrored as the scalars
+    // `whileCol` + the array `whileVals`, not as a map, because neither rules language can loop over one
+    // — a single column and a value list is what both can check in one expression.
+    //
+    // Shape per table: { cols: [...allowed], locked: { col: valueItMustHaveAtCreate }, whileCol, whileVals }.
     //   - `locked` carries each gated column's declared `default` (or '' — what _createBlankRow writes
     //     for a column with none), so a create can be checked with one map diff instead of a loop the
     //     rules language does not have.
@@ -96,9 +103,42 @@
           if (d2 && typeof d2 === 'object' && (d2.type === 'owner' || d2.defaultFrom)) continue;
           locked[c2] = (d2 && typeof d2 === 'object' && d2['default'] !== undefined) ? d2['default'] : '';
         }
-        out[t] = { cols: list.slice(), locked: locked };
+        // `ownerWritableWhile` is a one-key map; extra keys are rejected at load (validateSchema), and
+        // ignored here rather than half-applied. An empty whileCol means "no state gate" everywhere.
+        var whileCol = '', whileVals = [];
+        var gate = def.ownerWritableWhile;
+        if (gate && typeof gate === 'object' && !Array.isArray(gate)) {
+          var gk = Object.keys(gate);
+          if (gk.length === 1 && defs[gk[0]]) {
+            whileCol = gk[0];
+            whileVals = (Array.isArray(gate[gk[0]]) ? gate[gk[0]] : [gate[gk[0]]]).map(String);
+          }
+        }
+        out[t] = { cols: list.slice(), locked: locked, whileCol: whileCol, whileVals: whileVals };
       }
       return out;
+    },
+    // Does an owner-scoped write get to touch THIS row at all? `existing` is the stored row (null on a
+    // create — a create is always in the gate's own starting state, so it passes). Shared by the dev
+    // server and the client so both answer exactly as the two rules layers do.
+    ownerRowInState: function(bounds, existing) {
+      if (!bounds || !bounds.whileCol) return true;
+      if (!existing) return true;                       // create: nothing to be out of state yet
+      return (bounds.whileVals || []).indexOf(String(existing[bounds.whileCol] == null ? '' : existing[bounds.whileCol])) >= 0;
+    },
+
+    // Lists a NON-ADMIN may add values to. Editing a list is editing shared vocabulary — the member
+    // names, the status words every view reads — so it defaults to admin-only. A schema opts individual
+    // lists back out with top-level `userWritableLists: [...]`, for the ones that are just free-form
+    // data an ordinary user types as they work (a shopping list's items). The owning-table rw check
+    // still applies ON TOP: being named here does not grant a member a list whose tables they cannot
+    // write. Mirrored to _meta/listWritable because both rules layers are schema-blind.
+    //   Absent/empty -> no list is user-writable, i.e. admin-only, which is the safe default: a
+    // deployment that never declares it cannot silently keep the old behaviour.
+    userWritableListsOf: function(schema) {
+      var raw = (schema && schema.userWritableLists) || [];
+      var out = Array.isArray(raw) ? raw.filter(function(n) { return typeof n === 'string' && n; }) : [];
+      return { lists: out.slice().sort() };
     },
 
     // The tables a boot should LOAD for a caller whose read scope is `allowed` (null = unrestricted).

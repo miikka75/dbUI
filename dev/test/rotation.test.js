@@ -57,6 +57,21 @@ describe('rotation.js — position resolvers', () => {
     assert.deepEqual(R.resolveByCalendar(partial, '2026-01-01', '2026-01-01', 'weekly'), ['P1']); // pos 1 first
   });
 
+  // A roster that holds TASKS rather than people names its column something else; `valueCol` points
+  // the resolvers at it. Without this the column had to be called `people` whatever it contained.
+  it('valueCol reads a non-`people` roster column, and a missing one yields [] not undefined', () => {
+    const tasks = [
+      { id: 'w1', position: 1, tasks: ['dishes', 'trash'] },
+      { id: 'w2', position: 2, tasks: ['vacuum'] }
+    ];
+    assert.deepEqual(R.resolveByCalendar(tasks, '2026-01-01', '2026-01-01', 'weekly', 'tasks'), ['dishes', 'trash']);
+    assert.deepEqual(R.resolveByCalendar(tasks, '2026-01-08', '2026-01-01', 'weekly', 'tasks'), ['vacuum']);
+    assert.deepEqual(R.resolveByOccurrence(tasks, src, src[1], 'date', 'tasks'), ['vacuum']);
+    assert.deepEqual(R.resolveByCalendar(tasks, '2026-01-01', '2026-01-01', 'weekly', 'nope'), []);
+    assert.deepEqual(R.resolveByCalendar(tasks, '2026-01-01', '2026-01-01', 'weekly'), []); // default `people` absent
+    assert.deepEqual(R.resolveByCalendar(rot, '2026-01-22', '2026-01-01', 'weekly'), ['A']); // default unchanged
+  });
+
   it('resolveAnchorDate: literal column wins, else global, else null', () => {
     assert.equal(R.resolveAnchorDate({ anchorDate: '2026-02-02' }, '2026-01-01'), '2026-02-02');
     assert.equal(R.resolveAnchorDate({}, '2026-01-01'), '2026-01-01');
@@ -94,6 +109,30 @@ describe('rotation.js — buildRotationViewRows', () => {
       { p: '2026-01-01', duty: ['A'] },
       { p: '2026-01-08', duty: ['B'] }
     ]);
+  });
+
+  // The person-x-task matrix: slots ARE the people, rosters hold each person's task sets, and
+  // rotateEvery hands one person's set to the next. A 1-row roster never advances -> fixed chores.
+  it('slots-as-people + valueCol: each person gets their own task list per period', () => {
+    const view = { rotation: {
+      slots: ['anna', 'bob'], rosters: ['tasks_anna', 'tasks_bob'],
+      interval: 'weekly', valueCol: 'tasks', rotateEvery: 1, range: { from: '2026-01-01', periods: 2 }
+    } };
+    const dc = {
+      tasks_anna: [{ position: 1, tasks: ['dishes', 'trash'] }, { position: 2, tasks: ['vacuum'] }],
+      tasks_bob: [{ position: 1, tasks: ['laundry'] }]   // single row -> same task every week
+    };
+    const rows = R.buildRotationViewRows(view, dc, '2026-07-06', '2026-01-01');
+    // Week 1: anna <- tasks_anna row 1, bob <- tasks_bob.
+    assert.deepEqual({ anna: rows[0].anna, bob: rows[0].bob }, { anna: ['dishes', 'trash'], bob: ['laundry'] });
+    // Week 2: the rosters swap slots, AND tasks_anna has advanced to its second row.
+    assert.deepEqual({ anna: rows[1].anna, bob: rows[1].bob }, { anna: ['laundry'], bob: ['vacuum'] });
+  });
+
+  it('columns form takes valueCol per column', () => {
+    const view = { rotation: { columns: [{ name: 'duty', rotationTable: 'crew', interval: 'weekly', valueCol: 'tasks' }], range: { from: '2026-01-01', periods: 1 } } };
+    const dc = { crew: [{ position: 1, tasks: ['mop'], people: ['ignored'] }] };
+    assert.deepEqual(R.buildRotationViewRows(view, dc, '2026-07-06', '2026-01-01')[0].duty, ['mop']);
   });
 
   it('rotateEveryOverride (folder config) replaces the schema value', () => {
