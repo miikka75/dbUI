@@ -5072,6 +5072,35 @@ test.describe('owner column is immutable through a VIEW', () => {
   });
 });
 
+test.describe('board card colour', () => {
+  // `board.color` names the column the card's left stripe encodes. Hashing it into a 10-colour palette
+  // collides ~70% of the time at five values — which is how a four-person household ended up with one
+  // colour on a board that claims to be coloured by person. A list-backed column has a stable order, so
+  // it indexes the palette instead and the first ten values are guaranteed distinct.
+  test('a list-backed colour column indexes the palette; anything else still hashes', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.cb = { name: 'cb', sources: ['tickets'], mode: 'join', columns: ['title'],
+        board: { lane: 'status', lanes: ['open'], title: 'title', color: 'assignee' } };
+      // `assignee` is list-backed (list: assigned_to) in the fixture.
+      app.listsCache = Object.assign({}, app.listsCache, { assigned_to: ['Ann', 'Bob', 'Cara', 'Dan', 'Parent'] });
+      app.selectTab('cb');
+      const c = window.Calendar;
+      const byList = ['Ann', 'Bob', 'Cara', 'Dan', 'Parent'].map((v, i) => c.paletteAt(i));
+      return {
+        expected: byList,
+        distinct: new Set(byList).size,
+        // a value that is NOT in the list falls back to the hash rather than to nothing
+        strayIsHashed: c.hashColor('Zeta') === c.hashColor('Zeta') && /^#[0-9a-f]{6}$/.test(c.hashColor('Zeta'))
+      };
+    });
+    expect(r.distinct).toBe(5);                 // the whole point: five people, five colours
+    expect(r.expected[0]).not.toBe(r.expected[1]);
+    expect(r.strayIsHashed).toBe(true);
+  });
+});
+
 test.describe('board card `hideEmpty`', () => {
   // A card face is a stack of labelled boxes, so an empty one is pure noise. `hideEmpty` drops it PER
   // CARD (isColumnHidden takes the row) — but only from the READ face: edit mode derives its editors
