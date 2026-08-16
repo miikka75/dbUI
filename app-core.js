@@ -1203,7 +1203,9 @@ function createVueApp() {
         try { if (loc) { Intl.DateTimeFormat(loc); return loc; } } catch (e) {}   // fall through if `loc` isn't a usable locale
         return (typeof navigator !== 'undefined' && navigator.language) || 'en';
       },
-      hashColor: function(key) { return Calendar.hashColor(key); },
+      // `this.theme` is 'light' | 'dark' — the categorical palette is stepped per surface, so the
+      // mode has to reach it. Callers keep asking for a color and nothing else.
+      hashColor: function(key) { return Calendar.hashColor(key, this.theme); },
       // Resolve a calendar view's source specs / rotation overlays (pure over VIEWS -> calendar.js).
       calSources: function(name) { return Calendar.sources(VIEWS, name); },
       // The source a day-add creates in. One source -> that one. Several -> ambiguous, so the calendar
@@ -5294,7 +5296,7 @@ function createVueApp() {
         var list = appInstance.colIsList(col);
         var items = list && appInstance.listsCache[list];
         var i = items ? items.indexOf(val) : -1;
-        return i >= 0 ? Calendar.paletteAt(i) : Calendar.hashColor(val);
+        return i >= 0 ? Calendar.paletteAt(i, appInstance.theme) : Calendar.hashColor(val, appInstance.theme);
       },
       toggleGroup: function(key) { this.collapsed[key] = !this.collapsed[key]; },
       // --- drag/drop (desktop) ---

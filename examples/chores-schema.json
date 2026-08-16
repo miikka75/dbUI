@@ -575,6 +575,7 @@
         "item",
         "qty",
         "shop_status",
+        "added_by",
         "needed_by",
         {
           "name": "days_late",
