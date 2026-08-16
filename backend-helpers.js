@@ -54,11 +54,17 @@
     // filter a map, so the write gates read this list (same denormalize-for-schema-blind-rules trick as
     // _meta/ownerTables). Omitted for 'all' and legacy arrays, whose write gates fall back to plain
     // membership -- which is why no stored grant needs migrating.
-    userGrantDoc: function(key, role, user, tables) {
+    userGrantDoc: function(key, role, user, tables, identity) {
       var doc = { role: role, user: user || key, tables: (tables == null ? 'all' : tables) };
       if (doc.tables && typeof doc.tables === 'object' && !Array.isArray(doc.tables)) {
         doc.rwTables = Object.keys(doc.tables).filter(function(t) { return doc.tables[t] !== 'r'; });
       }
+      // `identity` = { <listName>: <the value linked to this user> }, mirrored here by setListUser so the
+      // schema-blind rules can ask "is this the caller's own identity?" without a QUERY, which neither
+      // rules language has. It lives on the grant doc rather than a store of its own because this doc is
+      // already admin-write-only (a member cannot forge it) and is already fetched on every rule
+      // evaluation — so the check costs no extra read. Preserved across grant edits by the callers.
+      if (identity && typeof identity === 'object' && Object.keys(identity).length) doc.identity = identity;
       return doc;
     },
 
@@ -114,13 +120,39 @@
             whileVals = (Array.isArray(gate[gk[0]]) ? gate[gk[0]] : [gate[gk[0]]]).map(String);
           }
         }
-        out[t] = { cols: list.slice(), locked: locked, whileCol: whileCol, whileVals: whileVals };
+        // An IDENTITY column: `defaultFrom: "@me"` and owner-writable. It has to be owner-writable or
+        // the owner could not create the row at all (a defaultFrom value is per-user, so `locked` cannot
+        // predict it) — which left the owner free to write SOMEBODY ELSE'S identity into it and log a
+        // chore as them. Naming it here lets the write layers require it to be the caller's own.
+        // `identityList` is the column's list, so the caller's value can be looked up the same way `@me`
+        // resolves it; '' means the identity is the profile display name.
+        var identityCol = '', identityList = '';
+        for (var c3 in defs) {
+          var d3 = defs[c3];
+          if (!d3 || typeof d3 !== 'object' || d3.defaultFrom !== '@me') continue;
+          if (list.indexOf(c3) < 0) continue;            // not owner-writable -> already unreachable
+          identityCol = c3; identityList = d3.list || '';
+          break;                                          // one identity column per table
+        }
+        out[t] = { cols: list.slice(), locked: locked, whileCol: whileCol, whileVals: whileVals,
+                   identityCol: identityCol, identityList: identityList };
       }
       return out;
     },
     // Does an owner-scoped write get to touch THIS row at all? `existing` is the stored row (null on a
     // create — a create is always in the gate's own starting state, so it passes). Shared by the dev
     // server and the client so both answer exactly as the two rules layers do.
+    // Is the identity column in this write the CALLER'S own? `identity` is the caller's resolved value
+    // for the bound's list ('' when they have none). Shared by the dev server and the client so both
+    // answer exactly as the two rules layers do.
+    //   A row with no identity column, or a write that does not carry it, passes — a partial update that
+    // never mentions the column cannot forge it. A caller with NO identity fails: they cannot name
+    // themselves, so they cannot own a row that says who did the work.
+    ownerIdentityOk: function(bounds, incoming, identity) {
+      if (!bounds || !bounds.identityCol) return true;
+      if (!incoming || !Object.prototype.hasOwnProperty.call(incoming, bounds.identityCol)) return true;
+      return !!identity && String(incoming[bounds.identityCol] == null ? '' : incoming[bounds.identityCol]) === String(identity);
+    },
     ownerRowInState: function(bounds, existing) {
       if (!bounds || !bounds.whileCol) return true;
       if (!existing) return true;                       // create: nothing to be out of state yet

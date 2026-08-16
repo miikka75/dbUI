@@ -1335,6 +1335,47 @@ log, only a parent may approve" expressible without a second table.
   board whose lane column is gated offers that owner no drag and no move-menu — otherwise the write
   would simply be refused and the card would snap back unexplained.
 
+### Identity columns — an owner may only ever name themselves
+
+A column with **`defaultFrom: "@me"`** is an *identity* column: it records which person a row is about.
+It **must** appear in `ownerWritable`, or its owner could not create the row at all — a `defaultFrom`
+value is resolved per user, so the `locked` map cannot predict it. That left the owner free to write
+*somebody else's* identity into it and log the work as them, which the column bounds cannot catch,
+because the column IS one they may write.
+
+So the write layers require an identity column to carry **the caller's own value**. No schema key is
+needed: a `defaultFrom: "@me"` column that is owner-writable is one, automatically.
+
+```json
+"chore_log": {
+  "columns": [ { "name": "owner", "type": "owner" },
+               { "name": "person", "type": "select", "list": "members", "defaultFrom": "@me" } ],
+  "ownerWritable": ["person", "chore", "done_on", "note"]
+}
+```
+
+Ann may log a chore as Ann and may not log one as Bob — on create *or* update. An **editor with a table
+grant, or an admin, is unaffected**: a parent logging on someone's behalf is the owner branch not
+applying, exactly as with the rest of `ownerWritable`.
+
+- **Only for a LIST-backed column.** Without a list the identity is the profile display name, which the
+  user writes themselves — there would be nothing to verify against, so it is left alone rather than
+  pretending.
+- **A write that does not carry the column cannot forge it**, so ordinary cell edits are untouched.
+- **A caller with no identity cannot claim one** — they can't name themselves, so they can't own a row
+  that says who did the work.
+- **How the rules know**: they can't QUERY for "the link naming me". `setListUser` mirrors the answer
+  onto the linked user's grant doc as `identity: { <list>: <value> }` — `_users/<email>` is
+  admin-write-only, so a member cannot forge it, and both rules layers already read it for the grant, so
+  the check costs no extra read. Re-linking a value to someone else clears it from whoever held it.
+- **Migration grace**: a grant written before this has no `identity` map, and is permissive. Failing
+  closed would lock every existing member out of logging until an admin re-saved every link. It starts
+  binding for a user the moment their link is saved again.
+- **Enforced in all four layers**: `firestore.rules` (`ownerIdentityOk`, on owner create *and* update),
+  `supabase-schema.sql` (`app_owner_identity_ok`), `dev/server.js` (which resolves the identity live
+  from the links rather than the mirror), and the UI, which renders the column read-only so it never
+  offers a write the server will refuse.
+
 ### `ownerWritableWhile` — until when an owner may set them
 
 `ownerWritable` bounds *which* fields an owner may rewrite, but ownership never expires: they could

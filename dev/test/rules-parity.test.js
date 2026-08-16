@@ -90,6 +90,40 @@ describe('rules parity — ownerWritableWhile (the owner-branch state gate)', ()
   });
 });
 
+describe('rules parity — identity columns (an owner may only name themselves)', () => {
+  // A `defaultFrom: "@me"` column has to be owner-writable or the owner cannot create the row, which
+  // left them free to log the work as somebody else. Rules cannot QUERY for "the link naming me", so the
+  // caller's value is mirrored onto the admin-write-only grant doc both layers already read.
+  it('backend-helpers emits identityCol + identityList and the shared predicate', () => {
+    assert.match(HELPERS, /identityCol:\s*identityCol/, 'ownerWritableOf must emit identityCol');
+    assert.match(HELPERS, /identityList:\s*identityList/, 'ownerWritableOf must emit identityList');
+    assert.match(HELPERS, /ownerIdentityOk:\s*function/, 'the shared predicate must exist');
+  });
+  it('firestore.rules gates owner CREATE and UPDATE on it', () => {
+    assert.match(RULES, /function ownerIdentityOk\(coll\)/, 'firestore.rules needs ownerIdentityOk');
+    const uses = (RULES.match(/ownerIdentityOk\(coll\)/g) || []).length;
+    assert.equal(uses, 3, 'declaration + create + update should reference it (found ' + uses + ')');
+  });
+  it('supabase gates the owner branch on it', () => {
+    assert.match(SQL, /create or replace function public\.app_owner_identity_ok/, 'supabase needs app_owner_identity_ok');
+    assert.match(SQL, /public\.app_owner_identity_ok\(store, val\)/, 'the owner branch must call it');
+  });
+  it('dev/server.js gates the owner branch on it', () => {
+    assert.match(SERVER, /BackendHelpers\.ownerIdentityOk\(bounds, incoming, myIdentityFor\(bounds\.identityList\)\)/,
+      'the dev server must consult it with the caller resolved identity');
+  });
+  it('all three read the mirror off the grant doc, never a self-writable one', () => {
+    // `_profiles` is self-writable, so an identity taken from there could be forged by its own subject.
+    assert.match(RULES, /u\.identity\.get\(b\.identityList/, 'firestore must read identity off userData()');
+    assert.match(SQL, /app_user_data\(\) -> 'identity'/, 'supabase must read identity off app_user_data()');
+  });
+  it('an absent mirror is permissive (migration grace), in both layers', () => {
+    // Failing closed here would lock every existing member out of logging until an admin re-saved links.
+    assert.match(RULES, /!\('identity' in u\)/);
+    assert.match(SQL, /not \(public\.app_user_data\(\) \? 'identity'\) then true/);
+  });
+});
+
 describe('rules parity — userWritableLists (list editing is admin-only by default)', () => {
   // A list is shared vocabulary, so writing one is admin-only unless the schema opens it. A layer that
   // never learned the allowlist keeps handing every editor with one rw table the run of every list those
