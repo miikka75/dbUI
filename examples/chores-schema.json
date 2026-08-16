@@ -286,7 +286,7 @@
     {
       "name": "doc_mine",
       "icon": "mdi-account-check",
-      "markdown": "## {{t:text.mine_tasks}}\n\n{{view:duty_matrix}}\n\n## {{t:text.mine_log}}\n\n{{view:chore_mine}}\n"
+      "markdown": "## {{t:text.mine_tasks}}\n\n{{view:duty_matrix}}\n\n## {{t:text.mine_log}}\n\n{{view:chore_mine}}\n\n## {{t:text.mine_past}}\n\n{{view:chore_mine@archive?}}\n"
     },
     {
       "name": "chore_mine",
