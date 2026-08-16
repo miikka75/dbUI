@@ -1449,10 +1449,18 @@ from the authenticated session — never asked for.
 - Each item: optional `icon`, `title`. Access-filtered (a view needs all its sources).
 - **`adminOnly`** (boolean, optional) — hide the entry from non-admins. On a `{group}` it hides the
   whole branch. Use it for admin-facing plumbing (the tables behind a rotation, reference data) that
-  members read *through* another view but never need in their own menu. It is **tidiness, not access
-  control**: what a member may read or write is decided by their table grants, and an entry hidden
-  here is still reachable if something else links to it. Pair it with a read-only (`'r'`) grant when
-  the point is that members must not change the data.
+  members read *through* another view but never need in their own menu, and for approval surfaces: a
+  board whose lane column only an admin may write is a read-only feed for everyone else.
+- **`hideFromAdmin`** (boolean, optional) — the mirror, for views about being a **participant**. In the
+  chores example a parent approves and is never assigned a chore, so "My chores" and "My rewards" are
+  not theirs. This matters beyond tidiness there: an admin is *exempt* from `mineOnly`, so a personal
+  page embedding a `mineOnly` rotation would show them everyone **else's** column under a heading
+  reading "My tasks". Hiding the page is what keeps that exemption correct in the one place it belongs
+  (the standalone matrix).
+- Setting **both** on one entry hides it from every user, which is never the intent — rejected at load.
+- Both are **tidiness, not access control**: what a member may read or write is decided by their table
+  grants, and an entry hidden here is still reachable if something else links to it. Pair `adminOnly`
+  with a read-only (`'r'`) grant when the point is that members must not change the data.
 - System tabs (Lookup / Languages / Settings) are appended automatically.
 - **`bottomNav`** (string[], optional) — **mobile only**: view/table ids shown in the bottom
   navigation bar, in this order. More than 5 → the first 4 plus a "⋯ More" button that opens the

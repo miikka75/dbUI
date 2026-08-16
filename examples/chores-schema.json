@@ -710,13 +710,15 @@
         "adminOnly": true
       },
       {
-        "view": "doc_mine"
+        "view": "doc_mine",
+        "hideFromAdmin": true
       },
       {
         "view": "doc_scoreboard"
       },
       {
-        "view": "reward_mine"
+        "view": "reward_mine",
+        "hideFromAdmin": true
       },
       {
         "view": "reward_board",
