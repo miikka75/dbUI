@@ -706,7 +706,8 @@
         "view": "doc_home"
       },
       {
-        "view": "chore_board"
+        "view": "chore_board",
+        "adminOnly": true
       },
       {
         "view": "doc_mine"
@@ -718,7 +719,8 @@
         "view": "reward_mine"
       },
       {
-        "view": "reward_board"
+        "view": "reward_board",
+        "adminOnly": true
       },
       {
         "view": "shop_open"
@@ -751,7 +753,6 @@
     ],
     "bottomNav": [
       "doc_home",
-      "chore_board",
       "doc_mine",
       "doc_scoreboard",
       "shop_open"
