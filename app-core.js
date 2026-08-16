@@ -5280,7 +5280,22 @@ function createVueApp() {
           return !(item && appInstance && appInstance.isColumnHidden(c, item, self.view));
         });
       },
-      cardColor: function(item) { return this.cfg.color ? Calendar.hashColor(String(item[this.cfg.color] || '')) : null; },
+      // The card's left stripe, from `board.color`. A LIST-BACKED column indexes the palette by the
+      // value's position in its list rather than hashing it: 10 colors and a handful of people means a
+      // hash collides most of the time (5 names -> ~70%), which is how Ann, Bob, Cara and Dan all ended
+      // up wearing one color on a board that claims to be colored by person. List order is stable, so
+      // the first 10 values get 10 distinct colors. Anything else (a free-text or lookup-backed column)
+      // still hashes — there is no ordering to borrow.
+      cardColor: function(item) {
+        var col = this.cfg.color;
+        if (!col) return null;
+        var val = String((item && item[col]) || '');
+        if (!val) return null;
+        var list = appInstance.colIsList(col);
+        var items = list && appInstance.listsCache[list];
+        var i = items ? items.indexOf(val) : -1;
+        return i >= 0 ? Calendar.paletteAt(i) : Calendar.hashColor(val);
+      },
       toggleGroup: function(key) { this.collapsed[key] = !this.collapsed[key]; },
       // --- drag/drop (desktop) ---
       onDragStart: function(item) { if (this.canEditCard(item) && this.canMoveCards) this.dragId = item.id; },

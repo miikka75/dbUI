@@ -33,11 +33,34 @@
     var last = cells[cells.length - 1].date.split('-');
     return { from: cells[0].date, toExclusive: fmtDate(new Date(+last[0], +last[1] - 1, +last[2] + 1)) };
   }
-  // Deterministic palette color for an event key (stable across renders).
+  // Deterministic palette color for an event key (stable across renders). Colors a calendar event's
+  // label, a rotation overlay, and a board card's left stripe (`board.color`).
+  //
+  // The mixing is load-bearing, and the obvious cheap hash is the wrong one here. The previous
+  // `h*31 + c` collapsed entirely: 31 % 10 === 1 and the palette has 10 entries, so multiplying by 31
+  // is the IDENTITY modulo the palette length and the whole thing degenerated to (sum of char codes)
+  // % 10. Any two names whose letters sum alike collided — in the chores example Ann, Bob, Cara and Dan
+  // all came out the same pink, a board "colored by person" that encoded nothing.
+  //   FNV-1a alone does not fix it either: its avalanche is weak in the LOW bits, and `% 10` reads
+  // exactly those. So the FNV pass is followed by murmur3's fmix32 finalizer, which folds the high bits
+  // down before the modulo. Measured over 24 names: old = 7 in the worst bucket, FNV alone = 6,
+  // FNV+fmix32 = 4, against ~2.4 for a perfect split.
+  //   A hash into a FIXED palette can never promise distinct colors — 10 buckets, birthday paradox —
+  // so this is a legibility improvement, not a guarantee. There is no legend either way.
+  var PALETTE = ['#5b8def', '#26a69a', '#ab47bc', '#ef6c00', '#66bb6a', '#ec407a', '#8d6e63', '#c62828', '#00897b', '#7e57c2'];
+  // The palette BY INDEX. A caller that already has a stable ordering (a list-backed column: the k-th
+  // member of `members`) should use this instead of hashing, because it is the only way to actually get
+  // distinct colors — hashing n values into 10 buckets collides ~70% of the time at n=5, which is how a
+  // four-person household ended up sharing one color.
+  function paletteAt(i) { return PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length]; }
   function hashColor(key) {
-    var pal = ['#5b8def', '#26a69a', '#ab47bc', '#ef6c00', '#66bb6a', '#ec407a', '#8d6e63', '#c62828', '#00897b', '#7e57c2'];
-    var s = String(key || ''), h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-    return pal[h % pal.length];
+    var pal = PALETTE;
+    var s = String(key || ''), h = 2166136261;
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    h ^= h >>> 16; h = Math.imul(h, 2246822507) >>> 0;   // fmix32: mix the high bits down so `% pal`
+    h ^= h >>> 13; h = Math.imul(h, 3266489909) >>> 0;   // is not reading FNV's weakest bits
+    h ^= h >>> 16;
+    return pal[(h >>> 0) % pal.length];
   }
   // A calendar view's source specs (single-source `source` sugar -> one-element list).
   function sources(views, name) {
@@ -50,7 +73,7 @@
 
   var C = {
     fmtDate: fmtDate, cellsMonth: cellsMonth, cellsWeek: cellsWeek, windowFor: windowFor,
-    hashColor: hashColor, sources: sources, rotationSources: rotationSources
+    hashColor: hashColor, paletteAt: paletteAt, sources: sources, rotationSources: rotationSources
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
   else { root.Calendar = C; root.fmtDate = fmtDate; }

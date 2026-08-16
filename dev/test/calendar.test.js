@@ -102,6 +102,40 @@ describe('calendar.js — primitives', () => {
     assert.match(Calendar.hashColor('team-a'), /^#[0-9a-f]{6}$/);
   });
 
+  // The palette has 10 entries and the old mixer was `h*31 + c`. 31 % 10 === 1, so the multiply was the
+  // identity modulo the palette length and the hash collapsed to (sum of char codes) % 10 — Ann, Bob,
+  // Cara and Dan all came out the same color on a board that claims to be colored by person.
+  it('hashColor does not collapse to a character sum (the h*31 %% 10 degeneracy)', () => {
+    // Anagrams have an identical character sum, so the old hash could not tell them apart.
+    assert.notEqual(Calendar.hashColor('abc'), Calendar.hashColor('cba'),
+      'an anagram must not force the same color — the mixer is order-blind again');
+    // Neither could it separate strings whose sums differ by a multiple of ten.
+    assert.notEqual(Calendar.hashColor('A'), Calendar.hashColor('K'));   // 65 vs 75
+  });
+
+  it('hashColor spreads a realistic name set across the palette', () => {
+    const names = ['Ann', 'Bob', 'Cara', 'Dan', 'Erik', 'Fiona', 'Greg', 'Hana', 'Ivan', 'Jo', 'Kim',
+                   'Liam', 'Mia', 'Noah', 'Olga', 'Pia', 'Sam', 'Tom', 'Uma', 'Vera', 'Will', 'Xena',
+                   'Yuri', 'Zoe'];
+    const buckets = {};
+    for (const n of names) (buckets[Calendar.hashColor(n)] ||= []).push(n);
+    const largest = Math.max(...Object.values(buckets).map((a) => a.length));
+    // 24 names over 10 colors: a perfect split is 2.4 per color. The old hash put 7 in one bucket.
+    assert.ok(Object.keys(buckets).length >= 8, 'uses at least 8 of the 10 colors, got ' + Object.keys(buckets).length);
+    assert.ok(largest <= 5, 'no color should swallow a sixth of the set, largest was ' + largest);
+  });
+
+  // A hash into a FIXED palette cannot promise distinct colors (10 buckets, birthday paradox: ~70%
+  // collision at 5 values), so a caller with a stable ordering indexes the palette instead. That is what
+  // a board colored by a list-backed column does.
+  it('paletteAt gives distinct colors for the first 10 values, and wraps after', () => {
+    const first10 = Array.from({ length: 10 }, (_, i) => Calendar.paletteAt(i));
+    assert.equal(new Set(first10).size, 10, 'the first ten indices must all differ');
+    assert.equal(Calendar.paletteAt(10), Calendar.paletteAt(0));    // wraps
+    assert.equal(Calendar.paletteAt(-1), Calendar.paletteAt(9));    // negative-safe
+    for (const c of first10) assert.match(c, /^#[0-9a-f]{6}$/);
+  });
+
   it('fmtDate formats a Date as local YYYY-MM-DD', () => {
     assert.equal(Calendar.fmtDate(new Date(2026, 6, 6)), '2026-07-06'); // month is 0-based
     assert.equal(Calendar.fmtDate(new Date(2026, 0, 3)), '2026-01-03'); // zero-padded
