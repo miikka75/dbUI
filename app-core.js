@@ -1039,7 +1039,7 @@ function createVueApp() {
             self.tableMap = result.tableMap || {};
             self.languages = result.languages || [];
             self.listsCache = result.lists || {}; window._listsCache = self.listsCache;
-            self.loadListAvatars(); self.loadListUserLinks(); self.loadMyListValues();   // avatars + admin editor links + my own @me identity
+            self.loadListAvatars(); self.loadMyListValues();   // avatars + my own @me identity (the admin-only editor links wait for the user list — see the usersLoaded watcher)
             // Auto-seed lists (create missing list names + seed mandatory filter values): admin-only
             // maintenance. A restricted user's listsCache is already scoped to their own tables
             // server-side; seeding+saving here would add entries for tables they don't own, and
@@ -1114,7 +1114,7 @@ function createVueApp() {
           return backend.getLists(self.folderId).then(function(lists) {
             self.listsCache = lists || {}; window._listsCache = self.listsCache;
             if (self._seedSchemaLists()) backend.saveLists(self.folderId, self.listsCache);
-            self.loadListAvatars(); self.loadListUserLinks(); self.loadMyListValues();   // avatars + admin editor links + my own @me identity
+            self.loadListAvatars(); self.loadMyListValues();   // avatars + my own @me identity (the admin-only editor links wait for the user list — see the usersLoaded watcher)
           });
         }).then(function() {
           // Load users FIRST to know access restrictions
@@ -4274,6 +4274,13 @@ function createVueApp() {
         this._updateManifest();
       }},
       appTitle: { immediate: true, handler: function(t) { if (t) document.title = t; this._updateManifest(); } },
+      // The raw value->email links are admin-only at every layer (dev server 403s, Firestore rules deny),
+      // and only the Lookup editor's picker reads them. Boot used to fire the request for every user and
+      // swallow the denial into {} — harmless, but it put a red 403 in every member's console on every
+      // load. Ask only once the answer can be yes: `isAdmin` returns true until the user list lands (see
+      // its default), so gating at the boot call site would have changed nothing; the wait is the fix.
+      // Non-admins keep the initial {} exactly as the swallowed rejection left them.
+      usersLoaded: function(v) { if (v && this.isAdmin) this.loadListUserLinks(); },
       viewingArchive: function() {
         // Active tab sorts the default column ascending (today -> future); the archive tab reverses it
         // (today -> past, most-recently-archived first). Only applies when a defaultSort is set.
