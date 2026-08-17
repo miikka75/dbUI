@@ -2314,6 +2314,87 @@ test.describe('v3 archived table embed', () => {
   });
 });
 
+test.describe('v3 @both partition toggle in an embed', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }], archivable: true } },
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }, { name: 'home', markdown: '## Log\n\n{{table:tasks@both}}' }],
+    nav: { layout: 'tabs', items: [{ view: 'home' }, { view: 'all' }] }
+  };
+  // Boot the page view with the given archive rows present (or absent).
+  async function boot(page, withArchived) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 'a1', title: 'Active item' }, tab: 'active' } });
+    if (withArchived) await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 'z1', title: 'Archived item' }, tab: 'archive' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
+    await page.waitForTimeout(200);
+  }
+
+  test('one embed, two partitions: the tabs swap the rows and the Past half is read-only', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page, true);
+    const tabs = page.locator('[data-testid="embed-part-tabs"]');
+    await expect(tabs).toBeVisible();
+    // Labels resolve through t() against the keys the top-level archive tabs use. This fixture has no
+    // btn.show_* translations, so they show as their keys — a visible gap, the app's rule for UI prose.
+    await expect(tabs).toContainText('btn.show_active');
+    await expect(tabs).toContainText('btn.show_archived');
+    // Upcoming: the active partition, editable exactly as a partition-less embed (Add offered).
+    await expect(page.locator('.v-main')).toContainText('Active item');
+    await expect(page.locator('.v-main')).not.toContainText('Archived item');
+    expect(await page.evaluate(() => appInstance.canMutateEmbed('table', 'tasks'))).toBe(true);
+    await expect(page.locator('.v-main').getByRole('button', { name: 'Add' })).toBeVisible();
+    // Past: the archive partition, read-only — the same deal `{{table:tasks@archive}}` has always given.
+    await tabs.locator('.v-tab').nth(1).click();
+    await expect(page.locator('.v-main')).toContainText('Archived item');
+    await expect(page.locator('.v-main')).not.toContainText('Active item');
+    await expect(page.locator('.v-main').getByRole('button', { name: 'Add' })).toHaveCount(0);
+    await tabs.locator('.v-tab').nth(0).click();
+    await expect(page.locator('.v-main')).toContainText('Active item');
+  });
+
+  test('no tabs until something has actually aged into the archive', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page, false);
+    // Empty archive -> the embed renders exactly as it did before the toggle existed: no chrome, editable.
+    await expect(page.locator('[data-testid="embed-part-tabs"]')).toHaveCount(0);
+    await expect(page.locator('.v-main')).toContainText('Active item');
+    await expect(page.locator('.v-main').getByRole('button', { name: 'Add' })).toBeVisible();
+    // Archiving a row is what brings the toggle out.
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 'z2', title: 'Aged out' }, tab: 'archive' } });
+    await page.reload();
+    await page.waitForTimeout(400);
+    await expect(page.locator('[data-testid="embed-part-tabs"]')).toBeVisible();
+  });
+
+  test('validateSchema names an inert @both token and a malformed partitionLabels', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      window.SCHEMA.plain = { columns: { title: 'text' } };                        // no archive partition
+      window.VIEWS.both_bad = { name: 'both_bad', markdown: '{{table:plain@both}}' };
+      window.VIEWS.lbl_bad = { name: 'lbl_bad', sources: ['tasks'], columns: ['title'], partitionLabels: { activ: 'x', archive: 3 } };
+      const bad = window.validateSchema().join(' | ');
+      // control: an archivable target and well-formed labels raise nothing
+      window.SCHEMA.plain.archivable = true;
+      window.VIEWS.lbl_bad.partitionLabels = { active: 'text.a', archive: 'text.b' };
+      const good = window.validateSchema().filter(e => e.indexOf('both_bad') >= 0 || e.indexOf('lbl_bad') >= 0).join(' | ');
+      delete window.SCHEMA.plain; delete window.VIEWS.both_bad; delete window.VIEWS.lbl_bad;
+      return { bad, good };
+    });
+    expect(r.bad).toContain('both_bad');
+    expect(r.bad).toContain('no archive partition to toggle to');
+    expect(r.bad).toContain('lbl_bad');
+    expect(r.bad).toContain('is not a partition');           // "activ" typo
+    expect(r.bad).toContain('must be a translation key');    // archive: 3
+    expect(r.good).toBe('');
+  });
+});
+
 test.describe('v3 page body stored on server', () => {
   const V3 = {
     defaultLanguage: 'en',

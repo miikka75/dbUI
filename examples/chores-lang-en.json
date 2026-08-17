@@ -8,6 +8,8 @@
   "translations": {
     "en": {
       "app.title": "Our Home",
+      "btn.show_active": "Upcoming",
+      "btn.show_archived": "Past",
       "tab.chore_log": "Chore log",
       "tab.home_shopping": "Shopping list",
       "tab.ref_chores": "Chore catalogue",

@@ -83,10 +83,26 @@
     return out.join('');
   }
 
+  // `@both` is not the name of a partition: it asks for BOTH of them behind one Upcoming/Past toggle,
+  // the embedded counterpart of the top-level archive tabs. The block carries no fixed part (the
+  // component owns which half is showing) plus the `embedBoth` flag that turns the tab strip on.
+  var BOTH = 'both';
+
   // v3 pages: a {{view:x}}/{{table:x}} embed block — the embed-view component resolves cols/rows itself.
   function buildEmbedBlock(type, name, part, ctx) {
-    if ((type === 'view' && ctx.views[name]) || (type === 'table' && ctx.schema[name])) return { embedType: type, embedName: name, embedPart: part || null };
+    if ((type === 'view' && ctx.views[name]) || (type === 'table' && ctx.schema[name])) {
+      var both = part === BOTH;
+      return { embedType: type, embedName: name, embedPart: both ? null : (part || null), embedBoth: both };
+    }
     return { html: '<em>Unknown embed: ' + type + ':' + name + '</em>' };
+  }
+
+  // How many rows a block has for the `?` hide-when-empty test. A `@both` block counts BOTH partitions:
+  // a member whose active list is empty must still get the block when something has aged into the
+  // archive, or the toggle that would reveal it is exactly what got hidden.
+  function embedRowCount(type, name, part, ctx) {
+    if (part !== BOTH) return embedRows(type, name, part, ctx).length;
+    return embedRows(type, name, null, ctx).length + embedRows(type, name, 'archive', ctx).length;
   }
 
   // Parse markdown into render blocks: {html} or {embedType,embedName,embedPart}. `?` hides empty embeds.
@@ -104,7 +120,7 @@
         var type = parts[i + 1], raw = parts[i + 2];
         var optional = raw.charAt(raw.length - 1) === '?'; if (optional) raw = raw.slice(0, -1);
         var at = raw.indexOf('@'), part = at >= 0 ? raw.slice(at + 1) : null, name = at >= 0 ? raw.slice(0, at) : raw;
-        if (!(optional && embedRows(type, name, part, ctx).length === 0)) blocks.push(buildEmbedBlock(type, name, part, ctx)); // hide-when-empty
+        if (!(optional && embedRowCount(type, name, part, ctx) === 0)) blocks.push(buildEmbedBlock(type, name, part, ctx)); // hide-when-empty
         i += 3;
       } else break;
     }
@@ -115,7 +131,7 @@
   function docHasData(markdown, selfName, ctx) {
     var md = String(markdown || '').replace(/\{\{\s*self\s*\}\}/g, selfName ? '{{view:' + selfName + '}}' : '');
     var re = /\{\{\s*(view|table)\s*:\s*([^\s@?{}:]+)(@[^\s?{}:]+)?\??\s*\}\}/g, m, any = false;
-    while ((m = re.exec(md))) { any = true; if (embedRows(m[1], m[2], m[3] ? m[3].slice(1) : null, ctx).length) return true; }
+    while ((m = re.exec(md))) { any = true; if (embedRowCount(m[1], m[2], m[3] ? m[3].slice(1) : null, ctx)) return true; }
     return !any;
   }
 
@@ -210,7 +226,7 @@
 
   var M = {
     mdToHtml: mdToHtml, buildEmbedBlock: buildEmbedBlock, mdBlocks: mdBlocks, docHasData: docHasData,
-    resolveEmbed: resolveEmbed, embedCols: embedCols, embedRows: embedRows,
+    resolveEmbed: resolveEmbed, embedCols: embedCols, embedRows: embedRows, embedRowCount: embedRowCount,
     embedRowsForItem: embedRowsForItem, embedWhenOk: embedWhenOk, embedVisible: embedVisible, safeUrl: safeUrl, safeImgSrc: safeImgSrc,
     isAssetRef: isAssetRef, assetId: assetId, safeCssUrl: safeCssUrl
   };

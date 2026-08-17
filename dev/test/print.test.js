@@ -83,6 +83,20 @@ describe('print.js — embed', () => {
     assert.equal(/<table>/.test(Print.embed(ei, null, makeCtx({ embedCols: () => ['n'], embedRows: () => [] }))), false);
   });
 
+  it('a @both block prints both partitions stacked under their tab labels', () => {
+    const ei = { kind: 'doc', config: { bare: true }, blocks: [{ embedType: 'view', embedName: 'mine', embedPart: null, embedBoth: true }] };
+    const ctx = makeCtx({
+      embedCols: () => ['n'],
+      embedRows: (t, n, p) => (p === 'archive' ? [{ n: 'aged' }] : [{ n: 'current' }]),
+      embedPartLabel: (t, n, p) => 'L:' + p
+    });
+    const html = Print.embed(ei, null, ctx);
+    assert.match(html, /<h4>L:active<\/h4><table>.*current.*<h4>L:archive<\/h4><table>.*aged/s);   // active first, then archive
+    // An empty half contributes neither heading nor table (same rule as any other empty embed).
+    const noArchive = Print.embed(ei, null, Object.assign(makeCtx(), { embedCols: () => ['n'], embedRows: (t, n, p) => (p === 'archive' ? [] : [{ n: 'current' }]), embedPartLabel: (t, n, p) => 'L:' + p }));
+    assert.equal(/L:archive/.test(noArchive), false);
+  });
+
   it('inline {{self}} embed renders the own-table grid where the marker sits', () => {
     const ei = { kind: 'data', config: {}, columns: ['a'], rows: [{ a: '1' }], inlineBlocks: [{ html: '<p>Intro</p>' }, { self: true }] };
     const html = Print.embed(ei, null, makeCtx());
