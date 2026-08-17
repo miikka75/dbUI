@@ -4962,6 +4962,45 @@ test.describe('a `@me` view with no linked identity', () => {
   });
 });
 
+test.describe('a view whose rows are not its own to add to', () => {
+  // The chores scoreboard: leaderboards over `chore_log`, declared `readonly` AND aggregate. `chore_log`
+  // has an owner column, so a member holding only `r` qualifies for self-service — which used to override
+  // the read-only answer wholesale and put an Add button on a leaderboard. The row it wrote landed in the
+  // source table, failed the view's own `status: approved` filter, and never appeared: "Add does nothing",
+  // plus a blank row in whatever view DOES list that table.
+  test('an explicit readonly / aggregate view offers no Add, even to a self-service member', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // `signups` is the fixture's owner-column table; a member with no grant on it is the self-service
+      // shape — the same setup the "embedded self-service view keeps Add" test uses.
+      app.usersLoaded = true;
+      app.userList = [{ key: 'mel@x.com', role: 'editor', tables: ['notes'] }];
+      app.currentUserEmail = 'mel@x.com';
+      window.VIEWS.board_agg = { name: 'board_agg', sources: ['signups'], mode: 'union', groupBy: { column: 'dish', from: ['dish'] }, aggregate: { sum: 'n', into: 'total' }, columns: ['dish', 'total'], readonly: true };
+      window.VIEWS.board_ro = { name: 'board_ro', sources: ['signups'], mode: 'union', columns: ['dish'], readonly: true };
+      window.VIEWS.log_mine = { name: 'log_mine', sources: ['signups'], mode: 'union', columns: ['dish'] };
+      const selfServe = app.embedSelfServeTable('view', 'board_agg');   // the bypass's precondition
+      const out = { selfServe: selfServe, embed: {}, top: {} };
+      ['board_agg', 'board_ro', 'log_mine'].forEach((n) => {
+        out.embed[n] = app.canMutateEmbed('view', n);
+        app.selectTab(n);
+        out.top[n] = { canAdd: app.canAddRows, readonlyView: app.isReadonlyView };
+      });
+      ['board_agg', 'board_ro', 'log_mine'].forEach((n) => { delete window.VIEWS[n]; });
+      return out;
+    });
+    expect(r.selfServe).toBe('signups');                // self-service really does apply here
+    expect(r.embed.board_agg).toBe(false);              // ...and no longer overrides an aggregate view
+    expect(r.embed.board_ro).toBe(false);               // ...nor an explicit readonly: true
+    expect(r.top.board_agg).toEqual({ canAdd: false, readonlyView: true });   // same answer top-level
+    expect(r.top.board_ro).toEqual({ canAdd: false, readonlyView: true });
+    // The case the bypass exists for is untouched: a plain view of the same self-service table.
+    expect(r.embed.log_mine).toBe(true);
+    expect(r.top.log_mine).toEqual({ canAdd: true, readonlyView: false });
+  });
+});
+
 test.describe('a `list:` may name a lookup TABLE', () => {
   // One catalogue can back both a `ref` column (which carries the row's other fields) and a plain
   // select/multiselect that only needs the name — instead of maintaining a second free-string list

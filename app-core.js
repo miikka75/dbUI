@@ -580,7 +580,7 @@ function createVueApp() {
       // editable from a list (see the `layout` note in SCHEMA.md — use table/card for data entry).
       identityMissing: function() { return this.viewIdentityMissing(this.currentTable); },
       canAddRows: function() { return this.canMutateRows && !this.identityMissing; },
-      isReadonlyView: function() { return !this.currentSelfService && this.viewReadonly(this.currentTable); },
+      isReadonlyView: function() { return this.viewAddBlocked(this.currentTable) || (!this.currentSelfService && this.viewReadonly(this.currentTable)); },
       embedConfigs: function() {
         var self = this;
         var cfg = this.currentConfig;
@@ -1483,6 +1483,7 @@ function createVueApp() {
         // Same trap as the top-level grid: an embed of a `@me` view the viewer has no identity for would
         // offer Add, write an orphan, and drop it from the list again.
         if (type === 'view' && this.viewIdentityMissing(name)) return false;
+        if (type === 'view' && this.viewAddBlocked(name)) return false;   // declared/synthetic: no row behind the button
         var selfServe = this.embedSelfServeTable(type, name);
         if (this.viewReadonly(name) && !selfServe) return false;
         if (selfServe) return true;              // add opens; per-row/per-column bounds gate the rest
@@ -2205,6 +2206,18 @@ function createVueApp() {
         return !(SCHEMA[item._source] && SCHEMA[item._source].columns && SCHEMA[item._source].columns[col]);
       },
       // Is a view/table read-only as a whole (config flag, viewer role, aggregate, or a read-only grant)
+      // Rows a view SHOWS but does not own: an explicit `readonly: true`, or rows that are SYNTHETIC —
+      // aggregate/groupBy lines and pivot cells, which stand for many source rows rather than one. There
+      // is nothing to add to either. Deliberately separate from viewReadonly's GRANT-derived answer,
+      // which self-service is designed to override (an owner-column table is exactly where a member
+      // holding only `r` may still add their own row). Self-service must not override THIS: the row an
+      // Add writes lands in the source table and cannot satisfy the view that offered the button — the
+      // leaderboard's `status: approved` filter, say — so the button reads as "Add does nothing", while
+      // the blank row it wrote shows up in whatever view DOES list that table.
+      viewAddBlocked: function(id) {
+        var v = VIEWS[id];
+        return !!(v && (v.readonly || v.groupBy || v.aggregate || v.pivot));
+      },
       viewReadonly: function(id) {
         var v = VIEWS[id], cfg = VIEWS[id] || SCHEMA[id] || {};
         if (!!cfg.readonly || this.currentUserRole === 'viewer' || !!(v && v.groupBy && v.collect)) return true;
