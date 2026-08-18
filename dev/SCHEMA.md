@@ -544,6 +544,21 @@ A view with a `markdown` field renders as a **document** instead of a data grid:
 - **Archived data**: append `@<partition>` to embed a non-active partition, e.g.
   `{{table:tasks@archive}}` or `{{view:report@archive?}}`. Partitioned embeds are **read-only**.
   (Requires the partition to be preloaded — on by default via the `preload_archive` setting.)
+- **Both partitions behind a toggle**: append `@both` (`{{view:chore_mine@both}}`) to render **one**
+  embed with the active/archive tabs the top-level grid has, instead of stacking a live embed and an
+  `@archive` one under two headings. Each half keeps its usual deal: the active tab is fully
+  interactive (edit / add / archive), the archive tab is read-only. The tabs appear **only once the
+  archive actually has rows** — until then the embed renders exactly as an untagged one, so a fresh
+  database shows no empty "Past" tab. `?` still applies (`{{view:x@both?}}`) and counts **both**
+  partitions, since hiding the block would hide the toggle that reveals the archived half. Printing a
+  `@both` embed stacks both partitions (paper has no tabs). Requires an `archivable` source — a
+  `@both` token aimed at a table without an archive partition is a load-time schema error.
+- **Tab labels** come from `btn.show_active` / `btn.show_archived` (the same keys as the top-level
+  archive tabs). Override per view/table with `partitionLabels`, whose values are translation keys —
+  usually the headings the page used before the toggle:
+  ```json
+  { "name": "chore_mine", "sources": ["chore_log"], "partitionLabels": { "archive": "text.mine_past" } }
+  ```
 - Translatable text: `{{t:<key>}}` resolves via the translations store and is collected
   into the Languages tab as a translation key.
 - Markdown supports headings, bold/italic, lists, links, paragraphs.

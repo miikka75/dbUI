@@ -150,8 +150,33 @@ function validateSchema() {
     if (!isFinite(Number(aa.days)) || Number(aa.days) < 0) errors.push('table "' + at + '": `archiveAfter.days` must be a non-negative number');
     if (!('updated_at' in acols)) errors.push('table "' + at + '": `archiveAfter` measures from `updated_at`, so the table must declare that column (`{ "name": "updated_at", "type": "text", "hidden": true }`)');
   }
+  // `partitionLabels` renames the two tabs of a `{{view:x@both}}` embed. Its values are TRANSLATION
+  // KEYS, and both halves of it fail silently: an unknown partition key is simply never read, and a
+  // non-string value resolves to no label at all. Check the shape on both carriers (a view and a table
+  // can each be the target of a `@both` token).
+  var partLabelCheck = function(what, name, cfg) {
+    var pl = cfg && cfg.partitionLabels;
+    if (pl === undefined) return;
+    if (!pl || typeof pl !== 'object' || Array.isArray(pl)) { errors.push(what + ' "' + name + '": `partitionLabels` must be an object like { "active": "text.upcoming", "archive": "text.past" }'); return; }
+    Object.keys(pl).forEach(function(k) {
+      if (k !== 'active' && k !== 'archive') errors.push(what + ' "' + name + '": `partitionLabels` key "' + k + '" is not a partition — use "active" and/or "archive"');
+      else if (typeof pl[k] !== 'string' || !pl[k]) errors.push(what + ' "' + name + '": `partitionLabels.' + k + '` must be a translation key (a non-empty string)');
+    });
+  };
+  for (var pt in SCHEMA) partLabelCheck('table', pt, SCHEMA[pt]);
   for (var v in VIEWS) {
     var view = VIEWS[v];
+    partLabelCheck('View', v, view);
+    // `{{view:x@both}}` renders the Upcoming/Past toggle, which needs somewhere to toggle TO. Aimed at a
+    // target with no archive partition the token renders as a plain embed forever — the tab strip the
+    // author is waiting for can never appear — so say so at load rather than let it look like a bug.
+    if (typeof view.markdown === 'string') {
+      var bre = /\{\{\s*(view|table)\s*:\s*([^\s@?{}:]+)@both\??\s*\}\}/g, bm;
+      while ((bm = bre.exec(view.markdown))) {
+        var tgt = bm[2], bsrcs = bm[1] === 'view' ? ((VIEWS[tgt] && VIEWS[tgt].sources) || []) : [tgt];
+        if (!bsrcs.some(function(s) { return SCHEMA[s] && SCHEMA[s].archivable; })) errors.push('View "' + v + '": `{{' + bm[1] + ':' + tgt + '@both}}` has no archive partition to toggle to (no source of "' + tgt + '" is `archivable: true`)');
+      }
+    }
     // Check sources exist
     (view.sources || []).forEach(function(s) { if (!SCHEMA[s]) errors.push('View "' + v + '" references non-existent table "' + s + '"'); });
     // A restricted doc-view's `access` lists the tables whose grant unlocks the page; each must exist.

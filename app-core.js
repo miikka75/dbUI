@@ -580,7 +580,7 @@ function createVueApp() {
       // editable from a list (see the `layout` note in SCHEMA.md — use table/card for data entry).
       identityMissing: function() { return this.viewIdentityMissing(this.currentTable); },
       canAddRows: function() { return this.canMutateRows && !this.identityMissing; },
-      isReadonlyView: function() { return !this.currentSelfService && this.viewReadonly(this.currentTable); },
+      isReadonlyView: function() { return this.viewAddBlocked(this.currentTable) || (!this.currentSelfService && this.viewReadonly(this.currentTable)); },
       embedConfigs: function() {
         var self = this;
         var cfg = this.currentConfig;
@@ -1039,7 +1039,7 @@ function createVueApp() {
             self.tableMap = result.tableMap || {};
             self.languages = result.languages || [];
             self.listsCache = result.lists || {}; window._listsCache = self.listsCache;
-            self.loadListAvatars(); self.loadListUserLinks(); self.loadMyListValues();   // avatars + admin editor links + my own @me identity
+            self.loadListAvatars(); self.loadMyListValues();   // avatars + my own @me identity (the admin-only editor links wait for the user list — see the usersLoaded watcher)
             // Auto-seed lists (create missing list names + seed mandatory filter values): admin-only
             // maintenance. A restricted user's listsCache is already scoped to their own tables
             // server-side; seeding+saving here would add entries for tables they don't own, and
@@ -1114,7 +1114,7 @@ function createVueApp() {
           return backend.getLists(self.folderId).then(function(lists) {
             self.listsCache = lists || {}; window._listsCache = self.listsCache;
             if (self._seedSchemaLists()) backend.saveLists(self.folderId, self.listsCache);
-            self.loadListAvatars(); self.loadListUserLinks(); self.loadMyListValues();   // avatars + admin editor links + my own @me identity
+            self.loadListAvatars(); self.loadMyListValues();   // avatars + my own @me identity (the admin-only editor links wait for the user list — see the usersLoaded watcher)
           });
         }).then(function() {
           // Load users FIRST to know access restrictions
@@ -1453,6 +1453,18 @@ function createVueApp() {
       embedCols: function(type, name) { return Embeds.embedCols(type, name, this._embedCtx()); },
       embedRows: function(type, name, part) { return Embeds.embedRows(type, name, part, this._embedCtx()); },
       embedHideEmpty: function(type, name) { var c = type === 'view' ? VIEWS[name] : SCHEMA[name]; return !!(c && c.hideEmpty); },
+      // Tab labels for a `{{view:x@both}}` embed's Upcoming/Past toggle. Default to the keys the
+      // top-level archive tabs already use (so a database that translated those gets the toggle
+      // translated for free); a view/table may name its own keys instead — `partitionLabels:
+      // { "active": "text.mine_log", "archive": "text.mine_past" }` — because the section headings a
+      // page had before the toggle ("What I've logged" / "Approved earlier") are usually the better
+      // labels. Resolution goes through t(), so an untranslated key shows as the key: static UI prose,
+      // visibly a gap, exactly as the top-level archive tabs behave.
+      embedPartLabel: function(type, name, part) {
+        var c = type === 'view' ? VIEWS[name] : SCHEMA[name];
+        var own = c && c.partitionLabels && c.partitionLabels[part];
+        return this.t(own || (part === 'archive' ? 'btn.show_archived' : 'btn.show_active'));
+      },
       embedViewLayout: function(type, name) { var c = type === 'view' ? VIEWS[name] : SCHEMA[name]; return (c && c.layout) || 'table'; },
       embedRowsForItem: function(ei, item) { return Embeds.embedRowsForItem(ei, item); },
       embedWhenOk: function(ei, item) { return Embeds.embedWhenOk(ei, item); },
@@ -1471,6 +1483,7 @@ function createVueApp() {
         // Same trap as the top-level grid: an embed of a `@me` view the viewer has no identity for would
         // offer Add, write an orphan, and drop it from the list again.
         if (type === 'view' && this.viewIdentityMissing(name)) return false;
+        if (type === 'view' && this.viewAddBlocked(name)) return false;   // declared/synthetic: no row behind the button
         var selfServe = this.embedSelfServeTable(type, name);
         if (this.viewReadonly(name) && !selfServe) return false;
         if (selfServe) return true;              // add opens; per-row/per-column bounds gate the rest
@@ -2193,6 +2206,18 @@ function createVueApp() {
         return !(SCHEMA[item._source] && SCHEMA[item._source].columns && SCHEMA[item._source].columns[col]);
       },
       // Is a view/table read-only as a whole (config flag, viewer role, aggregate, or a read-only grant)
+      // Rows a view SHOWS but does not own: an explicit `readonly: true`, or rows that are SYNTHETIC —
+      // aggregate/groupBy lines and pivot cells, which stand for many source rows rather than one. There
+      // is nothing to add to either. Deliberately separate from viewReadonly's GRANT-derived answer,
+      // which self-service is designed to override (an owner-column table is exactly where a member
+      // holding only `r` may still add their own row). Self-service must not override THIS: the row an
+      // Add writes lands in the source table and cannot satisfy the view that offered the button — the
+      // leaderboard's `status: approved` filter, say — so the button reads as "Add does nothing", while
+      // the blank row it wrote shows up in whatever view DOES list that table.
+      viewAddBlocked: function(id) {
+        var v = VIEWS[id];
+        return !!(v && (v.readonly || v.groupBy || v.aggregate || v.pivot));
+      },
       viewReadonly: function(id) {
         var v = VIEWS[id], cfg = VIEWS[id] || SCHEMA[id] || {};
         if (!!cfg.readonly || this.currentUserRole === 'viewer' || !!(v && v.groupBy && v.collect)) return true;
@@ -4194,7 +4219,8 @@ function createVueApp() {
           embedWhenOk: function(ei, item) { return self.embedWhenOk(ei, item); },
           embedRowsForItem: function(ei, item) { return self.embedRowsForItem(ei, item); },
           embedCols: function(t, n) { return self.embedCols(t, n); },
-          embedRows: function(t, n, p) { return self.embedRows(t, n, p); }
+          embedRows: function(t, n, p) { return self.embedRows(t, n, p); },
+          embedPartLabel: function(t, n, p) { return self.embedPartLabel(t, n, p); }
         };
       },
       printView: function() {
@@ -4261,6 +4287,13 @@ function createVueApp() {
         this._updateManifest();
       }},
       appTitle: { immediate: true, handler: function(t) { if (t) document.title = t; this._updateManifest(); } },
+      // The raw value->email links are admin-only at every layer (dev server 403s, Firestore rules deny),
+      // and only the Lookup editor's picker reads them. Boot used to fire the request for every user and
+      // swallow the denial into {} — harmless, but it put a red 403 in every member's console on every
+      // load. Ask only once the answer can be yes: `isAdmin` returns true until the user list lands (see
+      // its default), so gating at the boot call site would have changed nothing; the wait is the fix.
+      // Non-admins keep the initial {} exactly as the swallowed rejection left them.
+      usersLoaded: function(v) { if (v && this.isAdmin) this.loadListUserLinks(); },
       viewingArchive: function() {
         // Active tab sorts the default column ascending (today -> future); the archive tab reverses it
         // (today -> past, most-recently-archived first). Only applies when a defaultSort is set.
@@ -4370,12 +4403,14 @@ function createVueApp() {
   app.component('embed-view', {
     props: {
       type: { type: String, default: 'view' }, name: { type: String, default: null }, part: { type: String, default: null },
+      both: { type: Boolean, default: false }, // `@both`: render the Upcoming/Past toggle, own the partition
       spec: { type: Object, default: null }, row: { type: Object, default: null },
       fontSize: { type: String, default: '0.75rem' }, cellPad: { type: String, default: '2px 6px' }, header: { type: Boolean, default: false },
       depth: { type: Number, default: 0 } // recursion guard for doc-view-in-doc-view embeds
     },
-    // Per-embed inline-edit state for doc-view embeds (each embed edits its own page independently).
-    data: function() { return { editing: false, docDraft: '' }; },
+    // Per-embed inline-edit state for doc-view embeds (each embed edits its own page independently), and
+    // which half of a `@both` embed is showing (per embed: two toggles on one page move independently).
+    data: function() { return { editing: false, docDraft: '', showArchive: false }; },
     created: function() {
       // A doc-view embed renders the ACCESS-GATED server body, not the world-readable schema seed. Kick
       // off the single-page read (server-filtered) once, but only if the viewer may see it -- a restricted
@@ -4417,12 +4452,26 @@ function createVueApp() {
         if (appInstance.embedHideEmpty(this.type, this.name)) { var rows = this.rows; cols = cols.filter(function(c) { return rows.some(function(r) { return r[c]; }); }); }
         return cols;
       },
+      // The partition actually being rendered. A fixed `@part` embed is whatever the token said; a
+      // `@both` embed follows its own tab. Everything downstream keys off THIS, not the prop, so the
+      // Upcoming half of a toggle behaves exactly like a partition-less embed (editable, Add, archive)
+      // and the Past half exactly like `@archive` (read-only) — no new editing semantics either way.
+      // (`showToggle` guards the tab going away underneath the reader — a live-sync restore that empties
+      // the archive while the Past half is open would otherwise strand them on an empty read-only list
+      // with no tab strip left to click back with.)
+      effPart: function() { return this.both ? (this.showArchive && this.showToggle ? 'archive' : null) : this.part; },
+      // The toggle appears only once something has actually aged into the archive. An embed whose
+      // archive is empty renders exactly as it did before the toggle existed, no chrome — the same
+      // promise `{{view:x@archive?}}` made by hiding its heading until the section had content.
+      showToggle: function() {
+        return !!(this.both && !this.spec && appInstance && appInstance.embedRows(this.type, this.name, 'archive').length);
+      },
       rows: function() {
         if (this.spec) return (this.spec.config.filterBy && this.row) ? appInstance.embedRowsForItem(this.spec, this.row) : this.spec.rows;
-        return appInstance ? appInstance.embedRows(this.type, this.name, this.part) : [];
+        return appInstance ? appInstance.embedRows(this.type, this.name, this.effPart) : [];
       },
-      canMutate: function() { return !this.part && appInstance && appInstance.canMutateEmbed(this.type, this.name); },
-      hasArchive: function() { return !this.part && appInstance && appInstance.embedHasArchive(this.type, this.name); },
+      canMutate: function() { return !this.effPart && appInstance && appInstance.canMutateEmbed(this.type, this.name); },
+      hasArchive: function() { return !this.effPart && appInstance && appInstance.embedHasArchive(this.type, this.name); },
       layout: function() { return appInstance ? appInstance.embedViewLayout(this.type, this.name) : 'table'; },
       roLayout: function() { return (this.spec && this.spec.config.layout) || 'table'; },
       // The config whose column entries govern THIS embed's per-row visibility: an inline/named-view
@@ -4439,6 +4488,7 @@ function createVueApp() {
       colHidden: function(col, item) { return !!appInstance && appInstance.isColumnHidden(col, item, this.colCfg); },
       colsFor: function(item) { var self = this; return this.cols.filter(function(c) { return !self.colHidden(c, item); }); },
       isArmed: function(item) { return appInstance.isArmed('erow:' + item.id); },
+      partLabel: function(archive) { return appInstance.embedPartLabel(this.type, this.name, archive ? 'archive' : 'active'); },
       // Per-row control gate. On a self-service embed `canMutate` only means "the Add button is open";
       // whether THIS row may be archived/deleted is ownership + state, exactly as in the primary grid.
       canMutateRow: function(item) { return this.canMutate && appInstance.canMutateEmbedRow(this.type, this.name, item); },
@@ -4475,7 +4525,7 @@ function createVueApp() {
       + '<v-textarea v-if="editing" :model-value="docDraft" @update:model-value="docDraft = $event" auto-grow variant="outlined" density="compact" hide-details placeholder="# Markdown"></v-textarea>'
       + '<template v-else v-for="(blk, bi) in blocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
-      + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart" :depth="depth + 1"></embed-view>'
+      + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart" :both="blk.embedBoth" :depth="depth + 1"></embed-view>'
       + '</template>'
       + '</template>'
       // --- read-only data (data-view spec path): inline {{self}} blocks, or table/card/chip + header ---
@@ -4495,6 +4545,11 @@ function createVueApp() {
       + '</template>'
       // --- editable data (page / doc-leaf self path): list/card/table with data-cell + row controls ---
       + '<div v-else>'
+      // `@both`: the top-level archive tabs (ui.html), scaled down and scoped to this embed.
+      + '<v-tabs v-if="showToggle" :model-value="showArchive" @update:model-value="showArchive = $event" density="compact" class="mb-2" data-testid="embed-part-tabs">'
+      + '<v-tab :value="false" size="small">{{ partLabel(false) }}</v-tab>'
+      + '<v-tab :value="true" size="small">{{ partLabel(true) }}</v-tab>'
+      + '</v-tabs>'
       + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
       + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
       + '<template v-slot:default><span v-for="(col, i) in colsFor(item)" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]"></list-value><span v-if="i < colsFor(item).length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
@@ -4508,7 +4563,7 @@ function createVueApp() {
       + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
       + '<thead><tr><th v-for="c in cols" :key="c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
       + '<tbody><tr v-for="(item, ri) in rows" :key="item.id || ri"><td v-for="col in cols" :key="col">'
-      + '<data-cell v-if="!colHidden(col, item)" :item="item" :col="col" :owner="name" :readonly="!!part" :embed="true"></data-cell>'
+      + '<data-cell v-if="!colHidden(col, item)" :item="item" :col="col" :owner="name" :readonly="!!effPart" :embed="true"></data-cell>'
       + '</td><td v-if="canMutate" style="white-space:nowrap"><template v-if="canMutateRow(item)">'
       + '<v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn>'
       + '<v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn>'
@@ -5405,7 +5460,7 @@ function createVueApp() {
       + '<v-textarea v-if="a.pageEditing" :model-value="a.pageEditText" @update:model-value="a.pageEditText = $event" auto-grow variant="outlined" density="compact" placeholder="# Markdown — embed views with {{view:name}} or {{table:name}}"></v-textarea>'
       + '<template v-else v-for="(blk, bi) in a.pageBlocks" :key="bi">'
       + '<div v-if="blk.html" v-html="blk.html"></div>'
-      + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart"></embed-view>'
+      + '<embed-view v-else :type="blk.embedType" :name="blk.embedName" :part="blk.embedPart" :both="blk.embedBoth"></embed-view>'
       + '</template>'
       + '</v-card>'
   });

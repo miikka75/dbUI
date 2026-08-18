@@ -2314,6 +2314,87 @@ test.describe('v3 archived table embed', () => {
   });
 });
 
+test.describe('v3 @both partition toggle in an embed', () => {
+  const V3 = {
+    defaultLanguage: 'en',
+    tables: { tasks: { columns: [{ name: 'title', type: 'text' }], archivable: true } },
+    views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }, { name: 'home', markdown: '## Log\n\n{{table:tasks@both}}' }],
+    nav: { layout: 'tabs', items: [{ view: 'home' }, { view: 'all' }] }
+  };
+  // Boot the page view with the given archive rows present (or absent).
+  async function boot(page, withArchived) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: V3 } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 'a1', title: 'Active item' }, tab: 'active' } });
+    if (withArchived) await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 'z1', title: 'Archived item' }, tab: 'archive' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
+    await page.waitForTimeout(200);
+  }
+
+  test('one embed, two partitions: the tabs swap the rows and the Past half is read-only', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page, true);
+    const tabs = page.locator('[data-testid="embed-part-tabs"]');
+    await expect(tabs).toBeVisible();
+    // Labels resolve through t() against the keys the top-level archive tabs use. This fixture has no
+    // btn.show_* translations, so they show as their keys — a visible gap, the app's rule for UI prose.
+    await expect(tabs).toContainText('btn.show_active');
+    await expect(tabs).toContainText('btn.show_archived');
+    // Upcoming: the active partition, editable exactly as a partition-less embed (Add offered).
+    await expect(page.locator('.v-main')).toContainText('Active item');
+    await expect(page.locator('.v-main')).not.toContainText('Archived item');
+    expect(await page.evaluate(() => appInstance.canMutateEmbed('table', 'tasks'))).toBe(true);
+    await expect(page.locator('.v-main').getByRole('button', { name: 'Add' })).toBeVisible();
+    // Past: the archive partition, read-only — the same deal `{{table:tasks@archive}}` has always given.
+    await tabs.locator('.v-tab').nth(1).click();
+    await expect(page.locator('.v-main')).toContainText('Archived item');
+    await expect(page.locator('.v-main')).not.toContainText('Active item');
+    await expect(page.locator('.v-main').getByRole('button', { name: 'Add' })).toHaveCount(0);
+    await tabs.locator('.v-tab').nth(0).click();
+    await expect(page.locator('.v-main')).toContainText('Active item');
+  });
+
+  test('no tabs until something has actually aged into the archive', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page, false);
+    // Empty archive -> the embed renders exactly as it did before the toggle existed: no chrome, editable.
+    await expect(page.locator('[data-testid="embed-part-tabs"]')).toHaveCount(0);
+    await expect(page.locator('.v-main')).toContainText('Active item');
+    await expect(page.locator('.v-main').getByRole('button', { name: 'Add' })).toBeVisible();
+    // Archiving a row is what brings the toggle out.
+    await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 'z2', title: 'Aged out' }, tab: 'archive' } });
+    await page.reload();
+    await page.waitForTimeout(400);
+    await expect(page.locator('[data-testid="embed-part-tabs"]')).toBeVisible();
+  });
+
+  test('validateSchema names an inert @both token and a malformed partitionLabels', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      window.SCHEMA.plain = { columns: { title: 'text' } };                        // no archive partition
+      window.VIEWS.both_bad = { name: 'both_bad', markdown: '{{table:plain@both}}' };
+      window.VIEWS.lbl_bad = { name: 'lbl_bad', sources: ['tasks'], columns: ['title'], partitionLabels: { activ: 'x', archive: 3 } };
+      const bad = window.validateSchema().join(' | ');
+      // control: an archivable target and well-formed labels raise nothing
+      window.SCHEMA.plain.archivable = true;
+      window.VIEWS.lbl_bad.partitionLabels = { active: 'text.a', archive: 'text.b' };
+      const good = window.validateSchema().filter(e => e.indexOf('both_bad') >= 0 || e.indexOf('lbl_bad') >= 0).join(' | ');
+      delete window.SCHEMA.plain; delete window.VIEWS.both_bad; delete window.VIEWS.lbl_bad;
+      return { bad, good };
+    });
+    expect(r.bad).toContain('both_bad');
+    expect(r.bad).toContain('no archive partition to toggle to');
+    expect(r.bad).toContain('lbl_bad');
+    expect(r.bad).toContain('is not a partition');           // "activ" typo
+    expect(r.bad).toContain('must be a translation key');    // archive: 3
+    expect(r.good).toBe('');
+  });
+});
+
 test.describe('v3 page body stored on server', () => {
   const V3 = {
     defaultLanguage: 'en',
@@ -4878,6 +4959,45 @@ test.describe('a `@me` view with no linked identity', () => {
     expect(r.viaOr).toBe(true);                 // the walk descends $or without losing the column
     expect(r.unfiltered).toEqual({ missing: false, canAdd: true });   // a view without @me is untouched
     expect(r.withIdentity).toEqual({ missing: false, canAdd: true });
+  });
+});
+
+test.describe('a view whose rows are not its own to add to', () => {
+  // The chores scoreboard: leaderboards over `chore_log`, declared `readonly` AND aggregate. `chore_log`
+  // has an owner column, so a member holding only `r` qualifies for self-service — which used to override
+  // the read-only answer wholesale and put an Add button on a leaderboard. The row it wrote landed in the
+  // source table, failed the view's own `status: approved` filter, and never appeared: "Add does nothing",
+  // plus a blank row in whatever view DOES list that table.
+  test('an explicit readonly / aggregate view offers no Add, even to a self-service member', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // `signups` is the fixture's owner-column table; a member with no grant on it is the self-service
+      // shape — the same setup the "embedded self-service view keeps Add" test uses.
+      app.usersLoaded = true;
+      app.userList = [{ key: 'mel@x.com', role: 'editor', tables: ['notes'] }];
+      app.currentUserEmail = 'mel@x.com';
+      window.VIEWS.board_agg = { name: 'board_agg', sources: ['signups'], mode: 'union', groupBy: { column: 'dish', from: ['dish'] }, aggregate: { sum: 'n', into: 'total' }, columns: ['dish', 'total'], readonly: true };
+      window.VIEWS.board_ro = { name: 'board_ro', sources: ['signups'], mode: 'union', columns: ['dish'], readonly: true };
+      window.VIEWS.log_mine = { name: 'log_mine', sources: ['signups'], mode: 'union', columns: ['dish'] };
+      const selfServe = app.embedSelfServeTable('view', 'board_agg');   // the bypass's precondition
+      const out = { selfServe: selfServe, embed: {}, top: {} };
+      ['board_agg', 'board_ro', 'log_mine'].forEach((n) => {
+        out.embed[n] = app.canMutateEmbed('view', n);
+        app.selectTab(n);
+        out.top[n] = { canAdd: app.canAddRows, readonlyView: app.isReadonlyView };
+      });
+      ['board_agg', 'board_ro', 'log_mine'].forEach((n) => { delete window.VIEWS[n]; });
+      return out;
+    });
+    expect(r.selfServe).toBe('signups');                // self-service really does apply here
+    expect(r.embed.board_agg).toBe(false);              // ...and no longer overrides an aggregate view
+    expect(r.embed.board_ro).toBe(false);               // ...nor an explicit readonly: true
+    expect(r.top.board_agg).toEqual({ canAdd: false, readonlyView: true });   // same answer top-level
+    expect(r.top.board_ro).toEqual({ canAdd: false, readonlyView: true });
+    // The case the bypass exists for is untouched: a plain view of the same self-service table.
+    expect(r.embed.log_mine).toBe(true);
+    expect(r.top.log_mine).toEqual({ canAdd: true, readonlyView: false });
   });
 });
 

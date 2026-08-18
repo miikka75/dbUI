@@ -5,7 +5,7 @@
 //
 // Pure over an explicit `ctx` the root builds (app-core `_printCtx()`):
 //   { t, colIsDate, toDateStr, displayValue, isColumnHidden, colHideEmpty,
-//     embedItems, embedWhenOk, embedRowsForItem, embedCols, embedRows }
+//     embedItems, embedWhenOk, embedRowsForItem, embedCols, embedRows, embedPartLabel }
 //   Browser: <script src="/print.js">; exposes Print.*. Node: const Print = require('../print').
 (function(root) {
   function escape(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
@@ -40,8 +40,15 @@
       var dh = ei.config.bare ? '<div>' : '<div class="embed">';
       (ei.blocks || []).forEach(function(b) {
         if (b.html) { dh += b.html; return; }
-        var cols = ctx.embedCols(b.embedType, b.embedName), brows = ctx.embedRows(b.embedType, b.embedName, b.embedPart);
-        if (brows.length) dh += table(cols, brows, ctx);
+        var cols = ctx.embedCols(b.embedType, b.embedName);
+        // Paper has no tabs: a `@both` block prints BOTH partitions stacked, each under its tab label,
+        // rather than silently dropping whichever half the reader had not clicked before printing.
+        (b.embedBoth ? [null, 'archive'] : [b.embedPart]).forEach(function(p) {
+          var brows = ctx.embedRows(b.embedType, b.embedName, p);
+          if (!brows.length) return;
+          if (b.embedBoth) dh += '<h4>' + escape(ctx.embedPartLabel(b.embedType, b.embedName, p || 'active')) + '</h4>';
+          dh += table(cols, brows, ctx);
+        });
       });
       return dh + '</div>';
     }
