@@ -234,6 +234,46 @@ describe('backend-helpers - ownerWritableOf (bound an owner-scoped write to colu
   });
 });
 
+describe('backend-helpers - identity columns', () => {
+  // A `defaultFrom: "@me"` column must be owner-writable or the owner cannot create the row at all
+  // (its value is per-user, so `locked` cannot predict it) — which left them free to write somebody
+  // else's identity into it. The mirror names the column so the write layers can require it to be theirs.
+  const schema = { tables: { chore_log: {
+    ownerWritable: ['person', 'chore', 'note'],
+    columns: [
+      { name: 'owner', type: 'owner' },
+      { name: 'person', type: 'select', list: 'members', defaultFrom: '@me' },
+      { name: 'chore', type: 'text' }, { name: 'note', type: 'text' }
+    ] } } };
+
+  it('names the identity column and its list', () => {
+    const b = H.ownerWritableOf(schema).chore_log;
+    assert.equal(b.identityCol, 'person');
+    assert.equal(b.identityList, 'members');
+  });
+  it('a defaultFrom column that is NOT owner-writable is already unreachable, so it is not named', () => {
+    const s2 = JSON.parse(JSON.stringify(schema));
+    s2.tables.chore_log.ownerWritable = ['chore', 'note'];
+    assert.equal(H.ownerWritableOf(s2).chore_log.identityCol, '');
+  });
+
+  const bounds = { identityCol: 'person', identityList: 'members' };
+  it('accepts the caller own value and refuses anybody else', () => {
+    assert.equal(H.ownerIdentityOk(bounds, { person: 'Ann' }, 'Ann'), true);
+    assert.equal(H.ownerIdentityOk(bounds, { person: 'Bob' }, 'Ann'), false);
+  });
+  it('a write that does not carry the column cannot forge it', () => {
+    assert.equal(H.ownerIdentityOk(bounds, { note: 'x' }, 'Ann'), true);
+  });
+  it('a caller with no identity cannot claim one', () => {
+    assert.equal(H.ownerIdentityOk(bounds, { person: 'Ann' }, ''), false);
+  });
+  it('a table with no identity column is unaffected', () => {
+    assert.equal(H.ownerIdentityOk({ identityCol: '', identityList: '' }, { person: 'Bob' }, ''), true);
+    assert.equal(H.ownerIdentityOk(null, { person: 'Bob' }, ''), true);
+  });
+});
+
 describe('backend-helpers - ownerRowInState (the shared while-gate predicate)', () => {
   const gated = { whileCol: 'status', whileVals: ['logged'] };
   it('a create (no stored row) always passes — it is in its own starting state', () => {

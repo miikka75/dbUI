@@ -374,11 +374,31 @@ backend = {
   // the shared-only query stays rules-provable; a later share/unshare needs a re-link to refresh it.
   setListUser: function(listName, value, email) {
     var self = this, id = self._linkDocId(listName, value);
-    if (!email) return _db.collection('_list_users').doc(id).delete();
+    if (!email) return _db.collection('_list_users').doc(id).delete().then(function() { return self._mirrorIdentity(listName, value, ''); });
     var e = String(email).toLowerCase();
     return _db.collection('_profiles').doc(e).get().then(function(d) {
       return _db.collection('_list_users').doc(id).set({ list: String(listName), value: String(value), email: e, shared: (d.exists && !!d.data().shared) });
-    });
+    }).then(function() { return self._mirrorIdentity(listName, value, e); });
+  },
+  // Mirror the link onto the linked user's GRANT doc as `identity: { <list>: <value> }`. The rules need
+  // "what is this caller's own value for this list" and cannot QUERY for it; the grant doc is
+  // admin-write-only (so a member cannot forge it) and already read on every evaluation, so this is the
+  // cheapest place to put the answer. Unlinking clears the key, and re-linking a value to a different
+  // user clears it from whoever held it before.
+  _mirrorIdentity: function(listName, value, email) {
+    var col = _db.collection('_users');
+    return col.get().then(function(snap) {
+      var writes = [];
+      snap.forEach(function(doc) {
+        var d = doc.data() || {}, ident = Object.assign({}, d.identity || {});
+        var had = ident[listName];
+        if (email && doc.id === email) { if (had === value) return; ident[listName] = value; }
+        else if (had === value) { delete ident[listName]; }                 // somebody else holds it now
+        else return;
+        writes.push(doc.ref.set(Object.assign({}, d, { identity: ident }))); // whole doc: grants are small
+      });
+      return Promise.all(writes);
+    }).catch(function() { /* non-admin or offline: the link itself is already written */ });
   },
   getTranslations: function(folderId, langCode) {
     return StorageFirestore.getMeta('lang_' + langCode).then(function(d) { return d || {}; });

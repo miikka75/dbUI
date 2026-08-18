@@ -284,8 +284,9 @@ service cloud.firestore {
     // already approved" is one comparison rather than a loop the rules language does not have.
     function ownerCreateOk(coll) {
       return !ownerBounded(coll)
-        || request.resource.data.diff(ownerBounds(coll).locked).affectedKeys()
-             .hasOnly(ownerBounds(coll).cols.concat(ownerSystemCols()));
+        || (ownerIdentityOk(coll)
+            && request.resource.data.diff(ownerBounds(coll).locked).affectedKeys()
+                 .hasOnly(ownerBounds(coll).cols.concat(ownerSystemCols())));
     }
     // `ownerWritableWhile: {col: value|[values]}` -> mirrored as whileCol + whileVals. The owner branch
     // reaches a STORED row only while it still holds one of those values: "you may fix your entry until
@@ -302,10 +303,30 @@ service cloud.firestore {
         || ownerBounds(coll).whileCol == ''
         || (resource.data[ownerBounds(coll).whileCol] in ownerBounds(coll).whileVals);
     }
+    // An IDENTITY column (`defaultFrom: "@me"`, and owner-writable because otherwise the owner could not
+    // create the row at all) may only ever carry the CALLER'S OWN value — without this a member could log
+    // the work as somebody else, which the column bounds cannot catch: the column IS one they may write.
+    // The caller's value comes from `_users/<email>.identity`, mirrored by setListUser. That doc is
+    // admin-write-only, so a member cannot forge it, and userData() has already fetched it — this costs
+    // no extra get(). A QUERY (find the link naming me) is what rules cannot do; this is the same
+    // denormalize-for-schema-blind-rules trick as rwTables.
+    //   Enforced only for a column backed by a LIST. Without one the identity is the profile display
+    // name, which the user writes themselves, so there would be nothing to verify against.
+    //   No `identity` map on the grant -> migration grace, permissive, exactly like selfServiceTable():
+    // it starts binding once an admin re-saves the links.
+    function ownerIdentityOk(coll) {
+      let b = ownerBounds(coll);
+      let u = userData();
+      return !ownerBounded(coll)
+        || !('identityCol' in b) || b.identityCol == '' || b.identityList == ''
+        || !(b.identityCol in request.resource.data)
+        || !('identity' in u)
+        || request.resource.data[b.identityCol] == u.identity.get(b.identityList, '__no_identity__');
+    }
     // UPDATE: the row must still be in an owner-writable state, and only listed columns may change value.
     function ownerUpdateOk(coll) {
       return !ownerBounded(coll)
-        || (ownerStateOk(coll)
+        || (ownerStateOk(coll) && ownerIdentityOk(coll)
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(ownerBounds(coll).cols.concat(ownerSystemCols())));
     }

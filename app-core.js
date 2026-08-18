@@ -2235,6 +2235,11 @@ function createVueApp() {
           ? (this.currentSelfService ? this.selfServeTable : null)
           : this.embedSelfServeTable(VIEWS[ownerId] ? 'view' : 'table', ownerId);
         if (st) {
+          // The IDENTITY column is read-only for its owner even though it is owner-writable: the write
+          // layers require it to carry the caller's own value, so offering an editor here would only
+          // produce a refused write (or, worse, an optimistic value that never lands).
+          var bounds = ownerBoundsFor(st);
+          if (bounds && bounds.identityCol === col && bounds.identityList) return true;
           return !this.rowOwnedByMe(item, st)
             || !this.ownerRowWritable(item, st)     // out of its editable state -> frozen
             || !this.ownerCanWrite(st, col);

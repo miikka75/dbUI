@@ -253,10 +253,25 @@ const server = http.createServer(async (req, res) => {
     // Same comparison the rules make: diff the incoming row against what it is allowed to differ from —
     // the existing row on an update, the gated columns' create-time defaults on a create — and require
     // every field that actually changes to be listed (or system bookkeeping).
+    // The caller's own value for a list, resolved exactly as the client's `@me` does: the curated value
+    // linked to their account on a userlink list, else their profile display name.
+    function myIdentityFor(listName) {
+      if (listName) {
+        const links = (backend.getListUsers ? backend.getListUsers('local') : {})[listName] || {};
+        for (const value of Object.keys(links)) if (_mine(links[value])) return value;
+        return '';
+      }
+      const p = (backend._profiles || {})[(userEmail || '').toLowerCase()];
+      return (p && p.name) || '';
+    }
     function ownerFieldsOk(tableId, incoming, existing) {
       const base = tableId ? tableId.split('__')[0] : '';
       const bounds = BackendHelpers.ownerWritableOf(backend.getSchema('local') || {})[base];
       if (!bounds) return true;
+      // An identity column (`defaultFrom: "@me"`, owner-writable) may only ever carry the CALLER'S own
+      // identity. It has to be owner-writable for the owner to create the row at all, which otherwise
+      // left them free to log the work as somebody else.
+      if (!BackendHelpers.ownerIdentityOk(bounds, incoming, myIdentityFor(bounds.identityList))) return false;
       // `ownerWritableWhile`: once the STORED row leaves its editable states the owner branch stops
       // reaching it at all — no field of it, not even a listed one. Checked against `existing`, so the
       // owner cannot escape the gate by sending a compliant new state in the same write.

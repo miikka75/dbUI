@@ -359,6 +359,9 @@ function validateRefs(schema) {
     // A truthy non-boolean (e.g. "admin") would hide the entry too, but silently reads as a role name
     // rather than the flag it is — say so rather than let it look like it does something finer.
     if (it.adminOnly !== undefined && typeof it.adminOnly !== 'boolean') errs.push('Nav -> `adminOnly` must be true or false (got ' + JSON.stringify(it.adminOnly) + ')');
+    if (it.hideFromAdmin !== undefined && typeof it.hideFromAdmin !== 'boolean') errs.push('Nav -> `hideFromAdmin` must be true or false (got ' + JSON.stringify(it.hideFromAdmin) + ')');
+    // Both together hides the entry from EVERYONE, which is never what anyone means by writing them.
+    if (it.adminOnly && it.hideFromAdmin) errs.push('Nav -> "' + (it.view || it.table || it.group) + '" sets both `adminOnly` and `hideFromAdmin`, which hides it from every user');
     if (it.items) walk(it.items);
   }); })(schema.nav && schema.nav.items);
   return errs;
@@ -369,10 +372,12 @@ function buildNavTabs(navItems, t, canAccess, opts) {
   var tabs = [];
   function navTab(it) {
     // `adminOnly` hides an entry (a group and everything under it, or a single view/table) from
-    // non-admins. This is TIDINESS, not access control -- what a member may read or write is decided by
-    // their table grants, and this only keeps admin-facing plumbing out of their menu. Put it on the
-    // group to hide the whole branch.
+    // non-admins; `hideFromAdmin` is its mirror, for the views that are about being a PARTICIPANT —
+    // "my chores", "my rewards" — which an admin who only approves is not. Both are TIDINESS, not
+    // access control: what a member may read or write is decided by their table grants, and these only
+    // keep the wrong menu out of the wrong hands. Put either on a group to hide the whole branch.
     if (it.adminOnly && !opts.isAdmin) return null;
+    if (it.hideFromAdmin && opts.isAdmin) return null;
     if (it.group) { var ch = (it.items || []).map(navTab).filter(Boolean); return ch.length ? { id: 'grp:' + it.group, title: t('nav.' + it.group) || it.group, icon: it.icon || 'mdi-folder', children: ch } : null; }
     var gid = it.view || it.table;
     if (!gid || !canAccess(gid)) return null;

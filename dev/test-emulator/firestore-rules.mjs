@@ -389,6 +389,42 @@ await ok('owner CANNOT create a row that is already approved',
     row({ id: 'new2', chore: 'Bins', status: 'approved' }))));
 await ok('an ADMIN still approves it (the gate binds only the owner branch)',
   assertSucceeds(setDoc(doc(admin, 'chore_log__active/mine'), row({ status: 'approved' }))));
+// An IDENTITY column may only carry the CALLER'S own value. It has to be owner-writable (a defaultFrom
+// value is per-user, so `locked` cannot predict it), which left a member free to log the work as
+// somebody else. The caller's value rides on the admin-write-only grant doc, which userData() already
+// reads, because rules cannot QUERY for "the link naming me".
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), '_meta/ownerWritable'), {
+    chore_log: { cols: ['person', 'chore', 'note'], locked: { status: 'logged' },
+                 whileCol: '', whileVals: [], identityCol: 'person', identityList: 'members' }
+  });
+  await setDoc(doc(ctx.firestore(), '_users/kid@x.com'), {
+    role: 'editor', user: 'kid@x.com', tables: { chore_log: 'r' }, rwTables: [], identity: { members: 'Kid' }
+  });
+});
+await ok('owner CAN log a chore as THEMSELVES',
+  assertSucceeds(setDoc(doc(kid, 'chore_log__active/ident1'),
+    { id: 'ident1', owner: 'kid@x.com', person: 'Kid', chore: 'Wash up', note: '', status: 'logged' })));
+await ok('owner CANNOT log a chore as somebody else',
+  assertFails(setDoc(doc(kid, 'chore_log__active/ident2'),
+    { id: 'ident2', owner: 'kid@x.com', person: 'Ann', chore: 'Wash up', note: '', status: 'logged' })));
+await ok('owner CANNOT reassign their own row to somebody else',
+  assertFails(setDoc(doc(kid, 'chore_log__active/ident1'),
+    { id: 'ident1', owner: 'kid@x.com', person: 'Ann', chore: 'Wash up', note: '', status: 'logged' })));
+await ok('...but may still edit a field that is not the identity',
+  assertSucceeds(setDoc(doc(kid, 'chore_log__active/ident1'),
+    { id: 'ident1', owner: 'kid@x.com', person: 'Kid', chore: 'Hoover', note: 'ok', status: 'logged' })));
+// A grant written before this feature has no `identity` map -> migration grace, or every member would
+// be locked out of logging until an admin re-saved every link.
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), '_users/kid@x.com'), {
+    role: 'editor', user: 'kid@x.com', tables: { chore_log: 'r' }, rwTables: []
+  });
+});
+await ok('a grant with no identity mirror still writes (migration grace)',
+  assertSucceeds(setDoc(doc(kid, 'chore_log__active/ident3'),
+    { id: 'ident3', owner: 'kid@x.com', person: 'Ann', chore: 'Wash up', note: '', status: 'logged' })));
+
 await ok('a table with no ownerWritable entry stays unbounded (opt-in)',
   assertSucceeds(setDoc(doc(viewer, 'claims__active/free'), { id: 'free', owner: 'viewer@x.com', status: 'approved' })));
 

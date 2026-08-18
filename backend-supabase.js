@@ -309,11 +309,27 @@ backend = {
   },
   setListUser: function(listName, value, email) {
     var self = this, id = self._linkDocId(listName, value);
-    if (!email) return StorageSupabase.delete('_list_users', id);
+    if (!email) return StorageSupabase.delete('_list_users', id).then(function() { return self._mirrorIdentity(listName, value, ''); });
     var e = String(email).toLowerCase();
     return StorageSupabase.get('_profiles', e).then(function(d) {
       return StorageSupabase._replace('_list_users', id, { list: String(listName), value: String(value), email: e, shared: !!(d && d.shared) });
-    });
+    }).then(function() { return self._mirrorIdentity(listName, value, e); });
+  },
+  // See backend-firebase._mirrorIdentity: the rules need the caller's own value for a list and cannot
+  // query for it, so it rides on the admin-write-only grant doc they already read.
+  _mirrorIdentity: function(listName, value, email) {
+    return StorageSupabase._all('_users').then(function(rows) {
+      var writes = [];
+      (rows || []).forEach(function(r) {
+        var d = r.value || r, key = r.key || r.id, ident = Object.assign({}, d.identity || {});
+        var had = ident[listName];
+        if (email && key === email) { if (had === value) return; ident[listName] = value; }
+        else if (had === value) { delete ident[listName]; }
+        else return;
+        writes.push(StorageSupabase._replace('_users', key, Object.assign({}, d, { identity: ident })));
+      });
+      return Promise.all(writes);
+    }).catch(function() { /* non-admin or offline: the link itself is already written */ });
   },
 
   getTranslations: function(folderId, langCode) {

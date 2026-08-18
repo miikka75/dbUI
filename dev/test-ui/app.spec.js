@@ -5248,6 +5248,35 @@ test.describe('self-service inside an embed', () => {
   });
 });
 
+test.describe('nav hideFromAdmin', () => {
+  // The mirror of adminOnly, for views that are about being a PARTICIPANT. In the chores app a parent
+  // approves and is never assigned a chore, so "My chores" / "My rewards" are not theirs — and an admin
+  // is exempt from mineOnly, so that page would have shown them everyone ELSE's tasks under a heading
+  // reading "My tasks".
+  test('hides an entry from admins only, and both flags together are rejected at load', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.schemaData = Object.assign({}, app.schemaData || {}, { nav: { items: [
+        { view: 'combined' },
+        { table: 'notes', hideFromAdmin: true },
+        { table: 'tasks', adminOnly: true }
+      ] } });
+      app.usersLoaded = true;
+      const ids = () => app.sidebarTabs.filter(t => !t.divider).map(t => t.id);
+      app.userList = []; app.selfUnregistered = false;      // admin
+      const admin = ids();
+      app.currentUserEmail = 'u@x.com';
+      app.userList = [{ key: 'u@x.com', addr: 'u@x.com', role: 'editor', tables: ['tasks', 'notes', 'chore_log'] }];
+      return { admin, member: ids() };
+    });
+    expect(r.admin).not.toContain('notes');    // the participant view is not the approver's
+    expect(r.admin).toContain('tasks');
+    expect(r.member).toContain('notes');
+    expect(r.member).not.toContain('tasks');
+  });
+});
+
 test.describe('nav adminOnly', () => {
   test('adminOnly hides a group (and its whole branch) from non-admins, admins keep it', async ({ page }) => {
     await ensureAppReady(page);
