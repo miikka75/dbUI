@@ -109,7 +109,9 @@ describe('rules parity — identity columns (an owner may only name themselves)'
     assert.match(SQL, /public\.app_owner_identity_ok\(store, val\)/, 'the owner branch must call it');
   });
   it('dev/server.js gates the owner branch on it', () => {
-    assert.match(SERVER, /BackendHelpers\.ownerIdentityOk\(bounds, incoming, myIdentityFor\(bounds\.identityList\)\)/,
+    // `await` is tolerated: the dev server's backend calls became async so the same code could run
+    // against PGlite. What this guards is that the identity is RESOLVED and passed, not the spelling.
+    assert.match(SERVER, /BackendHelpers\.ownerIdentityOk\(bounds, incoming, (?:await )?myIdentityFor\(bounds\.identityList\)\)/,
       'the dev server must consult it with the caller resolved identity');
   });
   it('all three read the mirror off the grant doc, never a self-writable one', () => {
