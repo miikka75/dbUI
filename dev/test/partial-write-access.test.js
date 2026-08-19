@@ -66,7 +66,10 @@ describe('dev server — self-service writes are gated on the MERGED row', () =>
       stdio: 'ignore'
     });
     let up = false;
-    const deadline = Date.now() + 8000;
+    // 20s, not 8: node --test runs suites concurrently and gate-parity now boots a WASM Postgres
+    // alongside this one, which is enough contention to miss a tighter deadline on a loaded machine.
+    // A generous ceiling costs nothing when the server is up in under a second, as it normally is.
+    const deadline = Date.now() + 20000;
     while (!up && Date.now() < deadline) {
       try {
         const r = await fetch(BASE + '/api/serverInfo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });

@@ -25,6 +25,11 @@ const DEV_DIR = path.join(__dirname, '..');
 const PORT = 4310 + (process.pid % 200);
 const BASE = 'http://127.0.0.1:' + PORT;
 const DB_REL = path.join('test', '.gp-' + process.pid + '.db');
+// A SECOND server, this one on --pg, where the JavaScript gates are stood down and the policies are the
+// only gate. Its verdicts must match the first server's, or standing them down changed behaviour.
+const PG_PORT = PORT + 1;
+const PG_BASE = 'http://127.0.0.1:' + PG_PORT;
+const PG_DB_REL = path.join('test', '.gppg-' + process.pid + '.db');
 
 // Two ordinary tables for the grant model, plus one self-service table for the owner model.
 const SCHEMA = {
@@ -107,15 +112,17 @@ const MATRIX = [
   ['nobody@x.com', 'notes', 'write', 'deny']
 ];
 
-let child, PG;
+let child, pgChild, PG;
 
-function post(route, body, user) {
-  return fetch(BASE + '/api/' + route, {
+function postTo(base, route, body, user) {
+  return fetch(base + '/api/' + route, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-User': user || 'admin@x.com' },
     body: JSON.stringify(body || {})
   });
 }
+const post = (route, body, user) => postTo(BASE, route, body, user);
+const postPg = (route, body, user) => postTo(PG_BASE, route, body, user);
 
 // --- the JavaScript gate, over HTTP --------------------------------------------------------------
 async function jsVerdict(user, table, op) {
@@ -197,18 +204,44 @@ before(async () => {
   await PG.putRow('notes', { id: 'seed', body: 'seed' }, 'active');
   await PG.putRow('_pages', { id: 'open', markdown: '# Open' }, 'active');
   await PG.putRow('_pages', { id: 'secret', markdown: '# Secret' }, 'active');
+
+  // --- the same app, served by the --pg server, with the JavaScript gates stood down ---
+  pgChild = spawn(process.execPath, ['server.js', '--pg'], {
+    cwd: DEV_DIR,
+    env: Object.assign({}, process.env, { PORT: String(PG_PORT), APP_DB: PG_DB_REL }),
+    stdio: 'ignore'
+  });
+  let pgUp = false;
+  const pgDeadline = Date.now() + 30000;          // PGlite boots a WASM Postgres and applies the schema
+  while (!pgUp && Date.now() < pgDeadline) {
+    try { pgUp = (await postPg('serverInfo', {})).ok; }
+    catch (e) { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  assert.ok(pgUp, '--pg dev server started');
+
+  await postPg('saveSchema', { schema: SCHEMA });
+  for (const [email, g] of Object.entries(ACTORS)) {
+    await postPg('setUserRole', { uid: email, role: g.role, user: email, email: email, tables: g.tables });
+  }
+  await postPg('saveLists', { lists: { status: ['a'], locked: ['a'], members: ['Ann', 'Bob'] } }, 'admin@x.com');
+  await postPg('setListUser', { listName: 'members', value: 'Ann', email: 'member@x.com' }, 'admin@x.com');
+  await postPg('putRow', { tableId: 'tasks', tab: 'active', data: { id: 'seed', title: 'seed' } }, 'admin@x.com');
+  await postPg('putRow', { tableId: 'notes', tab: 'active', data: { id: 'seed', body: 'seed' } }, 'admin@x.com');
   await PG.saveLists({ status: ['a'], locked: ['a'], members: ['Ann', 'Bob'] });
 });
 
 after(async () => {
   if (PG) { try { await PG.close(); } catch (e) {} }
-  if (child) {
-    const exited = new Promise((r) => child.once('exit', r));
-    child.kill();
+  for (const c of [child, pgChild]) {
+    if (!c) continue;
+    const exited = new Promise((r) => c.once('exit', r));
+    c.kill();
     await Promise.race([exited, new Promise((r) => setTimeout(r, 2000))]);
   }
   for (const f of fs.readdirSync(path.join(DEV_DIR, 'test'))) {
-    if (f.startsWith('.gp-' + process.pid)) { try { fs.rmSync(path.join(DEV_DIR, 'test', f), { force: true }); } catch (e) {} }
+    if (f.startsWith('.gp-' + process.pid) || f.startsWith('.gppg-' + process.pid)) {
+      try { fs.rmSync(path.join(DEV_DIR, 'test', f), { recursive: true, force: true }); } catch (e) {}
+    }
   }
 });
 
@@ -497,6 +530,50 @@ describe('gate parity — doc-view writes', () => {
       assert.equal(js, expected);
     });
   }
+});
+
+// ==================================================================================================
+// The whole point of the phase: with --pg, the JavaScript gates are stood down and the policies are the
+// only thing deciding. If that changed any answer, this is where it shows -- the same matrix, against a
+// server that has no JavaScript gate left to fall back on.
+describe('gate parity — the --pg server, with the JS gates stood down', () => {
+  const pgHttp = async (user, table, op) => {
+    if (op === 'read') {
+      const r = await postPg('getTableData', { tableId: table, tab: 'active' }, user);
+      if (!r.ok) return 'deny';
+      const d = await r.json();
+      if (d && d.error) return 'deny';
+      return (d.rows || []).length ? 'allow' : 'deny';
+    }
+    const r = await postPg('putRow', { tableId: table, tab: 'active', data: { id: 'probe-' + user, title: 'x', body: 'x' } }, user);
+    if (!r.ok) return 'deny';
+    const d = await r.json();
+    return (d && d.error) ? 'deny' : 'allow';
+  };
+
+  for (const [user, table, op, expected] of MATRIX) {
+    it(`${op} ${table} as ${user.split('@')[0]} -> ${expected}`, async () => {
+      const got = await pgHttp(user, table, op);
+      assert.equal(got, expected,
+        'the --pg server answered ' + got + ' where both gates agree on ' + expected +
+        ' -- standing the JavaScript gates down changed behaviour');
+    });
+  }
+
+  it('an owner may create their own row on a table they hold no grant on', async () => {
+    const r = await postPg('putRow', { tableId: 'signups', tab: 'active', data: { id: 'pg1', owner: 'member@x.com', status: 'yes' } }, 'member@x.com');
+    assert.equal((await r.json()).error, undefined);
+  });
+
+  it('...and may not create one owned by somebody else', async () => {
+    const r = await postPg('putRow', { tableId: 'signups', tab: 'active', data: { id: 'pg2', owner: 'other@x.com', status: 'yes' } }, 'member@x.com');
+    assert.ok((await r.json()).error, 'the policy must refuse this with no JavaScript gate in front of it');
+  });
+
+  it('...nor set a column outside ownerWritable on their own row', async () => {
+    const r = await postPg('putRow', { tableId: 'signups', tab: 'active', data: { id: 'pg1', owner: 'member@x.com', organizerNote: 'hah' } }, 'member@x.com');
+    assert.ok((await r.json()).error, 'ownerWritable must still bind');
+  });
 });
 
 describe('gate parity — the matrix is not vacuous', () => {

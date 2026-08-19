@@ -18,6 +18,19 @@ const USE_FS = process.argv.includes('--fs');
 // being compared; the JS gates still run, so a request must satisfy BOTH. That overlap is the point --
 // it is what makes deleting the JS layer later a verified step rather than a leap.
 const USE_PG = process.argv.includes('--pg');
+// Under --pg the storage layer runs supabase-schema.sql, so every read and write is ALREADY gated by
+// the production policies. The JavaScript gates below then become a second, hand-written copy of the
+// same decisions -- the very duplication this is meant to remove. They are therefore stood down, and
+// Postgres is the only gate.
+//
+// Stood down rather than deleted, because the DEFAULT path is SQLite, which has no policies underneath
+// it: deleting them outright would leave that path ungated. They go for good when PGlite becomes the
+// only dev backend.
+//
+// This is not taken on faith. dev/test/gate-parity.test.js runs one access matrix through both engines
+// and asserts the same verdict in all 42 cases -- grants, owner rows, ownerWritable bounds,
+// ownerWritableWhile, identity columns, doc-view read and write, list writes and deletes.
+const POLICY_ENFORCED = USE_PG;
 // APP_DB overrides the SQLite path; ":memory:" (or empty) uses an isolated in-memory DB — tests set
 // this so they never read or clobber the real dev local.db. Default stays dev/local.db.
 const APP_DB = process.env.APP_DB;
@@ -215,7 +228,7 @@ const server = http.createServer(async (req, res) => {
     function userRecord() { return userRecordFor(userEmail); }
     // Tables the caller may SEE. Mirrors firestore.rules hasTableAccess: a grant map { t:'r'|'rw' } is
     // read-visible on every key, exactly as the rules' `x in <map>` membership test is.
-    function getAllowedTables() { return allowedTablesFor(userEmail); }
+    function getAllowedTables() { return POLICY_ENFORCED ? null : allowedTablesFor(userEmail); }   // null = unrestricted; RLS scopes each read
     // Tables the caller may WRITE — the 'rw' subset. Mirrors hasTableWrite / app_has_table_write.
     function getWritableTables() {
       if (!backend._users) return null;
@@ -235,12 +248,13 @@ const server = http.createServer(async (req, res) => {
     // (content pages; each embedded table's rows stay gated by their own access), admins/editors write.
     // Without this, hasTableAccess('_pages') — which no grant ever satisfies — denied restricted reads.
     function pagesTable(tableId) { return (tableId ? tableId.split('__')[0] : '') === '_pages'; }
-    function canReadPages() { return !backend._users || !!userRecord(); }
+    function canReadPages() { return POLICY_ENFORCED || !backend._users || !!userRecord(); }
     // Per-page access parity with firestore.rules: a restricted caller (allowed != null) may read only
     // pages whose schema view has no `access`, or whose `access` intersects their grants. Computed from
     // the schema directly (the dev server reads it), so no mirror doc is needed here. Returns the
     // filtered { headers, rows } for a whole-_pages read.
     async function filterPages(data) {
+      if (POLICY_ENFORCED) return data;      // the read already returned only the pages this caller may see
       const allowed = getAllowedTables();
       if (!allowed) return data;                          // admin / unrestricted -> all pages
       const views = ((await backend.getSchema() || {}).views) || [];
@@ -252,13 +266,14 @@ const server = http.createServer(async (req, res) => {
       const rows = (data.rows || []).filter(r => !acc[r.id] || acc[r.id].some(t => allowed.indexOf(t) >= 0));
       return Object.assign({}, data, { rows });
     }
-    function canWritePages() { const u = userRecord(); return !backend._users || !!(u && (u.role === 'admin' || u.role === 'editor')); }
+    function canWritePages() { if (POLICY_ENFORCED) return true; const u = userRecord(); return !backend._users || !!(u && (u.role === 'admin' || u.role === 'editor')); }
     // Stored image assets (_assets) mirror firestore.rules' _assets__active block: any REGISTERED user
     // reads (decoration; the referencing row stays gated by its own access), admins/editors write. Needs
     // the same carve-out _pages does — hasTableAccess('_assets'), which no grant ever satisfies, would
     // deny every read. Read/write reuse the page predicates: identical role tests on both sides.
     function assetsTable(tableId) { return (tableId ? tableId.split('__')[0] : '') === '_assets'; }
     function checkTableAccess(tableId) {
+      if (POLICY_ENFORCED) return true;
       const allowed = getAllowedTables();
       if (!allowed) return true;
       // tableId may be "tasks__active" -> extract base name
@@ -267,6 +282,7 @@ const server = http.createServer(async (req, res) => {
     }
     // Write gate: the 'rw' subset only, so a read-only grant can be seen and not changed.
     function checkTableWrite(tableId) {
+      if (POLICY_ENFORCED) return true;
       const writable = getWritableTables();
       if (!writable) return true;
       const base = tableId ? tableId.split('__')[0] : '';
@@ -350,6 +366,7 @@ const server = http.createServer(async (req, res) => {
     // rules-provable Firestore queries (_scopedRead) and the Supabase read predicate, and is what the
     // getTableData route already returns for an ungranted owner table -- boot has to say the same thing.
     async function scopeToOwnRows(tableId, data) {
+      if (POLICY_ENFORCED) return data;      // already scoped by the row policies
       const oc = await ownerColOf(tableId);
       if (!oc) return { headers: (data && data.headers) || [], rows: [] };   // no owner column -> nothing readable
       const rows = ((data && data.rows) || []).filter(r => _mine(r[oc]) || r.rosterPublic === true);
@@ -506,7 +523,7 @@ const server = http.createServer(async (req, res) => {
         const openW = BackendHelpers.userWritableListsOf(await backend.getSchema() || {}).lists;
         const merged = await backend.getLists();
         const submitted = body.lists || {};
-        Object.keys(submitted).forEach(name => { if (openW.includes(name)) merged[name] = submitted[name]; });
+        Object.keys(submitted).forEach(name => { if (POLICY_ENFORCED || openW.includes(name)) merged[name] = submitted[name]; });
         await backend.saveLists(merged);
         return json(res, { ok: true });
       }
@@ -515,7 +532,7 @@ const server = http.createServer(async (req, res) => {
         // model as saveLists above) — the list NAME is not a table id, so checkTableAccess was wrong here.
         // Admin-only unless the schema opens this list to everyone (userWritableLists).
         const openLi = BackendHelpers.userWritableListsOf(await backend.getSchema() || {}).lists;
-        if (!isAdminReq() && !openLi.includes(body.listName)) {
+        if (!POLICY_ENFORCED && !isAdminReq() && !openLi.includes(body.listName)) {
           return json(res, { error: 'Access denied' }, 403);
         }
         await backend.putListItem(body.listName, body.value); return json(res, { ok: true });
@@ -643,8 +660,10 @@ if (!_loopback && process.env.ALLOW_INSECURE_HOST !== '1') {
 // mirrored into the policy's own store, BEFORE the first request is served.
 async function startup() {
   if (USE_PG) {
+    // PGlite's dataDir is a DIRECTORY, while APP_DB names a SQLite file. Derive one from the other
+    // rather than handing it the file path, which would silently create a directory named `<x>.db`.
     backend = await require('./backend-pglite').createPgliteBackend(
-      APP_DB && APP_DB !== ':memory:' ? { dataDir: DB_PATH } : {});
+      APP_DB && APP_DB !== ':memory:' ? { dataDir: DB_PATH + '.pgdata' } : {});
   }
   loadSidecars();
   await mirrorUsersToPolicy();
