@@ -639,9 +639,13 @@ const server = http.createServer(async (req, res) => {
       default: res.writeHead(404); return res.end('Not found');
     }
     } catch (err) {
-      console.error('API error:', route, err.message);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: err.message }));
+      // A policy refusal is an AUTHORIZATION failure, not a server fault. Reporting it as 500 made
+      // every denial under --pg look like a crash -- to the client, to the logs, and to anyone reading
+      // them -- and left callers with no way to tell "you may not" from "something broke".
+      const refused = /row-level security|permission denied/i.test(err.message || '');
+      if (!refused) console.error('API error:', route, err.message);
+      res.writeHead(refused ? 403 : 500, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: refused ? 'Access denied' : err.message }));
     }
   }
 

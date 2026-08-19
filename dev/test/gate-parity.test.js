@@ -592,6 +592,43 @@ describe('gate parity — revoking a member revokes it in the policy store too',
   });
 });
 
+// ---- KNOWN DIVERGENCE, found by running the E2E suite against --pg ------------------------------
+// Writing the app-level config (_meta/config, the Settings screen) is ungated in dev/server.js and
+// admin-only under the policies. So a grantless member can rewrite everyone's app config on the dev
+// server and cannot on Supabase or Firebase -- the JavaScript path is the permissive outlier here,
+// which is the opposite direction to the userWritableLists divergence.
+//
+// It is left as-is deliberately rather than "fixed" in passing: closing it means the CLIENT must stop
+// attempting the write for users who cannot make it (today the refusal surfaces as an unhandled
+// rejection, which is what made the E2E fail), and that is an app-core change with its own UI question
+// -- whether a member should see the control at all. Recorded, with the direction stated, so the choice
+// is made on purpose.
+//
+// Asserted as STILL DIVERGING: gating it in dev, or making the policies permit it, will fail this and
+// prompt its removal.
+describe('gate parity — app config writes', () => {
+  it('KNOWN DIVERGENCE: a member may write app config on the dev server and not under the policies', async () => {
+    const r = await post('setFolderConfig', { config: { tabsNav: true } }, 'member@x.com');
+    const js = r.ok && !((await r.json()) || {}).error ? 'allow' : 'deny';
+
+    PG.setCaller('member@x.com');
+    let rls = 'allow';
+    try { await PG.setFolderConfig({ tabsNav: true }); }
+    catch (e) { if (/row-level security/.test(e.message)) rls = 'deny'; else throw e; }
+
+    assert.equal(js, 'allow', 'the dev JavaScript path does not gate this');
+    assert.equal(rls, 'deny', 'the policies restrict _meta to admins -- if this now says allow, the ' +
+      'divergence was closed: delete this block');
+  });
+
+  it('an admin may write app config through both', async () => {
+    const r = await post('setFolderConfig', { config: { tabsNav: false } }, 'admin@x.com');
+    assert.equal(((await r.json()) || {}).error, undefined);
+    PG.setCaller('admin@x.com');
+    await PG.setFolderConfig({ tabsNav: false });          // must not throw
+  });
+});
+
 describe('gate parity — the matrix is not vacuous', () => {
   it('covers both verdicts and every actor', async () => {
     // A matrix of all-denies would pass trivially against a gate that refuses everything.
