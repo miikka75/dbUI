@@ -32,6 +32,10 @@ jobs:
         cache-dependency-path: dev/package-lock.json
     - run: npm ci
     - run: npm run build --if-present
+    # Type-check the pure domain modules with tsc --checkJs (no build step: allowJs + noEmit, so the
+    # shipped .js is read as-is). Catches the class of slip that unit tests only find by value --
+    # a shifted positional argument, a Date used as a number.
+    - run: npm run typecheck
     # Includes dev/test/supabase-rls.test.js, which executes the real supabase-schema.sql policies
     # against PostgreSQL-in-WASM (@electric-sql/pglite). No service container, Docker or JVM needed —
     # unlike the `rules` job below, it is just another unit test.

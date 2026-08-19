@@ -1,0 +1,39 @@
+{
+  "// why": [
+    "Type-checking WITHOUT a build step: allowJs + checkJs + noEmit means tsc reads the shipped .js",
+    "directly and emits nothing, so index.html keeps loading the same plain <script src> files.",
+    "Run it with `npm run typecheck` from dev/.",
+    "",
+    "Scope is the Vue-free domain modules -- the ones that already have node:test coverage. app-core.js",
+    "and the backend adapters come later; they need the contract typed first."
+  ],
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "es2017",
+    "module": "commonjs",
+    "lib": ["es2020", "dom"],
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "types": []
+  },
+  "include": [
+    "columns.js",
+    "access-features.js",
+    "list-access.js",
+    "list-users.js",
+    "calendar.js",
+    "rotation.js",
+    "rows.js",
+    "embeds.js",
+    "print.js",
+    "pivot.js",
+    "rsvp.js",
+    "board.js",
+    "live-sync.js",
+    "backend-helpers.js",
+    "csp.js"
+  ]
+}

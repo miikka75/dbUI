@@ -13,8 +13,15 @@
 // time through globalThis — same pattern (and same Node gotcha) as rows.js.
 (function(root) {
   var isNode = (typeof module !== 'undefined' && module.exports);
-  var Rows = isNode ? require('./rows') : root;         // buildRows/resolveComputed/aggregateRows/sortByCol/condMatches
-  var Cols = isNode ? require('./columns') : root;      // colName/isEmbed/isViewEmbed shape predicates
+  // These resolve to the module under Node and to globals hung off the root object in the browser.
+  // tsc cannot type that: `module.exports = M` sits inside an `if (isNode)` within this IIFE, so the
+  // inferred export shape comes out incomplete, and the globalThis branch has no declarations at all.
+  // Both are therefore `any`, which means CALLS THROUGH THESE ARE NOT TYPE-CHECKED. Everything inside
+  // each module still is, which is where the value has been so far. Closing this gap needs either
+  // .d.ts companions (a second copy of the API to keep in sync -- the exact duplication this codebase
+  // is trying to shed) or ES modules; neither is worth doing ahead of the store refactor.
+  /** @type {any} */ var Rows = isNode ? require('./rows') : root;   // buildRows/resolveComputed/aggregateRows/sortByCol/condMatches
+  /** @type {any} */ var Cols = isNode ? require('./columns') : root;   // colName/isEmbed/isViewEmbed shape predicates
 
   // A URL safe to place in an href/src attribute: http(s) only. Relative URLs are allowed when they
   // resolve against the page onto http/https. Everything else -- javascript:, data:, vbscript:, file:,

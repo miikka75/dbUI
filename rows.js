@@ -15,7 +15,14 @@
   var isNode = (typeof module !== 'undefined' && module.exports);
   // fmtDate from calendar.js; rotation resolvers from rotation.js (globals in the browser, required in Node).
   var fmtDate = isNode ? require('./calendar').fmtDate : root.fmtDate;
-  var Rot = isNode ? require('./rotation') : root;
+  // These resolve to the module under Node and to globals hung off the root object in the browser.
+  // tsc cannot type that: `module.exports = M` sits inside an `if (isNode)` within this IIFE, so the
+  // inferred export shape comes out incomplete, and the globalThis branch has no declarations at all.
+  // Both are therefore `any`, which means CALLS THROUGH THESE ARE NOT TYPE-CHECKED. Everything inside
+  // each module still is, which is where the value has been so far. Closing this gap needs either
+  // .d.ts companions (a second copy of the API to keep in sync -- the exact duplication this codebase
+  // is trying to shed) or ES modules; neither is worth doing ahead of the store refactor.
+  /** @type {any} */ var Rot = isNode ? require('./rotation') : root;
 
   // Unified per-row condition matcher. Single source of truth for BOTH row filtering (view/embed
   // `filter`, via condMatches/filterRows) AND column/embed visibility (conditional columns, the `when`
@@ -80,7 +87,7 @@
     var from = new Date(String(dateVal).slice(0, 10) + 'T00:00:00');
     var to = new Date(String(today || fmtDate(new Date())).slice(0, 10) + 'T00:00:00');
     if (isNaN(from.getTime()) || isNaN(to.getTime())) return '';
-    return Math.round((to - from) / 86400000);
+    return Math.round((to.getTime() - from.getTime()) / 86400000);
   }
 
   // Relative period membership for the `within` filter operator. Token: @today|@day|@week|@month|@year,
