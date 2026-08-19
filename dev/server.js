@@ -13,13 +13,20 @@ const LU = require('../list-users');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const USE_FS = process.argv.includes('--fs');
+// --pg: serve storage from PostgreSQL-in-WASM with the REAL supabase-schema.sql policies enforcing,
+// instead of SQLite gated by the JavaScript checks further down this file. Opt-in while the two are
+// being compared; the JS gates still run, so a request must satisfy BOTH. That overlap is the point --
+// it is what makes deleting the JS layer later a verified step rather than a leap.
+const USE_PG = process.argv.includes('--pg');
 // APP_DB overrides the SQLite path; ":memory:" (or empty) uses an isolated in-memory DB — tests set
 // this so they never read or clobber the real dev local.db. Default stays dev/local.db.
 const APP_DB = process.env.APP_DB;
 const DB_PATH = (APP_DB && APP_DB !== ':memory:') ? path.resolve(__dirname, APP_DB) : undefined;
-const backend = USE_FS
+// `let`, not `const`: the PGlite backend is built asynchronously (WASM), so under --pg this stays null
+// until startup() below fills it in, and nothing serves a request before then.
+let backend = USE_PG ? null : (USE_FS
   ? require('./storage-fs').createFsBackend(path.join(__dirname, 'data'))
-  : require('./backend-local').createLocalBackend(APP_DB === ':memory:' ? undefined : (DB_PATH || path.join(__dirname, 'local.db')));
+  : require('./backend-local').createLocalBackend(APP_DB === ':memory:' ? undefined : (DB_PATH || path.join(__dirname, 'local.db'))));
 const STATIC_DIR = path.join(__dirname, '..');
 
 // CSP=1 -> compute the enforced policy once at startup (inline-script hashes come from the real
@@ -48,17 +55,31 @@ function sidecarPath(name) {
 // Persist users to file. In isolated (in-memory test) mode use a throwaway path so resetData/test
 // runs never overwrite the real dev users.json.
 const USERS_PATH = sidecarPath('users');
-if (fs.existsSync(USERS_PATH)) backend._users = JSON.parse(fs.readFileSync(USERS_PATH, 'utf8'));
-function saveUsers() { fs.writeFileSync(USERS_PATH, JSON.stringify(backend._users || {}, null, 2)); }
+function loadSidecars() {
+  if (fs.existsSync(USERS_PATH)) backend._users = JSON.parse(fs.readFileSync(USERS_PATH, 'utf8'));
+  if (fs.existsSync(REQ_PATH)) backend._accessRequests = JSON.parse(fs.readFileSync(REQ_PATH, 'utf8'));
+  if (fs.existsSync(PROF_PATH)) backend._profiles = JSON.parse(fs.readFileSync(PROF_PATH, 'utf8'));
+}
+// The RLS policies read members from kv `_users`, keyed by EMAIL; the dev registry is a JSON sidecar
+// keyed by uid. Without this mirror, kv would hold no members, app_no_users() would be true, and every
+// caller would be treated as the bootstrap admin -- RLS switched on but gating nothing, which is worse
+// than leaving it off because it looks like coverage.
+function mirrorUsersToPolicy() {
+  if (!USE_PG || !backend._seed) return Promise.resolve();
+  const recs = Object.values(backend._users || {});
+  return Promise.all(recs.filter(r => r && r.user).map(r => backend._seed('_users', r.user, r)));
+}
+function saveUsers() {
+  fs.writeFileSync(USERS_PATH, JSON.stringify(backend._users || {}, null, 2));
+  mirrorUsersToPolicy().catch(e => console.error('policy registry mirror failed:', e.message));
+}
 
 // Membership requests (self-service; admin approves). Isolated file in in-memory test mode.
 const REQ_PATH = sidecarPath('access-requests');
-if (fs.existsSync(REQ_PATH)) backend._accessRequests = JSON.parse(fs.readFileSync(REQ_PATH, 'utf8'));
 function saveRequests() { fs.writeFileSync(REQ_PATH, JSON.stringify(backend._accessRequests || {}, null, 2)); }
 
 // Opt-in display-name profiles. Isolated file in in-memory test mode.
 const PROF_PATH = sidecarPath('profiles');
-if (fs.existsSync(PROF_PATH)) backend._profiles = JSON.parse(fs.readFileSync(PROF_PATH, 'utf8'));
 function saveProfiles() { fs.writeFileSync(PROF_PATH, JSON.stringify(backend._profiles || {}, null, 2)); }
 
 function parseBody(req) {
@@ -182,6 +203,11 @@ const server = http.createServer(async (req, res) => {
     // NOT the production access model — that is Firestore security rules (firestore.rules), which key on
     // the real, unspoofable request.auth.token.email. Never expose this server to a network.
     const userEmail = req.headers['x-user'] || 'local@dev';
+    // Hand the caller to the storage layer BEFORE any read or write. Under --pg this becomes
+    // request.jwt.claims inside Postgres, so the policies judge this request as this user. Set per
+    // request, never once at startup: the identity is connection state and the previous request's
+    // would otherwise still be in force.
+    if (backend.setCaller) backend.setCaller(userEmail);
     // The one lookup for "who is this user" — previously getAllowedTables and getMyAccess each rolled
     // their own with different fallbacks (getMyAccess also tried key lookups), a latent access split.
     // Bound to this request's identity; the implementations are hoisted to module scope so the SSE
@@ -376,7 +402,7 @@ const server = http.createServer(async (req, res) => {
       }
       case 'resetData': await backend.resetData(); backend._users = undefined; saveUsers(); backend._accessRequests = undefined; saveRequests(); backend._profiles = undefined; saveProfiles(); if (backend.saveListUsers) await backend.saveListUsers({}); return json(res, { ok: true });
       case 'getAvailableTables': return json(res, await backend.getAvailableTables());
-      case 'serverInfo': return json(res, { storage: USE_FS ? 'fs' : 'sqlite' });
+      case 'serverInfo': return json(res, { storage: USE_PG ? 'pglite' : (USE_FS ? 'fs' : 'sqlite') });
       case 'getAvailableLanguages': return json(res, await backend.getAvailableLanguages());
       case 'getTableData': {
         if (pagesTable(body.tableId)) {
@@ -613,11 +639,24 @@ if (!_loopback && process.env.ALLOW_INSECURE_HOST !== '1') {
   console.error('and is safe only on loopback. To bind a non-loopback host anyway, set ALLOW_INSECURE_HOST=1.');
   process.exit(1);
 }
-server.listen(PORT, HOST, () => {
-  console.log('Local dev server: http://' + HOST + ':' + PORT + (_loopback ? '' : '  [INSECURE: unauthenticated, exposed off-host]'));
-  // Print the database ACTUALLY in use, not the default: with APP_DB set this line was still claiming
-  // dev/local.db, which is the one thing you check when you are running an isolated instance on purpose.
-  console.log('Storage backend: ' + (USE_FS
-    ? 'JSON files (dev/data/)'
-    : 'SQLite (' + (APP_DB === ':memory:' ? ':memory:' : path.relative(STATIC_DIR, DB_PATH || path.join(__dirname, 'local.db')).replace(/\\/g, '/')) + ')'));
-});
+// Startup is async because the PGlite backend is WASM: it must exist, and the member registry must be
+// mirrored into the policy's own store, BEFORE the first request is served.
+async function startup() {
+  if (USE_PG) {
+    backend = await require('./backend-pglite').createPgliteBackend(
+      APP_DB && APP_DB !== ':memory:' ? { dataDir: DB_PATH } : {});
+  }
+  loadSidecars();
+  await mirrorUsersToPolicy();
+
+  server.listen(PORT, HOST, () => {
+    console.log('Local dev server: http://' + HOST + ':' + PORT + (_loopback ? '' : '  [INSECURE: unauthenticated, exposed off-host]'));
+    // Print the database ACTUALLY in use, not the default: with APP_DB set this line was still claiming
+    // dev/local.db, which is the one thing you check when you are running an isolated instance on purpose.
+    console.log('Storage backend: ' + (USE_PG ? 'PGlite + supabase-schema.sql policies' : USE_FS
+      ? 'JSON files (dev/data/)'
+      : 'SQLite (' + (APP_DB === ':memory:' ? ':memory:' : path.relative(STATIC_DIR, DB_PATH || path.join(__dirname, 'local.db')).replace(/\\/g, '/')) + ')'));
+  });
+}
+
+startup().catch((e) => { console.error('startup failed:', e); process.exit(1); });
