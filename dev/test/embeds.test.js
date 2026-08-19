@@ -90,6 +90,65 @@ describe('embeds.js — mdBlocks / docHasData / buildEmbedBlock', () => {
   });
 });
 
+// The two extension points doc-views hang off. They exist so that adopting a real markdown parser, or
+// adding a directive like {{gauge:x}}, is a registration at boot rather than an edit inside embeds.js.
+describe('embeds.js — renderer + block-directive seams', () => {
+  it('setRenderer swaps the prose renderer, and only prose ever reaches it', () => {
+    const ctx = makeCtx();
+    const seen = [];
+    Embeds.setRenderer(t => { seen.push(t); return '<p>' + t.trim().toUpperCase() + '</p>'; });
+    try {
+      const blocks = Embeds.mdBlocks(`hello
+
+{{view:open}}
+
+bye`, null, ctx);
+      assert.deepEqual(blocks.map(b => b.embedName || b.html), ['<p>HELLO</p>', 'open', '<p>BYE</p>']);
+      // The embed token itself must never reach a renderer -- mdBlocks splits it out first, which is
+      // what lets a third-party parser be dropped in without teaching it this app's {{...}} syntax.
+      assert.ok(seen.every(t => t.indexOf('{{') === -1), 'renderer saw an embed token: ' + JSON.stringify(seen));
+    } finally { Embeds.setRenderer(null); }
+  });
+
+  it('setRenderer(null) restores the built-in renderer', () => {
+    Embeds.setRenderer(() => 'REPLACED');
+    Embeds.setRenderer(null);
+    assert.ok(Embeds.mdBlocks('# Hi', null, makeCtx())[0].html.indexOf('<h1>Hi</h1>') === 0);
+  });
+
+  it('a registered directive parses, resolves, and honours the `?` hide-when-empty suffix', () => {
+    const ctx = makeCtx();
+    let rows = 1;
+    Embeds.registerBlock('gauge', {
+      resolve: (name, part) => ({ embedType: 'gauge', embedName: name, embedPart: part || null }),
+      count: () => rows
+    });
+    const b = Embeds.mdBlocks('{{gauge:points}}', null, ctx);
+    assert.equal(b.length, 1);
+    assert.equal(b[0].embedType, 'gauge');
+    assert.equal(b[0].embedName, 'points');
+    // `?` on a directive reporting rows keeps the block...
+    assert.equal(Embeds.mdBlocks('{{gauge:points?}}', null, ctx).length, 1);
+    rows = 0;
+    // ...and drops it when the count is zero, exactly as for view/table.
+    assert.equal(Embeds.mdBlocks('{{gauge:points?}}', null, ctx).length, 0);
+    // Without `?` it stays even when empty.
+    assert.equal(Embeds.mdBlocks('{{gauge:points}}', null, ctx).length, 1);
+  });
+
+  it('a directive whose resolve returns null renders the inline unknown-embed note', () => {
+    Embeds.registerBlock('ghost', { resolve: () => null, count: () => 1 });
+    const b = Embeds.mdBlocks('{{ghost:x}}', null, makeCtx());
+    assert.equal(b.length, 1);
+    assert.ok(b[0].html.indexOf('Unknown embed: ghost:x') >= 0);
+  });
+
+  it('registerBlock rejects a kind that is not word characters (it is spliced into a regex)', () => {
+    assert.throws(() => Embeds.registerBlock('a|b', { resolve: () => null, count: () => 0 }), /word characters/);
+    assert.throws(() => Embeds.registerBlock('a.b', { resolve: () => null, count: () => 0 }), /word characters/);
+  });
+});
+
 describe('embeds.js — resolveEmbed (kind-tagged specs)', () => {
   it('doc / calendar / rotation kinds', () => {
     const ctx = makeCtx();
