@@ -92,8 +92,8 @@ describe('dev server — live-sync SSE stream', () => {
       } catch (e) { await new Promise(r => setTimeout(r, 50)); }
     }
     assert.ok(up, 'dev server started');
-    await post('saveSchema', { folderId: 'local', schema: SCHEMA });
-    await post('initSchema', { folderId: 'local', schema: SCHEMA.tables });
+    await post('saveSchema', { schema: SCHEMA });
+    await post('initSchema', { schema: SCHEMA.tables });
   });
 
   after(async () => {

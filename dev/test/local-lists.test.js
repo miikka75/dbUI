@@ -16,23 +16,23 @@ describe('Local per-list storage + legacy migration', () => {
 
   function freshBackend() {
     const b = createLocalBackend(':memory:');
-    b.saveSchema('local', schema);
+    b.saveSchema(schema);
     return b;
   }
 
   it('saveLists writes one row per list with items + owning tables', () => {
     const b = freshBackend();
-    b.saveLists('local', { staff: ['A', 'B'], cleaners: ['C'], guests: ['G'] });
-    assert.deepEqual(b.getLists('local'), { staff: ['A', 'B'], cleaners: ['C'], guests: ['G'] });
-    assert.deepEqual(b.getLists('local').cleaners, ['C']);
+    b.saveLists({ staff: ['A', 'B'], cleaners: ['C'], guests: ['G'] });
+    assert.deepEqual(b.getLists(), { staff: ['A', 'B'], cleaners: ['C'], guests: ['G'] });
+    assert.deepEqual(b.getLists().cleaners, ['C']);
   });
 
   it('putListItem upserts into the per-list row (dedupes)', () => {
     const b = freshBackend();
-    b.putListItem('local', 'cleaners', 'X');
-    b.putListItem('local', 'cleaners', 'Y');
-    b.putListItem('local', 'cleaners', 'X'); // dup ignored
-    assert.deepEqual(b.getLists('local').cleaners, ['X', 'Y']);
+    b.putListItem('cleaners', 'X');
+    b.putListItem('cleaners', 'Y');
+    b.putListItem('cleaners', 'X'); // dup ignored
+    assert.deepEqual(b.getLists().cleaners, ['X', 'Y']);
   });
 
   it('migrates a legacy (name,value) _lists table in place, preserving all items', () => {
@@ -48,7 +48,7 @@ describe('Local per-list storage + legacy migration', () => {
     raw.close();
 
     const b = createLocalBackend(path);
-    const lists = b.getLists('local'); // triggers _ensureLists migration
+    const lists = b.getLists(); // triggers _ensureLists migration
     assert.deepEqual(lists.staff, ['A', 'B', 'C']);
     assert.deepEqual(lists.cleaners, ['Z']);
     b.close();   // release the file handle -- Windows can't unlink an open db (and reopens it readonly next)

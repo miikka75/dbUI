@@ -380,7 +380,7 @@ test.describe('image/url column types', () => {
 
     // Stored as a REFERENCE in the synced folder config; the bytes are an _assets row keyed bg_<view>.
     await expect.poll(async () => {
-      const cfg = await (await page.request.post('/api/getFolderConfig', { data: { folderId: 'local' } })).json();
+      const cfg = await (await page.request.post('/api/getFolderConfig', { data: {} })).json();
       return ((cfg.backgrounds || {}).gallery || {}).image || '';
     }, { timeout: 6000 }).toBe('asset:bg_gallery');
     const assets = await (await page.request.post('/api/getTableData', { data: { tableId: '_assets', tab: 'active' } })).json();
@@ -409,7 +409,7 @@ test.describe('image/url column types', () => {
     // Clearing drops the whole entry rather than leaving an empty one behind.
     await page.evaluate(() => window.appInstance.saveViewBackground('gallery', { image: '' }));
     await expect.poll(async () => {
-      const cfg = await (await page.request.post('/api/getFolderConfig', { data: { folderId: 'local' } })).json();
+      const cfg = await (await page.request.post('/api/getFolderConfig', { data: {} })).json();
       return (cfg.backgrounds || {}).gallery === undefined;
     }, { timeout: 4000 }).toBe(true);
     await expect.poll(styleOf, { timeout: 4000 }).not.toContain('background-image');
@@ -434,7 +434,7 @@ test.describe('image/url column types', () => {
     await page.request.post('/api/saveSchema', { data: { schema: SCH } });
     // Stored state from "last time": the bytes in _assets, the reference in the folder config.
     await page.request.post('/api/putRow', { data: { tableId: '_assets', tab: 'active', data: { id: 'bg_welcome', src: png } } });
-    await page.request.post('/api/setFolderConfig', { data: { folderId: 'local', config: { mode: 'local', backgrounds: { welcome: { image: 'asset:bg_welcome', fit: 'cover', opacity: 0.5 } } } } });
+    await page.request.post('/api/setFolderConfig', { data: { config: { mode: 'local', backgrounds: { welcome: { image: 'asset:bg_welcome', fit: 'cover', opacity: 0.5 } } } } });
 
     await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.goto('/');
@@ -474,7 +474,7 @@ test.describe('image/url column types', () => {
 
     const styleOf = async () => (await page.locator('.v-main .v-card').first().getAttribute('style')) || '';   // attribute is REMOVED when there is no background
     const cfgBg = async () => {
-      const c = await (await page.request.post('/api/getFolderConfig', { data: { folderId: 'local' } })).json();
+      const c = await (await page.request.post('/api/getFolderConfig', { data: {} })).json();
       return ((c || {}).backgrounds || {}).welcome;   // the dev backend returns null when no config exists yet
     };
     // The schema default paints the landing view with no config entry at all.
@@ -505,7 +505,7 @@ test.describe('image/url column types', () => {
       window.appInstance.saveViewBackground('docs', { image: '' });
     });
     await expect.poll(async () => {
-      const c = await (await page.request.post('/api/getFolderConfig', { data: { folderId: 'local' } })).json();
+      const c = await (await page.request.post('/api/getFolderConfig', { data: {} })).json();
       return ((c || {}).backgrounds || {}).docs === undefined;
     }, { timeout: 4000 }).toBe(true);
   });
@@ -528,7 +528,7 @@ test.describe('image/url column types', () => {
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: SCH } });
     await page.request.post('/api/putRow', { data: { tableId: '_assets', tab: 'active', data: { id: 'bg_welcome', src: png } } });
-    await page.request.post('/api/setFolderConfig', { data: { folderId: 'local', config: { mode: 'local', backgrounds: { welcome: { image: 'asset:bg_welcome' } } } } });
+    await page.request.post('/api/setFolderConfig', { data: { config: { mode: 'local', backgrounds: { welcome: { image: 'asset:bg_welcome' } } } } });
     await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.goto('/');
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 8000 });
@@ -1229,7 +1229,7 @@ test.describe('Import round-trip', () => {
     await page.setInputFiles('input[type=file][accept=".json"]', { name: 'import.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(I18N_BUNDLE)) });
     await page.waitForTimeout(2500);
 
-    const fi = await (await page.request.post('/api/getTranslations', { data: { folderId: 'local', langCode: 'fi' } })).json();
+    const fi = await (await page.request.post('/api/getTranslations', { data: { langCode: 'fi' } })).json();
     expect(fi['tab.docs']).toBe('Asiakirjat');
     expect(fi['field.title']).toBe('Otsikko');
   });
@@ -1260,7 +1260,7 @@ test.describe('Import round-trip', () => {
     await expect(page.locator('[data-testid="import-errors"]')).toContainText('docs');
 
     // The point of the fix: everything AFTER the failed row still ran.
-    const fi = await (await page.request.post('/api/getTranslations', { data: { folderId: 'local', langCode: 'fi' } })).json();
+    const fi = await (await page.request.post('/api/getTranslations', { data: { langCode: 'fi' } })).json();
     expect(fi['tab.docs']).toBe('Asiakirjat');
     const active = await (await page.request.post('/api/getTableData', { data: { tableId: 'docs', tab: 'active' } })).json();
     expect(active.rows.some(r => r.id === 'a1')).toBe(true);   // the row after the failure
@@ -1288,8 +1288,8 @@ test.describe('Stale defaultLanguage', () => {
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: SCH } });
     // Only 'fi' exists — the schema's 'Suomi' names nothing.
-    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'fi', name: 'Suomi', keys: [] } });
-    await page.request.post('/api/updateTranslations', { data: { folderId: 'local', langCode: 'fi', updates: { 'tab.docs': 'Asiakirjat' } } });
+    await page.request.post('/api/createLanguage', { data: { code: 'fi', name: 'Suomi', keys: [] } });
+    await page.request.post('/api/updateTranslations', { data: { langCode: 'fi', updates: { 'tab.docs': 'Asiakirjat' } } });
     // A remembered code that no longer exists must not select a missing language either.
     await page.addInitScript(() => {
       localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local');
@@ -2128,7 +2128,7 @@ test.describe('listSwitch (toggle between two dropdown lists)', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: V3 } });
-    await page.request.post('/api/saveLists', { data: { folderId: 'local', lists: { internal: ['Alice', 'Bob'], external: ['ExtJohn', 'ExtJane'] } } });
+    await page.request.post('/api/saveLists', { data: { lists: { internal: ['Alice', 'Bob'], external: ['ExtJohn', 'ExtJane'] } } });
     await page.request.post('/api/putRow', { data: { tableId: 't', data: { id: 'r1', person: 'Alice' }, tab: 'active' } });
     await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.goto('/');
@@ -2160,7 +2160,7 @@ test.describe('listSwitch (toggle between two dropdown lists)', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: V3 } });
-    await page.request.post('/api/saveLists', { data: { folderId: 'local', lists: { internal: ['Alice', 'Bob'], external: ['ExtJohn', 'ExtJane'] } } });
+    await page.request.post('/api/saveLists', { data: { lists: { internal: ['Alice', 'Bob'], external: ['ExtJohn', 'ExtJane'] } } });
     await page.request.post('/api/putRow', { data: { tableId: 't', data: { id: 'r1', person: 'Alice' }, tab: 'active' } });
     await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.goto('/');
@@ -2172,7 +2172,7 @@ test.describe('listSwitch (toggle between two dropdown lists)', () => {
       // Spy on the persistence call so we assert BOTH the in-memory cache and what was written to the backend.
       var puts = [];
       var realPut = backend.putListItem;
-      backend.putListItem = function(folder, list, v) { puts.push({ list: list, v: v }); return realPut && realPut.apply(backend, arguments); };
+      backend.putListItem = function(list, v) { puts.push({ list: list, v: v }); return realPut && realPut.apply(backend, arguments); };
       // Switch the cell to the alt list (the swap arrow), then type a brand-new name.
       appInstance.toggleListSwitch('person', item);
       item.person = 'Zelda';                       // a name in neither list
@@ -2228,7 +2228,7 @@ test.describe('matchList (filter + filterBy + computed)', () => {
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: ML } });
     await page.request.post('/api/initSchema', { data: { schema: ML.tables } });
-    await page.request.post('/api/saveLists', { data: { folderId: 'local', lists: ML.lists } });
+    await page.request.post('/api/saveLists', { data: { lists: ML.lists } });
     await page.request.post('/api/putRow', { data: { tableId: 'events', data: { id: '1', speaker: 'Alice', guest: '', topic: 'a' }, tab: 'active' } });
     await page.request.post('/api/putRow', { data: { tableId: 'events', data: { id: '2', speaker: 'Charlie', guest: '', topic: 'b' }, tab: 'active' } });
     await page.request.post('/api/putRow', { data: { tableId: 'events', data: { id: '3', speaker: 'Bob', guest: 'Dave', topic: 'c' }, tab: 'active' } });
@@ -2244,7 +2244,7 @@ test.describe('matchList (filter + filterBy + computed)', () => {
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: ML } });
     await page.request.post('/api/initSchema', { data: { schema: ML.tables } });
-    await page.request.post('/api/saveLists', { data: { folderId: 'local', lists: ML.lists } });
+    await page.request.post('/api/saveLists', { data: { lists: ML.lists } });
     await page.request.post('/api/putRow', { data: { tableId: 'events', data: { id: '1', speaker: 'Alice', guest: '', topic: 'a' }, tab: 'active' } });
     await page.request.post('/api/putRow', { data: { tableId: 'events', data: { id: '2', speaker: 'Charlie', guest: '', topic: 'b' }, tab: 'active' } });
     await page.request.post('/api/putRow', { data: { tableId: 'events', data: { id: '3', speaker: 'Bob', guest: 'Dave', topic: 'c' }, tab: 'active' } });
@@ -2340,7 +2340,7 @@ test.describe('v3 page body stored on server', () => {
     const pages = await (await page.request.post('/api/getTableData', { data: { tableId: '_pages', tab: 'active' } })).json();
     const row = pages.rows.find(r => r.id === 'home');
     expect(row && row.markdown).toBe('# Edited on server');
-    const schema = await (await page.request.post('/api/getSchema', { data: { folderId: 'local' } })).json();
+    const schema = await (await page.request.post('/api/getSchema', { data: {} })).json();
     expect(JSON.stringify(schema.pages || {})).not.toContain('Edited on server');
     // survives reload (rendered from server, not schema seed)
     await page.reload();
@@ -2384,8 +2384,8 @@ test.describe('Page {{t:key}} translatable token', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: V3 } });
-    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'en', name: 'English', keys: ['page.home.intro'] } });
-    await page.request.post('/api/updateTranslations', { data: { folderId: 'local', langCode: 'en', updates: { 'page.home.intro': 'Welcome translated intro' } } });
+    await page.request.post('/api/createLanguage', { data: { code: 'en', name: 'English', keys: ['page.home.intro'] } });
+    await page.request.post('/api/updateTranslations', { data: { langCode: 'en', updates: { 'page.home.intro': 'Welcome translated intro' } } });
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
@@ -2396,24 +2396,24 @@ test.describe('Page {{t:key}} translatable token', () => {
 
   test('renameLanguage decouples name from code: rename preserves code + translations', async ({ page }) => {
     await page.request.post('/api/resetData');
-    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'xx', name: 'TestLang', keys: ['app.title'] } });
-    await page.request.post('/api/updateTranslations', { data: { folderId: 'local', langCode: 'xx', updates: { 'app.title': 'Hello' } } });
+    await page.request.post('/api/createLanguage', { data: { code: 'xx', name: 'TestLang', keys: ['app.title'] } });
+    await page.request.post('/api/updateTranslations', { data: { langCode: 'xx', updates: { 'app.title': 'Hello' } } });
     // Rename the (default) language's display name — code 'xx' must stay, translations must survive
-    const r = await page.request.post('/api/renameLanguage', { data: { folderId: 'local', code: 'xx', name: 'Renamed' } });
+    const r = await page.request.post('/api/renameLanguage', { data: { code: 'xx', name: 'Renamed' } });
     expect(r.ok()).toBeTruthy();
     const langs = await (await page.request.post('/api/getAvailableLanguages', { data: {} })).json();
     const lang = langs.find(l => l.code === 'xx');
     expect(lang).toBeTruthy();             // code 'xx' still present (stable)
     expect(lang.name).toBe('Renamed');     // display name updated
-    const tr = await (await page.request.post('/api/getTranslations', { data: { folderId: 'local', langCode: 'xx' } })).json();
+    const tr = await (await page.request.post('/api/getTranslations', { data: { langCode: 'xx' } })).json();
     expect(tr['app.title']).toBe('Hello'); // translations preserved across rename
   });
 
   test('deleting the default language repoints the default to a remaining language', async ({ page }) => {
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: { defaultLanguage: 'en', tables: { t: { columns: [{ name: 'a', type: 'text' }] } }, views: [{ table: 't' }], nav: { items: [{ table: 't' }] } } } });
-    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'en', name: 'English', keys: ['tab.t'] } });
-    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'xx', name: 'TestLang', keys: ['tab.t'] } });
+    await page.request.post('/api/createLanguage', { data: { code: 'en', name: 'English', keys: ['tab.t'] } });
+    await page.request.post('/api/createLanguage', { data: { code: 'xx', name: 'TestLang', keys: ['tab.t'] } });
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
@@ -2434,7 +2434,7 @@ test.describe('Page {{t:key}} translatable token', () => {
   test('deleting the last language clears default and falls back to raw keys', async ({ page }) => {
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: { defaultLanguage: 'en', tables: { t: { columns: [{ name: 'a', type: 'text' }] } }, views: [{ table: 't' }], nav: { items: [{ table: 't' }] } } } });
-    await page.request.post('/api/createLanguage', { data: { folderId: 'local', code: 'en', name: 'English', keys: ['tab.t'] } });
+    await page.request.post('/api/createLanguage', { data: { code: 'en', name: 'English', keys: ['tab.t'] } });
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();

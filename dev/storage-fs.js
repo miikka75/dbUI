@@ -22,22 +22,22 @@ function createFsBackend(dataDir) {
   function fLang(code) { return 'lang_' + code; }
 
   return {
-    getSchema(folderId) {
+    getSchema() {
       return readJSON(F_SCHEMA) || null;
     },
-    saveSchema(folderId, schema) {
+    saveSchema(schema) {
       writeJSON(F_SCHEMA, schema);
     },
     validateFolder(folderId) {
       return { valid: true, name: 'Local FS: ' + dataDir };
     },
-    getFolderConfig(folderId) {
+    getFolderConfig() {
       return readJSON(F_CONFIG) || null;
     },
-    setFolderConfig(folderId, config) {
+    setFolderConfig(config) {
       writeJSON(F_CONFIG, config);
     },
-    initSchema(folderId, schema) {
+    initSchema(schema) {
       var result = {};
       for (var table of Object.keys(schema)) {
         var def = schema[table];
@@ -51,8 +51,8 @@ function createFsBackend(dataDir) {
       }
       return result;
     },
-    getAvailableTables(folderId) { return []; },
-    getAvailableLanguages(folderId) {
+    getAvailableTables() { return []; },
+    getAvailableLanguages() {
       return readJSON(F_LANGS) || [];
     },
     getTableData(tableId, tab) {
@@ -78,13 +78,13 @@ function createFsBackend(dataDir) {
       this.deleteRow(tableId, rowData.id, fromTab);
       this.putRow(tableId, rowData, toTab);
     },
-    getLists(folderId) {
+    getLists() {
       return readJSON(F_LISTS) || {};
     },
-    saveLists(folderId, lists) {
+    saveLists(lists) {
       writeJSON(F_LISTS, lists);
     },
-    putListItem(folderId, listName, value) {
+    putListItem(listName, value) {
       var lists = readJSON(F_LISTS) || {};
       lists[listName] = lists[listName] || [];
       if (lists[listName].indexOf(value) === -1) lists[listName].push(value);
@@ -92,30 +92,30 @@ function createFsBackend(dataDir) {
     },
     // User-linked lists (Option C): the admin-only { listName: { value: email } } link map. Stored whole;
     // the server derives the viewer-safe projection from it (see list-users.js / getListAvatars).
-    getListUsers(folderId) {
+    getListUsers() {
       return readJSON(F_LISTUSERS) || {};
     },
-    saveListUsers(folderId, map) {
+    saveListUsers(map) {
       writeJSON(F_LISTUSERS, map || {});
     },
-    getTranslations(folderId, code) {
+    getTranslations(code) {
       return readJSON(fLang(code)) || {};
     },
-    updateTranslations(folderId, code, updates) {
+    updateTranslations(code, updates) {
       var t = readJSON(fLang(code)) || {};
       Object.assign(t, updates);
       writeJSON(fLang(code), t);
     },
-    createLanguage(folderId, code, name, keys) {
+    createLanguage(code, name, keys) {
       writeJSON(F_LANGS, H.addLanguage(readJSON(F_LANGS), code, name));
       writeJSON(fLang(code), H.emptyTranslations(keys));
       return code;
     },
-    deleteLanguage(folderId, code) {
+    deleteLanguage(code) {
       writeJSON(F_LANGS, H.removeLanguage(readJSON(F_LANGS), code));
       try { fs.unlinkSync(filePath(fLang(code))); } catch(e) {}
     },
-    renameLanguage(folderId, code, name) {
+    renameLanguage(code, name) {
       writeJSON(F_LANGS, H.renameLanguage(readJSON(F_LANGS), code, name));
     },
     resetData() {

@@ -5,7 +5,7 @@ const { SCHEMA, VIEWS, getColumns, getColumnType } = require('../schema');
 
 let backend;
 
-beforeEach(() => { backend = createLocalBackend(); backend.initSchema('local', SCHEMA); });
+beforeEach(() => { backend = createLocalBackend(); backend.initSchema(SCHEMA); });
 afterEach(() => { backend.close(); });
 
 describe('Union view data access', () => {

@@ -19,7 +19,7 @@ describe('Mirror columns', () => {
 
   before(() => {
     backend = createLocalBackend(':memory:');
-    backend.initSchema('local', SCHEMA);
+    backend.initSchema(SCHEMA);
   });
 
   it('creating note propagates to tasks (mirror row created)', () => {
@@ -98,7 +98,7 @@ describe('Mirror columns', () => {
 
 describe('archive propagation to mirror tables', () => {
   let backend;
-  beforeEach(() => { backend = createLocalBackend(); backend.initSchema('local', SCHEMA); });
+  beforeEach(() => { backend = createLocalBackend(); backend.initSchema(SCHEMA); });
   afterEach(() => { backend.close(); });
 
   it('archiving master row also archives mirrored row', () => {

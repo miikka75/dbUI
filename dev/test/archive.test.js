@@ -6,7 +6,7 @@ const { SCHEMA, getColumns } = require('../schema');
 let backend;
 const TABLE = Object.keys(SCHEMA)[0]; // first table
 
-beforeEach(() => { backend = createLocalBackend(); backend.initSchema('local', SCHEMA); });
+beforeEach(() => { backend = createLocalBackend(); backend.initSchema(SCHEMA); });
 afterEach(() => { backend.close(); });
 
 describe('Archive (tab parameter)', () => {

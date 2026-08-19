@@ -28,7 +28,7 @@ describe('FS Backend - Basic operations', () => {
   });
 
   it('initSchema creates table files', () => {
-    backend.initSchema('local', SCHEMA);
+    backend.initSchema(SCHEMA);
     TABLES.forEach(function(t) {
       var def = SCHEMA[t];
       var tab = (def.partition || 'active');
@@ -38,7 +38,7 @@ describe('FS Backend - Basic operations', () => {
   });
 
   it('putRow and getTableData', () => {
-    backend.initSchema('local', SCHEMA);
+    backend.initSchema(SCHEMA);
     var row = makeRow(FIRST_TABLE, 'row1');
     backend.putRow(FIRST_TABLE, row, 'active');
     var result = backend.getTableData(FIRST_TABLE, 'active');
@@ -47,7 +47,7 @@ describe('FS Backend - Basic operations', () => {
   });
 
   it('putRow updates existing row', () => {
-    backend.initSchema('local', SCHEMA);
+    backend.initSchema(SCHEMA);
     var row = makeRow(FIRST_TABLE, 'row1');
     backend.putRow(FIRST_TABLE, row, 'active');
     var cols = getColumns(FIRST_TABLE).filter(c => c !== 'id');
@@ -60,7 +60,7 @@ describe('FS Backend - Basic operations', () => {
   });
 
   it('deleteRow removes row', () => {
-    backend.initSchema('local', SCHEMA);
+    backend.initSchema(SCHEMA);
     var row = makeRow(FIRST_TABLE, 'row1');
     backend.putRow(FIRST_TABLE, row, 'active');
     backend.deleteRow(FIRST_TABLE, 'row1', 'active');
@@ -69,7 +69,7 @@ describe('FS Backend - Basic operations', () => {
   });
 
   it('moveRow transfers between partitions', () => {
-    backend.initSchema('local', SCHEMA);
+    backend.initSchema(SCHEMA);
     var row = makeRow(FIRST_TABLE, 'row1');
     backend.putRow(FIRST_TABLE, row, 'active');
     backend.moveRow(FIRST_TABLE, row, 'active', 'archive');
@@ -80,8 +80,8 @@ describe('FS Backend - Basic operations', () => {
 
 describe('FS Backend - Schema persistence', () => {
   it('saveSchema and getSchema', () => {
-    backend.saveSchema('local', { tables: SCHEMA });
-    var loaded = backend.getSchema('local');
+    backend.saveSchema({ tables: SCHEMA });
+    var loaded = backend.getSchema();
     assert.deepEqual(loaded, { tables: SCHEMA });
   });
 });
@@ -89,82 +89,82 @@ describe('FS Backend - Schema persistence', () => {
 describe('FS Backend - Lists', () => {
   it('saveLists persists to file', () => {
     var lists = { status: ['open', 'closed'], priority: ['high', 'low'] };
-    backend.saveLists('local', lists);
+    backend.saveLists(lists);
     assert.ok(fs.existsSync(path.join(DATA_DIR, 'lists.json')));
-    var loaded = backend.getLists('local');
+    var loaded = backend.getLists();
     assert.deepEqual(loaded, lists);
   });
 
   it('putListItem appends to list', () => {
-    backend.saveLists('local', { status: ['open'] });
-    backend.putListItem('local', 'status', 'closed');
-    var lists = backend.getLists('local');
+    backend.saveLists({ status: ['open'] });
+    backend.putListItem('status', 'closed');
+    var lists = backend.getLists();
     assert.deepEqual(lists.status, ['open', 'closed']);
   });
 
   it('putListItem does not duplicate', () => {
-    backend.saveLists('local', { status: ['open'] });
-    backend.putListItem('local', 'status', 'open');
-    var lists = backend.getLists('local');
+    backend.saveLists({ status: ['open'] });
+    backend.putListItem('status', 'open');
+    var lists = backend.getLists();
     assert.deepEqual(lists.status, ['open']);
   });
 });
 
 describe('FS Backend - Languages', () => {
   it('createLanguage persists language file', () => {
-    backend.createLanguage('local', 'xx', 'TestLang', ['hello', 'world']);
+    backend.createLanguage('xx', 'TestLang', ['hello', 'world']);
     assert.ok(fs.existsSync(path.join(DATA_DIR, 'languages.json')));
     assert.ok(fs.existsSync(path.join(DATA_DIR, 'lang_xx.json')));
-    var langs = backend.getAvailableLanguages('local');
+    var langs = backend.getAvailableLanguages();
     assert.equal(langs.length, 1);
     assert.equal(langs[0].code, 'xx');
   });
 
   it('getTranslations returns empty keys', () => {
-    backend.createLanguage('local', 'xx', 'TestLang', ['hello', 'world']);
-    var t = backend.getTranslations('local', 'xx');
+    backend.createLanguage('xx', 'TestLang', ['hello', 'world']);
+    var t = backend.getTranslations('xx');
     assert.equal(t.hello, '');
     assert.equal(t.world, '');
   });
 
   it('updateTranslations persists', () => {
-    backend.createLanguage('local', 'xx', 'TestLang', ['hello']);
-    backend.updateTranslations('local', 'xx', { hello: 'Hello' });
-    var t = backend.getTranslations('local', 'xx');
+    backend.createLanguage('xx', 'TestLang', ['hello']);
+    backend.updateTranslations('xx', { hello: 'Hello' });
+    var t = backend.getTranslations('xx');
     assert.equal(t.hello, 'Hello');
   });
 
   it('deleteLanguage removes files', () => {
-    backend.createLanguage('local', 'xx', 'TestLang', ['hello']);
-    backend.deleteLanguage('local', 'xx');
-    assert.equal(backend.getAvailableLanguages('local').length, 0);
+    backend.createLanguage('xx', 'TestLang', ['hello']);
+    backend.deleteLanguage('xx');
+    assert.equal(backend.getAvailableLanguages().length, 0);
     assert.ok(!fs.existsSync(path.join(DATA_DIR, 'lang_xx.json')));
   });
 
   it('renameLanguage updates name, keeps code + translations file', () => {
-    backend.createLanguage('local', 'xx', 'TestLang', ['hello']);
-    backend.updateTranslations('local', 'xx', { hello: 'Hi' });
-    backend.renameLanguage('local', 'xx', 'Renamed');
-    var langs = backend.getAvailableLanguages('local');
+    backend.createLanguage('xx', 'TestLang', ['hello']);
+    backend.updateTranslations('xx', { hello: 'Hi' });
+    backend.renameLanguage('xx', 'Renamed');
+    var langs = backend.getAvailableLanguages();
     assert.equal(langs[0].code, 'xx');                       // code stable
     assert.equal(langs[0].name, 'Renamed');                    // name renamed
-    assert.equal(backend.getTranslations('local', 'xx').hello, 'Hi'); // translations intact
+    assert.equal(backend.getTranslations('xx').hello, 'Hi'); // translations intact
   });
 });
 
 describe('FS Backend - Folder config', () => {
   it('stores and retrieves config', () => {
-    backend.setFolderConfig('local', { theme: 'dark' });
-    assert.deepEqual(backend.getFolderConfig('local'), { theme: 'dark' });
+    backend.setFolderConfig({ theme: 'dark' });
+    assert.deepEqual(backend.getFolderConfig(), { theme: 'dark' });
     assert.ok(fs.existsSync(path.join(DATA_DIR, '.app-config.json')));
   });
 });
 
 describe('FS Backend - Reset', () => {
   it('resetData clears all files', () => {
-    backend.initSchema('local', SCHEMA);
-    backend.saveLists('local', { x: ['y'] });
-    backend.createLanguage('local', 'en', 'English', ['hi']);
+    backend.initSchema(SCHEMA);
+    backend.saveLists({ x: ['y'] });
+    backend.createLanguage('en', 'English', ['hi']);
     backend.resetData();
     assert.equal(fs.readdirSync(DATA_DIR).length, 0);
   });

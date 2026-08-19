@@ -30,7 +30,7 @@ describe('Security - storage-fs path traversal', () => {
   // a file inside the data dir), so depth 3 is the shallowest that actually escapes -- and safePath,
   // not the prefix, is what stops it.
   it('createLanguage rejects traversal in the language code', () => {
-    assert.throws(() => b.createLanguage('local', '../../../evil', 'Evil', ['k']), /Invalid path/);
+    assert.throws(() => b.createLanguage('../../../evil', 'Evil', ['k']), /Invalid path/);
   });
   it('normal table names still work', () => {
     b.putRow('tasks', { id: 'r1', title: 'ok' }, 'active');
@@ -44,17 +44,17 @@ describe('Security - SQLite identifier injection', () => {
   afterEach(() => { b.close(); });
 
   it('malicious table name with quote does not break out / drop tables', () => {
-    b.initSchema('local', { real: { columns: ['id', 'v'], partition: 'active' } });
+    b.initSchema({ real: { columns: ['id', 'v'], partition: 'active' } });
     // Attempt injection via tableId containing a double-quote
     const evil = 'x" ; DROP TABLE _tables; --';
     // Should not throw a syntax error nor drop _tables; treated as a (weird) identifier
     assert.doesNotThrow(() => b.getTableData(evil, 'active'));
     // _tables must still exist -> real table still registered
-    assert.deepEqual(b.getAvailableTables('local').map(t => t.id), ['real']);
+    assert.deepEqual(b.getAvailableTables().map(t => t.id), ['real']);
   });
 
   it('non-ASCII table/column names work', () => {
-    b.initSchema('local', { 'café': { columns: ['id', 'résumé'], partition: 'upcoming' } });
+    b.initSchema({ 'café': { columns: ['id', 'résumé'], partition: 'upcoming' } });
     b.putRow('café', { id: 't1', 'résumé': 'Test' }, 'upcoming');
     const r = b.getTableData('café', 'upcoming');
     assert.equal(r.rows.length, 1);

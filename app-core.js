@@ -207,7 +207,6 @@ function createVueApp() {
       needsReauth: false,
       setupStep: (function() { var m = localStorage.getItem('app_mode'); return (m === 'firebase' || m === 'supabase') ? m : null; })(),
       mode: '',
-      folderId: '',
       currentTable: '',
       currentData: [],
       dataCache: {},
@@ -931,7 +930,7 @@ function createVueApp() {
       completeLocalSetup: function() {
         localStorage.setItem('app_folder', 'local');
         localStorage.setItem('app_mode', 'local');
-        this.folderId = 'local'; this.mode = 'local';
+        this.mode = 'local';
         this.showSetup = false;
         this.startApp();
       },
@@ -948,7 +947,7 @@ function createVueApp() {
         // Load schema from backend, fall back to default
         var schemaPromise;
         if (backend.getSchema && !backend.bootData) {
-          schemaPromise = backend.getSchema(self.folderId).then(function(s) {
+          schemaPromise = backend.getSchema().then(function(s) {
             if (s) {
               var parsed = typeof s === 'string' ? JSON.parse(s) : s;
               _normalizeSchema(parsed);
@@ -958,7 +957,7 @@ function createVueApp() {
               if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify(self.t('msg.schema_error') + ' ' + schemaErrors[0]); }
             } else {
               // First time: save default schema to Drive
-              if (backend.saveSchema) backend.saveSchema(self.folderId, defaultSchema);
+              if (backend.saveSchema) backend.saveSchema(defaultSchema);
               self.schemaData = Object.freeze(defaultSchema);
             }
           });
@@ -969,7 +968,7 @@ function createVueApp() {
         // Load app-wide folder config (holds the global rotationAnchor) before rendering rotations.
         schemaPromise = schemaPromise.then(function() {
           if (!backend.getFolderConfig) return;
-          return Promise.resolve(backend.getFolderConfig(self.folderId)).then(function(cfg) {
+          return Promise.resolve(backend.getFolderConfig()).then(function(cfg) {
             self.appConfig = cfg || {};
           }).catch(function() {});
         });
@@ -977,7 +976,7 @@ function createVueApp() {
         schemaPromise.then(function() {
         // Fast path: single batch call (Apps Script)
         if (backend.bootData) {
-          backend.bootData(self.folderId).then(function(result) {
+          backend.bootData().then(function(result) {
             if (!result) { self.notify(self.t('msg.server_error') + ' bootData returned null'); self.loading = false; return; }
             if (result.error) { self.notify(self.t('msg.server_error') + ' ' + result.error); self.loading = false; return; }
             // Not registered yet: skip schema/data entirely and fall through to loadUsers() below,
@@ -996,7 +995,7 @@ function createVueApp() {
             } else {
               // First boot: save bundled default schema to Drive
               self.schemaData = Object.freeze(defaultSchema);
-              backend.saveSchema(self.folderId, defaultSchema);
+              backend.saveSchema(defaultSchema);
             }
             self.languages = result.languages || [];
             self.listsCache = result.lists || {}; window._listsCache = self.listsCache;
@@ -1007,7 +1006,7 @@ function createVueApp() {
             // saveLists's batch write would then be denied wholesale (Firestore batches are atomic --
             // one disallowed doc fails the lot). result.unrestricted is only ever explicitly false
             // for a scoped Firebase user; other backends don't set it, so they keep seeding as before.
-            if (result.unrestricted !== false && self._seedSchemaLists()) backend.saveLists(self.folderId, self.listsCache);
+            if (result.unrestricted !== false && self._seedSchemaLists()) backend.saveLists(self.listsCache);
             // Populate data cache
             for (var key in result.data) {
               var d = result.data[key];
@@ -1020,7 +1019,7 @@ function createVueApp() {
             }
             // Load default language translations as base
             var defCode = self.defaultLanguage;
-            return backend.getTranslations(self.folderId, defCode).then(function(baseTrans) {
+            return backend.getTranslations(defCode).then(function(baseTrans) {
               self.strings = baseTrans || {};
               // A remembered code can outlive its language too (a rename, or a different database on the
               // same origin), so validate it against the list rather than trusting localStorage.
@@ -1028,7 +1027,7 @@ function createVueApp() {
               if (!self.languages.some(function(l) { return l.code === saved; })) saved = defCode;
               self.currentLang = saved;
               if (saved !== defCode) {
-                return backend.getTranslations(self.folderId, saved).then(function(trans) {
+                return backend.getTranslations(saved).then(function(trans) {
                   if (trans) self.strings = Object.assign({}, self.strings, trans);
                 });
               }
@@ -1044,9 +1043,9 @@ function createVueApp() {
         }
 
         // Sequential path (local server / OAuth)
-        backend.initSchema(self.folderId, SCHEMA).then(function(schemaResult) {
+        backend.initSchema(SCHEMA).then(function(schemaResult) {
 
-          return backend.getAvailableLanguages(self.folderId);
+          return backend.getAvailableLanguages();
         }).then(function(langs) {
           self.languages = langs || [];
           if (self.languages.length === 0) {
@@ -1054,7 +1053,7 @@ function createVueApp() {
           }
           // Load default language as base strings
           var defCode = self.defaultLanguage;
-          return backend.getTranslations(self.folderId, defCode).then(function(baseTrans) {
+          return backend.getTranslations(defCode).then(function(baseTrans) {
             self.strings = baseTrans || {};
             // Same validation as the bootData path above: a stale app_lang must not select a language
             // that no longer exists.
@@ -1062,16 +1061,16 @@ function createVueApp() {
             if (!self.languages.some(function(l) { return l.code === saved; })) saved = defCode;
             self.currentLang = saved;
             if (saved !== defCode) {
-              return backend.getTranslations(self.folderId, saved).then(function(trans) {
+              return backend.getTranslations(saved).then(function(trans) {
                 if (trans) self.strings = Object.assign({}, self.strings, trans);
               });
             }
           });
         }).then(function() {
           // Preload lists + auto-seed (shared with the bootData path via _seedSchemaLists)
-          return backend.getLists(self.folderId).then(function(lists) {
+          return backend.getLists().then(function(lists) {
             self.listsCache = lists || {}; window._listsCache = self.listsCache;
-            if (self._seedSchemaLists()) backend.saveLists(self.folderId, self.listsCache);
+            if (self._seedSchemaLists()) backend.saveLists(self.listsCache);
             self.loadListAvatars(); self.loadListUserLinks(); self.loadMyListValues();   // avatars + admin editor links + my own @me identity
           });
         }).then(function() {
@@ -2104,7 +2103,7 @@ function createVueApp() {
         vals.forEach(function(v) {
           if (v && self.listsCache[listName].indexOf(v) === -1) {
             self.listsCache[listName].push(v);
-            backend.putListItem(self.folderId, listName, v);
+            backend.putListItem(listName, v);
           }
         });
       },
@@ -2449,10 +2448,10 @@ function createVueApp() {
         var self = this;
         localStorage.setItem('app_lang', code);
         var defCode = self.defaultLanguage;
-        backend.getTranslations(self.folderId, defCode).then(function(baseTrans) {
+        backend.getTranslations(defCode).then(function(baseTrans) {
           self.strings = baseTrans || {};
           if (code !== defCode) {
-            return backend.getTranslations(self.folderId, code).then(function(trans) {
+            return backend.getTranslations(code).then(function(trans) {
               if (trans) self.strings = Object.assign({}, self.strings, trans);
             });
           }
@@ -2461,7 +2460,7 @@ function createVueApp() {
       openLangEditor: function(lang) {
         var self = this;
         this.editingLang = lang;
-        backend.getTranslations(self.folderId, lang.code).then(function(trans) {
+        backend.getTranslations(lang.code).then(function(trans) {
           self.currentTranslations = trans || {};
         });
       },
@@ -2472,7 +2471,7 @@ function createVueApp() {
         clearTimeout(this._langTimer);
         this._langTimer = setTimeout(function() {
           if (!self.editingLang) return;
-          backend.updateTranslations(self.folderId, self.editingLang.code, self.currentTranslations);
+          backend.updateTranslations(self.editingLang.code, self.currentTranslations);
           self.notify(self.t('msg.translation_saved'));
         }, 500);
       },
@@ -2490,7 +2489,7 @@ function createVueApp() {
         if (!code) return;
         if ((this.languages || []).some(function(l) { return l.code === code; })) { this.notify(this.t('msg.language_exists')); return; }
         name = (name || code).trim();
-        backend.createLanguage(this.folderId, code, name, this.translationKeys).then(function() {
+        backend.createLanguage(code, name, this.translationKeys).then(function() {
           var newLang = { code: code, name: name };
           self.languages.push(newLang);
           self.openLangEditor(newLang);
@@ -2506,7 +2505,7 @@ function createVueApp() {
         // (keyed by code) and the default-language reference are preserved — this makes even
         // the default language safely renamable. Backends without renameLanguage (e.g. Sheets,
         // where the name IS the code) just skip persistence via the guard.
-        if (backend.renameLanguage) backend.renameLanguage(self.folderId, lang.code, newName);
+        if (backend.renameLanguage) backend.renameLanguage(lang.code, newName);
         lang.name = newName;
         self.notify(self.t('msg.language_renamed'));
       },
@@ -2514,7 +2513,7 @@ function createVueApp() {
         var key = 'lang:' + lang.code;
         if (this.pendingDelete !== key) { this.armDelete(key); return; }  // arm-then-confirm (double click)
         var self = this;
-        backend.deleteLanguage(self.folderId, lang.code).then(function() {
+        backend.deleteLanguage(lang.code).then(function() {
           self.languages = self.languages.filter(function(l) { return l.code !== lang.code; });
           if (self.editingLang && self.editingLang.code === lang.code) self.editingLang = null;
           // Deleting the (explicit) default is allowed: repoint it to a remaining language, or clear
@@ -2523,7 +2522,7 @@ function createVueApp() {
             var newDef = self.languages.length ? self.languages[0].code : null;
             var newSchema = Object.assign({}, self.schemaData, { defaultLanguage: newDef });
             self.schemaData = Object.freeze(newSchema);
-            if (backend.saveSchema) backend.saveSchema(self.folderId, newSchema);
+            if (backend.saveSchema) backend.saveSchema(newSchema);
           }
           if (self.languages.length === 0) {
             self.strings = {};            // no languages -> UI shows the translation keys themselves
@@ -2571,10 +2570,10 @@ function createVueApp() {
         var self = this, oldKey = 'list.' + ns + '.' + oldVal, newKey = 'list.' + ns + '.' + newVal;
         if (self.strings && self.strings[oldKey] != null) { self.strings[newKey] = self.strings[oldKey]; delete self.strings[oldKey]; }  // active language, immediate
         (self.languages || []).forEach(function(lang) {
-          Promise.resolve(backend.getTranslations(self.folderId, lang.code)).then(function(t) {
+          Promise.resolve(backend.getTranslations(lang.code)).then(function(t) {
             if (!t || t[oldKey] == null || t[oldKey] === '') return;
             var updates = {}; updates[newKey] = t[oldKey]; updates[oldKey] = '';   // '' clears the old key (getTranslations drops empty)
-            backend.updateTranslations(self.folderId, lang.code, updates);
+            backend.updateTranslations(lang.code, updates);
           }).catch(function() {});
         });
       },
@@ -2612,7 +2611,7 @@ function createVueApp() {
         var tmp = arr[i]; arr.splice(i, 1, arr[j]); arr.splice(j, 1, tmp);
         this.saveLists();
       },
-      saveLists: function() { backend.saveLists(this.folderId, this.listsCache); },
+      saveLists: function() { backend.saveLists(this.listsCache); },
 
       // All [table,col] pairs whose column is backed by `listName` (select or multiselect).
       // altList = the column's listSwitch alt list (if any) — a value still present in the alt list
@@ -2719,7 +2718,7 @@ function createVueApp() {
         var self = this;
         this.appConfig = cfg;                       // local override for everyone with view access
         if (this.isAdmin && backend.setFolderConfig) {
-          Promise.resolve(backend.setFolderConfig(this.folderId, cfg))
+          Promise.resolve(backend.setFolderConfig(cfg))
             .catch(function() { self.notify(self.t('msg.save_failed')); });
         }
         if (this.currentTable === viewName) this.loadTableData();
@@ -3612,7 +3611,7 @@ function createVueApp() {
         var chain = Promise.resolve();
         self.languages.forEach(function(lang) {
           chain = chain.then(function() {
-            return backend.getTranslations(self.folderId, lang.code).then(function(t) { translations[lang.code] = t; });
+            return backend.getTranslations(lang.code).then(function(t) { translations[lang.code] = t; });
           });
         });
         // Shared tail for both branches below: assemble the bundle around the cleaned schema + extras,
@@ -3736,10 +3735,10 @@ function createVueApp() {
                   _viewsNav = imported.schema.views;
                   VIEWS = {}; _flattenViews(_viewsNav);
                 }
-                return backend.saveSchema(self.folderId, imported.schema).then(function() {
+                return backend.saveSchema(imported.schema).then(function() {
                   _normalizeSchema(imported.schema);
                   self.schemaData = Object.freeze(imported.schema); // mirror boot: refresh the reactive schema (invalidates lockedListValues et al.)
-                  return backend.initSchema(self.folderId, SCHEMA);
+                  return backend.initSchema(SCHEMA);
                 }).then(function() {
                 });
               }));
@@ -3755,16 +3754,16 @@ function createVueApp() {
             if (imported.lists) {
               chain = chain.then(step('mdi-format-list-bulleted', '', function() {
                 self.listsCache = imported.lists;
-                return backend.saveLists(self.folderId, imported.lists);
+                return backend.saveLists(imported.lists);
               }));
             }
             langCodes.forEach(function(code) {
               chain = chain.then(step('mdi-translate', code, function() {
                 // Ensure language exists before writing translations
                 var langName = (imported.languages || []).find(function(l) { return l.code === code; });
-                return backend.createLanguage(self.folderId, code, langName ? langName.name : code, Object.keys(imported.translations[code]))
+                return backend.createLanguage(code, langName ? langName.name : code, Object.keys(imported.translations[code]))
                   .catch(function() {})   // already present is fine; the merge below still writes the strings
-                  .then(function() { return backend.updateTranslations(self.folderId, code, imported.translations[code]); });
+                  .then(function() { return backend.updateTranslations(code, imported.translations[code]); });
               }));
             });
             pages.forEach(function(page) {
@@ -3783,7 +3782,7 @@ function createVueApp() {
               chain = chain.then(step('mdi-cog', '', function() {
                 var merged = mergeImportedConfig(self.appConfig, imported.config, self.mode);
                 self.appConfig = merged;
-                return backend.setFolderConfig(self.folderId, merged);
+                return backend.setFolderConfig(merged);
               }));
             }
             chain = chain.then(step('mdi-format-list-checks', '', function() {
@@ -3795,7 +3794,7 @@ function createVueApp() {
                   if (self.listsCache[ln].indexOf(lv) < 0) { self.listsCache[ln].push(lv); needSave = true; }
                 }
               }
-              return needSave ? backend.saveLists(self.folderId, self.listsCache) : Promise.resolve();
+              return needSave ? backend.saveLists(self.listsCache) : Promise.resolve();
             }));
 
             chain.then(function() {
@@ -4040,7 +4039,7 @@ function createVueApp() {
         var theme = { light: Object.assign({}, base.light, this.themeEdit.light), dark: Object.assign({}, base.dark, this.themeEdit.dark) };
         var newSchema = Object.assign({}, this.schemaData, { theme: theme });
         this.schemaData = Object.freeze(newSchema);
-        if (backend.saveSchema) backend.saveSchema(this.folderId, newSchema);
+        if (backend.saveSchema) backend.saveSchema(newSchema);
       },
       // Commit a color (from the text field or the picker's final `change`): validate, live-preview, and
       // auto-persist to schema.theme — no Save button. Invalid input is ignored (the field re-syncs to the
@@ -4083,7 +4082,7 @@ function createVueApp() {
       resetTheme: function() {
         var newSchema = Object.assign({}, this.schemaData); delete newSchema.theme;
         this.schemaData = Object.freeze(newSchema);
-        if (backend.saveSchema) backend.saveSchema(this.folderId, newSchema);
+        if (backend.saveSchema) backend.saveSchema(newSchema);
         try { localStorage.removeItem('brand_splash'); } catch (e) {}
         location.reload(); // rebuild Vuetify with the built-in defaults (cleanly drops the override)
       },
@@ -5399,7 +5398,6 @@ function init() {
         .catch(function() { instance.showSetup = true; instance.loading = false; });
     }
   } else {
-    instance.folderId = folder;
     instance.mode = savedMode || 'local';
     instance.startApp();
   }

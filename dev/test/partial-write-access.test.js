@@ -74,8 +74,8 @@ describe('dev server — self-service writes are gated on the MERGED row', () =>
       } catch (e) { await new Promise(r => setTimeout(r, 50)); }
     }
     assert.ok(up, 'dev server started');
-    await post('saveSchema', { folderId: 'local', schema: SCHEMA });
-    await post('initSchema', { folderId: 'local', schema: SCHEMA.tables });
+    await post('saveSchema', { schema: SCHEMA });
+    await post('initSchema', { schema: SCHEMA.tables });
     // member holds NO grant on `signups` — everything they can do comes from the owner column.
     await post('setUserRole', { uid: 'admin@dev', role: 'admin', user: 'admin@dev', tables: 'all' });
     await post('setUserRole', { uid: 'member@dev', role: 'viewer', user: 'member@dev', tables: {} });

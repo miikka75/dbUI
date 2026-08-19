@@ -16,7 +16,7 @@ const SCHEMA = {
   }
 };
 
-beforeEach(() => { backend = createLocalBackend(); backend.saveSchema('f', SCHEMA); });
+beforeEach(() => { backend = createLocalBackend(); backend.saveSchema(SCHEMA); });
 afterEach(() => { backend.close(); });
 
 describe('multiselect array storage', () => {
@@ -48,7 +48,7 @@ describe('multiselect array storage', () => {
 
   it('decodes multiselect when the stored schema uses array-of-objects columns (authored form)', () => {
     // The authored/exported schema form stores columns as an array, not a colMap object.
-    backend.saveSchema('f', { tables: { duty: { columns: [
+    backend.saveSchema({ tables: { duty: { columns: [
       { name: 'title', type: 'text' },
       { name: 'people', type: 'multiselect', list: 'people', allowNew: true }
     ] } } });

@@ -92,7 +92,7 @@ function allowedTablesFor(email) {
   return AccessFeatures.readableTables(u.tables) || [];
 }
 function ownerColNameOf(base) {
-  const cols = (((backend.getSchema('local') || {}).tables || {})[base] || {}).columns;
+  const cols = (((backend.getSchema() || {}).tables || {})[base] || {}).columns;
   if (!cols) return null;
   if (Array.isArray(cols)) { const o = cols.find(c => c && c.type === 'owner'); return o ? o.name : null; }
   for (const n in cols) { const d = cols[n]; if (d && typeof d === 'object' && d.type === 'owner') return n; }
@@ -217,7 +217,7 @@ const server = http.createServer(async (req, res) => {
     function filterPages(data) {
       const allowed = getAllowedTables();
       if (!allowed) return data;                          // admin / unrestricted -> all pages
-      const views = ((backend.getSchema('local') || {}).views) || [];
+      const views = ((backend.getSchema() || {}).views) || [];
       const acc = {};
       (function walk(arr) { (arr || []).forEach(v => {
         if (v && v.name && typeof v.markdown === 'string' && Array.isArray(v.access) && v.access.length) acc[v.name] = v.access;
@@ -257,7 +257,7 @@ const server = http.createServer(async (req, res) => {
     // linked to their account on a userlink list, else their profile display name.
     function myIdentityFor(listName) {
       if (listName) {
-        const links = (backend.getListUsers ? backend.getListUsers('local') : {})[listName] || {};
+        const links = (backend.getListUsers ? backend.getListUsers() : {})[listName] || {};
         for (const value of Object.keys(links)) if (_mine(links[value])) return value;
         return '';
       }
@@ -266,7 +266,7 @@ const server = http.createServer(async (req, res) => {
     }
     function ownerFieldsOk(tableId, incoming, existing) {
       const base = tableId ? tableId.split('__')[0] : '';
-      const bounds = BackendHelpers.ownerWritableOf(backend.getSchema('local') || {})[base];
+      const bounds = BackendHelpers.ownerWritableOf(backend.getSchema() || {})[base];
       if (!bounds) return true;
       // An identity column (`defaultFrom: "@me"`, owner-writable) may only ever carry the CALLER'S own
       // identity. It has to be owner-writable for the owner to create the row at all, which otherwise
@@ -295,7 +295,7 @@ const server = http.createServer(async (req, res) => {
     // column" -- without the writable-set answer folded in.
     function ownerColOf(tableId) {
       const base = tableId ? tableId.split('__')[0] : '';
-      const cols = (((backend.getSchema('local') || {}).tables || {})[base] || {}).columns;
+      const cols = (((backend.getSchema() || {}).tables || {})[base] || {}).columns;
       if (!cols) return null;
       if (Array.isArray(cols)) { const o = cols.find(c => c && c.type === 'owner'); return o ? o.name : null; }
       for (const n in cols) { const d = cols[n]; if (d && typeof d === 'object' && d.type === 'owner') return n; }
@@ -332,23 +332,23 @@ const server = http.createServer(async (req, res) => {
 
     try {
     switch (route) {
-      case 'getSchema': return json(res, backend.getSchema('local'));
-      case 'saveSchema': backend.saveSchema('local', body.schema); return json(res, { ok: true });
+      case 'getSchema': return json(res, backend.getSchema());
+      case 'saveSchema': backend.saveSchema(body.schema); return json(res, { ok: true });
       case 'validateFolder': return json(res, backend.validateFolder(body.id || 'local'));
-      case 'getFolderConfig': return json(res, backend.getFolderConfig('local'));
-      case 'setFolderConfig': backend.setFolderConfig('local', body.config); return json(res, { ok: true });
-      case 'initSchema': if (!body.schema) return json(res, {}); return json(res, backend.initSchema('local', body.schema));
+      case 'getFolderConfig': return json(res, backend.getFolderConfig());
+      case 'setFolderConfig': backend.setFolderConfig(body.config); return json(res, { ok: true });
+      case 'initSchema': if (!body.schema) return json(res, {}); return json(res, backend.initSchema(body.schema));
       case 'bootData': {
         // One-round-trip boot: schema + languages + lists + all accessible table data, read
         // in-process (SQLite). Scoped per-table + per-list by X-User — a DEV convenience (trusted header,
         // localhost-only), not authenticated access control; see getAllowedTables above.
-        const schemaB = backend.getSchema('local');
+        const schemaB = backend.getSchema();
         if (!schemaB) return json(res, { schema: null }); // first boot: client saves the default schema
         const tablesB = schemaB.tables || {};
-        backend.initSchema('local', tablesB);   // creates the tables/files; ids ARE names
-        const languagesB = backend.getAvailableLanguages('local');
+        backend.initSchema(tablesB);   // creates the tables/files; ids ARE names
+        const languagesB = backend.getAvailableLanguages();
         const allowedB = getAllowedTables(); // null => unrestricted (admin / no users)
-        const listsB = filterLists(backend.getLists('local'), tablesB, allowedB);
+        const listsB = filterLists(backend.getLists(), tablesB, allowedB);
         const dataB = {};
         // Granted tables PLUS the owner-column (self-service) ones — the shared predicate, so this boot
         // set matches Firebase's and Supabase's. A self-service table the caller has no READ grant on
@@ -371,10 +371,10 @@ const server = http.createServer(async (req, res) => {
         });
         return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), languages: languagesB, lists: listsB, data: dataB });
       }
-      case 'resetData': backend.resetData(); backend._users = undefined; saveUsers(); backend._accessRequests = undefined; saveRequests(); backend._profiles = undefined; saveProfiles(); if (backend.saveListUsers) backend.saveListUsers('local', {}); return json(res, { ok: true });
-      case 'getAvailableTables': return json(res, backend.getAvailableTables('local'));
+      case 'resetData': backend.resetData(); backend._users = undefined; saveUsers(); backend._accessRequests = undefined; saveRequests(); backend._profiles = undefined; saveProfiles(); if (backend.saveListUsers) backend.saveListUsers({}); return json(res, { ok: true });
+      case 'getAvailableTables': return json(res, backend.getAvailableTables());
       case 'serverInfo': return json(res, { storage: USE_FS ? 'fs' : 'sqlite' });
-      case 'getAvailableLanguages': return json(res, backend.getAvailableLanguages('local'));
+      case 'getAvailableLanguages': return json(res, backend.getAvailableLanguages());
       case 'getTableData': {
         if (pagesTable(body.tableId)) {
           if (canReadPages()) return json(res, filterPages(backend.getTableData(body.tableId, body.tab) || { headers: [], rows: [] }));
@@ -451,62 +451,62 @@ const server = http.createServer(async (req, res) => {
         const existing = oc ? prior : null;   // may delete only my own owned row
         // ...and only while it is still in an owner-writable state: an approved row is out of my hands,
         // so deleting it must be refused for exactly the reason editing it is.
-        const dBounds = BackendHelpers.ownerWritableOf(backend.getSchema('local') || {})[String(body.tableId || '').split('__')[0]];
+        const dBounds = BackendHelpers.ownerWritableOf(backend.getSchema() || {})[String(body.tableId || '').split('__')[0]];
         if (!oc || !existing || !_mine(existing[oc]) || !BackendHelpers.ownerRowInState(dBounds, existing)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
         return delOk();
       }
-      case 'getTranslations': return json(res, backend.getTranslations(body.folderId || 'local', body.langCode));
-      case 'updateTranslations': backend.updateTranslations(body.folderId || 'local', body.langCode, body.updates); return json(res, { ok: true });
-      case 'createLanguage': return json(res, { id: backend.createLanguage(body.folderId || 'local', body.code, body.name, body.keys) });
-      case 'deleteLanguage': backend.deleteLanguage(body.folderId || 'local', body.code); return json(res, { ok: true });
-      case 'renameLanguage': backend.renameLanguage(body.folderId || 'local', body.code, body.name); return json(res, { ok: true });
+      case 'getTranslations': return json(res, backend.getTranslations(body.langCode));
+      case 'updateTranslations': backend.updateTranslations(body.langCode, body.updates); return json(res, { ok: true });
+      case 'createLanguage': return json(res, { id: backend.createLanguage(body.code, body.name, body.keys) });
+      case 'deleteLanguage': backend.deleteLanguage(body.code); return json(res, { ok: true });
+      case 'renameLanguage': backend.renameLanguage(body.code, body.name); return json(res, { ok: true });
       case 'getLists': {
         // Per-list access: return only lists owned by a table the user can access (admin: all).
         const allowed = getAllowedTables();          // null => unrestricted (admin/no users)
-        const schemaTables = (backend.getSchema('local') || {}).tables || {};
-        return json(res, filterLists(backend.getLists('local'), schemaTables, allowed));
+        const schemaTables = (backend.getSchema() || {}).tables || {};
+        return json(res, filterLists(backend.getLists(), schemaTables, allowed));
       }
       case 'saveLists': {
-        if (isAdminReq()) { backend.saveLists('local', body.lists); return json(res, { ok: true }); }
+        if (isAdminReq()) { backend.saveLists(body.lists); return json(res, { ok: true }); }
         // A non-admin may write ONLY the lists the schema opens (`userWritableLists`) — editing a list
         // is editing shared vocabulary, so it is admin-only by default. A table grant is deliberately
         // NOT part of the question: a list belongs to every table whose columns reference it, so keying
         // on the grant handed one rw table every list its columns touched. See userWritableListsOf.
         // Merge over the existing set rather than replacing it: their submitted map is a filtered subset,
         // so a plain save would drop every list they cannot see.
-        const openW = BackendHelpers.userWritableListsOf(backend.getSchema('local') || {}).lists;
-        const merged = backend.getLists('local');
+        const openW = BackendHelpers.userWritableListsOf(backend.getSchema() || {}).lists;
+        const merged = backend.getLists();
         const submitted = body.lists || {};
         Object.keys(submitted).forEach(name => { if (openW.includes(name)) merged[name] = submitted[name]; });
-        backend.saveLists('local', merged);
+        backend.saveLists(merged);
         return json(res, { ok: true });
       }
       case 'putListItem': {
         // Per-list access: a list is writable if ANY of its owning tables is granted (same ownership
         // model as saveLists above) — the list NAME is not a table id, so checkTableAccess was wrong here.
         // Admin-only unless the schema opens this list to everyone (userWritableLists).
-        const openLi = BackendHelpers.userWritableListsOf(backend.getSchema('local') || {}).lists;
+        const openLi = BackendHelpers.userWritableListsOf(backend.getSchema() || {}).lists;
         if (!isAdminReq() && !openLi.includes(body.listName)) {
           return json(res, { error: 'Access denied' }, 403);
         }
-        backend.putListItem('local', body.listName, body.value); return json(res, { ok: true });
+        backend.putListItem(body.listName, body.value); return json(res, { ok: true });
       }
       // --- User-linked lists (Option C) ---
       case 'getListAvatars': {
         // Viewer-safe projection: { listName: { value: pictureDataUrl } }. Non-admins get only SHARED
         // linked users; no email is ever included. Safe for everyone to read.
-        const links = backend.getListUsers ? backend.getListUsers('local') : {};
+        const links = backend.getListUsers ? backend.getListUsers() : {};
         return json(res, LU.buildAvatarProjection(links, backend._profiles || {}, isAdminReq()));
       }
       case 'getListUserLinks': {
         // Admin-only: the raw { value: email } links, for the Lookup editor's picker.
         if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
-        return json(res, backend.getListUsers ? backend.getListUsers('local') : {});
+        return json(res, backend.getListUsers ? backend.getListUsers() : {});
       }
       case 'getMyListValues': {
         // Self-scoped: only the links naming the caller. Not admin-gated — it is their own identity, and
         // it is what lets `@me` resolve to a curated value on a `userlink` list.
-        const all = backend.getListUsers ? backend.getListUsers('local') : {};
+        const all = backend.getListUsers ? backend.getListUsers() : {};
         const mine = {};
         Object.keys(all || {}).forEach(list => {
           const links = all[list] || {};
@@ -517,8 +517,8 @@ const server = http.createServer(async (req, res) => {
       case 'setListUser': {
         // Admin-only: link (email set) or unlink (email empty) a list value to a registered user.
         if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
-        const cur = backend.getListUsers ? backend.getListUsers('local') : {};
-        backend.saveListUsers('local', LU.setLink(cur, body.listName, body.value, body.email || ''));
+        const cur = backend.getListUsers ? backend.getListUsers() : {};
+        backend.saveListUsers(LU.setLink(cur, body.listName, body.value, body.email || ''));
         return json(res, { ok: true });
       }
       case 'moveRow': {

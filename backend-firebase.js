@@ -17,12 +17,12 @@ function _myEmail() {
 }
 
 backend = {
-  getSchema: function(folderId) {
+  getSchema: function() {
     return StorageFirestore.getMeta('schema').then(function(d) {
       return BackendHelpers.unwrapSchemaDoc(d);
     });
   },
-  saveSchema: function(folderId, schema) {
+  saveSchema: function(schema) {
     // Mirror the schema-derived facts the schema-blind firestore rules need, kept in sync on every
     // schema write: _meta/ownerTables (tables with an owner column -> gates owner-create),
     // _meta/pageAccess (restricted doc-views -> gates _pages__active reads; see pageAccessOf),
@@ -60,10 +60,10 @@ backend = {
   validateFolder: function(id) {
     return Promise.resolve({ valid: true, name: 'Firebase' });
   },
-  getFolderConfig: function(folderId) {
+  getFolderConfig: function() {
     return StorageFirestore.getMeta('config').then(function(d) { return d || null; });
   },
-  setFolderConfig: function(folderId, config) {
+  setFolderConfig: function(config) {
     return StorageFirestore.setMeta('config', config);
   },
   // Table ids ARE table names on every remaining backend, so there is nothing to map and nothing to
@@ -73,7 +73,7 @@ backend = {
   // CONCURRENTLY (Promise.all). Firestore has no Sheets-style per-call rate limit, so concurrency is
   // safe here. Access-scoped via _myTables so denied collections are never queried (rules aren't
   // filters — querying a denied collection would throw). Replaces ~20 sequential round-trips.
-  bootData: function(folderId) {
+  bootData: function() {
     var self = this;
     var DENIED = { __denied: true };
     return Promise.all([
@@ -82,7 +82,7 @@ backend = {
       // try to write a default schema we have no permission to save.
       StorageFirestore.getMeta('schema').catch(function() { return DENIED; }),
       StorageFirestore.getMeta('languages').catch(function() { return DENIED; }),
-      self.getLists(folderId).catch(function() { return {}; }),   // lists are optional — never let one denied read fail-fast the whole boot
+      self.getLists().catch(function() { return {}; }),   // lists are optional — never let one denied read fail-fast the whole boot
       self._myTables()           // null = unrestricted; [] = none; [..] = restricted set
     ]).then(function(r) {
       if (r[0] === DENIED) return { schema: null, denied: true };
@@ -116,7 +116,7 @@ backend = {
     });
   },
   getAvailableTables: function() { return Promise.resolve([]); },
-  getAvailableLanguages: function(folderId) {
+  getAvailableLanguages: function() {
     return StorageFirestore.getMeta('languages').then(function(d) {
       return d ? (d.list || []) : [];
     });
@@ -253,7 +253,7 @@ backend = {
   _legacyGetLists: function() {
     return StorageFirestore.getMeta('lists').then(function(d) { return (d && !d._value) ? d : {}; });
   },
-  getLists: function(folderId) {
+  getLists: function() {
     var self = this;
     return self._myTables().then(function(tabs) {
       if (tabs !== null && !tabs.length) return {};
@@ -263,7 +263,7 @@ backend = {
           // one-time additive migration of the legacy _meta/lists doc -> per-list _lists docs (admin only)
           return self._legacyGetLists().then(function(legacy) {
             if (!Object.keys(legacy).length) return {};
-            return self.saveLists(folderId, legacy).then(function() { return legacy; });
+            return self.saveLists(legacy).then(function() { return legacy; });
           });
         });
       }
@@ -298,7 +298,7 @@ backend = {
       });
     });
   },
-  saveLists: function(folderId, lists) {
+  saveLists: function(lists) {
     var self = this;
     return Promise.all([StorageFirestore.getMeta('schema'), self._myTables()]).then(function(r) {
       var tables = (r[0] && r[0].tables) || {}, myTabs = r[1];
@@ -315,7 +315,7 @@ backend = {
       return batch.commit();
     });
   },
-  putListItem: function(folderId, listName, value) {
+  putListItem: function(listName, value) {
     return StorageFirestore.getMeta('schema').then(function(s) {
       var tables = (s && s.tables) || {};
       return _db.collection('_lists').doc(listName).set(
@@ -397,13 +397,13 @@ backend = {
       return Promise.all(writes);
     }).catch(function() { /* non-admin or offline: the link itself is already written */ });
   },
-  getTranslations: function(folderId, langCode) {
+  getTranslations: function(langCode) {
     return StorageFirestore.getMeta('lang_' + langCode).then(function(d) { return d || {}; });
   },
-  updateTranslations: function(folderId, langCode, updates) {
+  updateTranslations: function(langCode, updates) {
     return _db.collection('_meta').doc('lang_' + langCode).set(updates, { merge: true });
   },
-  createLanguage: function(folderId, code, name, keys) {
+  createLanguage: function(code, name, keys) {
     return StorageFirestore.getMeta('languages').then(function(d) {
       var langs = BackendHelpers.addLanguage(d ? (d.list || []) : [], code, name);
       return StorageFirestore.setMeta('languages', { list: langs });
@@ -411,7 +411,7 @@ backend = {
       return StorageFirestore.setMeta('lang_' + code, BackendHelpers.emptyTranslations(keys));
     });
   },
-  deleteLanguage: function(folderId, code) {
+  deleteLanguage: function(code) {
     return StorageFirestore.getMeta('languages').then(function(d) {
       var langs = BackendHelpers.removeLanguage(d ? (d.list || []) : [], code);
       return StorageFirestore.setMeta('languages', { list: langs });
@@ -419,7 +419,7 @@ backend = {
       return _db.collection('_meta').doc('lang_' + code).delete();
     });
   },
-  renameLanguage: function(folderId, code, name) {
+  renameLanguage: function(code, name) {
     // Update only the languages index; the lang_<code> translations doc is left intact.
     return StorageFirestore.getMeta('languages').then(function(d) {
       var langs = BackendHelpers.renameLanguage(d ? (d.list || []) : [], code, name);

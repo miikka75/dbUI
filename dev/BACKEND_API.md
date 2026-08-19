@@ -11,34 +11,34 @@ dev-server pair `backend-local.js` / `backend-local-client.js`.
 
 | Method | Signature | Returns | Notes |
 |--------|-----------|---------|-------|
-| `getSchema(folderId)` | `(string) → Promise` | `object \| string \| null` | Schema JSON. String is auto-parsed. Null = first boot. |
-| `saveSchema(folderId, schema)` | `(string, object) → Promise` | void | Fire-and-forget. |
-| `initSchema(folderId, tables)` | `(string, object) → Promise` | ignored | Creates storage for each table where that is needed up front (dev SQLite/JSON). Table ids ARE table names on every backend, so nothing is returned. |
-| `validateFolder(folderId)` | `(string) → Promise` | `{valid: boolean, name: string\|null}` | Validates the storage target exists and is accessible. |
-| `getFolderConfig(folderId)` | `(string) → Promise` | `object \| null` | App-level config stored alongside data. |
-| `setFolderConfig(folderId, config)` | `(string, object) → Promise` | void | |
+| `getSchema()` | `() → Promise` | `object \| string \| null` | Schema JSON. String is auto-parsed. Null = first boot. |
+| `saveSchema(schema)` | `(object) → Promise` | void | Fire-and-forget. |
+| `initSchema(tables)` | `(object) → Promise` | ignored | Creates storage for each table where that is needed up front (dev SQLite/JSON). Table ids ARE table names on every backend, so nothing is returned. |
+| `validateFolder(id)` | `(string) → Promise` | `{valid: boolean, name: string\|null}` | Dev-server probe: does a database exist here? The only method still taking a handle -- every other one addresses the single database implicitly. |
+| `getFolderConfig()` | `() → Promise` | `object \| null` | App-level config stored alongside data. |
+| `setFolderConfig(config)` | `(object) → Promise` | void | |
 | `getTableData(tableId, partition)` | `(string, string) → Promise` | `{headers: string[], rows: object[]}` | Partition: 'active' or 'archive'. |
 | `putRow(tableId, row, partition)` | `(string, object, string) → Promise` | void | Upsert by row.id. |
 | `deleteRow(tableId, rowId, partition)` | `(string, string, string) → Promise` | void | No-op if not found. Return value discarded. |
 | `moveRow(tableId, row, fromPartition, toPartition)` | `(string, object, string, string) → Promise` | void | Delete from source + put to target. Not atomic. |
-| `getLists(folderId)` | `(string) → Promise` | `{listName: string[]}` | All dropdown lists. |
-| `saveLists(folderId, lists)` | `(string, object) → Promise` | void | Full replacement. Values must be strings. |
-| `putListItem(folderId, listName, value)` | `(string, string, string) → Promise` | void | Append single value. |
-| `getAvailableLanguages(folderId)` | `(string) → Promise` | `[{code, name}]` | Extra fields (fileId) allowed, ignored by caller. |
-| `getTranslations(folderId, langCode)` | `(string, string) → Promise` | `{key: string} \| null` | Null = no translations for that language. |
-| `updateTranslations(folderId, code, translations)` | `(string, string, object) → Promise` | void | |
-| `createLanguage(folderId, code, name, keys)` | `(string, string, string, string[]) → Promise` | void | Return value discarded. |
-| `deleteLanguage(folderId, code)` | `(string, string) → Promise` | void | |
+| `getLists()` | `() → Promise` | `{listName: string[]}` | All dropdown lists. |
+| `saveLists(lists)` | `(object) → Promise` | void | Full replacement. Values must be strings. |
+| `putListItem(listName, value)` | `(string, string) → Promise` | void | Append single value. |
+| `getAvailableLanguages()` | `() → Promise` | `[{code, name}]` | Extra fields (fileId) allowed, ignored by caller. |
+| `getTranslations(langCode)` | `(string) → Promise` | `{key: string} \| null` | Null = no translations for that language. |
+| `updateTranslations(code, translations)` | `(string, object) → Promise` | void | |
+| `createLanguage(code, name, keys)` | `(string, string, string[]) → Promise` | void | Return value discarded. |
+| `deleteLanguage(code)` | `(string) → Promise` | void | |
 
 ## Optional Methods
 
 | Method | When used | Notes |
 |--------|-----------|-------|
-| `bootData(folderId)` | One-round-trip boot | Returns `{schema, languages, lists, data, tableOrder?, columnOrders?}`. If present, skips sequential loading. Implemented by Firebase and Supabase. |
-| `getAvailableTables(folderId)` | Setup wizard (detect existing tables) | Returns `[{id, name}]`. OK to return `[]` if not applicable (Firebase/CRDT). |
-| `getUsers(folderId)` | User access panel | Returns `[{key, addr, role, tables}]`. See **grant shapes** below. |
-| `setUserRole(folderId, key, role, email, tables)` | User management | Build the stored record with `BackendHelpers.userGrantDoc(...)` — it also denormalizes `rwTables`, which the server-side rules need. |
-| `removeUser(folderId, key)` | User management | |
+| `bootData()` | One-round-trip boot | Returns `{schema, languages, lists, data, tableOrder?, columnOrders?}`. If present, skips sequential loading. Implemented by Firebase and Supabase. |
+| `getAvailableTables()` | Setup wizard (detect existing tables) | Returns `[{id, name}]`. OK to return `[]` if not applicable (Firebase/CRDT). |
+| `getUsers()` | User access panel | Returns `[{key, addr, role, tables}]`. See **grant shapes** below. |
+| `setUserRole(key, role, email, tables)` | User management | Build the stored record with `BackendHelpers.userGrantDoc(...)` — it also denormalizes `rwTables`, which the server-side rules need. |
+| `removeUser(key)` | User management | |
 | `subscribeTable(tableId, partition, onChange)` | Live sync between clients | Returns an **unsubscribe function**. Absent = no live updates (manual refresh only); implemented by Firebase, Supabase and the dev-server backends. See **Live sync** below. |
 
 ## Live sync (`subscribeTable`)
