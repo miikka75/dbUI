@@ -308,6 +308,14 @@ returns boolean language sql stable security definer set search_path = public as
     when store = '_lists' then
       public.app_is_registered() and (
         public.app_no_users() or public.app_role() = 'admin' or public.app_list_allowed(val -> 'tables')
+        -- A list the schema OPENS to everyone (userWritableLists) is readable by every registered user.
+        -- Not cosmetic: without it Postgres cannot APPEND to such a list either. An UPDATE has to locate
+        -- its row, which applies the SELECT policy, so a list the caller cannot read is a list they
+        -- cannot edit -- even though app_can_update deliberately grants them exactly that. Firestore
+        -- evaluates its write rules independently of read, so the same member succeeds there; this is
+        -- the clause that closes that gap. It grants read of precisely the lists the schema already
+        -- lets everyone modify, so it widens nothing that writing did not already imply.
+        or public.app_list_user_writable(key)
       )
     when store = '_pages__active' then
       public.app_is_registered() and (

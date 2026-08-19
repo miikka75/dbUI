@@ -343,6 +343,22 @@ describe('supabase RLS — _lists', () => {
     await as('mixed@x.com');
     assert.equal(await tryUpdate('_lists', 'taskvalues', { name: 'taskvalues', items: ['a', 'b'], tables: ['tasks'] }), 'ok');
   });
+  // The case above uses a caller who already holds a grant on the owning table, so it never asked
+  // whether the ALLOWLIST alone is enough. viewer@x.com holds nothing. This is the case that was
+  // silently broken: an UPDATE has to locate its row, Postgres applies the SELECT policy to do that,
+  // and _lists reads used to require a table grant -- so a member could be granted the write by
+  // userWritableLists and still be unable to perform it. Firestore evaluates write rules without
+  // needing the read, so the same member succeeded there and on the dev server. Found by
+  // dev/test/gate-parity.test.js comparing the two engines case by case.
+  it("a member with NO table grant can read and append to a list the schema opens", async () => {
+    await as('viewer@x.com');
+    assert.equal(await canRead('_lists', 'taskvalues'), true, 'an opened list must be readable, or it cannot be edited');
+    assert.equal(await tryUpdate('_lists', 'taskvalues', { name: 'taskvalues', items: ['a', 'b', 'c'], tables: ['tasks'] }), 'ok');
+  });
+  it("opening a list does not leak the lists it did not open", async () => {
+    await as('viewer@x.com');
+    assert.equal(await canRead('_lists', 'lockedvalues'), false, 'a list that is not opened stays behind the grant');
+  });
   it("a list the schema does NOT open stays admin-only, whatever the table grant", async () => {
     await as('mixed@x.com');   // rw on `tasks`, which owns lockedvalues — and that is deliberately not enough
     assert.equal(await tryUpdate('_lists', 'lockedvalues', { name: 'lockedvalues', items: ['a', 'b'], tables: ['tasks'] }), 'denied');

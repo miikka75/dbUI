@@ -144,7 +144,12 @@ describe('rules parity — userWritableLists (list editing is admin-only by defa
   it('supabase-schema.sql gates the non-admin branch of _lists create and update', () => {
     assert.match(SQL, /create or replace function public\.app_list_user_writable/, 'supabase needs app_list_user_writable');
     const uses = (SQL.match(/public\.app_list_user_writable\(key\)/g) || []).length;
-    assert.equal(uses, 2, 'create and update must each call it; delete is admin-only (found ' + uses + ')');
+    // THREE, not two, and the third is load-bearing rather than belt-and-braces: READ must consult it
+    // as well. Postgres applies the SELECT policy to rows an UPDATE has to locate, so a list a member
+    // cannot read is a list they cannot append to -- which silently disabled userWritableLists on
+    // Supabase while it kept working on Firebase and on the dev server. Firestore evaluates its write
+    // rules independently of read, which is why its own count stays at two. Delete remains admin-only.
+    assert.equal(uses, 3, 'read, create and update must each call it; delete is admin-only (found ' + uses + ')');
     assert.doesNotMatch(SQL, /app_list_write_allowed/, 'the table-grant helper should be gone');
   });
   it('dev/server.js gates putListItem and saveLists', () => {

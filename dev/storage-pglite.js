@@ -185,6 +185,10 @@ async function createPgliteStorage(opts) {
         [store, key, JSON.stringify(value)]));
     },
     _resetData() { return asOwner(() => q('delete from public.kv')); },
+    // Run a statement UNDER THE CALLER, with RLS enforcing. _query runs as owner, which is the wrong
+    // tool for asking "what would the policy say for this user?" -- it answers as the one identity the
+    // policies never see.
+    _callerQuery(sql, params) { return asCaller(() => q(sql, params)); },
     _query(sql, params) { return asOwner(() => q(sql, params)); }
   };
 }

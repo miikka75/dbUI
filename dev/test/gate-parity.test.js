@@ -298,6 +298,7 @@ describe('gate parity — per-list write access', () => {
   };
 
   for (const [user, list, expected, label] of [
+    ['member@x.com', 'status', 'allow', 'a member may append to a list the schema opens'],
     ['member@x.com', 'locked', 'deny',  'a member may not touch a list the schema does not open'],
     ['admin@x.com',  'locked', 'allow', 'an admin may edit any list']
   ]) {
@@ -309,29 +310,9 @@ describe('gate parity — per-list write access', () => {
     });
   }
 
-  // ---- KNOWN DIVERGENCE, found by this harness -------------------------------------------------
-  // A member appending to a list the schema opens via userWritableLists: the JavaScript gate ALLOWS
-  // it, the policies REFUSE it.
-  //
-  // Cause: every write goes through app_kv_merge, which is `insert ... on conflict do update`.
-  // Postgres evaluates the INSERT policy's WITH CHECK on the proposed row BEFORE it detects the
-  // conflict, so an upsert always demands CREATE permission -- and creating a _lists row is
-  // admin/editor-only by design (app_list_create_allowed). A member who may UPDATE an open list
-  // therefore cannot append to it. Postgres reports "new row violates row-level security policy".
-  //
-  // This is not a dev-only artifact: backend-supabase.js reaches _lists through the same upsert, so
-  // the same member is refused on Supabase today while succeeding on the dev server and on Firebase.
-  //
-  // Asserted as STILL DIVERGING on purpose. Fixing the policy -- most likely making app_kv_merge try
-  // the UPDATE first and INSERT only when it affects nothing -- will make this test fail, which is the
-  // signal to delete this block and move the case back into the table above.
-  it('KNOWN DIVERGENCE: userWritableLists append is allowed by the JS gate and refused by the policy', async () => {
-    const js = await jsPut('member@x.com', 'status');
-    const rls = await rlsPut('member@x.com', 'status');
-    assert.equal(js, 'allow', 'the JavaScript gate honours userWritableLists');
-    assert.equal(rls, 'deny', 'the policy refuses it -- if this now says allow, the policy was fixed: ' +
-      'delete this block and restore the case to the parity table');
-  });
+  // The read policy for _lists honours userWritableLists precisely so that this works: an UPDATE has
+  // to locate its row, which applies the SELECT policy, so a list a member cannot read is one they
+  // cannot append to either. This case is what caught that.
 });
 
 describe('gate parity — the matrix is not vacuous', () => {
