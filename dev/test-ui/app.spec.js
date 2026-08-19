@@ -1956,7 +1956,7 @@ test.describe('saveField debounce (data integrity)', () => {
     await page.waitForTimeout(500); // debounce fires (300ms)
     // reload from backend and verify last value persisted
     const persisted = await page.evaluate(async () => {
-      const rows = await backend.getTableData(appInstance.tableMap[appInstance.currentTable] || appInstance.currentTable, 'active');
+      const rows = await backend.getTableData(appInstance.currentTable, 'active');
       return rows && rows.rows ? rows.rows[0].title : (rows[0] && rows[0].title);
     });
     expect(persisted).toBe('val5');
@@ -5648,7 +5648,6 @@ test.describe('list-item delete/rename cascade into table data', () => {
       const app = window.appInstance;
       const puts = [];
       window.backend.putRow = (t, row, part) => { puts.push({ t, id: row.id, part, status: row.status, people: row.people && row.people.slice() }); };
-      app.tableMap = Object.assign({}, app.tableMap, { tasks: 'tasks', crew_rotation: 'crew_rotation' });
       app.listsCache = { status: ['open', 'done'], crew: ['A', 'B', 'C'] };
       // active + archive rows seeded directly in cache so no fetch is needed
       app.dataCache['tasks'] = [ { id: 't1', status: 'open' }, { id: 't2', status: 'done' } ];
@@ -5684,7 +5683,6 @@ test.describe('list-item delete/rename cascade into table data', () => {
       const app = window.appInstance;
       const puts = [];
       window.backend.putRow = (t, row, part) => { puts.push(row.id + ':' + part); };
-      app.tableMap = Object.assign({}, app.tableMap, { tasks: 'tasks', crew_rotation: 'crew_rotation' });
       app.listsCache = { status: ['open', 'done'], crew: ['A', 'B'] };
       app.dataCache['tasks'] = [ { id: 't1', status: 'done' } ];
       app.dataCache['tasks__archive'] = [ { id: 't3', status: 'done' } ];
@@ -5712,7 +5710,6 @@ test.describe('list-item delete/rename cascade into table data', () => {
       const app = window.appInstance;
       const puts = [];
       window.backend.putRow = (t, row, part) => { puts.push(row.id + ':' + part); };
-      app.tableMap = Object.assign({}, app.tableMap, { tasks: 'tasks' });
       // status column gets a listSwitch alt list 'guests' (primary list + an alternate: staff + guests)
       SCHEMA.tasks.columns.status.listSwitch = { list: 'guests', label: 'Guest' };
       app.listsCache = { status: ['done'], guests: ['Alice'] }; // 'Alice' moved: added to guests, removed from status

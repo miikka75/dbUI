@@ -13,7 +13,7 @@ dev-server pair `backend-local.js` / `backend-local-client.js`.
 |--------|-----------|---------|-------|
 | `getSchema(folderId)` | `(string) → Promise` | `object \| string \| null` | Schema JSON. String is auto-parsed. Null = first boot. |
 | `saveSchema(folderId, schema)` | `(string, object) → Promise` | void | Fire-and-forget. |
-| `initSchema(folderId, tables)` | `(string, object) → Promise` | `{tableName: id} \| null` | Creates storage for each table. Returns tableMap (id used in putRow/getTableData). Null = use table names as IDs. |
+| `initSchema(folderId, tables)` | `(string, object) → Promise` | ignored | Creates storage for each table where that is needed up front (dev SQLite/JSON). Table ids ARE table names on every backend, so nothing is returned. |
 | `validateFolder(folderId)` | `(string) → Promise` | `{valid: boolean, name: string\|null}` | Validates the storage target exists and is accessible. |
 | `getFolderConfig(folderId)` | `(string) → Promise` | `object \| null` | App-level config stored alongside data. |
 | `setFolderConfig(folderId, config)` | `(string, object) → Promise` | void | |
@@ -34,6 +34,7 @@ dev-server pair `backend-local.js` / `backend-local-client.js`.
 
 | Method | When used | Notes |
 |--------|-----------|-------|
+| `bootData(folderId)` | One-round-trip boot | Returns `{schema, languages, lists, data, tableOrder?, columnOrders?}`. If present, skips sequential loading. Implemented by Firebase and Supabase. |
 | `getAvailableTables(folderId)` | Setup wizard (detect existing tables) | Returns `[{id, name}]`. OK to return `[]` if not applicable (Firebase/CRDT). |
 | `getUsers(folderId)` | User access panel | Returns `[{key, addr, role, tables}]`. See **grant shapes** below. |
 | `setUserRole(folderId, key, role, email, tables)` | User management | Build the stored record with `BackendHelpers.userGrantDoc(...)` — it also denormalizes `rwTables`, which the server-side rules need. |

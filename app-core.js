@@ -208,7 +208,6 @@ function createVueApp() {
       setupStep: (function() { var m = localStorage.getItem('app_mode'); return (m === 'firebase' || m === 'supabase') ? m : null; })(),
       mode: '',
       folderId: '',
-      tableMap: {},
       currentTable: '',
       currentData: [],
       dataCache: {},
@@ -999,7 +998,6 @@ function createVueApp() {
               self.schemaData = Object.freeze(defaultSchema);
               backend.saveSchema(self.folderId, defaultSchema);
             }
-            self.tableMap = result.tableMap || {};
             self.languages = result.languages || [];
             self.listsCache = result.lists || {}; window._listsCache = self.listsCache;
             self.loadListAvatars(); self.loadListUserLinks(); self.loadMyListValues();   // avatars + admin editor links + my own @me identity
@@ -1047,9 +1045,6 @@ function createVueApp() {
 
         // Sequential path (local server / OAuth)
         backend.initSchema(self.folderId, SCHEMA).then(function(schemaResult) {
-          self.tableMap = {};
-          if (schemaResult) { Object.keys(schemaResult).forEach(function(n) { self.tableMap[n] = schemaResult[n]; }); }
-          else { Object.keys(SCHEMA).forEach(function(n) { self.tableMap[n] = n; }); }
 
           return backend.getAvailableLanguages(self.folderId);
         }).then(function(langs) {
@@ -1108,17 +1103,17 @@ function createVueApp() {
           // Preload data -- only tables the user can reach. Self-serviceable tables are included: the
           // member holds no grant on them but the backend scopes the read to their own rows, and
           // leaving them out left every self-service view empty until something else fetched them.
-          var tables = Object.keys(self.tableMap).filter(function(t) { return self.canReachTable(t); });
+          var tables = Object.keys(SCHEMA).filter(function(t) { return self.canReachTable(t); });
           var chain = Promise.resolve();
           tables.forEach(function(name) {
             chain = chain.then(function() {
-              return backend.getTableData(self.tableMap[name], 'active').then(function(result) {
+              return backend.getTableData(name, 'active').then(function(result) {
                 self.dataCache[name] = parseTableResult(result).rows;
               }).catch(function() { self.dataCache[name] = []; });
             });
             if (self.settings.preload_archive && SCHEMA[name] && SCHEMA[name].archivable) {
               chain = chain.then(function() {
-                return backend.getTableData(self.tableMap[name], 'archive').then(function(result) {
+                return backend.getTableData(name, 'archive').then(function(result) {
                   self.dataCache[aKey(name)] = parseTableResult(result).rows;
                 }).catch(function() { self.dataCache[aKey(name)] = []; });
               });
@@ -1346,7 +1341,7 @@ function createVueApp() {
         // Removing the vote (toggled off -> empty status): delete my response row rather than leave an
         // empty-status orphan that would show as a blank line in the roster.
         if (!status) {
-          if (mine) { var mi = rows.indexOf(mine); if (mi >= 0) rows.splice(mi, 1); backend.deleteRow(this.tableMap[table], mine.id, 'active'); }
+          if (mine) { var mi = rows.indexOf(mine); if (mi >= 0) rows.splice(mi, 1); backend.deleteRow(table, mine.id, 'active'); }
           return;
         }
         if (mine) {
@@ -1356,13 +1351,13 @@ function createVueApp() {
           // already correct on the stored row.
           var patch = { id: mine.id, rosterPublic: pub, updated_at: mine.updated_at };
           patch[cfg.statusColumn] = status;
-          backend.putRow(this.tableMap[table], patch, 'active');
+          backend.putRow(table, patch, 'active');
         } else {
           var row = { id: this.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           getColumns(table).forEach(function(c) { if (!(c in row)) row[c] = ''; });
           row[ownerCol] = me; row[linkColumn] = eventKey; row[cfg.statusColumn] = status; row.rosterPublic = pub;
           rows.push(row);
-          backend.putRow(this.tableMap[table], row, 'active');
+          backend.putRow(table, row, 'active');
         }
       },
       // Doc-view bodies live in a server-side "_pages" collection (not in schema.json).
@@ -1508,7 +1503,7 @@ function createVueApp() {
           // member's own rows) — the same canReachTable the sidebar's canAccess uses, so an rsvp view's
           // responses table loads for a no-grant member instead of silently staying empty.
           if (!tbl || self.dataCache[tbl] || !self.canReachTable(tbl)) return;
-          backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
+          backend.getTableData(tbl, 'active').then(function(result) {
             self.dataCache[tbl] = parseTableResult(result).rows;
             if (onLoad) onLoad(tbl);
           }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
@@ -1537,7 +1532,7 @@ function createVueApp() {
           if (!tbl || !self.canReachTable(tbl)) return;
           var store = BackendHelpers.storeName(tbl, tab || 'active');
           if (self._liveSubs[store]) return;                 // already watched — subscribe once per session
-          self._liveSubs[store] = backend.subscribeTable(self.tableMap[tbl] || tbl, tab || 'active', function(change) {
+          self._liveSubs[store] = backend.subscribeTable(tbl, tab || 'active', function(change) {
             self._liveApply(store, change);
           }) || function() {};
         });
@@ -1692,7 +1687,7 @@ function createVueApp() {
               if (!self.canReachTable(tbl)) return;
               if (tbl && !self.dataCache[tbl]) {
                 var embedTab = 'active';
-                backend.getTableData(self.tableMap[tbl], embedTab).then(function(result) {
+                backend.getTableData(tbl, embedTab).then(function(result) {
                   self.dataCache[tbl] = parseTableResult(result).rows;
                 });
               }
@@ -1711,7 +1706,7 @@ function createVueApp() {
               if (!dep.table) return;
               self._liveWatch([dep.table], dep.part);   // a computed column is only as live as its inputs
               if (!self.canReachTable(dep.table) || self.dataCache[dep.key]) return;
-              backend.getTableData(self.tableMap[dep.table], dep.part).then(function(result) {
+              backend.getTableData(dep.table, dep.part).then(function(result) {
                 self.dataCache[dep.key] = parseTableResult(result).rows;
                 recomputeRotation();
               }).catch(function() { self.dataCache[dep.key] = self.dataCache[dep.key] || []; });
@@ -1727,7 +1722,7 @@ function createVueApp() {
           self._liveWatch([self.currentTable], self.viewingArchive ? 'archive' : 'active');
           if (!self.dataCache[key]) {
             var tab = self.viewingArchive ? 'archive' : 'active';
-            backend.getTableData(self.tableMap[self.currentTable], tab).then(function(result) {
+            backend.getTableData(self.currentTable, tab).then(function(result) {
               self.dataCache[key] = parseTableResult(result).rows;
               var rows = self.dataCache[key];
               if (tableDef.filter) rows = filterRows(rows, tableDef.filter);
@@ -1834,7 +1829,7 @@ function createVueApp() {
             row[col] = value;
           }
           row.updated_at = new Date().toISOString();
-          backend.putRow(self.tableMap[source], row, tab);
+          backend.putRow(source, row, tab);
           // Propagate to mirror tables if this column is mirrored. This takes the LIVE row, not the
           // payload: `row` is now a partial, and propagateMirror reads every synced column off it —
           // given the partial it would blank each one it couldn't find.
@@ -1886,7 +1881,7 @@ function createVueApp() {
             row.position = String(mp + 1);
           }
           self.dataCache[cacheKey].push(row);
-          backend.putRow(self.tableMap[src], row, tab);
+          backend.putRow(src, row, tab);
           if (src === primary) primaryRow = row;
         });
         return primaryRow;
@@ -1936,7 +1931,7 @@ function createVueApp() {
           self.dataCache[aKey(source)] = cached.filter(function(r) { return r.id !== item.id; });
           if (!self.dataCache[source]) self.dataCache[source] = [];
           self.dataCache[source].push(srcRow);
-          backend.moveRow(self.tableMap[source], srcRow, 'archive', 'active');
+          backend.moveRow(source, srcRow, 'archive', 'active');
         });
         self.currentData = self.currentData.filter(function(r) { return r.id !== item.id; });
         self.notify(self.t('msg.restored'));
@@ -2329,7 +2324,7 @@ function createVueApp() {
           if (row[parentCol] === oldParent) {
             row[parentCol] = newParent;
             row.updated_at = new Date().toISOString();
-            backend.putRow(self.tableMap[table], row, 'active');
+            backend.putRow(table, row, 'active');
           }
         });
         self.migrateListTranslation(table, oldParent, newParent);   // carry the group's own label
@@ -2345,7 +2340,7 @@ function createVueApp() {
         var parentCol = self.refParentCol;
         var toDelete = (self.dataCache[table] || []).filter(function(r) { return r[parentCol] === parent; });
         self.dataCache[table] = (self.dataCache[table] || []).filter(function(r) { return r[parentCol] !== parent; });
-        toDelete.forEach(function(row) { backend.deleteRow(self.tableMap[table], row.id, 'active'); });
+        toDelete.forEach(function(row) { backend.deleteRow(table, row.id, 'active'); });
         self.pendingDelete = null;
         self.notify(self.t('msg.deleted'));
       },
@@ -2387,8 +2382,8 @@ function createVueApp() {
         if (i < 0 || j < 0 || j >= group.length) return;
         var b = group[j], pa = item.position, pb = b.position, now = new Date().toISOString();
         item.position = pb; b.position = pa; item.updated_at = b.updated_at = now;
-        backend.putRow(self.tableMap[table], { id: item.id, position: item.position, updated_at: now }, 'active');
-        backend.putRow(self.tableMap[table], { id: b.id, position: b.position, updated_at: now }, 'active');
+        backend.putRow(table, { id: item.id, position: item.position, updated_at: now }, 'active');
+        backend.putRow(table, { id: b.id, position: b.position, updated_at: now }, 'active');
       },
       // Move a whole group up/down (swap it with the adjacent group), then renumber every row sequentially.
       moveRefGroup: function(parentVal, dir) {
@@ -2399,7 +2394,7 @@ function createVueApp() {
         var t = order[i]; order[i] = order[j]; order[j] = t;
         var pos = 1, now = new Date().toISOString();
         order.forEach(function(g) { (grouped[g] || []).forEach(function(r) {
-          if (Number(r.position) !== pos) { r.position = String(pos); r.updated_at = now; backend.putRow(self.tableMap[table], { id: r.id, position: r.position, updated_at: now }, 'active'); }
+          if (Number(r.position) !== pos) { r.position = String(pos); r.updated_at = now; backend.putRow(table, { id: r.id, position: r.position, updated_at: now }, 'active'); }
           pos++;
         }); });
       },
@@ -2426,7 +2421,7 @@ function createVueApp() {
           delete self.saveTimers[timerKey];
           // Whole row on purpose, unlike saveField: a lookup rename cascades through propagateRefChange
           // above, so the row this writes is the one the editor just rebuilt in full.
-          backend.putRow(self.tableMap[refTable], item, 'active');
+          backend.putRow(refTable, item, 'active');
           self.notify(self.t('msg.saved'));
           self._liveFlush();
         }, 500);
@@ -2445,7 +2440,7 @@ function createVueApp() {
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
         var table = this.currentRefTable;
         this.dataCache[table] = (this.dataCache[table] || []).filter(function(r) { return r.id !== item.id; });
-        backend.deleteRow(this.tableMap[table], item.id, 'active');
+        backend.deleteRow(table, item.id, 'active');
         this.notify(this.t('msg.deleted'));
       },
 
@@ -2689,7 +2684,7 @@ function createVueApp() {
                   rowChanged = true;
                 }
               });
-              if (rowChanged) { row.updated_at = new Date().toISOString(); backend.putRow(self.tableMap[table], row, partition); changed++; }
+              if (rowChanged) { row.updated_at = new Date().toISOString(); backend.putRow(table, row, partition); changed++; }
             });
             return changed;
           };
@@ -2698,7 +2693,7 @@ function createVueApp() {
             if (self.dataCache[cacheKey]) {
               jobs.push(Promise.resolve(apply(self.dataCache[cacheKey], partition)));
             } else {
-              jobs.push(Promise.resolve(backend.getTableData(self.tableMap[table], partition)).then(function(result) {
+              jobs.push(Promise.resolve(backend.getTableData(table, partition)).then(function(result) {
                 var rows = parseTableResult(result).rows;
                 var n = apply(rows, partition);
                 if (n) self.dataCache[cacheKey] = rows; // cache so app state stays consistent after scrub
@@ -2943,7 +2938,7 @@ function createVueApp() {
             r.updated_at = new Date().toISOString();
             // position-only write: reordering says nothing about the row's other columns, so it must not
             // carry (and overwrite with) our copy of them.
-            backend.putRow(self.tableMap[table], { id: r.id, position: r.position, updated_at: r.updated_at }, 'active');
+            backend.putRow(table, { id: r.id, position: r.position, updated_at: r.updated_at }, 'active');
           }
         });
       },
@@ -2967,7 +2962,7 @@ function createVueApp() {
             synced.forEach(function(c) { if (mr[c] !== rowData[c]) { mr[c] = rowData[c] || ''; patch[c] = mr[c]; } });
             if (Object.keys(patch).length > 1) {
               mr.updated_at = patch.updated_at = new Date().toISOString();
-              backend.putRow(self.tableMap[mt], patch, mTab);
+              backend.putRow(mt, patch, mTab);
             }
           }
         }
@@ -2984,7 +2979,7 @@ function createVueApp() {
             upTargets[st].forEach(function(c) { if (stRow[c] !== rowData[c]) { stRow[c] = rowData[c] || ''; upPatch[c] = stRow[c]; } });
             if (Object.keys(upPatch).length > 1) {
               stRow.updated_at = upPatch.updated_at = new Date().toISOString();
-              backend.putRow(self.tableMap[st], upPatch, stTab);
+              backend.putRow(st, upPatch, stTab);
             }
           }
         });
@@ -3745,14 +3740,13 @@ function createVueApp() {
                   _normalizeSchema(imported.schema);
                   self.schemaData = Object.freeze(imported.schema); // mirror boot: refresh the reactive schema (invalidates lockedListValues et al.)
                   return backend.initSchema(self.folderId, SCHEMA);
-                }).then(function(tableMap) {
-                  if (tableMap) self.tableMap = tableMap;
+                }).then(function() {
                 });
               }));
             }
             rowJobs.forEach(function(job, i) {
               chain = chain.then(step('mdi-table-row', (i + 1) + '/' + rowJobs.length + ' · ' + job.table, function() {
-                var target = self.tableMap[job.table] || job.table;
+                var target = job.table;
                 // Delete first to force CRDT change detection on re-import
                 return backend.deleteRow(target, job.row.id, job.tab).catch(function() {})
                   .then(function() { return backend.putRow(target, job.row, job.tab); });
@@ -3868,7 +3862,7 @@ function createVueApp() {
         var chain = Promise.resolve();
         sources.forEach(function(src) {
           chain = chain.then(function() {
-            return backend.getTableData(self.tableMap[src], 'active').then(function(r) {
+            return backend.getTableData(src, 'active').then(function(r) {
               self.dataCache[src] = (r && r.rows) ? r.rows : [];
             });
           });
@@ -3900,7 +3894,7 @@ function createVueApp() {
           var tab = fromArchive ? 'archive' : 'active';
           var key = fromArchive ? aKey(src) : src;
           self.dataCache[key] = (self.dataCache[key] || []).filter(function(r) { return r.id !== itemId; });
-          backend.deleteRow(self.tableMap[src], itemId, tab);
+          backend.deleteRow(src, itemId, tab);
         });
         this.currentData = this.currentData.filter(function(r) { return r.id !== itemId; });
         this.notify(this.t('msg.deleted'));
@@ -3939,7 +3933,7 @@ function createVueApp() {
           self.dataCache[source] = cached.filter(function(r) { return r.id !== itemId; });
           if (!self.dataCache[aKey(source)]) self.dataCache[aKey(source)] = [];
           self.dataCache[aKey(source)].push(srcRow);
-          backend.moveRow(self.tableMap[source], srcRow, 'active', 'archive');
+          backend.moveRow(source, srcRow, 'active', 'archive');
         });
         if (!quiet) this.notify(this.t('msg.archived'));   // the auto sweep files rows silently
       },

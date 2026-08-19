@@ -91,11 +91,9 @@ backend = {
     return StorageSupabase.getMeta('config').then(function(d) { return d || null; });
   },
   setFolderConfig: function(folderId, config) { return StorageSupabase.setMeta('config', config); },
-  initSchema: function(folderId, schema) {
-    var result = {};
-    Object.keys(schema).forEach(function(t) { result[t] = t; });
-    return Promise.resolve(result);
-  },
+  // Table ids ARE table names on every remaining backend, so there is nothing to map and nothing to
+  // create up front -- a Firestore collection / kv row springs into being on first write.
+  initSchema: function() { return Promise.resolve(null); },
   // One-round-trip boot: schema + languages + lists + all accessible table data, concurrently. Unlike
   // Firestore (denied read throws), an RLS-forbidden Postgres SELECT returns 0 rows — so we can't infer
   // "not registered" from an empty schema read. Instead we PRE-CHECK registration (getMyAccess), then read.
@@ -113,7 +111,6 @@ backend = {
         if (!r[0]) return { schema: null }; // first boot -> client saves the bundled default
         var parsed = BackendHelpers.unwrapSchemaDoc(r[0]);
         var tables = (parsed && parsed.tables) || {};
-        var tableMap = {}; Object.keys(tables).forEach(function(t) { tableMap[t] = t; });
         var languages = (r[1] && (r[1].list || [])) || [];
         var lists = r[2] || {};
         var allowed = r[3];
@@ -131,7 +128,7 @@ backend = {
         return Promise.all(jobs).then(function(results) {
           var data = {};
           results.forEach(function(x) { data[x.key] = x.res; });
-          return { schema: parsed, tableOrder: Object.keys(tables), tableMap: tableMap, languages: languages, lists: lists, data: data, unrestricted: allowed === null };
+          return { schema: parsed, tableOrder: Object.keys(tables), languages: languages, lists: lists, data: data, unrestricted: allowed === null };
         });
       });
     });

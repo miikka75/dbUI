@@ -66,11 +66,9 @@ backend = {
   setFolderConfig: function(folderId, config) {
     return StorageFirestore.setMeta('config', config);
   },
-  initSchema: function(folderId, schema) {
-    var result = {};
-    Object.keys(schema).forEach(function(t) { result[t] = t; });
-    return Promise.resolve(result);
-  },
+  // Table ids ARE table names on every remaining backend, so there is nothing to map and nothing to
+  // create up front -- a Firestore collection / kv row springs into being on first write.
+  initSchema: function() { return Promise.resolve(null); },
   // One-round-trip boot for Firebase: schema + languages + lists + all accessible table data, fetched
   // CONCURRENTLY (Promise.all). Firestore has no Sheets-style per-call rate limit, so concurrency is
   // safe here. Access-scoped via _myTables so denied collections are never queried (rules aren't
@@ -91,7 +89,6 @@ backend = {
       if (!r[0]) return { schema: null }; // first boot -> client saves the bundled default
       var parsed = BackendHelpers.unwrapSchemaDoc(r[0]);
       var tables = (parsed && parsed.tables) || {};
-      var tableMap = {}; Object.keys(tables).forEach(function(t) { tableMap[t] = t; });
       var languages = (r[1] !== DENIED && r[1] && (r[1].list || [])) || [];
       var lists = r[2] || {};
       var allowed = r[3];
@@ -114,7 +111,7 @@ backend = {
         // unrestricted: false tells the caller not to auto-seed/write shared list scaffolding -- a
         // restricted editor's writes to lists outside their own tables would be denied wholesale
         // (Firestore batch commits are atomic), whereas an admin/bootstrap (allowed === null) may.
-        return { schema: parsed, tableOrder: Object.keys(tables), tableMap: tableMap, languages: languages, lists: lists, data: data, unrestricted: allowed === null };
+        return { schema: parsed, tableOrder: Object.keys(tables), languages: languages, lists: lists, data: data, unrestricted: allowed === null };
       });
     });
   },

@@ -339,13 +339,13 @@ const server = http.createServer(async (req, res) => {
       case 'setFolderConfig': backend.setFolderConfig('local', body.config); return json(res, { ok: true });
       case 'initSchema': if (!body.schema) return json(res, {}); return json(res, backend.initSchema('local', body.schema));
       case 'bootData': {
-        // One-round-trip boot: schema + tableMap + languages + lists + all accessible table data, read
+        // One-round-trip boot: schema + languages + lists + all accessible table data, read
         // in-process (SQLite). Scoped per-table + per-list by X-User — a DEV convenience (trusted header,
         // localhost-only), not authenticated access control; see getAllowedTables above.
         const schemaB = backend.getSchema('local');
         if (!schemaB) return json(res, { schema: null }); // first boot: client saves the default schema
         const tablesB = schemaB.tables || {};
-        const tableMapB = backend.initSchema('local', tablesB);
+        backend.initSchema('local', tablesB);   // creates the tables/files; ids ARE names
         const languagesB = backend.getAvailableLanguages('local');
         const allowedB = getAllowedTables(); // null => unrestricted (admin / no users)
         const listsB = filterLists(backend.getLists('local'), tablesB, allowedB);
@@ -358,18 +358,18 @@ const server = http.createServer(async (req, res) => {
         const scopedB = (name) => !!(allowedB && allowedB.indexOf(name) < 0);
         namesB.forEach(name => {
           try {
-            const d = backend.getTableData(tableMapB[name], 'active');
+            const d = backend.getTableData(name, 'active');
             dataB[name] = scopedB(name) ? scopeToOwnRows(name, d) : d;
           } catch (e) {}
           const def = tablesB[name];
           if (def && def.archivable) {
             try {
-              const a = backend.getTableData(tableMapB[name], 'archive');
+              const a = backend.getTableData(name, 'archive');
               dataB[name + '__archive'] = scopedB(name) ? scopeToOwnRows(name, a) : a;
             } catch (e) {}
           }
         });
-        return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), tableMap: tableMapB, languages: languagesB, lists: listsB, data: dataB });
+        return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), languages: languagesB, lists: listsB, data: dataB });
       }
       case 'resetData': backend.resetData(); backend._users = undefined; saveUsers(); backend._accessRequests = undefined; saveRequests(); backend._profiles = undefined; saveProfiles(); if (backend.saveListUsers) backend.saveListUsers('local', {}); return json(res, { ok: true });
       case 'getAvailableTables': return json(res, backend.getAvailableTables('local'));
