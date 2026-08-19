@@ -1,5 +1,5 @@
 // dev-client.js -- Shared dev-server client helpers (_post + backend_users).
-// Loaded before backend-local-client.js and backend-crdt-local.js. Dev-server only.
+// Loaded before backend-local-client.js. Dev-server only.
 function _devUser() {
   return (new URLSearchParams(location.search)).get('user') || localStorage.getItem('test_user') || 'local@dev';
 }

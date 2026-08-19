@@ -4225,23 +4225,21 @@ test.describe('Export/import includes edited page bodies', () => {
 // so a refresh doesn't re-apply / leak them. The param block runs synchronously
 // at the top of loadApp() before any backend fetch.
 test.describe('Shared-link URL params', () => {
-  // Non-firebase branch: restores app_folder + oauth_client_id and boots cleanly
-  // in local mode (mode!=='sheets/crdt/crdt-local/firebase' falls through to the
-  // local dev backend, exactly like the other tests' default setup).
-  test('mode link restores folder/clientId and strips the URL', async ({ page }) => {
+  // Non-firebase branch: restores app_folder and boots cleanly in local mode
+  // (any mode other than firebase/supabase falls through to the local dev
+  // backend, exactly like the other tests' default setup).
+  test('mode link restores the folder and strips the URL', async ({ page }) => {
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: SCHEMA } });
-    await page.goto('/?mode=local&folder=local&clientId=shared-client-123');
+    await page.goto('/?mode=local&folder=local');
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
 
     const ls = await page.evaluate(() => ({
       mode: localStorage.getItem('app_mode'),
       folder: localStorage.getItem('app_folder'),
-      clientId: localStorage.getItem('oauth_client_id'),
     }));
     expect(ls.mode).toBe('local');
     expect(ls.folder).toBe('local');
-    expect(ls.clientId).toBe('shared-client-123');
 
     // Params stripped from the URL after restore.
     const loc = await page.evaluate(() => ({ search: location.search, pathname: location.pathname }));

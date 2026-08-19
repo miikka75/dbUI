@@ -199,35 +199,6 @@ describe('languages', () => {
   });
 });
 
-describe('changesets (CRDT sync)', () => {
-  it('saveChangesets stores data', () => {
-    backend.saveChangesets('f1', 'site-a', '{"x":1}');
-    const r = backend.loadChangesets('f1', 'site-b');
-    assert.equal(r.length, 1);
-    assert.equal(r[0].siteId, 'site-a');
-  });
-  it('loadChangesets excludes own site', () => {
-    backend.saveChangesets('f1', 'site-a', '1');
-    backend.saveChangesets('f1', 'site-b', '2');
-    assert.equal(backend.loadChangesets('f1', 'site-a').length, 1);
-    assert.equal(backend.loadChangesets('f1', 'site-a')[0].siteId, 'site-b');
-  });
-  it('saveChangesets overwrites existing', () => {
-    backend.saveChangesets('f1', 'site-a', 'v1');
-    backend.saveChangesets('f1', 'site-a', 'v2');
-    assert.equal(backend.loadChangesets('f1', 'x')[0].data, 'v2');
-  });
-  it('loadChangesets returns empty when none', () => {
-    assert.deepEqual(backend.loadChangesets('f1', 'x'), []);
-  });
-});
-
-describe('getFileModifiedTime', () => {
-  it('returns ISO date string', () => {
-    assert.ok(backend.getFileModifiedTime('any').match(/^\d{4}-\d{2}-\d{2}T/));
-  });
-});
-
 describe('schema storage', () => {
   it('getSchema returns null when no schema saved', () => {
     const result = backend.getSchema('f1');

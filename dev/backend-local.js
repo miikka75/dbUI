@@ -284,10 +284,6 @@ function createLocalBackend(dbPath) {
       db.prepare('UPDATE _languages SET name = ? WHERE code = ?').run(name, code);
     },
 
-    getFileModifiedTime(fileId) {
-      return new Date().toISOString();
-    },
-
     getLists(folderId) {
       _ensureLists();
       const rows = db.prepare('SELECT name, items FROM _lists').all();
@@ -317,30 +313,6 @@ function createLocalBackend(dbPath) {
       if (items.indexOf(value) === -1) items.push(value);
       db.prepare('INSERT OR REPLACE INTO _lists (name, items, tables) VALUES (?, ?, ?)')
         .run(listName, JSON.stringify(items), JSON.stringify(_listOwning(listName)));
-    },
-
-    saveChangesets(folderId, siteId, json) {
-      db.exec('CREATE TABLE IF NOT EXISTS _changesets (site_id TEXT PRIMARY KEY, data TEXT)');
-      db.prepare('INSERT OR REPLACE INTO _changesets (site_id, data) VALUES (?, ?)').run(siteId, json);
-    },
-
-    loadChangesets(folderId, excludeSiteId) {
-      db.exec('CREATE TABLE IF NOT EXISTS _changesets (site_id TEXT PRIMARY KEY, data TEXT)');
-      return db.prepare('SELECT site_id as siteId, data FROM _changesets WHERE site_id != ?').all(excludeSiteId || '');
-    },
-
-    // Generic named-file store (for unified CRDT transport). name = full filename e.g. 'schema.json'
-    readFile(folderId, name) {
-      db.exec('CREATE TABLE IF NOT EXISTS _files (name TEXT PRIMARY KEY, data TEXT)');
-      const row = db.prepare('SELECT data FROM _files WHERE name = ?').get(name);
-      return row ? JSON.parse(row.data) : null;
-    },
-    writeFile(folderId, name, data) {
-      db.exec('CREATE TABLE IF NOT EXISTS _files (name TEXT PRIMARY KEY, data TEXT)');
-      db.prepare('INSERT OR REPLACE INTO _files (name, data) VALUES (?, ?)').run(name, JSON.stringify(data));
-    },
-    deleteFile(folderId, name) {
-      try { db.prepare('DELETE FROM _files WHERE name = ?').run(name); } catch(e) {}
     },
 
     // Test helper: close DB

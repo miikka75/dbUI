@@ -1,8 +1,11 @@
 # Backend API Contract
 
-Every backend adapter must implement these methods. The app (`app-core.html`) calls them
+Every backend adapter must implement these methods. The app (`app-core.js`) calls them
 via the global `backend` object. All return Promises (except `backend-local.js` which is
 synchronous — the local-client HTTP adapter wraps it in Promises).
+
+Three adapters implement it: `backend-supabase.js` (reference), `backend-firebase.js`, and the
+dev-server pair `backend-local.js` / `backend-local-client.js`.
 
 ## Required Methods
 
@@ -31,14 +34,10 @@ synchronous — the local-client HTTP adapter wraps it in Promises).
 
 | Method | When used | Notes |
 |--------|-----------|-------|
-| `bootData(folderId)` | Apps Script batch path | Returns `{schema, tableMap, languages, lists, data, tableOrder?, columnOrders?}`. If present, skips sequential loading. |
 | `getAvailableTables(folderId)` | Setup wizard (detect existing tables) | Returns `[{id, name}]`. OK to return `[]` if not applicable (Firebase/CRDT). |
 | `getUsers(folderId)` | User access panel | Returns `[{key, addr, role, tables}]`. See **grant shapes** below. |
 | `setUserRole(folderId, key, role, email, tables)` | User management | Build the stored record with `BackendHelpers.userGrantDoc(...)` — it also denormalizes `rwTables`, which the server-side rules need. |
 | `removeUser(folderId, key)` | User management | |
-| `readFile(folderId, name)` / `writeFile` / `deleteFile` | CRDT transport layer | Generic named-file store. |
-| `saveChangesets` / `loadChangesets` | CRDT sync | |
-| `getFileModifiedTime(folderId, name)` | CRDT cache invalidation | |
 | `subscribeTable(tableId, partition, onChange)` | Live sync between clients | Returns an **unsubscribe function**. Absent = no live updates (manual refresh only); implemented by Firebase, Supabase and the dev-server backends. See **Live sync** below. |
 
 ## Live sync (`subscribeTable`)
@@ -94,7 +93,7 @@ explicitly before its ownership and `ownerWritable` checks.
 A user's `tables` value is `'all'`, a **legacy** array of names (read + write on each), or a map
 `{ table: 'r' | 'rw' }`. Never branch on the shape yourself — `AccessFeatures.grantMode(tables, t)`,
 `.readableTables(tables)` and `.writableTables(tables)` normalize all three (`null` = unrestricted,
-`[]` = none). A backend that scopes its own reads (`_myTables`, `bootData`) must use the **readable**
+`[]` = none). A backend that scopes its own reads (`_myTables`) must use the **readable**
 set; write gates use the **writable** one. Records written through `BackendHelpers.userGrantDoc` carry
 an extra `rwTables` array for the map shape only — the rules layers can't filter a map, so they read
 that list, falling back to plain membership when it's absent. See `## Access modes` in SCHEMA.md.

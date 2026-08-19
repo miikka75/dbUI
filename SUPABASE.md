@@ -1,7 +1,6 @@
 # Supabase backend + GitHub Pages hosting
 
-Supabase (Postgres) is available as a backend mode alongside Firebase, Google Sheets, and CRDT. It's a
-first-class *alternative* — nothing about the other modes changes. Firestore's document model is
+Supabase (Postgres) is the reference backend, alongside Firebase and the local dev server. Firestore's document model is
 reproduced on a single Postgres key-value table (`kv`), so each per-document Firestore rule maps to a
 per-row Row-Level-Security (RLS) policy.
 

@@ -17,7 +17,6 @@ backend = {
   createLanguage: (folderId, code, name, keys) => _post('createLanguage', { folderId, code, name, keys }),
   deleteLanguage: (folderId, code) => _post('deleteLanguage', { folderId, code }),
   renameLanguage: (folderId, code, name) => _post('renameLanguage', { folderId, code, name }),
-  getFileModifiedTime: (fileId) => _post('getFileModifiedTime', { fileId }).then(r => r.time),
   getLists: (folderId) => _post('getLists', { folderId }),
   saveLists: (folderId, lists) => _post('saveLists', { folderId, lists }),
   putListItem: (folderId, listName, value) => _post('putListItem', { folderId, listName, value }),
@@ -26,8 +25,6 @@ backend = {
   getMyListValues: () => _post('getMyListValues', {}),                                     // self-scoped list->myValue
   setListUser: (listName, value, email) => _post('setListUser', { listName, value, email }),
   moveRow: (tableId, rowData, fromTab, toTab) => _post('moveRow', { tableId, rowData, fromTab, toTab }),
-  saveChangesets: (folderId, siteId, json) => _post('saveChangesets', { folderId, siteId, json }),
-  loadChangesets: (folderId, excludeSiteId) => _post('loadChangesets', { folderId, excludeSiteId })
 };
 if (typeof _devUploadFile === 'function') backend.uploadFile = _devUploadFile; // image-column upload (dev store)
 if (typeof _devSubscribeTable === 'function') backend.subscribeTable = _devSubscribeTable; // live sync (SSE)

@@ -460,7 +460,6 @@ const server = http.createServer(async (req, res) => {
       case 'createLanguage': return json(res, { id: backend.createLanguage(body.folderId || 'local', body.code, body.name, body.keys) });
       case 'deleteLanguage': backend.deleteLanguage(body.folderId || 'local', body.code); return json(res, { ok: true });
       case 'renameLanguage': backend.renameLanguage(body.folderId || 'local', body.code, body.name); return json(res, { ok: true });
-      case 'getFileModifiedTime': return json(res, { time: backend.getFileModifiedTime(body.fileId) });
       case 'getLists': {
         // Per-list access: return only lists owned by a table the user can access (admin: all).
         const allowed = getAllowedTables();          // null => unrestricted (admin/no users)
@@ -535,11 +534,6 @@ const server = http.createServer(async (req, res) => {
         }
         return json(res, { ok: true });
       }
-      case 'saveChangesets': backend.saveChangesets('local', body.siteId, body.json); return json(res, { ok: true });
-      case 'loadChangesets': return json(res, backend.loadChangesets('local', body.excludeSiteId));
-      case 'readFile': return json(res, { data: backend.readFile('local', body.name) });
-      case 'writeFile': backend.writeFile('local', body.name, body.data); return json(res, { ok: true });
-      case 'deleteFile': backend.deleteFile('local', body.name); return json(res, { ok: true });
       case 'saveConfig': { var allowed = ['firebase-config.json', 'config.json']; var fn = path.basename(body.filename || 'config.json'); if (!allowed.includes(fn)) return json(res, { error: 'filename not allowed' }, 403); fs.writeFileSync(path.join(STATIC_DIR, fn), JSON.stringify(body.data, null, 2)); return json(res, { ok: true }); }
       case 'getUsers': return json(res, backend._users || {});
       case 'getMyAccess': {

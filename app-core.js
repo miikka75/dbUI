@@ -182,12 +182,7 @@ function createVueApp() {
       loading: true,
       showSetup: false,
       hasLocalServer: false,
-      setupFolderId: '',
-      setupMode: 'sheets',
-      folderValid: false,
-      oauthReady: false,
       currentUserEmail: null,
-      serverStorage: '',
       userList: [],
       usersLoaded: false,
       // True when users exist but the signed-in user is not one of them (self-scoped getMyAccess said
@@ -209,10 +204,9 @@ function createVueApp() {
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
       supabaseUrlInput: '',
       supabaseKeyInput: '',
-      oauthClientId: localStorage.getItem('oauth_client_id') || '',
       needsReauth: false,
-      setupStep: (function() { var m = localStorage.getItem('app_mode'); return (m === 'sheets' || m === 'crdt' || m === 'firebase' || m === 'supabase') ? m : null; })(),
-      mode: 'sheets',
+      setupStep: (function() { var m = localStorage.getItem('app_mode'); return (m === 'firebase' || m === 'supabase') ? m : null; })(),
+      mode: '',
       folderId: '',
       tableMap: {},
       currentTable: '',
@@ -551,12 +545,8 @@ function createVueApp() {
             return base + '?mode=supabase&url=' + encodeURIComponent(s.url) + '&key=' + encodeURIComponent(s.anonKey); }
           catch (e) { return base; }
         }
-        var folder = localStorage.getItem('app_folder');
-        var clientId = localStorage.getItem('oauth_client_id');
-        var params = '?mode=' + (mode || 'sheets');
-        if (folder) params += '&folder=' + folder;
-        if (clientId) params += '&clientId=' + clientId;
-        return base + params;
+        // Dev-server mode is loopback-only: there is nothing shareable about the link.
+        return base;
       },
       currentConfig: function() { return VIEWS[this.currentTable] || SCHEMA[this.currentTable] || {}; },
       // Printing is opt-in via "printable": "view" (toolbar), "cards" (per-card), or ["view","cards"] (both). Off by default.
@@ -939,12 +929,6 @@ function createVueApp() {
       setNavLayout: function(v) { this.navLayoutOverride = v; localStorage.setItem('app_nav_layout', v); },
 
       // Setup
-      validateFolder: function() {
-        var self = this;
-        if (this.setupFolderId.length > 10) {
-          backend.validateFolder(this.setupFolderId).then(function() { self.folderValid = true; }).catch(function() { self.folderValid = false; });
-        }
-      },
       completeLocalSetup: function() {
         localStorage.setItem('app_folder', 'local');
         localStorage.setItem('app_mode', 'local');
@@ -952,30 +936,9 @@ function createVueApp() {
         this.showSetup = false;
         this.startApp();
       },
-      openCrdtLocalSetup: function() {
-        var self = this;
-        this.setupStep = 'crdt-local';
-        fetch(_u('/api/serverInfo')).then(function(r) { return r.json(); }).then(function(d) { self.serverStorage = d.storage; }).catch(function() {});
-      },
       backToSetup: function() {
         this.setupStep = null;
         try { localStorage.removeItem('app_mode'); } catch (e) {}
-      },
-      completeCrdtLocalSetup: function() {
-        localStorage.setItem('app_folder', 'local');
-        localStorage.setItem('app_mode', 'crdt-local');
-        this.folderId = 'local'; this.mode = 'crdt-local';
-        this.showSetup = false;
-        this.startApp();
-      },
-      completeSetup: function() {
-        var self = this;
-        localStorage.setItem('app_folder', this.setupFolderId);
-        localStorage.setItem('app_mode', this.setupMode);
-        this.folderId = this.setupFolderId; this.mode = this.setupMode;
-        backend.setFolderConfig(this.folderId, Object.assign({}, self.appConfig || {}, { mode: this.mode })).then(function() {
-          self.showSetup = false; self.startApp();
-        });
       },
 
       // Boot
@@ -3630,9 +3593,6 @@ function createVueApp() {
           location.reload();
         } catch(e) { this.notify(this.t('msg.invalid_json')); }
       },
-      saveClientId: function() {
-        if (this.oauthClientId) localStorage.setItem('oauth_client_id', this.oauthClientId);
-      },
       saveSupabaseConfig: function() {
         var url = (this.supabaseUrlInput || '').trim().replace(/\/+$/, '');
         var key = (this.supabaseKeyInput || '').trim();
@@ -3892,10 +3852,6 @@ function createVueApp() {
         if (mode === 'firebase' && !this.firestoreRules) {
           var self = this;
           fetch(_u('/firestore.rules')).then(function(r) { return r.ok ? r.text() : ''; }).then(function(t) { self.firestoreRules = t; }).catch(function(){});
-        }
-        if (mode === 'sheets' || mode === 'crdt') {
-          if (typeof google !== 'undefined' && google.script) { return; }
-          if (typeof _oauthClient === 'undefined' || !_oauthClient) { location.reload(); return; }
         }
       },
 
@@ -4319,10 +4275,10 @@ function createVueApp() {
         }
       });
       // Probe local server availability for setup UI — but only when a local dev server could
-      // actually be present. On a committed cloud backend (firebase/sheets/crdt) there is no /api
+      // actually be present. On a committed cloud backend (firebase/supabase) there is no /api
       // endpoint, so the probe would just log a spurious 404 to the console on every load.
       var appMode = (function() { try { return localStorage.getItem('app_mode'); } catch (e) { return null; } })();
-      if (appMode !== 'firebase' && appMode !== 'sheets' && appMode !== 'crdt' && _mayLocal()) {
+      if (appMode !== 'firebase' && appMode !== 'supabase' && _mayLocal()) {
         fetch(_u('/api/validateFolder'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' })
           .then(function(r) { if (r.ok) self.hasLocalServer = true; })
           .catch(function() {});
@@ -5429,8 +5385,6 @@ function init() {
   var folder = localStorage.getItem('app_folder');
   var savedMode = localStorage.getItem('app_mode');
   var instance = appInstance;
-  if (savedMode === 'sheets' || savedMode === 'crdt' || savedMode === 'oauth') instance.oauthReady = true;
-
   if (savedMode === 'firebase') {
     instance.mode = 'firebase';
     instance.loading = true;
@@ -5439,12 +5393,7 @@ function init() {
   }
 
   if (!folder) {
-    // On Apps Script, skip local server probe
-    if (typeof google !== 'undefined' && google.script) {
-      instance.showSetup = true; instance.loading = false;
-    } else if (savedMode === 'sheets' || savedMode === 'oauth' || savedMode === 'crdt') {
-      instance.mode = savedMode; instance.showSetup = true; instance.loading = false;
-    } else if (!_mayLocal()) {
+    if (!_mayLocal()) {
       // No dev server can exist on this origin: same outcome as a failed probe, minus the request.
       instance.showSetup = true; instance.loading = false;
     } else {
@@ -5457,7 +5406,7 @@ function init() {
     }
   } else {
     instance.folderId = folder;
-    instance.mode = savedMode || 'sheets';
+    instance.mode = savedMode || 'local';
     instance.startApp();
   }
 }

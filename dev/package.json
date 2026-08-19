@@ -1,7 +1,7 @@
 {
   "name": "dbui",
   "version": "1.0.0",
-  "description": "Schema-driven web app with 5 backends: Apps Script, OAuth Sheets, CRDT Drive sync, Firebase Firestore, local SQLite",
+  "description": "Schema-driven web app with 3 backends: Supabase Postgres, Firebase Firestore, local SQLite",
   "private": true,
   "scripts": {
     "start": "node server.js",

@@ -429,8 +429,6 @@ backend = {
       return StorageFirestore.setMeta('languages', { list: langs });
     });
   },
-  saveChangesets: function() { return Promise.resolve(); },
-  loadChangesets: function() { return Promise.resolve(); },
   // Upload a file to Firebase Storage under uploads/<user-email>/<ts>_<name>, resolving to its download
   // URL (stored in the row by the image column). The download URL carries an access token, so the <img>
   // renders regardless of Storage read rules. Presence of this method is what enables the image uploader;

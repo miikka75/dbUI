@@ -79,13 +79,12 @@ describe('Import - schema persistence and reset', () => {
     assert.equal(backend.getSchema('local'), null);
   });
 
-  it('resetData drops tables, schema, lists, languages, changesets', () => {
+  it('resetData drops tables, schema, lists and languages', () => {
     backend.initSchema('local', CUSTOM_SCHEMA);
     backend.saveSchema('local', { tables: CUSTOM_SCHEMA });
     backend.putRow('music', { id: 'm1', date: '2026-06-01', topic: 'X' }, 'upcoming');
     backend.saveLists('local', { genre: ['hymn'] });
     backend.createLanguage('local', 'xx', 'TestLang', ['hello']);
-    backend.saveChangesets('local', 'site-a', '{"changes":[]}');
 
     backend.resetData();
 
@@ -93,7 +92,6 @@ describe('Import - schema persistence and reset', () => {
     assert.equal(backend.getSchema('local'), null);
     assert.deepEqual(backend.getLists('local'), {});
     assert.equal(backend.getAvailableLanguages('local').length, 0);
-    assert.equal(backend.loadChangesets('local', '').length, 0);
     // Table dropped -> getTableData returns empty (no rows)
     assert.equal(backend.getTableData('music', 'upcoming').rows.length, 0);
   });

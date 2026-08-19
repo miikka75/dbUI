@@ -360,8 +360,6 @@ backend = {
       return StorageSupabase.setMeta('languages', { list: langs });
     });
   },
-  saveChangesets: function() { return Promise.resolve(); },
-  loadChangesets: function() { return Promise.resolve(); },
   // Upload to the public Supabase Storage bucket `uploads` under <email>/<ts>_<name>, resolving to the
   // public URL (stored in the row by the image column). Presence of this method enables the image uploader.
   uploadFile: function(file, opts) {

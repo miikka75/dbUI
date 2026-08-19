@@ -118,21 +118,6 @@ function createFsBackend(dataDir) {
     renameLanguage(folderId, code, name) {
       writeJSON(F_LANGS, H.renameLanguage(readJSON(F_LANGS), code, name));
     },
-    getFileModifiedTime(fileId) { return new Date().toISOString(); },
-    saveChangesets(folderId, siteId, json) {
-      var dir = path.join(dataDir, '_sync');
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(safePath(path.join('_sync', siteId + '.json')), json);
-    },
-    loadChangesets(folderId, excludeSiteId) {
-      var dir = path.join(dataDir, '_sync');
-      if (!fs.existsSync(dir)) return [];
-      return fs.readdirSync(dir)
-        .filter(function(f) { return f.endsWith('.json') && f !== (excludeSiteId + '.json'); })
-        .map(function(f) {
-          return { siteId: f.replace('.json', ''), data: fs.readFileSync(path.join(dir, f), 'utf8') };
-        });
-    },
     resetData() {
       var files = fs.readdirSync(dataDir);
       files.forEach(function(f) {
@@ -141,10 +126,6 @@ function createFsBackend(dataDir) {
         else fs.rmSync(p, { recursive: true });
       });
     },
-    // Generic named-file store (for unified CRDT transport). name = full filename e.g. 'schema.json'
-    readFile(folderId, name) { try { return JSON.parse(fs.readFileSync(safePath(name), 'utf8')); } catch(e) { return null; } },
-    writeFile(folderId, name, data) { fs.writeFileSync(safePath(name), JSON.stringify(data, null, 2)); },
-    deleteFile(folderId, name) { try { fs.unlinkSync(safePath(name)); } catch(e) {} },
     close() {}
   };
 }
