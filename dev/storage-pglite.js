@@ -128,12 +128,23 @@ async function createPgliteStorage(opts) {
       });
     },
 
+    // A DELETE that RLS filters away affects zero rows and RAISES NOTHING, so "no error" is not a
+    // verdict here -- the first version of this reported a refused delete as a success. Zero rows is
+    // genuinely ambiguous though: the contract says deleting an absent row is a no-op, so it means
+    // either "refused" or "not there". The only way to tell them apart is to look, which is why the
+    // privileged probe runs on that path alone and never on the happy one.
     delete(store, key) {
       return asCaller(async function () {
+        let affected;
         try {
-          await q('delete from public.kv where store = $1 and key = $2', [store, key]);
-          return null;
+          const r = await q('delete from public.kv where store = $1 and key = $2', [store, key]);
+          affected = r.affectedRows;
         } catch (e) { throw isRlsError(e) ? denied(e) : e; }
+        if (affected) return null;
+        await leave();                                   // owner: RLS off, to ask whether it survived
+        const still = await q('select 1 from public.kv where store = $1 and key = $2', [store, key]);
+        if (still.rows.length) throw denied();           // it is there and the delete did not touch it
+        return null;                                     // genuinely absent -- a no-op, per the contract
       });
     },
 

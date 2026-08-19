@@ -47,14 +47,22 @@ describe('storage-pglite — bootstrap, then the registry closes it', () => {
     assert.equal(await denied(S.put('tasks__active', 'r9', { id: 'r9', title: 'yes' })), 'ok');
   });
 
-  it('the denial is the SAME whether the policy errors or filters the row away', async () => {
-    // USING-filtered rows come back as zero affected rows rather than an exception. A caller must not be
-    // able to tell those apart, or "your write silently did nothing" becomes indistinguishable from
-    // success -- which is how a fail-open bug hides.
+  it('a filtered DELETE is reported as a denial, not as success', async () => {
+    // A DELETE the policy filters away affects zero rows and raises NOTHING. Reporting that as success
+    // tells the caller their delete worked when the row is still sitting there -- which is exactly how a
+    // fail-open bug hides. Zero rows is ambiguous (the contract makes deleting an absent row a no-op),
+    // so the adapter looks, and only on that path.
     S.setCaller('viewer@x.com');
-    assert.equal(await denied(S.delete('tasks__active', 'r9')), 'ok');   // delete of an unreadable row is a no-op
+    assert.equal(await denied(S.delete('tasks__active', 'r9')), 'denied');
     S.setCaller('admin@x.com');
-    assert.ok(await S.get('tasks__active', 'r9'), 'the row the viewer could not see is still there');
+    assert.ok(await S.get('tasks__active', 'r9'), 'and the row really did survive');
+  });
+
+  it('deleting a row that is genuinely absent stays a no-op', async () => {
+    // The other half of the same ambiguity: absent must NOT be reported as refused, or every idempotent
+    // cleanup path starts throwing.
+    S.setCaller('admin@x.com');
+    assert.equal(await denied(S.delete('tasks__active', 'never-existed')), 'ok');
   });
 });
 

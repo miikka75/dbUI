@@ -41,6 +41,31 @@ const SCHEMA = {
         status: { type: 'text' },
         organizerNote: { type: 'text' }      // NOT ownerWritable -- a member must never change it
       }
+    },
+    // ownerWritableWhile: ownership does not expire on its own, so without this an owner could still
+    // rewrite their entry the day after it was ruled on. The owner branch reaches the row only WHILE
+    // status is still `logged`.
+    entries: {
+      ownerWritable: ['status', 'note'],
+      ownerWritableWhile: { status: 'logged' },
+      columns: {
+        id: { type: 'text' },
+        owner: { type: 'owner' },
+        status: { type: 'text' },
+        note: { type: 'text' }
+      }
+    },
+    // An identity column: `defaultFrom: '@me'` inside ownerWritable. It must be owner-writable or the
+    // owner could not create the row at all -- which is exactly what leaves them free to write SOMEBODY
+    // ELSE'S identity and log the work as them. Both layers therefore require the caller's own value.
+    logs: {
+      ownerWritable: ['person', 'note'],
+      columns: {
+        id: { type: 'text' },
+        owner: { type: 'owner' },
+        person: { type: 'select', list: 'members', defaultFrom: '@me' },
+        note: { type: 'text' }
+      }
     }
   },
   // `access` lists TABLE names: a restricted caller may read the page only if one of their granted
@@ -151,7 +176,10 @@ before(async () => {
   await post('putRow', { tableId: 'notes', tab: 'active', data: { id: 'seed', body: 'seed' } }, 'admin@x.com');
   await post('putRow', { tableId: '_pages', tab: 'active', data: { id: 'open', markdown: '# Open' } }, 'admin@x.com');
   await post('putRow', { tableId: '_pages', tab: 'active', data: { id: 'secret', markdown: '# Secret' } }, 'admin@x.com');
-  await post('saveLists', { lists: { status: ['a'], locked: ['a'] } }, 'admin@x.com');
+  await post('saveLists', { lists: { status: ['a'], locked: ['a'], members: ['Ann', 'Bob'] } }, 'admin@x.com');
+  // Link the list value 'Ann' to the member. The dev gate resolves identity through these links;
+  // the policies read it off the grant doc, which is what setListUser mirrors in production.
+  await post('setListUser', { listName: 'members', value: 'Ann', email: 'member@x.com' }, 'admin@x.com');
 
   // --- the RLS policies: backend-pglite, no JavaScript gate ---
   PG = await createPgliteBackend();
@@ -162,13 +190,14 @@ before(async () => {
     if (g.tables && typeof g.tables === 'object' && !Array.isArray(g.tables)) {
       doc.rwTables = Object.keys(g.tables).filter((t) => g.tables[t] !== 'r');
     }
+    if (email === 'member@x.com') doc.identity = { members: 'Ann' };   // what setListUser mirrors
     await PG._seed('_users', email, doc);
   }
   await PG.putRow('tasks', { id: 'seed', title: 'seed' }, 'active');
   await PG.putRow('notes', { id: 'seed', body: 'seed' }, 'active');
   await PG.putRow('_pages', { id: 'open', markdown: '# Open' }, 'active');
   await PG.putRow('_pages', { id: 'secret', markdown: '# Secret' }, 'active');
-  await PG.saveLists({ status: ['a'], locked: ['a'] });
+  await PG.saveLists({ status: ['a'], locked: ['a'], members: ['Ann', 'Bob'] });
 });
 
 after(async () => {
@@ -259,6 +288,90 @@ describe('gate parity — the owner model', () => {
 // putListItem. Policy side: app_page_allowed reading _meta/pageAccess, and app_list_create_allowed
 // reading _meta/listWritable.
 
+describe('gate parity — ownerWritableWhile freezes the owner branch', () => {
+  const jsPut = async (user, data) => {
+    const r = await post('putRow', { tableId: 'entries', tab: 'active', data }, user);
+    if (!r.ok) return 'deny';
+    const d = await r.json();
+    return (d && d.error) ? 'deny' : 'allow';
+  };
+  const rlsPut = async (user, data) => {
+    PG.setCaller(user);
+    try { await PG.putRow('entries', data, 'active'); return 'allow'; }
+    catch (e) { if (/row-level security/.test(e.message)) return 'deny'; throw e; }
+  };
+  const both = async (user, data) => {
+    const js = await jsPut(user, data);
+    const rls = await rlsPut(user, data);
+    assert.equal(js, rls, `the two gates disagree (js=${js}, rls=${rls})`);
+    return js;
+  };
+
+  it('an owner may edit their row while it is still in the listed state', async () => {
+    assert.equal(await both('member@x.com', { id: 'e1', owner: 'member@x.com', status: 'logged', note: 'first' }), 'allow');
+    assert.equal(await both('member@x.com', { id: 'e1', owner: 'member@x.com', note: 'corrected' }), 'allow');
+  });
+
+  it('once the row leaves that state the owner is frozen out, and both gates agree', async () => {
+    // Only an admin can move it: `status` is owner-writable, but the freeze is judged on the STORED
+    // state, so the owner cannot rule on their own entry and then keep editing it.
+    assert.equal(await both('admin@x.com', { id: 'e1', owner: 'member@x.com', status: 'approved' }), 'allow');
+    assert.equal(await both('member@x.com', { id: 'e1', owner: 'member@x.com', note: 'sneaky' }), 'deny');
+  });
+
+  it('the owner cannot thaw their own row by putting the state back', async () => {
+    // The most obvious way round the freeze: rewrite status to the open value. The gate reads the
+    // stored state, not the incoming one, so this is refused for the same reason.
+    assert.equal(await both('member@x.com', { id: 'e1', owner: 'member@x.com', status: 'logged' }), 'deny');
+  });
+
+  it('an admin is unaffected by the freeze', async () => {
+    assert.equal(await both('admin@x.com', { id: 'e1', owner: 'member@x.com', note: 'organiser edit' }), 'allow');
+  });
+});
+
+describe('gate parity — an owner may only ever name themselves', () => {
+  const jsPut = async (user, data) => {
+    const r = await post('putRow', { tableId: 'logs', tab: 'active', data }, user);
+    if (!r.ok) return 'deny';
+    const d = await r.json();
+    return (d && d.error) ? 'deny' : 'allow';
+  };
+  const rlsPut = async (user, data) => {
+    PG.setCaller(user);
+    try { await PG.putRow('logs', data, 'active'); return 'allow'; }
+    catch (e) { if (/row-level security/.test(e.message)) return 'deny'; throw e; }
+  };
+  const both = async (user, data) => {
+    const js = await jsPut(user, data);
+    const rls = await rlsPut(user, data);
+    assert.equal(js, rls, `the two gates disagree (js=${js}, rls=${rls})`);
+    return js;
+  };
+
+  it('an owner may log work as themselves', async () => {
+    assert.equal(await both('member@x.com', { id: 'l1', owner: 'member@x.com', person: 'Ann', note: 'mine' }), 'allow');
+  });
+
+  it('an owner may NOT log work as somebody else, on create', async () => {
+    assert.equal(await both('member@x.com', { id: 'l2', owner: 'member@x.com', person: 'Bob', note: 'theirs' }), 'deny');
+  });
+
+  it('...nor by reassigning it afterwards', async () => {
+    // The column IS one they may write, so column bounds cannot catch this -- only the identity check.
+    assert.equal(await both('member@x.com', { id: 'l1', owner: 'member@x.com', person: 'Bob' }), 'deny');
+  });
+
+  it('an owner may still edit a field that is not the identity', async () => {
+    assert.equal(await both('member@x.com', { id: 'l1', owner: 'member@x.com', note: 'amended' }), 'allow');
+  });
+
+  it('an admin logging on somebody else behalf is unaffected', async () => {
+    // Not the owner branch: an organiser recording work for a member is the ordinary grant path.
+    assert.equal(await both('admin@x.com', { id: 'l3', owner: 'member@x.com', person: 'Bob', note: 'on their behalf' }), 'allow');
+  });
+});
+
 describe('gate parity — doc-view access', () => {
   // Asserted as a SET, for the same reason as the owner read: "may read pages" is not the question,
   // "WHICH pages" is. A gate that leaked the restricted page would pass a boolean check.
@@ -313,6 +426,77 @@ describe('gate parity — per-list write access', () => {
   // The read policy for _lists honours userWritableLists precisely so that this works: an UPDATE has
   // to locate its row, which applies the SELECT policy, so a list a member cannot read is one they
   // cannot append to either. This case is what caught that.
+});
+
+describe('gate parity — deletes', () => {
+  const jsDel = async (user, table, id) => {
+    const r = await post('deleteRow', { tableId: table, tab: 'active', id }, user);
+    if (!r.ok) return 'deny';
+    const d = await r.json();
+    return (d && d.error) ? 'deny' : 'allow';
+  };
+  const rlsDel = async (user, table, id) => {
+    PG.setCaller(user);
+    try { await PG.deleteRow(table, id, 'active'); return 'allow'; }
+    catch (e) { if (/row-level security/.test(e.message)) return 'deny'; throw e; }
+  };
+  const both = async (user, table, id) => {
+    const js = await jsDel(user, table, id);
+    const rls = await rlsDel(user, table, id);
+    assert.equal(js, rls, `the two gates disagree on delete (js=${js}, rls=${rls})`);
+    return js;
+  };
+
+  it('a member with no grant cannot delete a table row', async () => {
+    assert.equal(await both('member@x.com', 'tasks', 'seed'), 'deny');
+  });
+
+  it('an owner may delete their own self-service row', async () => {
+    await post('putRow', { tableId: 'signups', tab: 'active', data: { id: 'd1', owner: 'member@x.com', status: 'yes' } }, 'member@x.com');
+    PG.setCaller('member@x.com');
+    await PG.putRow('signups', { id: 'd1', owner: 'member@x.com', status: 'yes' }, 'active');
+    assert.equal(await both('member@x.com', 'signups', 'd1'), 'allow');
+  });
+
+  it("an owner may not delete somebody else's row", async () => {
+    await post('putRow', { tableId: 'signups', tab: 'active', data: { id: 'd2', owner: 'other@x.com', status: 'yes' } }, 'other@x.com');
+    PG.setCaller('other@x.com');
+    await PG.putRow('signups', { id: 'd2', owner: 'other@x.com', status: 'yes' }, 'active');
+    assert.equal(await both('member@x.com', 'signups', 'd2'), 'deny');
+  });
+
+  it('the ownerWritableWhile freeze covers delete, not just edit', async () => {
+    // Ownership expiring for edits but not deletes would let an owner erase a ruled-on entry instead of
+    // amending it -- the same escape by another door.
+    assert.equal(await both('member@x.com', 'entries', 'e1'), 'deny');
+  });
+});
+
+describe('gate parity — doc-view writes', () => {
+  const jsPut = async (user, id) => {
+    const r = await post('putRow', { tableId: '_pages', tab: 'active', data: { id, markdown: '# edited by ' + user } }, user);
+    if (!r.ok) return 'deny';
+    const d = await r.json();
+    return (d && d.error) ? 'deny' : 'allow';
+  };
+  const rlsPut = async (user, id) => {
+    PG.setCaller(user);
+    try { await PG.putRow('_pages', { id, markdown: '# edited by ' + user }, 'active'); return 'allow'; }
+    catch (e) { if (/row-level security/.test(e.message)) return 'deny'; throw e; }
+  };
+
+  for (const [user, expected, label] of [
+    ['admin@x.com',  'allow', 'an admin may edit a doc-view body'],
+    ['editor@x.com', 'allow', 'an editor may edit a doc-view body'],
+    ['member@x.com', 'deny',  'a member may not, even one they can read']
+  ]) {
+    it(`${label} -> ${expected}`, async () => {
+      const js = await jsPut(user, 'open');
+      const rls = await rlsPut(user, 'open');
+      assert.equal(js, rls, `the two gates disagree (js=${js}, rls=${rls}) on: ${label}`);
+      assert.equal(js, expected);
+    });
+  }
 });
 
 describe('gate parity — the matrix is not vacuous', () => {
