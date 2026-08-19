@@ -26,13 +26,22 @@ const PORT = 4310 + (process.pid % 200);
 const BASE = 'http://127.0.0.1:' + PORT;
 const DB_REL = path.join('test', '.gp-' + process.pid + '.db');
 
-// Two ordinary tables and three actors. Deliberately the plain grant shapes -- role, a table list, and
-// a read-only grant -- because those are what both layers claim to implement. Owner-scoped rules have
-// their own suites; this is about the grant model.
+// Two ordinary tables for the grant model, plus one self-service table for the owner model.
 const SCHEMA = {
   tables: {
     tasks: { columns: { id: { type: 'text' }, title: { type: 'text' } } },
-    notes: { columns: { id: { type: 'text' }, body: { type: 'text' } } }
+    notes: { columns: { id: { type: 'text' }, body: { type: 'text' } } },
+    // The canonical self-service shape: an owner column (auto-stamped, read-only) plus an
+    // ownerWritable bound naming the one column a member may actually set on their own row.
+    signups: {
+      ownerWritable: ['status'],
+      columns: {
+        id: { type: 'text' },
+        owner: { type: 'owner' },
+        status: { type: 'text' },
+        organizerNote: { type: 'text' }      // NOT ownerWritable -- a member must never change it
+      }
+    }
   },
   views: []
 };
@@ -41,7 +50,10 @@ const ACTORS = {
   'admin@x.com':  { role: 'admin',  tables: 'all' },
   'editor@x.com': { role: 'editor', tables: ['tasks'] },
   'reader@x.com': { role: 'viewer', tables: { tasks: 'r' } },
-  'nobody@x.com': { role: 'viewer', tables: [] }
+  'nobody@x.com': { role: 'viewer', tables: [] },
+  // Hold NO grant on `signups`: everything they can do there comes from the owner column.
+  'member@x.com': { role: 'viewer', tables: [] },
+  'other@x.com':  { role: 'viewer', tables: [] }
 };
 
 // actor x table x operation. `expect` is what BOTH engines should say; it is written down rather than
@@ -171,11 +183,73 @@ describe('gate parity — the JavaScript gate and the RLS policies agree', () =>
   }
 });
 
+// ==================================================================================================
+// The OWNER model: a member holding no grant at all, acting on their own row. This is the surface the
+// grant matrix above does not reach -- canSeeRow / scopeToOwnRows / ownerFieldsOk / selfServiceOwnerCol
+// on the JavaScript side, app_owner_identity_ok / app_owner_fields_ok in the policies. Deleting the
+// JavaScript without covering it would be deleting a gate nothing had checked.
+
+// Each case is a full write payload, because that is what both engines actually judge.
+const OWNER_MATRIX = [
+  ['member@x.com', { id: 's-mine',  owner: 'member@x.com', status: 'yes' }, 'allow',
+   'a member creates their OWN row on a table they hold no grant on'],
+  ['member@x.com', { id: 's-forge', owner: 'other@x.com',  status: 'yes' }, 'deny',
+   'a member cannot create a row owned by someone else'],
+  ['member@x.com', { id: 's-mine',  owner: 'member@x.com', status: 'no' }, 'allow',
+   'a member may set an ownerWritable column on their own row'],
+  ['member@x.com', { id: 's-mine',  owner: 'member@x.com', organizerNote: 'hah' }, 'deny',
+   'a member may NOT set a column outside ownerWritable, even on their own row'],
+  ['other@x.com',  { id: 's-mine',  owner: 'member@x.com', status: 'hijack' }, 'deny',
+   "a member may not write someone else's row"],
+  ['admin@x.com',  { id: 's-mine',  owner: 'member@x.com', organizerNote: 'ok' }, 'allow',
+   'an admin is not bound by ownerWritable']
+];
+
+async function jsWrite(user, data) {
+  const r = await post('putRow', { tableId: 'signups', tab: 'active', data }, user);
+  if (!r.ok) return 'deny';
+  const d = await r.json();
+  return (d && d.error) ? 'deny' : 'allow';
+}
+
+async function rlsWrite(user, data) {
+  PG.setCaller(user);
+  try { await PG.putRow('signups', data, 'active'); return 'allow'; }
+  catch (e) { if (/row-level security/.test(e.message)) return 'deny'; throw e; }
+}
+
+describe('gate parity — the owner model', () => {
+  for (const [user, data, expected, label] of OWNER_MATRIX) {
+    it(`${label} -> ${expected}`, async () => {
+      const js = await jsWrite(user, data);
+      const rls = await rlsWrite(user, data);
+      assert.equal(js, rls,
+        `the two gates disagree (js=${js}, rls=${rls}) on: ${label}. That is a finding about the ` +
+        'policies, not a broken test.');
+      assert.equal(js, expected, 'both gates agree on ' + js + ', but the intent is ' + expected);
+    });
+  }
+
+  it('a member sees only their own rows', async () => {
+    // Not a boolean: the two engines must scope the READ to the same set, or one of them is leaking.
+    PG.setCaller('member@x.com');
+    const rlsRows = (await PG.getTableData('signups', 'active')).rows.map((r) => r.id).sort();
+    const jr = await post('getTableData', { tableId: 'signups', tab: 'active' }, 'member@x.com');
+    const jsRows = ((await jr.json()).rows || []).map((r) => r.id).sort();
+    assert.deepEqual(jsRows, rlsRows, 'the two gates scope the read differently');
+  });
+});
+
 describe('gate parity — the matrix is not vacuous', () => {
   it('covers both verdicts and every actor', async () => {
     // A matrix of all-denies would pass trivially against a gate that refuses everything.
-    assert.ok(MATRIX.some((c) => c[3] === 'allow'), 'must contain allows');
-    assert.ok(MATRIX.some((c) => c[3] === 'deny'), 'must contain denies');
-    assert.deepEqual([...new Set(MATRIX.map((c) => c[0]))].sort(), Object.keys(ACTORS).sort());
+    for (const [name, m, verdictAt] of [['grant', MATRIX, 3], ['owner', OWNER_MATRIX, 2]]) {
+      assert.ok(m.some((c) => c[verdictAt] === 'allow'), name + ' matrix must contain allows');
+      assert.ok(m.some((c) => c[verdictAt] === 'deny'), name + ' matrix must contain denies');
+    }
+    // Every declared actor must actually be exercised by one matrix or the other -- an actor that is
+    // set up but never used is a case someone meant to write and did not.
+    const used = new Set([...MATRIX.map((c) => c[0]), ...OWNER_MATRIX.map((c) => c[0])]);
+    assert.deepEqual([...used].sort(), Object.keys(ACTORS).sort());
   });
 });
