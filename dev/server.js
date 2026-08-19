@@ -77,10 +77,24 @@ function loadSidecars() {
 // keyed by uid. Without this mirror, kv would hold no members, app_no_users() would be true, and every
 // caller would be treated as the bootstrap admin -- RLS switched on but gating nothing, which is worse
 // than leaving it off because it looks like coverage.
-function mirrorUsersToPolicy() {
-  if (!USE_PG || !backend._seed) return Promise.resolve();
-  const recs = Object.values(backend._users || {});
-  return Promise.all(recs.filter(r => r && r.user).map(r => backend._seed('_users', r.user, r)));
+async function mirrorUsersToPolicy() {
+  if (!USE_PG || !backend._seed) return;
+  const recs = Object.values(backend._users || {}).filter(r => r && r.user);
+  const want = new Set(recs.map(r => String(r.user).toLowerCase()));
+  for (const r of recs) await backend._seed('_users', r.user, r);
+  // A MIRROR, not an append: removing a member has to remove their grant from the policy's store too,
+  // or removeUser revokes access on the JavaScript side while RLS keeps honouring the stale row -- the
+  // gate that is now the only one. resetData relies on this as well: it empties the registry, and
+  // without the delete pass every member it just cleared would still be a member as far as the policies
+  // were concerned.
+  // _query, not _all: _all reads AS THE CALLER, and the caller here may be anyone -- a non-admin would
+  // see no rows, the delete pass would find nothing to do, and stale grants would survive silently.
+  // Reconciling the registry is bookkeeping, not a user action, so it runs as owner.
+  const existing = await backend._storage._query('select key from public.kv where store = $1', ['_users']);
+  for (const row of existing.rows || []) {
+    if (!want.has(String(row.key).toLowerCase())) await backend._storage._query(
+      'delete from public.kv where store = $1 and key = $2', ['_users', row.key]);
+  }
 }
 function saveUsers() {
   fs.writeFileSync(USERS_PATH, JSON.stringify(backend._users || {}, null, 2));
@@ -228,7 +242,13 @@ const server = http.createServer(async (req, res) => {
     function userRecord() { return userRecordFor(userEmail); }
     // Tables the caller may SEE. Mirrors firestore.rules hasTableAccess: a grant map { t:'r'|'rw' } is
     // read-visible on every key, exactly as the rules' `x in <map>` membership test is.
-    function getAllowedTables() { return POLICY_ENFORCED ? null : allowedTablesFor(userEmail); }   // null = unrestricted; RLS scopes each read
+    // NOT stood down under --pg, unlike the predicates: this is not a gate, it is the caller's SCOPE,
+    // and the client acts on it. bootData turns it into `unrestricted`, which app-core reads to decide
+    // whether to attempt admin-ish writes such as seeding schema lists. Reporting null (unrestricted)
+    // for everyone made a grantless member attempt those writes, RLS refused them exactly as it should,
+    // and the rejection surfaced as an uncaught page error. Enforcement moved to the policies; telling
+    // the client who it is did not.
+    function getAllowedTables() { return allowedTablesFor(userEmail); }
     // Tables the caller may WRITE — the 'rw' subset. Mirrors hasTableWrite / app_has_table_write.
     function getWritableTables() {
       if (!backend._users) return null;

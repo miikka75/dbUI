@@ -576,6 +576,22 @@ describe('gate parity — the --pg server, with the JS gates stood down', () => 
   });
 });
 
+// The registry the policies read is a MIRROR of the dev server's, and a mirror has to reflect removals
+// as well as additions. If it did not, removeUser would revoke access on the JavaScript side while RLS
+// kept honouring the stale grant -- and under --pg RLS is the only gate left, so the revocation would
+// simply not happen.
+describe('gate parity — revoking a member revokes it in the policy store too', () => {
+  it('a removed member loses the access they had', async () => {
+    await postPg('setUserRole', { uid: 'temp@x.com', role: 'admin', user: 'temp@x.com', email: 'temp@x.com', tables: 'all' }, 'admin@x.com');
+    let r = await postPg('putRow', { tableId: 'tasks', tab: 'active', data: { id: 'tmp1', title: 'as admin' } }, 'temp@x.com');
+    assert.equal((await r.json()).error, undefined, 'the new admin can write');
+
+    await postPg('removeUser', { uid: 'temp@x.com' }, 'admin@x.com');
+    r = await postPg('putRow', { tableId: 'tasks', tab: 'active', data: { id: 'tmp2', title: 'after removal' } }, 'temp@x.com');
+    assert.ok((await r.json()).error, 'and must not still be able to write once removed');
+  });
+});
+
 describe('gate parity — the matrix is not vacuous', () => {
   it('covers both verdicts and every actor', async () => {
     // A matrix of all-denies would pass trivially against a gate that refuses everything.
