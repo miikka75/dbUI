@@ -89,7 +89,9 @@ async function createPgliteStorage(opts) {
   // An RLS refusal surfaces either as an error, or as zero affected rows because USING filtered the row
   // out before the statement saw it. Both are denials; callers must not be able to tell them apart.
   const isRlsError = (e) => /row-level security|permission denied/i.test((e && e.message) || '');
-  const denied = () => new Error('denied by row-level security');
+  // Keep the original error as `cause`: a denial that discards why it happened turns every policy
+  // investigation into guesswork, and this is a dev server -- there is no one to leak it to.
+  const denied = (e) => Object.assign(new Error('denied by row-level security'), { cause: e });
 
   return {
     // --- lifecycle ---
@@ -108,20 +110,21 @@ async function createPgliteStorage(opts) {
       });
     },
 
-    // Merge semantics match StorageSupabase.put: `value || patch` in ONE statement, so a concurrent
-    // patch of a different column merges instead of racing. The policies therefore see the MERGED row,
-    // which is what makes a partial write judged exactly as the equivalent full-row write would be.
+    // Calls the schema's OWN merge function rather than reimplementing it, so dev takes exactly the
+    // write path production takes: `value || patch` in one statement, SECURITY INVOKER, gated by the
+    // same kv policies.
+    //
+    // Note what is deliberately NOT here: a `returning` clause used as the verdict. That was the first
+    // version, and it reported a false DENIAL for a caller who may WRITE a row but not READ it --
+    // `returning` is a read, so it yields nothing and the write looks refused. Write-without-read is
+    // not a corner case: a list opened by userWritableLists is exactly that, appendable by any member
+    // while the grants still govern who can see it. A refusal now comes only from the policy raising.
     put(store, key, value) {
       return asCaller(async function () {
         try {
-          const r = await q(
-            'insert into public.kv (store, key, value) values ($1, $2, $3::jsonb)' +
-            ' on conflict (store, key) do update set value = public.kv.value || excluded.value' +
-            ' returning key',
-            [store, key, JSON.stringify(value || {})]);
-          if (!r.rows.length) throw denied();
+          await q('select public.app_kv_merge($1, $2, $3::jsonb)', [store, key, JSON.stringify(value || {})]);
           return null;
-        } catch (e) { throw isRlsError(e) ? denied() : e; }
+        } catch (e) { throw isRlsError(e) ? denied(e) : e; }
       });
     },
 
@@ -130,7 +133,7 @@ async function createPgliteStorage(opts) {
         try {
           await q('delete from public.kv where store = $1 and key = $2', [store, key]);
           return null;
-        } catch (e) { throw isRlsError(e) ? denied() : e; }
+        } catch (e) { throw isRlsError(e) ? denied(e) : e; }
       });
     },
 
@@ -160,7 +163,7 @@ async function createPgliteStorage(opts) {
             [key, JSON.stringify(boxed)]);
           if (!r.rows.length) throw denied();
           return null;
-        } catch (e) { throw isRlsError(e) ? denied() : e; }
+        } catch (e) { throw isRlsError(e) ? denied(e) : e; }
       });
     },
 

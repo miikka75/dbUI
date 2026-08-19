@@ -43,7 +43,14 @@ const SCHEMA = {
       }
     }
   },
-  views: []
+  // `access` lists TABLE names: a restricted caller may read the page only if one of their granted
+  // tables appears here. `open` carries none, so everyone registered may read it.
+  views: [
+    { name: 'open',   markdown: '# Open' },
+    { name: 'secret', markdown: '# Secret', access: ['notes'] }
+  ],
+  // Everything else is admin-only to edit; this one list is opened to any member.
+  userWritableLists: ['status']
 };
 
 const ACTORS = {
@@ -142,6 +149,9 @@ before(async () => {
   // Seed a row in each table so a scoped-away read is distinguishable from an empty table.
   await post('putRow', { tableId: 'tasks', tab: 'active', data: { id: 'seed', title: 'seed' } }, 'admin@x.com');
   await post('putRow', { tableId: 'notes', tab: 'active', data: { id: 'seed', body: 'seed' } }, 'admin@x.com');
+  await post('putRow', { tableId: '_pages', tab: 'active', data: { id: 'open', markdown: '# Open' } }, 'admin@x.com');
+  await post('putRow', { tableId: '_pages', tab: 'active', data: { id: 'secret', markdown: '# Secret' } }, 'admin@x.com');
+  await post('saveLists', { lists: { status: ['a'], locked: ['a'] } }, 'admin@x.com');
 
   // --- the RLS policies: backend-pglite, no JavaScript gate ---
   PG = await createPgliteBackend();
@@ -156,6 +166,9 @@ before(async () => {
   }
   await PG.putRow('tasks', { id: 'seed', title: 'seed' }, 'active');
   await PG.putRow('notes', { id: 'seed', body: 'seed' }, 'active');
+  await PG.putRow('_pages', { id: 'open', markdown: '# Open' }, 'active');
+  await PG.putRow('_pages', { id: 'secret', markdown: '# Secret' }, 'active');
+  await PG.saveLists({ status: ['a'], locked: ['a'] });
 });
 
 after(async () => {
@@ -237,6 +250,87 @@ describe('gate parity — the owner model', () => {
     const jr = await post('getTableData', { tableId: 'signups', tab: 'active' }, 'member@x.com');
     const jsRows = ((await jr.json()).rows || []).map((r) => r.id).sort();
     assert.deepEqual(jsRows, rlsRows, 'the two gates scope the read differently');
+  });
+});
+
+// ==================================================================================================
+// Doc-view access and per-list write access -- the last two gates in dev/server.js with no parity
+// coverage. JavaScript side: filterPages / canReadPages, and the userWritableLists check on
+// putListItem. Policy side: app_page_allowed reading _meta/pageAccess, and app_list_create_allowed
+// reading _meta/listWritable.
+
+describe('gate parity — doc-view access', () => {
+  // Asserted as a SET, for the same reason as the owner read: "may read pages" is not the question,
+  // "WHICH pages" is. A gate that leaked the restricted page would pass a boolean check.
+  const visibleJs = async (user) => {
+    const r = await post('getTableData', { tableId: '_pages', tab: 'active' }, user);
+    return r.ok ? (((await r.json()).rows) || []).map((x) => x.id).sort() : [];
+  };
+  const visibleRls = async (user) => {
+    PG.setCaller(user);
+    return (await PG.getTableData('_pages', 'active')).rows.map((x) => x.id).sort();
+  };
+
+  it('an admin sees every page through both gates', async () => {
+    assert.deepEqual(await visibleJs('admin@x.com'), await visibleRls('admin@x.com'));
+    assert.deepEqual(await visibleJs('admin@x.com'), ['open', 'secret']);
+  });
+
+  it('a caller granted only `tasks` sees the open page and not the restricted one', async () => {
+    const js = await visibleJs('editor@x.com');
+    const rls = await visibleRls('editor@x.com');
+    assert.deepEqual(js, rls, `the two gates scope pages differently (js=${js}, rls=${rls})`);
+    assert.deepEqual(js, ['open'], 'secret is gated behind a `notes` grant this caller lacks');
+  });
+});
+
+describe('gate parity — per-list write access', () => {
+  const jsPut = async (user, list) => {
+    const r = await post('putListItem', { listName: list, value: 'x-' + user }, user);
+    if (!r.ok) return 'deny';
+    const d = await r.json();
+    return (d && d.error) ? 'deny' : 'allow';
+  };
+  const rlsPut = async (user, list) => {
+    PG.setCaller(user);
+    try { await PG.putListItem(list, 'x-' + user); return 'allow'; }
+    catch (e) { if (/row-level security/.test(e.message)) return 'deny'; throw e; }
+  };
+
+  for (const [user, list, expected, label] of [
+    ['member@x.com', 'locked', 'deny',  'a member may not touch a list the schema does not open'],
+    ['admin@x.com',  'locked', 'allow', 'an admin may edit any list']
+  ]) {
+    it(`${label} -> ${expected}`, async () => {
+      const js = await jsPut(user, list);
+      const rls = await rlsPut(user, list);
+      assert.equal(js, rls, `the two gates disagree (js=${js}, rls=${rls}) on: ${label}`);
+      assert.equal(js, expected);
+    });
+  }
+
+  // ---- KNOWN DIVERGENCE, found by this harness -------------------------------------------------
+  // A member appending to a list the schema opens via userWritableLists: the JavaScript gate ALLOWS
+  // it, the policies REFUSE it.
+  //
+  // Cause: every write goes through app_kv_merge, which is `insert ... on conflict do update`.
+  // Postgres evaluates the INSERT policy's WITH CHECK on the proposed row BEFORE it detects the
+  // conflict, so an upsert always demands CREATE permission -- and creating a _lists row is
+  // admin/editor-only by design (app_list_create_allowed). A member who may UPDATE an open list
+  // therefore cannot append to it. Postgres reports "new row violates row-level security policy".
+  //
+  // This is not a dev-only artifact: backend-supabase.js reaches _lists through the same upsert, so
+  // the same member is refused on Supabase today while succeeding on the dev server and on Firebase.
+  //
+  // Asserted as STILL DIVERGING on purpose. Fixing the policy -- most likely making app_kv_merge try
+  // the UPDATE first and INSERT only when it affects nothing -- will make this test fail, which is the
+  // signal to delete this block and move the case back into the table above.
+  it('KNOWN DIVERGENCE: userWritableLists append is allowed by the JS gate and refused by the policy', async () => {
+    const js = await jsPut('member@x.com', 'status');
+    const rls = await rlsPut('member@x.com', 'status');
+    assert.equal(js, 'allow', 'the JavaScript gate honours userWritableLists');
+    assert.equal(rls, 'deny', 'the policy refuses it -- if this now says allow, the policy was fixed: ' +
+      'delete this block and restore the case to the parity table');
   });
 });
 
