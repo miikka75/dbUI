@@ -14,7 +14,8 @@
     "test:rules": "node run-with-emulators.mjs --only firestore --project demo-rules -- node test-emulator/firestore-rules.mjs",
     "test:cdn": "node test-cdn-fallback.mjs",
     "free-ports": "node free-emulator-ports.mjs",
-    "test:all": "npm run typecheck && npm test && npm run test:rules && npm run test:storage-rules && npm run test:e2e-firebase && npm run test:ui"
+    "test:all": "npm run typecheck && npm test && npm run test:rules && npm run test:differential && npm run test:storage-rules && npm run test:e2e-firebase && npm run test:ui",
+    "test:differential": "node run-with-emulators.mjs --only firestore --project demo-diff -- node test-emulator/policy-differential.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.4",

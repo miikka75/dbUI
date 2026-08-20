@@ -50,9 +50,8 @@ date-relative rows with `node seed-import.js --regen`.
 
 **Reset**: delete `dev/local.db*` and `dev/*.pgdata/` + browser `localStorage.clear(); location.reload()`
 
-> Switching to the PGlite default starts from an EMPTY database — an existing `dev/local.db` is not
-> migrated. Export a bundle from the old one first (Settings → Export) and import it back, or keep
-> using it with `--sqlite`.
+> The PGlite default starts from an empty database; an existing `dev/local.db` is not migrated. Nothing
+> is lost — the demo content lives in the repo, so `npm run seed:import` rebuilds it.
 
 **A second, isolated instance.** `PORT` alone is *not* isolation — every dev server shares
 `dev/local.db`, so a reset on one wipes the other. Point `APP_DB` at another file to get a genuinely
