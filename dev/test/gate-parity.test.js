@@ -592,68 +592,31 @@ describe('gate parity — revoking a member revokes it in the policy store too',
   });
 });
 
-// ---- KNOWN DIVERGENCE, found by running the E2E suite against --pg ------------------------------
-// Writing the app-level config (_meta/config, the Settings screen) is ungated in dev/server.js and
-// admin-only under the policies. So a grantless member can rewrite everyone's app config on the dev
-// server and cannot on Supabase or Firebase -- the JavaScript path is the permissive outlier here,
-// which is the opposite direction to the userWritableLists divergence.
-//
-// It is left as-is deliberately rather than "fixed" in passing: closing it means the CLIENT must stop
-// attempting the write for users who cannot make it (today the refusal surfaces as an unhandled
-// rejection, which is what made the E2E fail), and that is an app-core change with its own UI question
-// -- whether a member should see the control at all. Recorded, with the direction stated, so the choice
-// is made on purpose.
-//
-// Asserted as STILL DIVERGING: gating it in dev, or making the policies permit it, will fail this and
-// prompt its removal.
+// App-level config is shared state for everyone using the database, and all three layers now agree that
+// only an admin may write it. The dev server used to be the permissive outlier here -- the opposite
+// direction to the userWritableLists divergence, which is why one harness catches both.
 describe('gate parity — app config writes', () => {
-  it('KNOWN DIVERGENCE: a member may write app config on the dev server and not under the policies', async () => {
-    const r = await post('setFolderConfig', { config: { tabsNav: true } }, 'member@x.com');
+  const both = async (user, config) => {
+    const r = await post('setFolderConfig', { config }, user);
     const js = r.ok && !((await r.json()) || {}).error ? 'allow' : 'deny';
-
-    PG.setCaller('member@x.com');
+    PG.setCaller(user);
     let rls = 'allow';
-    try { await PG.setFolderConfig({ tabsNav: true }); }
+    try { await PG.setFolderConfig(config); }
     catch (e) { if (/row-level security/.test(e.message)) rls = 'deny'; else throw e; }
-
-    assert.equal(js, 'allow', 'the dev JavaScript path does not gate this');
-    assert.equal(rls, 'deny', 'the policies restrict _meta to admins -- if this now says allow, the ' +
-      'divergence was closed: delete this block');
-  });
-
-  it('an admin may write app config through both', async () => {
-    const r = await post('setFolderConfig', { config: { tabsNav: false } }, 'admin@x.com');
-    assert.equal(((await r.json()) || {}).error, undefined);
-    PG.setCaller('admin@x.com');
-    await PG.setFolderConfig({ tabsNav: false });          // must not throw
-  });
-});
-
-// bootData's `unrestricted` flag is a contract all three backends owe the client: it decides whether
-// app-core auto-seeds shared list scaffolding. Firebase and Supabase have always sent it; the dev
-// server did not, so the client seeded for every caller -- invisible while dev had no gate on _lists,
-// and a refused write the moment the policies became the gate.
-describe('gate parity — bootData reports the caller as restricted or not', () => {
-  const flag = async (base, user) => {
-    const r = await (base === 'pg' ? postPg('bootData', {}, user) : post('bootData', {}, user));
-    return (await r.json()).unrestricted;
+    assert.equal(js, rls, `the two gates disagree (js=${js}, rls=${rls}) on writing app config as ${user}`);
+    return js;
   };
 
-  it('an admin is unrestricted, through both servers', async () => {
-    assert.equal(await flag('js', 'admin@x.com'), true);
-    assert.equal(await flag('pg', 'admin@x.com'), true);
+  it('a member may not write app config', async () => {
+    assert.equal(await both('member@x.com', { tabsNav: true }), 'deny');
   });
 
-  it('a member with no grants is NOT, through both servers', async () => {
-    // false, not undefined: app-core tests `!== false`, so a missing flag reads as unrestricted and the
-    // client goes ahead and writes.
-    assert.equal(await flag('js', 'member@x.com'), false);
-    assert.equal(await flag('pg', 'member@x.com'), false);
+  it('an editor holding a table grant may not either -- it is not a table', async () => {
+    assert.equal(await both('editor@x.com', { tabsNav: true }), 'deny');
   });
 
-  it('an editor holding one table grant is restricted too', async () => {
-    assert.equal(await flag('js', 'editor@x.com'), false);
-    assert.equal(await flag('pg', 'editor@x.com'), false);
+  it('an admin may', async () => {
+    assert.equal(await both('admin@x.com', { tabsNav: false }), 'allow');
   });
 });
 

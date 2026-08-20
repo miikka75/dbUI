@@ -399,7 +399,16 @@ const server = http.createServer(async (req, res) => {
       case 'saveSchema': await backend.saveSchema(body.schema); return json(res, { ok: true });
       case 'validateFolder': return json(res, await backend.validateFolder(body.id || 'local'));
       case 'getFolderConfig': return json(res, await backend.getFolderConfig());
-      case 'setFolderConfig': await backend.setFolderConfig(body.config); return json(res, { ok: true });
+      case 'setFolderConfig': {
+        // _meta/config is shared state for everyone using the database, and both rule layers restrict it
+        // to admins. The dev server did not, which made it the PERMISSIVE outlier -- a member could
+        // rewrite everyone's app config here and nowhere else. app-core already guards its own two call
+        // sites on isAdmin (and says why), so nothing legitimate is affected; this closes the hole a
+        // direct API call went through.
+        if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
+        await backend.setFolderConfig(body.config);
+        return json(res, { ok: true });
+      }
       case 'initSchema': if (!body.schema) return json(res, {}); return json(res, await backend.initSchema(body.schema));
       case 'bootData': {
         // One-round-trip boot: schema + languages + lists + all accessible table data, read
