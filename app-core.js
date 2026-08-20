@@ -361,6 +361,12 @@ function createVueApp() {
         if (ct === '__languages') return 'languages';
         if (ct === '__lookup') return 'lookup';
         if (ct === '__settings') return 'settings';
+        // A migrated schema SAYS what each view is (migrations.js v1->v2), so ask rather than sniff.
+        // The chain below is the fallback for a schema that has not been through the migration -- a
+        // fixture built by hand in a test, say. It is also what the migration derives from, so the two
+        // cannot disagree.
+        var declared = (VIEWS[ct] || {}).kind;
+        if (declared) return declared;
         if (this.isCalendarView) return 'calendar';
         if (this.isRotationView) return 'rotation';
         if (this.isPivotView) return 'pivot';

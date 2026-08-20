@@ -24,6 +24,11 @@ function ensureImplicitId(schema, orders) {
 }
 // Shared schema normalization: strip dead text entries + set globals + colMap + ensureImplicitId. Returns nothing; mutates globals.
 function _normalizeSchema(parsed) {
+  // Bring an older schema forward BEFORE anything reads it, so nothing downstream has to know which
+  // shape it was written in. Idempotent, because the result is not written back yet and so this runs on
+  // every load. convertViewFilters below is the pattern this replaces: a permanent shim, because there
+  // was no version to migrate past.
+  if (typeof Migrations !== 'undefined' && Migrations.migrate) Migrations.migrate(parsed);
   convertViewFilters(parsed.views);   // upgrade legacy array-IN ({col:[a,b]})->$or and shorthand conditional cols ({col:{cond}})->{name,when}
   SCHEMA = parsed.tables || SCHEMA;
   _viewsNav = Array.isArray(parsed.views) ? parsed.views : _viewsNav;

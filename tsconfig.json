@@ -29,6 +29,7 @@
     "list-users.js",
     "calendar.js",
     "rotation.js",
+    "migrations.js",
     "writes.js",
     "rows.js",
     "embeds.js",
