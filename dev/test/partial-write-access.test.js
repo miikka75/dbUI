@@ -66,10 +66,10 @@ describe('dev server — self-service writes are gated on the MERGED row', () =>
       stdio: 'ignore'
     });
     let up = false;
-    // 20s, not 8: node --test runs suites concurrently and gate-parity now boots a WASM Postgres
-    // alongside this one, which is enough contention to miss a tighter deadline on a loaded machine.
-    // A generous ceiling costs nothing when the server is up in under a second, as it normally is.
-    const deadline = Date.now() + 20000;
+    // 45s: the dev server's default backend is PGlite, so this spawn boots a WebAssembly Postgres and
+    // applies supabase-schema.sql before it answers -- seconds on its own, and node --test runs the
+    // suites that do this concurrently. The ceiling costs nothing when the server is up sooner.
+    const deadline = Date.now() + 45000;
     while (!up && Date.now() < deadline) {
       try {
         const r = await fetch(BASE + '/api/serverInfo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
@@ -94,9 +94,9 @@ describe('dev server — self-service writes are gated on the MERGED row', () =>
       await Promise.race([exited, new Promise(r => setTimeout(r, 2000))]);
     }
     for (const f of fs.readdirSync(path.join(DEV_DIR, 'test'))) {
-      if (f.startsWith('.pwa-' + process.pid)) { try { fs.rmSync(path.join(DEV_DIR, 'test', f), { force: true }); } catch (e) {} }
+      if (f.startsWith('.pwa-' + process.pid)) { try { fs.rmSync(path.join(DEV_DIR, 'test', f), { recursive: true, force: true }); } catch (e) {} }
     }
-    try { fs.rmSync(DB_ABS, { force: true }); } catch (e) {}
+    try { fs.rmSync(DB_ABS, { recursive: true, force: true }); } catch (e) {}
   });
 
   it('a member can CREATE their own owner-stamped row (full payload, unchanged behaviour)', async () => {

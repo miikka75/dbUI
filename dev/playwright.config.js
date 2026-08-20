@@ -22,6 +22,8 @@ module.exports = defineConfig({
     env: { PORT: String(TEST_PORT), APP_DB: ':memory:', CSP: '1' },
     port: TEST_PORT,
     reuseExistingServer: false,
-    timeout: 10000,
+    // PGlite is the default backend now: it boots a WebAssembly Postgres and applies supabase-schema.sql
+    // before serving, which is seconds rather than the instant SQLite open this allowed for.
+    timeout: 60000,
   },
 });

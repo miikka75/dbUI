@@ -320,7 +320,11 @@ describe('rules parity — a partial write is judged on the MERGED row, on every
   it('Supabase merges server-side rather than read-modify-write, so concurrent patches cannot clobber', () => {
     assert.match(SQL, /create or replace function public\.app_kv_merge/,
       'the app_kv_merge RPC is missing — StorageSupabase.put falls back to a racy client-side merge');
-    assert.match(SQL, /do update set value = public\.kv\.value \|\| excluded\.value/,
+    // The shape changed from `insert ... on conflict do update` to UPDATE-first, because the former
+    // evaluated the INSERT policy against the bare patch and so refused every partial write on a
+    // self-service row. What this guards is unchanged: the patch must merge ONTO the stored value
+    // rather than replace it, which is `kv.value || <patch>` in either shape.
+    assert.match(SQL, /set value = public\.kv\.value \|\| (p_patch|excluded\.value)/,
       'app_kv_merge does not merge onto the stored value');
     // SECURITY INVOKER (the default) is load-bearing: a DEFINER merge would bypass the kv policies and
     // turn a concurrency fix into a write-anything hole.

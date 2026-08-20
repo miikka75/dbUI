@@ -158,7 +158,9 @@ async function rlsVerdict(user, table, op) {
 
 before(async () => {
   // --- the JavaScript gate: a real dev server on SQLite ---
-  child = spawn(process.execPath, ['server.js'], {
+  // --sqlite explicitly: PGlite is the default now, and a harness that spawned the default here would be
+  // comparing the policies against themselves and reporting perfect agreement.
+  child = spawn(process.execPath, ['server.js', '--sqlite'], {
     cwd: DEV_DIR,
     env: Object.assign({}, process.env, { PORT: String(PORT), APP_DB: DB_REL }),
     stdio: 'ignore'
@@ -356,6 +358,22 @@ describe('gate parity — ownerWritableWhile freezes the owner branch', () => {
     // The most obvious way round the freeze: rewrite status to the open value. The gate reads the
     // stored state, not the incoming one, so this is refused for the same reason.
     assert.equal(await both('member@x.com', { id: 'e1', owner: 'member@x.com', status: 'logged' }), 'deny');
+  });
+
+  // THE CASE THIS HARNESS MISSED. Every owner case above resends `owner` in the payload, so none of
+  // them asked what happens when it is absent -- and app-core's saveField sends { id, <col>, updated_at }
+  // and nothing else. The owner column lives on the STORED row, so a gate that judges the payload alone
+  // refuses every cell edit a self-service member makes. Supabase did exactly that until app_kv_merge
+  // was made update-first.
+  it('a partial write that omits the owner column is judged on the MERGED row', async () => {
+    assert.equal(await both('member@x.com', { id: 'e2', owner: 'member@x.com', status: 'logged', note: 'a' }), 'allow');
+    assert.equal(await both('member@x.com', { id: 'e2', note: 'b' }), 'allow');       // no owner in the patch
+  });
+
+  it('...and omitting the owner does not let somebody else write the row', async () => {
+    // The other half: if the merged row is what gets judged, the merge must not become a way to reach a
+    // row you do not own by simply leaving the owner out.
+    assert.equal(await both('other@x.com', { id: 'e2', note: 'not mine' }), 'deny');
   });
 
   it('an admin is unaffected by the freeze', async () => {

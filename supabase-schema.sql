@@ -547,13 +547,42 @@ end $$;
 -- is a single atomic statement, so the second write merges onto the first instead of racing it.
 -- SECURITY INVOKER (the default): this runs as the caller, so kv_insert/kv_update still gate it exactly
 -- as a direct upsert would -- it is a concurrency fix, NOT a privilege bypass.
+-- UPDATE FIRST, insert only if nothing was there. `insert ... on conflict do update` reads better and
+-- is wrong here: Postgres evaluates the INSERT policy's WITH CHECK against the row PROPOSED FOR
+-- INSERTION -- the bare patch -- before any conflict is detected. A partial write therefore had to
+-- satisfy the CREATE rule on its own, with only the columns it happened to carry.
+--
+-- That silently broke every self-service cell edit. app-core's saveField sends { id, <col>, updated_at }
+-- and nothing else, so the owner column lives on the STORED row, not in the patch; app_can_create saw a
+-- row with no owner and refused. Firestore evaluates request.resource.data AFTER the merge and allows
+-- it, and the dev server was taught to gate the merged row for exactly this reason -- Supabase was the
+-- odd one out, and the only place a member's edits simply stopped working.
+--
+-- Update-first puts an existing row on the UPDATE policy instead, whose USING sees the stored value and
+-- whose WITH CHECK sees the merged one. Both carry the owner. A genuinely new row still takes the
+-- INSERT path and is still judged by the create rule, which is correct: there is no stored row to
+-- inherit anything from.
 create or replace function public.app_kv_merge(p_store text, p_key text, p_patch jsonb)
 returns void language plpgsql as $$
 begin
-  insert into public.kv (store, key, value, updated_at)
-  values (p_store, p_key, p_patch, now())
-  on conflict (store, key)
-  do update set value = public.kv.value || excluded.value, updated_at = now();
+  update public.kv set value = public.kv.value || p_patch, updated_at = now()
+   where store = p_store and key = p_key;
+  if found then return; end if;
+  begin
+    insert into public.kv (store, key, value, updated_at)
+    values (p_store, p_key, p_patch, now());
+  exception when unique_violation then
+    -- The row exists but the UPDATE above matched nothing. Either another caller inserted it in the
+    -- gap (retry, and this succeeds), or the UPDATE policy filtered it away -- a refusal, which RLS
+    -- expresses as zero rows rather than an error. Returning quietly here would report a refused write
+    -- as a success, which is worse than refusing it.
+    update public.kv set value = public.kv.value || p_patch, updated_at = now()
+     where store = p_store and key = p_key;
+    if not found then
+      raise insufficient_privilege using
+        message = 'new row violates row-level security policy for table "kv"';
+    end if;
+  end;
 end $$;
 
 grant execute on function public.app_kv_merge(text, text, jsonb) to authenticated;

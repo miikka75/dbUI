@@ -5,7 +5,7 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 ## Features
 
 - **Schema-driven**: JSON config defines tables, columns, views, and behavior
-- **Three backends**: Supabase (Postgres + RLS), Firebase (Firestore), Dev Server (SQLite)
+- **Three backends**: Supabase (Postgres + RLS), Firebase (Firestore), Dev Server (PGlite — runs the *real* `supabase-schema.sql` policies locally)
 - **i18n**: multi-language with auto-generated translation keys from schema
 - **Views**: flat union, join, and aggregate views, plus **rotationView** (generated rotating roster), **calendar** (month/week/list), **pivot** (cross-tab grid), **rsvp** (self-service signup sheet), and **board** (kanban — group a table's rows into lanes by a `select` column; drag a card between lanes to write that column); columns can embed named views/inline tables
 - **Rotating rosters**: `multiselect` columns hold a group of people; rotation tables cycle a group per occurrence (tied to another table's rows) or per calendar interval (`daily/weekly/monthly/yearly` or `<n><unit>` like `3w`), with the anchor stored as editable data
@@ -24,7 +24,8 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 | Backend | Storage | Auth | Offline | Real-time | Setup |
 |---------|---------|------|---------|-----------|-------|
 | **Firebase** | Firestore | Firebase Auth | ✅ | ✅ Instant | Firebase Console |
-| **Dev Server (SQLite)** | SQLite | None | N/A | N/A | `npm start` |
+| **Dev Server (PGlite)** | PostgreSQL-in-WASM | Trusted `X-User` header (loopback only) | N/A | ✅ SSE | `npm start` |
+| **Dev Server (SQLite)** | SQLite | same | N/A | ✅ SSE | `npm start -- --sqlite` |
 
 ## Quick Start (Local Development)
 
@@ -36,13 +37,22 @@ npm test         # run backend unit tests
 npx playwright test  # run E2E tests
 ```
 
+**The dev server runs the production access policy.** `npm start` boots PostgreSQL compiled to
+WebAssembly and applies `supabase-schema.sql` — the same file Supabase runs — so a permission question
+is answered in dev exactly as it is in production, rather than by a hand-written imitation of it. It
+costs a few seconds of startup; `npm start -- --sqlite` opts out when boot speed matters more.
+
 Browser: click "Create Local Database" → app loads with schema from `schema.json`.
 Optionally run `npm run seed:import` (with the server running) to layer the demo data — rows, lists,
 translations, rotation config, plus example users/profiles — on top of the schema. The importable data
 lives in `dev/demo-bundle.json` (the same bundle shape as Settings → Import); regenerate its
 date-relative rows with `node seed-import.js --regen`.
 
-**Reset**: delete `dev/local.db` + browser `localStorage.clear(); location.reload()`
+**Reset**: delete `dev/local.db*` and `dev/*.pgdata/` + browser `localStorage.clear(); location.reload()`
+
+> Switching to the PGlite default starts from an EMPTY database — an existing `dev/local.db` is not
+> migrated. Export a bundle from the old one first (Settings → Export) and import it back, or keep
+> using it with `--sqlite`.
 
 **A second, isolated instance.** `PORT` alone is *not* isolation — every dev server shares
 `dev/local.db`, so a reset on one wipes the other. Point `APP_DB` at another file to get a genuinely
@@ -124,7 +134,7 @@ Generate the link from Settings tab (shown under "Share link" for Firebase mode)
 | Backend | How to add users | Admin UI? |
 |---------|-----------------|:---:|
 | **Firebase** | Settings → User Access panel | ✅ Yes |
-| **Dev Server (SQLite)** | Settings → User Access panel (test with `?user=`) | ✅ Yes |
+| **Dev Server** | Settings → User Access panel (test with `?user=`) | ✅ Yes |
 | **Supabase** | Settings → User Access panel | ✅ Yes |
 
 ### User Registry
@@ -307,7 +317,9 @@ dev/                           ← Local development (dev-server-only files live
   seed-import.js               ← applies demo-bundle.json to the dev server (--regen rebuilds it)
   package.json                 ← dependencies + scripts (npm start/test)
   server.js                    ← HTTP server (port 3000; --fs for JSON-file storage)
-  backend-local.js             ← SQLite backend (better-sqlite3)
+  backend-pglite.js            ← DEFAULT: dev contract over the kv table (no access checks of its own)
+  storage-pglite.js            ← PGlite storage; applies supabase-schema.sql verbatim at startup
+  backend-local.js             ← SQLite backend (better-sqlite3), via --sqlite
   storage-fs.js                ← JSON-file backend (node server.js --fs)
   backend-local-client.js    ← client adapter for local server (direct SQLite)
   test/                        ← node:test backend tests
@@ -357,7 +369,7 @@ markdown documents and their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens
 ├────────────────┼─────────────────────────────────┤
 │ backend-*.html │   schema.json / firebase-config │  ← adapter + config
 ├────────────────┴─────────────────────────────────┤
-│ Supabase │ Firestore │ SQLite │
+│ Supabase │ Firestore │ PGlite / SQLite │
 └──────────────────────────────────────────────────┘
 ```
 

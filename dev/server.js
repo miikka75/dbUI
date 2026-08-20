@@ -13,11 +13,15 @@ const LU = require('../list-users');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const USE_FS = process.argv.includes('--fs');
+// --sqlite opts OUT of the default. PGlite is the default because it runs the same supabase-schema.sql
+// production runs, so dev answers every access question the way Supabase and Firebase do instead of
+// through a hand-written imitation. SQLite remains for when boot speed matters more than fidelity.
+const USE_SQLITE = process.argv.includes('--sqlite');
 // --pg: serve storage from PostgreSQL-in-WASM with the REAL supabase-schema.sql policies enforcing,
 // instead of SQLite gated by the JavaScript checks further down this file. Opt-in while the two are
 // being compared; the JS gates still run, so a request must satisfy BOTH. That overlap is the point --
 // it is what makes deleting the JS layer later a verified step rather than a leap.
-const USE_PG = process.argv.includes('--pg');
+const USE_PG = !USE_FS && !USE_SQLITE;   // the default; `--pg` still names it explicitly
 // Under --pg the storage layer runs supabase-schema.sql, so every read and write is ALREADY gated by
 // the production policies. The JavaScript gates below then become a second, hand-written copy of the
 // same decisions -- the very duplication this is meant to remove. They are therefore stood down, and
