@@ -28,7 +28,13 @@ function _normalizeSchema(parsed) {
   // shape it was written in. Idempotent, because the result is not written back yet and so this runs on
   // every load. convertViewFilters below is the pattern this replaces: a permanent shim, because there
   // was no version to migrate past.
-  if (typeof Migrations !== 'undefined' && Migrations.migrate) Migrations.migrate(parsed);
+  // The RESULT is recorded, not just applied: app-core writes the upgraded schema back once, when a
+  // caller who may save it is known. Until that happens the chain re-runs on every load, which is
+  // why every migration has to be idempotent.
+  if (typeof Migrations !== 'undefined' && Migrations.migrate) {
+    var _m = Migrations.migrate(parsed);
+    if (typeof window !== 'undefined') window._schemaMigration = _m.applied.length ? _m : null;
+  }
   convertViewFilters(parsed.views);   // upgrade legacy array-IN ({col:[a,b]})->$or and shorthand conditional cols ({col:{cond}})->{name,when}
   SCHEMA = parsed.tables || SCHEMA;
   _viewsNav = Array.isArray(parsed.views) ? parsed.views : _viewsNav;

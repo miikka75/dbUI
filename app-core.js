@@ -932,6 +932,24 @@ function createVueApp() {
       notify: function(text) { this.snackText = text; this.snackbar = true; },
       setNavLayout: function(v) { this.navLayoutOverride = v; localStorage.setItem('app_nav_layout', v); },
 
+      // A schema that was upgraded on load is saved back ONCE, so the chain stops re-running and the
+      // next migration starts from a known version. Deliberately narrow:
+      //   - only if something was actually applied, so a current schema is never rewritten;
+      //   - only for an admin, because every write layer restricts the schema document to admins. The
+      //     alternative is a refused write on every member's boot, which is how the shared-list seeding
+      //     bug arrived as an unhandled rejection;
+      //   - failure is not fatal. The schema in memory is already migrated, so the app runs correctly
+      //     either way; the only cost of not persisting is that the chain runs again next time.
+      _writeBackMigratedSchema: function() {
+        var m = (typeof window !== 'undefined') && window._schemaMigration;
+        if (!m || !this.isAdmin || !backend.saveSchema || !this.schemaData) return Promise.resolve();
+        window._schemaMigration = null;                 // once per session, even if the save fails
+        var self = this;
+        return Promise.resolve(backend.saveSchema(this.schemaData))
+          .then(function() { console.info('schema migrated to v' + m.to + ': ' + m.applied.join('; ')); })
+          .catch(function() { self.notify(self.t('msg.save_failed')); });
+      },
+
       // Setup
       completeLocalSetup: function() {
         localStorage.setItem('app_folder', 'local');
@@ -1104,6 +1122,8 @@ function createVueApp() {
               resolve();
             }).catch(function() { self.usersLoaded = true; resolve(); });
           });
+        }).then(function() {
+          return self._writeBackMigratedSchema();
         }).then(function() {
           // Preload data -- only tables the user can reach. Self-serviceable tables are included: the
           // member holds no grant on them but the backend scopes the read to their own rows, and

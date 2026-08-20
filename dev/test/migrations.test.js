@@ -126,3 +126,39 @@ describe('migrations — every schema shipped in this repo survives it', () => {
     });
   }
 });
+
+describe('migrations — the write-back is narrow on purpose', () => {
+  // Asserted against the SOURCE, like the write-funnel and rules-parity guards, because the wrong
+  // condition here is not a crash: it is either a refused write on every member's boot, or a chain that
+  // never stops re-running.
+  const src = fs.readFileSync(path.join(ROOT, 'app-core.js'), 'utf8');
+  const fn = src.slice(src.indexOf('_writeBackMigratedSchema: function'),
+                       src.indexOf('// Setup', src.indexOf('_writeBackMigratedSchema: function')));
+
+  it('exists and is called from boot', () => {
+    assert.ok(fn.length > 0, '_writeBackMigratedSchema is missing');
+    assert.match(src, /self\._writeBackMigratedSchema\(\)/, 'nothing calls it');
+  });
+
+  it('only writes when a migration actually applied', () => {
+    assert.match(fn, /window\._schemaMigration/, 'it must consult what the chain reported');
+    assert.match(fn, /if \(!m \|\|/, 'a schema that needed nothing must not be rewritten');
+  });
+
+  it('only writes as an admin', () => {
+    // Every write layer restricts the schema document to admins. Attempting it as a member is a
+    // guaranteed refusal on every one of their boots.
+    assert.match(fn, /!this\.isAdmin/, 'the admin check is missing');
+  });
+
+  it('clears the flag so it cannot loop, and survives failure', () => {
+    assert.match(fn, /window\._schemaMigration = null/, 'it must not retry every boot');
+    assert.match(fn, /\.catch\(/, 'a failed save must not break boot -- memory is already migrated');
+  });
+
+  it('the loader records the result rather than discarding it', () => {
+    const loader = fs.readFileSync(path.join(ROOT, 'schema-loader.js'), 'utf8');
+    assert.match(loader, /window\._schemaMigration = _m\.applied\.length \? _m : null/,
+      'the loader must report an applied migration, and report nothing when none applied');
+  });
+});
