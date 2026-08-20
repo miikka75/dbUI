@@ -629,6 +629,34 @@ describe('gate parity — app config writes', () => {
   });
 });
 
+// bootData's `unrestricted` flag is a contract all three backends owe the client: it decides whether
+// app-core auto-seeds shared list scaffolding. Firebase and Supabase have always sent it; the dev
+// server did not, so the client seeded for every caller -- invisible while dev had no gate on _lists,
+// and a refused write the moment the policies became the gate.
+describe('gate parity — bootData reports the caller as restricted or not', () => {
+  const flag = async (base, user) => {
+    const r = await (base === 'pg' ? postPg('bootData', {}, user) : post('bootData', {}, user));
+    return (await r.json()).unrestricted;
+  };
+
+  it('an admin is unrestricted, through both servers', async () => {
+    assert.equal(await flag('js', 'admin@x.com'), true);
+    assert.equal(await flag('pg', 'admin@x.com'), true);
+  });
+
+  it('a member with no grants is NOT, through both servers', async () => {
+    // false, not undefined: app-core tests `!== false`, so a missing flag reads as unrestricted and the
+    // client goes ahead and writes.
+    assert.equal(await flag('js', 'member@x.com'), false);
+    assert.equal(await flag('pg', 'member@x.com'), false);
+  });
+
+  it('an editor holding one table grant is restricted too', async () => {
+    assert.equal(await flag('js', 'editor@x.com'), false);
+    assert.equal(await flag('pg', 'editor@x.com'), false);
+  });
+});
+
 describe('gate parity — the matrix is not vacuous', () => {
   it('covers both verdicts and every actor', async () => {
     // A matrix of all-denies would pass trivially against a gate that refuses everything.

@@ -435,7 +435,13 @@ const server = http.createServer(async (req, res) => {
             } catch (e) {}
           }
         }
-        return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), languages: languagesB, lists: listsB, data: dataB });
+        // unrestricted: false tells the client not to auto-seed shared list scaffolding. Firebase and
+        // Supabase have always sent it; the dev server never did, so app-core kept seeding for every
+        // caller. That was invisible while dev had no gate on _lists -- and under --pg it becomes a
+        // write the policies refuse, arriving as an unhandled rejection rather than anything legible.
+        // Computed exactly as the other two do: allowed === null means admin or bootstrap.
+        return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), languages: languagesB, lists: listsB, data: dataB,
+                           unrestricted: allowedB === null });
       }
       case 'resetData': await backend.resetData(); backend._users = undefined; saveUsers(); backend._accessRequests = undefined; saveRequests(); backend._profiles = undefined; saveProfiles(); if (backend.saveListUsers) await backend.saveListUsers({}); return json(res, { ok: true });
       case 'getAvailableTables': return json(res, await backend.getAvailableTables());
