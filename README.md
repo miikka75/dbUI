@@ -25,7 +25,7 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 |---------|---------|------|---------|-----------|-------|
 | **Firebase** | Firestore | Firebase Auth | ✅ | ✅ Instant | Firebase Console |
 | **Dev Server (PGlite)** | PostgreSQL-in-WASM | Trusted `X-User` header (loopback only) | N/A | ✅ SSE | `npm start` |
-| **Dev Server (SQLite)** | SQLite | same | N/A | ✅ SSE | `npm start -- --sqlite` |
+| **Dev Server (SQLite)** | SQLite | **none — every request permitted** | N/A | ✅ SSE | `npm start -- --sqlite` |
 
 ## Quick Start (Local Development)
 
@@ -40,7 +40,13 @@ npx playwright test  # run E2E tests
 **The dev server runs the production access policy.** `npm start` boots PostgreSQL compiled to
 WebAssembly and applies `supabase-schema.sql` — the same file Supabase runs — so a permission question
 is answered in dev exactly as it is in production, rather than by a hand-written imitation of it. It
-costs a few seconds of startup; `npm start -- --sqlite` opts out when boot speed matters more.
+costs a few seconds of startup.
+
+`npm start -- --sqlite` (or `--fs`) opts out for speed — but those backends have **no access policy at
+all**: every request is permitted, and the server says so loudly on startup. The access model used to be
+re-implemented here in JavaScript so that dev behaved like production; running the real policies made
+that copy redundant, and it has been deleted rather than left to drift. Use the default whenever the
+question is "can this member actually do that?".
 
 Browser: click "Create Local Database" → app loads with schema from `schema.json`.
 Optionally run `npm run seed:import` (with the server running) to layer the demo data — rows, lists,

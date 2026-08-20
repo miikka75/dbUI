@@ -152,9 +152,13 @@ describe('rules parity — userWritableLists (list editing is admin-only by defa
     assert.equal(uses, 3, 'read, create and update must each call it; delete is admin-only (found ' + uses + ')');
     assert.doesNotMatch(SQL, /app_list_write_allowed/, 'the table-grant helper should be gone');
   });
-  it('dev/server.js gates putListItem and saveLists', () => {
+  it('dev/server.js no longer implements this rule at all', () => {
+    // It used to consult userWritableListsOf on both list write paths, because it carried its own copy
+    // of the access model. It does not any more: the dev server runs supabase-schema.sql, so the
+    // policies answer this. ZERO is the assertion -- a reappearance means the third implementation is
+    // growing back.
     const uses = (SERVER.match(/BackendHelpers\.userWritableListsOf\(/g) || []).length;
-    assert.equal(uses, 2, 'both list write paths must consult it (found ' + uses + ')');
+    assert.equal(uses, 0, 'the dev server should not be re-deciding list access (found ' + uses + ')');
   });
   it('an absent mirror fails CLOSED in both rules layers', () => {
     // A deployment that has not re-saved its schema must not keep the old permissive behaviour.

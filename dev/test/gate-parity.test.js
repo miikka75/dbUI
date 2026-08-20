@@ -1,18 +1,21 @@
-// gate-parity.test.js — do the dev server's JavaScript access gates and the production RLS policies
-// reach the SAME verdict?
+// gate-parity.test.js — does the dev server, driven over HTTP, reach the same verdict as the policies
+// it runs on?
 //
-// This is the test that makes phase 02's last step safe. dev/server.js carries a hand-written copy of
-// the access model; supabase-schema.sql carries the real one. The plan is to delete the JavaScript
-// copy, and the only responsible way to do that is to first show, case by case, that the two already
-// agree — then delete only where they do.
+// It began as a differential between dev/server.js's hand-written JavaScript gates and
+// supabase-schema.sql, and that comparison did its job: it authorised deleting the JavaScript, and
+// caught two real divergences plus a fail-open delete report on the way.
 //
-// It differs from rules-parity.test.js, which compares the SOURCE TEXT of the policy layers looking for
-// constants that drifted. This compares BEHAVIOUR: one access matrix, two engines, same verdicts.
+// The JavaScript gates are gone now, so the two sides are:
 //
-//   js  = the JavaScript gate      -> a real dev server over HTTP (SQLite), which is how it actually runs
-//   rls = supabase-schema.sql      -> backend-pglite in-process, which has no JavaScript gate at all
+//   http = the dev server end to end -- request handling, identity from the X-User header, the backend
+//   pg   = backend-pglite in process, the policies with no server in front of them
 //
-// A disagreement here is a finding about the policies, not a broken test.
+// What that still catches is everything BETWEEN those two: an identity not passed through, a route that
+// forgets to await, a payload reshaped on the way in. Every bug this file has found so far has been of
+// exactly that kind rather than a policy being wrong.
+//
+// Cross-checking the POLICIES themselves is now test-emulator/policy-differential.mjs, which runs the
+// same idea against firestore.rules.
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
@@ -27,9 +30,7 @@ const BASE = 'http://127.0.0.1:' + PORT;
 const DB_REL = path.join('test', '.gp-' + process.pid + '.db');
 // A SECOND server, this one on --pg, where the JavaScript gates are stood down and the policies are the
 // only gate. Its verdicts must match the first server's, or standing them down changed behaviour.
-const PG_PORT = PORT + 1;
-const PG_BASE = 'http://127.0.0.1:' + PG_PORT;
-const PG_DB_REL = path.join('test', '.gppg-' + process.pid + '.db');
+const PG_BASE = BASE;
 
 // Two ordinary tables for the grant model, plus one self-service table for the owner model.
 const SCHEMA = {
@@ -112,7 +113,7 @@ const MATRIX = [
   ['nobody@x.com', 'notes', 'write', 'deny']
 ];
 
-let child, pgChild, PG;
+let child, PG;
 
 function postTo(base, route, body, user) {
   return fetch(base + '/api/' + route, {
@@ -122,7 +123,7 @@ function postTo(base, route, body, user) {
   });
 }
 const post = (route, body, user) => postTo(BASE, route, body, user);
-const postPg = (route, body, user) => postTo(PG_BASE, route, body, user);
+const postPg = post;   // one server now; the alias keeps the later suites reading as written
 
 // --- the JavaScript gate, over HTTP --------------------------------------------------------------
 async function jsVerdict(user, table, op) {
@@ -158,15 +159,16 @@ async function rlsVerdict(user, table, op) {
 
 before(async () => {
   // --- the JavaScript gate: a real dev server on SQLite ---
-  // --sqlite explicitly: PGlite is the default now, and a harness that spawned the default here would be
-  // comparing the policies against themselves and reporting perfect agreement.
-  child = spawn(process.execPath, ['server.js', '--sqlite'], {
+  child = spawn(process.execPath, ['server.js'], {
     cwd: DEV_DIR,
     env: Object.assign({}, process.env, { PORT: String(PORT), APP_DB: DB_REL }),
     stdio: 'ignore'
   });
   let up = false;
-  const deadline = Date.now() + 10000;
+  // 45s: this spawns the dev server, which boots a WebAssembly Postgres and applies
+  // supabase-schema.sql before answering -- and node --test runs the suites that do this at the same
+  // time. The ceiling costs nothing when it is up sooner, which it normally is.
+  const deadline = Date.now() + 45000;
   while (!up && Date.now() < deadline) {
     try {
       const r = await post('serverInfo', {});
@@ -207,41 +209,18 @@ before(async () => {
   await PG.putRow('_pages', { id: 'open', markdown: '# Open' }, 'active');
   await PG.putRow('_pages', { id: 'secret', markdown: '# Secret' }, 'active');
 
-  // --- the same app, served by the --pg server, with the JavaScript gates stood down ---
-  pgChild = spawn(process.execPath, ['server.js', '--pg'], {
-    cwd: DEV_DIR,
-    env: Object.assign({}, process.env, { PORT: String(PG_PORT), APP_DB: PG_DB_REL }),
-    stdio: 'ignore'
-  });
-  let pgUp = false;
-  const pgDeadline = Date.now() + 30000;          // PGlite boots a WASM Postgres and applies the schema
-  while (!pgUp && Date.now() < pgDeadline) {
-    try { pgUp = (await postPg('serverInfo', {})).ok; }
-    catch (e) { await new Promise((r) => setTimeout(r, 100)); }
-  }
-  assert.ok(pgUp, '--pg dev server started');
-
-  await postPg('saveSchema', { schema: SCHEMA });
-  for (const [email, g] of Object.entries(ACTORS)) {
-    await postPg('setUserRole', { uid: email, role: g.role, user: email, email: email, tables: g.tables });
-  }
-  await postPg('saveLists', { lists: { status: ['a'], locked: ['a'], members: ['Ann', 'Bob'] } }, 'admin@x.com');
-  await postPg('setListUser', { listName: 'members', value: 'Ann', email: 'member@x.com' }, 'admin@x.com');
-  await postPg('putRow', { tableId: 'tasks', tab: 'active', data: { id: 'seed', title: 'seed' } }, 'admin@x.com');
-  await postPg('putRow', { tableId: 'notes', tab: 'active', data: { id: 'seed', body: 'seed' } }, 'admin@x.com');
   await PG.saveLists({ status: ['a'], locked: ['a'], members: ['Ann', 'Bob'] });
 });
 
 after(async () => {
   if (PG) { try { await PG.close(); } catch (e) {} }
-  for (const c of [child, pgChild]) {
-    if (!c) continue;
-    const exited = new Promise((r) => c.once('exit', r));
-    c.kill();
+  if (child) {
+    const exited = new Promise((r) => child.once('exit', r));
+    child.kill();
     await Promise.race([exited, new Promise((r) => setTimeout(r, 2000))]);
   }
   for (const f of fs.readdirSync(path.join(DEV_DIR, 'test'))) {
-    if (f.startsWith('.gp-' + process.pid) || f.startsWith('.gppg-' + process.pid)) {
+    if (f.startsWith('.gp-' + process.pid)) {
       try { fs.rmSync(path.join(DEV_DIR, 'test', f), { recursive: true, force: true }); } catch (e) {}
     }
   }

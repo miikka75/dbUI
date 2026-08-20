@@ -22,19 +22,6 @@ const USE_SQLITE = process.argv.includes('--sqlite');
 // being compared; the JS gates still run, so a request must satisfy BOTH. That overlap is the point --
 // it is what makes deleting the JS layer later a verified step rather than a leap.
 const USE_PG = !USE_FS && !USE_SQLITE;   // the default; `--pg` still names it explicitly
-// Under --pg the storage layer runs supabase-schema.sql, so every read and write is ALREADY gated by
-// the production policies. The JavaScript gates below then become a second, hand-written copy of the
-// same decisions -- the very duplication this is meant to remove. They are therefore stood down, and
-// Postgres is the only gate.
-//
-// Stood down rather than deleted, because the DEFAULT path is SQLite, which has no policies underneath
-// it: deleting them outright would leave that path ungated. They go for good when PGlite becomes the
-// only dev backend.
-//
-// This is not taken on faith. dev/test/gate-parity.test.js runs one access matrix through both engines
-// and asserts the same verdict in all 42 cases -- grants, owner rows, ownerWritable bounds,
-// ownerWritableWhile, identity columns, doc-view read and write, list writes and deletes.
-const POLICY_ENFORCED = USE_PG;
 // APP_DB overrides the SQLite path; ":memory:" (or empty) uses an isolated in-memory DB — tests set
 // this so they never read or clobber the real dev local.db. Default stays dev/local.db.
 const APP_DB = process.env.APP_DB;
@@ -272,46 +259,23 @@ const server = http.createServer(async (req, res) => {
     // (content pages; each embedded table's rows stay gated by their own access), admins/editors write.
     // Without this, hasTableAccess('_pages') — which no grant ever satisfies — denied restricted reads.
     function pagesTable(tableId) { return (tableId ? tableId.split('__')[0] : '') === '_pages'; }
-    function canReadPages() { return POLICY_ENFORCED || !backend._users || !!userRecord(); }
+    // Reads and writes are gated by the policies the storage layer runs, not here. What remains is
+    // the shape of the response, never who may see it.
+    function canReadPages() { return true; }
     // Per-page access parity with firestore.rules: a restricted caller (allowed != null) may read only
     // pages whose schema view has no `access`, or whose `access` intersects their grants. Computed from
     // the schema directly (the dev server reads it), so no mirror doc is needed here. Returns the
     // filtered { headers, rows } for a whole-_pages read.
-    async function filterPages(data) {
-      if (POLICY_ENFORCED) return data;      // the read already returned only the pages this caller may see
-      const allowed = getAllowedTables();
-      if (!allowed) return data;                          // admin / unrestricted -> all pages
-      const views = ((await backend.getSchema() || {}).views) || [];
-      const acc = {};
-      (function walk(arr) { (arr || []).forEach(v => {
-        if (v && v.name && typeof v.markdown === 'string' && Array.isArray(v.access) && v.access.length) acc[v.name] = v.access;
-        if (v && v.views) walk(v.views);
-      }); })(views);
-      const rows = (data.rows || []).filter(r => !acc[r.id] || acc[r.id].some(t => allowed.indexOf(t) >= 0));
-      return Object.assign({}, data, { rows });
-    }
-    function canWritePages() { if (POLICY_ENFORCED) return true; const u = userRecord(); return !backend._users || !!(u && (u.role === 'admin' || u.role === 'editor')); }
+    async function filterPages(data) { return data; }   // the read already returned only the caller's pages
+    function canWritePages() { return true; }
     // Stored image assets (_assets) mirror firestore.rules' _assets__active block: any REGISTERED user
     // reads (decoration; the referencing row stays gated by its own access), admins/editors write. Needs
     // the same carve-out _pages does — hasTableAccess('_assets'), which no grant ever satisfies, would
     // deny every read. Read/write reuse the page predicates: identical role tests on both sides.
     function assetsTable(tableId) { return (tableId ? tableId.split('__')[0] : '') === '_assets'; }
-    function checkTableAccess(tableId) {
-      if (POLICY_ENFORCED) return true;
-      const allowed = getAllowedTables();
-      if (!allowed) return true;
-      // tableId may be "tasks__active" -> extract base name
-      const base = tableId ? tableId.split('__')[0] : '';
-      return allowed.indexOf(base) >= 0;
-    }
+    function checkTableAccess() { return true; }
     // Write gate: the 'rw' subset only, so a read-only grant can be seen and not changed.
-    function checkTableWrite(tableId) {
-      if (POLICY_ENFORCED) return true;
-      const writable = getWritableTables();
-      if (!writable) return true;
-      const base = tableId ? tableId.split('__')[0] : '';
-      return writable.indexOf(base) >= 0;
-    }
+    function checkTableWrite() { return true; }
     // Which columns an owner-scoped write may touch (mirrors firestore.rules ownerCreateOk/ownerUpdateOk).
     // null = the table sets no bound. Read straight from the schema here; the rules layers read the
     // _meta mirror because they cannot see the schema.
@@ -389,13 +353,7 @@ const server = http.createServer(async (req, res) => {
     // The self-service read slice: my own owned rows plus the ones flagged public. Mirrors the two
     // rules-provable Firestore queries (_scopedRead) and the Supabase read predicate, and is what the
     // getTableData route already returns for an ungranted owner table -- boot has to say the same thing.
-    async function scopeToOwnRows(tableId, data) {
-      if (POLICY_ENFORCED) return data;      // already scoped by the row policies
-      const oc = await ownerColOf(tableId);
-      if (!oc) return { headers: (data && data.headers) || [], rows: [] };   // no owner column -> nothing readable
-      const rows = ((data && data.rows) || []).filter(r => _mine(r[oc]) || r.rosterPublic === true);
-      return Object.assign({}, data, { rows });
-    }
+    async function scopeToOwnRows(tableId, data) { return data; }   // already scoped by the row policies
 
     try {
     switch (route) {
@@ -552,28 +510,16 @@ const server = http.createServer(async (req, res) => {
         return json(res, filterLists(await backend.getLists(), schemaTables, allowed));
       }
       case 'saveLists': {
-        if (isAdminReq()) { await backend.saveLists(body.lists); return json(res, { ok: true }); }
-        // A non-admin may write ONLY the lists the schema opens (`userWritableLists`) — editing a list
-        // is editing shared vocabulary, so it is admin-only by default. A table grant is deliberately
-        // NOT part of the question: a list belongs to every table whose columns reference it, so keying
-        // on the grant handed one rw table every list its columns touched. See userWritableListsOf.
-        // Merge over the existing set rather than replacing it: their submitted map is a filtered subset,
-        // so a plain save would drop every list they cannot see.
-        const openW = BackendHelpers.userWritableListsOf(await backend.getSchema() || {}).lists;
+        // Which lists this caller may write is the policies' question (userWritableLists -> the _lists
+        // rules), not this file's. Merge over the existing set rather than replacing it: a non-admin's
+        // submitted map is a filtered subset of what they can see, so a plain save would drop the rest,
+        // and each individual write is then accepted or refused on its own.
         const merged = await backend.getLists();
-        const submitted = body.lists || {};
-        Object.keys(submitted).forEach(name => { if (POLICY_ENFORCED || openW.includes(name)) merged[name] = submitted[name]; });
+        Object.keys(body.lists || {}).forEach(name => { merged[name] = body.lists[name]; });
         await backend.saveLists(merged);
         return json(res, { ok: true });
       }
       case 'putListItem': {
-        // Per-list access: a list is writable if ANY of its owning tables is granted (same ownership
-        // model as saveLists above) — the list NAME is not a table id, so checkTableAccess was wrong here.
-        // Admin-only unless the schema opens this list to everyone (userWritableLists).
-        const openLi = BackendHelpers.userWritableListsOf(await backend.getSchema() || {}).lists;
-        if (!POLICY_ENFORCED && !isAdminReq() && !openLi.includes(body.listName)) {
-          return json(res, { error: 'Access denied' }, 403);
-        }
         await backend.putListItem(body.listName, body.value); return json(res, { ok: true });
       }
       // --- User-linked lists (Option C) ---
@@ -604,6 +550,21 @@ const server = http.createServer(async (req, res) => {
         if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
         const cur = backend.getListUsers ? await backend.getListUsers() : {};
         await backend.saveListUsers(LU.setLink(cur, body.listName, body.value, body.email || ''));
+        // Mirror the link onto the member's GRANT DOC as `identity`, the way backend-supabase's
+        // _mirrorIdentity does. The identity-column rule ("an owner may only ever name themselves")
+        // reads it from there: neither rules language can run a query mid-evaluation, so the answer has
+        // to be sitting on a document the rule already fetches. Without this the policies fall through
+        // their migration-grace branch and permit any value -- the dev server's own gate used to resolve
+        // it from the links instead, which is why nothing noticed until the gate went away.
+        for (const [uid, rec] of Object.entries(backend._users || {})) {
+          const ident = Object.assign({}, rec.identity || {});
+          const owns = body.email && String(rec.user || uid).toLowerCase() === String(body.email).toLowerCase();
+          if (owns) { if (ident[body.listName] === body.value) continue; ident[body.listName] = body.value; }
+          else if (ident[body.listName] === body.value) { delete ident[body.listName]; }
+          else continue;
+          backend._users[uid] = Object.assign({}, rec, { identity: ident });
+        }
+        saveUsers();
         return json(res, { ok: true });
       }
       case 'moveRow': {
@@ -715,7 +676,20 @@ async function startup() {
     console.log('Local dev server: http://' + HOST + ':' + PORT + (_loopback ? '' : '  [INSECURE: unauthenticated, exposed off-host]'));
     // Print the database ACTUALLY in use, not the default: with APP_DB set this line was still claiming
     // dev/local.db, which is the one thing you check when you are running an isolated instance on purpose.
-    console.log('Storage backend: ' + (USE_PG ? 'PGlite + supabase-schema.sql policies' : USE_FS
+      if (!USE_PG) {
+      // Loud, because the difference is invisible from the browser. The dev server never authenticated
+      // anyone -- it trusts the X-User header on loopback -- so its old JavaScript checks were an
+      // EMULATION of production, not a security boundary. That emulation now comes from running the
+      // real policies, which only the default backend does. On --sqlite or --fs there is nothing left
+      // to emulate them, so every request is permitted: fine for speed, useless for answering "can this
+      // member actually do that?".
+      console.log('');
+      console.log('  !! NO ACCESS POLICY on this backend. Every request is permitted.');
+      console.log('     Access control comes from supabase-schema.sql, which only the default (PGlite)');
+      console.log('     backend runs. Use `node server.js` to test permissions.');
+      console.log('');
+    }
+  console.log('Storage backend: ' + (USE_PG ? 'PGlite + supabase-schema.sql policies' : USE_FS
       ? 'JSON files (dev/data/)'
       : 'SQLite (' + (APP_DB === ':memory:' ? ':memory:' : path.relative(STATIC_DIR, DB_PATH || path.join(__dirname, 'local.db')).replace(/\\/g, '/')) + ')'));
   });
