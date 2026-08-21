@@ -126,9 +126,13 @@ backend = {
   // unconstrained collection read is DENIED — the whole self-service read (RSVP, sign-ups, a shared
   // chore log) used to fail and get swallowed into an empty table. Ask for exactly the two slices the
   // rules can prove and merge them: my own rows, plus the rows marked public.
-  _scopedRead: function(store, tableId) {
+  // `constraints` are pushed ONLY on the granted branch. The scoped branch already spends Firestore's
+  // single-field budget on owner/rosterPublic, and a second field there needs a composite index this
+  // project does not ship -- it would fail in production while the emulator waved it through. Returning
+  // a superset from that branch is explicitly allowed by the contract: the caller re-filters.
+  _scopedRead: function(store, tableId, constraints) {
     return this._myTables().then(function(tabs) {
-      if (tabs === null || tabs.indexOf(tableId) >= 0) return StorageFirestore.getAll(store); // granted: whole collection
+      if (tabs === null || tabs.indexOf(tableId) >= 0) return StorageFirestore.getAll(store, constraints); // granted: whole collection
       var me = _myEmail();
       if (!me) return [];
       return Promise.all([
@@ -147,9 +151,9 @@ backend = {
       }).catch(function() { return []; });           // fail closed, never surface a denied read as an error
     });
   },
-  getTableData: function(tableId, tab) {
+  getTableData: function(tableId, tab, opts) {
     var store = _storeName(tableId, tab);
-    return this._scopedRead(store, tableId).then(function(rows) {
+    return this._scopedRead(store, tableId, opts && opts.constraints).then(function(rows) {
       return { headers: BackendHelpers.deriveHeaders(rows), rows: rows };
     });
   },
