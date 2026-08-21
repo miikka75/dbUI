@@ -75,6 +75,13 @@ async function tryDelete(store, key) {
     return r.rows.length ? 'ok' : 'denied';
   } catch (e) { if (isRlsError(e)) return 'denied'; throw e; }
 }
+// The write path the app actually takes: the app_kv_merge RPC, with a PARTIAL patch.
+async function tryMerge(store, key, patch) {
+  try {
+    await q(`select public.app_kv_merge($1, $2, $3::jsonb)`, [store, key, JSON.stringify(patch)]);
+    return 'ok';
+  } catch (e) { if (isRlsError(e)) return 'denied'; throw e; }
+}
 async function seed(store, key, value) {
   await asSuper();
   await q(`insert into public.kv (store, key, value) values ($1, $2, $3::jsonb)
@@ -197,6 +204,28 @@ describe('supabase RLS — self-service rows are bounded to owner-column tables'
     await as('viewer@x.com');
     assert.equal(await tryUpdate('rsvps__active', 'mine', { id: 'mine', owner: 'viewer@x.com', s: 'out' }), 'ok');
     assert.equal(await tryDelete('rsvps__active', 'mine'), 'ok');
+  });
+  // A PARTIAL write, which is what the app actually sends: app-core's saveField puts
+  // { id, <col>, updated_at } and nothing else, so the owner column is on the STORED row rather than in
+  // the patch. app_kv_merge used to be `insert ... on conflict do update`, and Postgres evaluates the
+  // INSERT policy's WITH CHECK against the row proposed for insertion -- the bare patch -- before any
+  // conflict is detected. app_can_create saw no owner and refused, so every self-service member's cell
+  // edit was silently rejected on Supabase while working on Firebase and on the dev server.
+  // `claims`, not `rsvps`: the read-gate suite below asserts the exact key set of rsvps__active, and
+  // these cases would otherwise seed rows into it. One shared database across describes.
+  it('member CAN patch their own row WITHOUT resending the owner column', async () => {
+    await seed('claims__active', 'partial', { id: 'partial', owner: 'viewer@x.com', s: 'coming' });
+    await as('viewer@x.com');
+    assert.equal(await tryMerge('claims__active', 'partial', { s: 'out' }), 'ok');
+    await asSuper();
+    const row = (await q("select value from public.kv where store = 'claims__active' and key = 'partial'")).rows[0].value;
+    assert.deepEqual(row, { id: 'partial', owner: 'viewer@x.com', s: 'out' }, 'the owner must survive the patch');
+  });
+  it('...and that route does not let a member patch a row they do not own', async () => {
+    // The merge must not become a way to reach somebody else's row by simply leaving the owner out.
+    await seed('claims__active', 'theirs', { id: 'theirs', owner: 'other@x.com', s: 'coming' });
+    await as('viewer@x.com');
+    assert.equal(await tryMerge('claims__active', 'theirs', { s: 'hijacked' }), 'denied');
   });
   it('member CANNOT update or delete an owner-stamped row in a NON-self-service table', async () => {
     await seed('tasks__active', 'stray', { id: 'stray', owner: 'viewer@x.com', title: 'x' });
@@ -342,6 +371,21 @@ describe('supabase RLS — _lists', () => {
   it("a list the schema OPENS is writable by a non-admin", async () => {
     await as('mixed@x.com');
     assert.equal(await tryUpdate('_lists', 'taskvalues', { name: 'taskvalues', items: ['a', 'b'], tables: ['tasks'] }), 'ok');
+  });
+  // The case above uses a caller who already holds a grant on the owning table, so it never asked
+  // whether the ALLOWLIST alone is enough. viewer@x.com holds nothing. This is the case that was
+  // silently broken: an UPDATE has to locate its row, Postgres applies the SELECT policy to do that,
+  // and _lists reads used to require a table grant -- so a member could be granted the write by
+  // userWritableLists and still be unable to perform it. Firestore evaluates write rules without
+  // needing the read, so the same member succeeded there and on the dev server.
+  it("a member with NO table grant can read and append to a list the schema opens", async () => {
+    await as('viewer@x.com');
+    assert.equal(await canRead('_lists', 'taskvalues'), true, 'an opened list must be readable, or it cannot be edited');
+    assert.equal(await tryUpdate('_lists', 'taskvalues', { name: 'taskvalues', items: ['a', 'b', 'c'], tables: ['tasks'] }), 'ok');
+  });
+  it("opening a list does not leak the lists it did not open", async () => {
+    await as('viewer@x.com');
+    assert.equal(await canRead('_lists', 'lockedvalues'), false, 'a list that is not opened stays behind the grant');
   });
   it("a list the schema does NOT open stays admin-only, whatever the table grant", async () => {
     await as('mixed@x.com');   // rw on `tasks`, which owns lockedvalues — and that is deliberately not enough
