@@ -163,7 +163,9 @@
   // archive, or the toggle that would reveal it is exactly what got hidden.
   function embedRowCount(type, name, part, ctx) {
     var h = BLOCKS[type];
-    if (!h) return 0;                       // an unregistered kind renders "Unknown embed", never hides
+    if (!h) return 0;                       // unreachable from mdBlocks -- the split pattern is BUILT
+                                            // from the registered kinds, so an unknown one is never
+                                            // parsed as an embed at all. Defensive, for direct callers.
     if (part !== BOTH) return h.count(name, part, ctx);
     return h.count(name, null, ctx) + h.count(name, 'archive', ctx);
   }

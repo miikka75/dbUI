@@ -166,6 +166,28 @@ bye`, null, ctx);
     assert.ok(b[0].html.indexOf('Unknown embed: ghost:x') >= 0);
   });
 
+  it('a registered directive gets @both for free — a partition is not a directive concern', () => {
+    // The merge that brought `@both` (#97) onto the directive registry could have put the BOTH check
+    // inside each handler. It did not: a partition is a property every kind shares, so a handler
+    // resolves a NAME and never decides what a partition means. The consequence is this — a kind
+    // registered afterwards, by code that has never heard of archives, still gets the toggle.
+    const ctx = makeCtx();
+    const seen = [];
+    Embeds.registerBlock('meter', {
+      resolve: (name, part) => { seen.push(part); return { embedType: 'meter', embedName: name, embedPart: part || null }; },
+      count: (name, part) => (part === 'archive' ? 3 : 0)     // empty active half, non-empty archive
+    });
+    const b = Embeds.mdBlocks('{{meter:load@both}}', null, ctx)[0];
+    assert.equal(b.embedBoth, true, 'the toggle flag must be set');
+    assert.equal(b.embedPart, null, '@both carries no fixed part — the component owns which half shows');
+    assert.deepEqual(seen, [null], 'the handler is asked for a name, never for the string "both"');
+
+    // And the `?` count spans both halves, so a block whose only rows have aged into the archive is
+    // NOT hidden — hiding it would hide the very toggle that reveals them.
+    assert.equal(Embeds.mdBlocks('{{meter:load@both?}}', null, ctx).length, 1);
+    assert.equal(Embeds.mdBlocks('{{meter:load?}}', null, ctx).length, 0, 'the active half alone is empty');
+  });
+
   it('registerBlock rejects a kind that is not word characters (it is spliced into a regex)', () => {
     assert.throws(() => Embeds.registerBlock('a|b', { resolve: () => null, count: () => 0 }), /word characters/);
     assert.throws(() => Embeds.registerBlock('a.b', { resolve: () => null, count: () => 0 }), /word characters/);
