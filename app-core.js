@@ -1546,6 +1546,38 @@ function createVueApp() {
             if (onLoad) onLoad(tbl);
           }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
         });
+        self._ensureDeps(tables, onLoad);
+      },
+
+      // The tables a view's COLUMNS resolve out of, as opposed to the tables its rows come from: a ref
+      // dropdown's options, a lookup computed's source, a rotation column's roster, a mirror's master.
+      // Every one of those reads dataCache directly and resolves to []/undefined when the entry is
+      // missing -- an empty dropdown and a blank cell, which look like data rather than like a missing
+      // fetch. Today boot loads every granted table so this never fires; it exists so that stops being
+      // the thing holding those columns up. See Columns.tableDeps for the five shapes.
+      //
+      // Two deliberate limits:
+      //   - LOAD ONLY, never _liveWatch. A listener bills a read per document in its first snapshot, so
+      //     watching every ref table would cost more than the lazy load saves, and a dropdown of options
+      //     does not need to be live the way a row grid does.
+      //   - DEPTH 1. A dependency's own dependencies are what you need once you OPEN that table, and
+      //     opening it goes through _ensureCached again. Recursing here would drag in the transitive
+      //     closure of the schema on the first view load, which is the cost this is meant to avoid.
+      _ensureDeps: function(tables, onLoad) {
+        var self = this;
+        if (typeof Columns === 'undefined' || !Columns.tableDeps) return;
+        var seen = {};
+        (tables || []).forEach(function(tbl) {
+          if (!tbl) return;
+          Columns.tableDeps(SCHEMA, tbl).forEach(function(dep) {
+            if (seen[dep] || self.dataCache[dep] || !self.canReachTable(dep)) return;
+            seen[dep] = 1;
+            backend.getTableData(dep, 'active').then(function(result) {
+              self.dataCache[dep] = parseTableResult(result).rows;
+              if (onLoad) onLoad(dep);
+            }).catch(function() { self.dataCache[dep] = self.dataCache[dep] || []; });
+          });
+        });
       },
 
       // --- Live sync ------------------------------------------------------------------------------
@@ -1758,6 +1790,7 @@ function createVueApp() {
           // partition here — and it is the only place `archive` is ever watched, since that is the only
           // partition a user can have open.
           self._liveWatch([self.currentTable], self.viewingArchive ? 'archive' : 'active');
+          self._ensureDeps([self.currentTable]);   // ref/lookup sources: this branch skips _ensureCached
           if (!self.dataCache[key]) {
             var tab = self.viewingArchive ? 'archive' : 'active';
             backend.getTableData(self.currentTable, tab).then(function(result) {

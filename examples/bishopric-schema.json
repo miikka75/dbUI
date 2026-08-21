@@ -96,12 +96,12 @@
           {
             "name": "date",
             "type": "date",
-            "syncFrom": "kokoukset"
+            "syncFrom": "meeting_agenda"
           },
           {
             "name": "theme",
             "type": "text",
-            "syncFrom": "kokoukset"
+            "syncFrom": "meeting_agenda"
           },
           {
             "name": "opening_hymn",
@@ -289,7 +289,7 @@
         "columns": [
           {
             "name": "date",
-            "syncFrom": "kokoukset",
+            "syncFrom": "meeting_agenda",
             "type": "date"
           }
         ]
@@ -333,12 +333,12 @@
           {
             "name": "date",
             "type": "date",
-            "syncFrom": "kokoukset"
+            "syncFrom": "meeting_agenda"
           },
           {
             "name": "theme",
             "type": "text",
-            "syncFrom": "kokoukset"
+            "syncFrom": "meeting_agenda"
           },
           {
             "name": "interpreter",

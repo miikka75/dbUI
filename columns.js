@@ -123,6 +123,56 @@
   function isViewEmbed(c) { return typeof c === 'object' && typeof c.view === 'string'; } // {view:name,filter?,hideEmpty?} -> embed a named view
   function isText(c) { return typeof c === 'object' && c.text && !c.name && !c.sources; }
 
+  // --- Which OTHER tables a column needs loaded ------------------------------------------------
+  // Five column shapes resolve their value out of a different table, and each one reads the row cache
+  // directly with no load path of its own -- a ref dropdown, a lookup computed, a rotation column, its
+  // occurrence source, and a mirror's master. When the cache has no entry for that table they do not
+  // fail: they resolve to [] or undefined. An empty dropdown and a blank lookup cell look like data,
+  // not like a missing fetch, which is why this derivation exists as a NAMED dependency rather than
+  // being left to whatever boot happened to have loaded.
+  //
+  // Scope, deliberately: tables a column's VALUE needs. Embed entries (`c.sources`, `{view:x}`) are a
+  // rendering dependency that app-core preloads separately and cannot be resolved here anyway -- a
+  // view embed names a view, and this module is pure over the TABLES map.
+  function defTables(def) {
+    if (!def || typeof def !== 'object') return [];
+    var out = [];
+    if (def.type === 'ref' && def.table) out.push(def.table);
+    if (typeof def.syncFrom === 'string' && def.syncFrom) out.push(def.syncFrom);   // mirror -> its master
+    var comp = def.computed;
+    if (comp && typeof comp === 'object') {
+      if (comp.lookup && comp.lookup.table) out.push(comp.lookup.table);
+      if (comp.rotationTable) out.push(comp.rotationTable);
+      if (comp.occurrenceSource) out.push(comp.occurrenceSource);
+    }
+    return out;
+  }
+
+  // Union of defTables over an array of column ENTRIES -- a view's `columns` or `compute`, which mix
+  // plain names (no dependency) with definition objects. Deduped, order of first appearance.
+  function entryTables(entries) {
+    var seen = {}, out = [];
+    (entries || []).forEach(function(c) {
+      defTables(c).forEach(function(t) { if (!seen[t]) { seen[t] = 1; out.push(t); } });
+    });
+    return out;
+  }
+
+  // Union of defTables over one table's own column definitions, EXCLUDING itself: a self-reference is
+  // already the table being loaded, and returning it would make callers re-request what they hold.
+  // `columns` ships in BOTH shapes -- a name->def map, and an array of {name,...} defs (examples/
+  // bishopric-schema.json uses the array form). Normalizing to a list of defs handles both; defTables
+  // reads only the def, never the key.
+  function tableDeps(schema, table) {
+    var cols = (schema[table] && schema[table].columns) || {};
+    var defs = Array.isArray(cols) ? cols : Object.keys(cols).map(function(k) { return cols[k]; });
+    var seen = {}, out = [];
+    defs.forEach(function(d) {
+      defTables(d).forEach(function(t) { if (t !== table && !seen[t]) { seen[t] = 1; out.push(t); } });
+    });
+    return out;
+  }
+
   var C = {
     columnType: columnType, columnList: columnList, columnRef: columnRef,
     isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol,
@@ -130,7 +180,8 @@
     colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate, colIsNumber: colIsNumber,
     colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted,
     colIsImage: colIsImage, colIsUrl: colIsUrl, colPicker: colPicker,
-    colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText
+    colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText,
+    defTables: defTables, entryTables: entryTables, tableDeps: tableDeps
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
   else { root.Columns = C; root.colName = colName; root.isEmbed = isEmbed; root.isViewEmbed = isViewEmbed; root.isText = isText; } // shape predicates as bare globals (schema-loader + app-core call them unqualified)
