@@ -148,9 +148,23 @@ async function createPgliteStorage(opts) {
       });
     },
 
-    getAll(store) {
+    // `constraints` (from query.js) narrow the read in the database instead of in the browser. Only
+    // equality is ever passed -- the compiler refuses anything whose meaning differs between the matcher
+    // and a query -- so this is a jsonb text comparison and nothing cleverer.
+    //
+    // Narrowing here is always SAFE even if it were wrong, in one direction only: the caller re-filters
+    // whatever comes back with the residual. What it must never do is drop a row the condition would
+    // keep, which is why the compiler is the one deciding what may be pushed, not this function.
+    getAll(store, constraints) {
+      const where = ['store = $1'];
+      const params = [store];
+      (constraints || []).forEach(function (c) {
+        if (!c || c.op !== '==') return;                 // unknown op: leave it to the residual
+        params.push(c.field, c.value === null ? null : String(c.value));
+        where.push('value->>$' + (params.length - 1) + ' = $' + params.length);
+      });
       return asCaller(async function () {
-        const r = await q('select value from public.kv where store = $1 order by key', [store]);
+        const r = await q('select value from public.kv where ' + where.join(' and ') + ' order by key', params);
         return r.rows.map((x) => x.value);
       });
     },

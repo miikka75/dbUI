@@ -137,9 +137,11 @@ backend = {
   getAvailableLanguages: function() {
     return StorageSupabase.getMeta('languages').then(function(d) { return d ? (d.list || []) : []; });
   },
-  getTableData: function(tableId, tab) {
+  // `opts.constraints` is the pushed-down half of a view filter. Optional: a backend that ignores it
+  // returns a superset, which the caller re-filters with the residual anyway.
+  getTableData: function(tableId, tab, opts) {
     var store = _storeName(tableId, tab);
-    return StorageSupabase.getAll(store).then(function(rows) {
+    return StorageSupabase.getAll(store, opts && opts.constraints).then(function(rows) {
       return { headers: BackendHelpers.deriveHeaders(rows), rows: rows };
     });
   },

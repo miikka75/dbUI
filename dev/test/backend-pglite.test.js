@@ -167,3 +167,63 @@ describe('backend-pglite — app config and user-linked lists', () => {
     assert.deepEqual(await B.getListUsers(), { crew: { Alex: 'alex@x.com' } });
   });
 });
+
+describe('backend-pglite — pushing a filter into the query returns the same rows', () => {
+  // The pushdown property, against a real database rather than the in-memory stand-in query.test.js
+  // uses:  read(constraints) + residual  ===  read(all) + whole condition.
+  //
+  // Getting this wrong does not throw. It returns a view with rows quietly missing, so the comparison is
+  // the test — not a check that the SQL ran.
+  const Query = require('../../query');
+  const Rows = require('../../rows');
+
+  before(async () => {
+    B.setCaller('admin@x.com');
+    await B.putRow('tasks', { id: 'p1', title: 'a', status: 'open',  owner: 'ann' }, 'active');
+    await B.putRow('tasks', { id: 'p2', title: 'b', status: 'done',  owner: 'ann' }, 'active');
+    await B.putRow('tasks', { id: 'p3', title: 'c', status: 'open',  owner: 'bob' }, 'active');
+    await B.putRow('tasks', { id: 'p4', title: 'd',                  owner: 'bob' }, 'active');   // no status
+  });
+
+  const CASES = [
+    { status: 'open' },
+    { status: 'open', owner: 'ann' },
+    { status: 'missing-value' },
+    { status: { ne: 'open' } },              // not pushable -- must still come out right
+    { $or: [{ status: 'open' }, { owner: 'bob' }] },
+    {}
+  ];
+
+  for (const cond of CASES) {
+    it('agrees for ' + JSON.stringify(cond), async () => {
+      B.setCaller('admin@x.com');
+      const { constraints, residual } = Query.compile(cond);
+
+      const pushed = (await B.getTableData('tasks', 'active', { constraints })).rows
+        .filter((r) => Rows.condMatches(r, residual)).map((r) => r.id).sort();
+
+      const whole = (await B.getTableData('tasks', 'active')).rows
+        .filter((r) => Rows.condMatches(r, cond)).map((r) => r.id).sort();
+
+      assert.deepEqual(pushed, whole, 'pushing the filter down changed which rows came back');
+    });
+  }
+
+  it('actually narrows, rather than quietly ignoring the constraints', async () => {
+    // Equivalence would also hold if getAll ignored constraints entirely, and then the whole exercise
+    // would buy nothing. This is what proves the database did the work.
+    B.setCaller('admin@x.com');
+    const { constraints } = Query.compile({ status: 'open' });
+    const narrowed = await B.getTableData('tasks', 'active', { constraints });
+    const all = await B.getTableData('tasks', 'active');
+    assert.ok(narrowed.rows.length < all.rows.length, 'the query returned everything');
+    assert.ok(narrowed.rows.every((r) => r.status === 'open'));
+  });
+
+  it('a row missing the field is excluded by an equality, matching condMatches', async () => {
+    B.setCaller('admin@x.com');
+    const { constraints } = Query.compile({ status: 'open' });
+    const ids = (await B.getTableData('tasks', 'active', { constraints })).rows.map((r) => r.id);
+    assert.ok(!ids.includes('p4'), 'p4 has no status and must not match status == open');
+  });
+});

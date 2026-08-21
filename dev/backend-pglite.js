@@ -64,8 +64,11 @@ async function createPgliteBackend(opts) {
 
     // --- rows ---------------------------------------------------------------------------------------
     // No scoping here on purpose: RLS already returned only the rows this caller may see.
-    async getTableData(tableId, tab) {
-      const rows = await S.getAll(store(tableId, tab));
+    // `opts.constraints` is the pushed-down half of a view filter (query.js compile). Optional by
+    // design: a backend that ignores it returns a superset, which the caller re-filters anyway, so the
+    // contract stays satisfiable by a backend that cannot query.
+    async getTableData(tableId, tab, opts) {
+      const rows = await S.getAll(store(tableId, tab), opts && opts.constraints);
       return { headers: BackendHelpers.deriveHeaders(rows), rows: rows };
     },
     async putRow(tableId, data, tab) {

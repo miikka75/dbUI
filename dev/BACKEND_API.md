@@ -17,7 +17,7 @@ dev-server pair `backend-local.js` / `backend-local-client.js`.
 | `validateFolder(id)` | `(string) → Promise` | `{valid: boolean, name: string\|null}` | Dev-server probe: does a database exist here? The only method still taking a handle -- every other one addresses the single database implicitly. |
 | `getFolderConfig()` | `() → Promise` | `object \| null` | App-level config stored alongside data. |
 | `setFolderConfig(config)` | `(object) → Promise` | void | |
-| `getTableData(tableId, partition)` | `(string, string) → Promise` | `{headers: string[], rows: object[]}` | Partition: 'active' or 'archive'. |
+| `getTableData(tableId, partition, opts?)` | `(string, string, object?) → Promise` | `{headers: string[], rows: object[]}` | Partition: 'active' or 'archive'. `opts.constraints` (from `query.js`) may narrow the read in the database. **Optional to honour**: ignoring it returns a superset, which the caller re-filters with the residual, so a backend that cannot query stays conformant. It must never return FEWER rows than the constraints describe. |
 | `putRow(tableId, row, partition)` | `(string, object, string) → Promise` | void | Upsert by row.id. |
 | `deleteRow(tableId, rowId, partition)` | `(string, string, string) → Promise` | void | No-op if not found. Return value discarded. |
 | `moveRow(tableId, row, fromPartition, toPartition)` | `(string, object, string, string) → Promise` | void | Delete from source + put to target. Not atomic. |
