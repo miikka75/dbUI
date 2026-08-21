@@ -724,7 +724,7 @@ function createVueApp() {
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
          'bg.fit', 'bg.fit_cover', 'bg.fit_contain', 'bg.fit_tile', 'bg.fit_width',
          'msg.saved', 'msg.save_failed', 'msg.upload_failed', 'msg.choose_image', 'msg.image_too_large', 'msg.image_read_failed', 'msg.image_invalid', 'msg.image_process_failed',
-         'msg.row_added', 'msg.no_identity', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.synced', 'msg.sync_failed',
+         'msg.row_added', 'msg.no_identity', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.export_incomplete', 'msg.synced', 'msg.sync_failed',
          'msg.load_failed', 'msg.request_failed', 'msg.approve_failed', 'msg.import_complete',
          'msg.group_added', 'msg.item_added', 'msg.translation_saved', 'msg.language_added', 'msg.language_renamed', 'msg.language_exists',
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
@@ -3685,14 +3685,34 @@ function createVueApp() {
       exportData: function() {
         var self = this;
         var data = {};
+        // A backup is the one place where "not cached" must never quietly become "empty". This read the
+        // cache and substituted [] -- safe only by accident, because boot happens to load every granted
+        // table. It is not safe when a read FAILS: both the boot path and _ensureCached cache [] on
+        // failure (fail-closed, correct for a grid), and that empty array was then written into the file
+        // as though the table really were empty. A backup that silently drops a table is worse than no
+        // backup, because it is the one that gets trusted.
+        //
+        // So: fetch what is missing, and produce no file at all if any read fails. This also stops boot
+        // from being load-bearing for exports, which is what a lazier boot needs.
+        var wanted = [], failed = [];
         Object.keys(SCHEMA).forEach(function(table) {
-          data[table] = self.dataCache[table] || [];
-          var archiveKey = aKey(table);
-          if (self.dataCache[archiveKey]) data[archiveKey] = self.dataCache[archiveKey];
+          // Omit what this user cannot read rather than asserting it is empty. Import is additive
+          // (delete+put per row), so an omitted table is left untouched on restore exactly as an empty
+          // one would be -- but the file no longer says something false about it.
+          if (!self.canReachTable(table)) return;
+          wanted.push([table, table, 'active']);
+          if (SCHEMA[table].archivable) wanted.push([aKey(table), table, 'archive']);
         });
+        var gather = Promise.all(wanted.map(function(w) {
+          var key = w[0];
+          if (self.dataCache[key]) { data[key] = self.dataCache[key]; return null; }
+          return Promise.resolve(backend.getTableData(w[1], w[2])).then(function(res) {
+            data[key] = parseTableResult(res).rows;
+          }).catch(function() { failed.push(key); });
+        }));
         // Gather translations
         var translations = {};
-        var chain = Promise.resolve();
+        var chain = gather;
         self.languages.forEach(function(lang) {
           chain = chain.then(function() {
             return backend.getTranslations(lang.code).then(function(t) { translations[lang.code] = t; });
@@ -3710,6 +3730,12 @@ function createVueApp() {
           self.notify(self.t('msg.exported'));
         };
         chain.then(function() {
+          // Refuse rather than hand over a file with a hole in it. The tables are named so the user can
+          // tell a permission problem from a network one.
+          if (failed.length) {
+            self.notify(self.t('msg.export_incomplete') + ' ' + failed.join(', '));
+            return;                      // no file at all -- a partial backup is the one that gets trusted
+          }
           // _pages and _assets are SYSTEM stores, so neither is in `tables` above (that map is built from
           // Object.keys(SCHEMA)) — each needs an explicit read to reach the bundle. Assets carry the actual
           // image bytes as data URIs; without them an import lands with `asset:` references resolving to
