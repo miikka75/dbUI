@@ -11,6 +11,19 @@ test.beforeEach(({ page }) => {
 });
 test.afterEach(() => { expect(_consoleErrors, 'console/page errors during test').toEqual([]); });
 
+// Boot fetches NO table data -- a view loads its own tables when it opens (see app-core _ensureCached),
+// so rows arrive a tick AFTER selectTab, and `!loading` no longer means "the data is here". Wait for the
+// tables the view actually needs rather than sleeping: _viewTables is the same derivation the loader
+// uses, so this cannot wait for the wrong set.
+async function viewReady(page, name) {
+  await page.waitForFunction((n) => {
+    const app = window.appInstance;
+    if (!app || app.loading) return false;
+    const want = app._viewTables(n || app.currentTable) || [];
+    return want.every((t) => Array.isArray(app.dataCache[t]));
+  }, name || null, { timeout: 8000 });
+}
+
 // Reset DB, seed the schema (server no longer auto-loads schema.json), and wait for the app.
 // Opens the 'notes' table tab by default — it's the addable master table (first sidebar
 // tab is a read-only join view; 'tasks' is a detail synced from 'notes' so has no add button).
@@ -2235,6 +2248,7 @@ test.describe('matchList (filter + filterBy + computed)', () => {
     await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.goto('/');
     await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 10000 });
+    await viewReady(page);
     // guest_events view: only rows where speaker is in guests list (Charlie)
     const guestRows = await page.evaluate(() => appInstance.sortedData.map(r => r.speaker));
     expect(guestRows).toEqual(['Charlie']);
@@ -3518,9 +3532,10 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => window.appInstance.selectTab('chore_heatmap'));
+    await viewReady(page, 'chore_heatmap');
     const r = await page.evaluate(() => {
       const app = window.appInstance;
-      app.selectTab('chore_heatmap');
       const g = app.pivotFor('chore_heatmap');
       return { kind: app.viewKind, columns: g.columns, rows: g.rows.map(x => ({ k: x.key, c: x.cells, t: x.total })), colTot: g.columnTotals, grand: g.grandTotal };
     });
@@ -5915,5 +5930,44 @@ test.describe('self-service tables (owner column) in the plain grid', () => {
     expect(r.cellTheirsRO).toBe(true);      // their cell read-only
     expect(r.ownerColRO).toBe(true);        // owner column immutable
     expect(r.tasksVisible).toBe(false);     // control: an ungranted non-owner table stays hidden
+  });
+});
+
+test.describe('lazy boot', () => {
+  // The point of the whole exercise: boot must not read tables. On Firestore every document read at
+  // boot is billed against the free plan's scarcest quota, and it was reading every granted table on
+  // every session including the ones nobody opened. If this test ever goes back to passing with a
+  // populated cache, the bill came back.
+  test('boot fetches no table data; opening a view loads exactly that view', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCHEMA } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 10000 });
+
+    // The landing view loads itself, so "nothing cached" is only true of tables it does not need.
+    const after = await page.evaluate(() => {
+      const app = window.appInstance;
+      return { cached: Object.keys(app.dataCache), landing: app._viewTables(app.currentTable) };
+    });
+    for (const t of after.cached) {
+      expect(after.landing, 'boot cached ' + t + ', which the landing view does not need').toContain(t.replace(/__archive$/, ''));
+    }
+
+    // And a table no view has opened is genuinely absent — not merely empty, which is what a failed
+    // read would leave behind and what every silently-blank-view bug looked like.
+    const untouched = await page.evaluate((landing) => {
+      const app = window.appInstance;
+      return Object.keys(app.schemaData.tables).filter((t) => landing.indexOf(t) < 0 && app.dataCache[t] === undefined);
+    }, after.landing);
+    expect(untouched.length, 'every table was already cached at boot').toBeGreaterThan(0);
+
+    // Opening a view fetches its tables, through the same path navigation always used.
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.notes' }).first().click();
+    await viewReady(page);
+    const notes = await page.evaluate(() => Array.isArray(window.appInstance.dataCache.notes));
+    expect(notes, 'opening the notes tab did not load the notes table').toBe(true);
   });
 });
