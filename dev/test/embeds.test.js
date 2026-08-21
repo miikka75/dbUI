@@ -8,7 +8,9 @@ beforeEach(() => { delete globalThis._listsCache; });
 function makeCtx(over) {
   const schema = {
     tasks: { columns: { id: 'text', title: 'text', status: 'text', secret: { hidden: true } }, defaultSort: 'title' },
-    notes: { columns: { id: 'text', title: 'text' } }
+    notes: { columns: { id: 'text', title: 'text' } },
+    // Everything aged out: the shape a `@both` toggle exists for (nothing active, history in the archive).
+    logs: { columns: { id: 'text', title: 'text' } }
   };
   const views = {
     open: { name: 'open', sources: ['tasks'], filter: { status: 'open' }, columns: ['title', 'status'] },
@@ -16,7 +18,9 @@ function makeCtx(over) {
   };
   const dataCache = {
     tasks: [{ id: 't1', title: 'B-task', status: 'open' }, { id: 't2', title: 'A-task', status: 'done' }],
-    tasks__archive: [{ id: 'old', title: 'Old', status: 'done' }]
+    tasks__archive: [{ id: 'old', title: 'Old', status: 'done' }],
+    logs: [],
+    logs__archive: [{ id: 'l1', title: 'Aged out' }]
   };
   return Object.assign({
     views, schema, dataCache, currentTable: 'host',
@@ -68,7 +72,7 @@ describe('embeds.js — mdBlocks / docHasData / buildEmbedBlock', () => {
     const blocks = Embeds.mdBlocks('Intro\n\n{{view:open}}\n\nOutro\n\n{{table:nope}}', null, ctx);
     assert.equal(blocks.length, 4);
     assert.match(blocks[0].html, /Intro/);
-    assert.deepEqual(blocks[1], { embedType: 'view', embedName: 'open', embedPart: null });
+    assert.deepEqual(blocks[1], { embedType: 'view', embedName: 'open', embedPart: null, embedBoth: false });
     assert.match(blocks[3].html, /Unknown embed/);
   });
 
@@ -77,9 +81,26 @@ describe('embeds.js — mdBlocks / docHasData / buildEmbedBlock', () => {
     const blocks = Embeds.mdBlocks('{{t:greet}}\n\n{{self}}\n\n{{table:tasks@archive}}\n\n{{table:notes?}}', 'open', ctx)
       .filter(b => b.html !== '');   // whitespace between adjacent tokens yields empty html blocks (render as nothing)
     assert.match(blocks[0].html, /Hello/);
-    assert.deepEqual(blocks[1], { embedType: 'view', embedName: 'open', embedPart: null });   // {{self}} -> own view
-    assert.deepEqual(blocks[2], { embedType: 'table', embedName: 'tasks', embedPart: 'archive' });
+    assert.deepEqual(blocks[1], { embedType: 'view', embedName: 'open', embedPart: null, embedBoth: false });   // {{self}} -> own view
+    assert.deepEqual(blocks[2], { embedType: 'table', embedName: 'tasks', embedPart: 'archive', embedBoth: false });
     assert.equal(blocks.length, 3);   // notes has no rows -> optional embed dropped
+  });
+
+  it('@both carries no fixed part — the component owns which half shows', () => {
+    const ctx = makeCtx();
+    const blocks = Embeds.mdBlocks('{{table:tasks@both}}', null, ctx);
+    assert.deepEqual(blocks[0], { embedType: 'table', embedName: 'tasks', embedPart: null, embedBoth: true });
+    // `both` is a request, not a partition name: it must never reach embedRows as one.
+    assert.deepEqual(Embeds.mdBlocks('{{table:tasks@archive}}', null, ctx)[0].embedBoth, false);
+  });
+
+  it('`?` on a @both embed counts BOTH partitions', () => {
+    const ctx = makeCtx();
+    // logs: nothing active, one archived row. Hiding the block would hide the toggle that reveals it.
+    assert.equal(Embeds.mdBlocks('{{table:logs?}}', null, ctx).length, 0);          // active only -> empty
+    assert.equal(Embeds.mdBlocks('{{table:logs@both?}}', null, ctx).length, 1);     // archive counts too
+    assert.equal(Embeds.mdBlocks('{{table:notes@both?}}', null, ctx).length, 0);    // both halves empty -> hidden
+    assert.equal(Embeds.embedRowCount('table', 'logs', 'both', ctx), 1);
   });
 
   it('docHasData: false only when every data embed is empty', () => {
@@ -87,6 +108,8 @@ describe('embeds.js — mdBlocks / docHasData / buildEmbedBlock', () => {
     assert.equal(Embeds.docHasData('x {{view:open}}', null, ctx), true);      // open has a row
     assert.equal(Embeds.docHasData('x {{table:notes}}', null, ctx), false);   // notes empty
     assert.equal(Embeds.docHasData('prose only', null, ctx), true);           // no embeds -> show
+    assert.equal(Embeds.docHasData('x {{table:logs}}', null, ctx), false);    // active half empty
+    assert.equal(Embeds.docHasData('x {{table:logs@both}}', null, ctx), true); // ...but the archive half is not
   });
 });
 
