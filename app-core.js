@@ -2554,6 +2554,12 @@ function createVueApp() {
         if (!this.currentSelfService) return true;
         return this.rowOwnedByMe(item, this.selfServeTable) && this.ownerRowWritable(item, this.selfServeTable);
       },
+      // What a cell's options are, whichever side they come from. The multiselect branches used to call
+      // getListOptions unconditionally, which returns [] for a `ref` -- its values live in a lookup
+      // TABLE, not a list -- so a multi-valued ref would have rendered an empty picker.
+      cellOptions: function(col, item) {
+        return this.colIsRef(col) ? this.getRefOptions(col, item) : this.getListOptions(col);
+      },
       getRefOptions: function(col, item) {
         var ref = null;
         for (var t in SCHEMA) { ref = getColumnRef(t, col); if (ref) break; }
@@ -2914,7 +2920,10 @@ function createVueApp() {
             if (getColumnList(t, c) === listName) {
               var def = cols[c];
               var alt = (def && typeof def === 'object' && def.listSwitch && def.listSwitch.list) || null;
-              out.push({ table: t, col: c, multi: getColumnType(t, c) === 'multiselect', altList: alt });
+              // Through colIsMultiselect, not the type string: `multiple: true` makes a select hold an
+              // array too, and reading the type directly would scrub it as a scalar -- blanking the
+              // whole cell where it should drop one element.
+              out.push({ table: t, col: c, multi: Columns.colIsMultiselect(SCHEMA, c), altList: alt });
             }
           }
         }
@@ -4883,6 +4892,7 @@ function createVueApp() {
         return appInstance.getListOptions(col, (sw && appInstance.isAltList(col, item)) ? sw.list : null);
       },
       getRefOptions: function(col, item) { return appInstance.getRefOptions(col, item); },
+      cellOptions: function(col, item) { return appInstance.cellOptions(col, item); },
       isAltList: function(col, item) { return appInstance.isAltList(col, item); },
       toggleListSwitch: function(col, item) { return appInstance.toggleListSwitch(col, item); },
       save: function(item, col, val) { return appInstance.saveField(item, col, val, this.owner); },
@@ -4927,8 +4937,8 @@ function createVueApp() {
       +   '<template v-else><list-value :col="col" :value="item[col]"></list-value></template>'
       + '</span>'
       + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82"><list-value :col="col" :value="item[col]"></list-value></span>'
-      + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
-      + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
+      + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col) && !colIsRef(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
+      + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="cellOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
       + '<v-btn-toggle v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'toggle\'" :name="col" :model-value="item[col] || \'\'" density="compact" variant="outlined" divided @update:model-value="save(item, col, $event || \'\')">'
       + '<v-btn v-for="o in getListOptions(col)" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
       + '</v-btn-toggle>'

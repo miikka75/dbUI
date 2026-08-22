@@ -16,7 +16,7 @@
 
   // Bump when a migration is added. A schema with no version is v1: everything written before this
   // existed.
-  var CURRENT_VERSION = 2;
+  var CURRENT_VERSION = 3;
 
   // Walk the nested view tree (nav groups nest views inside `views`), applying fn to each leaf.
   function eachView(list, fn) {
@@ -57,8 +57,38 @@
     return schema;
   }
 
+  // ---- v2 -> v3: cardinality is a flag, not a type ------------------------------------------------
+  // `select` and `multiselect` differed in exactly one thing: whether the cell holds one value or
+  // several. As a separate TYPE that difference could not compose -- `ref` had no multi-valued form at
+  // all, so a schema wanting several values from a lookup table had to point a `multiselect` at it
+  // through `list` and lose every reference behaviour on the way (colIsRef false, no filterBy, invisible
+  // to the ref editor). As a flag it composes with both.
+  //
+  // No column NAME changes, so no translation key moves and this step records no renames.
+  function eachColumnDef(schema, fn) {
+    var tables = (schema && schema.tables) || {};
+    Object.keys(tables).forEach(function (t) {
+      var cols = tables[t] && tables[t].columns;
+      if (Array.isArray(cols)) cols.forEach(function (d) { if (d && typeof d === 'object') fn(d); });
+      else if (cols && typeof cols === 'object') {
+        Object.keys(cols).forEach(function (k) { if (cols[k] && typeof cols[k] === 'object') fn(cols[k]); });
+      }
+    });
+  }
+
+  function v2_to_v3(schema, renames) {           // eslint-disable-line no-unused-vars
+    eachColumnDef(schema, function (d) {
+      // Idempotent: after the first pass nothing is typed `multiselect` any more.
+      if (d.type !== 'multiselect') return;
+      d.type = 'select';
+      d.multiple = true;
+    });
+    return schema;
+  }
+
   var CHAIN = [
-    { to: 2, apply: v1_to_v2, describes: 'name each view kind instead of inferring it from key presence' }
+    { to: 2, apply: v1_to_v2, describes: 'name each view kind instead of inferring it from key presence' },
+    { to: 3, apply: v2_to_v3, describes: 'make multi-value a `multiple` flag rather than its own column type' }
   ];
 
   // ---- Translation keys move with the schema ------------------------------------------------------
@@ -150,7 +180,8 @@
   }
 
   var M = { CURRENT_VERSION: CURRENT_VERSION, migrate: migrate, kindOf: kindOf, eachView: eachView,
-            renameKeys: renameKeys, renameAll: renameAll, renamePatch: renamePatch };
+            renameKeys: renameKeys, renameAll: renameAll, renamePatch: renamePatch,
+            eachColumnDef: eachColumnDef };
   if (isNode) module.exports = M;
   else root.Migrations = M;
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));

@@ -6142,3 +6142,83 @@ test.describe('the archive partition is read only when something reads it', () =
     expect(seen.history).toBe(true);
   });
 });
+
+test.describe('multiple: a reference that holds several values', () => {
+  // `select` and `multiselect` differed only in cardinality, so `ref` had no multi-valued form at all.
+  // A schema wanting several values from a lookup table had to point a `multiselect` at it through
+  // `list` — which works, but nothing then knows a reference is involved: colIsRef is false, filterBy
+  // cannot apply, and the lookup table is invisible to the dependency loader.
+  const SCH = {
+    defaultLanguage: 'en',
+    tables: {
+      ref_chores: { isLookup: true, columns: [{ name: 'chore', type: 'text' }] },
+      plans: { columns: [
+        { name: 'title', type: 'text' },
+        { name: 'jobs', type: 'ref', table: 'ref_chores', valueCol: 'chore', multiple: true }
+      ] }
+    },
+    views: [{ table: 'plans' }, { table: 'ref_chores' }],
+    nav: { items: [{ table: 'plans' }] }
+  };
+
+  async function boot(page) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    for (const [id, chore] of [['c1', 'Hoover'], ['c2', 'Dishes'], ['c3', 'Bins']]) {
+      await page.request.post('/api/putRow', { data: { tableId: 'ref_chores', data: { id, chore }, tab: 'active' } });
+    }
+    await page.request.post('/api/putRow', { data: { tableId: 'plans', data: { id: 'p1', title: 'Saturday' }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.plans' }).first().click();
+    await viewReady(page);
+  }
+
+  test('it is a ref AND multi-valued at once', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    const seen = await page.evaluate(() => ({
+      ref: appInstance.colIsRef('jobs'),
+      multi: appInstance.colIsMultiselect('jobs'),
+      target: (appInstance.colRef('jobs') || {}).table
+    }));
+    expect(seen).toEqual({ ref: true, multi: true, target: 'ref_chores' });
+  });
+
+  test('its options come from the lookup TABLE, not from an empty list', async ({ page }) => {
+    // The bug this would otherwise have: the multiselect cell asked getListOptions unconditionally,
+    // which returns [] for a ref because its values live in a table rather than a list. The picker
+    // would have rendered empty with nothing to explain it.
+    test.setTimeout(20000);
+    await boot(page);
+    const opts = await page.evaluate(() => {
+      const row = (appInstance.currentData || []).find(r => r.id === 'p1');
+      return appInstance.cellOptions('jobs', row).map(o => o.value).sort();
+    });
+    expect(opts).toEqual(['Bins', 'Dishes', 'Hoover']);
+  });
+
+  test('the lookup table is loaded because the column declares it', async ({ page }) => {
+    // A faked multi-ref lost this too: with the target named only as a `list`, tableDeps could not see
+    // it and nothing fetched it.
+    test.setTimeout(20000);
+    await boot(page);
+    expect(await page.evaluate(() => Array.isArray(appInstance.dataCache.ref_chores))).toBe(true);
+  });
+
+  test('several values round-trip as an array', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    await page.evaluate(() => {
+      const row = (appInstance.currentData || []).find(r => r.id === 'p1');
+      return appInstance.saveField(row, 'jobs', ['Hoover', 'Bins']);
+    });
+    await expect.poll(async () => {
+      const d = await (await page.request.post('/api/getTableData', { data: { tableId: 'plans', tab: 'active' } })).json();
+      const r = (d.rows || []).find(x => x.id === 'p1') || {};
+      return Array.isArray(r.jobs) ? r.jobs.join(',') : String(r.jobs);
+    }, { timeout: 8000 }).toBe('Hoover,Bins');
+  });
+});

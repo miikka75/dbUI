@@ -86,6 +86,11 @@
         if (typ === 'url') e.url = true;
         if (typ === 'number') e.number = true;
         if (d && typeof d === 'object') {
+          // `multiple: true` is cardinality, and cardinality is all that ever separated `multiselect`
+          // from `select`. As a flag it composes: `ref` + `multiple` is a reference that holds several
+          // values, which no type name could express -- schemas wanting one had to point a
+          // `multiselect` at a lookup table through `list` and lose every ref behaviour on the way.
+          if (d.multiple) e.multiselect = true;
           if (d.type === 'ref') e.ref = true;   // object-only, matching columnRef (a bare 'ref' string is not a ref)
           if (e.list == null && d.list) e.list = d.list;
           if (e.listSwitch == null && d.listSwitch) e.listSwitch = d.listSwitch;
