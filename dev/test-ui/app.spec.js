@@ -6370,3 +6370,51 @@ test.describe('a view may share its name with the table it sources', () => {
     ), { timeout: 8000 }).toEqual(['Faith']);
   });
 });
+
+test.describe('a boot that may not write the schema stays quiet', () => {
+  // "No schema came back" is indistinguishable from "the read failed": `schema: null` carries no
+  // reason. The app treats it as a first boot and offers to save the bundled default — which is right
+  // when the database really is empty, and refused for anyone who may not save the schema. That
+  // refusal used to be an unhandled rejection: `pageerror: Object` in the console of every non-admin,
+  // with nothing naming the cause.
+  //
+  // Being refused is the CORRECT outcome for them — it is what stops a failed read from overwriting a
+  // real schema with the default. What was wrong was rejecting into the console about it.
+  const SCH = {
+    defaultLanguage: 'en',
+    tables: { notes: { columns: [{ name: 'title', type: 'text' }] } },
+    views: [{ table: 'notes' }],
+    nav: { items: [{ table: 'notes' }] }
+  };
+
+  test('a second, unregistered identity produces no page error', async ({ page }) => {
+    test.setTimeout(40000);
+    const errs = [];
+    page.on('pageerror', (e) => errs.push('pageerror: ' + (e && e.message ? e.message : String(e))));
+    await page.addInitScript(() => {
+      window.__rej = [];
+      window.addEventListener('unhandledrejection', (ev) => {
+        const r = ev.reason;
+        window.__rej.push(typeof r === 'object' ? JSON.stringify(r) : String(r));
+      });
+    });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+
+    // The first identity registers as the bootstrap admin...
+    await page.goto('/?user=kati@x.com');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 20000 });
+    expect(await page.evaluate(() => appInstance.isAdmin), 'the first identity should bootstrap as admin').toBe(true);
+
+    // ...so the second one is an ordinary member who may not save the schema.
+    await page.goto('/?user=jussi@x.com');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 20000 });
+    expect(await page.evaluate(() => appInstance.isAdmin)).toBe(false);
+    await page.waitForTimeout(1200);   // the write is fire-and-forget; give it time to be refused
+
+    expect(await page.evaluate(() => window.__rej), 'a refused boot write rejected into the console').toEqual([]);
+    expect(errs, 'the second identity produced a page error').toEqual([]);
+  });
+});
