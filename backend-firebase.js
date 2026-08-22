@@ -158,6 +158,11 @@ backend = {
   // table grant is provable only when it constrains `owner` / `rosterPublic`. An unconstrained
   // onSnapshot for that user is denied outright — the listener would simply never fire, which is the
   // silent-empty-table failure _scopedRead was written to avoid, only harder to notice.
+  // A listener's FIRST snapshot carries every matching document, and Firestore bills a read for each
+  // one of them. So a table that was fetched and then subscribed was paid for twice, in full. This
+  // emits that first snapshot as a single { type:'sync', rows } and the caller uses it as the load,
+  // which is why `subscribeLoads` is advertised below.
+  subscribeLoads: true,
   subscribeTable: function(tableId, tab, onChange) {
     var store = _storeName(tableId, tab);
     var unsubs = [], stopped = false;
@@ -166,7 +171,28 @@ backend = {
     // whose rosterPublic flips false is still mine. Emitting a delete on that would make the row vanish
     // from a user who can still see it, so a delete is emitted only once the id has left both queries.
     var presence = {};
+    // First-snapshot bookkeeping. `pending` counts the queries yet to deliver theirs; until it reaches
+    // zero the docs are accumulated by id rather than emitted, so the two self-service queries merge
+    // into ONE sync instead of racing each other to half-populate the cache.
+    var pending = 0, delivered = 0, first = {}, merged = {};
+    function emitSync() {
+      var rows = Object.keys(merged).map(function(k) { return merged[k]; });
+      merged = {};
+      onChange({ type: 'sync', rows: rows });
+    }
     function onSnap(qi, snap) {
+      if (!first[qi]) {
+        first[qi] = true;
+        // Populate `presence` here too: a later 'removed' for one of these docs has to know the doc was
+        // matched, or the delete would be dropped as unknown.
+        snap.docChanges().forEach(function(c) {
+          (presence[c.doc.id] || (presence[c.doc.id] = {}))[qi] = true;
+          merged[c.doc.id] = c.doc.data();
+        });
+        delivered++;
+        if (--pending === 0) emitSync();
+        return;
+      }
       snap.docChanges().forEach(function(c) {
         var id = c.doc.id;
         var at = presence[id] || (presence[id] = {});
@@ -181,6 +207,9 @@ backend = {
         }
       });
     }
+    // Every path that ends without a live subscription must say so, or the caller waits for a load that
+    // is never coming and the view stays blank with nothing to explain it.
+    function giveUp() { if (!stopped) onChange({ type: 'sync-failed' }); }
     this._myTables().then(function(tabs) {
       if (stopped) return;
       var queries;
@@ -188,18 +217,26 @@ backend = {
         queries = [_db.collection(store)];
       } else {
         var me = _myEmail();
-        if (!me) return;
+        if (!me) { giveUp(); return; }
         queries = [
           _db.collection(store).where('owner', '==', me),
           _db.collection(store).where('rosterPublic', '==', true)
         ];
       }
+      pending = queries.length;
       queries.forEach(function(q, qi) {
-        // Errors are swallowed for the same reason _scopedRead's are: a denied read must degrade to
-        // "no live updates", never to an exception thrown out of a snapshot callback.
-        unsubs.push(q.onSnapshot(function(snap) { onSnap(qi, snap); }, function() {}));
+        // A denied read must degrade to "no live updates", never to an exception thrown out of a
+        // snapshot callback — but it must no longer degrade SILENTLY, now that the caller may be
+        // waiting on this snapshot for its rows.
+        unsubs.push(q.onSnapshot(function(snap) { onSnap(qi, snap); }, function() {
+          if (first[qi]) return;                       // already delivered once; just stop updating
+          first[qi] = true;
+          // One query denied does not mean no rows: in the self-service pair, `owner` may be readable
+          // while `rosterPublic` is not. Fall back only when NOTHING arrived.
+          if (--pending === 0) { if (delivered) emitSync(); else giveUp(); }
+        }));
       });
-    }).catch(function() {});
+    }).catch(giveUp);
     return function() {
       stopped = true;
       unsubs.forEach(function(u) { try { u(); } catch (e) {} });
