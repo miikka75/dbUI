@@ -325,3 +325,38 @@ test('live sync: a write in one client reaches another through onSnapshot, unsco
   } finally { await ctxB.close(); }
   await expectNoCspViolations(page);
 });
+
+test('a viewed table is read ONCE: the listener first snapshot is the load, not a second fetch', async ({ page }) => {
+  // Firestore bills a read per document in a listener's FIRST snapshot. The app fetched a table and
+  // then subscribed to it, so every table a view opened was paid for twice, in full. The listener now
+  // delivers that first snapshot as the load.
+  //
+  // Asserted by watching getTableData rather than by counting reads, which the client cannot see: if
+  // the adapter is asked for the rows at all, the second read happened.
+  test.setTimeout(60000);
+  await seed(page);
+  await page.goto('/');
+  await signIn(page, 'admin@test.com');
+  await page.waitForFunction(() => appInstance.isAdmin === true);
+  await page.evaluate((schema) => backend.saveSchema(schema), SCHEMA);
+  await page.evaluate(() => backend.putRow('notes', { id: 'n9', title: 'FromSnapshot' }, 'active'));
+  await page.reload();
+  await signIn(page, 'admin@test.com');
+
+  // Record every table the adapter is asked to fetch, from before the view opens.
+  await page.evaluate(() => {
+    window.__fetched = [];
+    const real = backend.getTableData.bind(backend);
+    backend.getTableData = function (tableId, tab, opts) { window.__fetched.push(tableId); return real(tableId, tab, opts); };
+  });
+
+  await page.click('text=tab.notes');
+  await expect.poll(async () => page.evaluate(
+    () => ((appInstance.dataCache.notes || []).find(r => r.id === 'n9') || {}).title
+  ), { timeout: 15000 }).toBe('FromSnapshot');
+
+  // The rows arrived, and nobody fetched them.
+  const fetched = await page.evaluate(() => window.__fetched);
+  expect(fetched, 'notes was fetched as well as subscribed — the table was read twice').not.toContain('notes');
+  expect(await page.evaluate(() => backend.subscribeLoads)).toBe(true);
+});
