@@ -343,7 +343,13 @@ backend = {
       var langs = BackendHelpers.addLanguage(d ? (d.list || []) : [], code, name);
       return StorageSupabase.setMeta('languages', { list: langs });
     }).then(function() {
-      return StorageSupabase.setMeta('lang_' + code, BackendHelpers.emptyTranslations(keys));
+      // Read first: an existing language keeps every string it already has, and every key the
+      // caller did not mention. Import calls this for each language in the file, so writing the
+      // blank seed straight over the document erased whichever translation pack was imported
+      // first -- schema strings wiped by an app pack, or the reverse.
+      return StorageSupabase.getMeta('lang_' + code).then(function(existing) {
+        return StorageSupabase.setMeta('lang_' + code, BackendHelpers.seedTranslations(existing, keys));
+      });
     });
   },
   deleteLanguage: function(folderId, code) {

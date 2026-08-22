@@ -32,6 +32,43 @@ describe('backend-helpers - unwrapSchemaDoc', () => {
   });
 });
 
+describe('backend-helpers - seedTranslations', () => {
+  // The rule that stops an import from erasing a language. createLanguage is called once per language
+  // in an imported file, so it has to be safe to call on a language that already has strings -- the
+  // whole point of splitting schema translations and app translations into separate packs is that both
+  // can be applied to the same language.
+  it('keeps every stored string, and every stored key the caller did not mention', () => {
+    const existing = { 'field.topic': 'Topic', 'msg.saved': 'Saved' };
+    const out = H.seedTranslations(existing, ['btn.add', 'field.topic']);
+    assert.deepEqual(out, { 'btn.add': '', 'field.topic': 'Topic', 'msg.saved': 'Saved' });
+  });
+
+  it('a stored value always beats the blank seed for the same key', () => {
+    // The direction that matters. Seeding over a translated string is the data loss this exists to stop.
+    assert.equal(H.seedTranslations({ a: 'kept' }, ['a']).a, 'kept');
+  });
+
+  it('seeds blanks when there is nothing stored yet', () => {
+    assert.deepEqual(H.seedTranslations(null, ['a', 'b']), { a: '', b: '' });
+    assert.deepEqual(H.seedTranslations(undefined, ['a']), { a: '' });
+  });
+
+  it('does not mutate what it was given', () => {
+    const existing = { a: 'kept' };
+    H.seedTranslations(existing, ['b']);
+    assert.deepEqual(existing, { a: 'kept' }, 'the stored document was modified in place');
+  });
+
+  it('survives a missing key list', () => {
+    assert.deepEqual(H.seedTranslations({ a: 'kept' }, null), { a: 'kept' });
+    assert.deepEqual(H.seedTranslations(null, null), {});
+  });
+
+  it('an empty stored string is still a stored key — it does not get re-seeded away', () => {
+    assert.deepEqual(H.seedTranslations({ a: '' }, ['a', 'b']), { a: '', b: '' });
+  });
+});
+
 describe('backend-helpers - addLanguage / removeLanguage', () => {
   it('addLanguage appends a new code without mutating', () => {
     const list = [{ code: 'xx', name: 'TestLang' }];

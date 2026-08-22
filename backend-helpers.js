@@ -48,6 +48,24 @@
       var t = {}; if (keys) keys.forEach(function(k) { t[k] = ''; }); return t;
     },
 
+    // The translations document for a language that may ALREADY EXIST: blank slots for the keys asked
+    // for, but every string already stored wins and every key already stored survives.
+    //
+    // createLanguage used to write emptyTranslations() straight over the document. For a genuinely new
+    // language that is correct; for one already present it deleted every key the caller did not
+    // mention. Import calls createLanguage unconditionally for each language in the file, so importing
+    // an app-translations pack ERASED the schema translations for that language, and vice versa --
+    // there was no way to layer the two. The SQLite dev backend never had the bug (INSERT OR IGNORE
+    // per key), so this is also the three document backends catching up to it, which is why the rule
+    // lives here rather than three times over.
+    //
+    // Deliberately not a store-level merge: Firestore's set({merge:true}) writes the fields given, so
+    // merging { greeting: '' } would BLANK an existing greeting. The existing value has to win, which
+    // means reading first.
+    seedTranslations: function(existing, keys) {
+      return Object.assign({}, H.emptyTranslations(keys), existing || {});
+    },
+
     // The stored /_users/<key> document for a grant. `tables` may be 'all', a legacy name array, or a
     // per-table mode map { table: 'r' | 'rw' }. For the map shape ONLY, the writable subset is
     // denormalized alongside as `rwTables`: neither firestore.rules nor the Supabase RLS functions can

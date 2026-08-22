@@ -411,7 +411,13 @@ backend = {
       var langs = BackendHelpers.addLanguage(d ? (d.list || []) : [], code, name);
       return StorageFirestore.setMeta('languages', { list: langs });
     }).then(function() {
-      return StorageFirestore.setMeta('lang_' + code, BackendHelpers.emptyTranslations(keys));
+      // Read first: an existing language keeps every string it already has, and every key the
+      // caller did not mention. Import calls this for each language in the file, so writing the
+      // blank seed straight over the document erased whichever translation pack was imported
+      // first -- schema strings wiped by an app pack, or the reverse.
+      return StorageFirestore.getMeta('lang_' + code).then(function(existing) {
+        return StorageFirestore.setMeta('lang_' + code, BackendHelpers.seedTranslations(existing, keys));
+      });
     });
   },
   deleteLanguage: function(folderId, code) {
