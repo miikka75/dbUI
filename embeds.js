@@ -274,16 +274,11 @@
   // Rows of an embedded view/table (@part reads the partition caches, e.g. tasks__archive).
   function embedRows(type, name, part, ctx) {
     if (type === 'view' && ctx.views[name]) {
-      var v = ctx.views[name], cache = ctx.dataCache;
+      var v = ctx.views[name];
       // A partition-scoped embed used to read the `<src>__<part>` store directly. `_status` moved that
-      // answer onto the row, so ask Rows.partitionRows -- and hand buildRows a cache projection whose
-      // ACTIVE key holds the requested partition, since buildRows reads the active side by default.
-      if (part) {
-        cache = {};
-        (v.sources || []).forEach(function(s) { cache[s] = Rows.partitionRows(ctx.dataCache, s, part); });
-      }
+      // answer onto the row, so the partition goes to buildRows as a parameter.
       var vMe = ctx.viewWithMe(v);
-      var esrc = Rows.buildRows(vMe, cache);
+      var esrc = Rows.buildRows(vMe, ctx.dataCache, part || 'active');
       if (v.compute) esrc = Rows.resolveComputed(esrc, v.compute, { dataCache: ctx.dataCache, rotationAnchor: ctx.anchorForView(v.name) });
       return Rows.sortByCol(Rows.resolveComputed(Rows.aggregateRows(vMe, esrc), v.columns, { dataCache: ctx.dataCache, rotationAnchor: ctx.anchorForView(v.name) }), v.defaultSort, v);
     }

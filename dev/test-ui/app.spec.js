@@ -886,9 +886,17 @@ test.describe('syncFrom read-only', () => {
 });
 
 test.describe('Multi-table lifecycle (join view UI)', () => {
+  // Asks which PARTITION a row is in, not which store it is filed under. Archiving is a field write
+  // now -- the row keeps its place and `_status` says where it belongs -- so a test that read one store
+  // would be asserting storage layout rather than archive/restore behaviour, and would have to be
+  // rewritten again the moment the archive store goes away. `_status` on the row wins; where it is
+  // absent the store still decides, which is how every row written before this change reads.
   const has = async (page, tableId, tab, id) => {
-    const d = await (await page.request.post('/api/getTableData', { data: { tableId, tab } })).json();
-    return (d.rows || []).some(r => r.id === id);
+    const read = async (t) => (await (await page.request.post('/api/getTableData',
+      { data: { tableId, tab: t } })).json()).rows || [];
+    const [act, arc] = await Promise.all([read('active'), read('archive')]);
+    const inPart = (rows, store) => rows.filter((r) => (r._status || store) === tab);
+    return [...inPart(act, 'active'), ...inPart(arc, 'archive')].some((r) => r.id === id);
   };
   test('add/archive/restore/delete in join view stays in sync across tasks+notes', async ({ page }) => {
     test.setTimeout(20000);
@@ -944,7 +952,18 @@ test.describe('Archivable flag', () => {
     views: [{ table: 'items' }],
     nav: { items: [{ table: 'items' }] }
   };
-  const get = (page, tab) => page.request.post('/api/getTableData', { data: { tableId: 'items', tab } }).then(r => r.json());
+  // Partition, not store. Archiving is a field write now -- the row keeps its place and `_status` says
+  // which partition it belongs to -- so reading one store asserts storage LAYOUT rather than
+  // archive/restore behaviour. `_status` wins; where absent the store still decides, which is how every
+  // row written before this change reads.
+  const partRows = async (page, tableId, part) => {
+    const read = async (t) => (await (await page.request.post('/api/getTableData',
+      { data: { tableId, tab: t } })).json()).rows || [];
+    const [act, arc] = await Promise.all([read('active'), read('archive')]);
+    const pick = (rows, store) => rows.filter((r) => (r._status || store) === part);
+    return [...pick(act, 'active'), ...pick(arc, 'archive')];
+  };
+  const get = async (page, tab) => ({ rows: await partRows(page, 'items', tab) });
 
   test('archivable flag enables archive/restore using the fixed "archive" partition', async ({ page }) => {
     test.setTimeout(20000);
@@ -994,7 +1013,18 @@ test.describe('Archive from a view whose source has a mirror table not in source
     views: [{ name: 'mtg', sources: ['meetings'], mode: 'union', columns: ['title'] }, { name: 'mus', sources: ['music'], mode: 'union', columns: ['song'] }, { table: 'meetings' }, { table: 'music' }],
     nav: { items: [{ view: 'mtg' }, { view: 'mus' }, { table: 'meetings' }, { table: 'music' }] }
   };
-  const get = (page, t, tab) => page.request.post('/api/getTableData', { data: { tableId: t, tab } }).then(r => r.json());
+  // Partition, not store. Archiving is a field write now -- the row keeps its place and `_status` says
+  // which partition it belongs to -- so reading one store asserts storage LAYOUT rather than
+  // archive/restore behaviour. `_status` wins; where absent the store still decides, which is how every
+  // row written before this change reads.
+  const partRows = async (page, tableId, part) => {
+    const read = async (t) => (await (await page.request.post('/api/getTableData',
+      { data: { tableId, tab: t } })).json()).rows || [];
+    const [act, arc] = await Promise.all([read('active'), read('archive')]);
+    const pick = (rows, store) => rows.filter((r) => (r._status || store) === part);
+    return [...pick(act, 'active'), ...pick(arc, 'archive')];
+  };
+  const get = async (page, t, tab) => ({ rows: await partRows(page, t, tab) });
 
   test('archiving in the view also archives the mirror table row', async ({ page }) => {
     test.setTimeout(20000);
@@ -1410,7 +1440,18 @@ test.describe('v3 embed row controls', () => {
     views: [{ name: 'all', sources: ['tasks'], mode: 'union', columns: ['title'] }, { name: 'home', markdown: '{{view:all}}' }],
     nav: { layout: 'tabs', items: [{ view: 'home' }, { view: 'all' }] }
   };
-  const count = (page, tab) => page.request.post('/api/getTableData', { data: { tableId: 'tasks', tab } }).then(r => r.json()).then(d => d.rows.length);
+  // Partition, not store. Archiving is a field write now -- the row keeps its place and `_status` says
+  // which partition it belongs to -- so reading one store asserts storage LAYOUT rather than
+  // archive/restore behaviour. `_status` wins; where absent the store still decides, which is how every
+  // row written before this change reads.
+  const partRows = async (page, tableId, part) => {
+    const read = async (t) => (await (await page.request.post('/api/getTableData',
+      { data: { tableId, tab: t } })).json()).rows || [];
+    const [act, arc] = await Promise.all([read('active'), read('archive')]);
+    const pick = (rows, store) => rows.filter((r) => (r._status || store) === part);
+    return [...pick(act, 'active'), ...pick(arc, 'archive')];
+  };
+  const count = async (page, tab) => (await partRows(page, 'tasks', tab)).length;
   test('add/archive/delete from an embedded view operate on the underlying table', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });

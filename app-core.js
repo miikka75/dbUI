@@ -1846,11 +1846,11 @@ function createVueApp() {
             return;
           }
           // Union or join view
+          // The archived tab is a PARTITION, not a store: an archived row now stays in the active store
+          // carrying `_status`, so this used to rebuild the cache from dataCache[src__archive] and would
+          // show only the rows filed away under the old model. buildRows takes the partition instead.
           var cache = self.dataCache;
-          if (self.viewingArchive) {
-            cache = {};
-            view.sources.forEach(function(src) { cache[src] = self.dataCache[aKey(src)] || []; });
-          }
+          var part = self.viewingArchive ? 'archive' : 'active';
           var vMe = self._viewWithMe(view);
           // Interactive ‹ › period navigation: inject the current back-offset into bare @period tokens.
           if (view.period && self.periodOffset) {
@@ -1858,7 +1858,7 @@ function createVueApp() {
             if (vMe.filter) vMe.filter = self.resolvePeriodTokens(vMe.filter, self.periodOffset);
             if (vMe.groupBy) { vMe.groupBy = Object.assign({}, vMe.groupBy); if (vMe.groupBy.filter) vMe.groupBy.filter = self.resolvePeriodTokens(vMe.groupBy.filter, self.periodOffset); }
           }
-          var srcRows = buildRows(vMe, cache);
+          var srcRows = buildRows(vMe, cache, part);
           // Resolve source-row computeds (e.g. a per-row lookup) BEFORE grouping so an aggregate can sum them.
           if (view.compute) srcRows = resolveComputed(srcRows, view.compute, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
           var rows = resolveComputed(aggregateRows(vMe, srcRows), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
@@ -1867,7 +1867,7 @@ function createVueApp() {
           // than beside the rotation preload below) because the source preload needs it too.
           var recomputeRotation = function() {
             var vMe2 = self._viewWithMe(view);
-            var src2 = buildRows(vMe2, self.dataCache);
+            var src2 = buildRows(vMe2, self.dataCache, part);
             if (view.compute) src2 = resolveComputed(src2, view.compute, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
             self.currentData = resolveComputed(aggregateRows(vMe2, src2), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
           };
@@ -2136,9 +2136,26 @@ function createVueApp() {
         sources.forEach(function(source) {
           var schema = SCHEMA[source];
           if (!schema) return;
+          var stamp = new Date().toISOString();
+          // A row archived under the FIELD model never left the active store, so restoring it is the
+          // same field write in reverse.
+          var live = (self.dataCache[source] || []).find(function(r) { return r.id === item.id; });
+          if (live && Rows.partitionOf(live, 'active') === 'archive') {
+            live._status = 'active';
+            live.updated_at = stamp;
+            Writes.putRow(source, { id: item.id, _status: 'active', updated_at: stamp }, 'active');
+            return;
+          }
+          // A row archived under the STORE model is still sitting in the archive collection, and every
+          // deployment has some. Those still move -- writing `_status: 'active'` onto a row in the
+          // archive store would be honoured by partitionRows, but only for a session that had loaded
+          // that store, and boot does not load it unless `preload_archive` is on. The row would appear
+          // to vanish from both tabs. Moving it is what keeps it visible; the stamp makes it
+          // unambiguous once it lands.
           var cached = self.dataCache[aKey(source)] || [];
           var srcRow = cached.find(function(r) { return r.id === item.id; });
           if (!srcRow) return;
+          srcRow._status = 'active';
           self.dataCache[aKey(source)] = cached.filter(function(r) { return r.id !== item.id; });
           if (!self.dataCache[source]) self.dataCache[source] = [];
           self.dataCache[source].push(srcRow);
@@ -4171,18 +4188,26 @@ function createVueApp() {
           ids.forEach(function(id) { self._archiveInSources(withMirrors([table]), id, true); });
         });
       },
+      // Archiving is a FIELD WRITE now, not a move between collections. The row stays where it is and
+      // `_status` says which partition it belongs to, which partitionRows already honours.
+      //
+      // What that buys, beyond one write instead of two: moveRow is delete-then-put across two
+      // collections with no transaction, and the backend contract says so outright -- a failure between
+      // the halves loses the row. There is no between any more.
+      //
+      // A PARTIAL patch, not the whole row: the contract pins that an omitted column keeps its stored
+      // value on every backend, and sending our cached copy of the rest is the cross-client clobber
+      // saveField already avoids.
       _archiveInSources: function(sources, itemId, quiet) {
         var self = this;
         sources.forEach(function(source) {
           var schema = SCHEMA[source];
           if (!schema || !schema.archivable) return;
-          var cached = self.dataCache[source] || [];
-          var srcRow = cached.find(function(r) { return r.id === itemId; });
-          if (!srcRow) return;
-          self.dataCache[source] = cached.filter(function(r) { return r.id !== itemId; });
-          if (!self.dataCache[aKey(source)]) self.dataCache[aKey(source)] = [];
-          self.dataCache[aKey(source)].push(srcRow);
-          Writes.moveRow(source, srcRow, 'active', 'archive');
+          var srcRow = (self.dataCache[source] || []).find(function(r) { return r.id === itemId; });
+          if (!srcRow || Rows.partitionOf(srcRow, 'active') === 'archive') return;
+          srcRow._status = 'archive';
+          srcRow.updated_at = new Date().toISOString();
+          Writes.putRow(source, { id: itemId, _status: 'archive', updated_at: srcRow.updated_at }, 'active');
         });
         if (!quiet) this.notify(this.t('msg.archived'));   // the auto sweep files rows silently
       },

@@ -232,7 +232,11 @@
   }
 
   // Merge a view's source tables into one row list (union tags _source; join merges by id), then filter.
-  function buildRows(cfg, dataCache) {
+  // `part` is the partition to read, 'active' by default. It is a PARAMETER rather than something the
+  // caller pre-projects into the cache, because projecting archived rows onto the plain source key and
+  // letting this filter them again drops every one of them -- they still carry `_status: 'archive'`.
+  function buildRows(cfg, dataCache, part) {
+    var want = part || 'active';
     var rows = [];
     var sources = cfg.sources || [];
     sources.forEach(function(src) {
@@ -243,8 +247,9 @@
       // Through partitionRows, not dataCache[src]: with `_status` in play the active store can hold a
       // row that is filed away, and the archive store one that has been restored. Indexing by store
       // name would show both in the wrong list.
-      var srcRows = partitionRows(dataCache, src, 'active');
-      if (cfg.includeArchive) srcRows = srcRows.concat(partitionRows(dataCache, src, 'archive'));
+      var srcRows = partitionRows(dataCache, src, want);
+      // `includeArchive` means "the history too", so it folds in whichever partition is NOT being read.
+      if (cfg.includeArchive) srcRows = srcRows.concat(partitionRows(dataCache, src, want === 'active' ? 'archive' : 'active'));
       if (cfg.mode === 'join') {
         srcRows.forEach(function(r) { var e = rows.find(function(x) { return x.id === r.id; }); if (e) Object.assign(e, r); else rows.push(Object.assign({ _source: src }, r)); });
       } else {
