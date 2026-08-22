@@ -1433,7 +1433,18 @@ function createVueApp() {
         if (!name || seen[name]) return out;
         seen[name] = 1;
         var push = function(t) { if (t && out.indexOf(t) < 0) out.push(t); };
-        var expand = function(n) { if (VIEWS[n]) self._viewTables(n, seen).forEach(push); else push(n); };
+        // A name that is a TABLE is a table, even when a view shares its name -- which is common, since
+        // the natural name for the view over `meeting_agenda` is `meeting_agenda`. Without the table
+        // winning, `sources: ["meeting_agenda"]` was expanded as a view name, recursed into the view
+        // already being resolved, hit the `seen` guard and contributed NOTHING. The view then loaded no
+        // tables at all and rendered empty -- silently, and only once boot stopped loading everything.
+        // Expansion still applies to pivot.source and rsvp.events, which genuinely may name a view.
+        var expand = function(n) {
+          if (!n) return;
+          if (SCHEMA[n]) { push(n); return; }
+          if (VIEWS[n]) { self._viewTables(n, seen).forEach(push); return; }
+          push(n);
+        };
 
         var v = VIEWS[name];
         if (!v) { if (SCHEMA[name]) push(name); return out; }        // a bare table
