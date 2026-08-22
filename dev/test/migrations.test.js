@@ -19,7 +19,9 @@ describe('migrations — the chain', () => {
     const r = Migrations.migrate(s);
     assert.equal(r.from, 1);
     assert.equal(r.to, Migrations.CURRENT_VERSION);
-    assert.equal(r.applied.length, 1);
+    // Every step above v1, whatever the chain currently holds — hard-coding 1 made this a test of how
+    // many migrations exist rather than of the chain running from the bottom.
+    assert.equal(r.applied.length, Migrations.CURRENT_VERSION - 1);
     assert.equal(s.schemaVersion, Migrations.CURRENT_VERSION);
   });
 

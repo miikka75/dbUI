@@ -78,7 +78,7 @@ hand. Reversible from the archive tab like any other archived row.
 | `number` | Numeric value (used e.g. as a `rotation`/`reorderable` position, and by pivot `sum`) |
 | `date` | Date picker, stored as `YYYY-MM-DD` |
 | `select` | Dropdown from a named list |
-| `multiselect` | Multiple values from a named list (chip input); stored as an **array** of strings |
+| `multiselect` | **Legacy spelling of `select` + `multiple: true`.** Still read, and migrated to that form on load (schema v3). |
 | `ref` | Reference to a lookup-table column |
 | `url` | A link — stored as a URL **string**; the cell shows an editable field + an open-in-new-tab icon, and a clickable link in read-only views |
 | `image` | An image — stored as a URL **string** (never the bytes). On a backend with file storage (**Firebase Storage** in prod, or the **local dev server** in development) the cell is an **upload** button that stores the file and saves the returned URL; backends without an uploader degrade to a paste-a-URL field. Read-only views show a thumbnail linking to the full image |
@@ -93,6 +93,7 @@ hand. Reversible from the archive tab like any other archived row.
 | `list` | List name for `select` type |
 | `allowNew` | Allow adding new list values (combobox) |
 | `sorted` | Sort dropdown items alphabetically |
+| `multiple` | Hold **several** values instead of one; stored as an **array** of strings, edited as a chip input. Cardinality is all that ever separated `multiselect` from `select`, so it is a flag rather than a type — which means it also composes with **`ref`**: `{"type": "ref", "table": "ref_chores", "valueCol": "chore", "multiple": true}` is a reference holding several values, which no type name could express. Before this, a schema wanting that had to point a `multiselect` at the lookup table through `list`; the values were right but nothing knew a reference was involved — `filterBy` could not apply, the ref editor did not see it, and the lookup table was invisible to the dependency loader. Ignored with `picker` (a multi-value cell is already chips) |
 | `picker` | Input widget for a single `select` column: `"chips"` (selectable chips) or `"toggle"` (segmented buttons); omit for the default dropdown. Applies wherever the column is edited (any view). Deselecting the current value clears the cell. Ignored with `allowNew` (which needs free-text entry) and for `multiselect` (already chips). Same widget vocabulary as the `rsvp` view's `picker`. |
 | `syncFrom` | Mirror this column's value from another table |
 | `default` | A literal seeded into the cell when a row is **created** (`"default": "logged"`), then freely editable. Use it so a new row starts in a sensible state — a status column that begins blank leaves the row outside every lane and filter that names a value. Prefer an explicit value over "whatever is first in the list": list order is data and can be reordered |
