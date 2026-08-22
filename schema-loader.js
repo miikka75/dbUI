@@ -7,7 +7,7 @@ var defaultSchema = {"tables":{},"views":[]};
 // Active schema — initially from defaultSchema, overwritten from Drive on boot
 var SCHEMA = defaultSchema.tables;
 var _viewsNav = Array.isArray(defaultSchema.views) ? defaultSchema.views : [];var VIEWS = {};
-function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp || v.board)) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
+function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp || v.board || v.form)) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
 // (Legacy `pages` map / {page:} nav and `text` entries are removed features with no load-time
 //  handling; a legacy schema must be hand-upgraded to markdown doc-views. See SCHEMA.md.)
 _flattenViews(_viewsNav);

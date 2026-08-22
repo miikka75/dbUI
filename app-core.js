@@ -315,13 +315,14 @@ function createVueApp() {
       bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
       isDataView: function() {
         var v = VIEWS[this.currentTable];
-        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp || v.board)) && (v || SCHEMA[this.currentTable]);
+        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp || v.board || v.form)) && (v || SCHEMA[this.currentTable]);
       },
       isRotationView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rotation); },
       isCalendarView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.calendar); },
       isPivotView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.pivot); },
       isRsvpView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rsvp); },
       isBoardView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.board); },
+      isFormView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.form); },
       // Curated palette tokens exposed in the admin theme editor (Vuetify color names + friendly labels).
       themeTokens: function() {
         return [
@@ -376,6 +377,7 @@ function createVueApp() {
         if (this.isPivotView) return 'pivot';
         if (this.isRsvpView) return 'rsvp';
         if (this.isBoardView) return 'board';
+        if (this.isFormView) return 'form';
         if (this.currentPage) return 'page';
         if (this.isDataView) return 'data';
         return null;
@@ -728,7 +730,7 @@ function createVueApp() {
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
          'bg.fit', 'bg.fit_cover', 'bg.fit_contain', 'bg.fit_tile', 'bg.fit_width',
          'msg.saved', 'msg.save_failed', 'msg.upload_failed', 'msg.choose_image', 'msg.image_too_large', 'msg.image_read_failed', 'msg.image_invalid', 'msg.image_process_failed',
-         'msg.row_added', 'msg.no_identity', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.export_incomplete', 'msg.synced', 'msg.sync_failed',
+         'msg.row_added', 'msg.no_identity', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.export_incomplete', 'msg.form_submitted', 'msg.form_incomplete', 'msg.form_required', 'msg.synced', 'msg.sync_failed',
          'msg.load_failed', 'msg.request_failed', 'msg.approve_failed', 'msg.import_complete',
          'msg.group_added', 'msg.item_added', 'msg.translation_saved', 'msg.language_added', 'msg.language_renamed', 'msg.language_exists',
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
@@ -1060,7 +1062,7 @@ function createVueApp() {
             // saveLists's batch write would then be denied wholesale (Firestore batches are atomic --
             // one disallowed doc fails the lot). result.unrestricted is only ever explicitly false
             // for a scoped Firebase user; other backends don't set it, so they keep seeding as before.
-            if (result.unrestricted !== false && self._seedSchemaLists()) backend.saveLists(self.listsCache);
+                    if (result.unrestricted !== false && self._seedSchemaLists()) backend.saveLists(self.listsCache);
             // Populate data cache
             for (var key in result.data) {
               var d = result.data[key];
@@ -1185,7 +1187,7 @@ function createVueApp() {
         var cfg = VIEWS[id] || SCHEMA[id] || {};
         this.sortCol = cfg.defaultSort || null;
         this.sortAsc = true;
-        if (this.isCalendarView || this.isPivotView || this.isRsvpView) { this.loadTableData(); }
+        if (this.isCalendarView || this.isPivotView || this.isRsvpView || this.isFormView) { this.loadTableData(); }
         else if (this.isDataView || this.isRotationView || this.isBoardView) { this.periodOffset = 0; this.loadTableData(); }
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
@@ -1365,6 +1367,43 @@ function createVueApp() {
           me: this.currentUserEmail || '', ownerCol: getOwnerCol(cfg.responses) || 'owner', today: fmtDate(new Date())
         }, cfg, this.rsvpLink(cfg)));
       },
+      // The `form` view: one focused record the member fills in properly, rather than a cell edited in
+      // a grid. Everything underneath is the self-service machinery rsvp already uses -- an owner-stamped
+      // row, gated by ownerWritable/ownerWritableWhile in both rule layers -- so a form record needs no
+      // new access rules at all. What is new is the SHAPE: several fields, grouped, some required,
+      // submitted once instead of toggled.
+      formFor: function(name) {
+        var v = VIEWS[name];
+        if (!v || !v.form) return Form.build([], {});
+        var cfg = v.form, table = cfg.table;
+        var bounds = (typeof BackendHelpers !== 'undefined' && BackendHelpers.ownerWritableOf)
+          ? (BackendHelpers.ownerWritableOf({ tables: SCHEMA })[table] || {}) : {};
+        return Form.build(this.dataCache[table] || [], Object.assign({}, cfg, {
+          me: this.currentUserEmail || '',
+          ownerCol: getOwnerCol(table) || 'owner',
+          // The state gate the rules will apply anyway. Reading it here is what lets the form say "this
+          // has been submitted and can no longer be changed" instead of offering an edit the write layer
+          // is about to refuse.
+          whileCol: bounds.whileCol || '',
+          whileVals: bounds.whileVals || []
+        }));
+      },
+
+      // Create the caller's record if they have none. Returns it either way, so the component can edit
+      // through the ordinary data-cell path -- a form field is the same editor as a grid cell, which is
+      // how every column type and widget works here for free.
+      formRecord: function(name) {
+        var v = VIEWS[name];
+        if (!v || !v.form || !v.form.table) return null;
+        var me = this.currentUserEmail || '';
+        if (!me) { this.notify(this.t('msg.sign_in_respond')); return null; }
+        var built = this.formFor(name);
+        if (built.record) return built.record;
+        // _createBlankRow stamps the owner column and any `default`/`defaultFrom`, and pushes the row
+        // into the cache -- the same path the grid's Add uses, so a form record is an ordinary row.
+        return this._createBlankRow(v.form.table, { tab: 'active' });
+      },
+
       // Upsert the current user's response for one event: update my existing owned row, else create one
       // stamped with owner = my email. Self-service — not gated by role (firestore rules enforce ownership).
       setRsvp: function(name, eventKey, status) {
@@ -1449,6 +1488,9 @@ function createVueApp() {
         var v = VIEWS[name];
         if (!v) { if (SCHEMA[name]) push(name); return out; }        // a bare table
 
+        // A form writes ONE table, named per-kind rather than in `sources` -- so nothing else
+        // derives it, and without this the view would load nothing and show an empty record.
+        if (v.form && v.form.table) push(v.form.table);
         AccessFeatures.viewTables(v).forEach(expand);
         viewImplicitTables(v).forEach(expand);
 
@@ -4253,7 +4295,19 @@ function createVueApp() {
         });
       },
 
-      getSource: function(item, ownerId) { ownerId = ownerId || this.currentTable; if (item._source) return item._source; var v = VIEWS[ownerId]; return v ? v.sources[0] : ownerId; },
+      // Which TABLE a row belongs to, for a view that may be over several. `v.sources[0]` was read
+      // unguarded, which is fine for the kinds that have sources and throws for the ones that name their
+      // table per-kind instead -- a `form` writes `form.table`, and saving any field on one died here
+      // before the write was even attempted.
+      getSource: function(item, ownerId) {
+        ownerId = ownerId || this.currentTable;
+        if (item && item._source) return item._source;
+        var v = VIEWS[ownerId];
+        if (!v) return ownerId;
+        if (v.sources && v.sources.length) return v.sources[0];
+        if (v.form && v.form.table) return v.form.table;
+        return ownerId;
+      },
 
       getTab: function(source) {
         return this.viewingArchive ? 'archive' : 'active';
@@ -5015,7 +5069,7 @@ function createVueApp() {
   // Top-level view-kind registry: kind -> the component that renders that whole view. Every kind is
   // componentized; the top-level dispatch is a single <component :is="viewComponent"> lookup in ui.html.
   window.VIEW_KINDS = {
-    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', page: 'page-view', data: 'data-view',
+    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', form: 'form-view', page: 'page-view', data: 'data-view',
     languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view'   // system screens
   };
 
@@ -5421,6 +5475,75 @@ function createVueApp() {
   // current user's own status toggle (setRsvp upserts their owner-stamped response row) and an optional
   // tally. Renders a one-row-per-event table on desktop and stacked cards on mobile. Self-service: works
   // for any signed-in member regardless of role; firestore rules enforce a member writes only their OWN row.
+  // --- form-view: one record, filled in properly -------------------------------------------------
+  // Fields render through data-cell, the same editor the grid uses, so every column type, widget, list,
+  // listSwitch and translation works here without a second implementation. What this component adds is
+  // the FORM shape: sections with headings, required-field validation before submit, and a submitted
+  // state that says so rather than silently offering an edit the rules would refuse.
+  //
+  // Fields save as they are edited (data-cell -> saveField), which is what lets a half-finished form
+  // survive a reload. "Submit" is therefore not what writes the answers -- it marks the record done,
+  // and is the only moment `required` is enforced.
+  app.component('form-view', {
+    props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    data: function() { return { touched: false }; },
+    computed: {
+      a: function() { return appInstance; },
+      viewName: function() { return this.name || appInstance.currentTable; },
+      cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].form) || {}; },
+      built: function() { return appInstance.formFor(this.viewName); },
+      // The row being edited. Null until the person starts: a form must not create a record in the
+      // database merely because somebody looked at the page.
+      item: function() { return this.built.record; },
+      signedIn: function() { return !!appInstance.currentUserEmail; },
+      missing: function() { return this.built.missing; },
+      canSubmit: function() { return this.built.complete && this.built.editable; },
+      // Once the state gate has closed, say so. The rules would refuse the write anyway; a dead editor
+      // that fails on save is the version that looks like a bug.
+      locked: function() { return this.built.submitted && !this.built.editable; },
+      intro: function() { return this.cfg.intro ? appInstance.mdBlocks(this.cfg.intro, this.viewName) : []; },
+      doneText: function() { return this.cfg.done ? appInstance.mdBlocks(this.cfg.done, this.viewName) : []; }
+    },
+    methods: {
+      label: function(col) { return appInstance.tOr("field." + col, col); },
+      isMissing: function(col) { return this.touched && this.missing.indexOf(col) >= 0; },
+      isRequired: function(col) { return this.built.required.indexOf(col) >= 0; },
+      start: function() { appInstance.formRecord(this.viewName); },
+      submit: function() {
+        this.touched = true;
+        if (!this.canSubmit) { appInstance.notify(appInstance.t("msg.form_incomplete")); return; }
+        var col = this.cfg.submitColumn;
+        if (col && this.item) {
+          appInstance.saveField(this.item, col, this.cfg.submitValue === undefined ? "submitted" : this.cfg.submitValue);
+        }
+        appInstance.notify(appInstance.t("msg.form_submitted"));
+      }
+    },
+    template: ''
+      + '<v-card class="pa-4" style="max-width:760px">'
+      +   '<div v-for="(b, i) in intro" :key="i" v-html="b.html"></div>'
+      +   '<div v-if="!signedIn" class="text-medium-emphasis">{{ a.t("msg.sign_in_respond") }}</div>'
+      +   '<template v-else>'
+      +     '<div v-if="locked">'
+      +       '<div v-for="(b, i) in doneText" :key="i" v-html="b.html"></div>'
+      +       '<v-alert v-if="!doneText.length" type="success" variant="tonal" density="compact">{{ a.t("msg.form_submitted") }}</v-alert>'
+      +     '</div>'
+      +     '<v-btn v-else-if="!item" color="primary" @click="start">{{ a.tOr(cfg.startLabel, a.t("btn.add")) }}</v-btn>'
+      +     '<div v-else>'
+      +       '<div v-for="(sec, si) in built.sections" :key="si" class="mb-4">'
+      +         '<div v-if="sec.title" class="text-subtitle-2 mb-2" style="opacity:0.85">{{ a.tOr(sec.title, sec.title) }}</div>'
+      +         '<div v-for="col in sec.columns" :key="col" class="mb-3">'
+      +           '<div class="text-caption" style="opacity:0.75">{{ label(col) }}<span v-if="isRequired(col)" style="opacity:0.6"> *</span></div>'
+      +           '<data-cell :item="item" :col="col" :owner="viewName"></data-cell>'
+      +           '<div v-if="isMissing(col)" class="text-caption text-error">{{ a.t("msg.form_required") }}</div>'
+      +         '</div>'
+      +       '</div>'
+      +       '<v-btn color="primary" data-testid="form-submit" @click="submit">{{ a.tOr(cfg.submitLabel, a.t("btn.save")) }}</v-btn>'
+      +     '</div>'
+      +   '</template>'
+      + '</v-card>'
+  });
+
   app.component('rsvp-view', {
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
     // Sort is component-local: rsvp renders its own event list (from the rsvp.js engine), not the root's

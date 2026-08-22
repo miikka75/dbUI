@@ -41,6 +41,7 @@
     if (v.pivot) return 'pivot';
     if (v.rsvp) return 'rsvp';
     if (v.board) return 'board';
+    if (v.form) return 'form';
     if (typeof v.markdown === 'string') return 'page';
     return 'data';
   }

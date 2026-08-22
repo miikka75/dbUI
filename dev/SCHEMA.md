@@ -1100,6 +1100,59 @@ The events live in one table; responses in another that has an **`owner` column*
 - With owner-scoped reads a non-organizer receives only their own response from the backend, so the
   rendered tally/roster reflects exactly what that user is permitted to see.
 
+## form (eighth view kind)
+
+A view with a `form` field renders **one record, filled in properly** — labels above fields, grouped
+into sections, with required-field validation — instead of a row edited in a grid. Engine: `form.js`.
+
+It is the self-service shape `rsvp` already had, loosened. Underneath it is the same machinery: an
+**owner-stamped row the member writes themselves**, gated by `ownerWritable` / `ownerWritableWhile` in
+both rule layers. A form record therefore needs **no new access rules at all**. What `rsvp` cannot
+express is a record with several fields, grouped, where some are required and the thing is submitted
+once rather than toggled — surveys, applications, intake, feedback.
+
+```json
+{
+  "name": "palaute",
+  "form": {
+    "table": "palautteet",
+    "sections": [
+      { "title": "field.perustiedot", "columns": ["nimi", "email"] },
+      { "title": "field.viesti",      "columns": ["aihe", "viesti"] }
+    ],
+    "required": ["aihe", "viesti"],
+    "submitColumn": "tila",
+    "submitValue": "submitted"
+  }
+}
+```
+
+| Key | Meaning |
+|-----|---------|
+| `table` | Where the record is written. **Must declare an `owner` column** — that is what makes the record the member's own, and what the rules gate on |
+| `sections` | `[{ title?, columns }]`. `title` is a translation key (falls back to the literal). Omit and use `columns` for a single untitled section |
+| `columns` | The fields, when no `sections` are declared |
+| `required` | Columns that must be answered before the form may be submitted. A name that is not one of the form's columns is ignored — otherwise the form could never be completed and nothing on screen would say why |
+| `once` | `true` (default) = one record per person, reopened for editing. `false` = a fresh blank record each time |
+| `submitColumn` / `submitValue` | Optional. On submit, stamp this column (default value `"submitted"`). Pair it with `ownerWritableWhile` to make submission final — see below |
+| `intro` / `done` | Optional markdown shown above the form, and in place of it once the record is locked. `{{t:key}}` works |
+| `startLabel` / `submitLabel` | Optional translation keys for the two buttons |
+
+- **Fields save as they are edited**, through the same `data-cell` editor the grid uses — so every
+  column type, widget, `list`, `listSwitch` and translation works here with no second implementation,
+  and a half-finished form survives a reload. **Submit** does not write the answers; it marks the
+  record done, and is the only moment `required` is enforced.
+- **Nothing is created until the person starts.** Opening the page writes no row: every row in the
+  table is somebody's answer, and a table full of blank ones is worse than an empty one.
+- **Making submission final**: give the table `"ownerWritableWhile": { "tila": "luonnos" }` and set
+  `submitColumn: "tila"`. The owner may edit while the record is a draft; once submitted the rules stop
+  accepting their writes, and the form says so instead of offering an editor that would fail on save.
+- An empty **array** counts as unanswered for `required` — a multi-value column with nothing chosen is
+  as blank as an empty text box. `false` and `0` count as answered.
+- Signed-out visitors are told to sign in. A form record is identified by its owner, so there is no
+  anonymous submission: without an identity there is nothing to stamp, and matching blank owners would
+  hand one visitor another's draft.
+
 ## board (seventh view kind)
 
 A view with a `board` field renders a **kanban board**: a single table's rows grouped into vertical
