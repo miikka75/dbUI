@@ -6333,3 +6333,40 @@ test.describe('read budget', () => {
     expect([...new Set(dup)], 'a table already loaded was read again on navigation').toEqual([]);
   });
 });
+
+test.describe('a view may share its name with the table it sources', () => {
+  // The natural name for the view over `meeting_agenda` is `meeting_agenda`, and real schemas do this
+  // (examples/bishopric-schema.json does it four times). _viewTables treated a source name as
+  // possibly-a-view, recursed into the view it was already resolving, hit its own cycle guard and
+  // contributed nothing — so the view loaded NO tables and rendered empty.
+  //
+  // It only broke once boot stopped loading everything, and no shipped test schema had the collision,
+  // so nothing caught it until a pre-upgrade schema was booted on purpose.
+  const SCH = {
+    defaultLanguage: 'en',
+    tables: { agenda: { columns: [{ name: 'topic', type: 'text' }] } },
+    views: [{ name: 'agenda', sources: ['agenda'], mode: 'join', columns: ['topic'] }],
+    nav: { items: [{ view: 'agenda' }] }
+  };
+
+  test('it loads its source and renders the rows', async ({ page }) => {
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.request.post('/api/putRow', { data: { tableId: 'agenda', data: { id: 'a1', topic: 'Faith' }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 10000 });
+
+    // The derivation itself: the view needs its source table, and says so.
+    expect(await page.evaluate(() => appInstance._viewTables('agenda')))
+      .toEqual(['agenda']);
+
+    // And the consequence, which is what a user would actually notice.
+    await viewReady(page, 'agenda');
+    await expect.poll(async () => page.evaluate(
+      () => (appInstance.currentData || []).map(r => r.topic)
+    ), { timeout: 8000 }).toEqual(['Faith']);
+  });
+});
