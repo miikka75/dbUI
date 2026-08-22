@@ -73,6 +73,7 @@
       "msg.deleted": "Deleted",
       "msg.error": "Error:",
       "msg.exported": "Exported",
+      "msg.export_incomplete": "Export cancelled - could not read:",
       "msg.group_added": "Group added",
       "msg.image_invalid": "The file is not a valid image",
       "msg.image_process_failed": "Image processing failed",

@@ -170,6 +170,27 @@
     return h.count(name, null, ctx) + h.count(name, 'archive', ctx);
   }
 
+  // Every embed a page REFERS to, as {kind, name, part}, without resolving or rendering any of them.
+  // Callers use it to answer "what does this page need loaded?" -- a doc-view renders its embeds
+  // straight out of the row cache, so without this the only thing standing them up is a boot that
+  // happened to load every table. Uses the same registered-kind pattern as mdBlocks, so a directive
+  // added later is scanned for too.
+  //
+  // `{{self}}` is expanded first, exactly as mdBlocks does it, so a page embedding its own view reports
+  // that view rather than nothing.
+  function blockRefs(markdown, selfName) {
+    var md = String(markdown || '').replace(/\{\{\s*self\s*\}\}/g, selfName ? '{{view:' + selfName + '}}' : '');
+    var re = _blockScanRe(), m, out = [], seen = {};
+    while ((m = re.exec(md))) {
+      var part = m[3] ? m[3].slice(1) : null;
+      var key = m[1] + ':' + m[2] + ':' + (part || '');
+      if (seen[key]) continue;
+      seen[key] = 1;
+      out.push({ kind: m[1], name: m[2], part: part });
+    }
+    return out;
+  }
+
   // Parse markdown into render blocks: {html} or {embedType,embedName,embedPart}. `?` hides empty embeds.
   function mdBlocks(markdown, selfName, ctx) {
     var md = String(markdown || '').replace(/\{\{\s*self\s*\}\}/g, selfName ? '{{view:' + selfName + '}}' : '').replace(/\{\{\s*t\s*:\s*([^\s{}:]+)\s*\}\}/g, function(_, k) { return ctx.t(k) || ''; });
@@ -290,7 +311,7 @@
   }
 
   var M = {
-    mdToHtml: mdToHtml, setRenderer: setRenderer, registerBlock: registerBlock, buildEmbedBlock: buildEmbedBlock, mdBlocks: mdBlocks, docHasData: docHasData,
+    mdToHtml: mdToHtml, setRenderer: setRenderer, registerBlock: registerBlock, buildEmbedBlock: buildEmbedBlock, mdBlocks: mdBlocks, docHasData: docHasData, blockRefs: blockRefs,
     resolveEmbed: resolveEmbed, embedCols: embedCols, embedRows: embedRows, embedRowCount: embedRowCount,
     embedRowsForItem: embedRowsForItem, embedWhenOk: embedWhenOk, embedVisible: embedVisible, safeUrl: safeUrl, safeImgSrc: safeImgSrc,
     isAssetRef: isAssetRef, assetId: assetId, safeCssUrl: safeCssUrl

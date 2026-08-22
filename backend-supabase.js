@@ -114,22 +114,11 @@ backend = {
         var languages = (r[1] && (r[1].list || [])) || [];
         var lists = r[2] || {};
         var allowed = r[3];
-        // Granted tables PLUS the owner-column (self-service) ones — the shared predicate, so this boot
-        // set matches Firebase's. RLS filters rather than denies, so an owner table read here returns
-        // exactly the caller's own rows + the public roster.
-        var names = BackendHelpers.bootTableNames(parsed, allowed);
-        var jobs = [];
-        names.forEach(function(name) {
-          jobs.push(self.getTableData(name, 'active').then(function(res) { return { key: name, res: res }; }).catch(function() { return { key: name, res: { rows: [] } }; }));
-          if (tables[name] && tables[name].archivable) {
-            jobs.push(self.getTableData(name, 'archive').then(function(res) { return { key: name + '__archive', res: res }; }).catch(function() { return { key: name + '__archive', res: { rows: [] } }; }));
-          }
-        });
-        return Promise.all(jobs).then(function(results) {
-          var data = {};
-          results.forEach(function(x) { data[x.key] = x.res; });
-          return { schema: parsed, tableOrder: Object.keys(tables), languages: languages, lists: lists, data: data, unrestricted: allowed === null };
-        });
+        // Boot fetches NO table data -- see the same note in backend-firebase.js. It used to read every
+        // granted table before a view opened; a view now loads its own through app-core's
+        // _ensureCached. Costs less here than on Firestore (rows are not billed per document) but the
+        // three backends keep one boot shape, which is why they stopped drifting in the first place.
+        return { schema: parsed, tableOrder: Object.keys(tables), languages: languages, lists: lists, data: {}, unrestricted: allowed === null };
       });
     });
   },

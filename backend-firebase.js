@@ -92,27 +92,21 @@ backend = {
       var languages = (r[1] !== DENIED && r[1] && (r[1].list || [])) || [];
       var lists = r[2] || {};
       var allowed = r[3];
-      // Boot loads granted tables PLUS the owner-column ones, which a member may reach without a grant
-      // at all (self-service) — see BackendHelpers.bootTableNames, shared with the Supabase and dev
-      // backends so the three boot sets cannot drift again. getTableData scopes each read to the slice
-      // the rules allow, so pulling them here costs a member their own rows + the public roster, never
-      // a denied request.
-      var names = BackendHelpers.bootTableNames(parsed, allowed);
-      var jobs = [];
-      names.forEach(function(name) {
-        jobs.push(self.getTableData(name, 'active').then(function(res) { return { key: name, res: res }; }).catch(function() { return { key: name, res: { rows: [] } }; }));
-        if (tables[name] && tables[name].archivable) {
-          jobs.push(self.getTableData(name, 'archive').then(function(res) { return { key: name + '__archive', res: res }; }).catch(function() { return { key: name + '__archive', res: { rows: [] } }; }));
-        }
-      });
-      return Promise.all(jobs).then(function(results) {
-        var data = {};
-        results.forEach(function(x) { data[x.key] = x.res; });
-        // unrestricted: false tells the caller not to auto-seed/write shared list scaffolding -- a
-        // restricted editor's writes to lists outside their own tables would be denied wholesale
-        // (Firestore batch commits are atomic), whereas an admin/bootstrap (allowed === null) may.
-        return { schema: parsed, tableOrder: Object.keys(tables), languages: languages, lists: lists, data: data, unrestricted: allowed === null };
-      });
+      // Boot fetches NO table data. This used to read the active partition of every granted table (plus
+      // the archive of every archivable one) before a single view opened, which was the whole Firestore
+      // read bill -- tables nobody looked at, read on every boot, against the free plan's scarcest
+      // quota. A view now loads its own tables when it opens, through app-core's _ensureCached, which
+      // already had to exist for navigation.
+      //
+      // Deliberately not "fetch what the LANDING view needs": that question already has an
+      // implementation in app-core (_viewTables), which understands every view kind including a
+      // doc-view's markdown embeds and the page body an admin has edited since. Answering it a second
+      // time here -- in a layer that can see neither -- would be a second implementation free to drift,
+      // and a view whose tables were never fetched renders blank exactly like one that was denied.
+      // unrestricted: false tells the caller not to auto-seed/write shared list scaffolding -- a
+      // restricted editor's writes to lists outside their own tables would be denied wholesale
+      // (Firestore batch commits are atomic), whereas an admin/bootstrap (allowed === null) may.
+      return { schema: parsed, tableOrder: Object.keys(tables), languages: languages, lists: lists, data: {}, unrestricted: allowed === null };
     });
   },
   getAvailableTables: function() { return Promise.resolve([]); },

@@ -354,3 +354,42 @@ describe('embeds.js — safeCssUrl (background-image url() token)', () => {
     assert.equal(out.includes('\n'), false, out);
   });
 });
+
+describe('embeds.js — blockRefs (what a page needs loaded)', () => {
+  // A doc-view renders its embeds straight out of the row cache and has no fetch of its own. This is
+  // what tells the loader which tables to fetch, so anything it misses is a block that renders empty --
+  // and hide-when-empty then removes the surrounding prose too, so the page looks intentionally short
+  // rather than broken.
+  it('reports each embed once, with its kind, name and partition', () => {
+    const refs = Embeds.blockRefs('# Hi\n\n{{view:open}}\n\ntext {{table:notes@archive}}\n\n{{view:open}}');
+    assert.deepEqual(refs, [
+      { kind: 'view', name: 'open', part: null },
+      { kind: 'table', name: 'notes', part: 'archive' }
+    ]);
+  });
+
+  it('sees through the `?` hide-when-empty suffix', () => {
+    // The suffix decides whether to RENDER the block; it says nothing about whether the data is needed.
+    // Skipping these would make an optional embed permanently empty, and so permanently hidden.
+    assert.deepEqual(Embeds.blockRefs('{{view:maybe?}}'), [{ kind: 'view', name: 'maybe', part: null }]);
+    assert.deepEqual(Embeds.blockRefs('{{table:t@both?}}'), [{ kind: 'table', name: 't', part: 'both' }]);
+  });
+
+  it('expands {{self}} the way mdBlocks does', () => {
+    assert.deepEqual(Embeds.blockRefs('{{self}}', 'me'), [{ kind: 'view', name: 'me', part: null }]);
+    assert.deepEqual(Embeds.blockRefs('{{self}}', null), []);
+  });
+
+  it('finds a kind registered after load', () => {
+    // Built from the registry at call time, like the split pattern -- a directive added later is
+    // scanned for too, or its data would be the one thing nobody fetched.
+    Embeds.registerBlock('dial', { resolve: () => null, count: () => 0 });
+    assert.deepEqual(Embeds.blockRefs('{{dial:speed}}'), [{ kind: 'dial', name: 'speed', part: null }]);
+  });
+
+  it('reports nothing for prose, and does not throw on empty input', () => {
+    assert.deepEqual(Embeds.blockRefs('just words {{ not an embed }}'), []);
+    assert.deepEqual(Embeds.blockRefs(''), []);
+    assert.deepEqual(Embeds.blockRefs(null), []);
+  });
+});

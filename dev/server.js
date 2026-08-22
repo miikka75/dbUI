@@ -350,11 +350,6 @@ const server = http.createServer(async (req, res) => {
       if (id) await broadcast(_store(b.tableId, b.tab), id, await _rowById(b.tableId, b.tab, id) || b.data);
       return json(res, { ok: true });
     }
-    // The self-service read slice: my own owned rows plus the ones flagged public. Mirrors the two
-    // rules-provable Firestore queries (_scopedRead) and the Supabase read predicate, and is what the
-    // getTableData route already returns for an ungranted owner table -- boot has to say the same thing.
-    async function scopeToOwnRows(tableId, data) { return data; }   // already scoped by the row policies
-
     try {
     switch (route) {
       case 'getSchema': return json(res, await backend.getSchema());
@@ -383,35 +378,15 @@ const server = http.createServer(async (req, res) => {
         const languagesB = await backend.getAvailableLanguages();
         const allowedB = getAllowedTables(); // null => unrestricted (admin / no users)
         const listsB = filterLists(await backend.getLists(), tablesB, allowedB);
-        const dataB = {};
-        // Granted tables PLUS the owner-column (self-service) ones — the shared predicate, so this boot
-        // set matches Firebase's and Supabase's. A self-service table the caller has no READ grant on
-        // comes back as their own rows + the public roster, exactly as the getTableData route scopes it;
-        // without that slice, boot would hand a grantless member the whole table.
-        const namesB = BackendHelpers.bootTableNames(schemaB, allowedB);
-        const scopedB = (name) => !!(allowedB && allowedB.indexOf(name) < 0);
-        // for..of, not forEach: an async forEach callback is fire-and-forget, so the response would
-        // serialise dataB before a single read resolved. Sequential is also what the old synchronous
-        // code did, so ordering and error isolation are unchanged.
-        for (const name of namesB) {
-          try {
-            const d = await backend.getTableData(name, 'active');
-            dataB[name] = scopedB(name) ? await scopeToOwnRows(name, d) : d;
-          } catch (e) {}
-          const def = tablesB[name];
-          if (def && def.archivable) {
-            try {
-              const a = await backend.getTableData(name, 'archive');
-              dataB[name + '__archive'] = scopedB(name) ? await scopeToOwnRows(name, a) : a;
-            } catch (e) {}
-          }
-        }
+        // Boot sends NO table data -- see the note in backend-firebase.js. A view loads its own tables
+        // when it opens, through app-core's _ensureCached, and the dev server keeps the same boot shape
+        // as the two production backends so a bug can still only exist in one of the three.
         // unrestricted: false tells the client not to auto-seed shared list scaffolding. Firebase and
         // Supabase have always sent it; the dev server never did, so app-core kept seeding for every
         // caller. That was invisible while dev had no gate on _lists -- and under --pg it becomes a
         // write the policies refuse, arriving as an unhandled rejection rather than anything legible.
         // Computed exactly as the other two do: allowed === null means admin or bootstrap.
-        return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), languages: languagesB, lists: listsB, data: dataB,
+        return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), languages: languagesB, lists: listsB, data: {},
                            unrestricted: allowedB === null });
       }
       case 'resetData': await backend.resetData(); backend._users = undefined; saveUsers(); backend._accessRequests = undefined; saveRequests(); backend._profiles = undefined; saveProfiles(); if (backend.saveListUsers) await backend.saveListUsers({}); return json(res, { ok: true });

@@ -724,7 +724,7 @@ function createVueApp() {
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
          'bg.fit', 'bg.fit_cover', 'bg.fit_contain', 'bg.fit_tile', 'bg.fit_width',
          'msg.saved', 'msg.save_failed', 'msg.upload_failed', 'msg.choose_image', 'msg.image_too_large', 'msg.image_read_failed', 'msg.image_invalid', 'msg.image_process_failed',
-         'msg.row_added', 'msg.no_identity', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.synced', 'msg.sync_failed',
+         'msg.row_added', 'msg.no_identity', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.export_incomplete', 'msg.synced', 'msg.sync_failed',
          'msg.load_failed', 'msg.request_failed', 'msg.approve_failed', 'msg.import_complete',
          'msg.group_added', 'msg.item_added', 'msg.translation_saved', 'msg.language_added', 'msg.language_renamed', 'msg.language_exists',
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
@@ -1125,27 +1125,13 @@ function createVueApp() {
         }).then(function() {
           return self._writeBackMigratedSchema();
         }).then(function() {
-          // Preload data -- only tables the user can reach. Self-serviceable tables are included: the
-          // member holds no grant on them but the backend scopes the read to their own rows, and
-          // leaving them out left every self-service view empty until something else fetched them.
-          var tables = Object.keys(SCHEMA).filter(function(t) { return self.canReachTable(t); });
-          var chain = Promise.resolve();
-          tables.forEach(function(name) {
-            chain = chain.then(function() {
-              return backend.getTableData(name, 'active').then(function(result) {
-                self.dataCache[name] = parseTableResult(result).rows;
-              }).catch(function() { self.dataCache[name] = []; });
-            });
-            if (self.settings.preload_archive && SCHEMA[name] && SCHEMA[name].archivable) {
-              chain = chain.then(function() {
-                return backend.getTableData(name, 'archive').then(function(result) {
-                  self.dataCache[aKey(name)] = parseTableResult(result).rows;
-                }).catch(function() { self.dataCache[aKey(name)] = []; });
-              });
-            }
-          });
-          return chain;
-        }).then(function() {
+          // No table preload here any more. This walked every reachable table and read it before a view
+          // opened -- the non-batched twin of what bootData used to do, and the same read bill. A view
+          // loads its own tables when it opens (loadTableData / loadPage -> _ensureCached), the path
+          // navigation already used, so the tables of a view nobody visits are simply never read.
+          //
+          // The archive partitions this used to pull under `preload_archive` moved with them:
+          // _ensureCached honours that same setting for each table it loads.
           self.loading = false;
           self._autoArchive();
           self._autoSelectTab();
@@ -1398,22 +1384,70 @@ function createVueApp() {
         if (!allowed) return true;                                     // admin / unrestricted
         return acc.some(function(t) { return allowed.indexOf(t) >= 0; });
       },
+      // The tables a named view needs LOADED. Composed from the ACCESS gate's answer to the same
+      // question rather than re-derived: AccessFeatures.viewTables covers sources + rosters + computed
+      // helpers, and viewImplicitTables covers the per-kind inputs of a sourceless calendar/pivot/rsvp.
+      // Keeping one derivation is what stops "what may I see" and "what do I load" from drifting apart
+      // -- a view that renders blank because its inputs were never fetched is indistinguishable from
+      // one blank because access was denied.
+      //
+      // What neither of those knows about is a DOC-VIEW: its markdown embeds render straight out of
+      // dataCache with no fetch of their own. That gap is the reason this exists.
+      //
+      // Names are expanded through VIEWS, because pivot.source and rsvp.events may each name a view
+      // rather than a table -- passing a view name to a loader would fetch nothing, silently. `seen`
+      // terminates the recursion: pages may embed each other, and two calendars may overlay each other.
+      _viewTables: function(name, seen) {
+        var self = this, out = [];
+        seen = seen || {};
+        if (!name || seen[name]) return out;
+        seen[name] = 1;
+        var push = function(t) { if (t && out.indexOf(t) < 0) out.push(t); };
+        var expand = function(n) { if (VIEWS[n]) self._viewTables(n, seen).forEach(push); else push(n); };
+
+        var v = VIEWS[name];
+        if (!v) { if (SCHEMA[name]) push(name); return out; }        // a bare table
+
+        AccessFeatures.viewTables(v).forEach(expand);
+        viewImplicitTables(v).forEach(expand);
+
+        // A doc-view's embeds. Read the LOADED body when there is one: an admin may have edited the
+        // page since the schema seed was written, and the edit is what actually renders.
+        if (typeof v.markdown === 'string') {
+          var body = (self.pageCache && self.pageCache[name] != null) ? self.pageCache[name] : v.markdown;
+          Embeds.blockRefs(body, name).forEach(function(ref) {
+            if (ref.kind === 'table') push(ref.name); else expand(ref.name);
+          });
+        }
+        // Embeds declared as COLUMN entries rather than in the markdown.
+        (v.columns || []).forEach(function(c) {
+          if (isEmbed(c)) (c.sources || []).forEach(expand);
+          else if (isViewEmbed(c)) expand(c.view);
+        });
+        return out;
+      },
+
       loadPage: function(name) {
         var self = this;
         var seed = function() { return (VIEWS[name] && VIEWS[name].markdown) || ''; };
+        // The page's embeds render out of dataCache and have no fetch of their own. Load what they need
+        // once the body is known -- which is AFTER the read below, because an admin's edit can embed
+        // something the schema seed does not. _ensureCached skips whatever is already cached, so on a
+        // boot that preloaded everything this costs nothing.
+        var needed = function() { self._ensureCached(self._viewTables(name)); };
         // Prefer a single-page read (backend.getPage) so per-page access can restrict it -- a
         // whole-collection read is denied wholesale once any page is restricted (rules aren't filters).
         // Backends without getPage (Sheets/CRDT/local) fall back to the collection read.
         if (backend.getPage) {
           Promise.resolve(backend.getPage(name)).then(function(p) {
             self.pageCache[name] = (p && p.markdown != null) ? p.markdown : seed();
-          }).catch(function() { self.pageCache[name] = seed(); });
+          }).catch(function() { self.pageCache[name] = seed(); }).then(needed);
           return;
         }
         Promise.resolve(backend.getTableData('_pages', 'active')).then(function(d) {
           var row = (d && d.rows || []).find(function(r) { return r.id === name; });
           self.pageCache[name] = row ? row.markdown : seed();
-        }).catch(function() {});
+        }).catch(function() {}).then(needed);
       },
       // Embed resolution lives in /embeds.js (pure over this ctx). The root keeps same-named thin
       // wrappers so components/templates/tests are unchanged; only root-state reads cross this seam.
@@ -1540,11 +1574,63 @@ function createVueApp() {
           // Reachable = granted OR self-serviceable (owner-column table: the backend returns only the
           // member's own rows) — the same canReachTable the sidebar's canAccess uses, so an rsvp view's
           // responses table loads for a no-grant member instead of silently staying empty.
-          if (!tbl || self.dataCache[tbl] || !self.canReachTable(tbl)) return;
-          backend.getTableData(tbl, 'active').then(function(result) {
-            self.dataCache[tbl] = parseTableResult(result).rows;
-            if (onLoad) onLoad(tbl);
-          }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
+          if (!tbl || !self.canReachTable(tbl)) return;
+          if (!self.dataCache[tbl]) {
+            backend.getTableData(tbl, 'active').then(function(result) {
+              self.dataCache[tbl] = parseTableResult(result).rows;
+              // A table can only be swept once it is HERE. _autoArchive walks whatever is cached and a
+              // repeat run finds nothing left to move, so this is what keeps the sweep working when boot
+              // no longer loads everything -- otherwise rows in a table nobody had opened would simply
+              // never age out, silently.
+              self._autoArchive();
+              if (onLoad) onLoad(tbl);
+            }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
+          }
+          // The ARCHIVE partition, under the SAME rule boot used (`preload_archive`, on by default) --
+          // just applied per view instead of to the whole schema at once. Several features read
+          // `<table>__archive` straight out of the cache with no fetch of their own: a view's
+          // `includeArchive`, an `@archive` embed, a rotation column's occurrence source. Proving which
+          // of them a given view will hit means re-deriving each one's config here; honouring the
+          // existing setting keeps every one of them working and is still narrower than boot, which
+          // fetched the archive of every archivable table in the schema.
+          if (self.settings.preload_archive && SCHEMA[tbl] && SCHEMA[tbl].archivable && !self.dataCache[aKey(tbl)]) {
+            backend.getTableData(tbl, 'archive').then(function(result) {
+              self.dataCache[aKey(tbl)] = parseTableResult(result).rows;
+              if (onLoad) onLoad(tbl);
+            }).catch(function() { self.dataCache[aKey(tbl)] = self.dataCache[aKey(tbl)] || []; });
+          }
+        });
+        self._ensureDeps(tables, onLoad);
+      },
+
+      // The tables a view's COLUMNS resolve out of, as opposed to the tables its rows come from: a ref
+      // dropdown's options, a lookup computed's source, a rotation column's roster, a mirror's master.
+      // Every one of those reads dataCache directly and resolves to []/undefined when the entry is
+      // missing -- an empty dropdown and a blank cell, which look like data rather than like a missing
+      // fetch. Today boot loads every granted table so this never fires; it exists so that stops being
+      // the thing holding those columns up. See Columns.tableDeps for the five shapes.
+      //
+      // Two deliberate limits:
+      //   - LOAD ONLY, never _liveWatch. A listener bills a read per document in its first snapshot, so
+      //     watching every ref table would cost more than the lazy load saves, and a dropdown of options
+      //     does not need to be live the way a row grid does.
+      //   - DEPTH 1. A dependency's own dependencies are what you need once you OPEN that table, and
+      //     opening it goes through _ensureCached again. Recursing here would drag in the transitive
+      //     closure of the schema on the first view load, which is the cost this is meant to avoid.
+      _ensureDeps: function(tables, onLoad) {
+        var self = this;
+        if (typeof Columns === 'undefined' || !Columns.tableDeps) return;
+        var seen = {};
+        (tables || []).forEach(function(tbl) {
+          if (!tbl) return;
+          Columns.tableDeps(SCHEMA, tbl).forEach(function(dep) {
+            if (seen[dep] || self.dataCache[dep] || !self.canReachTable(dep)) return;
+            seen[dep] = 1;
+            backend.getTableData(dep, 'active').then(function(result) {
+              self.dataCache[dep] = parseTableResult(result).rows;
+              if (onLoad) onLoad(dep);
+            }).catch(function() { self.dataCache[dep] = self.dataCache[dep] || []; });
+          });
         });
       },
 
@@ -1710,27 +1796,15 @@ function createVueApp() {
           // the self-service case: an owner-column table a member reaches without a grant.
           // Archive mode reads the __archive partitions, which _ensureCached doesn't fetch — leave that
           // path alone rather than have it load the wrong partition.
-          if (!self.viewingArchive) self._ensureCached(view.sources || [], recomputeRotation);
-          // Load embed table data if not cached
-          (view.columns || []).forEach(function(c) {
-            var embedSources = [];
-            if (isEmbed(c)) { embedSources = c.sources || []; }
-            else if (isViewEmbed(c) && VIEWS[c.view]) {
-              embedSources = VIEWS[c.view].sources || [];
-              // rotationView embed: its rosters aren't in `sources` — preload them so the embed resolves
-              var erv = VIEWS[c.view].rotation;
-              if (erv) embedSources = embedSources.concat(erv.rosters || (erv.columns || []).map(function(rc) { return rc.rotationTable; }));
-            }
-            embedSources.forEach(function(tbl) {
-              if (!self.canReachTable(tbl)) return;
-              if (tbl && !self.dataCache[tbl]) {
-                var embedTab = 'active';
-                backend.getTableData(tbl, embedTab).then(function(result) {
-                  self.dataCache[tbl] = parseTableResult(result).rows;
-                });
-              }
-            });
-          });
+          // Everything this view reads: its own sources, and whatever its column embeds resolve to.
+          // That second half used to be an inline loop over `columns` that asked each embedded view for
+          // its `sources` -- which is empty for a DOC-view, so a page embedded as a column never got its
+          // own embeds' tables. The doc-view then found no rows, and hide-when-empty hid the whole block
+          // including its prose. _viewTables answers this for every kind, recursively, and is the same
+          // derivation loadPage uses.
+          // Archive mode reads the __archive partitions, which _ensureCached doesn't fetch -- leave that
+          // path alone rather than have it load the wrong partition.
+          if (!self.viewingArchive) self._ensureCached(self._viewTables(self.currentTable), recomputeRotation);
           // Preload rotation-column dependencies (rotationTable + occurrenceSource), then recompute via
           // recomputeRotation (declared above, shared with the source preload).
           // The occurrenceSource ARCHIVE partition is also loaded so the occurrence rank stays absolute
@@ -1758,10 +1832,12 @@ function createVueApp() {
           // partition here — and it is the only place `archive` is ever watched, since that is the only
           // partition a user can have open.
           self._liveWatch([self.currentTable], self.viewingArchive ? 'archive' : 'active');
+          self._ensureDeps([self.currentTable]);   // ref/lookup sources: this branch skips _ensureCached
           if (!self.dataCache[key]) {
             var tab = self.viewingArchive ? 'archive' : 'active';
             backend.getTableData(self.currentTable, tab).then(function(result) {
               self.dataCache[key] = parseTableResult(result).rows;
+              self._autoArchive();                    // same reason as in _ensureCached
               var rows = self.dataCache[key];
               if (tableDef.filter) rows = filterRows(rows, tableDef.filter);
               self.currentData = rows;
@@ -3652,14 +3728,34 @@ function createVueApp() {
       exportData: function() {
         var self = this;
         var data = {};
+        // A backup is the one place where "not cached" must never quietly become "empty". This read the
+        // cache and substituted [] -- safe only by accident, because boot happens to load every granted
+        // table. It is not safe when a read FAILS: both the boot path and _ensureCached cache [] on
+        // failure (fail-closed, correct for a grid), and that empty array was then written into the file
+        // as though the table really were empty. A backup that silently drops a table is worse than no
+        // backup, because it is the one that gets trusted.
+        //
+        // So: fetch what is missing, and produce no file at all if any read fails. This also stops boot
+        // from being load-bearing for exports, which is what a lazier boot needs.
+        var wanted = [], failed = [];
         Object.keys(SCHEMA).forEach(function(table) {
-          data[table] = self.dataCache[table] || [];
-          var archiveKey = aKey(table);
-          if (self.dataCache[archiveKey]) data[archiveKey] = self.dataCache[archiveKey];
+          // Omit what this user cannot read rather than asserting it is empty. Import is additive
+          // (delete+put per row), so an omitted table is left untouched on restore exactly as an empty
+          // one would be -- but the file no longer says something false about it.
+          if (!self.canReachTable(table)) return;
+          wanted.push([table, table, 'active']);
+          if (SCHEMA[table].archivable) wanted.push([aKey(table), table, 'archive']);
         });
+        var gather = Promise.all(wanted.map(function(w) {
+          var key = w[0];
+          if (self.dataCache[key]) { data[key] = self.dataCache[key]; return null; }
+          return Promise.resolve(backend.getTableData(w[1], w[2])).then(function(res) {
+            data[key] = parseTableResult(res).rows;
+          }).catch(function() { failed.push(key); });
+        }));
         // Gather translations
         var translations = {};
-        var chain = Promise.resolve();
+        var chain = gather;
         self.languages.forEach(function(lang) {
           chain = chain.then(function() {
             return backend.getTranslations(lang.code).then(function(t) { translations[lang.code] = t; });
@@ -3677,6 +3773,12 @@ function createVueApp() {
           self.notify(self.t('msg.exported'));
         };
         chain.then(function() {
+          // Refuse rather than hand over a file with a hole in it. The tables are named so the user can
+          // tell a permission problem from a network one.
+          if (failed.length) {
+            self.notify(self.t('msg.export_incomplete') + ' ' + failed.join(', '));
+            return;                      // no file at all -- a partial backup is the one that gets trusted
+          }
           // _pages and _assets are SYSTEM stores, so neither is in `tables` above (that map is built from
           // Object.keys(SCHEMA)) — each needs an explicit read to reach the bundle. Assets carry the actual
           // image bytes as data URIs; without them an import lands with `asset:` references resolving to

@@ -173,24 +173,6 @@
       return { lists: out.slice().sort() };
     },
 
-    // The tables a boot should LOAD for a caller whose read scope is `allowed` (null = unrestricted).
-    // Granted tables, PLUS every owner-column (self-service) table: a member may reach those without a
-    // grant at all, and each backend already scopes the read to the slice they may see (Firestore via
-    // _scopedRead's two provable queries, Supabase via RLS, the dev server via its owner-column filter).
-    // Skipping them left every self-service view permanently empty -- the union/join branch of
-    // loadTableData renders straight out of dataCache, so nothing later fetches them.
-    //
-    // Lives here because all three backends compute the identical predicate from identical inputs, and
-    // it had already drifted: Firebase learned the self-service clause, Supabase and the dev server did
-    // not. Same reason list-access.js and access-features.js were extracted.
-    bootTableNames: function(schema, allowed) {
-      var tables = (schema && schema.tables) || {};
-      if (!allowed) return Object.keys(tables);            // unrestricted (admin / bootstrap) -> everything
-      var selfServe = H.ownerTablesOf(schema);
-      return Object.keys(tables).filter(function(t) {
-        return allowed.indexOf(t) >= 0 || selfServe.indexOf(t) >= 0;
-      });
-    },
 
     // Rows a table's `archiveAfter` policy has aged out of the ACTIVE partition:
     //   "archiveAfter": { "column": "status", "values": ["approved","rejected"], "days": 7 }
