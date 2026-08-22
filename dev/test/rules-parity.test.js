@@ -142,7 +142,12 @@ describe('rules parity — userWritableLists (list editing is admin-only by defa
   it('supabase-schema.sql gates the non-admin branch of _lists create and update', () => {
     assert.match(SQL, /create or replace function public\.app_list_user_writable/, 'supabase needs app_list_user_writable');
     const uses = (SQL.match(/public\.app_list_user_writable\(key\)/g) || []).length;
-    assert.equal(uses, 2, 'create and update must each call it; delete is admin-only (found ' + uses + ')');
+    // THREE, not two, and the third is load-bearing rather than belt-and-braces: READ must consult it
+    // as well. Postgres applies the SELECT policy to rows an UPDATE has to locate, so a list a member
+    // cannot read is a list they cannot append to -- which silently disabled userWritableLists on
+    // Supabase while it kept working on Firebase and on the dev server. Firestore evaluates its write
+    // rules independently of read, which is why its own count stays at two. Delete remains admin-only.
+    assert.equal(uses, 3, 'read, create and update must each call it; delete is admin-only (found ' + uses + ')');
     assert.doesNotMatch(SQL, /app_list_write_allowed/, 'the table-grant helper should be gone');
   });
   it('dev/server.js gates putListItem and saveLists', () => {
@@ -313,7 +318,11 @@ describe('rules parity — a partial write is judged on the MERGED row, on every
   it('Supabase merges server-side rather than read-modify-write, so concurrent patches cannot clobber', () => {
     assert.match(SQL, /create or replace function public\.app_kv_merge/,
       'the app_kv_merge RPC is missing — StorageSupabase.put falls back to a racy client-side merge');
-    assert.match(SQL, /do update set value = public\.kv\.value \|\| excluded\.value/,
+    // The shape changed from `insert ... on conflict do update` to UPDATE-first, because the former
+    // evaluated the INSERT policy against the bare patch and so refused every partial write on a
+    // self-service row. What this guards is unchanged: the patch must merge ONTO the stored value
+    // rather than replace it, which is `kv.value || <patch>` in either shape.
+    assert.match(SQL, /set value = public\.kv\.value \|\| (p_patch|excluded\.value)/,
       'app_kv_merge does not merge onto the stored value');
     // SECURITY INVOKER (the default) is load-bearing: a DEFINER merge would bypass the kv policies and
     // turn a concurrency fix into a write-anything hole.
