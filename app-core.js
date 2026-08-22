@@ -4239,10 +4239,11 @@ function createVueApp() {
         this.notify(this.t('msg.deleted'));
       },
       // Apply every table's `archiveAfter` policy once the cache is loaded: rows that have sat in a
-      // terminal state long enough move themselves to the archive, so a log stays the recent past
-      // without anyone filing it. Deliberately client-side and best-effort — there is no server-side
-      // scheduler — so it runs only for someone who could archive by hand anyway, and a concurrent
-      // second run is harmless (moveRow re-writes the same row into the same partition).
+      // terminal state long enough file themselves away, so a log stays the recent past without anyone
+      // doing it by hand. Deliberately client-side and best-effort — there is no server-side scheduler —
+      // so it runs only for someone who could archive by hand anyway, and a concurrent second run is
+      // harmless: _archiveInSources skips a row already in the archive partition, and the underlying
+      // write is an idempotent `_status` stamp rather than a move.
       _autoArchive: function() {
         var self = this, now = new Date();
         // Grants decide whether we may write, so wait until they are known — before that
@@ -4257,7 +4258,10 @@ function createVueApp() {
           // mirror cluster, so require write access to all of it (self-service rows are the owner's own).
           var writable = self.userWritableTables;
           if (writable && !withMirrors([table]).every(function(t) { return writable.indexOf(t) >= 0; })) return;
-          var ids = BackendHelpers.autoArchiveIds(self.dataCache[table] || [], cfg, now);
+          // The ACTIVE partition only. dataCache[table] now holds filed-away rows too, and an
+          // archived row still matches an archiveAfter policy -- _archiveInSources would skip it,
+          // but scanning it every sweep is work with no possible outcome.
+          var ids = BackendHelpers.autoArchiveIds(Rows.partitionRows(self.dataCache, table, 'active'), cfg, now);
           ids.forEach(function(id) { self._archiveInSources(withMirrors([table]), id, true); });
         });
       },
