@@ -110,21 +110,38 @@ describe('migrations — renameAll covers every language in one pass', () => {
 
 describe('migrations — no shipped language loses a string', () => {
   // The gate the plan names: migrate a schema plus its translations and assert zero keys lost, across
-  // every language actually shipped. The chain carries no renames yet, so this drives the real files
+  // every language actually shipped. The chain carries no renames yet, so this drives the real packs
   // through a synthetic rename of every field.* key — the shape a column-vocabulary migration would
   // take, and the case where silent loss would hurt most.
-  const dir = path.join(ROOT, 'dev', 'data');
-  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.indexOf('lang_') === 0 && f.endsWith('.json')) : [];
+  //
+  // Reads the COMMITTED packs. It first read dev/data/lang_*.json, which exists on a developer machine
+  // and not in a clean checkout — dev/data/ is gitignored, being the dev server's working directory.
+  // The "would pass vacuously" guard below is what caught that, on CI, having passed locally.
+  const packs = [];
+  const addTranslations = (label, obj) => {
+    Object.keys(obj || {}).forEach((code) => {
+      if (obj[code] && typeof obj[code] === 'object') packs.push([label + ':' + code, obj[code]]);
+    });
+  };
+  const exDir = path.join(ROOT, 'examples');
+  if (fs.existsSync(exDir)) {
+    for (const f of fs.readdirSync(exDir)) {
+      if (f.indexOf('-lang-') < 0 || !f.endsWith('.json')) continue;
+      const d = JSON.parse(fs.readFileSync(path.join(exDir, f), 'utf8'));
+      addTranslations(f, d.translations);
+    }
+  }
+  const bundle = path.join(ROOT, 'dev', 'demo-bundle.json');
+  if (fs.existsSync(bundle)) addTranslations('demo-bundle.json', JSON.parse(fs.readFileSync(bundle, 'utf8')).translations);
 
   it('found language packs to check', () => {
-    assert.ok(files.length > 0, 'no lang_*.json fixtures — this suite would pass vacuously');
+    assert.ok(packs.length > 0, 'no committed translation packs — this suite would pass vacuously');
   });
 
-  for (const file of files) {
-    it(file + ' keeps every translated string across a full field.* rename', () => {
-      const before = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+  for (const [label, before] of packs) {
+    it(label + ' keeps every translated string across a full field.* rename', () => {
       const fieldKeys = Object.keys(before).filter((k) => k.indexOf('field.') === 0);
-      assert.ok(fieldKeys.length > 0, file + ' has no field.* keys to move');
+      if (!fieldKeys.length) return;                 // an app-only pack may carry none
       const renames = fieldKeys.map((k) => [k, 'col.' + k.slice('field.'.length)]);
 
       const after = Migrations.renameKeys(before, renames);
@@ -132,15 +149,20 @@ describe('migrations — no shipped language loses a string', () => {
       // Nothing vanished: every translated value present before is still present after, under one name
       // or another. Compared as a multiset of VALUES, because the keys are exactly what changed.
       const vals = (m) => Object.keys(m).filter((k) => m[k] !== '').map((k) => m[k]).sort();
-      assert.deepEqual(vals(after), vals(before), file + ': a translated string was lost in the rename');
+      assert.deepEqual(vals(after), vals(before), label + ': a translated string was lost in the rename');
 
       // And every moved key landed where it was sent.
       for (const [from, to] of renames) {
-        assert.ok(!(from in after), file + ': ' + from + ' was left behind');
-        assert.equal(after[to], before[from], file + ': ' + to + ' did not receive the string');
+        assert.ok(!(from in after), label + ': ' + from + ' was left behind');
+        assert.equal(after[to], before[from], label + ': ' + to + ' did not receive the string');
       }
     });
   }
+
+  it('at least one pack actually carries field.* keys, or the rename is never exercised', () => {
+    const withFields = packs.filter(([, m]) => Object.keys(m).some((k) => k.indexOf('field.') === 0));
+    assert.ok(withFields.length > 0, 'no pack has a field.* key — the gate would prove nothing');
+  });
 });
 
 describe('migrations — the write-back applies renames rather than trusting anyone to remember', () => {
