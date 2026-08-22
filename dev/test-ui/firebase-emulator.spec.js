@@ -294,6 +294,45 @@ test('live sync: a write in one client reaches another through onSnapshot, unsco
       () => ((appInstance.dataCache.notes || []).find(r => r.id === 'n1') || {}).title
     ), { timeout: 15000 }).toBe('PatchedByA');
 
+    // The GRID, not just the cache. Every assertion above reads dataCache, which the reconciler mutates
+    // in place -- so all of them pass even if the debounced rebuild never runs and the screen never
+    // changes. currentData is derived, so it is the only thing that catches that. Asserted in the
+    // POSITIVE direction first: checking only that a row disappears would pass on a client whose grid
+    // never had it, which is exactly how the first version of this assertion went green under mutation.
+    await expect.poll(async () => pageB.evaluate(
+      () => ((appInstance.currentData || []).find(r => r.id === 'n1') || {}).title
+    ), { timeout: 15000 }).toBe('PatchedByA');
+
+    // ARCHIVING reaches the other client, and moves it between partitions there.
+    //
+    // This changed shape entirely and nothing was watching. Archiving used to be a delete from the
+    // active collection plus a create in the archive one, so a subscriber saw a DELETE and the row
+    // simply vanished. It is a `_status` stamp now, which arrives as an ordinary PUT to the collection
+    // the subscriber is already watching -- so the row has to stay in the cache and change PARTITION,
+    // which is a different thing for the reconciler to get right. A regression here would look like an
+    // archived row lingering in someone else's active list until they reloaded.
+    await page.evaluate(() => backend.putRow('notes', { id: 'n1', _status: 'archive' }, 'active'));
+    await expect.poll(async () => pageB.evaluate(
+      () => window.Rows.partitionRows(appInstance.dataCache, 'notes', 'active').some(r => r.id === 'n1')
+    ), { timeout: 15000 }).toBe(false);
+    expect(await pageB.evaluate(
+      () => window.Rows.partitionRows(appInstance.dataCache, 'notes', 'archive').some(r => r.id === 'n1')
+    ), 'the archived row left the active partition without arriving in the archive one').toBe(true);
+    // The row is still THERE -- carrying its other fields -- rather than having been dropped.
+    expect(await pageB.evaluate(
+      () => ((appInstance.dataCache.notes || []).find(r => r.id === 'n1') || {}).title
+    )).toBe('PatchedByA');
+    // ...and having arrived in the grid, it leaves when archived.
+    await expect.poll(async () => pageB.evaluate(
+      () => (appInstance.currentData || []).some(r => r.id === 'n1')
+    ), { timeout: 15000 }).toBe(false);
+
+    // And restoring it comes back the same way.
+    await page.evaluate(() => backend.putRow('notes', { id: 'n1', _status: 'active' }, 'active'));
+    await expect.poll(async () => pageB.evaluate(
+      () => window.Rows.partitionRows(appInstance.dataCache, 'notes', 'active').some(r => r.id === 'n1')
+    ), { timeout: 15000 }).toBe(true);
+
     // A delete propagates too.
     await page.evaluate(() => backend.deleteRow('notes', 'n1', 'active'));
     await expect.poll(async () => pageB.evaluate(
