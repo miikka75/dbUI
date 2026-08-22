@@ -60,7 +60,13 @@ function seed(page) {
 }
 
 async function expectNoCspViolations(page) {
-  expect(await page.evaluate(() => window.__cspViolations || [])).toEqual([]);
+  // The recorder has to be PROVED present before its emptiness means anything. `|| []` made a page that
+  // never ran seed()'s init script -- so never attached the securitypolicyviolation listener -- look
+  // exactly like a page with no violations, and this gate exists because a CSP regression once blocked
+  // boot outright. An empty array from a listener that was never attached is not evidence of anything.
+  const installed = await page.evaluate(() => Array.isArray(window.__cspViolations));
+  expect(installed, 'the CSP violation recorder was never installed on this page — seed() not called?').toBe(true);
+  expect(await page.evaluate(() => window.__cspViolations)).toEqual([]);
 }
 
 // Sign in against the AUTH EMULATOR with a mock Google credential (the emulator accepts an unsigned
