@@ -131,7 +131,10 @@ async function createPgliteBackend(opts) {
       const d = await S.getMeta('languages');
       const langs = BackendHelpers.addLanguage(d ? (d.list || []) : [], code, name);
       await S.setMeta('languages', { list: langs });
-      await S.setMeta('lang_' + code, BackendHelpers.emptyTranslations(keys));
+      // Read first: an existing language keeps every string it already has -- import calls this per
+      // language in the file, so writing the blank seed straight over erased whichever pack was
+      // imported first. Same rule as the other three backends (BackendHelpers.seedTranslations).
+      await S.setMeta('lang_' + code, BackendHelpers.seedTranslations(await S.getMeta('lang_' + code), keys));
       return code;
     },
     async deleteLanguage(code) {

@@ -946,8 +946,34 @@ function createVueApp() {
         window._schemaMigration = null;                 // once per session, even if the save fails
         var self = this;
         return Promise.resolve(backend.saveSchema(this.schemaData))
+          .then(function() { return self._migrateTranslations(m.renames); })
           .then(function() { console.info('schema migrated to v' + m.to + ': ' + m.applied.join('; ')); })
           .catch(function() { self.notify(self.t('msg.save_failed')); });
+      },
+
+      // Move stored translations with the schema. Translation keys are generated per column as
+      // `field.<col>`, so a migration that changes a column's identity orphans every string filed under
+      // the old key -- in every language at once, showing raw keys to exactly the people least able to
+      // work out why. This runs as a step OF the write-back rather than as a follow-up somebody has to
+      // remember, which is the only version of it that stays true.
+      //
+      // After the schema, deliberately: if the save is refused there is nothing to move to.
+      // Per-language failures are swallowed -- one language that cannot be written must not abandon the
+      // rest, and the chain re-runs next session because the schema write-back is what clears the flag.
+      _migrateTranslations: function(renames) {
+        if (!renames || !renames.length || typeof Migrations === 'undefined') return Promise.resolve();
+        var self = this;
+        return (self.languages || []).reduce(function(chain, lang) {
+          var code = lang && lang.code;
+          if (!code) return chain;
+          return chain.then(function() {
+            return Promise.resolve(backend.getTranslations(code)).then(function(t) {
+              var patch = Migrations.renamePatch(t, renames);
+              if (!Object.keys(patch).length) return null;
+              return backend.updateTranslations(code, patch);
+            }).catch(function() {});
+          });
+        }, Promise.resolve());
       },
 
       // Setup
@@ -1575,7 +1601,7 @@ function createVueApp() {
           // member's own rows) — the same canReachTable the sidebar's canAccess uses, so an rsvp view's
           // responses table loads for a no-grant member instead of silently staying empty.
           if (!tbl || !self.canReachTable(tbl)) return;
-          if (!self.dataCache[tbl]) {
+          if (!self.dataCache[tbl] && !self._liveLoads(tbl)) {
             backend.getTableData(tbl, 'active').then(function(result) {
               self.dataCache[tbl] = parseTableResult(result).rows;
               // A table can only be swept once it is HERE. _autoArchive walks whatever is cached and a
@@ -1644,6 +1670,21 @@ function createVueApp() {
       // the session. On Firestore a listener bills a read per document in its FIRST snapshot, so
       // re-subscribing on every navigation would quietly multiply the bill; keeping them costs one
       // extra full read per table per session and nothing for a table the user never opens.
+      // True when the live subscription will DELIVER the initial rows, so fetching them separately would
+      // pay for the same documents twice -- which is exactly what happened: Firestore bills a read per
+      // document in a listener's first snapshot, and every table a view opened was fetched and then
+      // subscribed. Backends whose realtime channel carries only subsequent CHANGES (Supabase, the dev
+      // server's SSE) do not set `subscribeLoads`, and keep fetching.
+      //
+      // Mirrors _liveWatch's own guards on purpose: if the conditions for subscribing are not met the
+      // subscription never happens, and skipping the fetch on top of that would leave the table empty
+      // for good.
+      _liveLoads: function(tbl) {
+        return !!(typeof LiveSync !== 'undefined' && typeof backend !== 'undefined' && backend
+                  && backend.subscribeLoads && typeof backend.subscribeTable === 'function'
+                  && tbl && this.canReachTable(tbl));
+      },
+
       _liveWatch: function(tables, tab) {
         var self = this;
         // `backend` is an implicit global assigned by whichever adapter loaded, and app-core is created
@@ -1660,6 +1701,24 @@ function createVueApp() {
             self._liveApply(store, change);
           }) || function() {};
         });
+      },
+
+      // A subscription that will never deliver rows -- denied, or no identity to scope it by. Fetch the
+      // partition directly, the way every backend without `subscribeLoads` is fetched anyway. Guarded on
+      // the cache still being empty so it cannot fire twice or overwrite a load that already landed.
+      _liveLoadFallback: function(store) {
+        var self = this;
+        var key = LiveSync.cacheKeyFor(store);
+        if (self.dataCache[key] !== undefined) return;
+        var parts = String(store).split('__');
+        var tbl = parts[0], tab = parts.length > 1 ? 'archive' : 'active';
+        if (!self.canReachTable(tbl)) { self.dataCache[key] = []; return; }
+        backend.getTableData(tbl, tab).then(function(result) {
+          if (self.dataCache[key] !== undefined) return;
+          self.dataCache[key] = parseTableResult(result).rows;
+          self._autoArchive();
+          self.loadTableData();
+        }).catch(function() { self.dataCache[key] = self.dataCache[key] || []; });
       },
 
       // Drop every subscription. Called by the two paths that discard the whole dataset before the
@@ -1695,6 +1754,29 @@ function createVueApp() {
 
       _liveApply: function(store, change) {
         var self = this;
+        // 'sync' is the listener's FIRST snapshot -- the whole partition, which Firestore billed a read
+        // per document for whether or not anyone used it. Treated as a LOAD, not as a remote edit: it
+        // is not queued behind an in-flight local edit (there is nothing local yet) and it never
+        // overwrites rows already in the cache, so a fallback fetch that won the race keeps its result
+        // and a late snapshot cannot clobber what the user has since typed.
+        if (change && change.type === 'sync') {
+          var key = LiveSync.cacheKeyFor(store);
+          // Applied unless the cache already holds ROWS -- not merely unless it exists. Other code
+          // seeds an empty array as a placeholder (app-core:1349 does it so a ref dropdown has
+          // something to read; _archiveInSources does it before moving a row), and treating that
+          // placeholder as "already loaded" threw the snapshot away and left the table permanently
+          // empty. A cache that already has rows got them from a fetch of the same partition, so the
+          // snapshot is redundant there, and skipping it is what protects a local optimistic insert.
+          if (!(self.dataCache[key] && self.dataCache[key].length)) {
+            self.dataCache[key] = change.rows || [];
+            self._autoArchive();
+            self.loadTableData();
+          }
+          return;
+        }
+        // No live subscription is coming (denied, or no identity). The rows have to arrive some other
+        // way or the view stays blank with nothing to explain it.
+        if (change && change.type === 'sync-failed') { self._liveLoadFallback(store); return; }
         if (!self._liveState) self._liveState = LiveSync.createState();
         var rowsFor = function(cacheKey) { return self.dataCache[cacheKey]; };
         var r = LiveSync.queueOrApply(self._liveState, store, change, self._liveHeld(), rowsFor);
@@ -1833,7 +1915,7 @@ function createVueApp() {
           // partition a user can have open.
           self._liveWatch([self.currentTable], self.viewingArchive ? 'archive' : 'active');
           self._ensureDeps([self.currentTable]);   // ref/lookup sources: this branch skips _ensureCached
-          if (!self.dataCache[key]) {
+          if (!self.dataCache[key] && !self._liveLoads(self.currentTable)) {
             var tab = self.viewingArchive ? 'archive' : 'active';
             backend.getTableData(self.currentTable, tab).then(function(result) {
               self.dataCache[key] = parseTableResult(result).rows;
@@ -1843,7 +1925,10 @@ function createVueApp() {
               self.currentData = rows;
             });
           } else {
-            var rows = self.dataCache[key];
+            // `|| []` matters now: with subscribeLoads the fetch above is skipped and the cache stays
+            // undefined until the listener's first snapshot lands, so this runs once with nothing in it.
+            // currentData must still be an array -- the grid renders it directly.
+            var rows = self.dataCache[key] || [];
             if (tableDef.filter) rows = filterRows(rows, tableDef.filter);
             self.currentData = rows;
           }

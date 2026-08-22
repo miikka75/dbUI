@@ -45,7 +45,11 @@
     return 'data';
   }
 
-  function v1_to_v2(schema) {
+  // Every step takes (schema, renames) even when it renames nothing: the collector is part of the step
+  // contract, not an optional extra, so a step that DOES move a column has somewhere to say so without
+  // first changing how the chain is called. This one changes no column identity -- it writes down a
+  // kind that was previously inferred -- so it records nothing.
+  function v1_to_v2(schema, renames) {           // eslint-disable-line no-unused-vars
     eachView(schema.views, function (v) {
       if (!v.name) return;                 // a bare nav group is not a view
       if (!v.kind) v.kind = kindOf(v);     // idempotent, and never overrides a hand-written kind
@@ -57,6 +61,79 @@
     { to: 2, apply: v1_to_v2, describes: 'name each view kind instead of inferring it from key presence' }
   ];
 
+  // ---- Translation keys move with the schema ------------------------------------------------------
+  // Translation keys are generated per column as `field.<col>`, so any migration that changes a
+  // column's identity orphans every string stored against the old key. Nothing would report it: the
+  // schema would be correct and the app would render raw keys, in every language at once, to the people
+  // least able to work out why.
+  //
+  // So a step that changes identity RECORDS the move, by calling renames(from, to) as it goes. Applying
+  // those to the stored translations is a derived step of migrating -- never a manual follow-up
+  // somebody has to remember -- and `migrate` hands the list back for the caller to apply.
+  //
+  // Order is preserved because it is load-bearing across steps: v2->v3 may rename a -> b and v3->v4
+  // rename b -> c, and only replaying them in order lands the string on c.
+  function collector() {
+    var list = [];
+    var add = function (from, to) {
+      if (!from || !to || from === to) return;
+      list.push([from, to]);
+    };
+    add.list = list;
+    return add;
+  }
+
+  // Apply recorded renames to one language's stored translations. Pure: returns a NEW map.
+  //
+  // Idempotent, like every migration here, and for the same reason -- the chain re-runs on every load
+  // until an admin session writes the result back, so this may be applied to translations that already
+  // moved. After the first pass the old key is gone, so a second pass finds nothing to move.
+  //
+  // Collisions keep the TARGET. If the new key already holds a non-empty string, somebody has already
+  // translated it under its new name, and their string is the better one -- the value under the old key
+  // is by definition the older wording.
+  function renameKeys(translations, renames) {
+    var out = {}, k;
+    for (k in (translations || {})) out[k] = translations[k];
+    (renames || []).forEach(function (pair) {
+      var from = pair && pair[0], to = pair && pair[1];
+      // The same validity rule the collector applies, repeated here rather than assumed: a chain step
+      // may hand this list over directly, and a half-formed pair would otherwise DELETE the source key
+      // and file its string under "null".
+      if (!from || !to || from === to) return;
+      if (!(from in out)) return;                       // already moved, or never existed
+      var moving = out[from];
+      delete out[from];
+      if (out[to] !== undefined && out[to] !== '') return;   // target already translated -- keep it
+      out[to] = moving;
+    });
+    return out;
+  }
+
+  // The same move expressed as a PATCH for updateTranslations, which merges and therefore cannot
+  // delete: a key that has gone is sent as '' instead. t() is `strings[key] || key`, so a blanked key
+  // reads exactly like an absent one -- and leaving the old key with its old VALUE would be worse than
+  // cruft, because a column that later reappears under that name would silently inherit stale wording.
+  function renamePatch(translations, renames) {
+    var before = translations || {};
+    var after = renameKeys(before, renames);
+    var patch = {};
+    Object.keys(after).forEach(function (k) { if (after[k] !== before[k]) patch[k] = after[k]; });
+    // `!== ''` keeps this a true no-op on a second pass: a key blanked by an earlier run is already
+    // gone as far as t() is concerned, and re-sending '' would make every boot issue a write.
+    Object.keys(before).forEach(function (k) { if (!(k in after) && before[k] !== '') patch[k] = ''; });
+    return patch;
+  }
+
+  // Every language at once: { code: translations } -> { code: translations }.
+  function renameAll(byLang, renames) {
+    var out = {};
+    Object.keys(byLang || {}).forEach(function (code) {
+      out[code] = renameKeys(byLang[code], renames);
+    });
+    return out;
+  }
+
   // Returns { schema, from, to, applied: [description] }. Mutates and returns the schema it is given:
   // callers pass the freshly parsed document, and copying a whole schema per load to avoid that would
   // buy nothing.
@@ -64,14 +141,16 @@
     var s = schema || {};
     var from = Number(s.schemaVersion) || 1;
     var applied = [];
+    var renames = collector();
     CHAIN.forEach(function (step) {
-      if (from < step.to) { s = step.apply(s); applied.push(step.describes); }
+      if (from < step.to) { s = step.apply(s, renames); applied.push(step.describes); }
     });
     s.schemaVersion = Math.max(from, CURRENT_VERSION);
-    return { schema: s, from: from, to: s.schemaVersion, applied: applied };
+    return { schema: s, from: from, to: s.schemaVersion, applied: applied, renames: renames.list };
   }
 
-  var M = { CURRENT_VERSION: CURRENT_VERSION, migrate: migrate, kindOf: kindOf, eachView: eachView };
+  var M = { CURRENT_VERSION: CURRENT_VERSION, migrate: migrate, kindOf: kindOf, eachView: eachView,
+            renameKeys: renameKeys, renameAll: renameAll, renamePatch: renamePatch };
   if (isNode) module.exports = M;
   else root.Migrations = M;
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));
