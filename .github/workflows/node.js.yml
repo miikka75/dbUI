@@ -32,6 +32,10 @@ jobs:
         cache-dependency-path: dev/package-lock.json
     - run: npm ci
     - run: npm run build --if-present
+    # Type-check the pure domain modules with tsc --checkJs (no build step: allowJs + noEmit, so the
+    # shipped .js is read as-is). Catches the class of slip that unit tests only find by value --
+    # a shifted positional argument, a Date used as a number.
+    - run: npm run typecheck
     # Includes dev/test/supabase-rls.test.js, which executes the real supabase-schema.sql policies
     # against PostgreSQL-in-WASM (@electric-sql/pglite). No service container, Docker or JVM needed —
     # unlike the `rules` job below, it is just another unit test.
@@ -63,6 +67,11 @@ jobs:
       run: npm run test:rules
     - name: Storage rules tests (cross-service registration gate)
       run: npm run test:storage-rules
+    # The two production policy layers, compared on BEHAVIOUR rather than on source text: one access
+    # matrix through the Firestore emulator and through PostgreSQL-in-WASM, asserting the rules are
+    # never LOOSER than the RLS. Belongs in this job because it needs the same emulator and JVM.
+    - name: Policy differential (firestore.rules vs supabase-schema.sql)
+      run: npm run test:differential
 
   # CDN-fallback integrity check (network-only). The app is self-hosted from committed /vendor assets, so
   # the functional suites never touch the CDN. This job is what keeps the SRI-pinned CDN *fallback* URLs in
@@ -109,6 +118,15 @@ jobs:
         java-version: '21'
     - run: npm ci
     - run: npm install -g firebase-tools
+    # /vendor/* is GENERATED, not committed (see .gitignore) — only vendor/versions is, and it pins what
+    # to fetch. Without this step the app under test falls back to the SRI-pinned jsdelivr URLs on every
+    # page load, which makes this lane network-dependent and slow: the exact opposite of what the comment
+    # above promises, and invisible because the fallback WORKS. Materialise them once, then the suite is
+    # offline and deterministic as intended.
+    - name: Materialise the vendored Vue/Vuetify/MDI assets
+      run: bash ../update-vendor.sh
+    - name: Verify they are actually there (a silent CDN fallback is what this guards)
+      run: test -s ../vendor/vue.js && test -s ../vendor/vuetify.js && test -s ../vendor/vuetify.css && test -s ../vendor/mdi.css
     - run: npx playwright install --with-deps chromium
     - run: npx playwright test
     - name: Firebase-mode E2E (app against auth/firestore/storage emulators)

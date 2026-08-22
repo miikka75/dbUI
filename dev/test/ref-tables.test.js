@@ -8,7 +8,7 @@ describe('Reference tables', () => {
 
   before(() => {
     backend = createLocalBackend(':memory:');
-    backend.initSchema('local', SCHEMA);
+    backend.initSchema(SCHEMA);
   });
 
   it('initSchema creates ref tables without tab suffix', () => {

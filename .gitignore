@@ -4,6 +4,9 @@ node_modules/
 dev/*.db
 dev/*.db-wal
 dev/*.db-shm
+# PGlite (the default dev backend) stores its cluster in a DIRECTORY beside the db path, not a file.
+dev/*.pgdata/
+dev/**/*.pgdata/
 test-results/
 playwright-report/
 

@@ -15,7 +15,7 @@ afterEach(() => { backend.close(); });
 
 describe('Import - initSchema creates tables for custom partitions', () => {
   it('creates partition + archivePartition tables', () => {
-    backend.initSchema('local', CUSTOM_SCHEMA);
+    backend.initSchema(CUSTOM_SCHEMA);
     // putRow must succeed (no "no such table") for custom partition
     backend.putRow('music', { id: 'm1', date: '2026-06-01', topic: 'Test' }, 'upcoming');
     backend.putRow('music', { id: 'm2', date: '2026-05-01', topic: 'Old' }, 'past');
@@ -24,7 +24,7 @@ describe('Import - initSchema creates tables for custom partitions', () => {
   });
 
   it('getTableData returns correct rows by partition', () => {
-    backend.initSchema('local', CUSTOM_SCHEMA);
+    backend.initSchema(CUSTOM_SCHEMA);
     backend.putRow('meetings', { id: 'k1', date: '2026-06-01', place: 'Hall' }, 'upcoming');
     var result = backend.getTableData('meetings', 'upcoming');
     assert.equal(result.rows.length, 1);
@@ -41,7 +41,7 @@ describe('Import - stored image assets (_assets system store)', () => {
   const DATA_URI = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
 
   it('putRow + getTableData round-trip an asset row without any schema registration', () => {
-    backend.initSchema('local', CUSTOM_SCHEMA);          // note: _assets is NOT part of the schema
+    backend.initSchema(CUSTOM_SCHEMA);          // note: _assets is NOT part of the schema
     backend.putRow('_assets', { id: 'bg_frontPage', src: DATA_URI }, 'active');
     const rows = backend.getTableData('_assets', 'active').rows;
     assert.equal(rows.length, 1);
@@ -50,7 +50,7 @@ describe('Import - stored image assets (_assets system store)', () => {
   });
 
   it('a deterministic id overwrites in place, so replacing a background leaves no orphan', () => {
-    backend.initSchema('local', CUSTOM_SCHEMA);
+    backend.initSchema(CUSTOM_SCHEMA);
     backend.putRow('_assets', { id: 'bg_frontPage', src: DATA_URI }, 'active');
     backend.putRow('_assets', { id: 'bg_frontPage', src: 'data:image/jpeg;base64,AAAA' }, 'active');
     const rows = backend.getTableData('_assets', 'active').rows;
@@ -59,7 +59,7 @@ describe('Import - stored image assets (_assets system store)', () => {
   });
 
   it('holds several independently-keyed assets (one background + image cells)', () => {
-    backend.initSchema('local', CUSTOM_SCHEMA);
+    backend.initSchema(CUSTOM_SCHEMA);
     backend.putRow('_assets', { id: 'bg_music', src: DATA_URI }, 'active');
     backend.putRow('_assets', { id: 'img_1720000000000_a1b2c3', src: DATA_URI }, 'active');
     const ids = backend.getTableData('_assets', 'active').rows.map((r) => r.id).sort();
@@ -69,41 +69,39 @@ describe('Import - stored image assets (_assets system store)', () => {
 
 describe('Import - schema persistence and reset', () => {
   it('saveSchema + getSchema round-trips imported schema', () => {
-    backend.saveSchema('local', { tables: CUSTOM_SCHEMA, defaultLanguage: 'xx' });
-    var s = backend.getSchema('local');
+    backend.saveSchema({ tables: CUSTOM_SCHEMA, defaultLanguage: 'xx' });
+    var s = backend.getSchema();
     assert.equal(s.defaultLanguage, 'xx');
     assert.ok(s.tables.music);
   });
 
   it('getSchema returns null when nothing saved (no schema.json fallback)', () => {
-    assert.equal(backend.getSchema('local'), null);
+    assert.equal(backend.getSchema(), null);
   });
 
-  it('resetData drops tables, schema, lists, languages, changesets', () => {
-    backend.initSchema('local', CUSTOM_SCHEMA);
-    backend.saveSchema('local', { tables: CUSTOM_SCHEMA });
+  it('resetData drops tables, schema, lists and languages', () => {
+    backend.initSchema(CUSTOM_SCHEMA);
+    backend.saveSchema({ tables: CUSTOM_SCHEMA });
     backend.putRow('music', { id: 'm1', date: '2026-06-01', topic: 'X' }, 'upcoming');
-    backend.saveLists('local', { genre: ['hymn'] });
-    backend.createLanguage('local', 'xx', 'TestLang', ['hello']);
-    backend.saveChangesets('local', 'site-a', '{"changes":[]}');
+    backend.saveLists({ genre: ['hymn'] });
+    backend.createLanguage('xx', 'TestLang', ['hello']);
 
     backend.resetData();
 
     // Everything cleared
-    assert.equal(backend.getSchema('local'), null);
-    assert.deepEqual(backend.getLists('local'), {});
-    assert.equal(backend.getAvailableLanguages('local').length, 0);
-    assert.equal(backend.loadChangesets('local', '').length, 0);
+    assert.equal(backend.getSchema(), null);
+    assert.deepEqual(backend.getLists(), {});
+    assert.equal(backend.getAvailableLanguages().length, 0);
     // Table dropped -> getTableData returns empty (no rows)
     assert.equal(backend.getTableData('music', 'upcoming').rows.length, 0);
   });
 
   it('after reset, re-import works cleanly', () => {
-    backend.initSchema('local', CUSTOM_SCHEMA);
+    backend.initSchema(CUSTOM_SCHEMA);
     backend.putRow('music', { id: 'm1', date: '2026-06-01', topic: 'X' }, 'upcoming');
     backend.resetData();
     // Re-import
-    backend.initSchema('local', CUSTOM_SCHEMA);
+    backend.initSchema(CUSTOM_SCHEMA);
     backend.putRow('music', { id: 'm2', date: '2026-06-02', topic: 'Y' }, 'upcoming');
     var result = backend.getTableData('music', 'upcoming');
     assert.equal(result.rows.length, 1);

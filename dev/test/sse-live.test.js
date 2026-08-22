@@ -84,7 +84,10 @@ describe('dev server — live-sync SSE stream', () => {
       stdio: 'ignore'
     });
     let up = false;
-    const deadline = Date.now() + 8000;
+    // 45s: the dev server's default backend is PGlite, so this spawn boots a WebAssembly Postgres and
+    // applies supabase-schema.sql before it answers -- seconds on its own, and node --test runs the
+    // suites that do this concurrently. The ceiling costs nothing when the server is up sooner.
+    const deadline = Date.now() + 45000;
     while (!up && Date.now() < deadline) {
       try {
         const r = await fetch(BASE + '/api/serverInfo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
@@ -92,8 +95,8 @@ describe('dev server — live-sync SSE stream', () => {
       } catch (e) { await new Promise(r => setTimeout(r, 50)); }
     }
     assert.ok(up, 'dev server started');
-    await post('saveSchema', { folderId: 'local', schema: SCHEMA });
-    await post('initSchema', { folderId: 'local', schema: SCHEMA.tables });
+    await post('saveSchema', { schema: SCHEMA });
+    await post('initSchema', { schema: SCHEMA.tables });
   });
 
   after(async () => {
@@ -106,9 +109,9 @@ describe('dev server — live-sync SSE stream', () => {
     }
     // Sidecars travel with the database (server.js sidecarPath), so clear the whole family.
     for (const f of fs.readdirSync(path.join(DEV_DIR, 'test'))) {
-      if (f.startsWith('.sse-' + process.pid)) { try { fs.rmSync(path.join(DEV_DIR, 'test', f), { force: true }); } catch (e) {} }
+      if (f.startsWith('.sse-' + process.pid)) { try { fs.rmSync(path.join(DEV_DIR, 'test', f), { recursive: true, force: true }); } catch (e) {} }
     }
-    try { fs.rmSync(DB_ABS, { force: true }); } catch (e) {}
+    try { fs.rmSync(DB_ABS, { recursive: true, force: true }); } catch (e) {}
   });
 
   it('a putRow reaches a listening client, carrying the STORED row', async () => {

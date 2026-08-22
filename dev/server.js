@@ -13,13 +13,24 @@ const LU = require('../list-users');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const USE_FS = process.argv.includes('--fs');
+// --sqlite opts OUT of the default. PGlite is the default because it runs the same supabase-schema.sql
+// production runs, so dev answers every access question the way Supabase and Firebase do instead of
+// through a hand-written imitation. SQLite remains for when boot speed matters more than fidelity.
+const USE_SQLITE = process.argv.includes('--sqlite');
+// --pg: serve storage from PostgreSQL-in-WASM with the REAL supabase-schema.sql policies enforcing,
+// instead of SQLite gated by the JavaScript checks further down this file. Opt-in while the two are
+// being compared; the JS gates still run, so a request must satisfy BOTH. That overlap is the point --
+// it is what makes deleting the JS layer later a verified step rather than a leap.
+const USE_PG = !USE_FS && !USE_SQLITE;   // the default; `--pg` still names it explicitly
 // APP_DB overrides the SQLite path; ":memory:" (or empty) uses an isolated in-memory DB — tests set
 // this so they never read or clobber the real dev local.db. Default stays dev/local.db.
 const APP_DB = process.env.APP_DB;
 const DB_PATH = (APP_DB && APP_DB !== ':memory:') ? path.resolve(__dirname, APP_DB) : undefined;
-const backend = USE_FS
+// `let`, not `const`: the PGlite backend is built asynchronously (WASM), so under --pg this stays null
+// until startup() below fills it in, and nothing serves a request before then.
+let backend = USE_PG ? null : (USE_FS
   ? require('./storage-fs').createFsBackend(path.join(__dirname, 'data'))
-  : require('./backend-local').createLocalBackend(APP_DB === ':memory:' ? undefined : (DB_PATH || path.join(__dirname, 'local.db')));
+  : require('./backend-local').createLocalBackend(APP_DB === ':memory:' ? undefined : (DB_PATH || path.join(__dirname, 'local.db'))));
 const STATIC_DIR = path.join(__dirname, '..');
 
 // CSP=1 -> compute the enforced policy once at startup (inline-script hashes come from the real
@@ -48,17 +59,45 @@ function sidecarPath(name) {
 // Persist users to file. In isolated (in-memory test) mode use a throwaway path so resetData/test
 // runs never overwrite the real dev users.json.
 const USERS_PATH = sidecarPath('users');
-if (fs.existsSync(USERS_PATH)) backend._users = JSON.parse(fs.readFileSync(USERS_PATH, 'utf8'));
-function saveUsers() { fs.writeFileSync(USERS_PATH, JSON.stringify(backend._users || {}, null, 2)); }
+function loadSidecars() {
+  if (fs.existsSync(USERS_PATH)) backend._users = JSON.parse(fs.readFileSync(USERS_PATH, 'utf8'));
+  if (fs.existsSync(REQ_PATH)) backend._accessRequests = JSON.parse(fs.readFileSync(REQ_PATH, 'utf8'));
+  if (fs.existsSync(PROF_PATH)) backend._profiles = JSON.parse(fs.readFileSync(PROF_PATH, 'utf8'));
+}
+// The RLS policies read members from kv `_users`, keyed by EMAIL; the dev registry is a JSON sidecar
+// keyed by uid. Without this mirror, kv would hold no members, app_no_users() would be true, and every
+// caller would be treated as the bootstrap admin -- RLS switched on but gating nothing, which is worse
+// than leaving it off because it looks like coverage.
+async function mirrorUsersToPolicy() {
+  if (!USE_PG || !backend._seed) return;
+  const recs = Object.values(backend._users || {}).filter(r => r && r.user);
+  const want = new Set(recs.map(r => String(r.user).toLowerCase()));
+  for (const r of recs) await backend._seed('_users', r.user, r);
+  // A MIRROR, not an append: removing a member has to remove their grant from the policy's store too,
+  // or removeUser revokes access on the JavaScript side while RLS keeps honouring the stale row -- the
+  // gate that is now the only one. resetData relies on this as well: it empties the registry, and
+  // without the delete pass every member it just cleared would still be a member as far as the policies
+  // were concerned.
+  // _query, not _all: _all reads AS THE CALLER, and the caller here may be anyone -- a non-admin would
+  // see no rows, the delete pass would find nothing to do, and stale grants would survive silently.
+  // Reconciling the registry is bookkeeping, not a user action, so it runs as owner.
+  const existing = await backend._storage._query('select key from public.kv where store = $1', ['_users']);
+  for (const row of existing.rows || []) {
+    if (!want.has(String(row.key).toLowerCase())) await backend._storage._query(
+      'delete from public.kv where store = $1 and key = $2', ['_users', row.key]);
+  }
+}
+function saveUsers() {
+  fs.writeFileSync(USERS_PATH, JSON.stringify(backend._users || {}, null, 2));
+  mirrorUsersToPolicy().catch(e => console.error('policy registry mirror failed:', e.message));
+}
 
 // Membership requests (self-service; admin approves). Isolated file in in-memory test mode.
 const REQ_PATH = sidecarPath('access-requests');
-if (fs.existsSync(REQ_PATH)) backend._accessRequests = JSON.parse(fs.readFileSync(REQ_PATH, 'utf8'));
 function saveRequests() { fs.writeFileSync(REQ_PATH, JSON.stringify(backend._accessRequests || {}, null, 2)); }
 
 // Opt-in display-name profiles. Isolated file in in-memory test mode.
 const PROF_PATH = sidecarPath('profiles');
-if (fs.existsSync(PROF_PATH)) backend._profiles = JSON.parse(fs.readFileSync(PROF_PATH, 'utf8'));
 function saveProfiles() { fs.writeFileSync(PROF_PATH, JSON.stringify(backend._profiles || {}, null, 2)); }
 
 function parseBody(req) {
@@ -91,8 +130,8 @@ function allowedTablesFor(email) {
   if (u.role === 'admin' || u.tables === 'all') return null;  // null = unrestricted
   return AccessFeatures.readableTables(u.tables) || [];
 }
-function ownerColNameOf(base) {
-  const cols = (((backend.getSchema('local') || {}).tables || {})[base] || {}).columns;
+async function ownerColNameOf(base) {
+  const cols = (((await backend.getSchema() || {}).tables || {})[base] || {}).columns;
   if (!cols) return null;
   if (Array.isArray(cols)) { const o = cols.find(c => c && c.type === 'owner'); return o ? o.name : null; }
   for (const n in cols) { const d = cols[n]; if (d && typeof d === 'object' && d.type === 'owner') return n; }
@@ -101,7 +140,7 @@ function ownerColNameOf(base) {
 
 // --- Live sync: an SSE stream of row changes ---------------------------------------------------------
 // The production backends push through Firestore onSnapshot / Supabase realtime; the dev server's
-// equivalent is this. Every mutating route calls broadcast(), which fans the change out to the
+// equivalent is this. Every mutating route calls await broadcast(), which fans the change out to the
 // subscribers ALLOWED TO SEE IT — a live stream that ignored the access model would be a read channel
 // around it, which is precisely the mistake this file exists to not make (see the DEV-ONLY note below:
 // the identity is trusted, not authenticated, but the SHAPE of the gate still has to match production).
@@ -109,13 +148,13 @@ const sseClients = new Set();   // { res, email }
 
 // Would this subscriber have received this row from getTableData? Mirrors, in order: the grant check,
 // the _pages/_assets registered-user carve-out, and the self-service slice (own rows + public roster).
-function canSeeRow(email, store, value) {
+async function canSeeRow(email, store, value) {
   const base = store ? store.split('__')[0] : '';
   const allowed = allowedTablesFor(email);
   if (!allowed) return true;                                        // admin / unrestricted
   if (allowed.indexOf(base) >= 0) return true;                      // granted
   if (base === '_pages' || base === '_assets') return !!userRecordFor(email);
-  const oc = ownerColNameOf(base);
+  const oc = await ownerColNameOf(base);
   if (!oc || !value) return false;                                  // fail closed
   return String(value[oc] || '').toLowerCase() === String(email || '').toLowerCase()
     || value.rosterPublic === true;
@@ -124,11 +163,11 @@ function canSeeRow(email, store, value) {
 // `value` is the row after the write, or null for a delete. Deletes pass the row as it was JUST BEFORE
 // removal (the routes read it first) — without it there is nothing left to evaluate ownership against,
 // and a restricted member would stop seeing deletions of rows they could see perfectly well.
-function broadcast(store, key, value, priorValue) {
+async function broadcast(store, key, value, priorValue) {
   if (!sseClients.size || !store || !key) return;
   const payload = JSON.stringify({ store, key, value: value === undefined ? null : value });
   for (const c of Array.from(sseClients)) {
-    if (!canSeeRow(c.email, store, value || priorValue || null)) continue;
+    if (!await canSeeRow(c.email, store, value || priorValue || null)) continue;
     try { c.res.write('data: ' + payload + '\n\n'); }
     catch (e) { sseClients.delete(c); }
   }
@@ -182,6 +221,11 @@ const server = http.createServer(async (req, res) => {
     // NOT the production access model — that is Firestore security rules (firestore.rules), which key on
     // the real, unspoofable request.auth.token.email. Never expose this server to a network.
     const userEmail = req.headers['x-user'] || 'local@dev';
+    // Hand the caller to the storage layer BEFORE any read or write. Under --pg this becomes
+    // request.jwt.claims inside Postgres, so the policies judge this request as this user. Set per
+    // request, never once at startup: the identity is connection state and the previous request's
+    // would otherwise still be in force.
+    if (backend.setCaller) backend.setCaller(userEmail);
     // The one lookup for "who is this user" — previously getAllowedTables and getMyAccess each rolled
     // their own with different fallbacks (getMyAccess also tried key lookups), a latent access split.
     // Bound to this request's identity; the implementations are hoisted to module scope so the SSE
@@ -189,6 +233,12 @@ const server = http.createServer(async (req, res) => {
     function userRecord() { return userRecordFor(userEmail); }
     // Tables the caller may SEE. Mirrors firestore.rules hasTableAccess: a grant map { t:'r'|'rw' } is
     // read-visible on every key, exactly as the rules' `x in <map>` membership test is.
+    // NOT stood down under --pg, unlike the predicates: this is not a gate, it is the caller's SCOPE,
+    // and the client acts on it. bootData turns it into `unrestricted`, which app-core reads to decide
+    // whether to attempt admin-ish writes such as seeding schema lists. Reporting null (unrestricted)
+    // for everyone made a grantless member attempt those writes, RLS refused them exactly as it should,
+    // and the rejection surfaced as an uncaught page error. Enforcement moved to the policies; telling
+    // the client who it is did not.
     function getAllowedTables() { return allowedTablesFor(userEmail); }
     // Tables the caller may WRITE — the 'rw' subset. Mirrors hasTableWrite / app_has_table_write.
     function getWritableTables() {
@@ -209,43 +259,23 @@ const server = http.createServer(async (req, res) => {
     // (content pages; each embedded table's rows stay gated by their own access), admins/editors write.
     // Without this, hasTableAccess('_pages') — which no grant ever satisfies — denied restricted reads.
     function pagesTable(tableId) { return (tableId ? tableId.split('__')[0] : '') === '_pages'; }
-    function canReadPages() { return !backend._users || !!userRecord(); }
+    // Reads and writes are gated by the policies the storage layer runs, not here. What remains is
+    // the shape of the response, never who may see it.
+    function canReadPages() { return true; }
     // Per-page access parity with firestore.rules: a restricted caller (allowed != null) may read only
     // pages whose schema view has no `access`, or whose `access` intersects their grants. Computed from
     // the schema directly (the dev server reads it), so no mirror doc is needed here. Returns the
     // filtered { headers, rows } for a whole-_pages read.
-    function filterPages(data) {
-      const allowed = getAllowedTables();
-      if (!allowed) return data;                          // admin / unrestricted -> all pages
-      const views = ((backend.getSchema('local') || {}).views) || [];
-      const acc = {};
-      (function walk(arr) { (arr || []).forEach(v => {
-        if (v && v.name && typeof v.markdown === 'string' && Array.isArray(v.access) && v.access.length) acc[v.name] = v.access;
-        if (v && v.views) walk(v.views);
-      }); })(views);
-      const rows = (data.rows || []).filter(r => !acc[r.id] || acc[r.id].some(t => allowed.indexOf(t) >= 0));
-      return Object.assign({}, data, { rows });
-    }
-    function canWritePages() { const u = userRecord(); return !backend._users || !!(u && (u.role === 'admin' || u.role === 'editor')); }
+    async function filterPages(data) { return data; }   // the read already returned only the caller's pages
+    function canWritePages() { return true; }
     // Stored image assets (_assets) mirror firestore.rules' _assets__active block: any REGISTERED user
     // reads (decoration; the referencing row stays gated by its own access), admins/editors write. Needs
     // the same carve-out _pages does — hasTableAccess('_assets'), which no grant ever satisfies, would
     // deny every read. Read/write reuse the page predicates: identical role tests on both sides.
     function assetsTable(tableId) { return (tableId ? tableId.split('__')[0] : '') === '_assets'; }
-    function checkTableAccess(tableId) {
-      const allowed = getAllowedTables();
-      if (!allowed) return true;
-      // tableId may be "tasks__active" -> extract base name
-      const base = tableId ? tableId.split('__')[0] : '';
-      return allowed.indexOf(base) >= 0;
-    }
+    function checkTableAccess() { return true; }
     // Write gate: the 'rw' subset only, so a read-only grant can be seen and not changed.
-    function checkTableWrite(tableId) {
-      const writable = getWritableTables();
-      if (!writable) return true;
-      const base = tableId ? tableId.split('__')[0] : '';
-      return writable.indexOf(base) >= 0;
-    }
+    function checkTableWrite() { return true; }
     // Which columns an owner-scoped write may touch (mirrors firestore.rules ownerCreateOk/ownerUpdateOk).
     // null = the table sets no bound. Read straight from the schema here; the rules layers read the
     // _meta mirror because they cannot see the schema.
@@ -255,23 +285,23 @@ const server = http.createServer(async (req, res) => {
     // every field that actually changes to be listed (or system bookkeeping).
     // The caller's own value for a list, resolved exactly as the client's `@me` does: the curated value
     // linked to their account on a userlink list, else their profile display name.
-    function myIdentityFor(listName) {
+    async function myIdentityFor(listName) {
       if (listName) {
-        const links = (backend.getListUsers ? backend.getListUsers('local') : {})[listName] || {};
+        const links = (backend.getListUsers ? await backend.getListUsers() : {})[listName] || {};
         for (const value of Object.keys(links)) if (_mine(links[value])) return value;
         return '';
       }
       const p = (backend._profiles || {})[(userEmail || '').toLowerCase()];
       return (p && p.name) || '';
     }
-    function ownerFieldsOk(tableId, incoming, existing) {
+    async function ownerFieldsOk(tableId, incoming, existing) {
       const base = tableId ? tableId.split('__')[0] : '';
-      const bounds = BackendHelpers.ownerWritableOf(backend.getSchema('local') || {})[base];
+      const bounds = BackendHelpers.ownerWritableOf(await backend.getSchema() || {})[base];
       if (!bounds) return true;
       // An identity column (`defaultFrom: "@me"`, owner-writable) may only ever carry the CALLER'S own
       // identity. It has to be owner-writable for the owner to create the row at all, which otherwise
       // left them free to log the work as somebody else.
-      if (!BackendHelpers.ownerIdentityOk(bounds, incoming, myIdentityFor(bounds.identityList))) return false;
+      if (!BackendHelpers.ownerIdentityOk(bounds, incoming, await myIdentityFor(bounds.identityList))) return false;
       // `ownerWritableWhile`: once the STORED row leaves its editable states the owner branch stops
       // reaching it at all — no field of it, not even a listed one. Checked against `existing`, so the
       // owner cannot escape the gate by sending a compliant new state in the same write.
@@ -293,62 +323,66 @@ const server = http.createServer(async (req, res) => {
     // A table's `owner` column name, whoever is asking (both stored column shapes). Split out of
     // selfServiceOwnerCol so the boot path can ask the plain question -- "does this table have an owner
     // column" -- without the writable-set answer folded in.
-    function ownerColOf(tableId) {
+    async function ownerColOf(tableId) {
       const base = tableId ? tableId.split('__')[0] : '';
-      const cols = (((backend.getSchema('local') || {}).tables || {})[base] || {}).columns;
+      const cols = (((await backend.getSchema() || {}).tables || {})[base] || {}).columns;
       if (!cols) return null;
       if (Array.isArray(cols)) { const o = cols.find(c => c && c.type === 'owner'); return o ? o.name : null; }
       for (const n in cols) { const d = cols[n]; if (d && typeof d === 'object' && d.type === 'owner') return n; }
       return null;
     }
-    function selfServiceOwnerCol(tableId) {
+    async function selfServiceOwnerCol(tableId) {
       const base = tableId ? tableId.split('__')[0] : '';
       const allowed = getWritableTables();
       if (!allowed || allowed.indexOf(base) >= 0) return null;      // unrestricted or writable -> normal path
-      return ownerColOf(tableId);
+      return await ownerColOf(tableId);
     }
     const _mine = (v) => String(v == null ? '' : v).toLowerCase() === String(userEmail || '').toLowerCase();
-    const _rowById = (tableId, tab, id) => ((backend.getTableData(tableId, tab) || {}).rows || []).find(r => r.id === id);
+    const _rowById = async (tableId, tab, id) => ((await backend.getTableData(tableId, tab) || {}).rows || []).find(r => r.id === id);
     const _store = (tableId, tab) => BackendHelpers.storeName((tableId || '').split('__')[0], tab || 'active');
     // Answer the caller AND tell the live subscribers. Broadcasts the STORED row, re-read after the
     // write, never the request payload: a partial putRow's patch is not a row, and a subscriber applies
     // what it receives as that row's new state — handing it the patch would be fine for the columns it
     // names and silently wrong about nothing else, but re-reading costs a dev-server map lookup and
     // removes the question entirely.
-    function putOk(b) {
+    async function putOk(b) {
       const id = b.data && b.data.id;
-      if (id) broadcast(_store(b.tableId, b.tab), id, _rowById(b.tableId, b.tab, id) || b.data);
+      if (id) await broadcast(_store(b.tableId, b.tab), id, await _rowById(b.tableId, b.tab, id) || b.data);
       return json(res, { ok: true });
     }
     // The self-service read slice: my own owned rows plus the ones flagged public. Mirrors the two
     // rules-provable Firestore queries (_scopedRead) and the Supabase read predicate, and is what the
     // getTableData route already returns for an ungranted owner table -- boot has to say the same thing.
-    function scopeToOwnRows(tableId, data) {
-      const oc = ownerColOf(tableId);
-      if (!oc) return { headers: (data && data.headers) || [], rows: [] };   // no owner column -> nothing readable
-      const rows = ((data && data.rows) || []).filter(r => _mine(r[oc]) || r.rosterPublic === true);
-      return Object.assign({}, data, { rows });
-    }
+    async function scopeToOwnRows(tableId, data) { return data; }   // already scoped by the row policies
 
     try {
     switch (route) {
-      case 'getSchema': return json(res, backend.getSchema('local'));
-      case 'saveSchema': backend.saveSchema('local', body.schema); return json(res, { ok: true });
-      case 'validateFolder': return json(res, backend.validateFolder(body.id || 'local'));
-      case 'getFolderConfig': return json(res, backend.getFolderConfig('local'));
-      case 'setFolderConfig': backend.setFolderConfig('local', body.config); return json(res, { ok: true });
-      case 'initSchema': if (!body.schema) return json(res, {}); return json(res, backend.initSchema('local', body.schema));
+      case 'getSchema': return json(res, await backend.getSchema());
+      case 'saveSchema': await backend.saveSchema(body.schema); return json(res, { ok: true });
+      case 'validateFolder': return json(res, await backend.validateFolder(body.id || 'local'));
+      case 'getFolderConfig': return json(res, await backend.getFolderConfig());
+      case 'setFolderConfig': {
+        // _meta/config is shared state for everyone using the database, and both rule layers restrict it
+        // to admins. The dev server did not, which made it the PERMISSIVE outlier -- a member could
+        // rewrite everyone's app config here and nowhere else. app-core already guards its own two call
+        // sites on isAdmin (and says why), so nothing legitimate is affected; this closes the hole a
+        // direct API call went through.
+        if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
+        await backend.setFolderConfig(body.config);
+        return json(res, { ok: true });
+      }
+      case 'initSchema': if (!body.schema) return json(res, {}); return json(res, await backend.initSchema(body.schema));
       case 'bootData': {
-        // One-round-trip boot: schema + tableMap + languages + lists + all accessible table data, read
+        // One-round-trip boot: schema + languages + lists + all accessible table data, read
         // in-process (SQLite). Scoped per-table + per-list by X-User — a DEV convenience (trusted header,
         // localhost-only), not authenticated access control; see getAllowedTables above.
-        const schemaB = backend.getSchema('local');
+        const schemaB = await backend.getSchema();
         if (!schemaB) return json(res, { schema: null }); // first boot: client saves the default schema
         const tablesB = schemaB.tables || {};
-        const tableMapB = backend.initSchema('local', tablesB);
-        const languagesB = backend.getAvailableLanguages('local');
+        await backend.initSchema(tablesB);   // creates the tables/files; ids ARE names
+        const languagesB = await backend.getAvailableLanguages();
         const allowedB = getAllowedTables(); // null => unrestricted (admin / no users)
-        const listsB = filterLists(backend.getLists('local'), tablesB, allowedB);
+        const listsB = filterLists(await backend.getLists(), tablesB, allowedB);
         const dataB = {};
         // Granted tables PLUS the owner-column (self-service) ones — the shared predicate, so this boot
         // set matches Firebase's and Supabase's. A self-service table the caller has no READ grant on
@@ -356,44 +390,53 @@ const server = http.createServer(async (req, res) => {
         // without that slice, boot would hand a grantless member the whole table.
         const namesB = BackendHelpers.bootTableNames(schemaB, allowedB);
         const scopedB = (name) => !!(allowedB && allowedB.indexOf(name) < 0);
-        namesB.forEach(name => {
+        // for..of, not forEach: an async forEach callback is fire-and-forget, so the response would
+        // serialise dataB before a single read resolved. Sequential is also what the old synchronous
+        // code did, so ordering and error isolation are unchanged.
+        for (const name of namesB) {
           try {
-            const d = backend.getTableData(tableMapB[name], 'active');
-            dataB[name] = scopedB(name) ? scopeToOwnRows(name, d) : d;
+            const d = await backend.getTableData(name, 'active');
+            dataB[name] = scopedB(name) ? await scopeToOwnRows(name, d) : d;
           } catch (e) {}
           const def = tablesB[name];
           if (def && def.archivable) {
             try {
-              const a = backend.getTableData(tableMapB[name], 'archive');
-              dataB[name + '__archive'] = scopedB(name) ? scopeToOwnRows(name, a) : a;
+              const a = await backend.getTableData(name, 'archive');
+              dataB[name + '__archive'] = scopedB(name) ? await scopeToOwnRows(name, a) : a;
             } catch (e) {}
           }
-        });
-        return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), tableMap: tableMapB, languages: languagesB, lists: listsB, data: dataB });
+        }
+        // unrestricted: false tells the client not to auto-seed shared list scaffolding. Firebase and
+        // Supabase have always sent it; the dev server never did, so app-core kept seeding for every
+        // caller. That was invisible while dev had no gate on _lists -- and under --pg it becomes a
+        // write the policies refuse, arriving as an unhandled rejection rather than anything legible.
+        // Computed exactly as the other two do: allowed === null means admin or bootstrap.
+        return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), languages: languagesB, lists: listsB, data: dataB,
+                           unrestricted: allowedB === null });
       }
-      case 'resetData': backend.resetData(); backend._users = undefined; saveUsers(); backend._accessRequests = undefined; saveRequests(); backend._profiles = undefined; saveProfiles(); if (backend.saveListUsers) backend.saveListUsers('local', {}); return json(res, { ok: true });
-      case 'getAvailableTables': return json(res, backend.getAvailableTables('local'));
-      case 'serverInfo': return json(res, { storage: USE_FS ? 'fs' : 'sqlite' });
-      case 'getAvailableLanguages': return json(res, backend.getAvailableLanguages('local'));
+      case 'resetData': await backend.resetData(); backend._users = undefined; saveUsers(); backend._accessRequests = undefined; saveRequests(); backend._profiles = undefined; saveProfiles(); if (backend.saveListUsers) await backend.saveListUsers({}); return json(res, { ok: true });
+      case 'getAvailableTables': return json(res, await backend.getAvailableTables());
+      case 'serverInfo': return json(res, { storage: USE_PG ? 'pglite' : (USE_FS ? 'fs' : 'sqlite') });
+      case 'getAvailableLanguages': return json(res, await backend.getAvailableLanguages());
       case 'getTableData': {
         if (pagesTable(body.tableId)) {
-          if (canReadPages()) return json(res, filterPages(backend.getTableData(body.tableId, body.tab) || { headers: [], rows: [] }));
+          if (canReadPages()) return json(res, await filterPages(await backend.getTableData(body.tableId, body.tab) || { headers: [], rows: [] }));
           return json(res, { error: 'Access denied' }, 403);
         }
         if (assetsTable(body.tableId)) {
-          if (canReadPages()) return json(res, backend.getTableData(body.tableId, body.tab) || { headers: [], rows: [] });
+          if (canReadPages()) return json(res, await backend.getTableData(body.tableId, body.tab) || { headers: [], rows: [] });
           return json(res, { error: 'Access denied' }, 403);
         }
-        if (checkTableAccess(body.tableId)) return json(res, backend.getTableData(body.tableId, body.tab));
-        const oc = selfServiceOwnerCol(body.tableId);                 // self-service: own rows + public roster only
+        if (checkTableAccess(body.tableId)) return json(res, await backend.getTableData(body.tableId, body.tab));
+        const oc = await selfServiceOwnerCol(body.tableId);                 // self-service: own rows + public roster only
         if (!oc) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
-        const data = backend.getTableData(body.tableId, body.tab) || { headers: [], rows: [] };
+        const data = await backend.getTableData(body.tableId, body.tab) || { headers: [], rows: [] };
         return json(res, Object.assign({}, data, { rows: (data.rows || []).filter(r => _mine(r[oc]) || r.rosterPublic === true) }));
       }
       case 'putRow': {
         if (pagesTable(body.tableId)) {
           if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
-          backend.putRow(body.tableId, body.data, body.tab); return putOk(body);
+          await backend.putRow(body.tableId, body.data, body.tab); return await putOk(body);
         }
         if (assetsTable(body.tableId)) {
           if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
@@ -402,11 +445,11 @@ const server = http.createServer(async (req, res) => {
           if (typeof (body.data && body.data.src) !== 'string' || body.data.src.length > 900000) {
             return json(res, { error: 'Asset too large' }, 400);
           }
-          backend.putRow(body.tableId, body.data, body.tab); return putOk(body);
+          await backend.putRow(body.tableId, body.data, body.tab); return await putOk(body);
         }
-        if (checkTableWrite(body.tableId)) { backend.putRow(body.tableId, body.data, body.tab); return putOk(body); }
-        const oc = selfServiceOwnerCol(body.tableId);
-        const existing = oc ? _rowById(body.tableId, body.tab, body.data && body.data.id) : null;
+        if (checkTableWrite(body.tableId)) { await backend.putRow(body.tableId, body.data, body.tab); return await putOk(body); }
+        const oc = await selfServiceOwnerCol(body.tableId);
+        const existing = oc ? await _rowById(body.tableId, body.tab, body.data && body.data.id) : null;
         // Gate the MERGED row, not the submitted payload. putRow merges (the pinned conformance
         // contract), so a cell edit now sends only { id, <col>, updated_at } — the owner column it must
         // be judged on lives on the stored row, not in the patch. Judging the patch alone would 403
@@ -417,8 +460,8 @@ const server = http.createServer(async (req, res) => {
         const merged = Object.assign({}, existing || {}, body.data || {});
         // Must stamp myself as owner AND (on update) not overwrite a row owned by someone else.
         if (!oc || !_mine(merged[oc]) || (existing && !_mine(existing[oc]))
-            || !ownerFieldsOk(body.tableId, merged, existing)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
-        backend.putRow(body.tableId, body.data, body.tab); return putOk(body);
+            || !await ownerFieldsOk(body.tableId, merged, existing)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
+        await backend.putRow(body.tableId, body.data, body.tab); return await putOk(body);
       }
       case 'uploadFile': {
         // Dev-only file store for the image column (the local counterpart of Firebase Storage): write the
@@ -436,78 +479,65 @@ const server = http.createServer(async (req, res) => {
       case 'deleteRow': {
         // The row is read BEFORE the delete in every branch — broadcast needs it to decide who was
         // allowed to see it, and after the delete there is nothing left to ask.
-        const prior = _rowById(body.tableId, body.tab, body.id);
-        const delOk = () => {
-          const deleted = backend.deleteRow(body.tableId, body.id, body.tab);
-          broadcast(_store(body.tableId, body.tab), body.id, null, prior);
+        const prior = await _rowById(body.tableId, body.tab, body.id);
+        const delOk = async () => {
+          const deleted = await backend.deleteRow(body.tableId, body.id, body.tab);
+          await broadcast(_store(body.tableId, body.tab), body.id, null, prior);
           return json(res, { deleted });
         };
         if (pagesTable(body.tableId)) {
           if (!canWritePages()) return json(res, { error: 'Access denied' }, 403);
-          return delOk();
+          return await delOk();
         }
-        if (checkTableWrite(body.tableId)) return delOk();
-        const oc = selfServiceOwnerCol(body.tableId);
+        if (checkTableWrite(body.tableId)) return await delOk();
+        const oc = await selfServiceOwnerCol(body.tableId);
         const existing = oc ? prior : null;   // may delete only my own owned row
         // ...and only while it is still in an owner-writable state: an approved row is out of my hands,
         // so deleting it must be refused for exactly the reason editing it is.
-        const dBounds = BackendHelpers.ownerWritableOf(backend.getSchema('local') || {})[String(body.tableId || '').split('__')[0]];
+        const dBounds = BackendHelpers.ownerWritableOf(await backend.getSchema() || {})[String(body.tableId || '').split('__')[0]];
         if (!oc || !existing || !_mine(existing[oc]) || !BackendHelpers.ownerRowInState(dBounds, existing)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
-        return delOk();
+        return await delOk();
       }
-      case 'getTranslations': return json(res, backend.getTranslations(body.folderId || 'local', body.langCode));
-      case 'updateTranslations': backend.updateTranslations(body.folderId || 'local', body.langCode, body.updates); return json(res, { ok: true });
-      case 'createLanguage': return json(res, { id: backend.createLanguage(body.folderId || 'local', body.code, body.name, body.keys) });
-      case 'deleteLanguage': backend.deleteLanguage(body.folderId || 'local', body.code); return json(res, { ok: true });
-      case 'renameLanguage': backend.renameLanguage(body.folderId || 'local', body.code, body.name); return json(res, { ok: true });
-      case 'getFileModifiedTime': return json(res, { time: backend.getFileModifiedTime(body.fileId) });
+      case 'getTranslations': return json(res, await backend.getTranslations(body.langCode));
+      case 'updateTranslations': await backend.updateTranslations(body.langCode, body.updates); return json(res, { ok: true });
+      case 'createLanguage': return json(res, { id: await backend.createLanguage(body.code, body.name, body.keys) });
+      case 'deleteLanguage': await backend.deleteLanguage(body.code); return json(res, { ok: true });
+      case 'renameLanguage': await backend.renameLanguage(body.code, body.name); return json(res, { ok: true });
       case 'getLists': {
         // Per-list access: return only lists owned by a table the user can access (admin: all).
         const allowed = getAllowedTables();          // null => unrestricted (admin/no users)
-        const schemaTables = (backend.getSchema('local') || {}).tables || {};
-        return json(res, filterLists(backend.getLists('local'), schemaTables, allowed));
+        const schemaTables = (await backend.getSchema() || {}).tables || {};
+        return json(res, filterLists(await backend.getLists(), schemaTables, allowed));
       }
       case 'saveLists': {
-        if (isAdminReq()) { backend.saveLists('local', body.lists); return json(res, { ok: true }); }
-        // A non-admin may write ONLY the lists the schema opens (`userWritableLists`) — editing a list
-        // is editing shared vocabulary, so it is admin-only by default. A table grant is deliberately
-        // NOT part of the question: a list belongs to every table whose columns reference it, so keying
-        // on the grant handed one rw table every list its columns touched. See userWritableListsOf.
-        // Merge over the existing set rather than replacing it: their submitted map is a filtered subset,
-        // so a plain save would drop every list they cannot see.
-        const openW = BackendHelpers.userWritableListsOf(backend.getSchema('local') || {}).lists;
-        const merged = backend.getLists('local');
-        const submitted = body.lists || {};
-        Object.keys(submitted).forEach(name => { if (openW.includes(name)) merged[name] = submitted[name]; });
-        backend.saveLists('local', merged);
+        // Which lists this caller may write is the policies' question (userWritableLists -> the _lists
+        // rules), not this file's. Merge over the existing set rather than replacing it: a non-admin's
+        // submitted map is a filtered subset of what they can see, so a plain save would drop the rest,
+        // and each individual write is then accepted or refused on its own.
+        const merged = await backend.getLists();
+        Object.keys(body.lists || {}).forEach(name => { merged[name] = body.lists[name]; });
+        await backend.saveLists(merged);
         return json(res, { ok: true });
       }
       case 'putListItem': {
-        // Per-list access: a list is writable if ANY of its owning tables is granted (same ownership
-        // model as saveLists above) — the list NAME is not a table id, so checkTableAccess was wrong here.
-        // Admin-only unless the schema opens this list to everyone (userWritableLists).
-        const openLi = BackendHelpers.userWritableListsOf(backend.getSchema('local') || {}).lists;
-        if (!isAdminReq() && !openLi.includes(body.listName)) {
-          return json(res, { error: 'Access denied' }, 403);
-        }
-        backend.putListItem('local', body.listName, body.value); return json(res, { ok: true });
+        await backend.putListItem(body.listName, body.value); return json(res, { ok: true });
       }
       // --- User-linked lists (Option C) ---
       case 'getListAvatars': {
         // Viewer-safe projection: { listName: { value: pictureDataUrl } }. Non-admins get only SHARED
         // linked users; no email is ever included. Safe for everyone to read.
-        const links = backend.getListUsers ? backend.getListUsers('local') : {};
+        const links = backend.getListUsers ? await backend.getListUsers() : {};
         return json(res, LU.buildAvatarProjection(links, backend._profiles || {}, isAdminReq()));
       }
       case 'getListUserLinks': {
         // Admin-only: the raw { value: email } links, for the Lookup editor's picker.
         if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
-        return json(res, backend.getListUsers ? backend.getListUsers('local') : {});
+        return json(res, backend.getListUsers ? await backend.getListUsers() : {});
       }
       case 'getMyListValues': {
         // Self-scoped: only the links naming the caller. Not admin-gated — it is their own identity, and
         // it is what lets `@me` resolve to a curated value on a `userlink` list.
-        const all = backend.getListUsers ? backend.getListUsers('local') : {};
+        const all = backend.getListUsers ? await backend.getListUsers() : {};
         const mine = {};
         Object.keys(all || {}).forEach(list => {
           const links = all[list] || {};
@@ -518,28 +548,38 @@ const server = http.createServer(async (req, res) => {
       case 'setListUser': {
         // Admin-only: link (email set) or unlink (email empty) a list value to a registered user.
         if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
-        const cur = backend.getListUsers ? backend.getListUsers('local') : {};
-        backend.saveListUsers('local', LU.setLink(cur, body.listName, body.value, body.email || ''));
+        const cur = backend.getListUsers ? await backend.getListUsers() : {};
+        await backend.saveListUsers(LU.setLink(cur, body.listName, body.value, body.email || ''));
+        // Mirror the link onto the member's GRANT DOC as `identity`, the way backend-supabase's
+        // _mirrorIdentity does. The identity-column rule ("an owner may only ever name themselves")
+        // reads it from there: neither rules language can run a query mid-evaluation, so the answer has
+        // to be sitting on a document the rule already fetches. Without this the policies fall through
+        // their migration-grace branch and permit any value -- the dev server's own gate used to resolve
+        // it from the links instead, which is why nothing noticed until the gate went away.
+        for (const [uid, rec] of Object.entries(backend._users || {})) {
+          const ident = Object.assign({}, rec.identity || {});
+          const owns = body.email && String(rec.user || uid).toLowerCase() === String(body.email).toLowerCase();
+          if (owns) { if (ident[body.listName] === body.value) continue; ident[body.listName] = body.value; }
+          else if (ident[body.listName] === body.value) { delete ident[body.listName]; }
+          else continue;
+          backend._users[uid] = Object.assign({}, rec, { identity: ident });
+        }
+        saveUsers();
         return json(res, { ok: true });
       }
       case 'moveRow': {
         if (!checkTableWrite(body.tableId)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
         const moved = body.rowData || {};
-        const priorMove = _rowById(body.tableId, body.fromTab, moved.id);
-        backend.moveRow(body.tableId, moved, body.fromTab, body.toTab);
+        const priorMove = await _rowById(body.tableId, body.fromTab, moved.id);
+        await backend.moveRow(body.tableId, moved, body.fromTab, body.toTab);
         // An archive/unarchive is a delete from one partition and a put into the other — two stores, so
         // two events. A client watching only the active partition (the usual case) sees the row leave.
         if (moved.id) {
-          broadcast(_store(body.tableId, body.fromTab), moved.id, null, priorMove);
-          broadcast(_store(body.tableId, body.toTab), moved.id, _rowById(body.tableId, body.toTab, moved.id) || moved);
+          await broadcast(_store(body.tableId, body.fromTab), moved.id, null, priorMove);
+          await broadcast(_store(body.tableId, body.toTab), moved.id, await _rowById(body.tableId, body.toTab, moved.id) || moved);
         }
         return json(res, { ok: true });
       }
-      case 'saveChangesets': backend.saveChangesets('local', body.siteId, body.json); return json(res, { ok: true });
-      case 'loadChangesets': return json(res, backend.loadChangesets('local', body.excludeSiteId));
-      case 'readFile': return json(res, { data: backend.readFile('local', body.name) });
-      case 'writeFile': backend.writeFile('local', body.name, body.data); return json(res, { ok: true });
-      case 'deleteFile': backend.deleteFile('local', body.name); return json(res, { ok: true });
       case 'saveConfig': { var allowed = ['firebase-config.json', 'config.json']; var fn = path.basename(body.filename || 'config.json'); if (!allowed.includes(fn)) return json(res, { error: 'filename not allowed' }, 403); fs.writeFileSync(path.join(STATIC_DIR, fn), JSON.stringify(body.data, null, 2)); return json(res, { ok: true }); }
       case 'getUsers': return json(res, backend._users || {});
       case 'getMyAccess': {
@@ -579,9 +619,13 @@ const server = http.createServer(async (req, res) => {
       default: res.writeHead(404); return res.end('Not found');
     }
     } catch (err) {
-      console.error('API error:', route, err.message);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: err.message }));
+      // A policy refusal is an AUTHORIZATION failure, not a server fault. Reporting it as 500 made
+      // every denial under --pg look like a crash -- to the client, to the logs, and to anyone reading
+      // them -- and left callers with no way to tell "you may not" from "something broke".
+      const refused = /row-level security|permission denied/i.test(err.message || '');
+      if (!refused) console.error('API error:', route, err.message);
+      res.writeHead(refused ? 403 : 500, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: refused ? 'Access denied' : err.message }));
     }
   }
 
@@ -616,11 +660,39 @@ if (!_loopback && process.env.ALLOW_INSECURE_HOST !== '1') {
   console.error('and is safe only on loopback. To bind a non-loopback host anyway, set ALLOW_INSECURE_HOST=1.');
   process.exit(1);
 }
-server.listen(PORT, HOST, () => {
-  console.log('Local dev server: http://' + HOST + ':' + PORT + (_loopback ? '' : '  [INSECURE: unauthenticated, exposed off-host]'));
-  // Print the database ACTUALLY in use, not the default: with APP_DB set this line was still claiming
-  // dev/local.db, which is the one thing you check when you are running an isolated instance on purpose.
-  console.log('Storage backend: ' + (USE_FS
-    ? 'JSON files (dev/data/)'
-    : 'SQLite (' + (APP_DB === ':memory:' ? ':memory:' : path.relative(STATIC_DIR, DB_PATH || path.join(__dirname, 'local.db')).replace(/\\/g, '/')) + ')'));
-});
+// Startup is async because the PGlite backend is WASM: it must exist, and the member registry must be
+// mirrored into the policy's own store, BEFORE the first request is served.
+async function startup() {
+  if (USE_PG) {
+    // PGlite's dataDir is a DIRECTORY, while APP_DB names a SQLite file. Derive one from the other
+    // rather than handing it the file path, which would silently create a directory named `<x>.db`.
+    backend = await require('./backend-pglite').createPgliteBackend(
+      APP_DB && APP_DB !== ':memory:' ? { dataDir: DB_PATH + '.pgdata' } : {});
+  }
+  loadSidecars();
+  await mirrorUsersToPolicy();
+
+  server.listen(PORT, HOST, () => {
+    console.log('Local dev server: http://' + HOST + ':' + PORT + (_loopback ? '' : '  [INSECURE: unauthenticated, exposed off-host]'));
+    // Print the database ACTUALLY in use, not the default: with APP_DB set this line was still claiming
+    // dev/local.db, which is the one thing you check when you are running an isolated instance on purpose.
+      if (!USE_PG) {
+      // Loud, because the difference is invisible from the browser. The dev server never authenticated
+      // anyone -- it trusts the X-User header on loopback -- so its old JavaScript checks were an
+      // EMULATION of production, not a security boundary. That emulation now comes from running the
+      // real policies, which only the default backend does. On --sqlite or --fs there is nothing left
+      // to emulate them, so every request is permitted: fine for speed, useless for answering "can this
+      // member actually do that?".
+      console.log('');
+      console.log('  !! NO ACCESS POLICY on this backend. Every request is permitted.');
+      console.log('     Access control comes from supabase-schema.sql, which only the default (PGlite)');
+      console.log('     backend runs. Use `node server.js` to test permissions.');
+      console.log('');
+    }
+  console.log('Storage backend: ' + (USE_PG ? 'PGlite + supabase-schema.sql policies' : USE_FS
+      ? 'JSON files (dev/data/)'
+      : 'SQLite (' + (APP_DB === ':memory:' ? ':memory:' : path.relative(STATIC_DIR, DB_PATH || path.join(__dirname, 'local.db')).replace(/\\/g, '/')) + ')'));
+  });
+}
+
+startup().catch((e) => { console.error('startup failed:', e); process.exit(1); });

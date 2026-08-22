@@ -264,8 +264,8 @@ const postAs = (email, action, body) => fetch(BASE + action, { method: 'POST', h
 
   for (const [code, map] of Object.entries(bundle.translations || {})) {
     const lang = (bundle.languages || []).find(l => l.code === code);
-    await post('createLanguage', { folderId: 'local', code, name: lang ? lang.name : code, keys: Object.keys(map) });
-    await post('updateTranslations', { folderId: 'local', langCode: code, updates: map });
+    await post('createLanguage', { code, name: lang ? lang.name : code, keys: Object.keys(map) });
+    await post('updateTranslations', { langCode: code, updates: map });
   }
 
   if (bundle.config) {

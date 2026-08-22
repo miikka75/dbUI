@@ -66,7 +66,10 @@ describe('dev server — self-service writes are gated on the MERGED row', () =>
       stdio: 'ignore'
     });
     let up = false;
-    const deadline = Date.now() + 8000;
+    // 45s: the dev server's default backend is PGlite, so this spawn boots a WebAssembly Postgres and
+    // applies supabase-schema.sql before it answers -- seconds on its own, and node --test runs the
+    // suites that do this concurrently. The ceiling costs nothing when the server is up sooner.
+    const deadline = Date.now() + 45000;
     while (!up && Date.now() < deadline) {
       try {
         const r = await fetch(BASE + '/api/serverInfo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
@@ -74,8 +77,8 @@ describe('dev server — self-service writes are gated on the MERGED row', () =>
       } catch (e) { await new Promise(r => setTimeout(r, 50)); }
     }
     assert.ok(up, 'dev server started');
-    await post('saveSchema', { folderId: 'local', schema: SCHEMA });
-    await post('initSchema', { folderId: 'local', schema: SCHEMA.tables });
+    await post('saveSchema', { schema: SCHEMA });
+    await post('initSchema', { schema: SCHEMA.tables });
     // member holds NO grant on `signups` — everything they can do comes from the owner column.
     await post('setUserRole', { uid: 'admin@dev', role: 'admin', user: 'admin@dev', tables: 'all' });
     await post('setUserRole', { uid: 'member@dev', role: 'viewer', user: 'member@dev', tables: {} });
@@ -91,9 +94,9 @@ describe('dev server — self-service writes are gated on the MERGED row', () =>
       await Promise.race([exited, new Promise(r => setTimeout(r, 2000))]);
     }
     for (const f of fs.readdirSync(path.join(DEV_DIR, 'test'))) {
-      if (f.startsWith('.pwa-' + process.pid)) { try { fs.rmSync(path.join(DEV_DIR, 'test', f), { force: true }); } catch (e) {} }
+      if (f.startsWith('.pwa-' + process.pid)) { try { fs.rmSync(path.join(DEV_DIR, 'test', f), { recursive: true, force: true }); } catch (e) {} }
     }
-    try { fs.rmSync(DB_ABS, { force: true }); } catch (e) {}
+    try { fs.rmSync(DB_ABS, { recursive: true, force: true }); } catch (e) {}
   });
 
   it('a member can CREATE their own owner-stamped row (full payload, unchanged behaviour)', async () => {

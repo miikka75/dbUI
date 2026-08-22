@@ -11,22 +11,30 @@ describe('Security - storage-fs path traversal', () => {
   beforeEach(() => { b = createFsBackend(DIR); });
   afterEach(() => { b.close(); fs.rmSync(DIR, { recursive: true, force: true }); });
 
-  it('writeFile rejects ../ escape', () => {
-    assert.throws(() => b.writeFile('local', '../escape.json', { x: 1 }), /Invalid path/);
+  // safePath() still guards every read/write, but the generic file store that used to exercise it
+  // went with the CRDT backend. The row + language APIs reach it through filePath(), so the guard is
+  // pinned through those instead -- a table id is caller-supplied and lands in a filename.
+  it('putRow rejects ../ escape in the table id', () => {
+    assert.throws(() => b.putRow('../escape', { id: 'r1' }, 'active'), /Invalid path/);
   });
-  it('writeFile rejects absolute path escape', () => {
-    assert.throws(() => b.writeFile('local', '../../tmp/evil.json', { x: 1 }), /Invalid path/);
+  it('putRow rejects a deep traversal in the table id', () => {
+    assert.throws(() => b.putRow('../../tmp/evil', { id: 'r1' }, 'active'), /Invalid path/);
   });
-  it('readFile on traversal returns null (no throw leak of outside files)', () => {
-    // readFile swallows errors -> null; the safePath throw is caught internally
-    assert.equal(b.readFile('local', '../../etc/hostname'), null);
+  it('deleteRow rejects traversal in the table id', () => {
+    assert.throws(() => b.deleteRow('../../tmp/evil', 'r1', 'active'), /Invalid path/);
   });
-  it('saveChangesets rejects traversal in siteId', () => {
-    assert.throws(() => b.saveChangesets('local', '../../evil', '{}'), /Invalid path/);
+  it('getTableData on traversal reads nothing (error swallowed, no outside file leaked)', () => {
+    assert.deepEqual(b.getTableData('../../etc/hostname', 'active').rows, []);
   });
-  it('normal filenames still work', () => {
-    b.writeFile('local', 'schema.json', { ok: true });
-    assert.deepEqual(b.readFile('local', 'schema.json'), { ok: true });
+  // The 'lang_' filename prefix absorbs one level on its own ('lang_../../evil' normalises back to
+  // a file inside the data dir), so depth 3 is the shallowest that actually escapes -- and safePath,
+  // not the prefix, is what stops it.
+  it('createLanguage rejects traversal in the language code', () => {
+    assert.throws(() => b.createLanguage('../../../evil', 'Evil', ['k']), /Invalid path/);
+  });
+  it('normal table names still work', () => {
+    b.putRow('tasks', { id: 'r1', title: 'ok' }, 'active');
+    assert.deepEqual(b.getTableData('tasks', 'active').rows, [{ id: 'r1', title: 'ok' }]);
   });
 });
 
@@ -36,17 +44,17 @@ describe('Security - SQLite identifier injection', () => {
   afterEach(() => { b.close(); });
 
   it('malicious table name with quote does not break out / drop tables', () => {
-    b.initSchema('local', { real: { columns: ['id', 'v'], partition: 'active' } });
+    b.initSchema({ real: { columns: ['id', 'v'], partition: 'active' } });
     // Attempt injection via tableId containing a double-quote
     const evil = 'x" ; DROP TABLE _tables; --';
     // Should not throw a syntax error nor drop _tables; treated as a (weird) identifier
     assert.doesNotThrow(() => b.getTableData(evil, 'active'));
     // _tables must still exist -> real table still registered
-    assert.deepEqual(b.getAvailableTables('local').map(t => t.id), ['real']);
+    assert.deepEqual(b.getAvailableTables().map(t => t.id), ['real']);
   });
 
   it('non-ASCII table/column names work', () => {
-    b.initSchema('local', { 'café': { columns: ['id', 'résumé'], partition: 'upcoming' } });
+    b.initSchema({ 'café': { columns: ['id', 'résumé'], partition: 'upcoming' } });
     b.putRow('café', { id: 't1', 'résumé': 'Test' }, 'upcoming');
     const r = b.getTableData('café', 'upcoming');
     assert.equal(r.rows.length, 1);

@@ -71,8 +71,17 @@ function createSupabaseStorage(sb) {
     delete: function(store, key) {
       return sb.from(TABLE).delete().eq('store', store).eq('key', key).then(_unwrap);
     },
-    getAll: function(store) {
-      return sb.from(TABLE).select('value').eq('store', store).then(_unwrap).then(function(rows) {
+    // `constraints` (from query.js) narrow the read in Postgres instead of in the browser -- on the free
+    // Firebase plan the equivalent saves document reads, and here it saves transfer and time. Only
+    // equality is ever passed: the compiler refuses anything whose meaning differs between the matcher
+    // and a query, so this is a jsonb text comparison and nothing cleverer.
+    getAll: function(store, constraints) {
+      var qb = sb.from(TABLE).select('value').eq('store', store);
+      (constraints || []).forEach(function(c) {
+        if (!c || c.op !== '==') return;                  // unknown op: the caller's residual handles it
+        qb = qb.eq('value->>' + c.field, c.value === null ? null : String(c.value));
+      });
+      return qb.then(_unwrap).then(function(rows) {
         return (rows || []).map(function(r) { return r.value; });
       });
     },

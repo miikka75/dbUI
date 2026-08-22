@@ -27,7 +27,6 @@
       ".git/**",
       "**/node_modules/**",
       "dev/**",
-      "appscript/**",
       "functions/**",
       ".github/**",
       "*.md",
@@ -44,7 +43,7 @@
         "headers": [
           {
             "key": "Content-Security-Policy-Report-Only",
-            "value": "default-src 'self'; script-src 'self' 'unsafe-eval' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-G3aMlmKGyy90czCLToBq35sBMH8mQllm9jrrz7QIPtA=' https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'self'; report-uri /csp-report"
+            "value": "default-src 'self'; script-src 'self' 'unsafe-eval' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-SbRmsHAQzxenWfAXq+cDJtKCFwN6BM5apHRLVw9aJP8=' https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'self'; report-uri /csp-report"
           }
         ]
       }

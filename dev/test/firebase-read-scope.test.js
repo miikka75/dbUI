@@ -18,7 +18,7 @@ const ROOT = path.join(__dirname, '..', '..');
 function loadBackend(email) {
   const calls = [];
   const StorageFirestore = {
-    getAll: function(store) { calls.push({ fn: 'getAll', store: store }); return Promise.resolve(StorageFirestore._all[store] || []); },
+    getAll: function(store, constraints) { calls.push({ fn: 'getAll', store: store, constraints: constraints }); return Promise.resolve(StorageFirestore._all[store] || []); },
     getWhere: function(store, field, op, value) {
       calls.push({ fn: 'getWhere', store: store, field: field, op: op, value: value });
       return Promise.resolve((StorageFirestore._where[store] || {})[field] || []);
@@ -111,5 +111,39 @@ describe('Firestore read scoping (rules are not filters)', () => {
     await env.backend.getTableData('chore_log', 'active');
     await env.backend.getTableData('chore_log', 'archive');
     assert.equal(resolved, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Pushdown, and the one place it must NOT happen.
+//
+// Firestore needs a COMPOSITE INDEX for any query constraining two or more fields, and this project
+// ships no firestore.indexes.json. The scoped read already spends its single field on owner /
+// rosterPublic, so pushing a filter there yields a two-field query that fails in production with
+// FAILED_PRECONDITION -- while the EMULATOR accepts it, because it does not enforce index requirements.
+// That combination (green tests, broken app) is why this is asserted against the calls the shipped code
+// actually makes rather than left to a comment.
+describe('firebase read scope — a filter is pushed only where an index is not needed', () => {
+  it('a GRANTED read pushes the constraint into the collection query', async () => {
+    const { backend, calls } = loadBackend('admin@x.com');
+    backend._myTables = () => Promise.resolve(null);         // unrestricted
+    await backend.getTableData('tasks', 'active', { constraints: [{ field: 'status', op: '==', value: 'open' }] });
+    const all = calls.filter((c) => c.fn === 'getAll');
+    assert.equal(all.length, 1, 'the granted path reads the whole collection, once');
+    assert.deepEqual(all[0].constraints, [{ field: 'status', op: '==', value: 'open' }],
+      'the constraint must reach the query, or nothing was pushed down');
+  });
+
+  it('a SCOPED read does not, because that would need a composite index', async () => {
+    const { backend, calls } = loadBackend('member@x.com');
+    backend._myTables = () => Promise.resolve([]);           // no grant -> owner/rosterPublic queries
+    await backend.getTableData('tasks', 'active', { constraints: [{ field: 'status', op: '==', value: 'open' }] });
+    const wheres = calls.filter((c) => c.fn === 'getWhere');
+    assert.ok(wheres.length >= 2, 'the scoped path issues its two provable queries');
+    for (const w of wheres) {
+      assert.ok(['owner', 'rosterPublic'].includes(w.field),
+        'the scoped read constrained ' + w.field + ' — a second field here needs an index this repo does not ship');
+    }
+    assert.equal(calls.filter((c) => c.fn === 'getAll').length, 0, 'the scoped path must not read the whole collection');
   });
 });

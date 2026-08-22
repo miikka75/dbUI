@@ -3,15 +3,15 @@ const assert = require('node:assert/strict');
 const { createLocalBackend } = require('../backend-local');
 const { SCHEMA, DEFAULT_LANGUAGE } = require('../schema');
 
-let backend, strings, folderId;
+let backend, strings;
 
 function t(key) { return strings[key] || key; }
 
 async function loadLanguage(code, defaultCode) {
-  var baseTrans = backend.getTranslations(folderId, defaultCode);
+  var baseTrans = backend.getTranslations(defaultCode);
   strings = baseTrans || {};
   if (code !== defaultCode) {
-    var trans = backend.getTranslations(folderId, code);
+    var trans = backend.getTranslations(code);
     if (trans) strings = Object.assign({}, strings, trans);
   }
 }
@@ -25,17 +25,16 @@ TEST_KEYS.forEach(k => { TEST_TRANSLATIONS[k] = 'translated-' + k; });
 beforeEach(() => {
   backend = createLocalBackend();
   strings = {};
-  folderId = 'local';
   // Create default language with translations (simulates first boot)
-  backend.createLanguage(folderId, DEFAULT_LANGUAGE, DEFAULT_LANGUAGE, TEST_KEYS);
-  backend.updateTranslations(folderId, DEFAULT_LANGUAGE, DEFAULT_TRANSLATIONS);
+  backend.createLanguage(DEFAULT_LANGUAGE, DEFAULT_LANGUAGE, TEST_KEYS);
+  backend.updateTranslations(DEFAULT_LANGUAGE, DEFAULT_TRANSLATIONS);
 });
 afterEach(() => { backend.close(); });
 
 describe('Language switching flow', () => {
   it('translated keys return translated values after switch', async () => {
-    backend.createLanguage(folderId, 'xx', 'TestLang', TEST_KEYS);
-    backend.updateTranslations(folderId, 'xx', TEST_TRANSLATIONS);
+    backend.createLanguage('xx', 'TestLang', TEST_KEYS);
+    backend.updateTranslations('xx', TEST_TRANSLATIONS);
 
     await loadLanguage('xx', DEFAULT_LANGUAGE);
 
@@ -45,9 +44,9 @@ describe('Language switching flow', () => {
   });
 
   it('untranslated keys fall back to default language', async () => {
-    backend.createLanguage(folderId, 'xx', 'TestLang', TEST_KEYS);
+    backend.createLanguage('xx', 'TestLang', TEST_KEYS);
     // Only translate first key
-    backend.updateTranslations(folderId, 'xx', { [TEST_KEYS[0]]: 'only-this' });
+    backend.updateTranslations('xx', { [TEST_KEYS[0]]: 'only-this' });
 
     await loadLanguage('xx', DEFAULT_LANGUAGE);
 
@@ -56,8 +55,8 @@ describe('Language switching flow', () => {
   });
 
   it('switching back to default language restores all keys', async () => {
-    backend.createLanguage(folderId, 'xx', 'TestLang', []);
-    backend.updateTranslations(folderId, 'xx', TEST_TRANSLATIONS);
+    backend.createLanguage('xx', 'TestLang', []);
+    backend.updateTranslations('xx', TEST_TRANSLATIONS);
 
     await loadLanguage('xx', DEFAULT_LANGUAGE);
     assert.equal(t(TEST_KEYS[0]), TEST_TRANSLATIONS[TEST_KEYS[0]]);
@@ -67,15 +66,15 @@ describe('Language switching flow', () => {
   });
 
   it('getAvailableLanguages returns code for added language', () => {
-    backend.createLanguage(folderId, 'xx', 'TestLang', []);
-    const langs = backend.getAvailableLanguages(folderId);
+    backend.createLanguage('xx', 'TestLang', []);
+    const langs = backend.getAvailableLanguages();
     const xx = langs.find(l => l.code === 'xx');
     assert.ok(xx, 'test language should be in list');
     assert.equal(xx.code, 'xx');
   });
 
   it('language with no translations returns default language values', async () => {
-    backend.createLanguage(folderId, 'xx', 'TestLang', TEST_KEYS);
+    backend.createLanguage('xx', 'TestLang', TEST_KEYS);
     // No updateTranslations call for xx
 
     await loadLanguage('xx', DEFAULT_LANGUAGE);

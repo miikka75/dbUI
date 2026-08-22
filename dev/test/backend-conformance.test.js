@@ -5,19 +5,18 @@ const path = require('path');
 const { createLocalBackend } = require('../backend-local');
 const { createFsBackend } = require('../storage-fs');
 
-// The app + dev server call `backend.<method>()` uniformly across five interchangeable backends
-// (SQLite, FS, Firebase, OAuth/Sheets, CRDT). Nothing else enforces that they stay in parity, so a
-// method added to one and forgotten in another silently breaks that backend. This is a drift guard:
-// the COMMON CONTRACT below is the floor every backend must implement (individual backends add extras
-// — bootData, renameLanguage, getFileModifiedTime, the Firebase user/profile RPCs — which are fine).
+// The app + dev server call `backend.<method>()` uniformly across the interchangeable backends
+// (SQLite, FS, Firebase, Supabase). Nothing else enforces that they stay in parity, so a method added
+// to one and forgotten in another silently breaks that backend. This is a drift guard: the COMMON
+// CONTRACT below is the floor every backend must implement (individual backends add extras — e.g.
+// renameLanguage, the Firebase user/profile RPCs — which are fine).
 const CONTRACT = [
   'getSchema', 'saveSchema', 'initSchema', 'validateFolder',
   'getFolderConfig', 'setFolderConfig',
   'getAvailableTables', 'getAvailableLanguages',
   'getTableData', 'putRow', 'deleteRow', 'moveRow',
   'getLists', 'saveLists', 'putListItem',
-  'getTranslations', 'updateTranslations', 'createLanguage', 'deleteLanguage',
-  'saveChangesets', 'loadChangesets'
+  'getTranslations', 'updateTranslations', 'createLanguage', 'deleteLanguage'
 ];
 
 describe('backend contract — Node backends (runtime)', () => {
@@ -67,7 +66,7 @@ describe('backend contract — browser backends (source scan)', () => {
     return set;
   }
 
-  for (const file of ['backend-firebase.js', 'backend-supabase.js', 'backend-oauth.js', 'crdt-backend.js']) {
+  for (const file of ['backend-firebase.js', 'backend-supabase.js']) {
     it(file + ' defines every contract method', () => {
       const defined = definedMethods(file);
       const missing = CONTRACT.filter(m => !defined.has(m));

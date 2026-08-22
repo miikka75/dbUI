@@ -109,7 +109,9 @@ describe('rules parity — identity columns (an owner may only name themselves)'
     assert.match(SQL, /public\.app_owner_identity_ok\(store, val\)/, 'the owner branch must call it');
   });
   it('dev/server.js gates the owner branch on it', () => {
-    assert.match(SERVER, /BackendHelpers\.ownerIdentityOk\(bounds, incoming, myIdentityFor\(bounds\.identityList\)\)/,
+    // `await` is tolerated: the dev server's backend calls became async so the same code could run
+    // against PGlite. What this guards is that the identity is RESOLVED and passed, not the spelling.
+    assert.match(SERVER, /BackendHelpers\.ownerIdentityOk\(bounds, incoming, (?:await )?myIdentityFor\(bounds\.identityList\)\)/,
       'the dev server must consult it with the caller resolved identity');
   });
   it('all three read the mirror off the grant doc, never a self-writable one', () => {
@@ -150,9 +152,13 @@ describe('rules parity — userWritableLists (list editing is admin-only by defa
     assert.equal(uses, 3, 'read, create and update must each call it; delete is admin-only (found ' + uses + ')');
     assert.doesNotMatch(SQL, /app_list_write_allowed/, 'the table-grant helper should be gone');
   });
-  it('dev/server.js gates putListItem and saveLists', () => {
+  it('dev/server.js no longer implements this rule at all', () => {
+    // It used to consult userWritableListsOf on both list write paths, because it carried its own copy
+    // of the access model. It does not any more: the dev server runs supabase-schema.sql, so the
+    // policies answer this. ZERO is the assertion -- a reappearance means the third implementation is
+    // growing back.
     const uses = (SERVER.match(/BackendHelpers\.userWritableListsOf\(/g) || []).length;
-    assert.equal(uses, 2, 'both list write paths must consult it (found ' + uses + ')');
+    assert.equal(uses, 0, 'the dev server should not be re-deciding list access (found ' + uses + ')');
   });
   it('an absent mirror fails CLOSED in both rules layers', () => {
     // A deployment that has not re-saved its schema must not keep the old permissive behaviour.

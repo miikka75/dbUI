@@ -64,7 +64,7 @@ jobs:
       # Publish the whole repo root. Excludes below keep secrets / dev-only files out of the public site.
       - name: Prune non-public files
         run: |
-          rm -rf .github dev node_modules tests test appscript .git || true
+          rm -rf .github dev node_modules tests test .git || true
           rm -f supabase-schema.sql firebase-config.json supabase-config.json .env* firebase.json .firebaserc firestore.indexes.json split-supabase-commits.bat || true
           # Data export / import bundles carry ROW data. This is the SECOND publish path for the repo
           # root (firebase.json hosting is the other), with its own hand-maintained exclusion list —

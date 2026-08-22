@@ -13,8 +13,15 @@
 // time through globalThis — same pattern (and same Node gotcha) as rows.js.
 (function(root) {
   var isNode = (typeof module !== 'undefined' && module.exports);
-  var Rows = isNode ? require('./rows') : root;         // buildRows/resolveComputed/aggregateRows/sortByCol/condMatches
-  var Cols = isNode ? require('./columns') : root;      // colName/isEmbed/isViewEmbed shape predicates
+  // These resolve to the module under Node and to globals hung off the root object in the browser.
+  // tsc cannot type that: `module.exports = M` sits inside an `if (isNode)` within this IIFE, so the
+  // inferred export shape comes out incomplete, and the globalThis branch has no declarations at all.
+  // Both are therefore `any`, which means CALLS THROUGH THESE ARE NOT TYPE-CHECKED. Everything inside
+  // each module still is, which is where the value has been so far. Closing this gap needs either
+  // .d.ts companions (a second copy of the API to keep in sync -- the exact duplication this codebase
+  // is trying to shed) or ES modules; neither is worth doing ahead of the store refactor.
+  /** @type {any} */ var Rows = isNode ? require('./rows') : root;   // buildRows/resolveComputed/aggregateRows/sortByCol/condMatches
+  /** @type {any} */ var Cols = isNode ? require('./columns') : root;   // colName/isEmbed/isViewEmbed shape predicates
 
   // A URL safe to place in an href/src attribute: http(s) only. Relative URLs are allowed when they
   // resolve against the page onto http/https. Everything else -- javascript:, data:, vbscript:, file:,
@@ -83,39 +90,97 @@
     return out.join('');
   }
 
+  // ---- Renderer seam -------------------------------------------------------------------------
+  // mdToHtml above is the DEFAULT prose renderer, not the only possible one. Swapping in a real
+  // markdown parser (for images, tables, code blocks) is one call at boot rather than an edit here:
+  //
+  //   Embeds.setRenderer(function (text) { return md.render(text); });
+  //
+  // The contract, in full:
+  //   - input is PROSE ONLY. mdBlocks has already split the {{...}} embeds out, so a renderer never
+  //     sees them and must never try to interpret them.
+  //   - output is an HTML STRING inserted with v-html. It must not contain raw user HTML. mdToHtml
+  //     escapes; a parser must be configured to escape too (markdown-it: `html: false`) and to run
+  //     URLs through safeUrl, so the javascript:/data: allowlist survives the swap.
+  // Passing a non-function resets to the built-in renderer.
+  var _renderProse = mdToHtml;
+  function setRenderer(fn) { _renderProse = (typeof fn === 'function') ? fn : mdToHtml; }
+
+  // ---- Block directive registry --------------------------------------------------------------
+  // `{{view:x}}` / `{{table:x}}` are two entries in a table, not two hardcoded branches. Adding a
+  // directive used to mean three edits in this file -- the split regex, buildEmbedBlock, and the
+  // hide-when-empty test. Now it is one registration:
+  //
+  //   Embeds.registerBlock('gauge', {
+  //     resolve: function (name, part, ctx) { return {...} | null; },  // null -> "Unknown embed"
+  //     count:   function (name, part, ctx) { return <rows>; }         // drives the `?` suffix
+  //   });
+  //
+  // Kind names must be word characters -- they are spliced into the split pattern.
+  var BLOCKS = {};
+  function registerBlock(kind, handler) {
+    if (!/^\w+$/.test(String(kind))) throw new Error('embed kind must be word characters: ' + kind);
+    BLOCKS[kind] = handler;
+  }
+  function _kinds() { return Object.keys(BLOCKS).join('|'); }
+  // The patterns come from real regex literals via .source, with the kind alternation spliced in.
+  // Building them from quoted strings instead means every backslash has to survive being written
+  // twice, which is a silent failure: a lost escape yields a regex that still compiles but matches
+  // the wrong thing.
+  var _SPLIT_SRC = /\{\{\s*(KINDS)\s*:\s*([^\s@?{}:]+(?:@[^\s?{}:]+)?\??)\s*\}\}/.source;
+  var _SCAN_SRC  = /\{\{\s*(KINDS)\s*:\s*([^\s@?{}:]+)(@[^\s?{}:]+)?\??\s*\}\}/.source;
+  // Built at call time, not once at load, so a directive registered later still parses.
+  function _blockSplitRe() { return new RegExp(_SPLIT_SRC.replace('KINDS', _kinds())); }
+  function _blockScanRe() { return new RegExp(_SCAN_SRC.replace('KINDS', _kinds()), 'g'); }
+
+  registerBlock('view', {
+    resolve: function(name, part, ctx) { return ctx.views[name] ? { embedType: 'view', embedName: name, embedPart: part || null } : null; },
+    count: function(name, part, ctx) { return embedRows('view', name, part, ctx).length; }
+  });
+  registerBlock('table', {
+    resolve: function(name, part, ctx) { return ctx.schema[name] ? { embedType: 'table', embedName: name, embedPart: part || null } : null; },
+    count: function(name, part, ctx) { return embedRows('table', name, part, ctx).length; }
+  });
+
   // `@both` is not the name of a partition: it asks for BOTH of them behind one Upcoming/Past toggle,
   // the embedded counterpart of the top-level archive tabs. The block carries no fixed part (the
   // component owns which half is showing) plus the `embedBoth` flag that turns the tab strip on.
+  // It is handled HERE rather than in a directive because it is a property of partitions, which every
+  // registered kind shares -- a handler resolves a name, it does not decide what a partition means.
   var BOTH = 'both';
 
   // v3 pages: a {{view:x}}/{{table:x}} embed block — the embed-view component resolves cols/rows itself.
   function buildEmbedBlock(type, name, part, ctx) {
-    if ((type === 'view' && ctx.views[name]) || (type === 'table' && ctx.schema[name])) {
-      var both = part === BOTH;
-      return { embedType: type, embedName: name, embedPart: both ? null : (part || null), embedBoth: both };
-    }
-    return { html: '<em>Unknown embed: ' + type + ':' + name + '</em>' };
+    var h = BLOCKS[type], both = part === BOTH;
+    var blk = h && h.resolve(name, both ? null : part, ctx);
+    if (!blk) return { html: '<em>Unknown embed: ' + type + ':' + name + '</em>' };
+    blk.embedBoth = both;
+    return blk;
   }
 
   // How many rows a block has for the `?` hide-when-empty test. A `@both` block counts BOTH partitions:
   // a member whose active list is empty must still get the block when something has aged into the
   // archive, or the toggle that would reveal it is exactly what got hidden.
   function embedRowCount(type, name, part, ctx) {
-    if (part !== BOTH) return embedRows(type, name, part, ctx).length;
-    return embedRows(type, name, null, ctx).length + embedRows(type, name, 'archive', ctx).length;
+    var h = BLOCKS[type];
+    if (!h) return 0;                       // unreachable from mdBlocks -- the split pattern is BUILT
+                                            // from the registered kinds, so an unknown one is never
+                                            // parsed as an embed at all. Defensive, for direct callers.
+    if (part !== BOTH) return h.count(name, part, ctx);
+    return h.count(name, null, ctx) + h.count(name, 'archive', ctx);
   }
 
   // Parse markdown into render blocks: {html} or {embedType,embedName,embedPart}. `?` hides empty embeds.
   function mdBlocks(markdown, selfName, ctx) {
     var md = String(markdown || '').replace(/\{\{\s*self\s*\}\}/g, selfName ? '{{view:' + selfName + '}}' : '').replace(/\{\{\s*t\s*:\s*([^\s{}:]+)\s*\}\}/g, function(_, k) { return ctx.t(k) || ''; });
-    var parts = md.split(/\{\{\s*(view|table)\s*:\s*([^\s@?{}:]+(?:@[^\s?{}:]+)?\??)\s*\}\}/);
+    var parts = md.split(_blockSplitRe());
     var blocks = [], i = 0;
     while (i < parts.length) {
       // Guard on the RENDERED html, not the raw text: whitespace-only prose (the newline after a closing
       // {{view:x}}, say) renders to '' and would be pushed as a block with a falsy `html`. Both templates
       // dispatch with `v-if="blk.html" … v-else <embed-view>`, so such a block fell through to the embed
       // branch with no type/name — a phantom empty grid plus an "Add" button at the end of the page.
-      if (parts[i]) { var _h = mdToHtml(parts[i]); if (_h) blocks.push({ html: _h }); }
+      if (parts[i]) { var _h = _renderProse(parts[i]); if (_h) blocks.push({ html: _h }); }
       if (i + 2 < parts.length) {
         var type = parts[i + 1], raw = parts[i + 2];
         var optional = raw.charAt(raw.length - 1) === '?'; if (optional) raw = raw.slice(0, -1);
@@ -130,7 +195,7 @@
   // For an embedded doc-view: false only if it has data embeds and ALL of them are empty (hide whole doc-view).
   function docHasData(markdown, selfName, ctx) {
     var md = String(markdown || '').replace(/\{\{\s*self\s*\}\}/g, selfName ? '{{view:' + selfName + '}}' : '');
-    var re = /\{\{\s*(view|table)\s*:\s*([^\s@?{}:]+)(@[^\s?{}:]+)?\??\s*\}\}/g, m, any = false;
+    var re = _blockScanRe(), m, any = false;
     while ((m = re.exec(md))) { any = true; if (embedRowCount(m[1], m[2], m[3] ? m[3].slice(1) : null, ctx)) return true; }
     return !any;
   }
@@ -225,7 +290,7 @@
   }
 
   var M = {
-    mdToHtml: mdToHtml, buildEmbedBlock: buildEmbedBlock, mdBlocks: mdBlocks, docHasData: docHasData,
+    mdToHtml: mdToHtml, setRenderer: setRenderer, registerBlock: registerBlock, buildEmbedBlock: buildEmbedBlock, mdBlocks: mdBlocks, docHasData: docHasData,
     resolveEmbed: resolveEmbed, embedCols: embedCols, embedRows: embedRows, embedRowCount: embedRowCount,
     embedRowsForItem: embedRowsForItem, embedWhenOk: embedWhenOk, embedVisible: embedVisible, safeUrl: safeUrl, safeImgSrc: safeImgSrc,
     isAssetRef: isAssetRef, assetId: assetId, safeCssUrl: safeCssUrl

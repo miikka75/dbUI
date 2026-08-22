@@ -107,7 +107,7 @@ test('admin: schema seed, grid add-row round-trip, image upload through Storage'
   await page.waitForFunction(() => appInstance.isAdmin === true);
 
   // Seed the fixture schema through the real adapter (also writes _meta/ownerTables), then reboot.
-  await page.evaluate((schema) => backend.saveSchema('', schema), SCHEMA);
+  await page.evaluate((schema) => backend.saveSchema(schema), SCHEMA);
   await page.reload();
   await signIn(page, 'admin@test.com'); // session persists, but wait for the re-boot to settle
 
@@ -142,7 +142,7 @@ test('zero-grant viewer: sees the EDITED page body (not the schema seed), no edi
   await page.goto('/');
   await signIn(page, 'admin@test.com');
   await page.waitForFunction(() => appInstance.isAdmin === true);
-  await page.evaluate((schema) => backend.saveSchema('', schema), SCHEMA);
+  await page.evaluate((schema) => backend.saveSchema(schema), SCHEMA);
   // Admin edits the doc body (server-side _pages store) and registers a viewer with NO grants.
   await page.evaluate(() => backend.putRow('_pages', { id: 'handbook', markdown: 'EDITED-BODY' }, 'active'));
   await page.evaluate(() => backend_users.setUserRole('viewer@test.com', 'viewer', 'viewer@test.com', []));
@@ -179,7 +179,7 @@ test('per-page access: gated doc-view is hidden + read-denied without the grant,
   await page.goto('/');
   await signIn(page, 'admin@test.com');
   await page.waitForFunction(() => appInstance.isAdmin === true);
-  await page.evaluate((schema) => backend.saveSchema('', schema), SCHEMA);
+  await page.evaluate((schema) => backend.saveSchema(schema), SCHEMA);
   // Admin edits the gated page's body and registers two users: one granted `notes`, one with nothing.
   await page.evaluate(() => backend.putRow('_pages', { id: 'secret_page', markdown: 'EDITED-SECRET' }, 'active'));
   await page.evaluate(() => backend_users.setUserRole('member@test.com', 'editor', 'member@test.com', ['notes']));
@@ -265,7 +265,7 @@ test('live sync: a write in one client reaches another through onSnapshot, unsco
   await page.goto('/');
   await signIn(page, 'admin@test.com');
   await page.waitForFunction(() => appInstance.isAdmin === true);
-  await page.evaluate((schema) => backend.saveSchema('', schema), OWNER_SCHEMA);
+  await page.evaluate((schema) => backend.saveSchema(schema), OWNER_SCHEMA);
   await page.reload();
   await signIn(page, 'admin@test.com');
   await page.click('text=tab.notes');

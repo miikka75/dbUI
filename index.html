@@ -87,7 +87,6 @@
     async function loadApp() {
       // Shared-link support: persist URL params to localStorage, then read mode.
       // shareLink generates: ?mode=firebase&k=<apiKey>&d=<authDomain>&p=<projectId>
-      //                  or: ?mode=sheets&folder=<id>&clientId=<id>
       try {
         var qp = new URLSearchParams(location.search);
         var urlMode = qp.get('mode');
@@ -131,7 +130,6 @@
           } else {
             localStorage.setItem('app_mode', urlMode);
             if (qp.get('folder')) localStorage.setItem('app_folder', qp.get('folder'));
-            if (qp.get('clientId')) localStorage.setItem('oauth_client_id', qp.get('clientId'));
           }
           // Strip params from the URL so a refresh doesn't re-apply / leak config
           history.replaceState(null, '', location.origin + location.pathname);
@@ -140,10 +138,7 @@
 
       var mode = localStorage.getItem('app_mode');
       var backendFile;
-      if (mode === 'sheets') { backendFile = '/backend-oauth.js'; }
-      else if (mode === 'crdt') { backendFile = '/backend-crdt.js'; }
-      else if (mode === 'crdt-local') { backendFile = '/backend-crdt-local.js'; }
-      else if (mode === 'firebase') { backendFile = '/backend-firebase.js'; }
+      if (mode === 'firebase') { backendFile = '/backend-firebase.js'; }
       else if (mode === 'supabase') { backendFile = '/backend-supabase.js'; }
       else {
         if (mayHaveLocalServer()) {
@@ -152,9 +147,8 @@
             if (probe.ok) { var pj = await probe.json(); if (pj && pj.valid) backendFile = '/backend-local-client.js'; }
           } catch(e) {}
         }
-        if (!backendFile) {
-          backendFile = '/backend-oauth.js';
-        }
+        // No stored mode and no dev server reachable: there is no backend to guess at, so boot
+        // straight to the setup screen and let it choose (it stores app_mode and reloads).
       }
 
       // Only the MARKUP fragments (styles + Vue templates) are fetched and injected — inserting
@@ -194,6 +188,7 @@
       var appModulesReady = loadScriptsOrdered([
         '/columns.js', '/access-features.js', '/list-access.js', '/list-users.js', '/calendar.js',
         '/rotation.js', '/rows.js', '/embeds.js', '/print.js', '/pivot.js', '/rsvp.js', '/board.js',
+        '/writes.js', '/migrations.js', '/query.js',
         '/live-sync.js'
       ]);
 
@@ -211,9 +206,6 @@
       // gating this on the backend left BackendHelpers undefined on the local/Sheets paths.
       await loadScript('/backend-helpers.js');
 
-      if (backendFile === '/backend-oauth.js' || backendFile === '/backend-crdt.js') {
-        await loadScript('https://accounts.google.com/gsi/client');
-      }
       if (backendFile === '/backend-firebase.js') {
         await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
         await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js');
@@ -232,19 +224,9 @@
       await stylesReady;   // ensure Vuetify's CSS is in before first paint (no FOUC)
       createVueApp();
       bootMark('vueMounted');
-      // Load shared auth before backend for OAuth/CRDT(Drive)
-      if (backendFile === '/backend-oauth.js' || backendFile === '/backend-crdt.js') {
-        await loadScriptsOrdered(['/auth-oauth.js', '/drive-helpers.js']);
-      }
-      // Dev-server client helpers (_post + backend_users) shared by local + crdt-local
-      if (backendFile === '/backend-local-client.js' || backendFile === '/backend-crdt-local.js') {
+      // Dev-server client helpers (_post + backend_users)
+      if (backendFile === '/backend-local-client.js') {
         await loadScript('/dev-client.js');
-      }
-      // Load shared CRDT modules (engine + IDB storage + transport + unified backend)
-      // for both Drive CRDT and local CRDT — they differ only in the transport.
-      if (backendFile === '/backend-crdt.js' || backendFile === '/backend-crdt-local.js') {
-        var transportFile = backendFile === '/backend-crdt.js' ? '/transport-drive.js' : '/transport-local.js';
-        await loadScriptsOrdered(['/crdt-engine.js', '/storage-idb.js', transportFile, '/crdt-backend.js']);
       }
       // Load Firestore storage adapter for Firebase mode
       if (backendFile === '/backend-firebase.js') {
@@ -254,17 +236,11 @@
       if (backendFile === '/backend-supabase.js') {
         await loadScript('/storage-supabase.js');
       }
-      await loadScript(backendFile);
-      // For OAuth/CRDT(Drive): handle auth
-      if (backendFile === '/backend-oauth.js' || backendFile === '/backend-crdt.js') {
-        if (!localStorage.getItem('app_folder')) {
-          appInstance.showSetup = true; appInstance.loading = false;
-        } else if (sessionStorage.getItem('oauth_token')) {
-          // Token cached: init directly (backend is now loaded)
-          init();
-        } else {
-          appInstance.needsReauth = true; appInstance.loading = false;
-        }
+      if (backendFile) {
+        await loadScript(backendFile);
+      } else {
+        // Nothing configured yet — the setup dialog picks a mode, stores it, and reloads into it.
+        appInstance.showSetup = true; appInstance.loading = false;
       }
       // Firebase: auth handled by onAuthStateChanged in backend-firebase.js
     }

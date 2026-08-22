@@ -11,7 +11,15 @@ const { createSupabaseStorage } = require('../../storage-supabase');
 //   from(t).delete().eq(c,v).eq(c,v)                -> thenable { data:null, error }
 function makeFakeSb() {
   const rows = []; // { store, key, value }
-  const matches = (r, f) => Object.keys(f).every(k => r[k] === f[k]);
+  // PostgREST accepts a jsonb path as a filter column ('value->>status'); the fake has to read one the
+  // same way, or a pushed-down constraint would silently match nothing here and everything in Postgres.
+  const fieldOf = (r, k) => {
+    const arrow = k.indexOf('->>');
+    if (arrow < 0) return r[k];
+    const v = (r[k.slice(0, arrow)] || {})[k.slice(arrow + 3)];
+    return v === undefined || v === null ? v : String(v);
+  };
+  const matches = (r, f) => Object.keys(f).every(k => fieldOf(r, k) === f[k]);
   const find = (f) => rows.find(r => matches(r, f));
   return {
     _rows: rows,
@@ -110,5 +118,44 @@ describe('storage-supabase adapter — interface parity with the Firestore adapt
     assert.deepEqual(await S.get('_profiles', 'me'), { name: 'Renamed', shared: true, picture: 'p' });
     await S._replace('_profiles', 'me', { name: 'Only' });            // drops the rest
     assert.deepEqual(await S.get('_profiles', 'me'), { name: 'Only' });
+  });
+});
+
+describe('storage-supabase — pushing a filter into the query', () => {
+  const Query = require('../../query');
+  const Rows = require('../../rows');
+
+  const seeded = () => {
+    const S = createSupabaseStorage(makeFakeSb());
+    return S.put('tasks__active', 'p1', { id: 'p1', status: 'open', owner: 'ann' })
+      .then(() => S.put('tasks__active', 'p2', { id: 'p2', status: 'done', owner: 'ann' }))
+      .then(() => S.put('tasks__active', 'p3', { id: 'p3', status: 'open', owner: 'bob' }))
+      .then(() => S.put('tasks__active', 'p4', { id: 'p4', owner: 'bob' }))     // no status
+      .then(() => S);
+  };
+
+  for (const cond of [{ status: 'open' }, { status: 'open', owner: 'ann' }, { status: { ne: 'open' } }, {}]) {
+    it('agrees for ' + JSON.stringify(cond), async () => {
+      const S = await seeded();
+      const { constraints, residual } = Query.compile(cond);
+      const pushed = (await S.getAll('tasks__active', constraints))
+        .filter((r) => Rows.condMatches(r, residual)).map((r) => r.id).sort();
+      const whole = (await S.getAll('tasks__active'))
+        .filter((r) => Rows.condMatches(r, cond)).map((r) => r.id).sort();
+      assert.deepEqual(pushed, whole, 'pushing the filter down changed which rows came back');
+    });
+  }
+
+  it('narrows rather than ignoring the constraints', async () => {
+    // Equivalence holds trivially if getAll drops them on the floor, and then this buys nothing.
+    const S = await seeded();
+    const { constraints } = Query.compile({ status: 'open' });
+    assert.deepEqual((await S.getAll('tasks__active', constraints)).map((r) => r.id).sort(), ['p1', 'p3']);
+  });
+
+  it('a row missing the field does not match an equality', async () => {
+    const S = await seeded();
+    const { constraints } = Query.compile({ status: 'open' });
+    assert.ok(!(await S.getAll('tasks__active', constraints)).some((r) => r.id === 'p4'));
   });
 });

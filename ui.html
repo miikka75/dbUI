@@ -20,10 +20,6 @@
               <v-icon start>mdi-database</v-icon>
               <div><strong>Dev Server (SQLite)</strong><br><small style="opacity:0.6">SQLite on the local dev server — fastest for development</small></div>
             </v-btn>
-            <v-btn v-if="hasLocalServer" block variant="outlined" class="mb-3 text-left mode-btn" @click="openCrdtLocalSetup">
-              <v-icon start>mdi-sync-circle</v-icon>
-              <div><strong>Browser + CRDT Sync (Local Server)</strong><br><small style="opacity:0.6">Browser IndexedDB synced to the local dev server (no Google)</small></div>
-            </v-btn>
             <v-btn block variant="outlined" class="mb-3 text-left mode-btn" @click="selectSetupMode('firebase')">
               <v-icon start>mdi-firebase</v-icon>
               <div><strong>Firebase</strong><br><small style="opacity:0.6">Real-time sync via Firestore with offline support</small></div>
@@ -32,32 +28,11 @@
               <v-icon start>mdi-database-outline</v-icon>
               <div><strong>Supabase</strong><br><small style="opacity:0.6">Postgres + Auth on Supabase, hosted anywhere (e.g. GitHub Pages)</small></div>
             </v-btn>
-            <v-btn block variant="outlined" class="mb-3 text-left mode-btn" @click="selectSetupMode('crdt')">
-              <v-icon start>mdi-google-drive</v-icon>
-              <div><strong>Browser + CRDT Sync (Google Drive)</strong><br><small style="opacity:0.6">Browser IndexedDB synced to Google Drive in the background</small></div>
-            </v-btn>
-            <v-btn block variant="outlined" class="mb-3 text-left mode-btn" @click="selectSetupMode('sheets')">
-              <v-icon start>mdi-google-spreadsheet</v-icon>
-              <div><strong>Google Sheets</strong><br><small style="opacity:0.6">Data stored in Google Sheets via OAuth REST API</small></div>
-            </v-btn>
           </div>
           <!-- Step 2: Local -->
           <div v-if="setupStep === 'local'">
             <p class="mb-4">Dev Server mode — data stored in the local server's SQLite database.</p>
             <v-btn color="primary" @click="completeLocalSetup">Create Database</v-btn>
-            <v-btn variant="text" @click="backToSetup" class="ml-2">Back</v-btn>
-          </div>
-          <!-- Step 2: CRDT-Local -->
-          <div v-if="setupStep === 'crdt-local'">
-            <p class="mb-4">Browser mode — data in browser IndexedDB with CRDT sync via the local dev server. No Google account needed.</p>
-            <p class="mb-4 pa-2" style="background:rgb(var(--v-theme-surface-variant),0.3);border-radius:8px;font-size:0.8rem">
-              <strong>Server storage:</strong>&nbsp;
-              <span v-if="serverStorage === 'fs'">JSON files on disk (<code>dev/data/</code>)</span>
-              <span v-else-if="serverStorage === 'sqlite'">SQLite (<code>dev/local.db</code>)</span>
-              <span v-else style="opacity:0.6">checking…</span><br>
-              To change it, restart the server with <code>node server.js --fs</code> (JSON files) or without it (SQLite).
-            </p>
-            <v-btn color="primary" @click="completeCrdtLocalSetup">Start Browser + CRDT</v-btn>
             <v-btn variant="text" @click="backToSetup" class="ml-2">Back</v-btn>
           </div>
           <!-- Step 2: Supabase -->
@@ -83,33 +58,8 @@
             <v-btn variant="text" @click="selectSetupMode(''); setupStep = null" class="ml-2">Back</v-btn>
             <div class="mt-3" style="font-size:0.8rem;opacity:0.7">After first sign-in: Settings → Import from JSON to load a schema, then Settings → User Access → add yourself as admin.</div>
           </div>
-          <!-- Step 2: Sheets / CRDT / Firebase (need sign-in) -->
-          <div v-if="setupStep === 'sheets' || setupStep === 'crdt' || setupStep === 'firebase'">
-            <div v-if="setupStep === 'sheets'" class="mb-3 pa-2" style="background:rgb(var(--v-theme-surface-variant),0.3);border-radius:8px;font-size:0.8rem">
-              <strong>Google Sheets Setup:</strong><br>
-              1) Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank">console.cloud.google.com</a> → Create or select project<br>
-              2) APIs &amp; Services → Library → Enable <em>Google Drive API</em> + <em>Google Sheets API</em><br>
-              3) OAuth consent screen → Get Started → Set app name, support email<br>
-              4) Audience → Add test user emails)<br>
-              5) Clients → Web Application → Name → Authorized JS origin & Authorized redirect URIs : Add your domain → Create<br>
-              6) Copy the Client ID → paste below<br>
-              7) Create a Drive folder → paste its ID after sign-in<br><br>
-              <strong>User permissions:</strong><br>
-              • Share the Drive folder with other users (Editor = read+write, Viewer = read-only)<br>
-              • Per-table access: create separate spreadsheets and share individually<br>
-              • Add each user's email to OAuth consent screen → Test users
-            </div>
-            <div v-if="setupStep === 'crdt'" class="mb-3 pa-2" style="background:rgb(var(--v-theme-surface-variant),0.3);border-radius:8px;font-size:0.8rem">
-              <strong>CRDT + Drive Sync Setup:</strong><br>
-              1) Same Google Cloud setup as Sheets (project, APIs, OAuth Client ID)<br>
-              2) Paste Client ID below → Sign in<br>
-              3) Create a Drive folder → paste its ID<br>
-              4) Data stays in browser (instant), syncs to Drive every 30s<br><br>
-              <strong>User permissions:</strong><br>
-              • Share the root Drive folder for full access to all tables<br>
-              • Per-table access: share individual <code>sync/{tableName}/</code> subfolders<br>
-              • Add each user's email to OAuth consent screen → Test users
-            </div>
+          <!-- Step 2: Firebase (needs sign-in) -->
+          <div v-if="setupStep === 'firebase'">
             <div v-if="setupStep === 'firebase'" class="mb-3 pa-2" style="background:rgb(var(--v-theme-surface-variant),0.3);border-radius:8px;font-size:0.8rem">
               <strong>Firebase Setup:</strong><br>
               1) Go to <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a> → Create project<br>
@@ -133,17 +83,7 @@
               8) Settings → Import from JSON to load schema + data.<br>
               9) Settings → User Access → add yourself as admin.
             </div>
-            <template v-if="setupStep === 'firebase'">
             <v-btn color="primary" prepend-icon="mdi-content-save" :disabled="!hasFirebaseConfig && !firebaseConfigInput" @click="saveFirebaseConfig()">Save &amp; Continue</v-btn>
-            </template>
-            <template v-else>
-            <v-text-field v-model="oauthClientId" name="oauth-client-id" label="OAuth Client ID" variant="outlined" density="compact" class="mb-2" placeholder="xxxxx.apps.googleusercontent.com"></v-text-field>
-            <v-btn v-if="!oauthReady" color="primary" prepend-icon="mdi-google" :disabled="!oauthClientId" @click="saveClientId(); triggerOAuth()" class="mb-4">Sign in with Google</v-btn>
-            <template v-if="oauthReady">
-            <v-text-field v-model="setupFolderId" name="drive-folder-id" label="Drive folder ID" variant="outlined" density="compact" class="mb-2" @input="validateFolder"></v-text-field>
-            <v-btn color="primary" :disabled="!folderValid" @click="setupMode = setupStep; completeSetup()">Start</v-btn>
-            </template>
-            </template>
             <v-btn variant="text" @click="selectSetupMode(''); setupStep = null" class="ml-2">Back</v-btn>
           </div>
         </v-card-text>

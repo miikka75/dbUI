@@ -32,35 +32,35 @@ describe('validateFolder', () => {
 
 describe('folderConfig', () => {
   it('returns null when no config set', () => {
-    assert.equal(backend.getFolderConfig('f1'), null);
+    assert.equal(backend.getFolderConfig(), null);
   });
   it('stores and retrieves config', () => {
-    backend.setFolderConfig('f1', { mode: 'sheets' });
-    assert.deepEqual(backend.getFolderConfig('f1'), { mode: 'sheets' });
+    backend.setFolderConfig({ mode: 'sheets' });
+    assert.deepEqual(backend.getFolderConfig(), { mode: 'sheets' });
   });
   it('overwrites existing config', () => {
-    backend.setFolderConfig('f1', { mode: 'sheets' });
-    backend.setFolderConfig('f1', { mode: 'crdt' });
-    assert.deepEqual(backend.getFolderConfig('f1'), { mode: 'crdt' });
+    backend.setFolderConfig({ mode: 'sheets' });
+    backend.setFolderConfig({ mode: 'crdt' });
+    assert.deepEqual(backend.getFolderConfig(), { mode: 'crdt' });
   });
 });
 
 describe('initSchema', () => {
   it('creates all tables from SCHEMA', () => {
-    const result = backend.initSchema('f1', SCHEMA);
+    const result = backend.initSchema(SCHEMA);
     TABLES.forEach(function(t) { assert.ok(result[t]); });
   });
   it('is idempotent', () => {
-    backend.initSchema('f1', SCHEMA);
-    const result = backend.initSchema('f1', SCHEMA);
+    backend.initSchema(SCHEMA);
+    const result = backend.initSchema(SCHEMA);
     TABLES.forEach(function(t) { assert.ok(result[t]); });
   });
   it('adds missing columns on re-init', () => {
     // Init with subset, then full
     const partial = {};
     partial[FIRST_TABLE] = { columns: ['id', getColumns(FIRST_TABLE)[1]], primaryKey: 'id' };
-    backend.initSchema('f1', partial);
-    backend.initSchema('f1', SCHEMA);
+    backend.initSchema(partial);
+    backend.initSchema(SCHEMA);
     const data = backend.getTableData(FIRST_TABLE);
     getColumns(FIRST_TABLE).forEach(function(c) {
       assert.ok(data.headers.includes(c), 'missing column: ' + c);
@@ -70,18 +70,18 @@ describe('initSchema', () => {
 
 describe('getAvailableTables', () => {
   it('returns empty before init', () => {
-    assert.deepEqual(backend.getAvailableTables('f1'), []);
+    assert.deepEqual(backend.getAvailableTables(), []);
   });
   it('returns all SCHEMA tables after init', () => {
-    backend.initSchema('f1', SCHEMA);
-    const tables = backend.getAvailableTables('f1');
+    backend.initSchema(SCHEMA);
+    const tables = backend.getAvailableTables();
     assert.equal(tables.length, TABLES.length);
   });
 });
 
 describe('getTableData', () => {
   it('returns correct headers for each table', () => {
-    backend.initSchema('f1', SCHEMA);
+    backend.initSchema(SCHEMA);
     TABLES.forEach(function(t) {
       const data = backend.getTableData(t);
       assert.deepEqual(data.headers, getColumns(t));
@@ -89,7 +89,7 @@ describe('getTableData', () => {
     });
   });
   it('returns rows after insert', () => {
-    backend.initSchema('f1', SCHEMA);
+    backend.initSchema(SCHEMA);
     const row = makeRow(FIRST_TABLE, 'r1');
     backend.putRow(FIRST_TABLE, row);
     const data = backend.getTableData(FIRST_TABLE);
@@ -103,7 +103,7 @@ describe('getTableData', () => {
 
 describe('putRow', () => {
   it('inserts new row with all columns', () => {
-    backend.initSchema('f1', SCHEMA);
+    backend.initSchema(SCHEMA);
     const row = makeRow(FIRST_TABLE, 'p1');
     backend.putRow(FIRST_TABLE, row);
     const data = backend.getTableData(FIRST_TABLE);
@@ -113,7 +113,7 @@ describe('putRow', () => {
     });
   });
   it('updates existing row by id', () => {
-    backend.initSchema('f1', SCHEMA);
+    backend.initSchema(SCHEMA);
     const row = makeRow(FIRST_TABLE, 'p2');
     backend.putRow(FIRST_TABLE, row);
     const col = getColumns(FIRST_TABLE)[1]; // first non-id column
@@ -124,7 +124,7 @@ describe('putRow', () => {
     assert.equal(data.rows[0][col], 'updated');
   });
   it('handles missing fields as empty string', () => {
-    backend.initSchema('f1', SCHEMA);
+    backend.initSchema(SCHEMA);
     backend.putRow(FIRST_TABLE, { id: 'p3' });
     const data = backend.getTableData(FIRST_TABLE);
     getColumns(FIRST_TABLE).forEach(function(c) {
@@ -135,17 +135,17 @@ describe('putRow', () => {
 
 describe('deleteRow', () => {
   it('deletes existing row', () => {
-    backend.initSchema('f1', SCHEMA);
+    backend.initSchema(SCHEMA);
     backend.putRow(FIRST_TABLE, makeRow(FIRST_TABLE, 'd1'));
     assert.equal(backend.deleteRow(FIRST_TABLE, 'd1'), true);
     assert.equal(backend.getTableData(FIRST_TABLE).rows.length, 0);
   });
   it('returns false for non-existent row', () => {
-    backend.initSchema('f1', SCHEMA);
+    backend.initSchema(SCHEMA);
     assert.equal(backend.deleteRow(FIRST_TABLE, 'nope'), false);
   });
   it('does not affect other rows', () => {
-    backend.initSchema('f1', SCHEMA);
+    backend.initSchema(SCHEMA);
     backend.putRow(FIRST_TABLE, makeRow(FIRST_TABLE, 'd2'));
     backend.putRow(FIRST_TABLE, makeRow(FIRST_TABLE, 'd3'));
     backend.deleteRow(FIRST_TABLE, 'd3');
@@ -157,91 +157,62 @@ describe('deleteRow', () => {
 
 describe('languages', () => {
   it('returns empty by default', () => {
-    assert.equal(backend.getAvailableLanguages('f1').length, 0);
+    assert.equal(backend.getAvailableLanguages().length, 0);
   });
   it('createLanguage adds a language', () => {
-    backend.createLanguage('f1', 'xx', 'TestLang', ['app.title']);
-    const langs = backend.getAvailableLanguages('f1');
+    backend.createLanguage('xx', 'TestLang', ['app.title']);
+    const langs = backend.getAvailableLanguages();
     assert.equal(langs.length, 1);
     assert.equal(langs[0].code, 'xx');
   });
   it('getTranslations returns empty for new language', () => {
-    backend.createLanguage('f1', 'xx', 'TestLang', ['app.title']);
-    assert.deepEqual(backend.getTranslations('f1', 'xx'), {});
+    backend.createLanguage('xx', 'TestLang', ['app.title']);
+    assert.deepEqual(backend.getTranslations('xx'), {});
   });
   it('updateTranslations stores and retrieves', () => {
-    backend.createLanguage('f1', 'xx', 'TestLang', []);
-    backend.updateTranslations('f1', 'xx', { 'app.title': 'App' });
-    assert.equal(backend.getTranslations('f1', 'xx')['app.title'], 'App');
+    backend.createLanguage('xx', 'TestLang', []);
+    backend.updateTranslations('xx', { 'app.title': 'App' });
+    assert.equal(backend.getTranslations('xx')['app.title'], 'App');
   });
   it('updateTranslations overwrites existing', () => {
-    backend.createLanguage('f1', 'xx', 'TestLang', []);
-    backend.updateTranslations('f1', 'xx', { 'k': 'v1' });
-    backend.updateTranslations('f1', 'xx', { 'k': 'v2' });
-    assert.equal(backend.getTranslations('f1', 'xx')['k'], 'v2');
+    backend.createLanguage('xx', 'TestLang', []);
+    backend.updateTranslations('xx', { 'k': 'v1' });
+    backend.updateTranslations('xx', { 'k': 'v2' });
+    assert.equal(backend.getTranslations('xx')['k'], 'v2');
   });
   it('deleteLanguage removes language and translations', () => {
-    backend.createLanguage('f1', 'xx', 'TestLang', []);
-    backend.updateTranslations('f1', 'xx', { 'k': 'v' });
-    backend.deleteLanguage('f1', 'xx');
-    assert.equal(backend.getAvailableLanguages('f1').length, 0);
-    assert.deepEqual(backend.getTranslations('f1', 'xx'), {});
+    backend.createLanguage('xx', 'TestLang', []);
+    backend.updateTranslations('xx', { 'k': 'v' });
+    backend.deleteLanguage('xx');
+    assert.equal(backend.getAvailableLanguages().length, 0);
+    assert.deepEqual(backend.getTranslations('xx'), {});
   });
   it('renameLanguage changes the display name but keeps code + translations', () => {
-    backend.createLanguage('f1', 'xx', 'TestLang', []);
-    backend.updateTranslations('f1', 'xx', { 'app.title': 'Hello' });
-    backend.renameLanguage('f1', 'xx', 'Renamed');
-    const langs = backend.getAvailableLanguages('f1');
+    backend.createLanguage('xx', 'TestLang', []);
+    backend.updateTranslations('xx', { 'app.title': 'Hello' });
+    backend.renameLanguage('xx', 'Renamed');
+    const langs = backend.getAvailableLanguages();
     assert.equal(langs.length, 1);
     assert.equal(langs[0].code, 'xx');                 // code unchanged (stable key)
     assert.equal(langs[0].name, 'Renamed');              // display name updated
-    assert.equal(backend.getTranslations('f1', 'xx')['app.title'], 'Hello'); // translations preserved
-  });
-});
-
-describe('changesets (CRDT sync)', () => {
-  it('saveChangesets stores data', () => {
-    backend.saveChangesets('f1', 'site-a', '{"x":1}');
-    const r = backend.loadChangesets('f1', 'site-b');
-    assert.equal(r.length, 1);
-    assert.equal(r[0].siteId, 'site-a');
-  });
-  it('loadChangesets excludes own site', () => {
-    backend.saveChangesets('f1', 'site-a', '1');
-    backend.saveChangesets('f1', 'site-b', '2');
-    assert.equal(backend.loadChangesets('f1', 'site-a').length, 1);
-    assert.equal(backend.loadChangesets('f1', 'site-a')[0].siteId, 'site-b');
-  });
-  it('saveChangesets overwrites existing', () => {
-    backend.saveChangesets('f1', 'site-a', 'v1');
-    backend.saveChangesets('f1', 'site-a', 'v2');
-    assert.equal(backend.loadChangesets('f1', 'x')[0].data, 'v2');
-  });
-  it('loadChangesets returns empty when none', () => {
-    assert.deepEqual(backend.loadChangesets('f1', 'x'), []);
-  });
-});
-
-describe('getFileModifiedTime', () => {
-  it('returns ISO date string', () => {
-    assert.ok(backend.getFileModifiedTime('any').match(/^\d{4}-\d{2}-\d{2}T/));
+    assert.equal(backend.getTranslations('xx')['app.title'], 'Hello'); // translations preserved
   });
 });
 
 describe('schema storage', () => {
   it('getSchema returns null when no schema saved', () => {
-    const result = backend.getSchema('f1');
+    const result = backend.getSchema();
     assert.equal(result, null);
   });
   it('saveSchema stores and retrieves schema', () => {
     const schema = { tables: { t1: { columns: { id: 'text' } } }, views: {}, i18n: {} };
-    backend.saveSchema('f1', schema);
-    assert.deepEqual(backend.getSchema('f1'), schema);
+    backend.saveSchema(schema);
+    assert.deepEqual(backend.getSchema(), schema);
   });
   it('saveSchema overwrites existing', () => {
-    backend.saveSchema('f1', { tables: {}, views: {}, i18n: { a: '1' } });
-    backend.saveSchema('f1', { tables: {}, views: {}, i18n: { b: '2' } });
-    assert.deepEqual(backend.getSchema('f1').i18n, { b: '2' });
+    backend.saveSchema({ tables: {}, views: {}, i18n: { a: '1' } });
+    backend.saveSchema({ tables: {}, views: {}, i18n: { b: '2' } });
+    assert.deepEqual(backend.getSchema().i18n, { b: '2' });
   });
 });
 

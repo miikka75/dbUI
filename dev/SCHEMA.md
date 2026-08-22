@@ -128,9 +128,8 @@ hand. Reversible from the archive tab like any other archived row.
 - **`matchList`/`notMatchList`**: match on **any** array member (array membership, not scalar equality).
   Works in row `filter`, column `when`, and `filterBy`.
 - **`computed` `fromColumns`**: array-valued source columns are flattened before `matchList` evaluation.
-- **Backends**: object-storing backends (Firebase/Firestore, IndexedDB/CRDT) store arrays natively;
-  columnar backends (dev SQLite, Google Sheets) JSON-encode the array into the text cell on write and
-  decode it back on read for `multiselect` columns. Concurrent edits to the same cell are
+- **Backends**: every backend stores arrays natively -- Firestore arrays, Postgres `jsonb`, SQLite
+  `json1`. (The encode/decode round-trip this used to describe existed only for Google Sheets.) Concurrent edits to the same cell are
   whole-array last-writer-wins (no element-level merge).
 
 ## views (flat)
@@ -587,8 +586,8 @@ of table names — the page is then visible only to users **granted at least one
   only people who can see everything should read.
 - **Enforced server-side on Firebase**: `saveSchema` mirrors the page→tables map to
   `_meta/pageAccess`, and the `_pages__active` read rule denies the stored body to users without a
-  listed grant. The dev server mirrors this from the schema. (Sheets/Drive-CRDT backends have no
-  server rules — there access is Drive folder sharing, so `access` is client-side hiding only.)
+  listed grant. Supabase enforces it in RLS and the dev server mirrors it from the schema, so every
+  backend gates this on the server; the client-side hiding is a UI hint on top, never the gate.
 - **Protects the stored (edited) body, not the page's existence.** The page name/title and the
   schema-defined *seed* markdown live in the schema every registered user reads — so a restricted
   user can learn the page exists and see its seed, just never its edited body. **Don't put secrets

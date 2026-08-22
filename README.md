@@ -5,8 +5,7 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 ## Features
 
 - **Schema-driven**: JSON config defines tables, columns, views, and behavior
-- **Six backends**: Google Sheets (Apps Script), OAuth REST API, Browser + CRDT Sync (Google Drive), Browser + CRDT Sync (Local Server), Firebase (Firestore), Dev Server (SQLite)
-- **Unified CRDT**: one offline-first engine; Drive and local server differ only in the transport
+- **Three backends**: Supabase (Postgres + RLS), Firebase (Firestore), Dev Server (PGlite — runs the *real* `supabase-schema.sql` policies locally)
 - **i18n**: multi-language with auto-generated translation keys from schema
 - **Views**: flat union, join, and aggregate views, plus **rotationView** (generated rotating roster), **calendar** (month/week/list), **pivot** (cross-tab grid), **rsvp** (self-service signup sheet), and **board** (kanban — group a table's rows into lanes by a `select` column; drag a card between lanes to write that column); columns can embed named views/inline tables
 - **Rotating rosters**: `multiselect` columns hold a group of people; rotation tables cycle a group per occurrence (tied to another table's rows) or per calendar interval (`daily/weekly/monthly/yearly` or `<n><unit>` like `3w`), with the anchor stored as editable data
@@ -24,12 +23,9 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 
 | Backend | Storage | Auth | Offline | Real-time | Setup |
 |---------|---------|------|---------|-----------|-------|
-| **Apps Script** | Google Sheets | Built-in | ❌ | ❌ | Web editor |
-| **OAuth** | Google Sheets | OAuth consent | ❌ | ❌ | Cloud Console |
-| **Browser + CRDT Sync (Google Drive)** | IndexedDB + Drive | OAuth consent | ✅ | 30s sync | Cloud Console |
-| **Browser + CRDT Sync (Local Server)** | IndexedDB + dev server (SQLite or `--fs` JSON) | None | ✅ | 30s sync | `npm start` |
 | **Firebase** | Firestore | Firebase Auth | ✅ | ✅ Instant | Firebase Console |
-| **Dev Server (SQLite)** | SQLite | None | N/A | N/A | `npm start` |
+| **Dev Server (PGlite)** | PostgreSQL-in-WASM | Trusted `X-User` header (loopback only) | N/A | ✅ SSE | `npm start` |
+| **Dev Server (SQLite)** | SQLite | **none — every request permitted** | N/A | ✅ SSE | `npm start -- --sqlite` |
 
 ## Quick Start (Local Development)
 
@@ -41,13 +37,27 @@ npm test         # run backend unit tests
 npx playwright test  # run E2E tests
 ```
 
+**The dev server runs the production access policy.** `npm start` boots PostgreSQL compiled to
+WebAssembly and applies `supabase-schema.sql` — the same file Supabase runs — so a permission question
+is answered in dev exactly as it is in production, rather than by a hand-written imitation of it. It
+costs a few seconds of startup.
+
+`npm start -- --sqlite` (or `--fs`) opts out for speed — but those backends have **no access policy at
+all**: every request is permitted, and the server says so loudly on startup. The access model used to be
+re-implemented here in JavaScript so that dev behaved like production; running the real policies made
+that copy redundant, and it has been deleted rather than left to drift. Use the default whenever the
+question is "can this member actually do that?".
+
 Browser: click "Create Local Database" → app loads with schema from `schema.json`.
 Optionally run `npm run seed:import` (with the server running) to layer the demo data — rows, lists,
 translations, rotation config, plus example users/profiles — on top of the schema. The importable data
 lives in `dev/demo-bundle.json` (the same bundle shape as Settings → Import); regenerate its
 date-relative rows with `node seed-import.js --regen`.
 
-**Reset**: delete `dev/local.db` + browser `localStorage.clear(); location.reload()`
+**Reset**: delete `dev/local.db*` and `dev/*.pgdata/` + browser `localStorage.clear(); location.reload()`
+
+> The PGlite default starts from an empty database; an existing `dev/local.db` is not migrated. Nothing
+> is lost — the demo content lives in the repo, so `npm run seed:import` rebuilds it.
 
 **A second, isolated instance.** `PORT` alone is *not* isolation — every dev server shares
 `dev/local.db`, so a reset on one wipes the other. Point `APP_DB` at another file to get a genuinely
@@ -62,10 +72,6 @@ APP_DB=:memory: PORT=3100 node server.js           # throwaway (what the E2E sui
 The startup banner prints the database actually in use, so you can confirm which one you are on. To
 load an example schema into it, import a bundle from `examples/` via Settings → Import JSON (see
 [examples/README.md](examples/README.md)).
-
-## Quick Start (Apps Script)
-
-See `apps-script/DEPLOY.md` for deployment guide.
 
 ## Quick Start (Firebase)
 
@@ -115,8 +121,8 @@ Share a pre-configured link so new users connect instantly without manual setup:
 # Firebase
 https://your-app.github.io/?mode=firebase&config=BASE64_ENCODED_CONFIG
 
-# Sheets/CRDT
-https://your-app.github.io/?mode=sheets&folder=DRIVE_FOLDER_ID
+# Supabase
+https://your-app.github.io/?mode=supabase&url=PROJECT_URL&key=PUBLISHABLE_KEY
 ```
 
 The app reads URL params on load, stores them in localStorage, then cleans the URL. One click = connected.
@@ -124,8 +130,7 @@ The app reads URL params on load, stores them in localStorage, then cleans the U
 > Firebase links also accept the config as discrete params instead of base64:
 > `?mode=firebase&k=<apiKey>&p=<projectId>` (with optional `&d=<authDomain>`). `d=` is
 > **optional** — it defaults to `<projectId>.firebaseapp.com` (the standard Firebase auth
-> domain), so it's only needed for a custom/non-default `authDomain`. Sheets links also accept
-> `&clientId=<oauthClientId>`.
+> domain), so it's only needed for a custom/non-default `authDomain`.
 
 Generate the link from Settings tab (shown under "Share link" for Firebase mode).
 
@@ -134,10 +139,8 @@ Generate the link from Settings tab (shown under "Share link" for Firebase mode)
 | Backend | How to add users | Admin UI? |
 |---------|-----------------|:---:|
 | **Firebase** | Settings → User Access panel | ✅ Yes |
-| **Dev Server (SQLite)** | Settings → User Access panel (test with `?user=`) | ✅ Yes |
-| **Sheets** | Share Drive folder via Google Drive | ❌ |
-| **Browser (CRDT)** | Share Drive subfolder per table | ❌ |
-| **Apps Script** | Share folder + add to OAuth test users | ❌ |
+| **Dev Server** | Settings → User Access panel (test with `?user=`) | ✅ Yes |
+| **Supabase** | Settings → User Access panel | ✅ Yes |
 
 ### User Registry
 
@@ -173,7 +176,7 @@ subset that the rules read, written automatically alongside the grant.
 One hosted instance serves multiple independent databases:
 - Each user enters their own connection details during setup
 - Details stored in browser localStorage (per-origin)
-- Different users on the same URL can connect to different Firebase projects or Drive folders
+- Different users on the same URL can connect to different Firebase or Supabase projects
 - Share a pre-configured URL to onboard users to a specific database
 
 ## Installable (PWA)
@@ -265,7 +268,6 @@ loopback entries so local dev + the Firebase emulators keep working.
 - **Keeping it in sync**: `dev/test/csp.test.js` fails CI if the `firebase.json` header drifts from
   `csp.js`, or if an inline script in `index.html` is edited without its hash updating. After
   editing either, regenerate the header value from `csp.js`.
-- **Future backends**: Sheets/Drive modes need `accounts.google.com` + `www.googleapis.com`
   additions; a Supabase backend needs `https://*.supabase.co` in `connect-src`.
 
 ### Violation reports
@@ -305,23 +307,14 @@ icon-512.png                   ← static apple-touch + manifest install/splash/
 app-core.js                  ← Vue app logic + computeds + helpers
 ui.html                        ← Vue template (data views, forms, setup)
 style.html                     ← CSS styles
-auth-oauth.js                ← shared OAuth (GSI) for Sheets + CRDT(Drive)
-backend-oauth.js             ← adapter: REST API + OAuth
 backend-firebase.js          ← adapter: Firestore + Firebase Auth
 storage-firestore.js         ← Firestore storage adapter
-── Unified CRDT (shared by Drive + local) ──
-crdt-backend.js              ← shared CRDT backend (data via engine, files via transport)
-crdt-engine.js               ← storage-agnostic LWW CRDT engine
-storage-idb.js               ← IndexedDB storage adapter
-transport-drive.js           ← Drive transport (files + changesets via Drive API)
-backend-crdt.js              ← Drive CRDT initializer (Transport = TransportDrive)
+backend-supabase.js          ← adapter: Postgres/RLS + Supabase Auth
+storage-supabase.js          ← Supabase kv storage adapter
 ────────────────────────────────────────────
 firebase.json                  ← Firebase Hosting config
 firestore.rules                ← Firestore Security Rules
-apps-script/                   ← Apps Script deployment files (GAS-only)
-  index.html, Code.gs, DEPLOY.md
-  sheets-helpers.js            ← pure transforms shared with unit tests
-  backend-appscript.html       ← adapter: google.script.run (GAS-only)
+supabase-schema.sql            ← Postgres kv table + RLS (run once in Supabase)
 dev/                           ← Local development (dev-server-only files live here)
   schema.json                  ← schema definition (tables, views, settings)
   schema.js                    ← test helper (parses schema.json)
@@ -329,11 +322,11 @@ dev/                           ← Local development (dev-server-only files live
   seed-import.js               ← applies demo-bundle.json to the dev server (--regen rebuilds it)
   package.json                 ← dependencies + scripts (npm start/test)
   server.js                    ← HTTP server (port 3000; --fs for JSON-file storage)
-  backend-local.js             ← SQLite backend (better-sqlite3)
+  backend-pglite.js            ← DEFAULT: dev contract over the kv table (no access checks of its own)
+  storage-pglite.js            ← PGlite storage; applies supabase-schema.sql verbatim at startup
+  backend-local.js             ← SQLite backend (better-sqlite3), via --sqlite
   storage-fs.js                ← JSON-file backend (node server.js --fs)
   backend-local-client.js    ← client adapter for local server (direct SQLite)
-  backend-crdt-local.js      ← local CRDT initializer (Transport = TransportLocal)
-  transport-local.js         ← local transport (files + changesets via dev server)
   test/                        ← node:test backend tests
   test-ui/                     ← Playwright E2E tests
 ```
@@ -381,41 +374,18 @@ markdown documents and their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens
 ├────────────────┼─────────────────────────────────┤
 │ backend-*.html │   schema.json / firebase-config │  ← adapter + config
 ├────────────────┴─────────────────────────────────┤
-│ Sheets │ OAuth │ CRDT (Drive / Local) │ Firestore │ SQLite │
+│ Supabase │ Firestore │ PGlite / SQLite │
 └──────────────────────────────────────────────────┘
 ```
 
 **Schema flow:**
-1. Server loads `schema.json` from disk/Drive
-2. Client receives schema via `bootData()` or `getSchema()`
+1. Server loads `schema.json` from disk (dev) or the database (Supabase/Firebase)
+2. Client receives schema via `getSchema()`
 3. `validateSchema()` checks for errors
 4. Tables auto-created if missing (`initSchema`)
 5. UI renders based on schema definitions
 
 **Key design decisions:**
-- Schema is pure JSON (user-editable in Drive without code access)
+- Schema is pure JSON (user-editable via Settings → Import without code access)
 - `defaultSchema` in app-core.js is minimal empty fallback only
-- Column order in Google Sheets preserved via JSON string serialization (avoids RPC key reordering)
-- All backends implement the same 16-function interface
-
-### Unified CRDT (Drive + Local)
-
-Both CRDT modes share **one backend** (`crdt-backend.js`) built on a storage-agnostic engine. They differ **only in the transport**:
-
-```
-            crdt-backend.js  (one shared backend)
-        data ─► CrdtEngine + StorageIDB  (IndexedDB, LWW per field)
-       files ─► Transport.readJson / writeJson / deleteFile
-                        │
-            ┌───────────┴────────────┐
-      TransportDrive            TransportLocal
-      (Google Drive API)        (HTTP → dev server)
-```
-
-- **Data** (table rows) lives in IndexedDB and syncs as compacted LWW changesets (`pushChangesets`/`pullChangesets`, 30s interval). The server/Drive is *not* the read path — it only stores changesets for cross-device sync.
-- **Metadata** (schema, lists, languages, translations, config) are plain JSON files read/written through the transport: `schema.json`, `lists.json`, `languages.json`, `lang_{code}.json`, `.app-config.json`.
-- Both transports produce an **identical file layout**, so a local `--fs` data folder is a drop-in Google Drive folder — copy it across and switch modes.
-- A **new user/device** bootstraps by reading the metadata files + pulling every device's `_sync/` changesets into a fresh IndexedDB.
-- The local dev server (`server.js`, optionally `--fs`) acts as a dumb file store via generic `readFile`/`writeFile`/`deleteFile` routes plus `saveChangesets`/`loadChangesets`.
-
-Firebase is intentionally **not** on the CRDT engine — Firestore provides its own real-time sync, offline cache, and conflict resolution.
+- All backends implement the same contract (see `dev/BACKEND_API.md`)

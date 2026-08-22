@@ -17,12 +17,12 @@ function _myEmail() {
 }
 
 backend = {
-  getSchema: function(folderId) {
+  getSchema: function() {
     return StorageFirestore.getMeta('schema').then(function(d) {
       return BackendHelpers.unwrapSchemaDoc(d);
     });
   },
-  saveSchema: function(folderId, schema) {
+  saveSchema: function(schema) {
     // Mirror the schema-derived facts the schema-blind firestore rules need, kept in sync on every
     // schema write: _meta/ownerTables (tables with an owner column -> gates owner-create),
     // _meta/pageAccess (restricted doc-views -> gates _pages__active reads; see pageAccessOf),
@@ -60,22 +60,20 @@ backend = {
   validateFolder: function(id) {
     return Promise.resolve({ valid: true, name: 'Firebase' });
   },
-  getFolderConfig: function(folderId) {
+  getFolderConfig: function() {
     return StorageFirestore.getMeta('config').then(function(d) { return d || null; });
   },
-  setFolderConfig: function(folderId, config) {
+  setFolderConfig: function(config) {
     return StorageFirestore.setMeta('config', config);
   },
-  initSchema: function(folderId, schema) {
-    var result = {};
-    Object.keys(schema).forEach(function(t) { result[t] = t; });
-    return Promise.resolve(result);
-  },
+  // Table ids ARE table names on every remaining backend, so there is nothing to map and nothing to
+  // create up front -- a Firestore collection / kv row springs into being on first write.
+  initSchema: function() { return Promise.resolve(null); },
   // One-round-trip boot for Firebase: schema + languages + lists + all accessible table data, fetched
   // CONCURRENTLY (Promise.all). Firestore has no Sheets-style per-call rate limit, so concurrency is
   // safe here. Access-scoped via _myTables so denied collections are never queried (rules aren't
   // filters — querying a denied collection would throw). Replaces ~20 sequential round-trips.
-  bootData: function(folderId) {
+  bootData: function() {
     var self = this;
     var DENIED = { __denied: true };
     return Promise.all([
@@ -84,14 +82,13 @@ backend = {
       // try to write a default schema we have no permission to save.
       StorageFirestore.getMeta('schema').catch(function() { return DENIED; }),
       StorageFirestore.getMeta('languages').catch(function() { return DENIED; }),
-      self.getLists(folderId).catch(function() { return {}; }),   // lists are optional — never let one denied read fail-fast the whole boot
+      self.getLists().catch(function() { return {}; }),   // lists are optional — never let one denied read fail-fast the whole boot
       self._myTables()           // null = unrestricted; [] = none; [..] = restricted set
     ]).then(function(r) {
       if (r[0] === DENIED) return { schema: null, denied: true };
       if (!r[0]) return { schema: null }; // first boot -> client saves the bundled default
       var parsed = BackendHelpers.unwrapSchemaDoc(r[0]);
       var tables = (parsed && parsed.tables) || {};
-      var tableMap = {}; Object.keys(tables).forEach(function(t) { tableMap[t] = t; });
       var languages = (r[1] !== DENIED && r[1] && (r[1].list || [])) || [];
       var lists = r[2] || {};
       var allowed = r[3];
@@ -114,12 +111,12 @@ backend = {
         // unrestricted: false tells the caller not to auto-seed/write shared list scaffolding -- a
         // restricted editor's writes to lists outside their own tables would be denied wholesale
         // (Firestore batch commits are atomic), whereas an admin/bootstrap (allowed === null) may.
-        return { schema: parsed, tableOrder: Object.keys(tables), tableMap: tableMap, languages: languages, lists: lists, data: data, unrestricted: allowed === null };
+        return { schema: parsed, tableOrder: Object.keys(tables), languages: languages, lists: lists, data: data, unrestricted: allowed === null };
       });
     });
   },
   getAvailableTables: function() { return Promise.resolve([]); },
-  getAvailableLanguages: function(folderId) {
+  getAvailableLanguages: function() {
     return StorageFirestore.getMeta('languages').then(function(d) {
       return d ? (d.list || []) : [];
     });
@@ -129,9 +126,13 @@ backend = {
   // unconstrained collection read is DENIED — the whole self-service read (RSVP, sign-ups, a shared
   // chore log) used to fail and get swallowed into an empty table. Ask for exactly the two slices the
   // rules can prove and merge them: my own rows, plus the rows marked public.
-  _scopedRead: function(store, tableId) {
+  // `constraints` are pushed ONLY on the granted branch. The scoped branch already spends Firestore's
+  // single-field budget on owner/rosterPublic, and a second field there needs a composite index this
+  // project does not ship -- it would fail in production while the emulator waved it through. Returning
+  // a superset from that branch is explicitly allowed by the contract: the caller re-filters.
+  _scopedRead: function(store, tableId, constraints) {
     return this._myTables().then(function(tabs) {
-      if (tabs === null || tabs.indexOf(tableId) >= 0) return StorageFirestore.getAll(store); // granted: whole collection
+      if (tabs === null || tabs.indexOf(tableId) >= 0) return StorageFirestore.getAll(store, constraints); // granted: whole collection
       var me = _myEmail();
       if (!me) return [];
       return Promise.all([
@@ -150,9 +151,9 @@ backend = {
       }).catch(function() { return []; });           // fail closed, never surface a denied read as an error
     });
   },
-  getTableData: function(tableId, tab) {
+  getTableData: function(tableId, tab, opts) {
     var store = _storeName(tableId, tab);
-    return this._scopedRead(store, tableId).then(function(rows) {
+    return this._scopedRead(store, tableId, opts && opts.constraints).then(function(rows) {
       return { headers: BackendHelpers.deriveHeaders(rows), rows: rows };
     });
   },
@@ -256,7 +257,7 @@ backend = {
   _legacyGetLists: function() {
     return StorageFirestore.getMeta('lists').then(function(d) { return (d && !d._value) ? d : {}; });
   },
-  getLists: function(folderId) {
+  getLists: function() {
     var self = this;
     return self._myTables().then(function(tabs) {
       if (tabs !== null && !tabs.length) return {};
@@ -266,7 +267,7 @@ backend = {
           // one-time additive migration of the legacy _meta/lists doc -> per-list _lists docs (admin only)
           return self._legacyGetLists().then(function(legacy) {
             if (!Object.keys(legacy).length) return {};
-            return self.saveLists(folderId, legacy).then(function() { return legacy; });
+            return self.saveLists(legacy).then(function() { return legacy; });
           });
         });
       }
@@ -301,7 +302,7 @@ backend = {
       });
     });
   },
-  saveLists: function(folderId, lists) {
+  saveLists: function(lists) {
     var self = this;
     return Promise.all([StorageFirestore.getMeta('schema'), self._myTables()]).then(function(r) {
       var tables = (r[0] && r[0].tables) || {}, myTabs = r[1];
@@ -318,7 +319,7 @@ backend = {
       return batch.commit();
     });
   },
-  putListItem: function(folderId, listName, value) {
+  putListItem: function(listName, value) {
     return StorageFirestore.getMeta('schema').then(function(s) {
       var tables = (s && s.tables) || {};
       return _db.collection('_lists').doc(listName).set(
@@ -400,13 +401,13 @@ backend = {
       return Promise.all(writes);
     }).catch(function() { /* non-admin or offline: the link itself is already written */ });
   },
-  getTranslations: function(folderId, langCode) {
+  getTranslations: function(langCode) {
     return StorageFirestore.getMeta('lang_' + langCode).then(function(d) { return d || {}; });
   },
-  updateTranslations: function(folderId, langCode, updates) {
+  updateTranslations: function(langCode, updates) {
     return _db.collection('_meta').doc('lang_' + langCode).set(updates, { merge: true });
   },
-  createLanguage: function(folderId, code, name, keys) {
+  createLanguage: function(code, name, keys) {
     return StorageFirestore.getMeta('languages').then(function(d) {
       var langs = BackendHelpers.addLanguage(d ? (d.list || []) : [], code, name);
       return StorageFirestore.setMeta('languages', { list: langs });
@@ -414,7 +415,7 @@ backend = {
       return StorageFirestore.setMeta('lang_' + code, BackendHelpers.emptyTranslations(keys));
     });
   },
-  deleteLanguage: function(folderId, code) {
+  deleteLanguage: function(code) {
     return StorageFirestore.getMeta('languages').then(function(d) {
       var langs = BackendHelpers.removeLanguage(d ? (d.list || []) : [], code);
       return StorageFirestore.setMeta('languages', { list: langs });
@@ -422,15 +423,13 @@ backend = {
       return _db.collection('_meta').doc('lang_' + code).delete();
     });
   },
-  renameLanguage: function(folderId, code, name) {
+  renameLanguage: function(code, name) {
     // Update only the languages index; the lang_<code> translations doc is left intact.
     return StorageFirestore.getMeta('languages').then(function(d) {
       var langs = BackendHelpers.renameLanguage(d ? (d.list || []) : [], code, name);
       return StorageFirestore.setMeta('languages', { list: langs });
     });
   },
-  saveChangesets: function() { return Promise.resolve(); },
-  loadChangesets: function() { return Promise.resolve(); },
   // Upload a file to Firebase Storage under uploads/<user-email>/<ts>_<name>, resolving to its download
   // URL (stored in the row by the image column). The download URL carries an access token, so the <img>
   // renders regardless of Storage read rules. Presence of this method is what enables the image uploader;

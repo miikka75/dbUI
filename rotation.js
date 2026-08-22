@@ -94,13 +94,13 @@
   // — floor(floor(x/a)/b) === floor(x/(ab)) for positive a,b, so this stays correct (incl. negatives).
   function wholeIntervalsBetween(anchor, target, interval) {
     var a = new Date(anchor), t = new Date(target);
-    if (isNaN(a) || isNaN(t)) return 0;
+    if (isNaN(a.getTime()) || isNaN(t.getTime())) return 0;
     var p = parseInterval(interval), base;
     if (p.unit === 'm') {
       base = (t.getFullYear() - a.getFullYear()) * 12 + (t.getMonth() - a.getMonth());
       if (t.getDate() < a.getDate()) base -= 1; // not a full month until the anchor day-of-month is reached
     } else {
-      var days = Math.floor((t - a) / 86400000);
+      var days = Math.floor((t.getTime() - a.getTime()) / 86400000);
       base = (p.unit === 'w') ? Math.floor(days / 7) : days; // 'd' = raw days
     }
     return Math.floor(base / p.count);

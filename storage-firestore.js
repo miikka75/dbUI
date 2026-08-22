@@ -18,8 +18,24 @@ var StorageFirestore = (function() {
     delete: function(store, key) {
       return _col(store).doc(key).delete();
     },
-    getAll: function(store) {
-      return _col(store).get().then(function(snap) {
+    // `constraints` (from query.js) narrow the read in Firestore instead of in the browser, which on the
+    // free plan is the difference between spending the daily document-read quota on rows the user sees
+    // and on rows they do not.
+    //
+    // ONLY EVER CALLED FOR THE WHOLE-COLLECTION READ, and that restriction is load-bearing rather than
+    // tidy. Firestore needs a COMPOSITE INDEX for any query constraining two or more fields, and this
+    // project ships no firestore.indexes.json. The access-scoped read already spends its one field on
+    // `owner`/`rosterPublic`, so adding a filter there would produce a two-field query that fails in
+    // production with FAILED_PRECONDITION. Worse, the EMULATOR does not enforce index requirements --
+    // it accepts the query and moves on -- so the test suite would stay green while the app broke for
+    // real users. See backend-firebase._scopedRead, which deliberately does not pass constraints.
+    getAll: function(store, constraints) {
+      var q = _col(store);
+      (constraints || []).forEach(function(c) {
+        if (!c || c.op !== '==') return;              // unknown op: the caller's residual handles it
+        q = q.where(c.field, '==', c.value);
+      });
+      return q.get().then(function(snap) {
         var rows = [];
         snap.forEach(function(doc) { rows.push(doc.data()); });
         return rows;

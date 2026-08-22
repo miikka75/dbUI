@@ -7,7 +7,7 @@ const { SCHEMA, VIEWS, getColumns } = require('../schema');
 const joinView = Object.values(VIEWS).find(v => v.mode === 'join' && v.sources && v.sources.length > 1);
 
 let backend;
-beforeEach(() => { backend = createLocalBackend(); backend.initSchema('local', SCHEMA); });
+beforeEach(() => { backend = createLocalBackend(); backend.initSchema(SCHEMA); });
 afterEach(() => { backend.close(); });
 
 // archiveRow/restoreRow fan-out: iterate the view's sources (mirrors app-core.js)

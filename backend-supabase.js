@@ -55,10 +55,10 @@ function _noUsers() {
 }
 
 backend = {
-  getSchema: function(folderId) {
+  getSchema: function() {
     return StorageSupabase.getMeta('schema').then(function(d) { return BackendHelpers.unwrapSchemaDoc(d); });
   },
-  saveSchema: function(folderId, schema) {
+  saveSchema: function(schema) {
     // Mirror the schema-derived facts the schema-blind RLS needs, kept in sync on every schema write:
     // _meta/ownerTables (owner-column tables -> gates owner-create), _meta/pageAccess (restricted
     // doc-views -> gates _pages__active reads), _meta/ownerWritable (which columns an owner-scoped
@@ -87,19 +87,17 @@ backend = {
       .catch(function() { return null; });
   },
   validateFolder: function(id) { return Promise.resolve({ valid: true, name: 'Supabase' }); },
-  getFolderConfig: function(folderId) {
+  getFolderConfig: function() {
     return StorageSupabase.getMeta('config').then(function(d) { return d || null; });
   },
-  setFolderConfig: function(folderId, config) { return StorageSupabase.setMeta('config', config); },
-  initSchema: function(folderId, schema) {
-    var result = {};
-    Object.keys(schema).forEach(function(t) { result[t] = t; });
-    return Promise.resolve(result);
-  },
+  setFolderConfig: function(config) { return StorageSupabase.setMeta('config', config); },
+  // Table ids ARE table names on every remaining backend, so there is nothing to map and nothing to
+  // create up front -- a Firestore collection / kv row springs into being on first write.
+  initSchema: function() { return Promise.resolve(null); },
   // One-round-trip boot: schema + languages + lists + all accessible table data, concurrently. Unlike
   // Firestore (denied read throws), an RLS-forbidden Postgres SELECT returns 0 rows — so we can't infer
   // "not registered" from an empty schema read. Instead we PRE-CHECK registration (getMyAccess), then read.
-  bootData: function(folderId) {
+  bootData: function() {
     var self = this;
     return backend_users.getMyAccess().then(function(access) {
       // Signed in but not a member: skip schema/data, let the caller show the request-access banner.
@@ -107,13 +105,12 @@ backend = {
       return Promise.all([
         StorageSupabase.getMeta('schema').catch(function() { return null; }),
         StorageSupabase.getMeta('languages').catch(function() { return null; }),
-        self.getLists(folderId).catch(function() { return {}; }),
+        self.getLists().catch(function() { return {}; }),
         self._myTables()           // null = unrestricted; [] = none; [..] = restricted set
       ]).then(function(r) {
         if (!r[0]) return { schema: null }; // first boot -> client saves the bundled default
         var parsed = BackendHelpers.unwrapSchemaDoc(r[0]);
         var tables = (parsed && parsed.tables) || {};
-        var tableMap = {}; Object.keys(tables).forEach(function(t) { tableMap[t] = t; });
         var languages = (r[1] && (r[1].list || [])) || [];
         var lists = r[2] || {};
         var allowed = r[3];
@@ -131,18 +128,20 @@ backend = {
         return Promise.all(jobs).then(function(results) {
           var data = {};
           results.forEach(function(x) { data[x.key] = x.res; });
-          return { schema: parsed, tableOrder: Object.keys(tables), tableMap: tableMap, languages: languages, lists: lists, data: data, unrestricted: allowed === null };
+          return { schema: parsed, tableOrder: Object.keys(tables), languages: languages, lists: lists, data: data, unrestricted: allowed === null };
         });
       });
     });
   },
   getAvailableTables: function() { return Promise.resolve([]); },
-  getAvailableLanguages: function(folderId) {
+  getAvailableLanguages: function() {
     return StorageSupabase.getMeta('languages').then(function(d) { return d ? (d.list || []) : []; });
   },
-  getTableData: function(tableId, tab) {
+  // `opts.constraints` is the pushed-down half of a view filter. Optional: a backend that ignores it
+  // returns a superset, which the caller re-filters with the residual anyway.
+  getTableData: function(tableId, tab, opts) {
     var store = _storeName(tableId, tab);
-    return StorageSupabase.getAll(store).then(function(rows) {
+    return StorageSupabase.getAll(store, opts && opts.constraints).then(function(rows) {
       return { headers: BackendHelpers.deriveHeaders(rows), rows: rows };
     });
   },
@@ -194,7 +193,7 @@ backend = {
   _legacyGetLists: function() {
     return StorageSupabase.getMeta('lists').then(function(d) { return (d && !d._value) ? d : {}; });
   },
-  getLists: function(folderId) {
+  getLists: function() {
     var self = this;
     return self._myTables().then(function(tabs) {
       if (tabs !== null && !tabs.length) return {};
@@ -204,7 +203,7 @@ backend = {
           // one-time additive migration of a legacy _meta/lists doc -> per-list _lists rows (admin only)
           return self._legacyGetLists().then(function(legacy) {
             if (!Object.keys(legacy).length) return {};
-            return self.saveLists(folderId, legacy).then(function() { return legacy; });
+            return self.saveLists(legacy).then(function() { return legacy; });
           });
         });
       }
@@ -236,7 +235,7 @@ backend = {
       });
     });
   },
-  saveLists: function(folderId, lists) {
+  saveLists: function(lists) {
     var self = this;
     return Promise.all([StorageSupabase.getMeta('schema'), self._myTables()]).then(function(r) {
       var tables = (r[0] && r[0].tables) || {}, myTabs = r[1];
@@ -252,7 +251,7 @@ backend = {
       return Promise.all(jobs);
     });
   },
-  putListItem: function(folderId, listName, value) {
+  putListItem: function(listName, value) {
     return Promise.all([StorageSupabase.getMeta('schema'), StorageSupabase.get('_lists', listName)]).then(function(r) {
       var tables = (r[0] && r[0].tables) || {};
       var doc = r[1] || { name: listName, items: [], tables: listOwningTables(tables, listName) };
@@ -332,13 +331,13 @@ backend = {
     }).catch(function() { /* non-admin or offline: the link itself is already written */ });
   },
 
-  getTranslations: function(folderId, langCode) {
+  getTranslations: function(langCode) {
     return StorageSupabase.getMeta('lang_' + langCode).then(function(d) { return d || {}; });
   },
-  updateTranslations: function(folderId, langCode, updates) {
+  updateTranslations: function(langCode, updates) {
     return StorageSupabase._merge('_meta', 'lang_' + langCode, updates);   // merge (Firestore set{merge:true})
   },
-  createLanguage: function(folderId, code, name, keys) {
+  createLanguage: function(code, name, keys) {
     return StorageSupabase.getMeta('languages').then(function(d) {
       var langs = BackendHelpers.addLanguage(d ? (d.list || []) : [], code, name);
       return StorageSupabase.setMeta('languages', { list: langs });
@@ -346,7 +345,7 @@ backend = {
       return StorageSupabase.setMeta('lang_' + code, BackendHelpers.emptyTranslations(keys));
     });
   },
-  deleteLanguage: function(folderId, code) {
+  deleteLanguage: function(code) {
     return StorageSupabase.getMeta('languages').then(function(d) {
       var langs = BackendHelpers.removeLanguage(d ? (d.list || []) : [], code);
       return StorageSupabase.setMeta('languages', { list: langs });
@@ -354,14 +353,12 @@ backend = {
       return StorageSupabase.delete('_meta', 'lang_' + code);
     });
   },
-  renameLanguage: function(folderId, code, name) {
+  renameLanguage: function(code, name) {
     return StorageSupabase.getMeta('languages').then(function(d) {
       var langs = BackendHelpers.renameLanguage(d ? (d.list || []) : [], code, name);
       return StorageSupabase.setMeta('languages', { list: langs });
     });
   },
-  saveChangesets: function() { return Promise.resolve(); },
-  loadChangesets: function() { return Promise.resolve(); },
   // Upload to the public Supabase Storage bucket `uploads` under <email>/<ts>_<name>, resolving to the
   // public URL (stored in the row by the image column). Presence of this method enables the image uploader.
   uploadFile: function(file, opts) {

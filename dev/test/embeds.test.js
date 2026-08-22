@@ -113,6 +113,87 @@ describe('embeds.js — mdBlocks / docHasData / buildEmbedBlock', () => {
   });
 });
 
+// The two extension points doc-views hang off. They exist so that adopting a real markdown parser, or
+// adding a directive like {{gauge:x}}, is a registration at boot rather than an edit inside embeds.js.
+describe('embeds.js — renderer + block-directive seams', () => {
+  it('setRenderer swaps the prose renderer, and only prose ever reaches it', () => {
+    const ctx = makeCtx();
+    const seen = [];
+    Embeds.setRenderer(t => { seen.push(t); return '<p>' + t.trim().toUpperCase() + '</p>'; });
+    try {
+      const blocks = Embeds.mdBlocks(`hello
+
+{{view:open}}
+
+bye`, null, ctx);
+      assert.deepEqual(blocks.map(b => b.embedName || b.html), ['<p>HELLO</p>', 'open', '<p>BYE</p>']);
+      // The embed token itself must never reach a renderer -- mdBlocks splits it out first, which is
+      // what lets a third-party parser be dropped in without teaching it this app's {{...}} syntax.
+      assert.ok(seen.every(t => t.indexOf('{{') === -1), 'renderer saw an embed token: ' + JSON.stringify(seen));
+    } finally { Embeds.setRenderer(null); }
+  });
+
+  it('setRenderer(null) restores the built-in renderer', () => {
+    Embeds.setRenderer(() => 'REPLACED');
+    Embeds.setRenderer(null);
+    assert.ok(Embeds.mdBlocks('# Hi', null, makeCtx())[0].html.indexOf('<h1>Hi</h1>') === 0);
+  });
+
+  it('a registered directive parses, resolves, and honours the `?` hide-when-empty suffix', () => {
+    const ctx = makeCtx();
+    let rows = 1;
+    Embeds.registerBlock('gauge', {
+      resolve: (name, part) => ({ embedType: 'gauge', embedName: name, embedPart: part || null }),
+      count: () => rows
+    });
+    const b = Embeds.mdBlocks('{{gauge:points}}', null, ctx);
+    assert.equal(b.length, 1);
+    assert.equal(b[0].embedType, 'gauge');
+    assert.equal(b[0].embedName, 'points');
+    // `?` on a directive reporting rows keeps the block...
+    assert.equal(Embeds.mdBlocks('{{gauge:points?}}', null, ctx).length, 1);
+    rows = 0;
+    // ...and drops it when the count is zero, exactly as for view/table.
+    assert.equal(Embeds.mdBlocks('{{gauge:points?}}', null, ctx).length, 0);
+    // Without `?` it stays even when empty.
+    assert.equal(Embeds.mdBlocks('{{gauge:points}}', null, ctx).length, 1);
+  });
+
+  it('a directive whose resolve returns null renders the inline unknown-embed note', () => {
+    Embeds.registerBlock('ghost', { resolve: () => null, count: () => 1 });
+    const b = Embeds.mdBlocks('{{ghost:x}}', null, makeCtx());
+    assert.equal(b.length, 1);
+    assert.ok(b[0].html.indexOf('Unknown embed: ghost:x') >= 0);
+  });
+
+  it('a registered directive gets @both for free — a partition is not a directive concern', () => {
+    // The merge that brought `@both` (#97) onto the directive registry could have put the BOTH check
+    // inside each handler. It did not: a partition is a property every kind shares, so a handler
+    // resolves a NAME and never decides what a partition means. The consequence is this — a kind
+    // registered afterwards, by code that has never heard of archives, still gets the toggle.
+    const ctx = makeCtx();
+    const seen = [];
+    Embeds.registerBlock('meter', {
+      resolve: (name, part) => { seen.push(part); return { embedType: 'meter', embedName: name, embedPart: part || null }; },
+      count: (name, part) => (part === 'archive' ? 3 : 0)     // empty active half, non-empty archive
+    });
+    const b = Embeds.mdBlocks('{{meter:load@both}}', null, ctx)[0];
+    assert.equal(b.embedBoth, true, 'the toggle flag must be set');
+    assert.equal(b.embedPart, null, '@both carries no fixed part — the component owns which half shows');
+    assert.deepEqual(seen, [null], 'the handler is asked for a name, never for the string "both"');
+
+    // And the `?` count spans both halves, so a block whose only rows have aged into the archive is
+    // NOT hidden — hiding it would hide the very toggle that reveals them.
+    assert.equal(Embeds.mdBlocks('{{meter:load@both?}}', null, ctx).length, 1);
+    assert.equal(Embeds.mdBlocks('{{meter:load?}}', null, ctx).length, 0, 'the active half alone is empty');
+  });
+
+  it('registerBlock rejects a kind that is not word characters (it is spliced into a regex)', () => {
+    assert.throws(() => Embeds.registerBlock('a|b', { resolve: () => null, count: () => 0 }), /word characters/);
+    assert.throws(() => Embeds.registerBlock('a.b', { resolve: () => null, count: () => 0 }), /word characters/);
+  });
+});
+
 describe('embeds.js — resolveEmbed (kind-tagged specs)', () => {
   it('doc / calendar / rotation kinds', () => {
     const ctx = makeCtx();

@@ -377,7 +377,8 @@ describe('supabase RLS — _lists', () => {
   // silently broken: an UPDATE has to locate its row, Postgres applies the SELECT policy to do that,
   // and _lists reads used to require a table grant -- so a member could be granted the write by
   // userWritableLists and still be unable to perform it. Firestore evaluates write rules without
-  // needing the read, so the same member succeeded there and on the dev server.
+  // needing the read, so the same member succeeded there and on the dev server. Found by
+  // dev/test/gate-parity.test.js comparing the two engines case by case.
   it("a member with NO table grant can read and append to a list the schema opens", async () => {
     await as('viewer@x.com');
     assert.equal(await canRead('_lists', 'taskvalues'), true, 'an opened list must be readable, or it cannot be edited');

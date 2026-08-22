@@ -182,12 +182,7 @@ function createVueApp() {
       loading: true,
       showSetup: false,
       hasLocalServer: false,
-      setupFolderId: '',
-      setupMode: 'sheets',
-      folderValid: false,
-      oauthReady: false,
       currentUserEmail: null,
-      serverStorage: '',
       userList: [],
       usersLoaded: false,
       // True when users exist but the signed-in user is not one of them (self-scoped getMyAccess said
@@ -209,12 +204,9 @@ function createVueApp() {
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
       supabaseUrlInput: '',
       supabaseKeyInput: '',
-      oauthClientId: localStorage.getItem('oauth_client_id') || '',
       needsReauth: false,
-      setupStep: (function() { var m = localStorage.getItem('app_mode'); return (m === 'sheets' || m === 'crdt' || m === 'firebase' || m === 'supabase') ? m : null; })(),
-      mode: 'sheets',
-      folderId: '',
-      tableMap: {},
+      setupStep: (function() { var m = localStorage.getItem('app_mode'); return (m === 'firebase' || m === 'supabase') ? m : null; })(),
+      mode: '',
       currentTable: '',
       currentData: [],
       dataCache: {},
@@ -369,6 +361,12 @@ function createVueApp() {
         if (ct === '__languages') return 'languages';
         if (ct === '__lookup') return 'lookup';
         if (ct === '__settings') return 'settings';
+        // A migrated schema SAYS what each view is (migrations.js v1->v2), so ask rather than sniff.
+        // The chain below is the fallback for a schema that has not been through the migration -- a
+        // fixture built by hand in a test, say. It is also what the migration derives from, so the two
+        // cannot disagree.
+        var declared = (VIEWS[ct] || {}).kind;
+        if (declared) return declared;
         if (this.isCalendarView) return 'calendar';
         if (this.isRotationView) return 'rotation';
         if (this.isPivotView) return 'pivot';
@@ -551,12 +549,8 @@ function createVueApp() {
             return base + '?mode=supabase&url=' + encodeURIComponent(s.url) + '&key=' + encodeURIComponent(s.anonKey); }
           catch (e) { return base; }
         }
-        var folder = localStorage.getItem('app_folder');
-        var clientId = localStorage.getItem('oauth_client_id');
-        var params = '?mode=' + (mode || 'sheets');
-        if (folder) params += '&folder=' + folder;
-        if (clientId) params += '&clientId=' + clientId;
-        return base + params;
+        // Dev-server mode is loopback-only: there is nothing shareable about the link.
+        return base;
       },
       currentConfig: function() { return VIEWS[this.currentTable] || SCHEMA[this.currentTable] || {}; },
       // Printing is opt-in via "printable": "view" (toolbar), "cards" (per-card), or ["view","cards"] (both). Off by default.
@@ -938,44 +932,35 @@ function createVueApp() {
       notify: function(text) { this.snackText = text; this.snackbar = true; },
       setNavLayout: function(v) { this.navLayoutOverride = v; localStorage.setItem('app_nav_layout', v); },
 
-      // Setup
-      validateFolder: function() {
+      // A schema that was upgraded on load is saved back ONCE, so the chain stops re-running and the
+      // next migration starts from a known version. Deliberately narrow:
+      //   - only if something was actually applied, so a current schema is never rewritten;
+      //   - only for an admin, because every write layer restricts the schema document to admins. The
+      //     alternative is a refused write on every member's boot, which is how the shared-list seeding
+      //     bug arrived as an unhandled rejection;
+      //   - failure is not fatal. The schema in memory is already migrated, so the app runs correctly
+      //     either way; the only cost of not persisting is that the chain runs again next time.
+      _writeBackMigratedSchema: function() {
+        var m = (typeof window !== 'undefined') && window._schemaMigration;
+        if (!m || !this.isAdmin || !backend.saveSchema || !this.schemaData) return Promise.resolve();
+        window._schemaMigration = null;                 // once per session, even if the save fails
         var self = this;
-        if (this.setupFolderId.length > 10) {
-          backend.validateFolder(this.setupFolderId).then(function() { self.folderValid = true; }).catch(function() { self.folderValid = false; });
-        }
+        return Promise.resolve(backend.saveSchema(this.schemaData))
+          .then(function() { console.info('schema migrated to v' + m.to + ': ' + m.applied.join('; ')); })
+          .catch(function() { self.notify(self.t('msg.save_failed')); });
       },
+
+      // Setup
       completeLocalSetup: function() {
         localStorage.setItem('app_folder', 'local');
         localStorage.setItem('app_mode', 'local');
-        this.folderId = 'local'; this.mode = 'local';
+        this.mode = 'local';
         this.showSetup = false;
         this.startApp();
-      },
-      openCrdtLocalSetup: function() {
-        var self = this;
-        this.setupStep = 'crdt-local';
-        fetch(_u('/api/serverInfo')).then(function(r) { return r.json(); }).then(function(d) { self.serverStorage = d.storage; }).catch(function() {});
       },
       backToSetup: function() {
         this.setupStep = null;
         try { localStorage.removeItem('app_mode'); } catch (e) {}
-      },
-      completeCrdtLocalSetup: function() {
-        localStorage.setItem('app_folder', 'local');
-        localStorage.setItem('app_mode', 'crdt-local');
-        this.folderId = 'local'; this.mode = 'crdt-local';
-        this.showSetup = false;
-        this.startApp();
-      },
-      completeSetup: function() {
-        var self = this;
-        localStorage.setItem('app_folder', this.setupFolderId);
-        localStorage.setItem('app_mode', this.setupMode);
-        this.folderId = this.setupFolderId; this.mode = this.setupMode;
-        backend.setFolderConfig(this.folderId, Object.assign({}, self.appConfig || {}, { mode: this.mode })).then(function() {
-          self.showSetup = false; self.startApp();
-        });
       },
 
       // Boot
@@ -986,7 +971,7 @@ function createVueApp() {
         // Load schema from backend, fall back to default
         var schemaPromise;
         if (backend.getSchema && !backend.bootData) {
-          schemaPromise = backend.getSchema(self.folderId).then(function(s) {
+          schemaPromise = backend.getSchema().then(function(s) {
             if (s) {
               var parsed = typeof s === 'string' ? JSON.parse(s) : s;
               _normalizeSchema(parsed);
@@ -996,7 +981,7 @@ function createVueApp() {
               if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify(self.t('msg.schema_error') + ' ' + schemaErrors[0]); }
             } else {
               // First time: save default schema to Drive
-              if (backend.saveSchema) backend.saveSchema(self.folderId, defaultSchema);
+              if (backend.saveSchema) backend.saveSchema(defaultSchema);
               self.schemaData = Object.freeze(defaultSchema);
             }
           });
@@ -1007,7 +992,7 @@ function createVueApp() {
         // Load app-wide folder config (holds the global rotationAnchor) before rendering rotations.
         schemaPromise = schemaPromise.then(function() {
           if (!backend.getFolderConfig) return;
-          return Promise.resolve(backend.getFolderConfig(self.folderId)).then(function(cfg) {
+          return Promise.resolve(backend.getFolderConfig()).then(function(cfg) {
             self.appConfig = cfg || {};
           }).catch(function() {});
         });
@@ -1015,7 +1000,7 @@ function createVueApp() {
         schemaPromise.then(function() {
         // Fast path: single batch call (Apps Script)
         if (backend.bootData) {
-          backend.bootData(self.folderId).then(function(result) {
+          backend.bootData().then(function(result) {
             if (!result) { self.notify(self.t('msg.server_error') + ' bootData returned null'); self.loading = false; return; }
             if (result.error) { self.notify(self.t('msg.server_error') + ' ' + result.error); self.loading = false; return; }
             // Not registered yet: skip schema/data entirely and fall through to loadUsers() below,
@@ -1034,9 +1019,8 @@ function createVueApp() {
             } else {
               // First boot: save bundled default schema to Drive
               self.schemaData = Object.freeze(defaultSchema);
-              backend.saveSchema(self.folderId, defaultSchema);
+              backend.saveSchema(defaultSchema);
             }
-            self.tableMap = result.tableMap || {};
             self.languages = result.languages || [];
             self.listsCache = result.lists || {}; window._listsCache = self.listsCache;
             self.loadListAvatars(); self.loadMyListValues();   // avatars + my own @me identity (the admin-only editor links wait for the user list — see the usersLoaded watcher)
@@ -1046,7 +1030,7 @@ function createVueApp() {
             // saveLists's batch write would then be denied wholesale (Firestore batches are atomic --
             // one disallowed doc fails the lot). result.unrestricted is only ever explicitly false
             // for a scoped Firebase user; other backends don't set it, so they keep seeding as before.
-            if (result.unrestricted !== false && self._seedSchemaLists()) backend.saveLists(self.folderId, self.listsCache);
+            if (result.unrestricted !== false && self._seedSchemaLists()) backend.saveLists(self.listsCache);
             // Populate data cache
             for (var key in result.data) {
               var d = result.data[key];
@@ -1059,7 +1043,7 @@ function createVueApp() {
             }
             // Load default language translations as base
             var defCode = self.defaultLanguage;
-            return backend.getTranslations(self.folderId, defCode).then(function(baseTrans) {
+            return backend.getTranslations(defCode).then(function(baseTrans) {
               self.strings = baseTrans || {};
               // A remembered code can outlive its language too (a rename, or a different database on the
               // same origin), so validate it against the list rather than trusting localStorage.
@@ -1067,7 +1051,7 @@ function createVueApp() {
               if (!self.languages.some(function(l) { return l.code === saved; })) saved = defCode;
               self.currentLang = saved;
               if (saved !== defCode) {
-                return backend.getTranslations(self.folderId, saved).then(function(trans) {
+                return backend.getTranslations(saved).then(function(trans) {
                   if (trans) self.strings = Object.assign({}, self.strings, trans);
                 });
               }
@@ -1083,12 +1067,9 @@ function createVueApp() {
         }
 
         // Sequential path (local server / OAuth)
-        backend.initSchema(self.folderId, SCHEMA).then(function(schemaResult) {
-          self.tableMap = {};
-          if (schemaResult) { Object.keys(schemaResult).forEach(function(n) { self.tableMap[n] = schemaResult[n]; }); }
-          else { Object.keys(SCHEMA).forEach(function(n) { self.tableMap[n] = n; }); }
+        backend.initSchema(SCHEMA).then(function(schemaResult) {
 
-          return backend.getAvailableLanguages(self.folderId);
+          return backend.getAvailableLanguages();
         }).then(function(langs) {
           self.languages = langs || [];
           if (self.languages.length === 0) {
@@ -1096,7 +1077,7 @@ function createVueApp() {
           }
           // Load default language as base strings
           var defCode = self.defaultLanguage;
-          return backend.getTranslations(self.folderId, defCode).then(function(baseTrans) {
+          return backend.getTranslations(defCode).then(function(baseTrans) {
             self.strings = baseTrans || {};
             // Same validation as the bootData path above: a stale app_lang must not select a language
             // that no longer exists.
@@ -1104,16 +1085,16 @@ function createVueApp() {
             if (!self.languages.some(function(l) { return l.code === saved; })) saved = defCode;
             self.currentLang = saved;
             if (saved !== defCode) {
-              return backend.getTranslations(self.folderId, saved).then(function(trans) {
+              return backend.getTranslations(saved).then(function(trans) {
                 if (trans) self.strings = Object.assign({}, self.strings, trans);
               });
             }
           });
         }).then(function() {
           // Preload lists + auto-seed (shared with the bootData path via _seedSchemaLists)
-          return backend.getLists(self.folderId).then(function(lists) {
+          return backend.getLists().then(function(lists) {
             self.listsCache = lists || {}; window._listsCache = self.listsCache;
-            if (self._seedSchemaLists()) backend.saveLists(self.folderId, self.listsCache);
+            if (self._seedSchemaLists()) backend.saveLists(self.listsCache);
             self.loadListAvatars(); self.loadMyListValues();   // avatars + my own @me identity (the admin-only editor links wait for the user list — see the usersLoaded watcher)
           });
         }).then(function() {
@@ -1142,20 +1123,22 @@ function createVueApp() {
             }).catch(function() { self.usersLoaded = true; resolve(); });
           });
         }).then(function() {
+          return self._writeBackMigratedSchema();
+        }).then(function() {
           // Preload data -- only tables the user can reach. Self-serviceable tables are included: the
           // member holds no grant on them but the backend scopes the read to their own rows, and
           // leaving them out left every self-service view empty until something else fetched them.
-          var tables = Object.keys(self.tableMap).filter(function(t) { return self.canReachTable(t); });
+          var tables = Object.keys(SCHEMA).filter(function(t) { return self.canReachTable(t); });
           var chain = Promise.resolve();
           tables.forEach(function(name) {
             chain = chain.then(function() {
-              return backend.getTableData(self.tableMap[name], 'active').then(function(result) {
+              return backend.getTableData(name, 'active').then(function(result) {
                 self.dataCache[name] = parseTableResult(result).rows;
               }).catch(function() { self.dataCache[name] = []; });
             });
             if (self.settings.preload_archive && SCHEMA[name] && SCHEMA[name].archivable) {
               chain = chain.then(function() {
-                return backend.getTableData(self.tableMap[name], 'archive').then(function(result) {
+                return backend.getTableData(name, 'archive').then(function(result) {
                   self.dataCache[aKey(name)] = parseTableResult(result).rows;
                 }).catch(function() { self.dataCache[aKey(name)] = []; });
               });
@@ -1383,7 +1366,7 @@ function createVueApp() {
         // Removing the vote (toggled off -> empty status): delete my response row rather than leave an
         // empty-status orphan that would show as a blank line in the roster.
         if (!status) {
-          if (mine) { var mi = rows.indexOf(mine); if (mi >= 0) rows.splice(mi, 1); backend.deleteRow(this.tableMap[table], mine.id, 'active'); }
+          if (mine) { var mi = rows.indexOf(mine); if (mi >= 0) rows.splice(mi, 1); Writes.deleteRow(table, mine.id, 'active'); }
           return;
         }
         if (mine) {
@@ -1393,13 +1376,13 @@ function createVueApp() {
           // already correct on the stored row.
           var patch = { id: mine.id, rosterPublic: pub, updated_at: mine.updated_at };
           patch[cfg.statusColumn] = status;
-          backend.putRow(this.tableMap[table], patch, 'active');
+          Writes.putRow(table, patch, 'active');
         } else {
           var row = { id: this.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           getColumns(table).forEach(function(c) { if (!(c in row)) row[c] = ''; });
           row[ownerCol] = me; row[linkColumn] = eventKey; row[cfg.statusColumn] = status; row.rosterPublic = pub;
           rows.push(row);
-          backend.putRow(this.tableMap[table], row, 'active');
+          Writes.putRow(table, row, 'active');
         }
       },
       // Doc-view bodies live in a server-side "_pages" collection (not in schema.json).
@@ -1516,7 +1499,7 @@ function createVueApp() {
       savePage: function() {
         var name = this.currentTable;
         this.pageCache[name] = this.pageEditText;
-        if (backend.putRow) backend.putRow('_pages', { id: name, markdown: this.pageEditText }, 'active');
+        if (backend.putRow) Writes.putRow('_pages', { id: name, markdown: this.pageEditText }, 'active');
         this.pageEditing = false;
         this.notify(this.t('msg.saved'));
       },
@@ -1558,7 +1541,7 @@ function createVueApp() {
           // member's own rows) — the same canReachTable the sidebar's canAccess uses, so an rsvp view's
           // responses table loads for a no-grant member instead of silently staying empty.
           if (!tbl || self.dataCache[tbl] || !self.canReachTable(tbl)) return;
-          backend.getTableData(self.tableMap[tbl], 'active').then(function(result) {
+          backend.getTableData(tbl, 'active').then(function(result) {
             self.dataCache[tbl] = parseTableResult(result).rows;
             if (onLoad) onLoad(tbl);
           }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
@@ -1587,7 +1570,7 @@ function createVueApp() {
           if (!tbl || !self.canReachTable(tbl)) return;
           var store = BackendHelpers.storeName(tbl, tab || 'active');
           if (self._liveSubs[store]) return;                 // already watched — subscribe once per session
-          self._liveSubs[store] = backend.subscribeTable(self.tableMap[tbl] || tbl, tab || 'active', function(change) {
+          self._liveSubs[store] = backend.subscribeTable(tbl, tab || 'active', function(change) {
             self._liveApply(store, change);
           }) || function() {};
         });
@@ -1742,7 +1725,7 @@ function createVueApp() {
               if (!self.canReachTable(tbl)) return;
               if (tbl && !self.dataCache[tbl]) {
                 var embedTab = 'active';
-                backend.getTableData(self.tableMap[tbl], embedTab).then(function(result) {
+                backend.getTableData(tbl, embedTab).then(function(result) {
                   self.dataCache[tbl] = parseTableResult(result).rows;
                 });
               }
@@ -1761,7 +1744,7 @@ function createVueApp() {
               if (!dep.table) return;
               self._liveWatch([dep.table], dep.part);   // a computed column is only as live as its inputs
               if (!self.canReachTable(dep.table) || self.dataCache[dep.key]) return;
-              backend.getTableData(self.tableMap[dep.table], dep.part).then(function(result) {
+              backend.getTableData(dep.table, dep.part).then(function(result) {
                 self.dataCache[dep.key] = parseTableResult(result).rows;
                 recomputeRotation();
               }).catch(function() { self.dataCache[dep.key] = self.dataCache[dep.key] || []; });
@@ -1777,7 +1760,7 @@ function createVueApp() {
           self._liveWatch([self.currentTable], self.viewingArchive ? 'archive' : 'active');
           if (!self.dataCache[key]) {
             var tab = self.viewingArchive ? 'archive' : 'active';
-            backend.getTableData(self.tableMap[self.currentTable], tab).then(function(result) {
+            backend.getTableData(self.currentTable, tab).then(function(result) {
               self.dataCache[key] = parseTableResult(result).rows;
               var rows = self.dataCache[key];
               if (tableDef.filter) rows = filterRows(rows, tableDef.filter);
@@ -1884,7 +1867,7 @@ function createVueApp() {
             row[col] = value;
           }
           row.updated_at = new Date().toISOString();
-          backend.putRow(self.tableMap[source], row, tab);
+          Writes.putRow(source, row, tab);
           // Propagate to mirror tables if this column is mirrored. This takes the LIVE row, not the
           // payload: `row` is now a partial, and propagateMirror reads every synced column off it —
           // given the partial it would blank each one it couldn't find.
@@ -1936,7 +1919,7 @@ function createVueApp() {
             row.position = String(mp + 1);
           }
           self.dataCache[cacheKey].push(row);
-          backend.putRow(self.tableMap[src], row, tab);
+          Writes.putRow(src, row, tab);
           if (src === primary) primaryRow = row;
         });
         return primaryRow;
@@ -1986,7 +1969,7 @@ function createVueApp() {
           self.dataCache[aKey(source)] = cached.filter(function(r) { return r.id !== item.id; });
           if (!self.dataCache[source]) self.dataCache[source] = [];
           self.dataCache[source].push(srcRow);
-          backend.moveRow(self.tableMap[source], srcRow, 'archive', 'active');
+          Writes.moveRow(source, srcRow, 'archive', 'active');
         });
         self.currentData = self.currentData.filter(function(r) { return r.id !== item.id; });
         self.notify(self.t('msg.restored'));
@@ -2159,7 +2142,7 @@ function createVueApp() {
         vals.forEach(function(v) {
           if (v && self.listsCache[listName].indexOf(v) === -1) {
             self.listsCache[listName].push(v);
-            backend.putListItem(self.folderId, listName, v);
+            backend.putListItem(listName, v);
           }
         });
       },
@@ -2391,7 +2374,7 @@ function createVueApp() {
           if (row[parentCol] === oldParent) {
             row[parentCol] = newParent;
             row.updated_at = new Date().toISOString();
-            backend.putRow(self.tableMap[table], row, 'active');
+            Writes.putRow(table, row, 'active');
           }
         });
         self.migrateListTranslation(table, oldParent, newParent);   // carry the group's own label
@@ -2407,7 +2390,7 @@ function createVueApp() {
         var parentCol = self.refParentCol;
         var toDelete = (self.dataCache[table] || []).filter(function(r) { return r[parentCol] === parent; });
         self.dataCache[table] = (self.dataCache[table] || []).filter(function(r) { return r[parentCol] !== parent; });
-        toDelete.forEach(function(row) { backend.deleteRow(self.tableMap[table], row.id, 'active'); });
+        toDelete.forEach(function(row) { Writes.deleteRow(table, row.id, 'active'); });
         self.pendingDelete = null;
         self.notify(self.t('msg.deleted'));
       },
@@ -2449,8 +2432,8 @@ function createVueApp() {
         if (i < 0 || j < 0 || j >= group.length) return;
         var b = group[j], pa = item.position, pb = b.position, now = new Date().toISOString();
         item.position = pb; b.position = pa; item.updated_at = b.updated_at = now;
-        backend.putRow(self.tableMap[table], { id: item.id, position: item.position, updated_at: now }, 'active');
-        backend.putRow(self.tableMap[table], { id: b.id, position: b.position, updated_at: now }, 'active');
+        Writes.putRow(table, { id: item.id, position: item.position, updated_at: now }, 'active');
+        Writes.putRow(table, { id: b.id, position: b.position, updated_at: now }, 'active');
       },
       // Move a whole group up/down (swap it with the adjacent group), then renumber every row sequentially.
       moveRefGroup: function(parentVal, dir) {
@@ -2461,7 +2444,7 @@ function createVueApp() {
         var t = order[i]; order[i] = order[j]; order[j] = t;
         var pos = 1, now = new Date().toISOString();
         order.forEach(function(g) { (grouped[g] || []).forEach(function(r) {
-          if (Number(r.position) !== pos) { r.position = String(pos); r.updated_at = now; backend.putRow(self.tableMap[table], { id: r.id, position: r.position, updated_at: now }, 'active'); }
+          if (Number(r.position) !== pos) { r.position = String(pos); r.updated_at = now; Writes.putRow(table, { id: r.id, position: r.position, updated_at: now }, 'active'); }
           pos++;
         }); });
       },
@@ -2488,7 +2471,7 @@ function createVueApp() {
           delete self.saveTimers[timerKey];
           // Whole row on purpose, unlike saveField: a lookup rename cascades through propagateRefChange
           // above, so the row this writes is the one the editor just rebuilt in full.
-          backend.putRow(self.tableMap[refTable], item, 'active');
+          Writes.putRow(refTable, item, 'active');
           self.notify(self.t('msg.saved'));
           self._liveFlush();
         }, 500);
@@ -2507,7 +2490,7 @@ function createVueApp() {
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
         var table = this.currentRefTable;
         this.dataCache[table] = (this.dataCache[table] || []).filter(function(r) { return r.id !== item.id; });
-        backend.deleteRow(this.tableMap[table], item.id, 'active');
+        Writes.deleteRow(table, item.id, 'active');
         this.notify(this.t('msg.deleted'));
       },
 
@@ -2516,10 +2499,10 @@ function createVueApp() {
         var self = this;
         localStorage.setItem('app_lang', code);
         var defCode = self.defaultLanguage;
-        backend.getTranslations(self.folderId, defCode).then(function(baseTrans) {
+        backend.getTranslations(defCode).then(function(baseTrans) {
           self.strings = baseTrans || {};
           if (code !== defCode) {
-            return backend.getTranslations(self.folderId, code).then(function(trans) {
+            return backend.getTranslations(code).then(function(trans) {
               if (trans) self.strings = Object.assign({}, self.strings, trans);
             });
           }
@@ -2528,7 +2511,7 @@ function createVueApp() {
       openLangEditor: function(lang) {
         var self = this;
         this.editingLang = lang;
-        backend.getTranslations(self.folderId, lang.code).then(function(trans) {
+        backend.getTranslations(lang.code).then(function(trans) {
           self.currentTranslations = trans || {};
         });
       },
@@ -2539,7 +2522,7 @@ function createVueApp() {
         clearTimeout(this._langTimer);
         this._langTimer = setTimeout(function() {
           if (!self.editingLang) return;
-          backend.updateTranslations(self.folderId, self.editingLang.code, self.currentTranslations);
+          backend.updateTranslations(self.editingLang.code, self.currentTranslations);
           self.notify(self.t('msg.translation_saved'));
         }, 500);
       },
@@ -2557,7 +2540,7 @@ function createVueApp() {
         if (!code) return;
         if ((this.languages || []).some(function(l) { return l.code === code; })) { this.notify(this.t('msg.language_exists')); return; }
         name = (name || code).trim();
-        backend.createLanguage(this.folderId, code, name, this.translationKeys).then(function() {
+        backend.createLanguage(code, name, this.translationKeys).then(function() {
           var newLang = { code: code, name: name };
           self.languages.push(newLang);
           self.openLangEditor(newLang);
@@ -2573,7 +2556,7 @@ function createVueApp() {
         // (keyed by code) and the default-language reference are preserved — this makes even
         // the default language safely renamable. Backends without renameLanguage (e.g. Sheets,
         // where the name IS the code) just skip persistence via the guard.
-        if (backend.renameLanguage) backend.renameLanguage(self.folderId, lang.code, newName);
+        if (backend.renameLanguage) backend.renameLanguage(lang.code, newName);
         lang.name = newName;
         self.notify(self.t('msg.language_renamed'));
       },
@@ -2581,7 +2564,7 @@ function createVueApp() {
         var key = 'lang:' + lang.code;
         if (this.pendingDelete !== key) { this.armDelete(key); return; }  // arm-then-confirm (double click)
         var self = this;
-        backend.deleteLanguage(self.folderId, lang.code).then(function() {
+        backend.deleteLanguage(lang.code).then(function() {
           self.languages = self.languages.filter(function(l) { return l.code !== lang.code; });
           if (self.editingLang && self.editingLang.code === lang.code) self.editingLang = null;
           // Deleting the (explicit) default is allowed: repoint it to a remaining language, or clear
@@ -2590,7 +2573,7 @@ function createVueApp() {
             var newDef = self.languages.length ? self.languages[0].code : null;
             var newSchema = Object.assign({}, self.schemaData, { defaultLanguage: newDef });
             self.schemaData = Object.freeze(newSchema);
-            if (backend.saveSchema) backend.saveSchema(self.folderId, newSchema);
+            if (backend.saveSchema) backend.saveSchema(newSchema);
           }
           if (self.languages.length === 0) {
             self.strings = {};            // no languages -> UI shows the translation keys themselves
@@ -2638,10 +2621,10 @@ function createVueApp() {
         var self = this, oldKey = 'list.' + ns + '.' + oldVal, newKey = 'list.' + ns + '.' + newVal;
         if (self.strings && self.strings[oldKey] != null) { self.strings[newKey] = self.strings[oldKey]; delete self.strings[oldKey]; }  // active language, immediate
         (self.languages || []).forEach(function(lang) {
-          Promise.resolve(backend.getTranslations(self.folderId, lang.code)).then(function(t) {
+          Promise.resolve(backend.getTranslations(lang.code)).then(function(t) {
             if (!t || t[oldKey] == null || t[oldKey] === '') return;
             var updates = {}; updates[newKey] = t[oldKey]; updates[oldKey] = '';   // '' clears the old key (getTranslations drops empty)
-            backend.updateTranslations(self.folderId, lang.code, updates);
+            backend.updateTranslations(lang.code, updates);
           }).catch(function() {});
         });
       },
@@ -2679,7 +2662,7 @@ function createVueApp() {
         var tmp = arr[i]; arr.splice(i, 1, arr[j]); arr.splice(j, 1, tmp);
         this.saveLists();
       },
-      saveLists: function() { backend.saveLists(this.folderId, this.listsCache); },
+      saveLists: function() { backend.saveLists(this.listsCache); },
 
       // All [table,col] pairs whose column is backed by `listName` (select or multiselect).
       // altList = the column's listSwitch alt list (if any) — a value still present in the alt list
@@ -2751,7 +2734,7 @@ function createVueApp() {
                   rowChanged = true;
                 }
               });
-              if (rowChanged) { row.updated_at = new Date().toISOString(); backend.putRow(self.tableMap[table], row, partition); changed++; }
+              if (rowChanged) { row.updated_at = new Date().toISOString(); Writes.putRow(table, row, partition); changed++; }
             });
             return changed;
           };
@@ -2760,7 +2743,7 @@ function createVueApp() {
             if (self.dataCache[cacheKey]) {
               jobs.push(Promise.resolve(apply(self.dataCache[cacheKey], partition)));
             } else {
-              jobs.push(Promise.resolve(backend.getTableData(self.tableMap[table], partition)).then(function(result) {
+              jobs.push(Promise.resolve(backend.getTableData(table, partition)).then(function(result) {
                 var rows = parseTableResult(result).rows;
                 var n = apply(rows, partition);
                 if (n) self.dataCache[cacheKey] = rows; // cache so app state stays consistent after scrub
@@ -2786,7 +2769,7 @@ function createVueApp() {
         var self = this;
         this.appConfig = cfg;                       // local override for everyone with view access
         if (this.isAdmin && backend.setFolderConfig) {
-          Promise.resolve(backend.setFolderConfig(this.folderId, cfg))
+          Promise.resolve(backend.setFolderConfig(cfg))
             .catch(function() { self.notify(self.t('msg.save_failed')); });
         }
         if (this.currentTable === viewName) this.loadTableData();
@@ -3005,7 +2988,7 @@ function createVueApp() {
             r.updated_at = new Date().toISOString();
             // position-only write: reordering says nothing about the row's other columns, so it must not
             // carry (and overwrite with) our copy of them.
-            backend.putRow(self.tableMap[table], { id: r.id, position: r.position, updated_at: r.updated_at }, 'active');
+            Writes.putRow(table, { id: r.id, position: r.position, updated_at: r.updated_at }, 'active');
           }
         });
       },
@@ -3029,7 +3012,7 @@ function createVueApp() {
             synced.forEach(function(c) { if (mr[c] !== rowData[c]) { mr[c] = rowData[c] || ''; patch[c] = mr[c]; } });
             if (Object.keys(patch).length > 1) {
               mr.updated_at = patch.updated_at = new Date().toISOString();
-              backend.putRow(self.tableMap[mt], patch, mTab);
+              Writes.putRow(mt, patch, mTab);
             }
           }
         }
@@ -3046,7 +3029,7 @@ function createVueApp() {
             upTargets[st].forEach(function(c) { if (stRow[c] !== rowData[c]) { stRow[c] = rowData[c] || ''; upPatch[c] = stRow[c]; } });
             if (Object.keys(upPatch).length > 1) {
               stRow.updated_at = upPatch.updated_at = new Date().toISOString();
-              backend.putRow(self.tableMap[st], upPatch, stTab);
+              Writes.putRow(st, upPatch, stTab);
             }
           }
         });
@@ -3317,7 +3300,7 @@ function createVueApp() {
         if (!backend.putRow) return Promise.reject(new Error(self.t('msg.save_failed')));
         if (!/^image\//.test((file && file.type) || '')) return Promise.reject(new Error(self.t('msg.choose_image')));
         return this._fitImageToCap(file, ASSET_CAP).then(function(src) {
-          return Promise.resolve(backend.putRow('_assets', { id: id, src: src }, 'active')).then(function() {
+          return Promise.resolve(Writes.putRow('_assets', { id: id, src: src }, 'active')).then(function() {
             self.assetCache[id] = src;               // show it immediately, no round-trip
             return 'asset:' + id;
           });
@@ -3655,9 +3638,6 @@ function createVueApp() {
           location.reload();
         } catch(e) { this.notify(this.t('msg.invalid_json')); }
       },
-      saveClientId: function() {
-        if (this.oauthClientId) localStorage.setItem('oauth_client_id', this.oauthClientId);
-      },
       saveSupabaseConfig: function() {
         var url = (this.supabaseUrlInput || '').trim().replace(/\/+$/, '');
         var key = (this.supabaseKeyInput || '').trim();
@@ -3682,7 +3662,7 @@ function createVueApp() {
         var chain = Promise.resolve();
         self.languages.forEach(function(lang) {
           chain = chain.then(function() {
-            return backend.getTranslations(self.folderId, lang.code).then(function(t) { translations[lang.code] = t; });
+            return backend.getTranslations(lang.code).then(function(t) { translations[lang.code] = t; });
           });
         });
         // Shared tail for both branches below: assemble the bundle around the cleaned schema + extras,
@@ -3806,46 +3786,45 @@ function createVueApp() {
                   _viewsNav = imported.schema.views;
                   VIEWS = {}; _flattenViews(_viewsNav);
                 }
-                return backend.saveSchema(self.folderId, imported.schema).then(function() {
+                return backend.saveSchema(imported.schema).then(function() {
                   _normalizeSchema(imported.schema);
                   self.schemaData = Object.freeze(imported.schema); // mirror boot: refresh the reactive schema (invalidates lockedListValues et al.)
-                  return backend.initSchema(self.folderId, SCHEMA);
-                }).then(function(tableMap) {
-                  if (tableMap) self.tableMap = tableMap;
+                  return backend.initSchema(SCHEMA);
+                }).then(function() {
                 });
               }));
             }
             rowJobs.forEach(function(job, i) {
               chain = chain.then(step('mdi-table-row', (i + 1) + '/' + rowJobs.length + ' · ' + job.table, function() {
-                var target = self.tableMap[job.table] || job.table;
+                var target = job.table;
                 // Delete first to force CRDT change detection on re-import
-                return backend.deleteRow(target, job.row.id, job.tab).catch(function() {})
-                  .then(function() { return backend.putRow(target, job.row, job.tab); });
+                return Writes.deleteRow(target, job.row.id, job.tab).catch(function() {})
+                  .then(function() { return Writes.putRow(target, job.row, job.tab); });
               }));
             });
             if (imported.lists) {
               chain = chain.then(step('mdi-format-list-bulleted', '', function() {
                 self.listsCache = imported.lists;
-                return backend.saveLists(self.folderId, imported.lists);
+                return backend.saveLists(imported.lists);
               }));
             }
             langCodes.forEach(function(code) {
               chain = chain.then(step('mdi-translate', code, function() {
                 // Ensure language exists before writing translations
                 var langName = (imported.languages || []).find(function(l) { return l.code === code; });
-                return backend.createLanguage(self.folderId, code, langName ? langName.name : code, Object.keys(imported.translations[code]))
+                return backend.createLanguage(code, langName ? langName.name : code, Object.keys(imported.translations[code]))
                   .catch(function() {})   // already present is fine; the merge below still writes the strings
-                  .then(function() { return backend.updateTranslations(self.folderId, code, imported.translations[code]); });
+                  .then(function() { return backend.updateTranslations(code, imported.translations[code]); });
               }));
             });
             pages.forEach(function(page) {
               chain = chain.then(step('mdi-file-document-outline', page.id, function() {
-                return backend.putRow('_pages', { id: page.id, markdown: page.markdown }, 'active');
+                return Writes.putRow('_pages', { id: page.id, markdown: page.markdown }, 'active');
               }));
             });
             assets.forEach(function(asset) {
               chain = chain.then(step('mdi-image-outline', asset.id, function() {
-                return backend.putRow('_assets', { id: asset.id, src: asset.src }, 'active');
+                return Writes.putRow('_assets', { id: asset.id, src: asset.src }, 'active');
               }));
             });
             // Restore portable folder config (rotationAnchors, rotationRanges, any future portable key),
@@ -3854,7 +3833,7 @@ function createVueApp() {
               chain = chain.then(step('mdi-cog', '', function() {
                 var merged = mergeImportedConfig(self.appConfig, imported.config, self.mode);
                 self.appConfig = merged;
-                return backend.setFolderConfig(self.folderId, merged);
+                return backend.setFolderConfig(merged);
               }));
             }
             chain = chain.then(step('mdi-format-list-checks', '', function() {
@@ -3866,7 +3845,7 @@ function createVueApp() {
                   if (self.listsCache[ln].indexOf(lv) < 0) { self.listsCache[ln].push(lv); needSave = true; }
                 }
               }
-              return needSave ? backend.saveLists(self.folderId, self.listsCache) : Promise.resolve();
+              return needSave ? backend.saveLists(self.listsCache) : Promise.resolve();
             }));
 
             chain.then(function() {
@@ -3918,10 +3897,6 @@ function createVueApp() {
           var self = this;
           fetch(_u('/firestore.rules')).then(function(r) { return r.ok ? r.text() : ''; }).then(function(t) { self.firestoreRules = t; }).catch(function(){});
         }
-        if (mode === 'sheets' || mode === 'crdt') {
-          if (typeof google !== 'undefined' && google.script) { return; }
-          if (typeof _oauthClient === 'undefined' || !_oauthClient) { location.reload(); return; }
-        }
       },
 
       // Sync
@@ -3937,7 +3912,7 @@ function createVueApp() {
         var chain = Promise.resolve();
         sources.forEach(function(src) {
           chain = chain.then(function() {
-            return backend.getTableData(self.tableMap[src], 'active').then(function(r) {
+            return backend.getTableData(src, 'active').then(function(r) {
               self.dataCache[src] = (r && r.rows) ? r.rows : [];
             });
           });
@@ -3969,7 +3944,7 @@ function createVueApp() {
           var tab = fromArchive ? 'archive' : 'active';
           var key = fromArchive ? aKey(src) : src;
           self.dataCache[key] = (self.dataCache[key] || []).filter(function(r) { return r.id !== itemId; });
-          backend.deleteRow(self.tableMap[src], itemId, tab);
+          Writes.deleteRow(src, itemId, tab);
         });
         this.currentData = this.currentData.filter(function(r) { return r.id !== itemId; });
         this.notify(this.t('msg.deleted'));
@@ -4008,7 +3983,7 @@ function createVueApp() {
           self.dataCache[source] = cached.filter(function(r) { return r.id !== itemId; });
           if (!self.dataCache[aKey(source)]) self.dataCache[aKey(source)] = [];
           self.dataCache[aKey(source)].push(srcRow);
-          backend.moveRow(self.tableMap[source], srcRow, 'active', 'archive');
+          Writes.moveRow(source, srcRow, 'active', 'archive');
         });
         if (!quiet) this.notify(this.t('msg.archived'));   // the auto sweep files rows silently
       },
@@ -4115,7 +4090,7 @@ function createVueApp() {
         var theme = { light: Object.assign({}, base.light, this.themeEdit.light), dark: Object.assign({}, base.dark, this.themeEdit.dark) };
         var newSchema = Object.assign({}, this.schemaData, { theme: theme });
         this.schemaData = Object.freeze(newSchema);
-        if (backend.saveSchema) backend.saveSchema(this.folderId, newSchema);
+        if (backend.saveSchema) backend.saveSchema(newSchema);
       },
       // Commit a color (from the text field or the picker's final `change`): validate, live-preview, and
       // auto-persist to schema.theme — no Save button. Invalid input is ignored (the field re-syncs to the
@@ -4158,7 +4133,7 @@ function createVueApp() {
       resetTheme: function() {
         var newSchema = Object.assign({}, this.schemaData); delete newSchema.theme;
         this.schemaData = Object.freeze(newSchema);
-        if (backend.saveSchema) backend.saveSchema(this.folderId, newSchema);
+        if (backend.saveSchema) backend.saveSchema(newSchema);
         try { localStorage.removeItem('brand_splash'); } catch (e) {}
         location.reload(); // rebuild Vuetify with the built-in defaults (cleanly drops the override)
       },
@@ -4352,10 +4327,10 @@ function createVueApp() {
         }
       });
       // Probe local server availability for setup UI — but only when a local dev server could
-      // actually be present. On a committed cloud backend (firebase/sheets/crdt) there is no /api
+      // actually be present. On a committed cloud backend (firebase/supabase) there is no /api
       // endpoint, so the probe would just log a spurious 404 to the console on every load.
       var appMode = (function() { try { return localStorage.getItem('app_mode'); } catch (e) { return null; } })();
-      if (appMode !== 'firebase' && appMode !== 'sheets' && appMode !== 'crdt' && _mayLocal()) {
+      if (appMode !== 'firebase' && appMode !== 'supabase' && _mayLocal()) {
         fetch(_u('/api/validateFolder'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' })
           .then(function(r) { if (r.ok) self.hasLocalServer = true; })
           .catch(function() {});
@@ -4507,7 +4482,7 @@ function createVueApp() {
       },
       saveDoc: function() {
         appInstance.pageCache[this.name] = this.docDraft;
-        if (backend.putRow) backend.putRow('_pages', { id: this.name, markdown: this.docDraft }, 'active');
+        if (backend.putRow) Writes.putRow('_pages', { id: this.name, markdown: this.docDraft }, 'active');
         this.editing = false;
         appInstance.notify(appInstance.t('msg.saved'));
       }
@@ -5484,8 +5459,6 @@ function init() {
   var folder = localStorage.getItem('app_folder');
   var savedMode = localStorage.getItem('app_mode');
   var instance = appInstance;
-  if (savedMode === 'sheets' || savedMode === 'crdt' || savedMode === 'oauth') instance.oauthReady = true;
-
   if (savedMode === 'firebase') {
     instance.mode = 'firebase';
     instance.loading = true;
@@ -5494,12 +5467,7 @@ function init() {
   }
 
   if (!folder) {
-    // On Apps Script, skip local server probe
-    if (typeof google !== 'undefined' && google.script) {
-      instance.showSetup = true; instance.loading = false;
-    } else if (savedMode === 'sheets' || savedMode === 'oauth' || savedMode === 'crdt') {
-      instance.mode = savedMode; instance.showSetup = true; instance.loading = false;
-    } else if (!_mayLocal()) {
+    if (!_mayLocal()) {
       // No dev server can exist on this origin: same outcome as a failed probe, minus the request.
       instance.showSetup = true; instance.loading = false;
     } else {
@@ -5511,8 +5479,7 @@ function init() {
         .catch(function() { instance.showSetup = true; instance.loading = false; });
     }
   } else {
-    instance.folderId = folder;
-    instance.mode = savedMode || 'sheets';
+    instance.mode = savedMode || 'local';
     instance.startApp();
   }
 }

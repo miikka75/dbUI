@@ -81,14 +81,14 @@ function createLocalBackend(dbPath) {
   db.exec('CREATE TABLE IF NOT EXISTS _schema (key TEXT PRIMARY KEY, value TEXT)');
 
   return {
-    getSchema(folderId) {
+    getSchema() {
       // Fresh parse per call (callers may mutate the result); the internal helpers use _storedSchema.
       const row = db.prepare('SELECT value FROM _schema WHERE key = ?').get('schema');
       if (row) return JSON.parse(row.value);
       return null;
     },
 
-    saveSchema(folderId, schema) {
+    saveSchema(schema) {
       db.prepare('INSERT OR REPLACE INTO _schema (key, value) VALUES (?, ?)').run('schema', JSON.stringify(schema));
       _schemaCache = undefined; // invalidate the parsed-schema cache
     },
@@ -99,27 +99,27 @@ function createLocalBackend(dbPath) {
       return { valid: true, name: 'Local Folder' };
     },
 
-    getFolderConfig(folderId) {
+    getFolderConfig() {
       const row = db.prepare('SELECT value FROM _config WHERE key = ?').get('folder-config');
       return row ? JSON.parse(row.value) : null;
     },
 
-    setFolderConfig(folderId, config) {
+    setFolderConfig(config) {
       db.prepare('INSERT OR REPLACE INTO _config (key, value) VALUES (?, ?)').run('folder-config', JSON.stringify(config));
     },
 
     // User-linked lists (Option C): the admin-only { listName: { value: email } } link map, stored whole in
     // the generic _config KV. The server derives the viewer-safe projection from it (see list-users.js).
-    getListUsers(folderId) {
+    getListUsers() {
       const row = db.prepare('SELECT value FROM _config WHERE key = ?').get('list-users');
       try { return row ? JSON.parse(row.value) : {}; } catch (e) { return {}; }
     },
 
-    saveListUsers(folderId, map) {
+    saveListUsers(map) {
       db.prepare('INSERT OR REPLACE INTO _config (key, value) VALUES (?, ?)').run('list-users', JSON.stringify(map || {}));
     },
 
-    initSchema(folderId, schema) {
+    initSchema(schema) {
       const result = {};
       for (const [table, def] of Object.entries(schema)) {
         const declared = Array.isArray(def.columns) ? def.columns.map(c => typeof c === 'object' ? c.name : c).filter(Boolean) : Object.keys(def.columns);
@@ -145,7 +145,7 @@ function createLocalBackend(dbPath) {
       return result;
     },
 
-    getAvailableTables(folderId) {
+    getAvailableTables() {
       const rows = db.prepare('SELECT name, columns FROM _tables').all();
       return rows.map(r => ({ id: r.name, name: r.name }));
     },
@@ -171,7 +171,7 @@ function createLocalBackend(dbPath) {
       try { db.exec('DELETE FROM _files'); } catch(e) {}
     },
 
-    getAvailableLanguages(folderId) {
+    getAvailableLanguages() {
       const langs = [];
       const rows = db.prepare('SELECT code, name FROM _languages').all();
       rows.forEach(r => langs.push({ code: r.code, name: r.name }));
@@ -251,21 +251,21 @@ function createLocalBackend(dbPath) {
       this.putRow(tableId, rowData, toTab);
     },
 
-    getTranslations(folderId, code) {
+    getTranslations(code) {
       const rows = db.prepare('SELECT key, text FROM _translations WHERE code = ?').all(code);
       const translations = {};
       rows.forEach(r => { if (r.key && r.text) translations[r.key] = r.text; });
       return translations;
     },
 
-    updateTranslations(folderId, code, updates) {
+    updateTranslations(code, updates) {
       const stmt = db.prepare('INSERT OR REPLACE INTO _translations (code, key, text) VALUES (?, ?, ?)');
       for (const [key, value] of Object.entries(updates)) {
         stmt.run(code, key, value);
       }
     },
 
-    createLanguage(folderId, code, name, keys) {
+    createLanguage(code, name, keys) {
       db.prepare('INSERT OR REPLACE INTO _languages (code, name) VALUES (?, ?)').run(code, name);
       if (keys && keys.length) {
         const stmt = db.prepare('INSERT OR IGNORE INTO _translations (code, key, text) VALUES (?, ?, ?)');
@@ -274,21 +274,17 @@ function createLocalBackend(dbPath) {
       return code;
     },
 
-    deleteLanguage(folderId, code) {
+    deleteLanguage(code) {
       db.prepare('DELETE FROM _languages WHERE code = ?').run(code);
       db.prepare('DELETE FROM _translations WHERE code = ?').run(code);
     },
 
     // Rename display name only; code + translations (keyed by code) are preserved.
-    renameLanguage(folderId, code, name) {
+    renameLanguage(code, name) {
       db.prepare('UPDATE _languages SET name = ? WHERE code = ?').run(name, code);
     },
 
-    getFileModifiedTime(fileId) {
-      return new Date().toISOString();
-    },
-
-    getLists(folderId) {
+    getLists() {
       _ensureLists();
       const rows = db.prepare('SELECT name, items FROM _lists').all();
       const result = {};
@@ -296,7 +292,7 @@ function createLocalBackend(dbPath) {
       return result;
     },
 
-    saveLists(folderId, lists) {
+    saveLists(lists) {
       _ensureLists();
       db.transaction(() => {
         db.exec('DELETE FROM _lists');
@@ -308,7 +304,7 @@ function createLocalBackend(dbPath) {
       })();
     },
 
-    putListItem(folderId, listName, value) {
+    putListItem(listName, value) {
       if (typeof value !== 'string') return;
       _ensureLists();
       const row = db.prepare('SELECT items FROM _lists WHERE name = ?').get(listName);
@@ -317,30 +313,6 @@ function createLocalBackend(dbPath) {
       if (items.indexOf(value) === -1) items.push(value);
       db.prepare('INSERT OR REPLACE INTO _lists (name, items, tables) VALUES (?, ?, ?)')
         .run(listName, JSON.stringify(items), JSON.stringify(_listOwning(listName)));
-    },
-
-    saveChangesets(folderId, siteId, json) {
-      db.exec('CREATE TABLE IF NOT EXISTS _changesets (site_id TEXT PRIMARY KEY, data TEXT)');
-      db.prepare('INSERT OR REPLACE INTO _changesets (site_id, data) VALUES (?, ?)').run(siteId, json);
-    },
-
-    loadChangesets(folderId, excludeSiteId) {
-      db.exec('CREATE TABLE IF NOT EXISTS _changesets (site_id TEXT PRIMARY KEY, data TEXT)');
-      return db.prepare('SELECT site_id as siteId, data FROM _changesets WHERE site_id != ?').all(excludeSiteId || '');
-    },
-
-    // Generic named-file store (for unified CRDT transport). name = full filename e.g. 'schema.json'
-    readFile(folderId, name) {
-      db.exec('CREATE TABLE IF NOT EXISTS _files (name TEXT PRIMARY KEY, data TEXT)');
-      const row = db.prepare('SELECT data FROM _files WHERE name = ?').get(name);
-      return row ? JSON.parse(row.data) : null;
-    },
-    writeFile(folderId, name, data) {
-      db.exec('CREATE TABLE IF NOT EXISTS _files (name TEXT PRIMARY KEY, data TEXT)');
-      db.prepare('INSERT OR REPLACE INTO _files (name, data) VALUES (?, ?)').run(name, JSON.stringify(data));
-    },
-    deleteFile(folderId, name) {
-      try { db.prepare('DELETE FROM _files WHERE name = ?').run(name); } catch(e) {}
     },
 
     // Test helper: close DB
