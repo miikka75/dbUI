@@ -136,14 +136,20 @@ describe('backend contract — the browser backends use the shared seed rule', (
   // Firebase and Supabase are plain scripts that assign globals, so they cannot be exercised in Node.
   // Asserted against the source instead, because the failure is silent data loss on a production
   // deployment and the runtime cases above cannot reach it.
-  for (const file of ['backend-firebase.js', 'backend-supabase.js']) {
+  // backend-pglite is requireable, but exercising createLanguage on it means standing up a WASM
+  // Postgres and applying the whole schema — supabase-rls.test.js already pays that cost for the
+  // policies. Scanned here instead, alongside the two it mirrors, so all three document backends are
+  // held to the rule in one place.
+  for (const file of ['backend-firebase.js', 'backend-supabase.js', 'dev/backend-pglite.js']) {
     it(file + ' seeds translations without overwriting what is stored', () => {
-      const src = fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8');
-      const fn = src.slice(src.indexOf('createLanguage: function'), src.indexOf('deleteLanguage'));
+      const src = fs.readFileSync(path.join(__dirname, '..', '..', ...file.split('/')), 'utf8');
+      const at = Math.max(src.indexOf('createLanguage: function'), src.indexOf('async createLanguage('));
+      const fn = src.slice(at, src.indexOf('deleteLanguage', at));
       assert.ok(fn.length > 50, file + ': createLanguage not found — this test would pass vacuously');
       assert.match(fn, /seedTranslations/, file + ' still writes a blank document over the stored one');
       assert.ok(!/setMeta\('lang_' \+ code, BackendHelpers\.emptyTranslations/.test(fn),
         file + ' writes emptyTranslations straight over the language document');
+      assert.match(fn, /getMeta\('lang_' \+ code\)/, file + ' must READ the stored document first');
     });
   }
 });
