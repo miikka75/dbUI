@@ -946,8 +946,34 @@ function createVueApp() {
         window._schemaMigration = null;                 // once per session, even if the save fails
         var self = this;
         return Promise.resolve(backend.saveSchema(this.schemaData))
+          .then(function() { return self._migrateTranslations(m.renames); })
           .then(function() { console.info('schema migrated to v' + m.to + ': ' + m.applied.join('; ')); })
           .catch(function() { self.notify(self.t('msg.save_failed')); });
+      },
+
+      // Move stored translations with the schema. Translation keys are generated per column as
+      // `field.<col>`, so a migration that changes a column's identity orphans every string filed under
+      // the old key -- in every language at once, showing raw keys to exactly the people least able to
+      // work out why. This runs as a step OF the write-back rather than as a follow-up somebody has to
+      // remember, which is the only version of it that stays true.
+      //
+      // After the schema, deliberately: if the save is refused there is nothing to move to.
+      // Per-language failures are swallowed -- one language that cannot be written must not abandon the
+      // rest, and the chain re-runs next session because the schema write-back is what clears the flag.
+      _migrateTranslations: function(renames) {
+        if (!renames || !renames.length || typeof Migrations === 'undefined') return Promise.resolve();
+        var self = this;
+        return (self.languages || []).reduce(function(chain, lang) {
+          var code = lang && lang.code;
+          if (!code) return chain;
+          return chain.then(function() {
+            return Promise.resolve(backend.getTranslations(code)).then(function(t) {
+              var patch = Migrations.renamePatch(t, renames);
+              if (!Object.keys(patch).length) return null;
+              return backend.updateTranslations(code, patch);
+            }).catch(function() {});
+          });
+        }, Promise.resolve());
       },
 
       // Setup
