@@ -63,7 +63,21 @@ const MATRIX = [
   ['viewer@x.com', 'signups__active', 's2', 'write', { id: 's2', owner: 'editor@x.com', status: 'y' }, 'deny'],
   ['viewer@x.com', 'signups__active', 's1', 'read',  null,                                            'allow'],
   // ownerWritable: the column bound holds even on a row they own.
-  ['viewer@x.com', 'signups__active', 's1', 'write', { id: 's1', owner: 'viewer@x.com', organizerNote: 'no' }, 'deny']
+  ['viewer@x.com', 'signups__active', 's1', 'write', { id: 's1', owner: 'viewer@x.com', organizerNote: 'no' }, 'deny'],
+  // _status -- the partition as data. A member must not be able to file their own row away, or pull one
+  // back, without a table grant. Both engines have to agree on that, and they express it completely
+  // differently: Firestore diffs the incoming doc against the stored one, Postgres reads the stored row
+  // inside the WITH CHECK because its UPDATE policy never sees both at once. Two implementations of one
+  // rule is exactly what this suite exists to keep honest.
+  // These two are CREATEs (s1 above is pre-seeded, so writing it is an update). A create on a bounded
+  // table is diffed against the `locked` map, and a locked column the payload omits counts as removed --
+  // so `organizerNote` has to be sent at its default or the row is refused for that reason instead of
+  // for _status, which would have made these pass while proving nothing.
+  ['viewer@x.com', 'signups__active', 's3', 'write', { id: 's3', owner: 'viewer@x.com', status: 'y', organizerNote: '', _status: 'active' },  'allow'],
+  ['viewer@x.com', 'signups__active', 's4', 'write', { id: 's4', owner: 'viewer@x.com', status: 'y', organizerNote: '', _status: 'archive' }, 'deny'],
+  ['viewer@x.com', 'signups__active', 's1', 'write', { id: 's1', owner: 'viewer@x.com', status: 'y', _status: 'archive' }, 'deny'],
+  // An editor holding the table writes it freely -- filing rows away is what the grant is for.
+  ['editor@x.com', 'tasks__active',   'w6', 'write', { id: 'w6', title: 'x', _status: 'archive' },                         'allow']
 ];
 
 // Places the mirror is knowingly stricter than the reference. Empty is the goal; an entry here is a
