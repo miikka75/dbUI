@@ -3950,12 +3950,30 @@ function createVueApp() {
             // both the ordering and the progress total.
             var tables = imported.tables || {};
             var rowJobs = [];
+            // This is also the MIGRATION route from partition-as-store to partition-as-field, which is
+            // why every row now imports into the active store whatever key it arrived under. A suffixed
+            // key -- `tasks__archive` -- becomes a `_status` stamp instead of a second collection, so
+            // exporting a deployment and importing the bundle back is what moves it over. Deliberately
+            // through the bundle rather than in place: an in-place sweep would have to rewrite live rows
+            // across two backends with no transaction, which is the thing this change exists to stop
+            // doing.
+            //
+            // `_status` on the row wins if the bundle already carries one, so re-importing an
+            // already-migrated bundle changes nothing.
             Object.keys(tables).forEach(function(key) {
               var rows = Array.isArray(tables[key]) ? tables[key] : (tables[key].rows || []);
               var parts = key.split('__');
-              // bare key = active partition; any suffixed key = the (single) archive partition
-              var tab = parts.length > 1 ? 'archive' : 'active';
-              rows.forEach(function(row) { rowJobs.push({ table: parts[0], tab: tab, row: row }); });
+              var archived = parts.length > 1;
+              rows.forEach(function(row) {
+                rowJobs.push({
+                  table: parts[0],
+                  tab: 'active',
+                  // The old collection has to be cleared as the row lands in the new one, or the id
+                  // exists in both and the archive partition shows it twice.
+                  clearArchive: archived,
+                  row: archived ? Object.assign({}, row, { _status: row._status || 'archive' }) : row
+                });
+              });
             });
             var langCodes = imported.translations ? Object.keys(imported.translations) : [];
             var pages = (imported.pages && Array.isArray(imported.pages))
@@ -4013,8 +4031,14 @@ function createVueApp() {
             rowJobs.forEach(function(job, i) {
               chain = chain.then(step('mdi-table-row', (i + 1) + '/' + rowJobs.length + ' · ' + job.table, function() {
                 var target = job.table;
-                // Delete first to force CRDT change detection on re-import
+                // Delete first to force change detection on re-import.
                 return Writes.deleteRow(target, job.row.id, job.tab).catch(function() {})
+                  .then(function() {
+                    // A row arriving from a `__archive` key is being MOVED out of that collection, so
+                    // clear it there too. Failures are swallowed like the delete above: the row not
+                    // being there is the normal case on a fresh import.
+                    return job.clearArchive ? Writes.deleteRow(target, job.row.id, 'archive').catch(function() {}) : null;
+                  })
                   .then(function() { return Writes.putRow(target, job.row, job.tab); });
               }));
             });

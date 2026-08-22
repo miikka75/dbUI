@@ -131,3 +131,37 @@ describe('rows — buildRows honours the field', () => {
     assert.deepEqual(ids(Rows.buildRows({ sources: ['t'], filter: { s: 'open' } }, c2)), ['a']);
   });
 });
+
+describe('rows — a row that exists in both stores is counted once', () => {
+  // Migrating a row means writing it to the active store and clearing it from the archive one: two
+  // writes with nothing joining them, so a failure between leaves the same id in both. Counting it
+  // twice would corrupt every total that uses includeArchive, silently. The stale copy is ignored
+  // instead, until the next migration pass clears it.
+  const dup = {
+    t: [{ id: '1', _status: 'archive', v: 'migrated' }],
+    t__archive: [{ id: '1', v: 'stale' }, { id: '2', v: 'other' }]
+  };
+
+  it('the active store wins', () => {
+    const rows = Rows.partitionRows(dup, 't', 'archive');
+    assert.deepEqual(ids(rows), ['1', '2']);
+    assert.equal(rows.find((r) => r.id === '1').v, 'migrated', 'the stale archive copy won');
+  });
+
+  it('and it is still counted exactly once across both partitions', () => {
+    const split = [...ids(Rows.partitionRows(dup, 't', 'active')),
+                   ...ids(Rows.partitionRows(dup, 't', 'archive'))];
+    assert.deepEqual(split.sort(), ['1', '2']);
+  });
+
+  it('includeArchive does not double it', () => {
+    // The sums this option exists for are exactly what a duplicate would break.
+    assert.deepEqual(ids(Rows.buildRows({ sources: ['t'], includeArchive: true }, dup)).sort(), ['1', '2']);
+  });
+
+  it('a row with no id is not deduped away', () => {
+    // Rows without an id are not identifiable, so they cannot be duplicates of each other.
+    const noid = { t: [{ _status: 'archive' }], t__archive: [{}] };
+    assert.equal(Rows.partitionRows(noid, 't', 'archive').length, 2);
+  });
+});
