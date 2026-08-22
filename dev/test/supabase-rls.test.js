@@ -659,10 +659,16 @@ describe('supabase RLS — _meta hardening', () => {
   });
 });
 
-describe('supabase RLS — _status is not the owner’s to write', () => {
-  // A row's partition is becoming a FIELD rather than a separate store, which makes it data — and data
-  // on a self-service row is data its owner can write. Without this gate a member could file their own
-  // row into the archive, or pull an archived one back, with no table grant at all.
+describe('supabase RLS — _status is a vocabulary, not a prohibition', () => {
+  // A row's partition is a FIELD now, which makes it data — and data on a self-service row is data its
+  // owner can write. That is deliberate: an owner could already file their own row away under the store
+  // model, because archiving was a delete from one store plus a create in the other and both halves are
+  // permitted on a row you own. Refusing the equivalent field write would REMOVE a capability
+  // (withdrawing your own signup), not harden anything.
+  //
+  // What is closed is the other door: `_status` may only ever name a partition, so a future rule that
+  // gates archived rows differently has a closed set to reason about rather than whatever string a
+  // client sent.
   //
   // `claims` rather than `rsvps`: the read-gate suite asserts the exact key set of rsvps__active, and
   // these cases would otherwise seed rows into it. One shared database across describes.
@@ -687,56 +693,55 @@ describe('supabase RLS — _status is not the owner’s to write', () => {
       { id: 'st2', owner: 'viewer@x.com', _status: 'active' }), 'ok');
   });
 
-  it('a member CANNOT create a row that starts archived', async () => {
-    await as('viewer@x.com');
-    assert.equal(await tryInsert('claims__active', 'st3',
-      { id: 'st3', owner: 'viewer@x.com', _status: 'archive' }), 'denied');
-  });
-
-  it('a member CANNOT archive their own row', async () => {
-    // The one that matters: filing a row away is not a self-service action, it is a table-write action.
+  it('a member CAN archive their own row — withdrawing a signup still works', async () => {
+    // The capability the store model already gave them, preserved through the change rather than
+    // quietly dropped by it.
     await asSuper();
     await seed('claims__active', 'st4', { id: 'st4', owner: 'viewer@x.com', s: 'coming' });
     await as('viewer@x.com');
     assert.equal(await tryUpdate('claims__active', 'st4',
-      { id: 'st4', owner: 'viewer@x.com', s: 'coming', _status: 'archive' }), 'denied');
+      { id: 'st4', owner: 'viewer@x.com', s: 'coming', _status: 'archive' }), 'ok');
   });
 
-  it('a member CANNOT un-archive a row of their own', async () => {
-    // And the reverse, which is how a member would resurrect something an editor had filed away.
+  it('...and CAN restore it again', async () => {
+    await as('viewer@x.com');
+    assert.equal(await tryUpdate('claims__active', 'st4',
+      { id: 'st4', owner: 'viewer@x.com', s: 'coming', _status: 'active' }), 'ok');
+  });
+
+  it('a member CANNOT invent a partition that is not one', async () => {
+    // The door that IS closed. Anything gating on _status later gets a closed set, not free text.
+    await as('viewer@x.com');
+    assert.equal(await tryUpdate('claims__active', 'st4',
+      { id: 'st4', owner: 'viewer@x.com', s: 'coming', _status: 'deleted' }), 'denied');
+    assert.equal(await tryInsert('claims__active', 'st9',
+      { id: 'st9', owner: 'viewer@x.com', _status: 'hidden' }), 'denied');
+  });
+
+  it('a member still CANNOT touch _status on a row that is not theirs', async () => {
+    // The owner branch is the only route a grantless member has, and it is bounded by ownership.
     await asSuper();
-    await seed('claims__active', 'st5', { id: 'st5', owner: 'viewer@x.com', s: 'coming', _status: 'archive' });
+    await seed('claims__active', 'st5', { id: 'st5', owner: 'other@x.com', s: 'coming' });
     await as('viewer@x.com');
     assert.equal(await tryUpdate('claims__active', 'st5',
-      { id: 'st5', owner: 'viewer@x.com', s: 'coming', _status: 'active' }), 'denied');
+      { id: 'st5', owner: 'other@x.com', s: 'coming', _status: 'archive' }), 'denied');
   });
 
-  it('a member CAN still edit their own row while leaving _status where it is', async () => {
-    // The gate must not cost them the edit they are entitled to. Both directions checked: a row that
-    // carries the field, and one that does not.
-    await asSuper();
-    await seed('claims__active', 'st6', { id: 'st6', owner: 'viewer@x.com', s: 'coming', _status: 'archive' });
-    await as('viewer@x.com');
-    assert.equal(await tryUpdate('claims__active', 'st6',
-      { id: 'st6', owner: 'viewer@x.com', s: 'out', _status: 'archive' }), 'ok');
-    assert.equal(await tryUpdate('claims__active', 'st1',
-      { id: 'st1', owner: 'viewer@x.com', s: 'out' }), 'ok');
-  });
-
-  it('a PARTIAL write cannot smuggle _status past the check', async () => {
-    // app_kv_merge is the route the app actually takes, and it evaluates the INSERT policy's WITH CHECK
-    // against the patch. A patch carrying only _status is the shortest path to the hole.
+  it('the PARTIAL write route obeys the same vocabulary', async () => {
+    // app_kv_merge is what the app actually sends, and it evaluates the INSERT policy's WITH CHECK
+    // against the patch alone.
     await asSuper();
     await seed('claims__active', 'st7', { id: 'st7', owner: 'viewer@x.com', s: 'coming' });
     await as('viewer@x.com');
-    assert.equal(await tryMerge('claims__active', 'st7', { _status: 'archive' }), 'denied');
+    assert.equal(await tryMerge('claims__active', 'st7', { _status: 'archive' }), 'ok');
+    assert.equal(await tryMerge('claims__active', 'st7', { _status: 'nonsense' }), 'denied');
     await asSuper();
     const row = (await q("select value from public.kv where store = 'claims__active' and key = 'st7'")).rows[0].value;
-    assert.equal(row._status, undefined, 'the row was archived through the merge route');
+    assert.equal(row._status, 'archive', 'the archive patch did not land');
+    assert.equal(row.owner, 'viewer@x.com', 'the partial write dropped the owner');
   });
 
   it('an EDITOR with table write may archive and un-archive', async () => {
-    // The gate is on the owner branch only — filing rows away is exactly what a table grant is for.
     await asSuper();
     await seed('claims__active', 'st8', { id: 'st8', owner: 'viewer@x.com', s: 'coming' });
     await as('keeper@x.com');

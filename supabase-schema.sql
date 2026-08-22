@@ -173,29 +173,19 @@ returns boolean language sql stable security definer set search_path = public as
   end
 $$;
 
--- _status: the partition, as data. Mirrors firestore.rules' statusCreateOk/statusUnchanged.
+-- _status: the partition, as data. Mirrors firestore.rules' statusValueOk.
 --
--- A row's partition is becoming a FIELD rather than a separate store, which makes it data -- and data on
--- a self-service row is data its owner can write. Without this a member could file their own row into
--- the archive, or pull an archived one back, with no table grant at all. Nothing gates archived rows
--- differently yet; the point is to shut the door before anything depends on it being shut.
+-- A VOCABULARY, not a prohibition. An owner could already file their own row away under the old model
+-- (archiving was a delete from one store plus a create in the other, and both halves are permitted on a
+-- row you own), so refusing the equivalent field write would remove a capability rather than harden
+-- anything. What is worth closing is that `_status` may only ever name a partition -- a future rule
+-- that gates archived rows differently then has a closed set to reason about.
 --
--- One function serves both directions because the UPDATE policy cannot see both rows at once: USING
--- gets the stored row and WITH CHECK the proposed one, and this runs in the WITH CHECK. So it reads the
--- stored row itself, the same trick app_list_editor_ok uses to pin an ownership label -- present means
--- UPDATE (the value must not move), absent means INSERT (it may only start active).
---
--- An absent _status IS 'active', so coalesce on both sides: otherwise the answer would depend on whether
--- the client happened to send the field.
-create or replace function public.app_status_ok(store text, rowkey text, val jsonb)
-returns boolean language sql stable security definer set search_path = public as $$
-  select case
-    when exists (select 1 from public.kv k where k.store = app_status_ok.store and k.key = rowkey) then
-      coalesce(val ->> '_status', 'active') is not distinct from
-        coalesce((select k.value ->> '_status' from public.kv k
-                   where k.store = app_status_ok.store and k.key = rowkey), 'active')
-    else coalesce(val ->> '_status', 'active') = 'active'
-  end
+-- WHEN an owner may touch the row at all is answered by app_owner_state_ok, exactly as for their delete.
+-- An absent _status IS 'active', so coalesce rather than testing for the key.
+create or replace function public.app_status_ok(val jsonb)
+returns boolean language sql immutable as $$
+  select coalesce(val ->> '_status', 'active') in ('active', 'archive')
 $$;
 
 -- selfServiceTable(): a data table declares an owner column (mirrored to _meta/ownerTables by saveSchema).
@@ -432,7 +422,7 @@ returns boolean language sql stable security definer set search_path = public as
       or ((val ->> 'owner') = public.app_email() and public.app_self_service(store)
           and public.app_owner_identity_ok(store, val)
           and public.app_owner_fields_ok(store, key, val)
-          and public.app_status_ok(store, key, val))
+          and public.app_status_ok(val))
       or (public.app_role() = 'editor' and public.app_has_table_write(store))
   end
 $$;

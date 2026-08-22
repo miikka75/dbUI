@@ -74,8 +74,11 @@ const MATRIX = [
   // so `organizerNote` has to be sent at its default or the row is refused for that reason instead of
   // for _status, which would have made these pass while proving nothing.
   ['viewer@x.com', 'signups__active', 's3', 'write', { id: 's3', owner: 'viewer@x.com', status: 'y', organizerNote: '', _status: 'active' },  'allow'],
-  ['viewer@x.com', 'signups__active', 's4', 'write', { id: 's4', owner: 'viewer@x.com', status: 'y', organizerNote: '', _status: 'archive' }, 'deny'],
-  ['viewer@x.com', 'signups__active', 's1', 'write', { id: 's1', owner: 'viewer@x.com', status: 'y', _status: 'archive' }, 'deny'],
+  ['viewer@x.com', 'signups__active', 's4', 'write', { id: 's4', owner: 'viewer@x.com', status: 'y', organizerNote: '', _status: 'archive' }, 'allow'],
+  // Archiving a row you own is a capability the store model already gave you; what is refused is a
+  // partition that is not one.
+  ['viewer@x.com', 'signups__active', 's1', 'write', { id: 's1', owner: 'viewer@x.com', status: 'y', _status: 'archive' }, 'allow'],
+  ['viewer@x.com', 'signups__active', 's1', 'write', { id: 's1', owner: 'viewer@x.com', status: 'y', _status: 'deleted' }, 'deny'],
   // An editor holding the table writes it freely -- filing rows away is what the grant is for.
   ['editor@x.com', 'tasks__active',   'w6', 'write', { id: 'w6', title: 'x', _status: 'archive' },                         'allow']
 ];
