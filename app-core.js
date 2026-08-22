@@ -1010,8 +1010,9 @@ function createVueApp() {
               var schemaErrors = validateSchema();
               if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify(self.t('msg.schema_error') + ' ' + schemaErrors[0]); }
             } else {
-              // First time: save default schema to Drive
-              if (backend.saveSchema) backend.saveSchema(defaultSchema);
+              // Same as the bootData path below: "no schema" may mean an empty database or a read that
+              // failed, and a refused write must not reject into the console.
+              if (backend.saveSchema) Promise.resolve(backend.saveSchema(defaultSchema)).catch(function() {});
               self.schemaData = Object.freeze(defaultSchema);
             }
           });
@@ -1047,9 +1048,17 @@ function createVueApp() {
               var schemaErrors = validateSchema();
               if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify(self.t('msg.schema_error') + ' ' + schemaErrors[0]); }
             } else {
-              // First boot: save bundled default schema to Drive
+              // No schema came back. That is USUALLY a first boot -- but it is also what a read that
+              // failed looks like, and the two are indistinguishable from here: `schema: null` carries
+              // no reason. Firebase says `denied: true` when it knows (handled above); nothing else can.
+              //
+              // So the write is best-effort. It used to be a bare call, and a refusal became an
+              // unhandled rejection -- `pageerror: Object` in the console of anyone who is not allowed
+              // to save the schema, which is every non-admin. Being refused here is the CORRECT outcome
+              // for them, and the rules refusing it is what stops a failed read from overwriting a real
+              // schema with the bundled default.
               self.schemaData = Object.freeze(defaultSchema);
-              backend.saveSchema(defaultSchema);
+              Promise.resolve(backend.saveSchema(defaultSchema)).catch(function() {});
             }
             self.languages = result.languages || [];
             self.listsCache = result.lists || {}; window._listsCache = self.listsCache;
