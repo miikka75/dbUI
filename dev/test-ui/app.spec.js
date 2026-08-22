@@ -6070,16 +6070,22 @@ test.describe('the archive partition is read only when something reads it', () =
   // holds only what was filed away under the old model. Fetching it for every archivable table a view
   // touches is a whole second read of rows almost nothing looks at — billed per document on Firestore,
   // which is the quota this whole line of work is about.
+  // `landing` exists so the app boots onto a view that does NOT touch `logs`. The spy below is
+  // installed after boot, and with `plain` first in nav the app auto-selected it and fetched
+  // logs/active before the spy existed — so `__reads` came up empty and the assertion depended on
+  // which won the race. It passed locally and failed in CI, which is the only reason it was noticed.
   const SCH = {
     defaultLanguage: 'en',
     tables: {
-      logs: { columns: [{ name: 'note', type: 'text' }], archivable: true }
+      logs: { columns: [{ name: 'note', type: 'text' }], archivable: true },
+      elsewhere: { columns: [{ name: 'note', type: 'text' }] }
     },
     views: [
+      { name: 'landing', sources: ['elsewhere'], mode: 'union', columns: ['note'] },
       { name: 'plain', sources: ['logs'], mode: 'union', columns: ['note'] },
       { name: 'history', sources: ['logs'], mode: 'union', columns: ['note'], includeArchive: true }
     ],
-    nav: { items: [{ view: 'plain' }, { view: 'history' }] }
+    nav: { items: [{ view: 'landing' }, { view: 'plain' }, { view: 'history' }] }
   };
 
   async function boot(page) {
@@ -6092,12 +6098,16 @@ test.describe('the archive partition is read only when something reads it', () =
     await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.goto('/');
     await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 10000 });
-    // Record every (table, tab) the adapter is asked for, from before any view opens.
+    // The landing view has settled before the spy goes in, so nothing it fetched is attributed to the
+    // view under test — and `logs` has not been touched at all yet.
+    await viewReady(page, 'landing');
     await page.evaluate(() => {
       window.__reads = [];
       const real = backend.getTableData.bind(backend);
       backend.getTableData = function (t, tab, opts) { window.__reads.push(t + '/' + (tab || 'active')); return real(t, tab, opts); };
     });
+    expect(await page.evaluate(() => appInstance.dataCache.logs === undefined),
+      'the landing view already loaded logs — the spy would see nothing').toBe(true);
   }
 
   test('a plain view reads the active partition only', async ({ page }) => {
