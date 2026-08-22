@@ -1453,6 +1453,53 @@ function createVueApp() {
         return out;
       },
 
+      // Does rendering this view read the ARCHIVE partition at all?
+      //
+      // It used to be safe to assume yes for every archivable table, because the archive was a separate
+      // store and anything wanting history had to fetch it. Now an archived row lives in the ACTIVE
+      // store carrying `_status`, so the archive store holds only rows filed away under the old model --
+      // and fetching it for every archivable table a view touches is a whole second read of data almost
+      // nothing looks at. On Firestore that is billed per document.
+      //
+      // The features that genuinely read it: a view's `includeArchive`, an `@archive` or `@both` embed,
+      // and a rotation column's occurrence source (resolveComputed deliberately ranks across both
+      // partitions so an archived turn still counts). Same traversal as _viewTables, so the two cannot
+      // disagree about what a view is made of.
+      _viewNeedsArchive: function(name, seen) {
+        var self = this;
+        seen = seen || {};
+        if (!name || seen[name]) return false;
+        seen[name] = 1;
+        var v = VIEWS[name];
+        if (!v) return false;
+        if (v.includeArchive) return true;
+
+        // pivot.source and rsvp.events may each name a VIEW whose own config wants history -- the same
+        // indirection _viewTables expands, and missing it here would fetch nothing while that view
+        // silently rendered a short total.
+        if (v.pivot && self._viewNeedsArchive(v.pivot.source, seen)) return true;
+        if (v.rsvp && self._viewNeedsArchive(v.rsvp.events, seen)) return true;
+
+        // A rotation column ranks across both partitions on purpose -- see resolveComputed.
+        var cols = v.columns || [];
+        if (cols.some(function(c) { return c && typeof c === 'object' && c.computed && c.computed.occurrenceSource; })) return true;
+        if ((v.compute || []).some(function(c) { return c && c.computed && c.computed.occurrenceSource; })) return true;
+
+        // A doc-view's markdown embeds: `@archive` names the partition, `@both` shows the toggle.
+        if (typeof v.markdown === 'string' && typeof Embeds !== 'undefined' && Embeds.blockRefs) {
+          var body = (self.pageCache && self.pageCache[name] != null) ? self.pageCache[name] : v.markdown;
+          var refs = Embeds.blockRefs(body, name);
+          if (refs.some(function(r) { return r.part === 'archive' || r.part === 'both'; })) return true;
+          if (refs.some(function(r) { return r.kind === 'view' && self._viewNeedsArchive(r.name, seen); })) return true;
+        }
+        // Embeds declared as column entries.
+        return cols.some(function(c) {
+          if (!c || typeof c !== 'object') return false;
+          if (c.includeArchive) return true;
+          return isViewEmbed(c) && self._viewNeedsArchive(c.view, seen);
+        });
+      },
+
       loadPage: function(name) {
         var self = this;
         var seed = function() { return (VIEWS[name] && VIEWS[name].markdown) || ''; };
@@ -1460,7 +1507,7 @@ function createVueApp() {
         // once the body is known -- which is AFTER the read below, because an admin's edit can embed
         // something the schema seed does not. _ensureCached skips whatever is already cached, so on a
         // boot that preloaded everything this costs nothing.
-        var needed = function() { self._ensureCached(self._viewTables(name)); };
+        var needed = function() { self._ensureCached(self._viewTables(name), null, self._viewNeedsArchive(name)); };
         // Prefer a single-page read (backend.getPage) so per-page access can restrict it -- a
         // whole-collection read is denied wholesale once any page is restricted (rules aren't filters).
         // Backends without getPage (Sheets/CRDT/local) fall back to the collection read.
@@ -1588,7 +1635,11 @@ function createVueApp() {
       // grants (fail-closed: a denied/failed read contributes an empty cache entry, never an error).
       // `onLoad` (optional) runs after each table lands — used by views that must re-derive rows.
       // One implementation for the calendar/rotation/pivot/rsvp preload blocks in loadTableData.
-      _ensureCached: function(tables, onLoad) {
+      // `wantArchive` -- the caller says whether the archive partition will actually be read. It used
+      // to be assumed for every archivable table, which is now a second full read of rows almost
+      // nothing looks at: an archived row lives in the ACTIVE store, so the archive store holds only
+      // what was filed away under the old model. See _viewNeedsArchive for who genuinely needs it.
+      _ensureCached: function(tables, onLoad, wantArchive) {
         var self = this;
         // Whatever this view needs cached is also what it needs kept LIVE. Watching here (rather than
         // per branch of loadTableData) means every derived kind — calendar, rotation, pivot, rsvp,
@@ -1612,14 +1663,10 @@ function createVueApp() {
               if (onLoad) onLoad(tbl);
             }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
           }
-          // The ARCHIVE partition, under the SAME rule boot used (`preload_archive`, on by default) --
-          // just applied per view instead of to the whole schema at once. Several features read
-          // `<table>__archive` straight out of the cache with no fetch of their own: a view's
-          // `includeArchive`, an `@archive` embed, a rotation column's occurrence source. Proving which
-          // of them a given view will hit means re-deriving each one's config here; honouring the
-          // existing setting keeps every one of them working and is still narrower than boot, which
-          // fetched the archive of every archivable table in the schema.
-          if (self.settings.preload_archive && SCHEMA[tbl] && SCHEMA[tbl].archivable && !self.dataCache[aKey(tbl)]) {
+          // The ARCHIVE partition, only when the caller says something will read it, and still behind
+          // `preload_archive` -- a user who turned that off asked not to load archives, and the
+          // documented consequence (a history view comes up short) is unchanged.
+          if (wantArchive && self.settings.preload_archive && SCHEMA[tbl] && SCHEMA[tbl].archivable && !self.dataCache[aKey(tbl)]) {
             backend.getTableData(tbl, 'archive').then(function(result) {
               self.dataCache[aKey(tbl)] = parseTableResult(result).rows;
               if (onLoad) onLoad(tbl);
@@ -1816,7 +1863,7 @@ function createVueApp() {
               var rvv = VIEWS[rs.view] && VIEWS[rs.view].rotation;
               ((rvv && rvv.rosters) || []).forEach(function(tbl) { if (tbl && calTables.indexOf(tbl) < 0) calTables.push(tbl); });
             });
-            self._ensureCached(calTables);
+            self._ensureCached(calTables, null, self._viewNeedsArchive(self.currentTable));
             return;
           }
           // rotationView (third view kind): generate rows from range; no sources to read.
@@ -1835,14 +1882,15 @@ function createVueApp() {
           // Pivot view: cross-tab of a source table/view. Load the source's table(s) into the reactive
           // dataCache; pivotFor() (read by the component) then builds the grid and re-derives on load.
           if (view.pivot) {
-            self._ensureCached(VIEWS[view.pivot.source] ? (VIEWS[view.pivot.source].sources || []) : [view.pivot.source]);
+            self._ensureCached(VIEWS[view.pivot.source] ? (VIEWS[view.pivot.source].sources || []) : [view.pivot.source],
+                               null, self._viewNeedsArchive(self.currentTable));
             return;
           }
           // RSVP view: load the events + responses tables; rsvpFor() builds the list, re-derives on load.
           if (view.rsvp) {
             var rsTables = (VIEWS[view.rsvp.events] ? (VIEWS[view.rsvp.events].sources || []) : [view.rsvp.events]).slice();
             if (view.rsvp.responses) rsTables.push(view.rsvp.responses);
-            self._ensureCached(rsTables);
+            self._ensureCached(rsTables, null, self._viewNeedsArchive(self.currentTable));
             return;
           }
           // Union or join view
@@ -1886,7 +1934,8 @@ function createVueApp() {
           // derivation loadPage uses.
           // Archive mode reads the __archive partitions, which _ensureCached doesn't fetch -- leave that
           // path alone rather than have it load the wrong partition.
-          if (!self.viewingArchive) self._ensureCached(self._viewTables(self.currentTable), recomputeRotation);
+          if (!self.viewingArchive) self._ensureCached(self._viewTables(self.currentTable), recomputeRotation,
+                                                     self._viewNeedsArchive(self.currentTable));
           // Preload rotation-column dependencies (rotationTable + occurrenceSource), then recompute via
           // recomputeRotation (declared above, shared with the source preload).
           // The occurrenceSource ARCHIVE partition is also loaded so the occurrence rank stays absolute

@@ -6064,3 +6064,71 @@ test.describe('lazy boot', () => {
     expect(notes, 'opening the notes tab did not load the notes table').toBe(true);
   });
 });
+
+test.describe('the archive partition is read only when something reads it', () => {
+  // Archiving is a field write now, so an archived row lives in the ACTIVE store and the archive store
+  // holds only what was filed away under the old model. Fetching it for every archivable table a view
+  // touches is a whole second read of rows almost nothing looks at — billed per document on Firestore,
+  // which is the quota this whole line of work is about.
+  const SCH = {
+    defaultLanguage: 'en',
+    tables: {
+      logs: { columns: [{ name: 'note', type: 'text' }], archivable: true }
+    },
+    views: [
+      { name: 'plain', sources: ['logs'], mode: 'union', columns: ['note'] },
+      { name: 'history', sources: ['logs'], mode: 'union', columns: ['note'], includeArchive: true }
+    ],
+    nav: { items: [{ view: 'plain' }, { view: 'history' }] }
+  };
+
+  async function boot(page) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.request.post('/api/putRow', { data: { tableId: 'logs', data: { id: 'a', note: 'Active' }, tab: 'active' } });
+    // A row filed away under the OLD model — the only reason the archive store still gets read.
+    await page.request.post('/api/putRow', { data: { tableId: 'logs', data: { id: 'z', note: 'Legacy' }, tab: 'archive' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 10000 });
+    // Record every (table, tab) the adapter is asked for, from before any view opens.
+    await page.evaluate(() => {
+      window.__reads = [];
+      const real = backend.getTableData.bind(backend);
+      backend.getTableData = function (t, tab, opts) { window.__reads.push(t + '/' + (tab || 'active')); return real(t, tab, opts); };
+    });
+  }
+
+  test('a plain view reads the active partition only', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    await page.evaluate(() => window.appInstance.selectTab('plain'));
+    await viewReady(page, 'plain');
+    const reads = await page.evaluate(() => window.__reads);
+    expect(reads).toContain('logs/active');
+    expect(reads, 'the archive partition was read for a view that never shows it').not.toContain('logs/archive');
+  });
+
+  test('an includeArchive view still gets its history', async ({ page }) => {
+    // The other half: narrowing the fetch must not quietly cost a view the rows it exists to total.
+    test.setTimeout(20000);
+    await boot(page);
+    await page.evaluate(() => window.appInstance.selectTab('history'));
+    await viewReady(page, 'history');
+    await expect.poll(async () => page.evaluate(
+      () => (window.appInstance.currentData || []).map(r => r.id).sort().join(',')
+    ), { timeout: 8000 }).toBe('a,z');
+    expect(await page.evaluate(() => window.__reads)).toContain('logs/archive');
+  });
+
+  test('_viewNeedsArchive answers for each view', async ({ page }) => {
+    await boot(page);
+    const seen = await page.evaluate(() => ({
+      plain: window.appInstance._viewNeedsArchive('plain'),
+      history: window.appInstance._viewNeedsArchive('history')
+    }));
+    expect(seen.plain).toBe(false);
+    expect(seen.history).toBe(true);
+  });
+});
