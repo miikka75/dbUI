@@ -6547,3 +6547,134 @@ test.describe('runtime search', () => {
     await expect.poll(() => page.evaluate(() => appInstance.isReorderable), { timeout: 5000 }).toBe(true);
   });
 });
+
+test.describe('form view', () => {
+  // A form is the self-service shape rsvp already had, loosened: one owner-stamped record the member
+  // writes themselves, with several fields, some required, submitted once. The access rules are
+  // unchanged — a form record IS an owner-stamped row — so what is worth proving end to end is that the
+  // record is created on demand, stamped with the caller, edited through the ordinary cell editor, and
+  // that `required` actually blocks submission.
+  const SCH = {
+    defaultLanguage: 'en',
+    tables: {
+      palautteet: {
+        ownerWritable: ['aihe', 'viesti', 'tila'],
+        columns: [
+          { name: 'owner', type: 'owner' },
+          { name: 'aihe', type: 'select', list: 'aiheet' },
+          { name: 'viesti', type: 'text' },
+          { name: 'tila', type: 'text', default: 'luonnos' },
+          { name: 'updated_at', type: 'text', hidden: true }
+        ]
+      }
+    },
+    lists: { aiheet: ['Kiitos', 'Ehdotus'] },
+    views: [{
+      name: 'palaute',
+      form: {
+        table: 'palautteet',
+        sections: [{ title: 'Viesti', columns: ['aihe', 'viesti'] }],
+        required: ['aihe', 'viesti'],
+        submitColumn: 'tila',
+        submitValue: 'submitted'
+      }
+    }],
+    nav: { items: [{ view: 'palaute' }] }
+  };
+
+  async function boot(page, who) {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.request.post('/api/saveLists', { data: { lists: SCH.lists } });
+    await page.addInitScript((u) => {
+      localStorage.setItem('app_folder', 'local');
+      localStorage.setItem('app_mode', 'local');
+      localStorage.setItem('test_user', u);
+    }, who || 'kati@x.com');
+    await page.goto('/?user=' + encodeURIComponent(who || 'kati@x.com'));
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 10000 });
+    await viewReady(page, 'palaute');
+  }
+
+  // WITH the identity header. An owner table's reads are scoped to the caller on the dev server, the
+  // same way the production rules scope them -- a raw API read with no identity owns nothing and comes
+  // back empty, which looks exactly like the write having failed. (It did not: putRow answers 200.)
+  const stored = async (page, who) => (await (await page.request.post('/api/getTableData',
+    { data: { tableId: 'palautteet', tab: 'active' }, headers: { 'X-User': who || 'kati@x.com' } })).json()).rows || [];
+
+  test('the view is classified as a form and knows the table it writes', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    expect(await page.evaluate(() => appInstance.viewKind)).toBe('form');
+    expect(await page.evaluate(() => appInstance._viewTables('palaute'))).toEqual(['palautteet']);
+  });
+
+  test('looking at the page creates no record', async ({ page }) => {
+    // A form must not write to the database because somebody opened it. Every row here is somebody's
+    // answer, and a table full of blank ones is worse than an empty table.
+    test.setTimeout(20000);
+    await boot(page);
+    expect(await stored(page)).toEqual([]);
+    expect(await page.evaluate(() => appInstance.formFor('palaute').submitted)).toBe(false);
+  });
+
+  test('starting creates one record, stamped with the caller and its column defaults', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    await page.evaluate(() => appInstance.formRecord('palaute'));
+    await expect.poll(async () => (await stored(page)).length, { timeout: 8000 }).toBe(1);
+    const row = (await stored(page))[0];
+    expect(row.owner).toBe('kati@x.com');
+    expect(row.tila).toBe('luonnos');          // `default` applies, exactly as for a grid Add
+    // Asking again returns the SAME record rather than starting another.
+    await page.evaluate(() => appInstance.formRecord('palaute'));
+    await page.waitForTimeout(400);
+    expect((await stored(page)).length).toBe(1);
+  });
+
+  test('required fields block completion until they are answered', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    await page.evaluate(() => appInstance.formRecord('palaute'));
+    expect(await page.evaluate(() => appInstance.formFor('palaute').missing)).toEqual(['aihe', 'viesti']);
+
+    await page.evaluate(() => {
+      const r = appInstance.formFor('palaute').record;
+      appInstance.saveField(r, 'aihe', 'Kiitos');
+    });
+    await expect.poll(async () => page.evaluate(() => appInstance.formFor('palaute').missing),
+      { timeout: 8000 }).toEqual(['viesti']);
+
+    await page.evaluate(() => {
+      const r = appInstance.formFor('palaute').record;
+      appInstance.saveField(r, 'viesti', 'Hyvin meni');
+    });
+    await expect.poll(async () => page.evaluate(() => appInstance.formFor('palaute').complete),
+      { timeout: 8000 }).toBe(true);
+  });
+
+  test('the form renders its fields, and submitting marks the record done', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    // The start button, then the fields, through the real UI.
+    await page.locator('.v-main button').first().click();
+    await page.waitForTimeout(400);
+    await expect(page.locator('.v-main')).toContainText('Viesti');   // the section heading
+    await expect(page.locator('[data-testid="form-submit"]')).toBeVisible();
+
+    await page.evaluate(() => {
+      const r = appInstance.formFor('palaute').record;
+      appInstance.saveField(r, 'aihe', 'Kiitos');
+      appInstance.saveField(r, 'viesti', 'Hyvin meni');
+    });
+    await expect.poll(async () => page.evaluate(() => appInstance.formFor('palaute').complete),
+      { timeout: 8000 }).toBe(true);
+
+    await page.locator('[data-testid="form-submit"]').click();
+    await expect.poll(async () => {
+      const rows = await stored(page);
+      return (rows[0] || {}).tila;
+    }, { timeout: 8000 }).toBe('submitted');
+  });
+});
