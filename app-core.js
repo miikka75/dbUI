@@ -1915,22 +1915,27 @@ function createVueApp() {
           // partition a user can have open.
           self._liveWatch([self.currentTable], self.viewingArchive ? 'archive' : 'active');
           self._ensureDeps([self.currentTable]);   // ref/lookup sources: this branch skips _ensureCached
+          // Through partitionRows, not dataCache[key]: `_status` on the row now decides its partition,
+          // so the active store can hold a row that is filed away and the archive store one that has
+          // been restored. Indexing by store name would show each in the wrong tab. It also always
+          // returns an array, which the subscribeLoads path needs -- there the fetch below is skipped
+          // and the cache stays undefined until the listener's first snapshot lands, so this runs once
+          // with nothing in it and currentData must still be a list for the grid to render.
+          var showRows = function() {
+            var rows = Rows.partitionRows(self.dataCache, self.currentTable,
+                                          self.viewingArchive ? 'archive' : 'active');
+            if (tableDef.filter) rows = filterRows(rows, tableDef.filter);
+            self.currentData = rows;
+          };
           if (!self.dataCache[key] && !self._liveLoads(self.currentTable)) {
             var tab = self.viewingArchive ? 'archive' : 'active';
             backend.getTableData(self.currentTable, tab).then(function(result) {
               self.dataCache[key] = parseTableResult(result).rows;
               self._autoArchive();                    // same reason as in _ensureCached
-              var rows = self.dataCache[key];
-              if (tableDef.filter) rows = filterRows(rows, tableDef.filter);
-              self.currentData = rows;
+              showRows();
             });
           } else {
-            // `|| []` matters now: with subscribeLoads the fetch above is skipped and the cache stays
-            // undefined until the listener's first snapshot lands, so this runs once with nothing in it.
-            // currentData must still be an array -- the grid renders it directly.
-            var rows = self.dataCache[key] || [];
-            if (tableDef.filter) rows = filterRows(rows, tableDef.filter);
-            self.currentData = rows;
+            showRows();
           }
         }
       },
@@ -2096,6 +2101,13 @@ function createVueApp() {
           var viewRow = Object.assign({}, primaryRow);
           if (view.mode === 'union') viewRow._source = primary;
           self.currentData.push(viewRow);
+        } else if (primaryRow) {
+          // A bare table used to need nothing here: currentData WAS dataCache[table] -- the same array
+          // object -- so the push inside _createBlankRow showed up on screen by aliasing. currentData is
+          // now derived (partitionRows returns a fresh list, because a partition is no longer one
+          // store), and a derived list does not gain rows by accident. Pushing explicitly is what that
+          // aliasing was silently doing, and it says so now.
+          self.currentData.push(primaryRow);
         }
         self.notify(self.t('msg.row_added'));
         self.focusLastEditable('.v-table tbody tr:last-child .editable-cell');

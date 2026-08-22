@@ -275,13 +275,19 @@
   function embedRows(type, name, part, ctx) {
     if (type === 'view' && ctx.views[name]) {
       var v = ctx.views[name], cache = ctx.dataCache;
-      if (part) { cache = {}; var dc = ctx.dataCache; (v.sources || []).forEach(function(s) { cache[s] = dc[s + '__' + part] || []; }); }
+      // A partition-scoped embed used to read the `<src>__<part>` store directly. `_status` moved that
+      // answer onto the row, so ask Rows.partitionRows -- and hand buildRows a cache projection whose
+      // ACTIVE key holds the requested partition, since buildRows reads the active side by default.
+      if (part) {
+        cache = {};
+        (v.sources || []).forEach(function(s) { cache[s] = Rows.partitionRows(ctx.dataCache, s, part); });
+      }
       var vMe = ctx.viewWithMe(v);
       var esrc = Rows.buildRows(vMe, cache);
       if (v.compute) esrc = Rows.resolveComputed(esrc, v.compute, { dataCache: ctx.dataCache, rotationAnchor: ctx.anchorForView(v.name) });
       return Rows.sortByCol(Rows.resolveComputed(Rows.aggregateRows(vMe, esrc), v.columns, { dataCache: ctx.dataCache, rotationAnchor: ctx.anchorForView(v.name) }), v.defaultSort, v);
     }
-    if (type === 'table' && ctx.schema[name]) return Rows.sortByCol(ctx.dataCache[part ? name + '__' + part : name] || [], ctx.schema[name].defaultSort);
+    if (type === 'table' && ctx.schema[name]) return Rows.sortByCol(Rows.partitionRows(ctx.dataCache, name, part || 'active'), ctx.schema[name].defaultSort);
     return [];
   }
 

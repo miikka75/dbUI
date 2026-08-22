@@ -195,6 +195,42 @@
     return rows.slice().sort(function(a, b) { return compareValues(a[col], b[col], asc !== false, listOrder); });
   }
 
+  // ---- Which partition a row is in ------------------------------------------------------------
+  // A partition used to be a STORE: `tasks` held the active rows and `tasks__archive` the filed-away
+  // ones, and "which partition is this row in" was answered by which of the two it came out of. It is
+  // becoming a FIELD instead -- one source, `_status`, and a saved filter -- because as a store it
+  // costs a cross-collection move to archive anything (non-atomic, as the backend contract admits), a
+  // second read to see history, and a special case in every view kind that has to look at both.
+  //
+  // Both shapes exist at once for as long as rows written under the old one are still around, so the
+  // rule has to cover both: the FIELD wins where it is present, and where it is not the store the row
+  // came from still decides. That makes this a no-op on data written before the change -- an active
+  // store full of rows with no `_status` reads exactly as it did.
+  //
+  // Note the transitional case this deliberately admits: a row sitting in the archive STORE carrying
+  // `_status: 'active'` counts as active. That state only exists mid-migration, and honouring it is
+  // what lets a restore be a field write rather than another cross-store move.
+  function partitionOf(row, storePart) {
+    var s = row && row._status;
+    return (typeof s === 'string' && s) ? s : (storePart || 'active');
+  }
+
+  // Every row of one partition for one source, across both stores. This is the single accessor every
+  // caller that used to index dataCache by store name should go through: with the two shapes coexisting
+  // there is no longer any one key that holds "the archived rows".
+  //
+  // The archive store is consulted only when it is loaded -- boot no longer fetches it unless
+  // `preload_archive` is on -- so a caller that wants history still has to have asked for it. Absent,
+  // this returns what the active store knows, which is the same answer it gave before.
+  function partitionRows(dataCache, src, part) {
+    var want = part || 'active';
+    var cache = dataCache || {};
+    var out = [];
+    (cache[src] || []).forEach(function (r) { if (partitionOf(r, 'active') === want) out.push(r); });
+    (cache[src + '__archive'] || []).forEach(function (r) { if (partitionOf(r, 'archive') === want) out.push(r); });
+    return out;
+  }
+
   // Merge a view's source tables into one row list (union tags _source; join merges by id), then filter.
   function buildRows(cfg, dataCache) {
     var rows = [];
@@ -204,8 +240,11 @@
       // active rows by default, which is right for a worklist and wrong for a TOTAL: archiving a row
       // would silently remove it from the sum, so a balance that nets earned against spent goes wrong
       // the moment either side ages out (see `archiveAfter`). Opt in wherever the history is the point.
-      var srcRows = dataCache[src] || [];
-      if (cfg.includeArchive) srcRows = srcRows.concat(dataCache[src + '__archive'] || []);
+      // Through partitionRows, not dataCache[src]: with `_status` in play the active store can hold a
+      // row that is filed away, and the archive store one that has been restored. Indexing by store
+      // name would show both in the wrong list.
+      var srcRows = partitionRows(dataCache, src, 'active');
+      if (cfg.includeArchive) srcRows = srcRows.concat(partitionRows(dataCache, src, 'archive'));
       if (cfg.mode === 'join') {
         srcRows.forEach(function(r) { var e = rows.find(function(x) { return x.id === r.id; }); if (e) Object.assign(e, r); else rows.push(Object.assign({ _source: src }, r)); });
       } else {
@@ -359,7 +398,8 @@
     condMatches: condMatches, _withinPeriod: _withinPeriod, filterRows: filterRows, filterToOr: filterToOr,
     convertViewFilters: convertViewFilters, sortByCol: sortByCol, buildRows: buildRows,
     aggregateRows: aggregateRows, resolveComputed: resolveComputed, isFilterToken: isFilterToken,
-    compareValues: compareValues, listOrderFor: listOrderFor
+    compareValues: compareValues, listOrderFor: listOrderFor,
+    partitionOf: partitionOf, partitionRows: partitionRows
   };
   if (isNode) module.exports = M;
   else { root.Rows = M; for (var k in M) root[k] = M[k]; } // also expose each as a global for bare callers
