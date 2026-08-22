@@ -85,7 +85,6 @@ describe('backend contract — createLanguage never erases existing translations
   // two, and nothing said so: the strings were simply gone afterwards. SQLite was the only backend that
   // got it right (INSERT OR IGNORE per key), which is exactly the kind of drift the shared helper in
   // backend-helpers exists to stop.
-  const FOLDER = 'local';        // both Node backends take folderId first
   const FS_DIR = path.join(__dirname, '.test-lang-' + process.pid);
   const sqlite = createLocalBackend();          // in-memory
   const fsb = createFsBackend(FS_DIR);
@@ -94,14 +93,14 @@ describe('backend contract — createLanguage never erases existing translations
   for (const [name, backend] of [['SQLite', sqlite], ['FS', fsb]]) {
     it(name + ': a second import layers onto the first instead of replacing it', () => {
       // Pack one: schema strings.
-      backend.createLanguage(FOLDER, 'en', 'English', ['field.topic', 'field.place']);
-      backend.updateTranslations(FOLDER, 'en', { 'field.topic': 'Topic', 'field.place': 'Place' });
+      backend.createLanguage('en', 'English', ['field.topic', 'field.place']);
+      backend.updateTranslations('en', { 'field.topic': 'Topic', 'field.place': 'Place' });
 
       // Pack two: app strings, a disjoint key set — the shape of the real app-lang / schema-lang split.
-      backend.createLanguage(FOLDER, 'en', 'English', ['btn.add', 'msg.saved']);
-      backend.updateTranslations(FOLDER, 'en', { 'btn.add': 'Add', 'msg.saved': 'Saved' });
+      backend.createLanguage('en', 'English', ['btn.add', 'msg.saved']);
+      backend.updateTranslations('en', { 'btn.add': 'Add', 'msg.saved': 'Saved' });
 
-      const t = backend.getTranslations(FOLDER, 'en');
+      const t = backend.getTranslations('en');
       assert.equal(t['field.topic'], 'Topic', name + ': the first pack was erased by the second');
       assert.equal(t['field.place'], 'Place', name + ': the first pack was erased by the second');
       assert.equal(t['btn.add'], 'Add');
@@ -109,10 +108,10 @@ describe('backend contract — createLanguage never erases existing translations
     });
 
     it(name + ': re-seeding a key that already has a value does not blank it', () => {
-      backend.createLanguage(FOLDER, 'sv', 'Svenska', ['btn.add']);
-      backend.updateTranslations(FOLDER, 'sv', { 'btn.add': 'Lägg till' });
-      backend.createLanguage(FOLDER, 'sv', 'Svenska', ['btn.add']);      // same key, second time
-      assert.equal(backend.getTranslations(FOLDER, 'sv')['btn.add'], 'Lägg till');
+      backend.createLanguage('sv', 'Svenska', ['btn.add']);
+      backend.updateTranslations('sv', { 'btn.add': 'Lägg till' });
+      backend.createLanguage('sv', 'Svenska', ['btn.add']);      // same key, second time
+      assert.equal(backend.getTranslations('sv')['btn.add'], 'Lägg till');
     });
 
     it(name + ': a genuinely new language is created, with no invented strings', () => {
@@ -121,13 +120,13 @@ describe('backend contract — createLanguage never erases existing translations
       // SQLite stores the blank row but filters it out on read (getTranslations skips falsy text). The
       // app cannot tell -- t() is `strings[key] || key`, so an empty string and a missing one both fall
       // back to the key. Pinning one shape would force a change with no behavioural payoff.
-      backend.createLanguage(FOLDER, 'fi', 'Suomi', ['btn.add', 'msg.saved']);
-      const t = backend.getTranslations(FOLDER, 'fi');
+      backend.createLanguage('fi', 'Suomi', ['btn.add', 'msg.saved']);
+      const t = backend.getTranslations('fi');
       assert.ok(t && typeof t === 'object', name + ': no translations map for a new language');
       for (const k of ['btn.add', 'msg.saved']) {
         assert.ok(t[k] === '' || t[k] === undefined, name + ': invented a value for ' + k + ': ' + t[k]);
       }
-      assert.ok((backend.getAvailableLanguages(FOLDER) || []).some((l) => (l.code || l) === 'fi'),
+      assert.ok((backend.getAvailableLanguages() || []).some((l) => (l.code || l) === 'fi'),
         name + ': the language was not registered');
     });
   }
