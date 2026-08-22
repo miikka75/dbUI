@@ -108,7 +108,10 @@ function createFsBackend(dataDir) {
     },
     createLanguage(code, name, keys) {
       writeJSON(F_LANGS, H.addLanguage(readJSON(F_LANGS), code, name));
-      writeJSON(fLang(code), H.emptyTranslations(keys));
+      // Blank slots for the keys asked for, but never over the strings already stored -- import calls
+      // this per language in the file, so writing the seed straight over erased whichever translation
+      // pack was imported first. SQLite already behaved this way (INSERT OR IGNORE per key).
+      writeJSON(fLang(code), H.seedTranslations(readJSON(fLang(code)), keys));
       return code;
     },
     deleteLanguage(code) {
