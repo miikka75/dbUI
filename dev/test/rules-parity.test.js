@@ -26,7 +26,13 @@ describe('rules parity — owner-writable system columns', () => {
   // The columns an owner-scoped write may always carry (identity + write bookkeeping). Listed in all
   // four layers; a column added to one and not the others either silently locks a field the app stamps
   // (write denied) or leaves a gated field writable on one backend.
-  const EXPECTED = ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic'];
+  //
+  // `_status` is here as a KEY the owner may carry, not as a field they may set to anything: its VALUE
+  // is gated separately (firestore.rules statusCreateOk/statusUnchanged, app_status_ok in the RLS) to
+  // 'active' on create and unchanged on update. Both halves are needed — without the key an owner
+  // cannot create a row at all once the app stamps _status on every row; without the value gate they
+  // could file their own row away with no table grant.
+  const EXPECTED = ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic', '_status'];
 
   const fromQuoted = (src, re) => {
     const m = re.exec(src);

@@ -428,5 +428,59 @@ await ok('a grant with no identity mirror still writes (migration grace)',
 await ok('a table with no ownerWritable entry stays unbounded (opt-in)',
   assertSucceeds(setDoc(doc(viewer, 'claims__active/free'), { id: 'free', owner: 'viewer@x.com', status: 'approved' })));
 
+
+// --- _status: the partition, as data ---------------------------------------------------------------
+// A row's partition is becoming a FIELD rather than a separate collection, which makes it data — and
+// data on a self-service row is data its owner can write. Without a gate a member could file their own
+// row into the archive, or pull an archived one back, with no table grant at all.
+//
+// Deliberately tested on `claims`, the table with NO ownerWritable entry. That is the unbounded case
+// the check above proves is opt-in: there the owner branch is all-or-nothing, so it is the one place a
+// column-bounds solution would not have reached. If the gate holds here it holds everywhere.
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  await setDoc(doc(db, 'claims__active/st_active'), { id: 'st_active', owner: 'viewer@x.com', status: 'logged' });
+  await setDoc(doc(db, 'claims__active/st_arch'),
+    { id: 'st_arch', owner: 'viewer@x.com', status: 'logged', _status: 'archive' });
+  await setDoc(doc(db, '_users/keeper@x.com'),
+    { role: 'editor', user: 'keeper@x.com', tables: { claims: 'rw' }, rwTables: ['claims'] });
+});
+const keeper = testEnv.authenticatedContext('keeper-uid', { email: 'keeper@x.com' }).firestore();
+
+await ok('owner CAN create their own row with no _status',
+  assertSucceeds(setDoc(doc(viewer, 'claims__active/st_new'),
+    { id: 'st_new', owner: 'viewer@x.com', status: 'logged' })));
+// An absent field IS active, so both spellings have to be allowed or the gate would depend on which one
+// the client happened to send.
+await ok('owner CAN create their own row saying _status: active explicitly',
+  assertSucceeds(setDoc(doc(viewer, 'claims__active/st_new2'),
+    { id: 'st_new2', owner: 'viewer@x.com', status: 'logged', _status: 'active' })));
+await ok('owner CANNOT create a row that starts archived',
+  assertFails(setDoc(doc(viewer, 'claims__active/st_new3'),
+    { id: 'st_new3', owner: 'viewer@x.com', status: 'logged', _status: 'archive' })));
+
+await ok('owner CANNOT archive their own row',
+  assertFails(setDoc(doc(viewer, 'claims__active/st_active'),
+    { id: 'st_active', owner: 'viewer@x.com', status: 'logged', _status: 'archive' })));
+await ok('owner CANNOT un-archive a row of their own',
+  assertFails(setDoc(doc(viewer, 'claims__active/st_arch'),
+    { id: 'st_arch', owner: 'viewer@x.com', status: 'logged', _status: 'active' })));
+// The gate must not cost the owner the edit they are entitled to — on a row carrying the field, and on
+// one that does not.
+await ok('owner CAN still edit their own archived row, leaving _status where it is',
+  assertSucceeds(setDoc(doc(viewer, 'claims__active/st_arch'),
+    { id: 'st_arch', owner: 'viewer@x.com', status: 'approved', _status: 'archive' })));
+await ok('owner CAN still edit their own active row that carries no _status',
+  assertSucceeds(setDoc(doc(viewer, 'claims__active/st_active'),
+    { id: 'st_active', owner: 'viewer@x.com', status: 'approved' })));
+
+// The gate is on the OWNER branch only: filing rows away is exactly what a table grant is for.
+await ok('an editor with table write CAN archive a row',
+  assertSucceeds(setDoc(doc(keeper, 'claims__active/st_active'),
+    { id: 'st_active', owner: 'viewer@x.com', status: 'approved', _status: 'archive' })));
+await ok('an editor with table write CAN un-archive a row',
+  assertSucceeds(setDoc(doc(keeper, 'claims__active/st_active'),
+    { id: 'st_active', owner: 'viewer@x.com', status: 'approved', _status: 'active' })));
+
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);

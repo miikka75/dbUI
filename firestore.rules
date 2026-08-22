@@ -278,7 +278,11 @@ service cloud.firestore {
         && (coll.split('__')[0] in get(/databases/$(database)/documents/_meta/ownerWritable).data);
     }
     // Fields any owner write may carry regardless: identity and the bookkeeping every write stamps.
-    function ownerSystemCols() { return ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic']; }
+    // '_status' is permitted as a KEY here and constrained by VALUE in statusCreateOk/statusUnchanged:
+    // the app stamps it on every row it creates, so a table with ownerWritable bounds would otherwise
+    // refuse every self-service create. Letting the key through costs nothing -- the owner may only
+    // ever send the value the row already has, or 'active' on a new one.
+    function ownerSystemCols() { return ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic', '_status']; }
     // CREATE: diffing the incoming row against the `locked` map leaves a gated column OUT of
     // affectedKeys exactly when it already holds its declared default — so "you may not start a row
     // already approved" is one comparison rather than a loop the rules language does not have.
@@ -330,6 +334,30 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(ownerBounds(coll).cols.concat(ownerSystemCols())));
     }
+    // ---- _status: the partition, as data -------------------------------------------------------
+    // A row's partition is becoming a FIELD rather than a separate collection. That makes it data, and
+    // data on a self-service row is data its owner can write -- which would let a member file their own
+    // row into the archive, or pull an archived one back out, with no table grant at all. Nothing gates
+    // archived rows differently today, so nothing breaks today; the point is that the door is shut
+    // before anything depends on it being shut.
+    //
+    // Deliberately NOT handled by adding '_status' to ownerSystemCols(): that list is what an owner MAY
+    // write. And deliberately not left to the ownerWritable bounds either, because those apply only to
+    // a table that declares them -- on a table with an owner column and no bounds the owner branch is
+    // all-or-nothing, which is exactly the hole. These two are unconditional on the owner branch.
+    //
+    // 'active' is the default: a row with no _status is active, so an absent field and an explicit
+    // 'active' have to be treated the same or the check would depend on which one the client sent.
+    function statusCreateOk() {
+      // Bracket access, not dot: a rules identifier cannot begin with an underscore, so
+      // `request.resource.data._status` is an evaluation error rather than a field read -- which
+      // surfaces as PERMISSION_DENIED with no clue why. `.get(key, default)` also folds the
+      // absent case in, so the membership test is no longer needed.
+      return request.resource.data.get('_status', 'active') == 'active';
+    }
+    function statusUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['_status']);
+    }
     match /{collection}/{doc} {
       // Read: owner-stamped rows are private to their owner UNLESS marked rosterPublic (a per-table policy
       // denormalized onto each row) — members self-serve without a table grant and read only their own,
@@ -351,14 +379,14 @@ service cloud.firestore {
       );
       allow create: if base(collection) && (
         noUsers() || role() == 'admin' ||
-        (request.resource.data.owner == myEmail() && selfServiceTable(collection) && ownerCreateOk(collection)) || // self-service: my own row, only on an owner-column table, only the fields I may set
+        (request.resource.data.owner == myEmail() && selfServiceTable(collection) && ownerCreateOk(collection) && statusCreateOk()) || // self-service: my own row, only on an owner-column table, only the fields I may set, never pre-archived
         (role() == 'editor' && hasTableWrite(collection))
       );
       allow update: if base(collection) && (
         noUsers() || role() == 'admin' ||
         // edit my own (can't reassign owner) — bounded to owner-column tables like create, so a stray
         // owner-stamped row in a non-self-service table doesn't stay member-editable forever
-        (resource.data.owner == myEmail() && request.resource.data.owner == myEmail() && selfServiceTable(collection) && ownerUpdateOk(collection)) ||
+        (resource.data.owner == myEmail() && request.resource.data.owner == myEmail() && selfServiceTable(collection) && ownerUpdateOk(collection) && statusUnchanged()) ||
         (role() == 'editor' && hasTableWrite(collection))
       );
       allow delete: if base(collection) && (

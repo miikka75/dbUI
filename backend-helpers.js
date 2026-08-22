@@ -110,7 +110,7 @@
     //     else the key would be inert and the rules should not pay to read it.
     ownerWritableOf: function(schema) {
       var tables = (schema && schema.tables) || {}, out = {};
-      var SYSTEM = ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic'];
+      var SYSTEM = ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic', '_status'];
       for (var t in tables) {
         var def = tables[t] || {}, list = def.ownerWritable;
         if (!Array.isArray(list)) continue;

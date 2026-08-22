@@ -279,7 +279,7 @@ const server = http.createServer(async (req, res) => {
     // Which columns an owner-scoped write may touch (mirrors firestore.rules ownerCreateOk/ownerUpdateOk).
     // null = the table sets no bound. Read straight from the schema here; the rules layers read the
     // _meta mirror because they cannot see the schema.
-    const OWNER_SYSTEM = ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic'];
+    const OWNER_SYSTEM = ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic', '_status'];
     // Same comparison the rules make: diff the incoming row against what it is allowed to differ from —
     // the existing row on an update, the gated columns' create-time defaults on a create — and require
     // every field that actually changes to be listed (or system bookkeeping).
