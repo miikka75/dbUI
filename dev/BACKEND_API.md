@@ -20,7 +20,7 @@ dev-server pair `backend-local.js` / `backend-local-client.js`.
 | `getTableData(tableId, partition, opts?)` | `(string, string, object?) → Promise` | `{headers: string[], rows: object[]}` | Partition: 'active' or 'archive'. `opts.constraints` (from `query.js`) may narrow the read in the database. **Optional to honour**: ignoring it returns a superset, which the caller re-filters with the residual, so a backend that cannot query stays conformant. It must never return FEWER rows than the constraints describe. |
 | `putRow(tableId, row, partition)` | `(string, object, string) → Promise` | void | Upsert by row.id. |
 | `deleteRow(tableId, rowId, partition)` | `(string, string, string) → Promise` | void | No-op if not found. Return value discarded. |
-| `moveRow(tableId, row, fromPartition, toPartition)` | `(string, object, string, string) → Promise` | void | Delete from source + put to target. Not atomic. |
+| `moveRow(tableId, row, fromPartition, toPartition)` | `(string, object, string, string) → Promise` | void | Delete from source + put to target. **Not atomic** — a failure between the halves loses the row. Archiving no longer uses it (it stamps `_status` instead); the only remaining caller is restoring a row still held in a legacy `__archive` collection. |
 | `getLists()` | `() → Promise` | `{listName: string[]}` | All dropdown lists. |
 | `saveLists(lists)` | `(object) → Promise` | void | Full replacement. Values must be strings. |
 | `putListItem(listName, value)` | `(string, string) → Promise` | void | Append single value. |

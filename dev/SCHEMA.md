@@ -35,8 +35,18 @@ nav     ← navigation tree + layout, references views/tables by name
 ```json
 "tables": { "tasks": { "columns": [...], "archivable": true } }
 ```
-`archivable: true` enables archive/restore for the table (rows move between the fixed
-`active` and `archive` partitions). Omit it for tables that are never archived.
+`archivable: true` enables archive/restore for the table. Archiving sets **`_status: "archive"`** on
+the row; the row itself does not move. Omit it for tables that are never archived.
+
+`_status` is a system column like `id`/`created_at`/`updated_at` — never declared, never displayed, and
+absent means `"active"`. It is write-gated in both rule layers to the two partition names, so a row can
+be filed away or restored but `_status` can never be set to anything else. The owner of a self-service
+row may set it (withdrawing your own signup), exactly as they could when archiving was a delete plus a
+create.
+
+Older deployments still hold archived rows in a separate `<table>__archive` collection; both shapes are
+read together, so nothing has to be migrated. To move over, **export and re-import the bundle** —
+import folds a `__archive` key into `_status` and clears the old collection.
 `isLookup: true` marks a reference/lookup table (managed in the Lookup tab, not the sidebar).
 
 ### `archiveAfter` — file finished rows away on their own
@@ -150,7 +160,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `columns` | array | Column names, embeds, conditional/computed columns (below) |
 | `filter` | object | Static row filter (see **filters**) |
 | `readonly` | boolean | Disable editing (report views) |
-| `includeArchive` | boolean | Read the **archive** partition alongside the active one. A view sees only active rows by default, which is right for a worklist and wrong for a TOTAL: with `archiveAfter` in play, a sum that nets one thing against another goes wrong the moment either side ages out. Turn it on for balances, leaderboards and any cross-tab of history. Needs the archive preloaded (`preload_archive`, on by default) |
+| `includeArchive` | boolean | Read the **archive** partition alongside the active one. A view sees only active rows by default, which is right for a worklist and wrong for a TOTAL: with `archiveAfter` in play, a sum that nets one thing against another goes wrong the moment either side ages out. Turn it on for balances, leaderboards and any cross-tab of history. Declaring it is also what makes the app fetch a legacy `__archive` collection at all — a view that does not ask for history never reads one (`preload_archive` remains an opt-out) |
 | `layout` | string | `"table"`, `"card"`, or `"list"`. **`list` is a reading layout**: compact single-line rows with values rendered read-only, so a row added there has no editor and must be filled in elsewhere. Add/delete/archive are still offered (a *table* may declare `list` as its only presentation), but use `table`/`card` for any view people actually enter data into |
 | `collapsed` | boolean | Cards start collapsed (accordion) |
 | `defaultSort` | string | Default sort column |
@@ -542,7 +552,8 @@ A view with a `markdown` field renders as a **document** instead of a data grid:
   when its view/table yields 0 rows.
 - **Archived data**: append `@<partition>` to embed a non-active partition, e.g.
   `{{table:tasks@archive}}` or `{{view:report@archive?}}`. Partitioned embeds are **read-only**.
-  (Requires the partition to be preloaded — on by default via the `preload_archive` setting.)
+  (Declaring `@archive` or `@both` is what makes the app fetch a legacy `__archive` collection for that
+  source; `preload_archive` remains an opt-out.)
 - **Both partitions behind a toggle**: append `@both` (`{{view:chore_mine@both}}`) to render **one**
   embed with the active/archive tabs the top-level grid has, instead of stacking a live embed and an
   `@archive` one under two headings. Each half keeps its usual deal: the active tab is fully
@@ -1151,7 +1162,7 @@ reuses the data-view load path (filters, `compute`, `defaultSort` all apply) and
 - **Card row controls.** Each card carries the same per-row actions as the grid, gated on write access: a
   **pencil** flips the card into edit mode (every field except the lane becomes the shared `data-cell`
   editor — same widgets and `saveField` persistence as the grid — with dragging disabled while editing); an
-  **archive** button (when the source table is `archivable`) files the card to the archive partition
+  **archive** button (when the source table is `archivable`) files the card away by stamping `_status`
   (reversible via restore); and a **delete** button uses the grid's arm-then-confirm (first click swaps the
   icon, the second removes the row). The lane itself is changed by drag or the card's **move-menu** (⋮).
 - **Integration.** Because a board only writes an existing column, moving cards feeds any other view that
