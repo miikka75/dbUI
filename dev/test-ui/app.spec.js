@@ -6222,3 +6222,114 @@ test.describe('multiple: a reference that holds several values', () => {
     }, { timeout: 8000 }).toBe('Hoover,Bins');
   });
 });
+
+test.describe('read budget', () => {
+  // The whole point of the lazy boot, the load paths and the read-once change was to spend fewer
+  // reads: on Firestore's free plan every document read is billed, and it is the ceiling on how much
+  // data the app can hold. Those changes are guarded individually. Nothing guarded the RESULT, in the
+  // units that motivated it — so a future change could give the reads back one at a time and every
+  // existing test would still pass.
+  //
+  // The spy is installed through a property setter on `window.backend`, before any page script runs.
+  // Wrapping it after boot (which is how I first wrote the #109 test) cannot tell "the read happened
+  // before I was watching" from "the read did not happen": both leave an empty list. This sees the
+  // very first assignment, so the recording is complete by construction.
+  async function watchReads(page) {
+    await page.addInitScript(() => {
+      window.__reads = [];
+      let held;
+      Object.defineProperty(window, 'backend', {
+        configurable: true,
+        get() { return held; },
+        set(v) {
+          held = v;
+          if (v && typeof v.getTableData === 'function' && !v.__readSpy) {
+            const real = v.getTableData.bind(v);
+            v.getTableData = function (t, tab, opts) {
+              window.__reads.push(t + '/' + (tab || 'active'));
+              return real(t, tab, opts);
+            };
+            v.__readSpy = true;
+          }
+        }
+      });
+    });
+  }
+  const reads = (page) => page.evaluate(() => window.__reads.slice());
+
+  // What a view legitimately reads: its own tables, PLUS whatever their columns resolve out of. The
+  // second half is _ensureDeps' business (a ref's lookup table, a lookup computed's source) and does not
+  // appear in _viewTables — comparing against that alone flags a ref target as a stray read.
+  const needFor = (page, view) => page.evaluate((v) => {
+    const app = window.appInstance;
+    const base = app._viewTables(v || app.currentTable);
+    const tables = (app.schemaData || {}).tables || {};
+    const deps = base.reduce((acc, t) => acc.concat(window.Columns.tableDeps(tables, t)), []);
+    return [...new Set(base.concat(deps))];
+  }, view || null);
+
+  async function boot(page) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCHEMA } });
+    await watchReads(page);
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 10000 });
+    await viewReady(page);
+  }
+
+  test('the spy sees the reads at all — this suite is worthless otherwise', async ({ page }) => {
+    // A budget of "no more than N" passes trivially at zero. Prove the recorder works before believing
+    // any of the limits below.
+    await boot(page);
+    expect((await reads(page)).length, 'nothing was recorded — the spy never attached').toBeGreaterThan(0);
+  });
+
+  test('boot reads nothing the landing view does not need', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    const got = await reads(page);
+    const need = await needFor(page);
+    const stray = got
+      .map((r) => r.split('/')[0])
+      .filter((t) => t[0] !== '_' && !need.includes(t));   // _pages/_assets are system stores
+    expect([...new Set(stray)], 'tables were read that the landing view never shows').toEqual([]);
+  });
+
+  test('no table+partition is read twice', async ({ page }) => {
+    // The shape of the bug #101 fixed on Firestore — a table fetched AND delivered by its listener,
+    // paying for the same documents twice. Here it catches the general case: any path that re-requests
+    // something already in the cache.
+    test.setTimeout(20000);
+    await boot(page);
+    const got = await reads(page);
+    const seen = {}, twice = [];
+    for (const r of got) { if (seen[r]) { if (!twice.includes(r)) twice.push(r); } seen[r] = 1; }
+    expect(twice, 'the same partition was requested more than once').toEqual([]);
+  });
+
+  test('opening a second view reads only what that view adds', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    const before = await reads(page);
+    const target = await page.evaluate(() => {
+      const app = window.appInstance;
+      const other = app.sidebarTabs.filter((t) => !t.divider && t.id !== app.currentTable);
+      return other.length ? other[0].id : null;
+    });
+    test.skip(!target, 'fixture has only one navigable view');
+    await page.evaluate((id) => window.appInstance.selectTab(id), target);
+    await viewReady(page, target);
+
+    const added = (await reads(page)).slice(before.length);
+    const need = await needFor(page, target);
+    const stray = added
+      .map((r) => r.split('/')[0])
+      .filter((t) => t[0] !== '_' && !need.includes(t));
+    expect([...new Set(stray)], 'navigating read tables the opened view does not use').toEqual([]);
+    // And nothing already cached was fetched again.
+    const dup = added.filter((r) => before.includes(r));
+    expect([...new Set(dup)], 'a table already loaded was read again on navigation').toEqual([]);
+  });
+});

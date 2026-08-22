@@ -240,6 +240,10 @@ function createVueApp() {
       // a table is subscribed at most once per session; _liveState is LiveSync's pending-change queue.
       // Both are plain bookkeeping — nothing renders them — but they sit here rather than on the raw
       // instance so a reset/reload path can find and tear them down.
+      // cacheKey -> the in-flight fetch for it. Every load site tests dataCache, which is only
+      // populated when a fetch RESOLVES -- so two loads in the same tick each issued their own request
+      // for the same rows. Billed twice on Firestore, for one copy of the data.
+      _inflight: {},
       _liveSubs: {},
       _liveState: null,
       _liveRebuildTimer: null,
@@ -1639,6 +1643,25 @@ function createVueApp() {
       // to be assumed for every archivable table, which is now a second full read of rows almost
       // nothing looks at: an archived row lives in the ACTIVE store, so the archive store holds only
       // what was filed away under the old model. See _viewNeedsArchive for who genuinely needs it.
+      // Fetch a partition into the cache, at most once at a time. Callers still check dataCache first
+      // for the already-loaded case; this covers the window between asking and arriving, which nothing
+      // else could see. Resolves with the rows either way -- a failed read caches [] (fail-closed, the
+      // same as before) rather than rejecting, because every caller here treats "denied" as "empty".
+      _fetchTable: function(table, tab, key) {
+        var self = this;
+        if (self._inflight[key]) return self._inflight[key];
+        var p = Promise.resolve(backend.getTableData(table, tab)).then(function(result) {
+          self.dataCache[key] = parseTableResult(result).rows;
+        }).catch(function() {
+          self.dataCache[key] = self.dataCache[key] || [];
+        }).then(function() {
+          delete self._inflight[key];
+          return self.dataCache[key];
+        });
+        self._inflight[key] = p;
+        return p;
+      },
+
       _ensureCached: function(tables, onLoad, wantArchive) {
         var self = this;
         // Whatever this view needs cached is also what it needs kept LIVE. Watching here (rather than
@@ -1653,24 +1676,20 @@ function createVueApp() {
           // responses table loads for a no-grant member instead of silently staying empty.
           if (!tbl || !self.canReachTable(tbl)) return;
           if (!self.dataCache[tbl] && !self._liveLoads(tbl)) {
-            backend.getTableData(tbl, 'active').then(function(result) {
-              self.dataCache[tbl] = parseTableResult(result).rows;
+            self._fetchTable(tbl, 'active', tbl).then(function() {
               // A table can only be swept once it is HERE. _autoArchive walks whatever is cached and a
               // repeat run finds nothing left to move, so this is what keeps the sweep working when boot
               // no longer loads everything -- otherwise rows in a table nobody had opened would simply
               // never age out, silently.
               self._autoArchive();
               if (onLoad) onLoad(tbl);
-            }).catch(function() { self.dataCache[tbl] = self.dataCache[tbl] || []; });
+            });
           }
           // The ARCHIVE partition, only when the caller says something will read it, and still behind
           // `preload_archive` -- a user who turned that off asked not to load archives, and the
           // documented consequence (a history view comes up short) is unchanged.
           if (wantArchive && self.settings.preload_archive && SCHEMA[tbl] && SCHEMA[tbl].archivable && !self.dataCache[aKey(tbl)]) {
-            backend.getTableData(tbl, 'archive').then(function(result) {
-              self.dataCache[aKey(tbl)] = parseTableResult(result).rows;
-              if (onLoad) onLoad(tbl);
-            }).catch(function() { self.dataCache[aKey(tbl)] = self.dataCache[aKey(tbl)] || []; });
+            self._fetchTable(tbl, 'archive', aKey(tbl)).then(function() { if (onLoad) onLoad(tbl); });
           }
         });
         self._ensureDeps(tables, onLoad);
@@ -1699,10 +1718,7 @@ function createVueApp() {
           Columns.tableDeps(SCHEMA, tbl).forEach(function(dep) {
             if (seen[dep] || self.dataCache[dep] || !self.canReachTable(dep)) return;
             seen[dep] = 1;
-            backend.getTableData(dep, 'active').then(function(result) {
-              self.dataCache[dep] = parseTableResult(result).rows;
-              if (onLoad) onLoad(dep);
-            }).catch(function() { self.dataCache[dep] = self.dataCache[dep] || []; });
+            self._fetchTable(dep, 'active', dep).then(function() { if (onLoad) onLoad(dep); });
           });
         });
       },
@@ -1949,10 +1965,7 @@ function createVueApp() {
               if (!dep.table) return;
               self._liveWatch([dep.table], dep.part);   // a computed column is only as live as its inputs
               if (!self.canReachTable(dep.table) || self.dataCache[dep.key]) return;
-              backend.getTableData(dep.table, dep.part).then(function(result) {
-                self.dataCache[dep.key] = parseTableResult(result).rows;
-                recomputeRotation();
-              }).catch(function() { self.dataCache[dep.key] = self.dataCache[dep.key] || []; });
+              self._fetchTable(dep.table, dep.part, dep.key).then(recomputeRotation);
             });
           });
         } else {
@@ -1978,8 +1991,7 @@ function createVueApp() {
           };
           if (!self.dataCache[key] && !self._liveLoads(self.currentTable)) {
             var tab = self.viewingArchive ? 'archive' : 'active';
-            backend.getTableData(self.currentTable, tab).then(function(result) {
-              self.dataCache[key] = parseTableResult(result).rows;
+            self._fetchTable(self.currentTable, tab, key).then(function() {
               self._autoArchive();                    // same reason as in _ensureCached
               showRows();
             });
