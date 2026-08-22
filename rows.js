@@ -225,9 +225,22 @@
   function partitionRows(dataCache, src, part) {
     var want = part || 'active';
     var cache = dataCache || {};
-    var out = [];
-    (cache[src] || []).forEach(function (r) { if (partitionOf(r, 'active') === want) out.push(r); });
-    (cache[src + '__archive'] || []).forEach(function (r) { if (partitionOf(r, 'archive') === want) out.push(r); });
+    var out = [], seen = {};
+    (cache[src] || []).forEach(function (r) {
+      if (partitionOf(r, 'active') !== want) return;
+      if (r && r.id != null) seen[r.id] = 1;
+      out.push(r);
+    });
+    // Deduped by id, with the ACTIVE store winning. Migrating a row means writing it to the active
+    // store and clearing it from the archive one, and those are two writes with nothing joining them --
+    // a failure between leaves the same id in both. Counting it twice would corrupt every total that
+    // uses includeArchive, silently, which is worse than the stale copy being ignored until the next
+    // migration pass clears it.
+    (cache[src + '__archive'] || []).forEach(function (r) {
+      if (partitionOf(r, 'archive') !== want) return;
+      if (r && r.id != null && seen[r.id]) return;
+      out.push(r);
+    });
     return out;
   }
 

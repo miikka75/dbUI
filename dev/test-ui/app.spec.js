@@ -1238,9 +1238,61 @@ test.describe('Import round-trip', () => {
 
     const active = await (await page.request.post('/api/getTableData', { data: { tableId: 'docs', tab: 'active' } })).json();
     const archive = await (await page.request.post('/api/getTableData', { data: { tableId: 'docs', tab: 'archive' } })).json();
-    expect(active.rows.some(r => r.id === 'a1' && r.title === 'Active1')).toBe(true);  // bare key -> active partition
-    expect(archive.rows.some(r => r.id === 'z1' && r.title === 'Arch1')).toBe(true);   // __archive key -> archive partition
+
+    // Import is the MIGRATION route from partition-as-store to partition-as-field, so a `__archive` key
+    // arrives as a `_status` stamp rather than a second collection. Exporting a deployment and
+    // importing the bundle back is what moves it over.
+    expect(active.rows.some(r => r.id === 'a1' && r.title === 'Active1')).toBe(true);
+    const arch = active.rows.find(r => r.id === 'z1');
+    expect(arch, 'the archived row did not land in the active store').toBeTruthy();
+    expect(arch.title).toBe('Arch1');
+    expect(arch._status).toBe('archive');
+    expect(archive.rows.some(r => r.id === 'z1'), 'the row was left in the archive collection too').toBe(false);
     expect(active.headers).toContain('id'); // implicit id present after import
+
+    // And the app agrees about which partition each is in.
+    const seen = await page.evaluate(() => ({
+      active: window.Rows.partitionRows(appInstance.dataCache, 'docs', 'active').map(r => r.id),
+      archive: window.Rows.partitionRows(appInstance.dataCache, 'docs', 'archive').map(r => r.id)
+    }));
+    expect(seen.active).toContain('a1');
+    expect(seen.archive).toContain('z1');
+  });
+
+  test('re-importing an already-migrated bundle changes nothing, and clears a leftover archive row', async ({ page }) => {
+    test.setTimeout(20000);
+    const SCH = { defaultLanguage: 'en', tables: { docs: { columns: [{ name: 'title', type: 'text' }], archivable: true } }, views: [{ table: 'docs' }], nav: { items: [{ table: 'docs' }] } };
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    // A deployment mid-migration: the same id present in BOTH collections, which is what a failed
+    // clear leaves behind.
+    await page.request.post('/api/putRow', { data: { tableId: 'docs', data: { id: 'z1', title: 'Stale' }, tab: 'archive' } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
+    await page.waitForTimeout(150);
+
+    // Already migrated: the row carries _status and arrives under the BARE key.
+    const bundle = { schema: SCH, tables: { docs: [{ id: 'z1', title: 'Arch1', _status: 'archive' }] } };
+    await page.setInputFiles('input[type=file][accept=".json"]', { name: 'import.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bundle)) });
+    await page.waitForTimeout(2000);
+
+    const active = await (await page.request.post('/api/getTableData', { data: { tableId: 'docs', tab: 'active' } })).json();
+    const row = active.rows.find(r => r.id === 'z1');
+    expect(row.title).toBe('Arch1');
+    expect(row._status).toBe('archive', 'a bundle that already carries _status must keep it');
+
+    // The stale copy is still in the archive collection -- a bare-key row is not a move, so nothing
+    // cleared it -- and the app must still count the row ONCE, from the active store.
+    const seen = await page.evaluate(() => ({
+      archive: window.Rows.partitionRows(appInstance.dataCache, 'docs', 'archive').map(r => r.id),
+      titles: window.Rows.partitionRows(appInstance.dataCache, 'docs', 'archive').map(r => r.title)
+    }));
+    expect(seen.archive).toEqual(['z1']);
+    expect(seen.titles).toEqual(['Arch1'], 'the stale archive copy won over the migrated row');
   });
 
   // The import used to be ONE serial promise chain with no .catch(): a single rejected write silently
