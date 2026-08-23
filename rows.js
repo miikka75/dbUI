@@ -195,6 +195,62 @@
     return rows.slice().sort(function(a, b) { return compareValues(a[col], b[col], asc !== false, listOrder); });
   }
 
+  // ---- Runtime search ---------------------------------------------------------------------------
+  // The schema's `filter` is authored: it decides what a view IS. This is the other kind — what the
+  // person looking at it wants to see right now — and the app had no way to express it at all. On a
+  // list of a hundred members or four years of meetings, typing a name is worth more than any view.
+  //
+  // Deliberately a SUBSTRING match over the row's text, not the condition language: someone typing
+  // into a box is not writing a filter, and `condMatches` cannot express "appears anywhere".
+  //
+  // Folded before comparing, because the data is not English. `normalize('NFD')` splits an accented
+  // letter into its base plus a combining mark, which the class below then strips — so "hameen" finds
+  // "Hämeen" and "saestaja" finds "säestäjä". Without it a Finnish name is only findable by someone
+  // who can type the diacritic, which on a phone keyboard is most of the point of searching.
+  function fold(v) {
+    if (v === undefined || v === null) return '';
+    var s = Array.isArray(v) ? v.join(' ') : String(v);
+    // The regex is built from a range rather than written literally so the file stays ASCII.
+    return s.normalize ? s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase() : s.toLowerCase();
+  }
+
+  // Columns that carry no meaning to a reader. Searching them would match ids and timestamps, which is
+  // never what someone typing into a box means, and `owner` would surface e-mail addresses in a view
+  // that deliberately shows display names instead.
+  var SEARCH_SKIP = ['id', 'created_at', 'updated_at', 'owner', 'rosterPublic', '_status', '_source'];
+
+  // Every token must appear SOMEWHERE in the row — "kati tup" finds "Kati Tuppurainen" even though no
+  // single column contains that string. One substring over the whole term would not, and that is the
+  // way people actually type a name they half remember.
+  function searchRows(rows, term, cols) {
+    var q = fold(term).trim();
+    if (!q) return rows || [];                 // no term is not a filter: everything, unchanged
+    var tokens = q.split(/\s+/);
+    var only = (Array.isArray(cols) && cols.length) ? cols : null;
+    return (rows || []).filter(function (r) {
+      if (!r || typeof r !== 'object') return false;
+      var hay = '';
+      if (only) {
+        for (var i = 0; i < only.length; i++) hay += ' ' + fold(r[only[i]]);
+      } else {
+        for (var k in r) { if (SEARCH_SKIP.indexOf(k) < 0) hay += ' ' + fold(r[k]); }
+      }
+      for (var t = 0; t < tokens.length; t++) if (hay.indexOf(tokens[t]) < 0) return false;
+      return true;
+    });
+  }
+
+  // What a view's `search` setting means, normalized. Mirrors `obscureNames`, which is the same shape
+  // for the same reason: `true` is the common case and naming columns is the exception.
+  //   absent / false -> null   (no search box)
+  //   true           -> []     (every column the row carries, minus bookkeeping)
+  //   ["a","b"]      -> those columns
+  function searchColumns(cfg) {
+    var s = cfg && cfg.search;
+    if (!s) return null;
+    return Array.isArray(s) ? s.filter(function (c) { return typeof c === 'string' && c; }) : [];
+  }
+
   // ---- Which partition a row is in ------------------------------------------------------------
   // A partition used to be a STORE: `tasks` held the active rows and `tasks__archive` the filed-away
   // ones, and "which partition is this row in" was answered by which of the two it came out of. It is
@@ -417,7 +473,8 @@
     convertViewFilters: convertViewFilters, sortByCol: sortByCol, buildRows: buildRows,
     aggregateRows: aggregateRows, resolveComputed: resolveComputed, isFilterToken: isFilterToken,
     compareValues: compareValues, listOrderFor: listOrderFor,
-    partitionOf: partitionOf, partitionRows: partitionRows
+    partitionOf: partitionOf, partitionRows: partitionRows,
+    searchRows: searchRows, searchColumns: searchColumns, fold: fold
   };
   if (isNode) module.exports = M;
   else { root.Rows = M; for (var k in M) root[k] = M[k]; } // also expose each as a global for bare callers
