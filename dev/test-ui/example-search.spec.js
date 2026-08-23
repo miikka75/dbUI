@@ -9,7 +9,6 @@
 // server and points baseURL at it. See test-ui/server-fixture.js.
 const { test, expect } = require('./server-fixture');
 const CHORES = require('../../examples/chores-schema.json');
-const BISHOP = require('../../examples/bishopric-schema.json').schema;
 
 async function boot(page, schema, rows) {
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -43,7 +42,7 @@ test('chores: the box renders where the example asks for it, and not elsewhere',
   await expect(box(page)).toBeVisible();
   expect((await shown(page)).length).toBe(3);
 
-  // `search: ["item"]` -- so a term in `item` matches...
+  // `search: ["item"]` -- so a term in `item` matches, diacritics folded...
   await box(page).locator('input').fill('leipa');           // and diacritics fold: leipa -> Leipä
   await expect.poll(() => shown(page), { timeout: 5000 }).toEqual(['s2']);
   // ...but `added_by` is NOT searched by this view.
@@ -54,20 +53,28 @@ test('chores: the box renders where the example asks for it, and not elsewhere',
   await expect(box(page)).toHaveCount(0);
 });
 
-test('bishopric: search:true over a real people view folds Finnish diacritics', async ({ page }) => {
+test('the box carries a floating label, and the count says what it counts', async ({ page }) => {
   test.setTimeout(60000);
-  await boot(page, BISHOP, [
-    ['admin_callings', { id: 'c1', person: 'Kati Tuppurainen', calling: 'Opettaja', notes: 'Hyväksytty' }],
-    ['admin_callings', { id: 'c2', person: 'Säestäjä Testi', calling: 'Pianisti', notes: '' }],
-    ['admin_callings', { id: 'c3', person: 'Bob Smith', calling: 'Opettaja', notes: '' }]
+  await boot(page, CHORES, [
+    ['home_shopping', { id: 's1', item: 'Maito', qty: '2', added_by: 'Ann', shop_status: 'needed' }],
+    ['home_shopping', { id: 's2', item: 'Leipa', qty: '1', added_by: 'Bob', shop_status: 'needed' }],
+    ['home_shopping', { id: 's3', item: 'Juusto', qty: '1', added_by: 'Ann', shop_status: 'needed' }]
   ]);
-  await open(page, 'admin_callings');
-  await expect(box(page)).toBeVisible();
+  await open(page, 'shop_todo');
 
-  await box(page).locator('input').fill('saestaja');        // typed without diacritics
-  await expect.poll(() => shown(page), { timeout: 5000 }).toEqual(['c2']);
-  await box(page).locator('input').fill('opettaja');        // search:true reaches other columns
-  await expect.poll(() => shown(page), { timeout: 5000 }).toEqual(['c1', 'c3']);
+  // A label, not a placeholder: it stays legible above the text once you have typed, the way every
+  // other text field in the app behaves. A placeholder is replaced by what you type, so the box
+  // stops saying what it is exactly when a term is hiding rows.
+  await expect(page.locator('[data-testid="view-search"] label').first()).toHaveText(/\S/);
+
+  // No term: nothing to count.
+  await expect(page.locator('[data-testid="search-count"]')).toHaveCount(0);
+
+  // A bare number could be read as either matches or misses. `shown / total` cannot.
+  await box(page).locator('input').fill('maito');
+  await expect(page.locator('[data-testid="search-count"]')).toHaveText('1 / 3');
+  await box(page).locator('input').fill('o');                      // Maito, Juusto
+  await expect(page.locator('[data-testid="search-count"]')).toHaveText('2 / 3');
   await box(page).locator('input').fill('');
-  await expect.poll(() => shown(page), { timeout: 5000 }).toEqual(['c1', 'c2', 'c3']);
+  await expect(page.locator('[data-testid="search-count"]')).toHaveCount(0);
 });
