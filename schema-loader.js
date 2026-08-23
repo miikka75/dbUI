@@ -151,6 +151,21 @@ function validateSchema() {
     });
     if (!Array.isArray(SCHEMA[ot].ownerWritable)) errors.push('table "' + ot + '": `ownerWritableWhile` has no effect without `ownerWritable` (nothing bounds an owner-scoped write to begin with)');
   }
+  // `stamped` marks a column the app fills in and nobody rewrites -- it binds a grant-holder, not just
+  // an owner. It only works on a `defaultFrom: "@me"` column backed by a list: that is what fills it in
+  // and what the write layers verify the value against. Silently ignoring a malformed one would leave a
+  // column that LOOKS protected and is not, which is the worst of the three outcomes.
+  for (var st in SCHEMA) {
+    var scols = (SCHEMA[st] && SCHEMA[st].columns) || {}, seen = 0;
+    for (var sc in scols) {
+      var sd = scols[sc];
+      if (!sd || typeof sd !== 'object' || !sd.stamped) continue;
+      seen++;
+      if (sd.defaultFrom !== '@me') errors.push('table "' + st + '": column "' + sc + '" is `stamped` but has no `defaultFrom: "@me"` — there would be nothing to fill it in with, and nothing to check a value against');
+      else if (!sd.list) errors.push('table "' + st + '": stamped column "' + sc + '" needs a `list` — without one the identity is the profile display name, which the user writes themselves');
+      if (seen === 2) errors.push('table "' + st + '": more than one `stamped` column — the rules layers resolve ONE column against its list and cannot loop a map');
+    }
+  }
   for (var at in SCHEMA) {
     var aa = SCHEMA[at] && SCHEMA[at].archiveAfter;
     if (!aa) continue;

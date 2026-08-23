@@ -70,6 +70,7 @@ backend = {
       StorageSupabase.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) }),
       StorageSupabase.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema)),
       StorageSupabase.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema)),
+      StorageSupabase.setMeta('stamped', BackendHelpers.stampedOf(schema)),
       StorageSupabase.setMeta('listTables', listOwnershipMap((schema && schema.tables) || {})),
       StorageSupabase.setMeta('listWritable', BackendHelpers.userWritableListsOf(schema))
     ]);

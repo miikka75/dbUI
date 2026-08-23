@@ -1433,6 +1433,59 @@ unaffected as always.
   (`app_owner_state_ok`), `dev/server.js` (`ownerFieldsOk` + the delete gate), and the UI
   (`ownerRowWritable`, feeding `cellReadonly` / `canMutateRow`).
 
+### `stamped` — a column the app fills in and nobody rewrites
+
+`ownerWritable` bounds the **owner** branch, and is deliberately inert for an editor holding a table
+grant. That is right for an approval column: a parent holds the grant precisely so they can decide.
+
+A stamped column is the other shape. On a **shared** table — a household shopping list everybody may
+tick off — one column records *who added the row*, and that is not a decision anyone gets to revise.
+Owner-bounding the table would protect it, at the cost of the sharing: nobody could tick off somebody
+else's milk. So this binds the **column** rather than the row.
+
+```json
+"home_shopping": {
+  "columns": [
+    { "name": "item", "type": "select", "list": "shop_items" },
+    { "name": "shop_status", "type": "select", "list": "shop_status", "default": "needed" },
+    { "name": "added_by", "type": "select", "list": "members",
+      "defaultFrom": "@me", "stamped": true }
+  ]
+}
+```
+
+Ann adds the milk and the row says Ann. Bob may tick it off, rename the item and change the quantity —
+and may not relabel who added it, nor may Ann relabel his.
+
+- **Only on a `defaultFrom: "@me"` column backed by a `list`.** The `defaultFrom` is what fills the
+  column in; the list is what the write layers check a value against (the same resolution `@me` uses).
+  Without either, the column would simply be unwritable — a broken table rather than a protected one.
+  `validateSchema` rejects both mistakes at load rather than leaving a column that *looks* protected.
+- **On create** the value must be the caller's own, so a row cannot be added under someone else's name.
+- **On update it may not change at all** — not even to the caller's own value. This is the half
+  `ownerWritable` cannot express, because a table grant makes its bounds inert.
+- **A write that does not carry the column is untouched.** Ticking off somebody else's row never
+  mentions it, and that has to keep working, or protecting the column would cost the sharing.
+- **An empty stored stamp counts as a create.** A row written before the column existed can be filled
+  in — but only with your own name. That is the migration path, not a hole.
+- **A caller with no identity cannot stamp one.** They have no name to write, and a table recording who
+  did something is not one to write anonymously. Note this has **no migration grace**, unlike the
+  identity column: a permissive window is one in which the attribution can be forged. Link the account
+  first (Settings → Lists), or creates on that table are refused.
+- **Admins are exempt**, as they are from every other bound here, so a wrong stamp can be corrected.
+- **One per table**: the value is resolved against the column's list, and neither rules language can
+  loop a map to use a different list per column. A second one is named at load.
+- **Enforced in all four layers** from a `_meta/stamped` mirror written by `saveSchema`
+  (`BackendHelpers.stampedOf`), the same denormalise-for-schema-blind-rules pattern as `ownerWritable`:
+  `firestore.rules` (`stampedOk`), `supabase-schema.sql` (`app_stamped_ok`, which reads the stored row
+  inside its `WITH CHECK` because an RLS update policy never sees old and new at once), the dev server
+  (which runs that SQL), and the UI, which renders the cell read-only so it never offers a write the
+  server will refuse.
+
+> **`stamped` vs `ownerWritable`.** Use `ownerWritable` for a *decision* — an approval, a verdict —
+> where a grant-holder is exactly who should be able to make it. Use `stamped` for a *fact about who
+> acted*, which nobody should revise. They compose: a table can have both.
+
 ## user profiles, user-backed lists & membership (Firebase)
 
 These features are Firebase-backed (the local/dev backend mirrors them for tests). They build on the

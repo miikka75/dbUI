@@ -59,6 +59,15 @@ function ownerBoundsFor(table) {
   return _ownerBoundsAll[table] || null;
 }
 
+// Which column a table STAMPS, memoized the same self-invalidating way. Unlike the owner bounds above
+// this is consulted for every caller, not just the self-service branch: a table grant does not lift a
+// stamped column, which is the whole reason the key exists.
+var _stampedKey = null, _stampedAll = null;
+function stampedBoundsFor(table) {
+  if (_stampedKey !== SCHEMA) { _stampedKey = SCHEMA; _stampedAll = BackendHelpers.stampedOf({ tables: SCHEMA }); }
+  return _stampedAll[table] || null;
+}
+
 // --- Permission "features" model: extracted to /access-features.js (AccessFeatures.*), a pure module
 //     over (schema, views) shared with the unit tests. These thin wrappers bind the app's global
 //     SCHEMA/VIEWS so every existing call site (grantFeatureChips, selectedFeatures, canAccess, ...)
@@ -2507,6 +2516,14 @@ function createVueApp() {
       // MY rows, others stay read-only (owner/mirror/union-foreign columns are always read-only).
       cellReadonly: function(item, col, ownerId) {
         if (this.isReadonlyCell(item, col, ownerId)) return true;
+        // A STAMPED column is filled in by the app and rewritten by nobody. Every write layer refuses a
+        // change to it from anyone but an admin, so offering an editor here would only produce a refused
+        // write -- or, worse, an optimistic value that never lands. Deliberately checked BEFORE the
+        // self-service branch below and outside it: a table grant does not lift a stamped column, which
+        // is exactly what distinguishes it from the identity column.
+        var sbTable = item ? this.getSource(item, ownerId) : null;
+        var sb = sbTable ? stampedBoundsFor(sbTable) : null;
+        if (sb && sb.col === col && !this.isAdmin) return true;
         // Which self-service table governs this cell: the open grid's own, or — when `ownerId` names an
         // EMBEDDED view/table — that embed's source. Without the second case an embedded self-service
         // view rendered every cell read-only while the same view opened top-level stayed editable.

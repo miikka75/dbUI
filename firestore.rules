@@ -334,6 +334,47 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(ownerBounds(coll).cols.concat(ownerSystemCols())));
     }
+    // ---- Stamped columns -----------------------------------------------------------------------
+    // `ownerWritable` bounds the OWNER branch and is deliberately inert for an editor holding a table
+    // grant -- right for an approval column, since a parent holds the grant precisely so they can
+    // decide. A stamped column is the other shape: on a SHARED table that everybody may edit, one
+    // column records who created the row, and that is not a decision anyone gets to revise. Bounding
+    // the whole table to its owner would protect it at the cost of the sharing (nobody could tick off
+    // somebody else's shopping item), so this binds the COLUMN instead of the row.
+    //
+    // `stamped: true` on a `defaultFrom: "@me"`, list-backed column, mirrored by saveSchema to
+    // _meta/stamped as { <table>: { col, list } }. A table absent from the mirror is unchanged -- the
+    // same opt-in contract ownerWritable has.
+    function stampedBound(coll) {
+      return get(/databases/$(database)/documents/_meta/stamped).data[coll.split('__')[0]];
+    }
+    function stampedTable(coll) {
+      return exists(/databases/$(database)/documents/_meta/stamped)
+        && (coll.split('__')[0] in get(/databases/$(database)/documents/_meta/stamped).data);
+    }
+    // The stamp already on the stored row, '' when there is none (a create, or a row written before the
+    // column existed). Taking it from `resource` is what makes the update case work at all: the rule has
+    // to compare against what is THERE, not against what the write claims.
+    function stampedPrev(coll) {
+      return (resource == null) ? '' : string(resource.data.get(stampedBound(coll).col, ''));
+    }
+    // A write that does not carry the column cannot forge it -- ticking off somebody else's row never
+    // mentions it, and that has to keep working. Otherwise: an empty stored stamp is a CREATE (the value
+    // must be the caller's own, so a row cannot be added under another name), and a non-empty one is an
+    // UPDATE (the value may not change at all, not even to the caller's own).
+    //   A caller with no identity cannot stamp one: they have no name to write, and a table that records
+    // who did something is not one to write anonymously. Unlike ownerIdentityOk there is no migration
+    // grace here -- a column that is stamped is stamped, and a permissive window would be one in which
+    // the attribution it exists for can be forged.
+    function stampedOk(coll) {
+      return !stampedTable(coll)
+        || !(stampedBound(coll).col in request.resource.data)
+        || (stampedPrev(coll) != ''
+              ? string(request.resource.data[stampedBound(coll).col]) == stampedPrev(coll)
+              : (userData().get('identity', {}).get(stampedBound(coll).list, '') != ''
+                 && string(request.resource.data[stampedBound(coll).col])
+                    == string(userData().get('identity', {}).get(stampedBound(coll).list, ''))));
+    }
     // ---- _status: the partition, as data -------------------------------------------------------
     // A row's partition is becoming a FIELD rather than a separate collection. That makes it data, and
     // data on a self-service row is data its owner can write.
@@ -375,17 +416,24 @@ service cloud.firestore {
         resource.data.get('owner', '') == myEmail() ||
         resource.data.get('rosterPublic', false) == true
       );
+      // stampedOk() sits OUTSIDE the branch alternation deliberately: it binds the grant-holder as well
+      // as the owner, which is the one thing ownerWritable cannot say. Admins stay exempt, as they are
+      // from every other bound here, so a wrong stamp can still be corrected.
       allow create: if base(collection) && (
         noUsers() || role() == 'admin' ||
-        (request.resource.data.owner == myEmail() && selfServiceTable(collection) && ownerCreateOk(collection) && statusValueOk()) || // self-service: my own row, only on an owner-column table, only the fields I may set
-        (role() == 'editor' && hasTableWrite(collection))
+        (stampedOk(collection) && (
+          (request.resource.data.owner == myEmail() && selfServiceTable(collection) && ownerCreateOk(collection) && statusValueOk()) || // self-service: my own row, only on an owner-column table, only the fields I may set
+          (role() == 'editor' && hasTableWrite(collection))
+        ))
       );
       allow update: if base(collection) && (
         noUsers() || role() == 'admin' ||
-        // edit my own (can't reassign owner) — bounded to owner-column tables like create, so a stray
-        // owner-stamped row in a non-self-service table doesn't stay member-editable forever
-        (resource.data.owner == myEmail() && request.resource.data.owner == myEmail() && selfServiceTable(collection) && ownerUpdateOk(collection) && statusValueOk()) ||
-        (role() == 'editor' && hasTableWrite(collection))
+        (stampedOk(collection) && (
+          // edit my own (can't reassign owner) — bounded to owner-column tables like create, so a stray
+          // owner-stamped row in a non-self-service table doesn't stay member-editable forever
+          (resource.data.owner == myEmail() && request.resource.data.owner == myEmail() && selfServiceTable(collection) && ownerUpdateOk(collection) && statusValueOk()) ||
+          (role() == 'editor' && hasTableWrite(collection))
+        ))
       );
       allow delete: if base(collection) && (
         noUsers() || role() == 'admin' ||

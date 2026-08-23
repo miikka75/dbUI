@@ -35,6 +35,7 @@ backend = {
       StorageFirestore.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) }),
       StorageFirestore.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema)),
       StorageFirestore.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema)),
+      StorageFirestore.setMeta('stamped', BackendHelpers.stampedOf(schema)),
       StorageFirestore.setMeta('listTables', listOwnershipMap((schema && schema.tables) || {})),
       StorageFirestore.setMeta('listWritable', BackendHelpers.userWritableListsOf(schema))
     ]);

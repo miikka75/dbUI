@@ -157,6 +157,60 @@
       }
       return out;
     },
+    // --- Stamped columns ------------------------------------------------------------------------
+    // `ownerWritable` bounds the OWNER branch, and is deliberately inert for an editor holding a table
+    // grant -- which is right for an approval column, since a parent holds the grant precisely so they
+    // can decide. A stamped column is the other shape: on a SHARED table that everybody may edit, one
+    // column records who created the row, and that is not a decision anyone gets to revise. Bounding
+    // the whole table to its owner would protect it at the cost of the sharing (you could no longer
+    // tick off somebody else's shopping item), so this binds the COLUMN instead of the row.
+    //
+    // Mirrored by saveSchema to _meta/stamped as { <table>: { col, list } }, the same
+    // denormalise-for-schema-blind-rules pattern as ownerWritable / ownerTables / pageAccess.
+    //
+    // One per table, like `identityCol`: the value is verified against the caller's entry in the
+    // column's LIST, and neither rules language can loop a map to resolve a different list per column.
+    // validateSchema names a second one rather than let it be silently dropped.
+    stampedOf: function(schema) {
+      var tables = (schema && schema.tables) || {}, out = {};
+      for (var t in tables) {
+        var cols = (tables[t] || {}).columns, defs = {}, order = [];
+        if (Array.isArray(cols)) cols.forEach(function(c) { if (c && c.name) { defs[c.name] = c; order.push(c.name); } });
+        else for (var k in (cols || {})) { defs[k] = cols[k]; order.push(k); }
+        for (var i = 0; i < order.length; i++) {
+          var d = defs[order[i]];
+          if (!d || typeof d !== 'object' || !d.stamped) continue;
+          // `defaultFrom: "@me"` is what FILLS the column in, and the list is what a write layer checks
+          // the value against. Without either there is nothing to stamp and nothing to verify, so the
+          // column would just be unwritable -- a broken table rather than a protected one.
+          if (d.defaultFrom !== '@me' || !d.list) continue;
+          out[t] = { col: order[i], list: d.list };
+          break;
+        }
+      }
+      return out;
+    },
+    // May this write touch the stamped column? `existing` is the stored row (null on a create),
+    // `identity` the caller's resolved value for the bound's list ('' when they have none).
+    //
+    //   no stamped column, or a write that does not carry it -> untouched (ticking off somebody
+    //     else's row never mentions the column, and that has to keep working);
+    //   create -> the value must be the caller's own, so a row cannot be born under another name;
+    //   update -> the value may not CHANGE, not even to the caller's own. That is the half
+    //     ownerWritable cannot express: a grant-holder may edit the row and still not relabel it.
+    stampedOk: function(bounds, existing, incoming, identity) {
+      if (!bounds || !bounds.col) return true;
+      if (!incoming || !Object.prototype.hasOwnProperty.call(incoming, bounds.col)) return true;
+      var str = function(v) { return String(v == null ? '' : v); };
+      var next = str(incoming[bounds.col]);
+      // An EMPTY stored stamp is not a stamp: a row written before the column existed has nothing
+      // there, and filling it in is a create as far as this rule is concerned -- so it must be the
+      // caller's own value. That is the migration path, and it is not a hole: the only value they can
+      // put in an unstamped row is their own name.
+      var prev = existing ? str(existing[bounds.col]) : '';
+      if (prev !== '') return next === prev;
+      return !!identity && next === str(identity);
+    },
     // Does an owner-scoped write get to touch THIS row at all? `existing` is the stored row (null on a
     // create — a create is always in the gate's own starting state, so it passes). Shared by the dev
     // server and the client so both answer exactly as the two rules layers do.

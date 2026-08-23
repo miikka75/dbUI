@@ -30,13 +30,21 @@ const { createPgliteStorage } = require('../storage-pglite.js');
 const ACTORS = {
   'admin@x.com':  { role: 'admin',  tables: 'all' },
   'editor@x.com': { role: 'editor', tables: ['tasks'] },
-  'viewer@x.com': { role: 'viewer', tables: [] }
+  'viewer@x.com': { role: 'viewer', tables: [] },
+  // A grant-holder who is also LINKED. A stamped column only bites on this shape: the grant is what
+  // makes ownerWritable inert, and the identity is what the stamp is checked against.
+  'shopper@x.com': { role: 'editor', tables: { shopping: 'rw' }, rwTables: ['shopping'],
+                     identity: { members: 'Ann' } }
 };
 
 const SCHEMA = {
   tables: {
     tasks:   { columns: { id: { type: 'text' }, title: { type: 'text' } } },
     notes:   { columns: { id: { type: 'text' }, body: { type: 'text' } } },
+    shopping: {
+      columns: { id: { type: 'text' }, item: { type: 'text' },
+                 added_by: { type: 'text', list: 'members', defaultFrom: '@me', stamped: true } }
+    },
     signups: {
       ownerWritable: ['status'],
       columns: { id: { type: 'text' }, owner: { type: 'owner' }, status: { type: 'text' }, organizerNote: { type: 'text' } }
@@ -64,6 +72,15 @@ const MATRIX = [
   ['viewer@x.com', 'signups__active', 's1', 'read',  null,                                            'allow'],
   // ownerWritable: the column bound holds even on a row they own.
   ['viewer@x.com', 'signups__active', 's1', 'write', { id: 's1', owner: 'viewer@x.com', organizerNote: 'no' }, 'deny'],
+  // A stamped column: the one bound that binds a GRANT-HOLDER, so both engines must agree that an `rw`
+  // grant is not enough to relabel who added a row. Firestore compares `resource.data` with the
+  // incoming doc; Postgres has to read the stored row inside its WITH CHECK because an UPDATE policy
+  // never sees both at once. Two implementations of one rule, which is what this suite is for.
+  ['shopper@x.com', 'shopping__active', 'h1', 'write', { id: 'h1', item: 'Sourdough' },                 'allow'],
+  ['shopper@x.com', 'shopping__active', 'h1', 'write', { id: 'h1', added_by: 'Ann' },                   'deny'],
+  ['shopper@x.com', 'shopping__active', 'h2', 'write', { id: 'h2', item: 'Eggs', added_by: 'Ann' },     'allow'],
+  ['shopper@x.com', 'shopping__active', 'h3', 'write', { id: 'h3', item: 'Jam', added_by: 'Bob' },      'deny'],
+  ['admin@x.com',   'shopping__active', 'h1', 'write', { id: 'h1', added_by: 'Cara' },                  'allow'],
   // _status -- the partition as data. A member must not be able to file their own row away, or pull one
   // back, without a table grant. Both engines have to agree on that, and they express it completely
   // differently: Firestore diffs the incoming doc against the stored one, Postgres reads the stored row
@@ -100,12 +117,16 @@ const ListAccess = require('../../list-access.js');
 await testEnv.withSecurityRulesDisabled(async (ctx) => {
   const db = ctx.firestore();
   const users = {};
-  for (const [email, g] of Object.entries(ACTORS)) users[email] = { role: g.role, tables: g.tables };
+  // Carry the WHOLE actor record, not just role+tables: a map-shaped grant needs its denormalized
+  // `rwTables` for the write gate, and a stamped column is checked against `identity`. Dropping either
+  // made both engines deny for the wrong reason, which reads as agreement and proves nothing.
+  for (const [email, g] of Object.entries(ACTORS)) users[email] = Object.assign({}, g);
   await setDoc(doc(db, '_meta/users'), users);
   // The schema-derived facts the schema-blind rules read -- the same set saveSchema mirrors.
   await setDoc(doc(db, '_meta/schema'), SCHEMA);
   await setDoc(doc(db, '_meta/ownerTables'), { tables: BackendHelpers.ownerTablesOf(SCHEMA) });
   await setDoc(doc(db, '_meta/ownerWritable'), BackendHelpers.ownerWritableOf(SCHEMA));
+  await setDoc(doc(db, '_meta/stamped'), BackendHelpers.stampedOf(SCHEMA));
   await setDoc(doc(db, '_meta/pageAccess'), BackendHelpers.pageAccessOf(SCHEMA));
   await setDoc(doc(db, '_meta/listTables'), ListAccess.listOwnershipMap(SCHEMA.tables));
   await setDoc(doc(db, '_meta/listWritable'), BackendHelpers.userWritableListsOf(SCHEMA));
@@ -113,6 +134,7 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(db, 'tasks__active/r1'), { id: 'r1', title: 'seed' });
   await setDoc(doc(db, 'notes__active/r2'), { id: 'r2', body: 'seed' });
   await setDoc(doc(db, 'signups__active/s1'), { id: 's1', owner: 'viewer@x.com', status: 'y' });
+  await setDoc(doc(db, 'shopping__active/h1'), { id: 'h1', item: 'Bread', added_by: 'Bob' });
 });
 
 const fsDb = {};
@@ -141,16 +163,18 @@ S.setCaller('admin@x.com');
 await S.setMeta('schema', SCHEMA);
 await S.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(SCHEMA) });
 await S.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(SCHEMA));
+await S.setMeta('stamped', BackendHelpers.stampedOf(SCHEMA));
 await S.setMeta('pageAccess', BackendHelpers.pageAccessOf(SCHEMA));
 await S.setMeta('listTables', ListAccess.listOwnershipMap(SCHEMA.tables));
 await S.setMeta('listWritable', BackendHelpers.userWritableListsOf(SCHEMA));
 for (const [email, g] of Object.entries(ACTORS)) {
-  const rec = { role: g.role, user: email, tables: g.tables };
+  const rec = Object.assign({ user: email }, g);
   await S._seed('_users', email, rec);
 }
 await S._seed('tasks__active', 'r1', { id: 'r1', title: 'seed' });
 await S._seed('notes__active', 'r2', { id: 'r2', body: 'seed' });
 await S._seed('signups__active', 's1', { id: 's1', owner: 'viewer@x.com', status: 'y' });
+await S._seed('shopping__active', 'h1', { id: 'h1', item: 'Bread', added_by: 'Bob' });
 
 async function postgresVerdict(email, store, key, op, payload) {
   S.setCaller(email);
