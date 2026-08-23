@@ -634,6 +634,66 @@ describe('supabase RLS — ownerWritable column bounds', () => {
 });
 
 // ==================================================================================================
+// A STAMPED column binds the GRANT-HOLDER, which is what makes it different from ownerWritable — so
+// the cases that matter here are the ones an `rw` grant would otherwise wave through. The shopping
+// list is the shape: everybody may tick off anybody's item, and nobody may relabel who added it.
+describe('supabase RLS — stamped columns bind a table grant, not just an owner', () => {
+  const row = (over) => Object.assign(
+    { id: 'milk', item: 'Milk', shop_status: 'needed', added_by: 'Bob' }, over);
+
+  before(async () => {
+    await seed('_meta', 'stamped', { home_shopping: { col: 'added_by', list: 'members' } });
+    // `shopper@x.com` holds a WRITE grant on the table and is linked to the members value "Ann".
+    await seed('_users', 'shopper@x.com', { role: 'editor', user: 'shopper@x.com',
+      tables: { home_shopping: 'rw', plainlist: 'rw' }, rwTables: ['home_shopping', 'plainlist'],
+      identity: { members: 'Ann' } });
+    // ...and `nolink@x.com` holds the same grant with no identity at all.
+    await seed('_users', 'nolink@x.com', { role: 'editor', user: 'nolink@x.com',
+      tables: { home_shopping: 'rw' }, rwTables: ['home_shopping'] });
+    await seed('home_shopping__active', 'milk', row());
+    await seed('plainlist__active', 'free', { id: 'free', added_by: 'Bob' });
+  });
+
+  it("a grant-holder CAN edit somebody else’s row — the sharing is the point", async () => {
+    await as('shopper@x.com');
+    assert.equal(await tryUpdate('home_shopping__active', 'milk', row({ shop_status: 'bought' })), 'ok');
+  });
+  it('...but CANNOT relabel who added it, even as themselves', async () => {
+    // This is the case ownerWritable cannot express: the grant makes its bounds inert.
+    await as('shopper@x.com');
+    assert.equal(await tryUpdate('home_shopping__active', 'milk', row({ added_by: 'Ann' })), 'denied');
+  });
+  it('...nor hand it to a third party', async () => {
+    await as('shopper@x.com');
+    assert.equal(await tryUpdate('home_shopping__active', 'milk', row({ added_by: 'Cara' })), 'denied');
+  });
+  it('resending the SAME stamp is not a change', async () => {
+    await as('shopper@x.com');
+    assert.equal(await tryUpdate('home_shopping__active', 'milk', row({ shop_status: 'needed', added_by: 'Bob' })), 'ok');
+  });
+  it("a create must carry the caller’s OWN stamp", async () => {
+    await as('shopper@x.com');
+    assert.equal(await tryInsert('home_shopping__active', 'eggs', row({ id: 'eggs', item: 'Eggs', added_by: 'Ann' })), 'ok');
+  });
+  it('a create CANNOT be stamped as somebody else', async () => {
+    await as('shopper@x.com');
+    assert.equal(await tryInsert('home_shopping__active', 'bread', row({ id: 'bread', item: 'Bread', added_by: 'Bob' })), 'denied');
+  });
+  it('a caller with no identity cannot stamp one', async () => {
+    await as('nolink@x.com');
+    assert.equal(await tryInsert('home_shopping__active', 'jam', row({ id: 'jam', item: 'Jam', added_by: 'Ann' })), 'denied');
+  });
+  it('an ADMIN can still correct a wrong stamp', async () => {
+    await as('admin@x.com');
+    assert.equal(await tryUpdate('home_shopping__active', 'milk', row({ added_by: 'Cara' })), 'ok');
+  });
+  it('a table absent from the mirror is unbounded (opt-in)', async () => {
+    await as('shopper@x.com');
+    assert.equal(await tryUpdate('plainlist__active', 'free', { id: 'free', added_by: 'Whoever' }), 'ok');
+  });
+});
+
+// ==================================================================================================
 describe('supabase RLS — _meta hardening', () => {
   it('the users registry and the legacy lists doc are admin-only reads', async () => {
     await seed('_meta', 'users', {});

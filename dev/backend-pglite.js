@@ -40,6 +40,7 @@ async function createPgliteBackend(opts) {
       await S.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) });
       await S.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema));
       await S.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema));
+      await S.setMeta('stamped', BackendHelpers.stampedOf(schema));
       await S.setMeta('listTables', ListAccess.listOwnershipMap(tables));
       await S.setMeta('listWritable', BackendHelpers.userWritableListsOf(schema));
     },

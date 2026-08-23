@@ -385,6 +385,41 @@ returns boolean language sql stable security definer set search_path = public as
   end
 $$;
 
+-- A STAMPED column (`stamped: true` on a `defaultFrom: "@me"`, list-backed column) records WHO created
+-- the row. Unlike `ownerWritable`, which bounds only the owner branch, this binds a grant-holder too:
+-- on a shared table an editor may revise the row and still not relabel who added it. _meta/stamped
+-- holds { table: { col, list } }; a table absent from it is unchanged, the same opt-in contract
+-- ownerWritable has. Mirrors firestore.rules stampedOk and BackendHelpers.stampedOk.
+--   The stored row is looked up HERE rather than passed in, because an RLS WITH CHECK sees only the NEW
+-- value. A subquery reads the pre-update snapshot, which is the old row.
+--   No stored row, or an EMPTY stamp on it, is a create: the value must be the caller's own, so a row
+-- cannot be added under somebody else's name (and a row predating the column can be filled in, but only
+-- with your own). A non-empty stored stamp is an update: the value may not change at all.
+--   A caller with no identity cannot stamp one -- they have no name to write, and a table that records
+-- who did something is not one to write anonymously.
+create or replace function public.app_stamped_ok(coll text, k text, incoming jsonb)
+returns boolean language sql stable security definer set search_path = public as $$
+  with b as (
+    select value -> split_part(coll, '__', 1) as bound
+    from public.kv where store = '_meta' and key = 'stamped'
+  ), c as (
+    select (select bound ->> 'col' from b) as col, (select bound ->> 'list' from b) as list
+  ), p as (
+    select coalesce((select value ->> (select col from c)
+                     from public.kv where store = coll and key = k), '') as prev
+  )
+  select case
+    when (select bound from b) is null then true
+    when coalesce((select col from c), '') = '' then true
+    when not (incoming ? (select col from c)) then true
+    when (select prev from p) <> '' then
+      coalesce(incoming ->> (select col from c), '') = (select prev from p)
+    else coalesce(public.app_user_data() -> 'identity' ->> (select list from c), '') <> ''
+         and coalesce(incoming ->> (select col from c), '')
+             = coalesce(public.app_user_data() -> 'identity' ->> (select list from c), '')
+  end
+$$;
+
 -- CREATE gate. `val` is the incoming row value.
 create or replace function public.app_can_create(store text, key text, val jsonb)
 returns boolean language sql stable security definer set search_path = public as $$
@@ -419,11 +454,15 @@ returns boolean language sql stable security definer set search_path = public as
     when store like '\_%' then false
     else  -- data tables
       public.app_no_users() or public.app_role() = 'admin'
-      or ((val ->> 'owner') = public.app_email() and public.app_self_service(store)
-          and public.app_owner_identity_ok(store, val)
-          and public.app_owner_fields_ok(store, key, val)
-          and public.app_status_ok(val))
-      or (public.app_role() = 'editor' and public.app_has_table_write(store))
+      -- A stamped column binds BOTH remaining branches, the owner's and the grant-holder's -- which is
+      -- the whole point of it, and the one thing ownerWritable cannot say. Admins stay exempt, as they
+      -- are from every other bound here, so a wrong stamp can still be corrected.
+      or (public.app_stamped_ok(store, key, val)
+          and (((val ->> 'owner') = public.app_email() and public.app_self_service(store)
+                and public.app_owner_identity_ok(store, val)
+                and public.app_owner_fields_ok(store, key, val)
+                and public.app_status_ok(val))
+            or (public.app_role() = 'editor' and public.app_has_table_write(store))))
   end
 $$;
 

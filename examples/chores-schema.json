@@ -251,7 +251,9 @@
           "name": "added_by",
           "type": "select",
           "list": "members",
-          "sorted": true
+          "sorted": true,
+          "defaultFrom": "@me",
+          "stamped": true
         },
         {
           "name": "needed_by",

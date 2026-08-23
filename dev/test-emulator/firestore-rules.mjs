@@ -483,5 +483,42 @@ await ok('an editor with table write CAN un-archive a row',
   assertSucceeds(setDoc(doc(keeper, 'claims__active/st_active'),
     { id: 'st_active', owner: 'viewer@x.com', status: 'logged', _status: 'active' })));
 
+// --- stamped columns: a bound that binds the GRANT-HOLDER too --------------------------------------
+// `ownerWritable` is inert for an editor holding a table grant, which is right for an approval column.
+// A stamped column is the other shape: on a shared table everybody may edit, the record of WHO created
+// a row is not a decision anyone gets to revise. So the cases that matter are the ones an `rw` grant
+// would otherwise wave through.
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  await setDoc(doc(db, '_meta/stamped'), { home_shopping: { col: 'added_by', list: 'members' } });
+  // A grant-holder linked to the members value "Vic"...
+  await setDoc(doc(db, '_users/viewer@x.com'), { role: 'editor', user: 'viewer@x.com',
+    tables: { home_shopping: 'rw', plainlist: 'rw' }, rwTables: ['home_shopping', 'plainlist'],
+    identity: { members: 'Vic' } });
+  await setDoc(doc(db, 'home_shopping__active/milk'),
+    { id: 'milk', item: 'Milk', shop_status: 'needed', added_by: 'Bob' });
+  await setDoc(doc(db, 'plainlist__active/free'), { id: 'free', added_by: 'Bob' });
+});
+const shop = (over) => Object.assign({ id: 'milk', item: 'Milk', shop_status: 'needed', added_by: 'Bob' }, over);
+
+await ok('a grant-holder CAN edit a row somebody else added (the sharing is the point)',
+  assertSucceeds(setDoc(doc(viewer, 'home_shopping__active/milk'), shop({ shop_status: 'bought' }))));
+await ok('...but CANNOT relabel who added it, even as themselves',
+  assertFails(setDoc(doc(viewer, 'home_shopping__active/milk'), shop({ added_by: 'Vic' }))));
+await ok('...nor hand it to a third party',
+  assertFails(setDoc(doc(viewer, 'home_shopping__active/milk'), shop({ added_by: 'Cara' }))));
+await ok('resending the SAME stamp is not a change',
+  assertSucceeds(setDoc(doc(viewer, 'home_shopping__active/milk'), shop({ shop_status: 'needed', added_by: 'Bob' }))));
+await ok('a create must carry the stamper’s OWN value',
+  assertSucceeds(setDoc(doc(viewer, 'home_shopping__active/eggs'),
+    shop({ id: 'eggs', item: 'Eggs', added_by: 'Vic' }))));
+await ok('a create CANNOT be stamped as somebody else',
+  assertFails(setDoc(doc(viewer, 'home_shopping__active/bread'),
+    shop({ id: 'bread', item: 'Bread', added_by: 'Bob' }))));
+await ok('an ADMIN can still correct a wrong stamp',
+  assertSucceeds(setDoc(doc(admin, 'home_shopping__active/milk'), shop({ added_by: 'Cara' }))));
+await ok('a table absent from the mirror is unbounded (opt-in)',
+  assertSucceeds(setDoc(doc(viewer, 'plainlist__active/free'), { id: 'free', added_by: 'Whoever' })));
+
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);
