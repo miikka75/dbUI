@@ -6428,3 +6428,122 @@ test.describe('a boot that may not write the schema stays quiet', () => {
     expect(errs, 'the second identity produced a page error').toEqual([]);
   });
 });
+
+test.describe('runtime search', () => {
+  // The schema's `filter` decides what a view IS; this is what the person looking at it wants right
+  // now. On a list of a hundred members or four years of meetings it is worth more than any view.
+  const SCH = {
+    defaultLanguage: 'en',
+    tables: {
+      people: { reorderable: true, defaultSort: 'position', search: true, columns: [
+        { name: 'position', type: 'number', hidden: true },
+        { name: 'nimi', type: 'text' },
+        { name: 'teema', type: 'text' }
+      ] },
+      quiet: { columns: [{ name: 'nimi', type: 'text' }] }
+    },
+    views: [
+      { name: 'haku', sources: ['people'], mode: 'union', columns: ['nimi', 'teema'], search: true },
+      { name: 'vain_nimi', sources: ['people'], mode: 'union', columns: ['nimi', 'teema'], search: ['nimi'] },
+      { name: 'ei_hakua', sources: ['quiet'], mode: 'union', columns: ['nimi'] }
+    ],
+    nav: { items: [{ view: 'haku' }, { view: 'vain_nimi' }, { view: 'ei_hakua' }, { table: 'people' }] }
+  };
+
+  async function boot(page) {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    const rows = [
+      { id: 'p1', position: '1', nimi: 'Kati Tuppurainen', teema: 'Usko' },
+      { id: 'p2', position: '2', nimi: 'Säestäjä Testi', teema: 'Toivo' },
+      { id: 'p3', position: '3', nimi: 'Bob', teema: 'Usko' }
+    ];
+    for (const r of rows) await page.request.post('/api/putRow', { data: { tableId: 'people', data: r, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'quiet', data: { id: 'q1', nimi: 'Yksi' }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 10000 });
+    await viewReady(page, 'haku');
+  }
+
+  const shown = (page) => page.evaluate(() => (appInstance.sortedData || []).map((r) => r.id));
+
+  test('the box appears only where the schema asks for it', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    await expect(page.locator('[data-testid="view-search"]')).toBeVisible();
+    await page.evaluate(() => window.appInstance.selectTab('ei_hakua'));
+    await viewReady(page, 'ei_hakua');
+    await expect(page.locator('[data-testid="view-search"]')).toHaveCount(0);
+  });
+
+  test('typing narrows the rendered rows, and clearing gives them back', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    expect(await shown(page)).toEqual(['p1', 'p2', 'p3']);
+
+    await page.locator('[data-testid="view-search"] input').fill('kati');
+    await expect.poll(() => shown(page), { timeout: 5000 }).toEqual(['p1']);
+
+    // Diacritic folding, through the real box: the data is Finnish and the keyboard often is not.
+    await page.locator('[data-testid="view-search"] input').fill('saestaja');
+    await expect.poll(() => shown(page), { timeout: 5000 }).toEqual(['p2']);
+
+    await page.locator('[data-testid="view-search"] input').fill('');
+    await expect.poll(() => shown(page), { timeout: 5000 }).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  test('`search: [cols]` searches only those columns', async ({ page }) => {
+    test.setTimeout(20000);
+    await boot(page);
+    await page.evaluate(() => window.appInstance.selectTab('vain_nimi'));
+    await viewReady(page, 'vain_nimi');
+    await page.locator('[data-testid="view-search"] input').fill('usko');
+    // `usko` is in `teema`, which this view does not search — so nothing matches.
+    await expect.poll(() => shown(page), { timeout: 5000 }).toEqual([]);
+    await page.locator('[data-testid="view-search"] input').fill('bob');
+    await expect.poll(() => shown(page), { timeout: 5000 }).toEqual(['p3']);
+  });
+
+  test('the term does not follow you to the next view', async ({ page }) => {
+    // A term is about the list it was typed over. Carrying it hides rows for a reason that is no
+    // longer on screen — the box would be empty and the list short.
+    test.setTimeout(20000);
+    await boot(page);
+    await page.locator('[data-testid="view-search"] input').fill('kati');
+    await expect.poll(() => shown(page), { timeout: 5000 }).toEqual(['p1']);
+    await page.evaluate(() => window.appInstance.selectTab('vain_nimi'));
+    await viewReady(page, 'vain_nimi');
+    expect(await page.evaluate(() => appInstance.searchTerm)).toBe('');
+    expect(await shown(page)).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  test('search narrows the VIEW, never the data', async ({ page }) => {
+    // currentData is what everything that writes reads — add, archive, the mirror cascade. If search
+    // narrowed it, those would operate on a list the person happens to be looking at.
+    test.setTimeout(20000);
+    await boot(page);
+    await page.locator('[data-testid="view-search"] input').fill('kati');
+    await expect.poll(() => shown(page), { timeout: 5000 }).toEqual(['p1']);
+    expect(await page.evaluate(() => (appInstance.currentData || []).length)).toBe(3);
+    const stored = await (await page.request.post('/api/getTableData', { data: { tableId: 'people', tab: 'active' } })).json();
+    expect((stored.rows || []).length).toBe(3);
+  });
+
+  test('reordering is withdrawn while a term is active', async ({ page }) => {
+    // Reorder moves a row relative to its NEIGHBOURS in the rendered list. With rows hidden that list
+    // is not the real order, so the arrows would renumber around rows nobody can see.
+    test.setTimeout(20000);
+    await boot(page);
+    // On the bare TABLE, not the view: reordering is a property of a table's stored `position`, and
+    // isReorderable is false for a view by design.
+    await page.evaluate(() => window.appInstance.selectTab('people'));
+    await viewReady(page, 'people');
+    expect(await page.evaluate(() => appInstance.isReorderable)).toBe(true);
+    await page.locator('[data-testid="view-search"] input').fill('kati');
+    await expect.poll(() => page.evaluate(() => appInstance.isReorderable), { timeout: 5000 }).toBe(false);
+    await page.locator('[data-testid="view-search"] input').fill('');
+    await expect.poll(() => page.evaluate(() => appInstance.isReorderable), { timeout: 5000 }).toBe(true);
+  });
+});

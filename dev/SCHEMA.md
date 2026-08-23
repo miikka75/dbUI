@@ -171,6 +171,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `markdown` | string | Makes this a **document** view (see below) instead of a data grid |
 | `access` | string[] | **Doc-views only.** Restrict the page to users granted at least one of these tables (see "Restricting a page to some users" below). Omit = visible to all registered users |
 | `rotation` | object | Makes this a **rotationView** (third view kind) — a generated rotating-roster table (see below) |
+| `search` | boolean \| string[] | Offer a **runtime search box** over this view's rows: `true` = every column, an array = only those. Narrows what is rendered, never the data. See **search** below |
 | `obscureNames` | boolean \| string[] | Display-only privacy: abbreviate person names to "First L." in this view. `true` = all list/multiselect columns (or all area columns of a rotationView); an array = exactly those columns. Stored data is untouched |
 | `mineOnly` | boolean \| `{list}` | **rotationViews only.** Show a viewer only the slot column that *is* them, so one shared view is the whole matrix for an admin and a single column for a member (see "Per-person views" below). `{ "list": "<listName>" }` resolves identity through that list; `true` uses the profile display name. An object, not a bare string, so it cannot be misread as the column array `obscureNames` takes. Display-only |
 | `background` | object | Background image for this view's card (see **background images** below). Works on **every** view kind |
@@ -1099,6 +1100,43 @@ The events live in one table; responses in another that has an **`owner` column*
   must be carried on the rows — the `rosterVisibility` view option alone does not restrict reads.
 - With owner-scoped reads a non-organizer receives only their own response from the backend, so the
   rendered tally/roster reflects exactly what that user is permitted to see.
+
+## search — a box the reader types in
+
+`filter` is **authored**: it decides what a view *is*. `search` is the other kind — what the person
+looking at it wants to see right now.
+
+```json
+{ "name": "ohjelma", "sources": ["kokoukset"], "search": true }
+{ "name": "puheet",  "sources": ["kokoukset"], "search": ["jäsen", "teema"] }
+"tables": { "seurakuntalaiset": { "search": true, "columns": [ … ] } }
+```
+
+| Value | Meaning |
+|-------|---------|
+| absent / `false` | **no search box.** The default — a box on every screen is noise on the ones with six rows |
+| `true` | search every column the row carries, minus bookkeeping (`id`, `created_at`, `updated_at`, `owner`, `rosterPublic`, `_status`, `_source`) |
+| `["col", …]` | search only these. Naming a bookkeeping column here *does* search it — the skip list is a default for "everything", not a prohibition |
+
+Same boolean-or-array shape as `obscureNames`, for the same reason: `true` is the common case and
+naming columns is the exception. It sits on a **view** or on a **table** (bare-table screens read their
+config from the table definition), and applies to the **data** and **board** kinds.
+
+- **Every token must match somewhere in the row**, not all in one column — so `kati tup` finds
+  *Kati Tuppurainen*, and `kati usko` finds a row whose name and theme match separately. That is how
+  people type a name they half remember; a single substring over the whole term would find neither.
+- **Diacritics fold both ways**: `saestaja` finds *säestäjä* and `hameen` finds *Hämeen*. Without it a
+  Finnish name is findable only by someone who can type the diacritic, which on a phone keyboard is
+  most of the point of searching.
+- **It narrows the VIEW, never the data.** `currentData` is what everything that writes reads — add,
+  archive, the mirror cascade — so those never operate on the filtered list.
+- **The term is cleared when you navigate.** A term belongs to the list it was typed over; carrying it
+  would hide rows for a reason no longer on screen.
+- **Reordering is withdrawn while a term is active** (`reorderable` tables). Reorder moves a row
+  relative to its neighbours in the rendered list; with rows hidden that list is not the real order,
+  and the arrows would renumber around rows nobody can see.
+- The count beside the box is how many rows the term is hiding — a filtered list with no count looks
+  like a list that has lost rows.
 
 ## board (seventh view kind)
 

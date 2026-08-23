@@ -218,6 +218,10 @@ function createVueApp() {
       editingLang: null,
       currentTranslations: {},
       listsCache: {},
+      // The runtime search term for the open view. Cleared on navigation (see selectTab): a term is
+      // about the list in front of you, and carrying it to the next view hides rows for a reason
+      // that is no longer on screen.
+      searchTerm: '',
       viewingArchive: false,
       drawer: true,
       rail: false,
@@ -405,7 +409,10 @@ function createVueApp() {
       },
       rotationCycleForView: function() { return this.rotateEveryForView(this.currentTable).indexOf('cycle') >= 0; },
       rotationRotateEveryOverridden: function() { return !!((this.appConfig && this.appConfig.rotationRotateEvery) || {})[this.currentTable]; },
-      isReorderable: function() { var t = this.currentTable; return !!(SCHEMA[t] && SCHEMA[t].reorderable && this.isDataView && !this.viewingArchive && this.canMutateRows); },
+      // Not while a search is active. Reorder moves a row relative to its NEIGHBOURS in the rendered
+      // list, and with rows hidden that list is not the real order -- the arrows would silently
+      // renumber around rows the person cannot see.
+      isReorderable: function() { var t = this.currentTable; return !!(SCHEMA[t] && SCHEMA[t].reorderable && this.isDataView && !this.viewingArchive && this.canMutateRows && !this.searchTerm); },
       navConfig: function() { return (this.schemaData && this.schemaData.nav) || null; },
       navLayout: function() { return this.navLayoutOverride || (this.navConfig && this.navConfig.layout) || 'drawer'; },
       currentPage: function() {
@@ -715,14 +722,28 @@ function createVueApp() {
       },
       // Delegates to Rows.sortByCol -> Rows.compareValues, the one comparator shared with embed
       // defaultSort and the rsvp/pivot views, so every sortable surface orders identically.
+      // null when the view does not ask for a search box; [] means "every column the row carries".
+      searchCols: function() { return Rows.searchColumns(this.currentConfig || {}); },
+      searchable: function() { return this.searchCols !== null; },
+      // Rows the term hides. Shown beside the box, because a filtered list with no count looks like a
+      // list that has lost rows.
+      searchHidden: function() {
+        if (!this.searchable || !this.searchTerm) return 0;
+        return this.currentData.length - Rows.searchRows(this.currentData, this.searchTerm, this.searchCols).length;
+      },
       sortedData: function() {
-        if (!this.sortCol) return this.currentData.slice();
+        // Search narrows what the grid renders; it does not touch currentData, so nothing that WRITES
+        // (add, archive, the mirror cascade) sees a filtered list.
+        var rows = this.searchable && this.searchTerm
+          ? Rows.searchRows(this.currentData, this.searchTerm, this.searchCols)
+          : this.currentData;
+        if (!this.sortCol) return rows.slice();
         var _dep = this.listsCache;   // list-backed order is read through the runtime-bound cache
-        return sortByCol(this.currentData, this.sortCol, VIEWS[this.currentTable], this.sortAsc);
+        return sortByCol(rows, this.sortCol, VIEWS[this.currentTable], this.sortAsc);
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1190,6 +1211,7 @@ function createVueApp() {
         this.editingLang = null;
         this.currentRefTable = null;
         this.viewingArchive = false;
+        this.searchTerm = '';          // a term belongs to the list it was typed over
         this.pageEditing = false;
         var cfg = VIEWS[id] || SCHEMA[id] || {};
         this.sortCol = cfg.defaultSort || null;
@@ -5542,6 +5564,9 @@ function createVueApp() {
       viewName: function() { return this.name || appInstance.currentTable; },
       view: function() { return VIEWS[this.viewName] || {}; },
       cfg: function() { return this.view.board || {}; },
+      // A computed rather than t() inline: the board template is a JS string, and a nested quote
+      // there is one escape away from a silent parse break.
+      searchLabel: function() { return appInstance.t('btn.search'); },
       laneCol: function() { return this.cfg.lane; },
       canEdit: function() { return !this.embed && appInstance.canMutateRows; },
       // Moving a card writes the lane column. On a self-service table that is an owner-scoped write, so
@@ -5561,7 +5586,16 @@ function createVueApp() {
         return (d && d.value !== undefined) ? String(d.value) : '';
       },
       hasArchive: function() { return appInstance.hasArchive; },
-      rows: function() { return this.embed ? (appInstance.boardRowsFor ? appInstance.boardRowsFor(this.viewName) : []) : (appInstance.currentData || []); },
+      // A board reads currentData directly rather than through sortedData (it groups into lanes rather
+      // than sorting a list), so the runtime search has to be applied here too -- otherwise typing a
+      // name would narrow every view kind except this one.
+      rows: function() {
+        if (this.embed) return appInstance.boardRowsFor ? appInstance.boardRowsFor(this.viewName) : [];
+        var rows = appInstance.currentData || [];
+        return (appInstance.searchable && appInstance.searchTerm)
+          ? Rows.searchRows(rows, appInstance.searchTerm, appInstance.searchCols)
+          : rows;
+      },
       // A 2-D REF lane: when `board.lane` is a `ref` to a 2-column lookup, the lookup's two dimensions are the
       // group (parent col) and the lane value (child col). Lane order, grouping, and labels then come from that
       // lookup DATA — no schema laneGroups. Null for a plain select lane, so the list/laneGroups paths run.
@@ -5716,6 +5750,10 @@ function createVueApp() {
     }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="board-view">'
+      + '<div v-if="!embed && a.searchable" class="d-flex align-center pa-2 ga-2">'
+      +   '<v-text-field v-model="a.searchTerm" data-testid="view-search" density="compact" variant="outlined" hide-details clearable single-line prepend-inner-icon="mdi-magnify" :placeholder="searchLabel" style="max-width:280px"></v-text-field>'
+      +   '<span v-if="a.searchHidden" class="text-caption text-medium-emphasis" data-testid="search-hidden">{{ a.searchHidden }}</span>'
+      + '</div>'
       + '<div v-for="g in groups" :key="g.key">'
       + '  <div v-if="g.label" class="px-3 pt-3 pb-1" style="cursor:pointer;display:flex;align-items:center;gap:6px" @click="toggleGroup(g.key)" :data-testid="\'board-group-\'+g.key">'
       + '    <v-icon size="x-small">{{ collapsed[g.key] ? \'mdi-chevron-right\' : \'mdi-chevron-down\' }}</v-icon>'
