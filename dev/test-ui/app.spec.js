@@ -1,4 +1,6 @@
-const { test, expect } = require('@playwright/test');
+// `test` comes from the fixture, not from Playwright directly: it spawns this worker's own dev
+// server and points baseURL at it. See test-ui/server-fixture.js.
+const { test, expect } = require('./server-fixture');
 const SCHEMA = require('./fixture-schema.json');
 
 // Global gate: fail any test that produces an uncaught page error or console error
@@ -3580,6 +3582,10 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(layouts).toEqual({ all_items: 'table', summary_cards: 'card', quick_list: 'list' });
   });
 
+  // data view + table + calendar + rotation + pivot + rsvp + aggregate view + nested doc-view
+  // + archive-partition table
+  const EMBEDS = ['combined', 'notes', 'chore_calendar', 'crewrota', 'chore_heatmap', 'my_rsvp', 'leaderboard', 'task_doc', 'tasks'];
+
   test('the showcase page embeds every element kind (data/table/calendar/rotation/pivot/rsvp/aggregate/doc)', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -3590,13 +3596,19 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    // selectTab starts the loads this page's embeds need -- the archive partition behind
+    // {{table:tasks@archive?}} among them -- so the block list is not complete on the next tick.
+    // Reading it synchronously raced, and lost once the suite started running eight workers deep:
+    // every embed was there except the last. Poll for the list instead of assuming one tick is enough.
+    await page.evaluate(() => window.appInstance.selectTab('showcase'));
+    await expect.poll(() => page.evaluate(
+      () => (window.appInstance.pageBlocks || []).filter((b) => b.embedName).map((b) => b.embedName)
+    ), { timeout: 8000 }).toEqual(EMBEDS);
+
     const r = await page.evaluate(() => {
       const app = window.appInstance;
-      app.selectTab('showcase');
-      const embeds = app.pageBlocks.filter(b => b.embedName).map(b => b.embedName);
       return {
         kind: app.viewKind,
-        embeds,
         cal: app.isCalendarName('chore_calendar'),   // page-view routes this to <calendar-view :embed>
         rot: app.isRotationName('crewrota'),          // ...and this to <rotation-view :embed>
         piv: app.isPivotName('chore_heatmap'),
@@ -3604,8 +3616,6 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
       };
     });
     expect(r.kind).toBe('page');
-    // data view + table + calendar + rotation + pivot + rsvp + aggregate view + nested doc-view + archive-partition table
-    expect(r.embeds).toEqual(['combined', 'notes', 'chore_calendar', 'crewrota', 'chore_heatmap', 'my_rsvp', 'leaderboard', 'task_doc', 'tasks']);
     expect(r.cal).toBe(true);
     expect(r.rot).toBe(true);
     expect(r.piv).toBe(true);

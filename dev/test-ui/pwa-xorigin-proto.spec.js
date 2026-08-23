@@ -11,7 +11,9 @@
 // then capture the console + Chromium's own manifest parser. No internet dependency, no TLS needed
 // (both ends are localhost => "potentially trustworthy", so no mixed-content block).
 
-const { test, expect } = require('@playwright/test');
+// `test` comes from the fixture, not from Playwright directly: it spawns this worker's own dev
+// server and points baseURL at it. See test-ui/server-fixture.js.
+const { test, expect } = require('./server-fixture');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
