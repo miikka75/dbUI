@@ -31,6 +31,24 @@ order. Add a second language any time by importing the other pair.
 that already has something in it. It is the same bundle shape Export produces, so it layers onto the
 schema without touching it.
 
+## Trying the search box
+
+Search is opt-in per view, so most views deliberately do not offer one. The views that do, in these
+bundles:
+
+| bundle | view | setting | what to try |
+|--------|------|---------|-------------|
+| chores | `chore_mine` | `"search": true` | any word from a chore, note or status |
+| chores | `chore_board` | `"search": true` | the same, on a **board** rather than a grid |
+| chores | `shop_todo` | `"search": ["item"]` | `leipa` finds *Leipä*; a shopper's name finds nothing, because only `item` is searched |
+| bishopric | `admin_callings` | `"search": true` | a name, a calling or a word from the notes |
+| bishopric | `admin_interviews` | `"search": ["person", "topic"]` | a person or a topic, but not the responsible party |
+
+Terms fold diacritics both ways (`saestaja` finds *Säestäjä*, and vice versa) and every word has to
+match somewhere in the row, not all in one column — so `kati tup` finds *Kati Tuppurainen*. The count
+beside the box is how many rows the term is hiding. Import `chores-data.json` first if you want rows
+to search without typing them yourself.
+
 Then start entering data: Settings → User Access to register yourself, the Lists tab to fill in the
 list values the schema declares, and the table tabs for rows.
 
