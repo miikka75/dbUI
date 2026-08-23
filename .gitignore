@@ -18,8 +18,16 @@ dev/profiles.json
 dev/*.users.json
 dev/*.access-requests.json
 dev/*.profiles.json
+dev/list-users.json
+dev/*.list-users.json
 dev/data/
 dev/uploads/
+
+# The same sidecars written by tests, which run with APP_DB=:memory: (dev/test-ui/.test-<name>.json) or
+# spawn a server per test file (dev/test/.<prefix>-<pid>.<name>.json). Both were committed by accident
+# before this rule existed -- a PID in a tracked filename is a good sign nobody meant to keep it.
+dev/test-ui/.test-*.json
+dev/test/.*-[0-9]*.json
 
 # Data exports / import bundles dropped in the repo root. These carry real ROW data (the `tables` key
 # of an export bundle), and firebase.json hosts the repo root — so an un-ignored one is both one
