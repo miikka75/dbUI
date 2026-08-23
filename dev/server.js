@@ -68,6 +68,25 @@ function loadSidecars() {
 // keyed by uid. Without this mirror, kv would hold no members, app_no_users() would be true, and every
 // caller would be treated as the bootstrap admin -- RLS switched on but gating nothing, which is worse
 // than leaving it off because it looks like coverage.
+// Put the link sidecar back into the store the app reads. Only when the store is EMPTY: the sidecar is
+// a backup of a database that is normally the source of truth, so restoring over a populated store
+// would resurrect links an admin had deliberately removed.
+async function restoreListUsers() {
+  if (!backend.getListUsers || !backend.saveListUsers) return;
+  if (!fs.existsSync(LINKS_PATH)) return;
+  const cur = await backend.getListUsers().catch(() => ({}));
+  if (cur && Object.keys(cur).length) return;
+  try {
+    const saved = JSON.parse(fs.readFileSync(LINKS_PATH, 'utf8'));
+    if (!saved || !Object.keys(saved).length) return;
+    // Seed, don't save: this runs at boot with no caller set, so the RLS policies see no identity and
+    // refuse every write. mirrorUsersToPolicy has the same problem and the same answer -- restoring a
+    // sidecar is a fixture, not a user action. Silently going through saveListUsers here is how the
+    // first cut of this looked correct and restored nothing.
+    if (backend._seed) await backend._seed('_meta', 'listusers', saved);
+    else await backend.saveListUsers(saved);
+  } catch (e) { /* a corrupt sidecar is not a reason to refuse to boot */ }
+}
 async function mirrorUsersToPolicy() {
   if (!USE_PG || !backend._seed) return;
   const recs = Object.values(backend._users || {}).filter(r => r && r.user);
@@ -99,6 +118,16 @@ function saveRequests() { fs.writeFileSync(REQ_PATH, JSON.stringify(backend._acc
 // Opt-in display-name profiles. Isolated file in in-memory test mode.
 const PROF_PATH = sidecarPath('profiles');
 function saveProfiles() { fs.writeFileSync(PROF_PATH, JSON.stringify(backend._profiles || {}, null, 2)); }
+
+// User-linked list values (`setListUser`) get a sidecar too, for the same reason the registry has one:
+// they are ADMIN CONFIGURATION, not data. Without it they lived only in the database, so recreating it
+// -- a fresh PGlite dataDir, a resetData -- restored every grant from users.json and no links, which is
+// not merely "the links are gone". `setListUser` mirrors the link onto the grant doc as `identity`, and
+// that mirror comes BACK with the grant. The write layers then read `identity` and believe the member
+// is Ann while `@me` finds no link and the UI tells her she is not linked to anybody: the two halves of
+// one fact, disagreeing, with the visible half wrong.
+const LINKS_PATH = sidecarPath('list-users');
+function saveLinks(map) { fs.writeFileSync(LINKS_PATH, JSON.stringify(map || {}, null, 2)); }
 
 function parseBody(req) {
   return new Promise((resolve, reject) => {
@@ -389,7 +418,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, { schema: schemaB, tableOrder: Object.keys(tablesB), languages: languagesB, lists: listsB, data: {},
                            unrestricted: allowedB === null });
       }
-      case 'resetData': await backend.resetData(); backend._users = undefined; saveUsers(); backend._accessRequests = undefined; saveRequests(); backend._profiles = undefined; saveProfiles(); if (backend.saveListUsers) await backend.saveListUsers({}); return json(res, { ok: true });
+      case 'resetData': await backend.resetData(); backend._users = undefined; saveUsers(); backend._accessRequests = undefined; saveRequests(); backend._profiles = undefined; saveProfiles(); if (backend.saveListUsers) await backend.saveListUsers({}); saveLinks({}); return json(res, { ok: true });
       case 'getAvailableTables': return json(res, await backend.getAvailableTables());
       case 'serverInfo': return json(res, { storage: USE_PG ? 'pglite' : (USE_FS ? 'fs' : 'sqlite') });
       case 'getAvailableLanguages': return json(res, await backend.getAvailableLanguages());
@@ -524,7 +553,9 @@ const server = http.createServer(async (req, res) => {
         // Admin-only: link (email set) or unlink (email empty) a list value to a registered user.
         if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
         const cur = backend.getListUsers ? await backend.getListUsers() : {};
-        await backend.saveListUsers(LU.setLink(cur, body.listName, body.value, body.email || ''));
+        const next = LU.setLink(cur, body.listName, body.value, body.email || '');
+        await backend.saveListUsers(next);
+        saveLinks(next);
         // Mirror the link onto the member's GRANT DOC as `identity`, the way backend-supabase's
         // _mirrorIdentity does. The identity-column rule ("an owner may only ever name themselves")
         // reads it from there: neither rules language can run a query mid-evaluation, so the answer has
@@ -646,6 +677,7 @@ async function startup() {
   }
   loadSidecars();
   await mirrorUsersToPolicy();
+  await restoreListUsers();
 
   server.listen(PORT, HOST, () => {
     // The port ACTUALLY bound, not the one asked for. PORT=0 means "any free port", which is how the

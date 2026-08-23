@@ -40,11 +40,19 @@ async function createPgliteStorage(opts) {
   const q = (sql, params) => db.query(sql, params);
 
   async function applySchema() {
-    // Roles must exist before the schema's REVOKE/GRANT statements name them.
-    await db.exec('create role authenticated; create role anon;');
+    // Roles must exist before the schema's REVOKE/GRANT statements name them. Guarded, because on a
+    // PERSISTED dataDir (APP_DB=<file>) this runs again on every boot against a database that already
+    // has them -- and an unguarded CREATE ROLE made the second start fail outright with `role
+    // "authenticated" already exists`, so the persistent option could be used exactly once. The rest of
+    // the bootstrap is already idempotent (`create or replace`, and supabase-schema.sql's own
+    // `drop policy if exists`); these two statements were the only ones that were not.
+    await db.exec(`do $roles$ begin
+      if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated; end if;
+      if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon; end if;
+    end $roles$;`);
     // Supabase's own auth.jwt(), reproduced — the policies read the caller's email through it.
     await db.exec([
-      'create schema auth;',
+      'create schema if not exists auth;',
       'create or replace function auth.jwt() returns jsonb language sql stable as $shim$',
       "  select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb",
       '$shim$;',
