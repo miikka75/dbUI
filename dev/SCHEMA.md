@@ -1135,8 +1135,8 @@ config from the table definition), and applies to the **data** and **board** kin
 - **Reordering is withdrawn while a term is active** (`reorderable` tables). Reorder moves a row
   relative to its neighbours in the rendered list; with rows hidden that list is not the real order,
   and the arrows would renumber around rows nobody can see.
-- The count beside the box is how many rows the term is hiding — a filtered list with no count looks
-  like a list that has lost rows.
+- The count beside the box reads `shown / total` — a filtered list with no count looks like a list
+  that has lost rows, and a bare number gives no way to tell matches from misses.
 
 ## board (seventh view kind)
 

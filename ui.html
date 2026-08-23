@@ -254,10 +254,10 @@
                  every screen is noise on the ones with six rows. `clearable` matters: the term is the
                  only thing hiding rows, so getting rid of it must be one click. -->
             <v-text-field v-if="a.searchable" v-model="a.searchTerm" data-testid="view-search"
-                          density="compact" variant="outlined" hide-details clearable single-line
-                          prepend-inner-icon="mdi-magnify" :placeholder="a.t('btn.search')"
+                          density="compact" variant="outlined" hide-details clearable
+                          prepend-inner-icon="mdi-magnify" :label="a.t('btn.search')"
                           style="max-width:280px"></v-text-field>
-            <span v-if="a.searchHidden" class="text-caption text-medium-emphasis" data-testid="search-hidden">{{ a.searchHidden }}</span>
+            <span v-if="a.searchCount" class="text-caption text-medium-emphasis" data-testid="search-count">{{ a.searchCount }}</span>
             <v-spacer></v-spacer>
             <v-btn v-if="a.canPrintView" icon="mdi-printer" size="small" variant="text" @click="a.printView()"></v-btn>
           </div>

@@ -733,7 +733,6 @@
       {
         "defaultSort": "date",
         "name": "admin_callings",
-        "search": true,
         "columns": [
           "date",
           "status",
@@ -783,7 +782,6 @@
       },
       {
         "name": "admin_interviews",
-        "search": ["person", "topic"],
         "mode": "union",
         "sources": [
           "admin_interviews"

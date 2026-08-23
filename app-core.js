@@ -727,9 +727,14 @@ function createVueApp() {
       searchable: function() { return this.searchCols !== null; },
       // Rows the term hides. Shown beside the box, because a filtered list with no count looks like a
       // list that has lost rows.
-      searchHidden: function() {
-        if (!this.searchable || !this.searchTerm) return 0;
-        return this.currentData.length - Rows.searchRows(this.currentData, this.searchTerm, this.searchCols).length;
+      // "3 / 12" -- how many rows the term is showing, out of how many the view holds. This used to be
+      // the bare count of rows HIDDEN, which is a number with no unit: looking at a "7" beside a search
+      // box, nobody can tell whether seven rows matched or seven were hidden. Two numbers and a slash
+      // say which is which, and need no translating.
+      searchCount: function() {
+        if (!this.searchable || !this.searchTerm) return '';
+        var shown = Rows.searchRows(this.currentData, this.searchTerm, this.searchCols).length;
+        return shown + ' / ' + this.currentData.length;
       },
       sortedData: function() {
         // Search narrows what the grid renders; it does not touch currentData, so nothing that WRITES
@@ -5751,8 +5756,8 @@ function createVueApp() {
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="board-view">'
       + '<div v-if="!embed && a.searchable" class="d-flex align-center pa-2 ga-2">'
-      +   '<v-text-field v-model="a.searchTerm" data-testid="view-search" density="compact" variant="outlined" hide-details clearable single-line prepend-inner-icon="mdi-magnify" :placeholder="searchLabel" style="max-width:280px"></v-text-field>'
-      +   '<span v-if="a.searchHidden" class="text-caption text-medium-emphasis" data-testid="search-hidden">{{ a.searchHidden }}</span>'
+      +   '<v-text-field v-model="a.searchTerm" data-testid="view-search" density="compact" variant="outlined" hide-details clearable prepend-inner-icon="mdi-magnify" :label="searchLabel" style="max-width:280px"></v-text-field>'
+      +   '<span v-if="a.searchCount" class="text-caption text-medium-emphasis" data-testid="search-count">{{ a.searchCount }}</span>'
       + '</div>'
       + '<div v-for="g in groups" :key="g.key">'
       + '  <div v-if="g.label" class="px-3 pt-3 pb-1" style="cursor:pointer;display:flex;align-items:center;gap:6px" @click="toggleGroup(g.key)" :data-testid="\'board-group-\'+g.key">'
