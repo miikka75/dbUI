@@ -128,13 +128,13 @@ jobs:
     - name: Verify they are actually there (a silent CDN fallback is what this guards)
       run: test -s ../vendor/vue.js && test -s ../vendor/vuetify.js && test -s ../vendor/vuetify.css && test -s ../vendor/mdi.css
     - run: npx playwright install --with-deps chromium
-    # The runner has 4 vCPU, so the config's own min(8, cores/2) would pick 2. These tests spend most
-    # of their time waiting -- for a server to boot, for a page to render -- rather than computing, so
-    # the useful worker count is above the core count, not half it. Measured on this job: 225s at the
-    # serial default and 130s at 2.
+    # Worker count is left to the config's min(8, cores/2), which is 2 on a 4-vCPU runner. Measured on
+    # this job: 225s serial, 130s at 2 workers, 104s at 4 -- but at 4 the contention pushes the slowest
+    # tests past the suite's 8s per-test timeout (`edit cell saves value` boots the app, sleeps twice
+    # and reloads, with no setTimeout override of its own). That timeout is the hang detector; raising
+    # it to buy 26s would trade a real guard for a little wall time, so this stays at 2. PW_WORKERS
+    # overrides if a bigger runner ever makes 4 comfortable.
     - run: npx playwright test
-      env:
-        PW_WORKERS: 4
     - name: Firebase-mode E2E (app against auth/firestore/storage emulators)
       run: npm run test:e2e-firebase
     - name: Upload report on failure
