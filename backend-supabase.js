@@ -446,14 +446,19 @@ var backend_users = {
   },
   setUserRole: function(uid, role, user, tables) {
     var key = String(uid || '').toLowerCase();
-    var rec = BackendHelpers.userGrantDoc(key, role, user, tables);
-    // Source of truth = /_users/<key>; also mirror into the legacy _meta/users map so an admin importing
-    // from / exporting to a Firestore deployment stays consistent.
-    var patch = {}; patch[key] = rec;
-    return Promise.all([
-      StorageSupabase._replace('_users', key, rec),
-      StorageSupabase._merge('_meta', 'users', patch)
-    ]);
+    // READ FIRST -- see backend-firebase's setUserRole for why. `_replace` writes the whole row, so the
+    // `identity` mirror setListUser put on this grant is gone unless it is carried forward, and the RLS
+    // identity check treats a missing mirror as migration grace and permits any value.
+    return StorageSupabase.get('_users', key).then(function(prev) {
+      var rec = BackendHelpers.userGrantDoc(key, role, user, tables, (prev || {}).identity);
+      // Source of truth = /_users/<key>; also mirror into the legacy _meta/users map so an admin
+      // importing from / exporting to a Firestore deployment stays consistent.
+      var patch = {}; patch[key] = rec;
+      return Promise.all([
+        StorageSupabase._replace('_users', key, rec),
+        StorageSupabase._merge('_meta', 'users', patch)
+      ]);
+    });
   },
   removeUser: function(uid) {
     var key = String(uid || '').toLowerCase();

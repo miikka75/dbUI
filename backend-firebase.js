@@ -575,14 +575,22 @@ var backend_users = {
   },
   setUserRole: function(uid, role, user, tables) {
     var key = String(uid || '').toLowerCase();
-    var doc = BackendHelpers.userGrantDoc(key, role, user, tables);
     backend._myTablesPromise = null;   // re-granting invalidates the memoized read scope
-    // Source of truth = /_users/<key>; also mirror into the legacy _meta/users map so a rules
-    // rollback keeps working during the transition.
-    return Promise.all([
-      _db.collection('_users').doc(key).set(doc),
-      _db.collection('_meta').doc('users').set(Object.fromEntries([[key, doc]]), { merge: true })
-    ]);
+    // READ FIRST. The stored grant carries the `identity` mirror setListUser wrote onto it, and this
+    // document is where the rules look for it -- so rebuilding the grant without it un-links the
+    // member. Worse than losing the link: ownerIdentityOk treats a MISSING identity map as migration
+    // grace and permits any value, so editing somebody's table access re-opened "log the work as
+    // somebody else" until an admin happened to re-save the link.
+    return _db.collection('_users').doc(key).get().then(function(snap) {
+      var prev = (snap && snap.exists && snap.data()) || {};
+      var doc = BackendHelpers.userGrantDoc(key, role, user, tables, prev.identity);
+      // Source of truth = /_users/<key>; also mirror into the legacy _meta/users map so a rules
+      // rollback keeps working during the transition.
+      return Promise.all([
+        _db.collection('_users').doc(key).set(doc),
+        _db.collection('_meta').doc('users').set(Object.fromEntries([[key, doc]]), { merge: true })
+      ]);
+    });
   },
   removeUser: function(uid) {
     var key = String(uid || '').toLowerCase();

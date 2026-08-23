@@ -593,7 +593,10 @@ const server = http.createServer(async (req, res) => {
         const mine = userRecord();
         return json(res, mine ? { role: mine.role, tables: mine.tables || 'all' } : { registered: false });
       }
-      case 'setUserRole': { if (!backend._users) backend._users = {}; backend._users[body.uid] = BackendHelpers.userGrantDoc(body.uid, body.role, body.user || '', body.tables); saveUsers(); return json(res, { ok: true }); }
+      // The stored grant carries the `identity` mirror setListUser put there. Rebuilding it without
+      // that mirror silently un-links the member -- and the identity rule goes PERMISSIVE when it is
+      // missing, so an admin adjusting a grant would re-open "log a chore as somebody else".
+      case 'setUserRole': { if (!backend._users) backend._users = {}; var _prevGrant = backend._users[body.uid] || {}; backend._users[body.uid] = BackendHelpers.userGrantDoc(body.uid, body.role, body.user || '', body.tables, _prevGrant.identity); saveUsers(); return json(res, { ok: true }); }
       case 'removeUser': { if (backend._users) delete backend._users[body.uid]; saveUsers(); return json(res, { ok: true }); }
       case 'requestAccess': {
         if (!backend._accessRequests) backend._accessRequests = {};
