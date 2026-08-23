@@ -9,7 +9,21 @@
 // This is the only end-to-end coverage of the Firebase adapter + security rules + loader working
 // together: bootstrap-admin registration, schema/data round-trips through Firestore, the Storage
 // upload path through the cross-service registration gate, and the restricted-viewer _pages fix.
-const { test, expect } = require('@playwright/test');
+// `test` comes from the fixture, not from Playwright directly: it spawns this worker's own dev
+// server and points baseURL at it. See test-ui/server-fixture.js.
+const { test, expect } = require('./server-fixture');
+
+// This file opts OUT of the suite-wide fullyParallel.
+//
+// Every other spec gets its own dev server and its own :memory: database from the fixture, so a reset
+// in one test cannot touch another's rows. These tests cannot: there is ONE Firebase emulator, and the
+// beforeEach below resets it by deleting every document and every account in the project. Run in
+// parallel, that wipe lands in the middle of a sibling test -- which is exactly what it did, as a
+// PERMISSION_DENIED from a test whose bootstrap admin had just been deleted out from under it.
+//
+// `default` rather than `serial`: the tests should run in order in one worker, but a failure in one
+// is not a reason to skip the rest.
+test.describe.configure({ mode: 'default' });
 
 const PROJECT = 'demo-app';
 const FS = 'http://127.0.0.1:8080';

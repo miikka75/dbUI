@@ -648,7 +648,11 @@ async function startup() {
   await mirrorUsersToPolicy();
 
   server.listen(PORT, HOST, () => {
-    console.log('Local dev server: http://' + HOST + ':' + PORT + (_loopback ? '' : '  [INSECURE: unauthenticated, exposed off-host]'));
+    // The port ACTUALLY bound, not the one asked for. PORT=0 means "any free port", which is how the
+    // E2E harness gives each Playwright worker its own server without picking numbers that a stale
+    // process might already hold; it reads the port back off this line.
+    const bound = server.address().port;
+    console.log('Local dev server: http://' + HOST + ':' + bound + (_loopback ? '' : '  [INSECURE: unauthenticated, exposed off-host]'));
     // Print the database ACTUALLY in use, not the default: with APP_DB set this line was still claiming
     // dev/local.db, which is the one thing you check when you are running an isolated instance on purpose.
       if (!USE_PG) {

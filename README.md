@@ -66,7 +66,7 @@ separate database, and its user registry / requests / profiles follow it as
 
 ```bash
 APP_DB=chores-demo.db PORT=3200 node server.js     # own DB + own sidecars, dev/local.db untouched
-APP_DB=:memory: PORT=3100 node server.js           # throwaway (what the E2E suite uses)
+APP_DB=:memory: PORT=0    node server.js           # throwaway; PORT=0 = any free port, printed on boot
 ```
 
 The startup banner prints the database actually in use, so you can confirm which one you are on. To
@@ -257,7 +257,7 @@ Firebase-mode origins with multi-database wildcards, hash-allowed inline boot sc
 loopback entries so local dev + the Firebase emulators keep working.
 
 - **Enforced in every E2E run**: the dev server sends the policy as an enforcing header under
-  `CSP=1` (the Playwright config sets it), so CI proves the app works under the policy.
+  `CSP=1` (the E2E harness sets it on every worker's server), so CI proves the app works under the policy.
 - **Production (Firebase Hosting)**: `firebase.json` currently sends it as
   **`Content-Security-Policy-Report-Only`** — deploy, watch DevTools/violation reports across your
   real flows (especially Google sign-in) for a few days, then rename the header key to

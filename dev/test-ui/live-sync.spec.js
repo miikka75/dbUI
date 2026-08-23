@@ -1,4 +1,6 @@
-const { test, expect } = require('@playwright/test');
+// `test` comes from the fixture, not from Playwright directly: it spawns this worker's own dev
+// server and points baseURL at it. See test-ui/server-fixture.js.
+const { test, expect } = require('./server-fixture');
 const SCHEMA = require('./fixture-schema.json');
 
 // The end-to-end claim of live sync, tested the only way it can honestly be tested: TWO clients.
