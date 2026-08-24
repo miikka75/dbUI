@@ -17,7 +17,11 @@ nav     ← navigation tree + layout, references views/tables by name
 
 ## icons + title
 ```json
-{ "icons": { "favicon": "./examples/chores-favicon.svg" } }
+{ "icons": {
+    "favicon":    "./examples/chores-favicon.svg",
+    "appleTouch": "./examples/chores-icon-512.png",
+    "png512":     "./examples/chores-icon-512.png"
+} }
 ```
 `icons` brands the browser tab and the installed app **per database**, so one deployment serving
 several schemas doesn't show the same icon for all of them. Every field is optional and every
@@ -43,6 +47,14 @@ any other schema having to opt out:
 - A favicon that 404s fails **silently** — browsers show the default and say nothing. If you point at
   a file, check it is actually served; `dev/test-ui/example-icons.spec.js` does exactly that for the
   bundled examples.
+- **Set `png512` too, or the installed app wears somebody else's mark.** `favicon` brands the tab;
+  the home-screen icon comes from `png512`, and its default is the bundled `./icon-512.png`. That
+  default is a beehive — right for the bishopric schema it was drawn for, wrong for anything else, and
+  invisible until somebody installs the app.
+- **The install icon must be a real PNG**, square and ≥144px: the manifest declares `image/png`, and a
+  launcher handed an SVG shows nothing. `node dev/make-icon-png.mjs <in.svg> <out.png> 512` renders one
+  from the favicon using the Chromium the E2E suite already ships — full-bleed and inset to the inner
+  80%, because the manifest declares `purpose: "any maskable"` and a round launcher crops to that.
 
 > **`icon` (singular) does nothing.** An older shape documented here set a single value for all three
 > roles; the app reads `icons` and ignores `icon`, and `app.spec.js` pins that. A schema still carrying

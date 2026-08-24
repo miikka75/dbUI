@@ -1,6 +1,8 @@
 {
   "icons": {
-    "favicon": "./examples/chores-favicon.svg"
+    "favicon": "./examples/chores-favicon.svg",
+    "appleTouch": "./examples/chores-icon-512.png",
+    "png512": "./examples/chores-icon-512.png"
   },
   "theme": {
     "light": {
