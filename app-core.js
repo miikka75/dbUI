@@ -2609,7 +2609,34 @@ function createVueApp() {
             || !this.ownerRowWritable(item, st)     // out of its editable state -> frozen
             || !this.ownerCanWrite(st, col);
         }
-        return this.viewReadonly(ownerId || this.currentTable);
+        return this.cellGrantReadonly(ownerId || this.currentTable, item, col);
+      },
+      // The view-level reasons a cell cannot be edited, MINUS the mirror-cluster grant rule.
+      //
+      // viewReadonly() answers for the ROW CONTROLS (add/delete/archive). Those fan out across the whole
+      // mirror cluster — deleting a meeting deletes its music row — so demanding write on every table in
+      // the cluster is right for them. A cell edit does not fan out: propagateMirror writes a mirror
+      // table only when a MIRRORED column's value actually changes, and the mirrored columns are already
+      // read-only in a detail (isReadonlyCell). Editing `accompanist` on a detail therefore writes that
+      // detail and nothing else — exactly what firestore.rules permits, since hasTableWrite() asks about
+      // one table.
+      //
+      // Applying the cluster rule here refused writes the server allows. Because withMirrors() is a
+      // transitive closure in both directions, a grant on one detail pulled in the master AND every
+      // sibling detail, and `.every()` meant one missing table greyed out the entire grid — so "may edit
+      // the music" was not grantable without also handing over write on the meetings table.
+      cellGrantReadonly: function(id, item, col) {
+        var v = VIEWS[id], cfg = v || SCHEMA[id] || {};
+        if (!!cfg.readonly || this.currentUserRole === 'viewer' || !!(v && v.groupBy && v.collect)) return true;
+        var writable = this.userWritableTables;
+        if (!writable) return false;                        // admin / unrestricted
+        // Which table this particular cell belongs to — a view can draw columns from several, and a
+        // grant on one of them should not open the others.
+        var table = this.tableForCol(id, item, col) || this.getSource(item, id);
+        // Nothing to attribute the cell to: keep the view-wide answer rather than guess in the open
+        // direction. This is the branch a sourceless view (calendar/pivot/doc) lands in.
+        if (!table || !SCHEMA[table]) return this.viewReadonly(id);
+        return writable.indexOf(table) < 0;
       },
       // A table a restricted member may self-serve: it has an owner column, they have no grant on it, and
       // it isn't part of a mirror cluster (adds fan out across the cluster -> keep self-service to simple

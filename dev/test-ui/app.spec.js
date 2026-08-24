@@ -3831,9 +3831,18 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
     expect(r.writes).toEqual([false, true]);       // ...but only 'rw' is writable
     expect(r.notes).toEqual({ readonly: true, mutate: false, cell: true });
     expect(r.tickets).toEqual({ readonly: false, mutate: true, cell: false });
-    // A write fans out across the whole mirror cluster, so one 'r' member closes the lot: tasks is
-    // granted rw but syncs date/title from notes, which is read-only.
-    expect(r.mirroredTasks).toEqual({ readonly: true, mutate: false, cell: true });
+    // The cluster rule holds for the ROW CONTROLS: add/delete/archive fan out across every table that
+    // shares the row, so one 'r' member closes the lot — tasks is granted rw but syncs date/title from
+    // notes, which is read-only. Hence readonly/mutate below.
+    //
+    // A CELL edit does not fan out, so it is judged on its own table. `status` is not one of the
+    // mirrored columns, and propagateMirror writes a mirror table only when a mirrored value actually
+    // changes — so this edit touches `tasks` alone, which the member holds rw on, and which
+    // firestore.rules would accept (hasTableWrite asks about one table). This used to be `cell: true`,
+    // which refused a write the server allowed and made "may edit the detail" ungrantable without also
+    // granting the master. The mirrored columns stay read-only via isReadonlyCell, so nothing here
+    // reaches `notes`.
+    expect(r.mirroredTasks).toEqual({ readonly: true, mutate: false, cell: false });
     expect(r.selfServeReadOnlyOwnerTable).toBe(true);
     expect(r.selfServeWritableTable).toBe(false);
   });
