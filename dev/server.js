@@ -4,6 +4,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 // Per-list access model — shared module (also loaded by the browser app + backend-local), no more copies.
 const { filterLists } = require('../list-access');
 const AccessFeatures = require('../access-features');
@@ -51,7 +52,18 @@ const CSP_POLICY = process.env.CSP === '1' ? (() => {
 // now derives its own sidecars (chores-demo.db -> chores-demo.users.json). Defaults and the in-memory
 // test paths are unchanged.
 function sidecarPath(name) {
-  if (APP_DB === ':memory:') return path.join(__dirname, 'test-ui', '.test-' + name + '.json');
+  // An in-memory database is a THROWAWAY instance, so its sidecars must be throwaway too -- and unique
+  // per process. They used to share one fixed path, which quietly undid the isolation the :memory: DB
+  // exists to provide: every Playwright worker and every unit test that spawns a server wrote the same
+  // registry file, and each new server LOADED whatever the last one left there.
+  //
+  // That is not a tidiness problem. A leaked user makes app_no_users() false, which ends bootstrap --
+  // so the next suite's own admin is an unregistered stranger, its saveSchema is refused by the
+  // policies, and the _meta mirrors those policies read are never written. The visible symptom was an
+  // intermittently PERMISSIVE identity check, because a missing ownerWritable mirror means "no bound".
+  //
+  // In the OS temp dir rather than the repo: nothing to gitignore, nothing to accidentally commit.
+  if (APP_DB === ':memory:') return path.join(os.tmpdir(), 'dbui-test-' + process.pid + '-' + name + '.json');
   if (DB_PATH) return DB_PATH.replace(/\.db$/i, '') + '.' + name + '.json';
   return path.join(__dirname, name + '.json');
 }

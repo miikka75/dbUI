@@ -52,11 +52,19 @@ describe('dev server — editing a grant preserves the identity link', () => {
   it('keeps the mirror, so the member cannot suddenly act as somebody else', async () => {
     const { base } = await startServer();
     const api = (r, b, u) => call(base, r, b, u);
-    await api('saveSchema', { schema: SCHEMA });
-    await api('initSchema', { schema: SCHEMA.tables });
-    await api('setUserRole', { uid: 'admin@dev', role: 'admin', user: 'admin@dev', tables: 'all' });
-    await api('setUserRole', { uid: 'ann@dev', role: 'editor', user: 'ann@dev', tables: { chore_log: 'r' } });
-    await api('setListUser', { listName: 'members', value: 'Ann', email: 'ann@dev' });
+    // Every step of the arrangement is checked. A REFUSED saveSchema leaves the policy layer without its
+    // ownerWritable mirror, and a missing mirror reads as "this table has no bound" -- so the gate under
+    // test goes permissive and the failure looks like a bug in the feature rather than in the setup.
+    const ok = async (route, body, user) => {
+      const r = await api(route, body, user);
+      assert.ok(r.ok, route + ' was refused during setup: ' + JSON.stringify(r.body));
+      return r;
+    };
+    await ok('saveSchema', { schema: SCHEMA });
+    await ok('initSchema', { schema: SCHEMA.tables });
+    await ok('setUserRole', { uid: 'admin@dev', role: 'admin', user: 'admin@dev', tables: 'all' });
+    await ok('setUserRole', { uid: 'ann@dev', role: 'editor', user: 'ann@dev', tables: { chore_log: 'r' } });
+    await ok('setListUser', { listName: 'members', value: 'Ann', email: 'ann@dev' });
 
     const linked = (await api('getUsers')).body['ann@dev'];
     assert.deepEqual(linked.identity, { members: 'Ann' }, 'the link should mirror onto the grant');
