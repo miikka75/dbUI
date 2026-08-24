@@ -682,6 +682,19 @@ async function startup() {
   await mirrorUsersToPolicy();
   await restoreListUsers();
 
+  // Node closes an idle keep-alive connection after 5s by default, and a browser holds its pooled
+  // connections open far longer than that. When the close and the next request cross, the client sees
+  // the socket go away mid-flight -- a bare `Failed to fetch` with no server-side trace, because from
+  // the server's side nothing went wrong.
+  //
+  // Harmless when a page is chatty. Not harmless when eight Playwright workers each drive their own
+  // WebAssembly-Postgres server: a worker's browser can easily sit idle past five seconds waiting on a
+  // busy backend, and the reconnect race then surfaces as a boot that never finished, on whichever test
+  // happened to be running. Give the server the longer timeout, which is the usual advice for anything
+  // sitting behind a client that pools connections.
+  server.keepAliveTimeout = 72000;
+  server.headersTimeout = 75000;      // must exceed keepAliveTimeout, or it re-introduces the same cut
+
   server.listen(PORT, HOST, () => {
     // The port ACTUALLY bound, not the one asked for. PORT=0 means "any free port", which is how the
     // E2E harness gives each Playwright worker its own server without picking numbers that a stale
