@@ -64,9 +64,45 @@ describe('deploy config — hosting ignore list', () => {
     });
   }
 
+  // Executables are not merely unwanted here, they are REFUSED: Firebase Hosting rejects the whole
+  // deploy on the Spark plan rather than skipping the file --
+  //   "Executable files are forbidden on the Spark billing plan"
+  // -- so a .bat left in the working tree fails the deploy of everything else with it. The list named
+  // `update-vendor.sh` specifically, which covered the one that existed and nothing a contributor
+  // might add next.
+  for (const f of [
+    'update-vendor.sh',
+    'make-supabase-pr.bat',
+    'split-supabase-commits.bat',
+    'deploy.cmd',
+    'Setup.exe',
+    'tools/build.ps1',
+    'scripts/migrate-schema-db.js'
+  ]) {
+    it(`excludes the executable/tooling file ${f}`, () => {
+      assert.ok(isIgnored(f), `${f} would be sent to Hosting — on Spark that FAILS THE WHOLE DEPLOY`);
+    });
+  }
+
+  // Dot-DIRECTORIES, which `**/.*` does not reach: it matches a path whose last segment starts with a
+  // dot, and `.claude/settings.local.json` does not. Editor and tooling directories sitting in the repo
+  // root were therefore being served -- local settings, caches, whatever a contributor's tooling keeps.
+  for (const f of [
+    '.claude/settings.local.json',
+    '.claude/launch.json',
+    '.firebase/hosting..cache',
+    '.vscode/settings.json',
+    'sub/.idea/workspace.xml'
+  ]) {
+    it(`excludes ${f} (inside a dot-directory)`, () => {
+      assert.ok(isIgnored(f), `${f} would be served publicly — a dot-directory is not covered by "**/.*"`);
+    });
+  }
+
   // The mirror image: an over-broad "*.json" would silently break boot, since these are fetched at
   // runtime (index.html appUrl + initFirebase/initSupabase) rather than bundled.
-  for (const f of ['manifest.json', 'firebase-config.json', 'supabase-config.json']) {
+  for (const f of ['manifest.json', 'firebase-config.json', 'supabase-config.json',
+                   'app-core.js', 'sw.js', 'index.html', 'vendor/vue.js', 'icon-512.png']) {
     it(`still serves ${f} (the app fetches it at runtime)`, () => {
       assert.ok(!isIgnored(f), `${f} is fetched at boot and must stay deployable`);
     });
