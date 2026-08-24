@@ -7,7 +7,7 @@ a **pivot** (`pivot` — a cross-tab grid), or an **rsvp** (`rsvp` — a self-se
 All of these are documented below.
 
 ```
-icon    ← optional favicon (data URI, relative path, or URL — cached as base64 on first load)
+icons   ← optional per-database favicon / apple-touch / install icon (see ## icons)
 title   ← optional document/tab title
 theme   ← optional brand palette (light/dark colors — see ## theme)
 views   ← flat, named components: data views, or views with markdown (documents)
@@ -15,17 +15,39 @@ tables  ← raw data + partitions
 nav     ← navigation tree + layout, references views/tables by name
 ```
 
-## icon + title
+## icons + title
 ```json
-{ "icon": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>📋</text></svg>" }
+{ "icons": { "favicon": "./examples/chores-favicon.svg" } }
 ```
-- **`icon`** — sets the browser favicon **and** the PWA install icon. Accepts:
-  - `data:` URI (inline SVG/PNG — recommended, no network)
-  - Relative path (`"./favicon.png"`)
-  - External URL (`"https://..."`) — fetched once, cached as base64 in localStorage; re-fetched when the URL changes
-  - Also drives the **PWA manifest icon** (remote icons are embedded as the cached base64) and
-    the **apple-touch-icon** for iOS (PNG used directly; SVG rasterized to a 180×180 PNG via
-    canvas). See the README "Installable (PWA)" section.
+`icons` brands the browser tab and the installed app **per database**, so one deployment serving
+several schemas doesn't show the same icon for all of them. Every field is optional and every
+omitted field falls back to the bundled default, which is what lets a schema brand itself without
+any other schema having to opt out:
+
+| field | drives | default |
+|-------|--------|---------|
+| `favicon` | `<link rel="icon">` — the browser tab | `./favicon.svg` |
+| `appleTouch` | `<link rel="apple-touch-icon">` — the iOS home-screen tile | `./icon-512.png` |
+| `png512` | the PWA install/splash icon in the runtime manifest. **Must be a PNG**, square, ≥144px | `./icon-512.png` |
+| `png512Sizes` | declares a differently-sized `png512` accurately (avoids a DevTools size-mismatch warning) | `"512x512"` |
+
+- **Relative paths resolve against the deployment root**, so a file shipped alongside the schema works:
+  `examples/chores-schema.json` points at `./examples/chores-favicon.svg`, and Hosting serves the repo
+  root. Absolute URLs are allowed too and may be cross-origin, which is what makes this usable when
+  Firebase is the database and the app is hosted elsewhere.
+- **Prefer a drawn SVG to an emoji.** An emoji favicon is rendered by whatever font the operating
+  system happens to have, so the same schema looks different on every platform — and the
+  apple-touch path rasterizes through canvas, where a missing glyph yields a blank tile.
+- **Keep it self-contained.** An icon that pulls in another origin is subject to the CSP and makes
+  your tab depend on somebody else's uptime.
+- A favicon that 404s fails **silently** — browsers show the default and say nothing. If you point at
+  a file, check it is actually served; `dev/test-ui/example-icons.spec.js` does exactly that for the
+  bundled examples.
+
+> **`icon` (singular) does nothing.** An older shape documented here set a single value for all three
+> roles; the app reads `icons` and ignores `icon`, and `app.spec.js` pins that. A schema still carrying
+> the old key silently gets the defaults.
+
 - **Browser tab title** — derived from the `app.title` translation key (set in Languages tab), not a schema field. The tab title updates reactively when the translation changes.
 
 `nav` is **required** and defines the sidebar (there is no auto-derived nav). `views` and
