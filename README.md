@@ -89,6 +89,31 @@ First user is auto-registered as admin (bootstrap mode). After that, only regist
 > in becomes the admin — so never share the app URL or a pre-configured link before you have signed
 > in once. Anyone holding the link during the bootstrap window could claim the admin role.
 
+### Deploying (and why plain `firebase deploy` may fail)
+
+```bash
+firebase deploy --only firestore:rules          # rules FIRST — see the note below
+firebase deploy --only hosting,storage          # `storage` here is storage.rules
+```
+
+Rules before the app, always: the app is what starts making requests, so a deploy that ships new code
+against yesterday's rules is a window where the two disagree.
+
+**On the free (Spark) plan, deploy with `--only`.** A bare `firebase deploy` also deploys
+`functions/`, and the CSP report collector there declares a Secret Manager secret — both Cloud
+Functions and Secret Manager need the **Blaze** plan, so the deploy dies before it gets to your app:
+
+```
+Error: Request to https://secretmanager.googleapis.com/v1/.../DBUI_CSP_REPORT_TOKEN
+had HTTP Error: 403, This API method requires billing to be enabled.
+```
+
+Nothing about the app needs that function. The `/csp-report` Hosting rewrite pointing at a function
+that was never deployed is not a deploy error and not a runtime one either — the path 404s, and a
+browser drops an undeliverable CSP report silently. The only thing you lose is the aggregated
+violation counts described under [Violation reports](#violation-reports); the Report-Only header
+still works, so you can still watch violations in DevTools while you soak the policy.
+
 Firebase config is stored in browser localStorage. Share a pre-configured URL to onboard users without manual setup.
 
 ### Firefox: "Sign in with Google" fails (third-party cookies)
@@ -279,7 +304,9 @@ The production (Report-Only) header carries `report-uri /csp-report` (relative �
 The `/csp-report` Hosting rewrite (`firebase.json`) routes reports to the `cspReport` Cloud
 Function (`functions/`), which aggregates them into the client-inaccessible `_csp_reports`
 Firestore collection (one doc per distinct violation, counted at write time). Requires the
-**Blaze plan** (Cloud Functions). Setup:
+**Blaze plan** (Cloud Functions) — and note that this is what makes a bare `firebase deploy` fail on
+the free plan, since it tries to deploy `functions/` too. See
+[Deploying](#deploying-and-why-plain-firebase-deploy-may-fail). Setup:
 
 ```bash
 firebase functions:secrets:set DBUI_CSP_REPORT_TOKEN   # long random string; gates the read endpoint
