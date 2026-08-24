@@ -39,7 +39,7 @@ several of them gives each its own identity rather than showing the app default 
 | bundle | favicon / install icon | drawn from |
 |--------|------------------------|------------|
 | bishopric | `bishopric-favicon.svg`, `bishopric-icon-512.png` | its beehive, which used to sit at the repo root and therefore branded *every* database |
-| chores | `chores-favicon.svg`, `chores-icon-512.png` | MDI `home-plus-outline` with its plus replaced by the tick from `file-check-outline` — a household, and a job done |
+| chores | `chores-favicon.svg`, `chores-icon-512.png` | MDI `home-plus` with its plus replaced by the tick from `file-check-outline` — a household, and a job done. The filled house carries a circular cutout for the badge, which is what keeps the tick legible against a transparent background |
 
 The MDI paths are the real outlines taken from `@mdi/svg` at **7.4.47**, the version `vendor/mdi.css`
 pins, because MDI is vendored here as a webfont and a font carries no path data. The tick is fitted to
