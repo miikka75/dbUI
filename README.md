@@ -267,9 +267,33 @@ deploy root** (next to `index.html`); the host must serve them with correct imag
 | `favicon.svg` | any | browser-tab favicon (`<link rel="icon">`) |
 | `icon-512.png` | 512×512 | apple-touch-icon + manifest install / splash / maskable icon |
 
-To customize the app's icon for a deployment, **replace these two files** (the repo ships
-defaults rasterized from `favicon.svg`, e.g. via `convert -background white -density 512
-favicon.svg -resize 512x512 icon-512.png`).
+These two are the **generic dbUI mark** — Material Design Icons' `database-eye`, on a **transparent**
+background — so an unbranded database looks like the app rather than like whichever schema happened to
+ship its artwork at the repo root. (It used to be a beehive, which is bishopric iconography; that now
+travels with `examples/bishopric-schema.json`, where it belongs.) The path is taken from `@mdi/svg` at
+the version `vendor/mdi.css` pins, so it is the same icon set the app already draws with.
+
+> The bundled icons — the default and both examples — are **transparent**, which is right for a tab
+> and for the `any` manifest purpose. The manifest also declares `maskable`, and an Android launcher
+> applying an adaptive-icon mask composites a transparent icon onto a background it picks, so the
+> installed tile can look different from device to device. A schema that wants its installed icon to
+> look identical everywhere should point `png512` at a full-bleed **opaque** PNG of its own; nothing
+> in the app requires it.
+
+To brand a deployment, prefer **`schema.icons`** above: it is per-database, so one deployment serving
+several schemas gives each its own tab and home-screen icon. Replacing these two files instead changes
+the default for every unbranded database at once, which is the right tool only when the whole
+deployment is one product.
+
+Either way the install icon must be a real PNG, square and ≥144px. Regenerate one from any SVG with
+the Chromium the E2E suite already ships:
+
+```bash
+node dev/make-icon-png.mjs favicon.svg icon-512.png 512
+```
+
+It renders full-bleed and inset to the inner 80%, because the manifest declares
+`purpose: "any maskable"` and a round launcher crops to that.
 
 - **Requirements**: install needs HTTPS (Firebase Hosting provides it) and a valid manifest;
   the icon files must be reachable and served as `image/*`.

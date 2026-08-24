@@ -1,5 +1,10 @@
 {
   "schema": {
+    "icons": {
+      "favicon": "./examples/bishopric-favicon.svg",
+      "appleTouch": "./examples/bishopric-icon-512.png",
+      "png512": "./examples/bishopric-icon-512.png"
+    },
     "nav": {
       "items": [
         {

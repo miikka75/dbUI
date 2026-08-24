@@ -1,5 +1,9 @@
 {
-  "icon": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>🧹</text></svg>",
+  "icons": {
+    "favicon": "./examples/chores-favicon.svg",
+    "appleTouch": "./examples/chores-icon-512.png",
+    "png512": "./examples/chores-icon-512.png"
+  },
   "theme": {
     "light": {
       "primary": "#00695c",
