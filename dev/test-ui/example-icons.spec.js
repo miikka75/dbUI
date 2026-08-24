@@ -131,6 +131,33 @@ test('a schema with NO icons gets the generic app default', async ({ page }) => 
   const dflt = await (await page.request.get('/favicon.svg')).text();
   const bishop = await (await page.request.get('/examples/bishopric-favicon.svg')).text();
   expect(dflt, 'the app default is byte-identical to a schema-specific icon').not.toBe(bishop);
+
+  // It is the MDI `database-eye` glyph, taken from @mdi/svg at the version vendor/mdi.css pins --
+  // the real icon rather than a redrawing of it. A distinctive slice of the official path, so a
+  // silent substitution shows up here.
+  expect(dflt).toMatch(/viewBox="0 0 24 24"/);
+  expect(dflt, 'the default is no longer the MDI database-eye path').toContain('M4 12V9C4 11.2 7.6 13 12 13S20 11.2 20 9');
+
+  // TRANSPARENT, and checked by sampling pixels: the PNG header says RGBA whether or not anything is
+  // actually see-through, so the colour-type byte proves nothing on its own.
+  const alpha = await page.evaluate(async () => {
+    const img = new Image();
+    img.src = '/icon-512.png';
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const at = (x, y) => ctx.getImageData(x, y, 1, 1).data[3];
+    const corners = [at(2, 2), at(img.width - 3, 2), at(2, img.height - 3), at(img.width - 3, img.height - 3)];
+    // Somewhere in the middle must be painted, or "transparent" would be satisfied by an empty file.
+    const all = ctx.getImageData(0, 0, img.width, img.height).data;
+    let opaque = 0;
+    for (let i = 3; i < all.length; i += 4) if (all[i] > 200) opaque++;
+    return { corners, opaque, total: img.width * img.height };
+  });
+  expect(alpha.corners, 'the default install icon has an opaque background').toEqual([0, 0, 0, 0]);
+  expect(alpha.opaque, 'the default install icon is blank').toBeGreaterThan(alpha.total * 0.05);
 });
 
 test('switching databases re-points the icon rather than keeping the last one', async ({ page }) => {

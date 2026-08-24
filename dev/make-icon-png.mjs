@@ -25,34 +25,44 @@ if (!svgPath || !outPath) {
 const size = Number(sizeArg || 512);
 const svg = readFileSync(svgPath, 'utf8');
 
-// Two changes for a MASKABLE icon, which is what the manifest declares:
+// The source SVG comes in two shapes, and they want opposite treatment.
 //
-//  - the rounded corner goes. The favicon is read at 16px in a tab, where rounding helps; the install
-//    icon is cropped by the launcher, where a rounded rect just loses its corners and looks broken.
-//    The background is drawn edge to edge instead.
-//  - the artwork is inset to 80% about the centre. A maskable icon's safe zone is the inner circle of
-//    80% diameter, and at full size this artwork's lower corners land exactly on that boundary -- fine
-//    on a square launcher, clipped on a round one.
+// WITH a full-bleed background rect (the branded example icons): drop the rounded corner and inset the
+// artwork to 80%. The manifest declares `purpose: "any maskable"`, so a launcher may crop to a circle
+// -- a rounded rect loses its corners, and artwork drawn to the edge loses them too.
+//
+// WITHOUT one (the app default, a bare MDI glyph): render TRANSPARENT and inset the same way. Nothing
+// is painted behind it, so the icon sits on whatever the tab or launcher provides.
 const SAFE = 0.8;
-const inset = (32 * (1 - SAFE)) / 2;
-const bgRect = svg.match(/<rect width="32" height="32"[^>]*\/>/);
-if (!bgRect) throw new Error(svgPath + ': no full-size background rect to keep full-bleed');
-const bg = bgRect[0].replace(/\srx="[\d.]+"/, '');
-const rest = svg.slice(svg.indexOf(bgRect[0]) + bgRect[0].length, svg.lastIndexOf('</svg>'));
-const fullBleed = svg.slice(0, svg.indexOf(bgRect[0]))
-  .replace(/\swidth="32"\s+height="32"/, '')
-  + bg
-  + `<g transform="translate(${inset},${inset}) scale(${SAFE})">${rest}</g>`
-  + '</svg>';
+const vb = (svg.match(/viewBox="([^"]+)"/) || [])[1];
+if (!vb) throw new Error(svgPath + ': no viewBox, so there is no way to know what to inset');
+const [, , vbW, vbH] = vb.trim().split(/[\s,]+/).map(Number);
+const inset = (vbW * (1 - SAFE)) / 2;
+
+const bgRect = svg.match(/<rect width="[\d.]+" height="[\d.]+"(?![^>]*\sx=)[^>]*\/>/);
+const transparent = !bgRect;
+const open = svg.slice(0, svg.indexOf('>') + 1).replace(/\s(width|height)="[^"]*"/g, '');
+const inner = svg.slice(svg.indexOf('>') + 1, svg.lastIndexOf('</svg>'));
+
+let body;
+if (bgRect) {
+  const bg = bgRect[0].replace(/\srx="[\d.]+"/, '');
+  const rest = inner.slice(inner.indexOf(bgRect[0]) + bgRect[0].length);
+  body = bg + `<g transform="translate(${inset},${inset}) scale(${SAFE})">${rest}</g>`;
+} else {
+  body = `<g transform="translate(${inset},${inset}) scale(${SAFE})">${inner}</g>`;
+}
+const out = open + body + '</svg>';
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: size, height: size }, deviceScaleFactor: 1 });
+void vbH;   // only the width is needed for a square inset; kept for the reader
 await page.setContent(
-  `<!doctype html><style>html,body{margin:0;padding:0;width:${size}px;height:${size}px;overflow:hidden}
-   svg{display:block;width:${size}px;height:${size}px}</style>${fullBleed}`,
+  `<!doctype html><style>html,body{margin:0;padding:0;width:${size}px;height:${size}px;overflow:hidden;background:transparent}
+   svg{display:block;width:${size}px;height:${size}px}</style>${out}`,
   { waitUntil: 'load' }
 );
-const buf = await page.screenshot({ type: 'png', omitBackground: false });
+const buf = await page.screenshot({ type: 'png', omitBackground: transparent });
 await browser.close();
 writeFileSync(outPath, buf);
-console.log(`${path.basename(outPath)}: ${size}x${size}, ${buf.length} bytes`);
+console.log(`${path.basename(outPath)}: ${size}x${size}, ${buf.length} bytes` + (transparent ? ', transparent' : ''));

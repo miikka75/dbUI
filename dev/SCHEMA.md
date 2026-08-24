@@ -48,9 +48,14 @@ any other schema having to opt out:
   a file, check it is actually served; `dev/test-ui/example-icons.spec.js` does exactly that for the
   bundled examples.
 - **Set `png512` too, or the installed app keeps the generic mark.** `favicon` brands the tab; the
-  home-screen icon comes from `png512`. Both defaults (`./favicon.svg`, `./icon-512.png`) are the
-  app's own neutral table glyph, so an unbranded database looks like dbUI rather than like whichever
-  schema happened to ship its artwork at the repo root — which is what they used to be.
+  home-screen icon comes from `png512`. Both defaults (`./favicon.svg`, `./icon-512.png`) are MDI's
+  `database-eye` on a transparent background, so an unbranded database looks like dbUI rather than like
+  whichever schema happened to ship its artwork at the repo root — which is what they used to be.
+- **A branded `png512` should be opaque and full-bleed.** The manifest declares
+  `purpose: "any maskable"`, so a launcher may crop it to a circle and will composite anything
+  transparent onto a background of its choosing. The default is transparent by design (it has no
+  business imposing a colour); a schema that wants its installed icon to look the same everywhere
+  should paint its own background, as both bundled examples do.
 - **The install icon must be a real PNG**, square and ≥144px: the manifest declares `image/png`, and a
   launcher handed an SVG shows nothing. `node dev/make-icon-png.mjs <in.svg> <out.png> 512` renders one
   from the favicon using the Chromium the E2E suite already ships — full-bleed and inset to the inner

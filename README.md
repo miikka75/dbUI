@@ -267,10 +267,16 @@ deploy root** (next to `index.html`); the host must serve them with correct imag
 | `favicon.svg` | any | browser-tab favicon (`<link rel="icon">`) |
 | `icon-512.png` | 512×512 | apple-touch-icon + manifest install / splash / maskable icon |
 
-These two are the **generic dbUI mark** — a plain table glyph — so an unbranded database looks like
-the app rather than like whichever schema happened to ship its artwork at the repo root. (It used to
-be a beehive, which is bishopric iconography; that now travels with `examples/bishopric-schema.json`,
-where it belongs.)
+These two are the **generic dbUI mark** — Material Design Icons' `database-eye`, on a **transparent**
+background — so an unbranded database looks like the app rather than like whichever schema happened to
+ship its artwork at the repo root. (It used to be a beehive, which is bishopric iconography; that now
+travels with `examples/bishopric-schema.json`, where it belongs.) The path is taken from `@mdi/svg` at
+the version `vendor/mdi.css` pins, so it is the same icon set the app already draws with.
+
+> Being transparent, the default install icon has no background of its own. The manifest declares
+> `purpose: "any maskable"`, and an Android launcher applying an adaptive-icon mask composites a
+> transparent icon onto a background it chooses. A schema that wants a predictable installed
+> appearance should set `png512` to a full-bleed opaque PNG, as both bundled examples do.
 
 To brand a deployment, prefer **`schema.icons`** above: it is per-database, so one deployment serving
 several schemas gives each its own tab and home-screen icon. Replacing these two files instead changes
