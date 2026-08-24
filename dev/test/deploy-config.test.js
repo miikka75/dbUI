@@ -7,6 +7,8 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const { execFileSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..', '..');
 
@@ -118,10 +120,70 @@ describe('deploy config — hosting ignore list', () => {
   // There are TWO publish paths for the repo root — Firebase Hosting (firebase.json `ignore`) and
   // GitHub Pages (deploy-pages.yml's `rm -f` prune) — each with its own hand-maintained denylist and
   // no reference to the other. Excluding a file from one only moves the leak to the other.
+  //
+  // This checked three glob STRINGS and called it parity, which is how the two lists drifted: the
+  // hosting side was hardened against executables and dot-directories while Pages -- which deploys on
+  // every push to main -- kept publishing them. So both are now asked about the same FILES, and the
+  // Pages side is answered by running its own prune over a copy of the repo rather than by reading it.
+  const wf = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'deploy-pages.yml'), 'utf8');
+
   it('the GitHub Pages prune refuses the same bundles as the hosting ignore list', () => {
-    const wf = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'deploy-pages.yml'), 'utf8');
     for (const p of ['drive-sync-export-*.json', '*-import.json', '*-export.json']) {
       assert.ok(wf.includes(p), `deploy-pages.yml does not prune ${p} — Pages would publish it`);
     }
+  });
+
+  // The files both paths must refuse. Named once, asked of both, so hardening one cannot silently
+  // leave the other open -- which is exactly what happened.
+  const MUST_NOT_PUBLISH = [
+    'make-supabase-pr.bat',
+    'split-supabase-commits.bat',
+    'update-vendor.sh',
+    'deploy.cmd',
+    'Setup.exe',
+    'scripts/migrate-schema-db.js',
+    '.claude/settings.local.json',
+    '.vscode/settings.json',
+    'drive-sync-export-2026-07-31.json',
+    'some-backup-export.json'
+  ];
+  // What the site needs. An exclusion list that breaks boot is the other way to get this wrong.
+  const MUST_PUBLISH = ['index.html', 'app-core.js', 'sw.js', 'manifest.json', 'favicon.svg',
+                        'icon-512.png', 'vendor/vue.js', 'examples/chores-schema.json'];
+
+  for (const f of MUST_NOT_PUBLISH) {
+    it(`hosting ignores ${f}`, () => {
+      assert.ok(isIgnored(f), `${f} would be served by Firebase Hosting`);
+    });
+  }
+  for (const f of MUST_PUBLISH) {
+    it(`hosting still serves ${f}`, () => {
+      assert.ok(!isIgnored(f), `${f} is needed at runtime and must stay deployable`);
+    });
+  }
+
+  it('the Pages prune removes every file the hosting ignore list refuses', () => {
+    // Run the workflow's OWN prune commands against a throwaway tree containing each file. Reading the
+    // YAML for substrings is what let `split-supabase-commits.bat` look like coverage while
+    // `make-supabase-pr.bat`, added later and right next to it, shipped.
+    const prune = (wf.match(/- name: Prune non-public files\r?\n\s+run: \|\r?\n([\s\S]*?)\r?\n\s+- name:/) || [])[1];
+    assert.ok(prune && prune.includes('rm '), 'could not find the prune step — this test would pass vacuously');
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dbui-pages-'));
+    for (const f of MUST_NOT_PUBLISH.concat(MUST_PUBLISH)) {
+      const full = path.join(dir, f);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, 'x');
+    }
+    const script = prune.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+      .filter((l) => !l.startsWith('#')).join('\n');
+    execFileSync('bash', ['-c', script], { cwd: dir, stdio: 'ignore' });
+
+    const left = (f) => fs.existsSync(path.join(dir, f));
+    const leaked = MUST_NOT_PUBLISH.filter(left);
+    const missing = MUST_PUBLISH.filter((f) => !left(f));
+    fs.rmSync(dir, { recursive: true, force: true });
+    assert.deepEqual(leaked, [], 'GitHub Pages would publish these');
+    assert.deepEqual(missing, [], 'the Pages prune deleted files the site needs');
   });
 });
