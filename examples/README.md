@@ -31,6 +31,26 @@ order. Add a second language any time by importing the other pair.
 that already has something in it. It is the same bundle shape Export produces, so it layers onto the
 schema without touching it.
 
+## Icons
+
+Each bundle brands its own tab and installed app through `schema.icons`, so one deployment serving
+several of them gives each its own identity rather than showing the app default everywhere.
+
+| bundle | favicon / install icon | drawn from |
+|--------|------------------------|------------|
+| bishopric | `bishopric-favicon.svg`, `bishopric-icon-512.png` | its beehive, which used to sit at the repo root and therefore branded *every* database |
+| chores | `chores-favicon.svg`, `chores-icon-512.png` | MDI `home-plus-outline` with its plus replaced by the tick from `file-check-outline` — a household, and a job done |
+
+The MDI paths are the real outlines taken from `@mdi/svg` at **7.4.47**, the version `vendor/mdi.css`
+pins, because MDI is vendored here as a webfont and a font carries no path data. The tick is fitted to
+the box the plus occupied — measured with `getBBox()`, not judged by eye.
+
+Regenerate a PNG from any of these SVGs with the Chromium the E2E suite already ships:
+
+```bash
+node dev/make-icon-png.mjs examples/chores-favicon.svg examples/chores-icon-512.png 512
+```
+
 ## Trying the search box
 
 Search is opt-in per view, so most views deliberately do not offer one. The views that do, in these

@@ -273,10 +273,12 @@ ship its artwork at the repo root. (It used to be a beehive, which is bishopric 
 travels with `examples/bishopric-schema.json`, where it belongs.) The path is taken from `@mdi/svg` at
 the version `vendor/mdi.css` pins, so it is the same icon set the app already draws with.
 
-> Being transparent, the default install icon has no background of its own. The manifest declares
-> `purpose: "any maskable"`, and an Android launcher applying an adaptive-icon mask composites a
-> transparent icon onto a background it chooses. A schema that wants a predictable installed
-> appearance should set `png512` to a full-bleed opaque PNG, as both bundled examples do.
+> The bundled icons — the default and both examples — are **transparent**, which is right for a tab
+> and for the `any` manifest purpose. The manifest also declares `maskable`, and an Android launcher
+> applying an adaptive-icon mask composites a transparent icon onto a background it picks, so the
+> installed tile can look different from device to device. A schema that wants its installed icon to
+> look identical everywhere should point `png512` at a full-bleed **opaque** PNG of its own; nothing
+> in the app requires it.
 
 To brand a deployment, prefer **`schema.icons`** above: it is per-database, so one deployment serving
 several schemas gives each its own tab and home-screen icon. Replacing these two files instead changes
