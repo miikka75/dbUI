@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 3,
   "icon": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>📋</text></svg>",
   "theme": {
     "light": { "primary": "#00695c", "secondary": "#26a69a" },
@@ -133,7 +134,8 @@
         },
         {
           "name": "people",
-          "type": "multiselect",
+          "type": "select",
+          "multiple": true,
           "list": "crew",
           "allowNew": true
         }
@@ -216,6 +218,7 @@
   "views": [
     {
       "name": "combined",
+      "kind": "data",
       "sources": [
         "tasks",
         "notes"
@@ -263,6 +266,7 @@
     },
     {
       "name": "attendance",
+      "kind": "data",
       "sources": [
         "tasks",
         "notes"
@@ -287,6 +291,7 @@
     },
     {
       "name": "report_open",
+      "kind": "data",
       "layout": "card",
       "icon": "mdi-progress-clock",
       "sources": [
@@ -313,6 +318,7 @@
     },
     {
       "name": "report_in_progress",
+      "kind": "data",
       "sources": [
         "tasks"
       ],
@@ -331,6 +337,7 @@
     },
     {
       "name": "all_items",
+      "kind": "data",
       "sources": [
         "tasks",
         "notes"
@@ -359,6 +366,7 @@
     },
     {
       "name": "open_tasks",
+      "kind": "data",
       "sources": [
         "tasks"
       ],
@@ -374,6 +382,7 @@
     },
     {
       "name": "summary_cards",
+      "kind": "data",
       "sources": [
         "tasks",
         "notes"
@@ -397,6 +406,7 @@
     },
     {
       "name": "quick_list",
+      "kind": "data",
       "sources": [
         "tasks"
       ],
@@ -409,6 +419,7 @@
     },
     {
       "name": "notes_list",
+      "kind": "data",
       "sources": [
         "notes"
       ],
@@ -421,22 +432,27 @@
     },
     {
       "name": "combined_page",
+      "kind": "page",
       "markdown": "{{t:view.combined.header}}\n\n{{view:combined}}\n\n## Attendance\n\n{{view:attendance}}\n\n## Archived tasks\n\n{{table:tasks@archive?}}\n\n## Notes\n\n{{table:notes}}\n\n{{t:view.combined.footer}}"
     },
     {
       "name": "progress_report_page",
+      "kind": "page",
       "markdown": "{{t:view.progress_report.header}}\n\n## {{t:embed.open.title}}\n\n{{view:report_open}}\n\n## {{t:embed.ip.title}}\n\n{{view:report_in_progress?}}\n\n{{t:embed.ip.attention}}\n\n{{t:view.progress_report.footer}}"
     },
     {
       "name": "showcase",
+      "kind": "page",
       "markdown": "# Showcase\n\nA single markdown page-view that embeds **every** kind of element — data view, table, calendar, rotation, pivot, RSVP, aggregate, a nested doc-view, and an archive partition — to demonstrate that any view can be composed into one.\n\n## Data view (union + inline embeds)\n\n{{view:combined}}\n\n## Table\n\n{{table:notes}}\n\n## Calendar\n\n{{view:chore_calendar}}\n\n## Rotation\n\n{{view:crewrota}}\n\n## Pivot (chore heatmap)\n\n{{view:chore_heatmap}}\n\n## RSVP (self-service sign-up)\n\n{{view:my_rsvp}}\n\n## Aggregate (leaderboard)\n\n{{view:leaderboard}}\n\n## Nested doc-view\n\n{{view:task_doc}}\n\n## Archived tasks (hidden when empty)\n\n{{table:tasks@archive?}}"
     },
     {
       "name": "in_progress_block",
+      "kind": "page",
       "markdown": "**{{t:embed.ip.title}}**\n\n{{view:report_in_progress}}\n\n_{{t:embed.ip.attention}}_"
     },
     {
       "name": "task_doc",
+      "kind": "page",
       "sources": [
         "tasks"
       ],
@@ -452,6 +468,7 @@
     },
     {
       "name": "active_work",
+      "kind": "data",
       "sources": [
         "tasks"
       ],
@@ -474,6 +491,7 @@
     },
     {
       "name": "tickets_board",
+      "kind": "board",
       "sources": [
         "tickets"
       ],
@@ -497,6 +515,7 @@
     },
     {
       "name": "ticket_pipeline",
+      "kind": "board",
       "sources": [
         "tickets"
       ],
@@ -515,6 +534,7 @@
     },
     {
       "name": "crewrota",
+      "kind": "rotation",
       "rotation": {
         "columns": [
           {
@@ -533,6 +553,7 @@
     },
     {
       "name": "chore_calendar",
+      "kind": "calendar",
       "calendar": {
         "source": "chore_log",
         "dateColumn": "done_on",
@@ -545,6 +566,7 @@
     },
     {
       "name": "chore_heatmap",
+      "kind": "pivot",
       "pivot": {
         "source": "chore_log",
         "row": "person",
@@ -555,6 +577,7 @@
     },
     {
       "name": "my_rsvp",
+      "kind": "rsvp",
       "rsvp": {
         "events": "practices",
         "dateColumn": "date",
@@ -568,6 +591,7 @@
     },
     {
       "name": "leaderboard",
+      "kind": "data",
       "sources": [
         "chore_log"
       ],
@@ -608,6 +632,7 @@
     },
     {
       "name": "leaderboard_week",
+      "kind": "data",
       "sources": [
         "chore_log"
       ],
@@ -649,6 +674,7 @@
     },
     {
       "name": "chores_last_month",
+      "kind": "data",
       "sources": [
         "chore_log"
       ],
@@ -677,6 +703,7 @@
     },
     {
       "name": "my_chores",
+      "kind": "data",
       "sources": [
         "chore_log"
       ],
