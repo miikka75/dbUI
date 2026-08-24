@@ -37,10 +37,18 @@ service cloud.firestore {
       return u.tables == 'all'
         || ('rwTables' in u ? table in u.rwTables : (u.tables is list && table in u.tables));
     }
+    // `tables` is deliberately polymorphic -- 'all', a legacy name list, or a { table: mode } map -- and
+    // each shape needs a different membership test, because calling a list method on a map is an
+    // evaluation ERROR here rather than a false. The `is` guards make that safe.
+    //   Read through `u.tables` at each use rather than binding it to one variable: the rules type
+    // checker tries to find a SINGLE type for a let-bound name that satisfies every clause, cannot
+    // (there isn't one, by design), and warns on every deploy -- noise that buries a real warning.
+    // `u` is still bound once, so this is the same single userData() read.
     function listAllowed() {
-      let t = userData().tables;
-      return t == 'all' || (t is list && t.hasAny(resource.data.tables))
-                        || (t is map && t.keys().hasAny(resource.data.tables));
+      let u = userData();
+      return u.tables == 'all'
+        || (u.tables is list && u.tables.hasAny(resource.data.tables))
+        || (u.tables is map && u.tables.keys().hasAny(resource.data.tables));
     }
 
     // Meta: read by registered. `lists` and `users` docs are admin-only reads (users holds every
@@ -207,11 +215,11 @@ service cloud.firestore {
     // returns a map). Split by type exactly like listAllowed above.
     function pageAllowed(doc) {
       let pa = pageAccessMap();
-      let t = userData().tables;
+      let u = userData();                                   // see listAllowed: read through, don't bind `tables`
       return !(doc in pa)                                   // untagged page -> all registered
-        || t == 'all'
-        || (t is list && t.hasAny(pa[doc]))                 // grant on any listed table
-        || (t is map && t.keys().hasAny(pa[doc]));
+        || u.tables == 'all'
+        || (u.tables is list && u.tables.hasAny(pa[doc]))   // grant on any listed table
+        || (u.tables is map && u.tables.keys().hasAny(pa[doc]));
     }
     match /_pages__active/{doc} {
       allow read:  if request.auth != null && isRegistered() && (

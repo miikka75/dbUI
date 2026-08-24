@@ -230,6 +230,25 @@ await ok("map grant: 'r' table CANNOT be updated",
   assertFails(setDoc(doc(mixed, 'refdata__active/ref1'), { id: 'ref1', label: 'tampered' })));
 await ok("map grant: 'r' table CANNOT be created into",
   assertFails(setDoc(doc(mixed, 'refdata__active/ref2'), { id: 'ref2', label: 'new' })));
+
+// The MAP-shaped grant, which is what the access UI actually writes (buildGrants returns a map) and the
+// shape both these gates were split by type to support. Every case above uses `editor`, whose grant is a
+// legacy LIST -- so the map branch of pageAllowed/listAllowed had no coverage at all, and a refactor of
+// either could have removed it silently. `mixed` holds { tasks: 'rw', refdata: 'r' }.
+await ok('map grant: CAN read a page gated on a table in the map',
+  assertSucceeds(getDoc(doc(mixed, '_pages__active/staff_handbook'))));
+await ok('map grant: CANNOT read a page gated on a table NOT in the map',
+  assertFails(getDoc(doc(mixed, '_pages__active/board_notes'))));
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), '_meta/listTables'), { crew: ['tasks'], ledger: ['finance'] });
+  await setDoc(doc(ctx.firestore(), '_lists/crew'), { tables: ['tasks'], values: ['Ann'] });
+  await setDoc(doc(ctx.firestore(), '_lists/ledger'), { tables: ['finance'], values: ['x'] });
+});
+await ok('map grant: CAN read a list owned by a table in the map',
+  assertSucceeds(getDoc(doc(mixed, '_lists/crew'))));
+await ok('map grant: CANNOT read a list owned by a table NOT in the map',
+  assertFails(getDoc(doc(mixed, '_lists/ledger'))));
+
 await ok("map grant: 'r' table CANNOT be deleted from",
   assertFails(deleteDoc(doc(mixed, 'refdata__active/ref1'))));
 await ok("map grant: 'rw' table is readable AND writable",
