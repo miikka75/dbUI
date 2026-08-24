@@ -316,7 +316,29 @@ firebase deploy --only functions,hosting               # run from the repo root
 
 Read the aggregated summary: `https://<your-hosting-domain>/csp-report?token=<DBUI_CSP_REPORT_TOKEN>`
 
-**B. Self-hosted (any static host, no Blaze).** Run the dependency-free collector
+**B. Supabase Edge Function (free tier, no Blaze).** Same collector, on a free Supabase project —
+useful when you want the policy soak without enabling billing, and independent of which backend the
+app uses: on Firestore, only the `report-uri` changes.
+
+```bash
+psql "$SUPABASE_DB_URL" -f supabase/csp-reports.sql   # or paste it into the SQL editor, once
+supabase functions deploy csp-report --no-verify-jwt
+supabase secrets set DBUI_CSP_REPORT_TOKEN=<long random string>
+```
+
+Then point the policy at it — `csp.js` takes the endpoint as `buildPolicy({ reportUri })`, so set it to
+`https://<project-ref>.supabase.co/functions/v1/csp-report` and regenerate the header value in
+`firebase.json` (or your host's headers file). Read the summary at that URL with `?token=…`.
+
+`--no-verify-jwt` is required and is not a loosening: a browser posts violation reports with no
+credentials and ignores the response, so a function demanding a JWT would receive nothing. Writes are
+append-only counters keyed by the violation itself; the only read is token-gated. Reports land in
+`public.csp_reports`, which has RLS on with **no policies** — unreachable by `anon`/`authenticated`,
+reached by the function's service role. `dev/test/supabase-csp-collector.test.js` executes that SQL
+against a real PostgreSQL and asserts both halves: the log is closed to the app's users, and repeat
+reports increment atomically rather than losing concurrent ones.
+
+**C. Self-hosted (any static host, no Blaze).** Run the dependency-free collector
 (`REPORT_TOKEN=... node dev/csp-report-collector.js`, port 3900) on your own box behind an
 HTTPS-terminating proxy, and point `csp.js` `REPORT_URI` at its absolute URL.
 
