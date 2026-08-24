@@ -47,10 +47,10 @@ any other schema having to opt out:
 - A favicon that 404s fails **silently** — browsers show the default and say nothing. If you point at
   a file, check it is actually served; `dev/test-ui/example-icons.spec.js` does exactly that for the
   bundled examples.
-- **Set `png512` too, or the installed app wears somebody else's mark.** `favicon` brands the tab;
-  the home-screen icon comes from `png512`, and its default is the bundled `./icon-512.png`. That
-  default is a beehive — right for the bishopric schema it was drawn for, wrong for anything else, and
-  invisible until somebody installs the app.
+- **Set `png512` too, or the installed app keeps the generic mark.** `favicon` brands the tab; the
+  home-screen icon comes from `png512`. Both defaults (`./favicon.svg`, `./icon-512.png`) are the
+  app's own neutral table glyph, so an unbranded database looks like dbUI rather than like whichever
+  schema happened to ship its artwork at the repo root — which is what they used to be.
 - **The install icon must be a real PNG**, square and ≥144px: the manifest declares `image/png`, and a
   launcher handed an SVG shows nothing. `node dev/make-icon-png.mjs <in.svg> <out.png> 512` renders one
   from the favicon using the Chromium the E2E suite already ships — full-bleed and inset to the inner

@@ -60,7 +60,7 @@ test('the chores schema brands its own tab, from a file in examples/', async ({ 
 });
 
 test('the chores schema brands the INSTALLED app too, not just the tab', async ({ page }) => {
-  // The bundled ./icon-512.png is a beehive -- bishopric iconography, and the app-wide default. A
+  // The bundled ./icon-512.png is the generic dbUI mark. A
   // schema that brands only its favicon still installs to the home screen under somebody else's mark,
   // which is the half of "per-database icons" that is invisible until someone installs it.
   test.setTimeout(90000);
@@ -85,30 +85,71 @@ test('the chores schema brands the INSTALLED app too, not just the tab', async (
   expect(buf.readUInt32BE(20)).toBe(512);
 });
 
-test('the bishopric schema keeps the bundled default', async ({ page }) => {
-  // It declares no icons, and that has to resolve to the shipped favicon rather than to nothing --
-  // which is what makes "one schema brands itself" safe to add without touching the other.
+test('the bishopric schema carries its own beehive, not the app default', async ({ page }) => {
+  // The beehive used to BE the app default, so every other database installed itself under this
+  // deployment's mark. It now travels with the schema it belongs to.
   test.setTimeout(90000);
-  expect(BISHOPRIC.icons, 'this test is about a schema with NO icons').toBe(undefined);
   await bootWith(page, BISHOPRIC);
-  expect(await iconHref(page)).toBe('./favicon.svg');
-  const res = await page.request.get('/favicon.svg');
-  expect(res.status()).toBe(200);
+  expect(await iconHref(page)).toBe('./examples/bishopric-favicon.svg');
+  const fav = await page.request.get('/examples/bishopric-favicon.svg');
+  expect(fav.status(), 'bishopric points at a favicon that is not served').toBe(200);
 
-  // The beehive is bishopric's own mark, so the default is the RIGHT answer here -- which is what
-  // makes branding chores separately a change to one schema rather than to the app.
+  const r = await installIcons(page);
+  expect(r.apple).toBe('./examples/bishopric-icon-512.png');
+  expect(r.icons[0].src).toMatch(/examples\/bishopric-icon-512\.png$/);
+  const png = await page.request.get('/examples/bishopric-icon-512.png');
+  expect(png.status()).toBe(200);
+  const buf = await png.body();
+  expect(buf.slice(1, 4).toString()).toBe('PNG');
+  expect(buf.readUInt32BE(16)).toBe(512);
+});
+
+test('a schema with NO icons gets the generic app default', async ({ page }) => {
+  // The property that makes per-schema branding safe to add: a schema that says nothing must land on
+  // the shipped icon rather than on nothing -- and that icon must now be GENERIC, since it is what
+  // every unbranded database wears.
+  test.setTimeout(90000);
+  const PLAIN = {
+    defaultLanguage: 'en',
+    tables: { notes: { columns: [{ name: 'title', type: 'text' }] } },
+    views: [{ table: 'notes' }],
+    nav: { items: [{ table: 'notes' }] }
+  };
+  await bootWith(page, PLAIN);
+  expect(await iconHref(page)).toBe('./favicon.svg');
   const r = await installIcons(page);
   expect(r.apple).toBe('./icon-512.png');
-  expect(r.icons[0].src).toMatch(/icon-512\.png$/);
-  expect(r.icons[0].src).not.toMatch(/examples\//);
+  expect(r.icons[0].src).toMatch(/\/icon-512\.png$/);
+  expect(r.icons[0].src, 'the default now points into an example').not.toMatch(/examples\//);
+
+  for (const p of ['/favicon.svg', '/icon-512.png']) {
+    const res = await page.request.get(p);
+    expect(res.status(), p + ' is the default and must be served').toBe(200);
+  }
+  // The default must not be one deployment's emblem. Checked by CONTENT, because the filenames never
+  // changed -- the beehive WAS ./favicon.svg, so a path assertion could never have caught it.
+  const dflt = await (await page.request.get('/favicon.svg')).text();
+  const bishop = await (await page.request.get('/examples/bishopric-favicon.svg')).text();
+  expect(dflt, 'the app default is byte-identical to a schema-specific icon').not.toBe(bishop);
 });
 
 test('switching databases re-points the icon rather than keeping the last one', async ({ page }) => {
   // The failure this guards is a branded tab surviving into a database that never asked for it: the
   // href is set on a <link> that persists across schema loads, so a missing field must RESET it.
-  test.setTimeout(120000);
+  // Both directions, because branded->branded and branded->plain fail differently.
+  test.setTimeout(150000);
+  const PLAIN = {
+    defaultLanguage: 'en',
+    tables: { notes: { columns: [{ name: 'title', type: 'text' }] } },
+    views: [{ table: 'notes' }],
+    nav: { items: [{ table: 'notes' }] }
+  };
   await bootWith(page, CHORES);
   expect(await iconHref(page)).toBe('./examples/chores-favicon.svg');
+
   await bootWith(page, BISHOPRIC);
-  expect(await iconHref(page), 'the previous schema kept branding the tab').toBe('./favicon.svg');
+  expect(await iconHref(page), 'one branded schema kept branding the next').toBe('./examples/bishopric-favicon.svg');
+
+  await bootWith(page, PLAIN);
+  expect(await iconHref(page), 'a branded schema kept branding a database that set no icons').toBe('./favicon.svg');
 });
