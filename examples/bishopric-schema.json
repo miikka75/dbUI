@@ -320,9 +320,10 @@
           {
             "name": "people",
             "sorted": true,
-            "type": "multiselect",
+            "type": "select",
             "allowNew": true,
-            "list": "members"
+            "list": "members",
+            "multiple": true
           }
         ],
         "defaultSort": "position",
@@ -390,9 +391,10 @@
           {
             "name": "people",
             "sorted": true,
-            "type": "multiselect",
+            "type": "select",
             "allowNew": true,
-            "list": "cleaners"
+            "list": "cleaners",
+            "multiple": true
           }
         ],
         "defaultSort": "position",
@@ -408,10 +410,11 @@
           },
           {
             "name": "people",
-            "type": "multiselect",
+            "type": "select",
             "sorted": true,
             "list": "members",
-            "allowNew": true
+            "allowNew": true,
+            "multiple": true
           }
         ],
         "defaultSort": "position"
@@ -500,7 +503,8 @@
     "views": [
       {
         "markdown": "# Welcome\n\nThis site carries the sacrament meeting program and the ward duty rosters.\n\n{{view:doc_internal}}",
-        "name": "doc_about"
+        "name": "doc_about",
+        "kind": "page"
       },
       {
         "access": [
@@ -508,27 +512,32 @@
         ],
         "name": "doc_internal",
         "bare": true,
-        "markdown": "# Bishopric tool"
+        "markdown": "# Bishopric tool",
+        "kind": "page"
       },
       {
         "markdown": "{{t:text.welcome}}",
         "bare": true,
-        "name": "doc_welcome"
+        "name": "doc_welcome",
+        "kind": "page"
       },
       {
         "bare": true,
         "markdown": "{{t:text.sacrament_intro}}",
-        "name": "doc_sacrament_intro"
+        "name": "doc_sacrament_intro",
+        "kind": "page"
       },
       {
         "markdown": "{{t:text.sacrament_prayers}}",
         "bare": true,
-        "name": "doc_sacrament"
+        "name": "doc_sacrament",
+        "kind": "page"
       },
       {
         "name": "doc_thanks",
         "bare": true,
-        "markdown": "{{t:text.closing_thanks}}"
+        "markdown": "{{t:text.closing_thanks}}",
+        "kind": "page"
       },
       {
         "hideEmpty": true,
@@ -660,7 +669,8 @@
           "meeting_agenda",
           "meeting_music",
           "duty_interpreters"
-        ]
+        ],
+        "kind": "data"
       },
       {
         "defaultSort": "date",
@@ -681,7 +691,8 @@
         "sources": [
           "meeting_agenda"
         ],
-        "mode": "join"
+        "mode": "join",
+        "kind": "data"
       },
       {
         "name": "meeting_speakers",
@@ -709,7 +720,8 @@
         ],
         "sources": [
           "meeting_agenda"
-        ]
+        ],
+        "kind": "data"
       },
       {
         "columns": [
@@ -728,7 +740,8 @@
         ],
         "mode": "join",
         "defaultSort": "date",
-        "name": "meeting_music"
+        "name": "meeting_music",
+        "kind": "data"
       },
       {
         "defaultSort": "date",
@@ -745,7 +758,8 @@
         "sources": [
           "admin_callings"
         ],
-        "mode": "join"
+        "mode": "join",
+        "kind": "data"
       },
       {
         "name": "admin_callings_board",
@@ -767,7 +781,8 @@
           "responsible",
           "notes",
           "date"
-        ]
+        ],
+        "kind": "board"
       },
       {
         "sources": [
@@ -778,7 +793,8 @@
           "responsible"
         ],
         "name": "admin_responsibilities",
-        "mode": "union"
+        "mode": "union",
+        "kind": "data"
       },
       {
         "name": "admin_interviews",
@@ -792,7 +808,8 @@
           "responsible",
           "expires",
           "topic"
-        ]
+        ],
+        "kind": "data"
       },
       {
         "sources": [
@@ -805,7 +822,8 @@
           "person"
         ],
         "name": "admin_reminders",
-        "mode": "union"
+        "mode": "union",
+        "kind": "data"
       },
       {
         "groupBy": {
@@ -917,7 +935,8 @@
             "markdown": "{{t:tab.admin_reminders}}\n\n{{self}}",
             "hideEmpty": true
           }
-        ]
+        ],
+        "kind": "data"
       },
       {
         "obscureNames": true,
@@ -943,7 +962,8 @@
             "periods": 12,
             "from": "today"
           }
-        }
+        },
+        "kind": "rotation"
       },
       {
         "columns": [
@@ -968,7 +988,8 @@
         "name": "duty_usher_shifts",
         "obscureNames": [
           "usher"
-        ]
+        ],
+        "kind": "data"
       },
       {
         "columns": [
@@ -980,7 +1001,8 @@
         ],
         "mode": "join",
         "defaultSort": "date",
-        "name": "duty_interpreters"
+        "name": "duty_interpreters",
+        "kind": "data"
       }
     ],
     "listSources": {
@@ -993,7 +1015,8 @@
       "callings",
       "bishopric",
       "interview_topics"
-    ]
+    ],
+    "schemaVersion": 3
   },
   "lists": {
     "interview_topics": [],

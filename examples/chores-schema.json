@@ -169,9 +169,10 @@
         },
         {
           "name": "tasks",
-          "type": "multiselect",
+          "type": "select",
           "list": "ref_chores",
-          "sorted": true
+          "sorted": true,
+          "multiple": true
         }
       ]
     },
@@ -186,9 +187,10 @@
         },
         {
           "name": "tasks",
-          "type": "multiselect",
+          "type": "select",
           "list": "ref_chores",
-          "sorted": true
+          "sorted": true,
+          "multiple": true
         }
       ]
     },
@@ -203,9 +205,10 @@
         },
         {
           "name": "tasks",
-          "type": "multiselect",
+          "type": "select",
           "list": "ref_chores",
-          "sorted": true
+          "sorted": true,
+          "multiple": true
         }
       ]
     },
@@ -220,9 +223,10 @@
         },
         {
           "name": "tasks",
-          "type": "multiselect",
+          "type": "select",
           "list": "ref_chores",
-          "sorted": true
+          "sorted": true,
+          "multiple": true
         }
       ]
     },
@@ -283,12 +287,14 @@
     {
       "name": "doc_home",
       "markdown": "# {{t:text.home_heading}}\n\n{{t:text.home_intro}}\n\n{{t:text.rules_body}}\n\n## {{t:text.rules_points}}\n\n{{view:reward_shop}}\n",
-      "icon": "mdi-home"
+      "icon": "mdi-home",
+      "kind": "page"
     },
     {
       "name": "doc_mine",
       "icon": "mdi-account-check",
-      "markdown": "## {{t:text.mine_tasks}}\n\n{{view:duty_matrix}}\n\n## {{t:text.mine_log}}\n\n{{view:chore_mine@both}}\n"
+      "markdown": "## {{t:text.mine_tasks}}\n\n{{view:duty_matrix}}\n\n## {{t:text.mine_log}}\n\n{{view:chore_mine@both}}\n",
+      "kind": "page"
     },
     {
       "name": "chore_mine",
@@ -307,7 +313,8 @@
       "filter": {
         "person": "@me"
       },
-      "icon": "mdi-clipboard-text-clock"
+      "icon": "mdi-clipboard-text-clock",
+      "kind": "data"
     },
     {
       "name": "chore_board",
@@ -334,7 +341,8 @@
         "color": "person",
         "addInLane": true
       },
-      "icon": "mdi-check-decagram"
+      "icon": "mdi-check-decagram",
+      "kind": "board"
     },
     {
       "name": "chore_points_month",
@@ -379,12 +387,14 @@
       },
       "readonly": true,
       "icon": "mdi-trophy",
-      "includeArchive": true
+      "includeArchive": true,
+      "kind": "data"
     },
     {
       "name": "doc_scoreboard",
       "icon": "mdi-trophy",
-      "markdown": "## {{t:text.score_week}}\n\n{{view:chore_points_week}}\n\n## {{t:text.score_month}}\n\n{{view:chore_points_month}}\n\n## {{t:text.score_balance}}\n\n{{view:chore_balance}}\n\n## {{t:text.score_who}}\n\n{{view:chore_heatmap}}\n"
+      "markdown": "## {{t:text.score_week}}\n\n{{view:chore_points_week}}\n\n## {{t:text.score_month}}\n\n{{view:chore_points_month}}\n\n## {{t:text.score_balance}}\n\n{{view:chore_balance}}\n\n## {{t:text.score_who}}\n\n{{view:chore_heatmap}}\n",
+      "kind": "page"
     },
     {
       "name": "chore_points_week",
@@ -429,7 +439,8 @@
       },
       "readonly": true,
       "icon": "mdi-trophy-variant",
-      "includeArchive": true
+      "includeArchive": true,
+      "kind": "data"
     },
     {
       "name": "chore_balance",
@@ -493,7 +504,8 @@
       },
       "readonly": true,
       "icon": "mdi-scale-balance",
-      "includeArchive": true
+      "includeArchive": true,
+      "kind": "data"
     },
     {
       "name": "chore_heatmap",
@@ -505,7 +517,8 @@
         "totals": "count"
       },
       "icon": "mdi-grid",
-      "includeArchive": true
+      "includeArchive": true,
+      "kind": "pivot"
     },
     {
       "name": "home_calendar",
@@ -539,7 +552,8 @@
         "weekStart": 1,
         "addTo": "chore_log"
       },
-      "icon": "mdi-calendar-check"
+      "icon": "mdi-calendar-check",
+      "kind": "calendar"
     },
     {
       "name": "duty_matrix",
@@ -567,7 +581,8 @@
           "periods": 8
         }
       },
-      "icon": "mdi-table-account"
+      "icon": "mdi-table-account",
+      "kind": "rotation"
     },
     {
       "name": "shop_open",
@@ -613,11 +628,14 @@
         "title": "item",
         "color": "added_by",
         "addInLane": true
-      }
+      },
+      "kind": "board"
     },
     {
       "name": "shop_todo",
-      "search": ["item"],
+      "search": [
+        "item"
+      ],
       "sources": [
         "home_shopping"
       ],
@@ -643,7 +661,8 @@
       ],
       "filter": {
         "shop_status": "needed"
-      }
+      },
+      "kind": "data"
     },
     {
       "name": "reward_shop",
@@ -658,7 +677,8 @@
         "reward",
         "cost"
       ],
-      "icon": "mdi-gift"
+      "icon": "mdi-gift",
+      "kind": "data"
     },
     {
       "name": "reward_mine",
@@ -676,7 +696,8 @@
       "filter": {
         "person": "@me"
       },
-      "icon": "mdi-gift-open"
+      "icon": "mdi-gift-open",
+      "kind": "data"
     },
     {
       "name": "reward_board",
@@ -701,7 +722,8 @@
         "color": "person",
         "addInLane": true
       },
-      "icon": "mdi-gift-open-outline"
+      "icon": "mdi-gift-open-outline",
+      "kind": "board"
     }
   ],
   "nav": {
@@ -764,5 +786,6 @@
       "doc_scoreboard",
       "shop_open"
     ]
-  }
+  },
+  "schemaVersion": 3
 }
