@@ -21,7 +21,7 @@ cd ..
 # PGlite (the browser-local Postgres backend) is a DIRECTORY of interdependent files — an ESM entry, its
 # content-hashed chunks and three binaries it loads by relative URL — so it comes from npm rather than a
 # per-file curl, and the copy list lives in one script the deploy workflow and the CI hook share.
-./scripts/vendor-pglite.sh --force
+bash scripts/vendor-pglite.sh --force
 
 # Update CDN fallback URLs in index.html
 sed -i "s|vue@[0-9.]*|vue@${VUE}|g" index.html
