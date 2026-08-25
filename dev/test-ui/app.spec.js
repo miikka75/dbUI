@@ -69,13 +69,20 @@ test.describe('Data table', () => {
 
   test('edit cell saves value', async ({ page }) => {
     await ensureAppReady(page);
+    const rows = page.locator('.v-table tbody tr');
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(200);
+    await expect(rows).toHaveCount(1);
     const cell = page.locator('.v-table .editable-cell').first();
     await cell.click();
     await page.keyboard.type('TestValue');
     await cell.blur();
-    await page.waitForTimeout(800);
+    // The 800ms sleep here was waiting for the blur to be PERSISTED before reloading -- reload too
+    // early and the write is lost, which is the very thing this test exists to catch. Ask the server
+    // instead: poll until the row actually carries the value, then reload knowing it is safe.
+    await expect.poll(async () => {
+      const d = await (await page.request.post('/api/getTableData', { data: { tableId: 'tasks', tab: 'active' } })).json();
+      return JSON.stringify(d.rows || []);
+    }).toContain('TestValue');
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 20000 });
     await expect(page.locator('.v-main')).toContainText('TestValue');
@@ -83,13 +90,15 @@ test.describe('Data table', () => {
 
   test('delete row removes it', async ({ page }) => {
     await ensureAppReady(page);
-    await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(150);
-    await page.locator('.v-table button:has(.mdi-close)').first().click();
-    await page.waitForTimeout(200);
-    await page.locator('.v-table button:has(.mdi-check-circle)').first().click();
-    await page.waitForTimeout(150);
     const rows = page.locator('.v-table tbody tr');
+    await page.locator('button:has(.mdi-plus)').click();
+    await expect(rows).toHaveCount(1);
+    // Two-press delete: the first click ARMS (swapping the icon), the second confirms. Waiting for the
+    // confirm button to appear is both the correct wait and the assertion that arming worked.
+    await page.locator('.v-table button:has(.mdi-close)').first().click();
+    const confirm = page.locator('.v-table button:has(.mdi-check-circle)').first();
+    await expect(confirm).toBeVisible();
+    await confirm.click();
     await expect(rows).toHaveCount(0);
   });
 });
@@ -160,7 +169,6 @@ test.describe('Lists management', () => {
     // Navigate to lookup tab
     const lookupTab = page.locator('.v-navigation-drawer .v-list-item').filter({ hasText: /lookup|tab\.lookup/ });
     await lookupTab.click();
-    await page.waitForTimeout(2000);
     await expect(page.locator('.v-main')).toContainText('status', { timeout: 5000 });
   });
 });
@@ -181,10 +189,8 @@ test.describe('Select dropdowns', () => {
   test('select column renders as Vuetify autocomplete in table', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(150);
     const selects = page.locator('.v-table .v-autocomplete, .v-table .v-combobox');
-    const count = await selects.count();
-    expect(count).toBeGreaterThan(0);
+    await expect.poll(() => selects.count()).toBeGreaterThan(0);
   });
 
   test('select column `picker` renders chips / toggle instead of a dropdown; selecting saves', async ({ page }) => {
@@ -208,7 +214,6 @@ test.describe('Select dropdowns', () => {
     await page.evaluate(() => { window.appInstance.listsCache = { status: ['open', 'done'], prio: ['low', 'high'] }; window.appInstance.selectTab('items'); });
     await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(150);
 
     // picker:"chips" -> chip group; picker:"toggle" -> button toggle; NOT the default autocomplete
     await expect(page.locator('.v-table .v-chip-group')).toBeVisible();
@@ -691,7 +696,6 @@ test.describe('Two-press delete', () => {
     await page.waitForTimeout(150);
     const deleteBtn = page.locator('.v-table button:has(.mdi-close)').first();
     await deleteBtn.click(); // arm
-    await page.waitForTimeout(200);
     await expect(page.locator('.v-table button:has(.mdi-check-circle)')).toBeVisible();
     await page.locator('.v-table button:has(.mdi-check-circle)').click(); // confirm
     await page.waitForTimeout(150);
@@ -707,15 +711,12 @@ test.describe('Views', () => {
     await page.waitForTimeout(150);
     // Navigate to all_items view
     await page.locator('.v-navigation-drawer .v-list-item:has-text("all_items")').click();
-    await page.waitForTimeout(200);
-    const rows = await page.locator('.v-table tbody tr, .v-card.ma-2').count();
-    expect(rows).toBeGreaterThanOrEqual(1);
+    await expect.poll(() => page.locator('.v-table tbody tr, .v-card.ma-2').count()).toBeGreaterThanOrEqual(1);
   });
 
   test('join view renders', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('.v-navigation-drawer .v-list-item:has-text("combined")').click();
-    await page.waitForTimeout(200);
     // Combined view should render (may be empty but not error)
     await expect(page.locator('.v-main .v-card')).toBeVisible();
   });
@@ -797,15 +798,17 @@ test.describe('Print embed positioning', () => {
     await ensureAppReady(page);
     // Add a task with data so combined view has content
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(150);
+    await expect(page.locator('.v-table tbody tr')).toHaveCount(1);
     const cell = page.locator('.v-table .editable-cell').first();
     await cell.click();
     await page.keyboard.type('TestTask');
     await cell.blur();
-    await page.waitForTimeout(200);
+    // The print output has to contain this text, so waiting for it to RENDER is both the correct wait
+    // and cheaper than the 200ms guess it replaces.
+    await expect(page.locator('.v-main')).toContainText('TestTask');
     // Navigate to combined view
     await page.locator('.v-navigation-drawer .v-list-item:has-text("combined")').click();
-    await page.waitForTimeout(200);
+    // No settle needed before the print click: Playwright waits for the button to be actionable.
     // Print the view
     const [popup] = await Promise.all([
       context.waitForEvent('page'),
@@ -829,15 +832,16 @@ test.describe('Print card embed positioning', () => {
     await ensureAppReady(page);
     // Add a task
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(150);
+    await expect(page.locator('.v-table tbody tr')).toHaveCount(1);
     const cell = page.locator('.v-table .editable-cell').first();
     await cell.click();
     await page.keyboard.type('CardTest');
     await cell.blur();
-    await page.waitForTimeout(200);
+    // The print output has to contain this text, so waiting for it to RENDER is both the correct wait
+    // and cheaper than the 200ms guess it replaces.
+    await expect(page.locator('.v-main')).toContainText('CardTest');
     // Navigate to combined view (has embeds with afterColumn:"title")
     await page.locator('.v-navigation-drawer .v-list-item:has-text("combined")').click();
-    await page.waitForTimeout(200);
     // Click per-card print button
     const printBtn = page.locator('button:has(.mdi-printer)').first();
     const [popup] = await Promise.all([
@@ -919,42 +923,47 @@ test.describe('Multi-table lifecycle (join view UI)', () => {
     await page.locator('.v-navigation-drawer .v-list-item').first().click();
     await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
 
+    // Every fixed sleep below was waiting for a write to reach the server before reading it back over
+    // the API. expect.poll asks the same question until it is true, so it costs what the write actually
+    // costs and, when it never becomes true, reports the value it kept seeing instead of "700ms elapsed".
+    const rowsOf = async (tableId, tab) =>
+      (await (await page.request.post('/api/getTableData', { data: { tableId, tab } })).json()).rows || [];
+
     // ADD via the join view -> must create a row with the same id in BOTH source tables
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(700);
-    const tasks = await (await page.request.post('/api/getTableData', { data: { tableId: 'tasks', tab: 'active' } })).json();
-    const notes = await (await page.request.post('/api/getTableData', { data: { tableId: 'notes', tab: 'active' } })).json();
-    expect(tasks.rows.length).toBe(1);
+    await expect.poll(async () => (await rowsOf('tasks', 'active')).length).toBe(1);
+    const tasks = { rows: await rowsOf('tasks', 'active') };
+    const notes = { rows: await rowsOf('notes', 'active') };
     expect(notes.rows.length).toBe(1);
     const id = tasks.rows[0].id;
     expect(notes.rows[0].id).toBe(id);
 
     // ARCHIVE -> both sources move to archive
     await page.locator('button:has(.mdi-archive-outline)').first().click();
-    await page.waitForTimeout(700);
+    await expect.poll(() => has(page, 'tasks', 'archive', id)).toBe(true);
+    expect(await has(page, 'notes', 'archive', id)).toBe(true);
     expect(await has(page, 'tasks', 'active', id)).toBe(false);
     expect(await has(page, 'notes', 'active', id)).toBe(false);
-    expect(await has(page, 'tasks', 'archive', id)).toBe(true);
-    expect(await has(page, 'notes', 'archive', id)).toBe(true);
 
     // RESTORE from archived view -> both sources back to active
     await page.locator('.v-tab:nth-child(2)').click();
-    await page.waitForTimeout(900);
-    await page.locator('button:has(.mdi-archive-arrow-up-outline)').first().click();
-    await page.waitForTimeout(700);
-    expect(await has(page, 'tasks', 'active', id)).toBe(true);
+    const restore = page.locator('.v-table button:has(.mdi-archive-arrow-up-outline)');
+    await expect(restore.first()).toBeVisible();
+    await restore.first().click();
+    await expect.poll(() => has(page, 'tasks', 'active', id)).toBe(true);
     expect(await has(page, 'notes', 'active', id)).toBe(true);
     expect(await has(page, 'tasks', 'archive', id)).toBe(false);
     expect(await has(page, 'notes', 'archive', id)).toBe(false);
 
     // DELETE (two-press) -> removed from both sources
     await page.locator('.v-tab:nth-child(1)').click();
-    await page.waitForTimeout(600);
-    await page.locator('.v-table button:has(.mdi-close)').first().click();
-    await page.waitForTimeout(200);
-    await page.locator('.v-table button:has(.mdi-check-circle)').first().click();
-    await page.waitForTimeout(700);
-    expect(await has(page, 'tasks', 'active', id)).toBe(false);
+    const arm = page.locator('.v-table button:has(.mdi-close)');
+    await expect(arm.first()).toBeVisible();
+    await arm.first().click();
+    const confirm = page.locator('.v-table button:has(.mdi-check-circle)');
+    await expect(confirm.first()).toBeVisible();
+    await confirm.first().click();
+    await expect.poll(() => has(page, 'tasks', 'active', id)).toBe(false);
     expect(await has(page, 'notes', 'active', id)).toBe(false);
   });
 });
@@ -993,25 +1002,24 @@ test.describe('Archivable flag', () => {
 
     // ADD + ARCHIVE
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(200);
+    await expect(page.locator('.v-table tbody tr')).toHaveCount(1);
     await page.locator('button:has(.mdi-archive-outline)').first().click();
-    await page.waitForTimeout(600);
 
-    // Stored under the fixed 'archive' partition
+    // Stored under the fixed 'archive' partition. Polled rather than slept for: the click is a write
+    // that has to reach the server before this read can see it, and how long that takes is not 600ms,
+    // it is however long it takes.
+    await expect.poll(async () => (await get(page, 'archive')).rows.length).toBe(1);
     const archive = await get(page, 'archive');
-    expect(archive.rows.length).toBe(1);
     expect((await get(page, 'active')).rows.length).toBe(0);
     const id = archive.rows[0].id;
 
     // Archived view shows the row
     await page.locator('.v-tab:nth-child(2)').click();
-    await page.waitForTimeout(700);
     await expect(page.locator('.v-table tbody tr')).toHaveCount(1);
 
     // RESTORE -> back to active, archive emptied
     await page.locator('button:has(.mdi-archive-arrow-up-outline)').first().click();
-    await page.waitForTimeout(600);
-    expect((await get(page, 'active')).rows.some(r => r.id === id)).toBe(true);
+    await expect.poll(async () => (await get(page, 'active')).rows.some(r => r.id === id)).toBe(true);
     expect((await get(page, 'archive')).rows.length).toBe(0);
   });
 });
@@ -1054,15 +1062,13 @@ test.describe('Archive from a view whose source has a mirror table not in source
 
     // ADD in the view -> meetings row + propagated music mirror row (same id)
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(600);
-    expect((await get(page, 'meetings', 'active')).rows.length).toBe(1);
+    await expect.poll(async () => (await get(page, 'meetings', 'active')).rows.length).toBe(1);
     expect((await get(page, 'music', 'active')).rows.length).toBe(1);
     const id = (await get(page, 'meetings', 'active')).rows[0].id;
 
     // ARCHIVE from the view -> BOTH meetings AND the mirror 'music' move to archive
     await page.locator('button:has(.mdi-archive-outline)').first().click();
-    await page.waitForTimeout(600);
-    expect((await get(page, 'meetings', 'active')).rows.length).toBe(0);
+    await expect.poll(async () => (await get(page, 'meetings', 'active')).rows.length).toBe(0);
     expect((await get(page, 'music', 'active')).rows.length).toBe(0);
     expect((await get(page, 'meetings', 'archive')).rows.some(r => r.id === id)).toBe(true);
     expect((await get(page, 'music', 'archive')).rows.some(r => r.id === id)).toBe(true);
@@ -1090,15 +1096,13 @@ test.describe('Archive from a view whose source has a mirror table not in source
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'mtg' }).first().click();
     await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(600);
-    expect((await get(page, 'music', 'active')).rows.length).toBe(1);
+    await expect.poll(async () => (await get(page, 'music', 'active')).rows.length).toBe(1);
     expect((await get(page, 'meetings', 'active')).rows.length).toBe(1);
     const id = (await get(page, 'meetings', 'active')).rows[0].id;
 
     // ARCHIVE from the master view -> the mirror 'music' detail row rides along to archive
     await page.locator('button:has(.mdi-archive-outline)').first().click();
-    await page.waitForTimeout(600);
-    expect((await get(page, 'music', 'active')).rows.length).toBe(0);
+    await expect.poll(async () => (await get(page, 'music', 'active')).rows.length).toBe(0);
     expect((await get(page, 'meetings', 'active')).rows.length).toBe(0);
     expect((await get(page, 'meetings', 'archive')).rows.some(r => r.id === id)).toBe(true);
     expect((await get(page, 'music', 'archive')).rows.some(r => r.id === id)).toBe(true);
@@ -1145,8 +1149,7 @@ test.describe('Permissions — restricted user UI gating', () => {
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.mtg' }).first().click();
     await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(200);
-    expect(await page.evaluate(() => appInstance.canMutateCurrent)).toBe(true);
+    await expect.poll(() => page.evaluate(() => appInstance.canMutateCurrent)).toBe(true);
     expect(await page.locator('button:has(.mdi-archive-outline)').count()).toBeGreaterThanOrEqual(1);
   });
 
@@ -1215,8 +1218,7 @@ test.describe('Mirror cluster is transitive (master + 2 details)', () => {
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'meet' }).first().click();
     await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(600);
-    expect((await get(page, 'mus')).rows.length).toBe(1);
+    await expect.poll(async () => (await get(page, 'mus')).rows.length).toBe(1);
     expect((await get(page, 'meet')).rows.length).toBe(1);
     expect((await get(page, 'task')).rows.length).toBe(1);
 
@@ -1224,8 +1226,7 @@ test.describe('Mirror cluster is transitive (master + 2 details)', () => {
     await page.locator('.v-table button:has(.mdi-close)').first().click();
     await page.waitForTimeout(200);
     await page.locator('.v-table button:has(.mdi-check-circle)').first().click();
-    await page.waitForTimeout(600);
-    expect((await get(page, 'mus')).rows.length).toBe(0);
+    await expect.poll(async () => (await get(page, 'mus')).rows.length).toBe(0);
     expect((await get(page, 'meet')).rows.length).toBe(0);
     expect((await get(page, 'task')).rows.length).toBe(0);
   });
@@ -1465,7 +1466,6 @@ test.describe('v3 nav + pages + tabs layout', () => {
     expect(await page.locator('.v-navigation-drawer').count()).toBe(0);
 
     // page auto-selected -> markdown heading + embedded data rendered
-    await page.waitForTimeout(150);
     await expect(page.locator('.v-main')).toContainText('Hello Page');   // markdown <h1>
     await expect(page.locator('.v-main')).toContainText('Buy milk');     // {{table:tasks}} + {{view:all}} embed
   });
@@ -1530,12 +1530,10 @@ test.describe('v3 embed row controls', () => {
     await page.waitForTimeout(150);
     // ADD via embed
     await page.locator('.v-main button:has(.mdi-plus)').first().click();
-    await page.waitForTimeout(600);
-    expect(await count(page, 'active')).toBe(1);
+    await expect.poll(() => count(page, 'active')).toBe(1);
     // ARCHIVE via embed
     await page.locator('.v-main button:has(.mdi-archive-outline)').first().click();
-    await page.waitForTimeout(600);
-    expect(await count(page, 'active')).toBe(0);
+    await expect.poll(() => count(page, 'active')).toBe(0);
     expect(await count(page, 'archive')).toBe(1);
   });
 });
@@ -1623,7 +1621,6 @@ test.describe('v3 embeddable doc-view (markdown header/footer/table inline)', ()
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
-    await page.waitForTimeout(200);
     await expect(page.locator('.v-main')).toContainText('People in progress'); // doc header
     await expect(page.locator('.v-main')).toContainText('Alice');              // embedded table
     await expect(page.locator('.v-main')).toContainText('end of people');      // doc footer
@@ -1731,7 +1728,6 @@ test.describe('v3 non-ASCII names in embed tokens', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.todo_block' }).first().click();
-    await page.waitForTimeout(150);
     await expect(page.locator('.v-main')).toContainText('List');   // header prose
     await expect(page.locator('.v-main')).toContainText('Café-Ñ'); // {{self}} + {{table:todos}} both rendered the row
   });
@@ -1810,8 +1806,7 @@ test.describe('v3 tabs nav layout', () => {
     const child = page.locator('.v-list-item', { hasText: 'view.report' });
     await expect(child).toBeVisible();
     await child.dispatchEvent('click');
-    await page.waitForTimeout(150);
-    expect(await page.evaluate(() => appInstance.currentTable)).toBe('report');
+    await expect.poll(() => page.evaluate(() => appInstance.currentTable)).toBe('report');
     await expect(page.locator('.v-main')).toContainText('TabRow');
     await expect(groupTab).toHaveClass(/nav-tab-active/); // parent tab shows active styling when a child view is selected
     // active indication is background, not the underline slider (slider hidden)
@@ -1850,8 +1845,7 @@ test.describe('v3 drawer nav layout', () => {
     await expect(page.locator('.v-navigation-drawer .v-list-item', { hasText: 'Group' })).toHaveCount(1);
     // clicking a top-level item navigates and shows its data
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.home' }).first().click();
-    await page.waitForTimeout(150);
-    expect(await page.evaluate(() => appInstance.currentTable)).toBe('home');
+    await expect.poll(() => page.evaluate(() => appInstance.currentTable)).toBe('home');
     await expect(page.locator('.v-main')).toContainText('DrawerRow');
   });
 });
@@ -1879,8 +1873,7 @@ test.describe('v3 live nav layout switch', () => {
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
     await page.waitForTimeout(200);
     await page.locator('[data-testid="nav-layout-toggle"] input').dispatchEvent('click');
-    await page.waitForTimeout(150);
-    expect(await page.evaluate(() => appInstance.navLayout)).toBe('tabs');
+    await expect.poll(() => page.evaluate(() => appInstance.navLayout)).toBe('tabs');
     await expect(page.locator('.v-tabs')).not.toHaveCount(0);
     await expect(page.locator('.v-navigation-drawer')).toHaveCount(0);
     await expect(page.locator('.v-toolbar__extension')).toHaveCount(0); // inline tabs -> no extension row, bar stays thin
@@ -1888,8 +1881,7 @@ test.describe('v3 live nav layout switch', () => {
     // hamburger toggles icon-only tabs (rail), like the drawer rail
     expect(await page.evaluate(() => appInstance.rail)).toBe(false);
     await page.locator('.v-app-bar-nav-icon').first().click();
-    await page.waitForTimeout(150);
-    expect(await page.evaluate(() => appInstance.rail)).toBe(true);
+    await expect.poll(() => page.evaluate(() => appInstance.rail)).toBe(true);
     await expect(page.locator('.v-tabs.nav-icons-only')).toHaveCount(1);
     // icon-only: label faded out (opacity 0) until hover, then fades in (overlay in place)
     const homeTab = page.locator('.v-tab', { hasText: 'view.home' });
@@ -1898,8 +1890,7 @@ test.describe('v3 live nav layout switch', () => {
     await expect(homeTab.locator('.tab-label')).toHaveCSS('opacity', '1');
     // toggle back to drawer; never any extension row
     await page.locator('[data-testid="nav-layout-toggle"] input').dispatchEvent('click');
-    await page.waitForTimeout(150);
-    expect(await page.evaluate(() => appInstance.navLayout)).toBe('drawer');
+    await expect.poll(() => page.evaluate(() => appInstance.navLayout)).toBe('drawer');
     await expect(page.locator('.v-toolbar__extension')).toHaveCount(0);
     await expect(page.locator('.v-app-bar-nav-icon')).toHaveCount(1);
   });
@@ -2002,7 +1993,6 @@ test.describe('v3 bare doc-view embed', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
-    await page.waitForTimeout(150);
     await expect(page.locator('.v-main')).toContainText('DocHeader'); // doc still renders inline
     await expect(page.locator('.v-main')).toContainText('TaskRow');
     expect(await page.locator('.v-main [style*="surface-variant"]').count()).toBe(0); // no boxed wrapper
@@ -2489,7 +2479,6 @@ test.describe('v3 @both partition toggle in an embed', () => {
     // Archiving a row is what brings the toggle out.
     await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id: 'z2', title: 'Aged out' }, tab: 'archive' } });
     await page.reload();
-    await page.waitForTimeout(400);
     await expect(page.locator('[data-testid="embed-part-tabs"]')).toBeVisible();
   });
 
@@ -2547,7 +2536,6 @@ test.describe('v3 page body stored on server', () => {
     // survives reload (rendered from server, not schema seed)
     await page.reload();
     await page.waitForSelector('.v-tabs .v-tab', { timeout: 6000 });
-    await page.waitForTimeout(200);
     await expect(page.locator('.v-main')).toContainText('Edited on server');
   });
 });
@@ -2592,7 +2580,6 @@ test.describe('Page {{t:key}} translatable token', () => {
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
-    await page.waitForTimeout(150);
     await expect(page.locator('.v-main')).toContainText('Welcome translated intro'); // {{t:page.home.intro}} resolved
   });
 
@@ -2827,16 +2814,18 @@ test.describe('access control: user matching + fail-closed', () => {
   test('admin can view and rename another user\'s profile name from the Users table', async ({ page }) => {
     await ensureAppReady(page);
     await page.evaluate(() => { appInstance.setUserRole('bob@x.com', 'editor', 'bob@x.com', ['tasks']); });
-    await page.waitForTimeout(300);   // let loadUsers()/loadAllProfiles() resolve
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
     const row = page.locator('.v-table tbody tr', { hasText: 'bob@x.com' });
-    await expect(row).toHaveCount(1);
+    await expect(row).toHaveCount(1);   // retries -- this IS the wait for loadUsers()/loadAllProfiles()
     const nameCell = row.locator('.editable-cell').nth(1);   // [0] = email/id, [1] = name
     await expect(nameCell).toHaveText('');   // no profile yet
     await nameCell.click();
     await page.keyboard.type('Bob Builder');
     await nameCell.blur();
-    await page.waitForTimeout(400);
+    // Poll the server rather than sleeping: the blur triggers a write, and 400ms was a guess at how
+    // long it takes. A failure now says which name it kept reading back.
+    await expect.poll(async () => page.evaluate(async () =>
+      ((await backend_users.getProfiles())['bob@x.com'] || {}).name)).toBe('Bob Builder');
     const r = await page.evaluate(async () => {
       const profiles = await backend_users.getProfiles();
       await backend_users.removeUser('bob@x.com'); await backend_users.setProfileName('bob@x.com', '');   // cleanup
@@ -2874,7 +2863,10 @@ test.describe('access control: user matching + fail-closed', () => {
   test('a registered user with no table access still sees and can edit their own profile name (not gated by user-backed lists)', async ({ page }) => {
     await ensureAppReady(page);
     await page.evaluate(() => { appInstance.setUserRole('noaccess@x.com', 'editor', 'noaccess@x.com', []); });
-    await page.waitForTimeout(300);
+    // The grant must have REACHED the server before the reload below signs in as that user -- reloading
+    // too early logs in a stranger. Polled, because how long the write takes is not 300ms.
+    await expect.poll(async () => page.evaluate(async () =>
+      !!(await backend_users.getUsers())['noaccess@x.com'])).toBe(true);
     await page.evaluate(() => { localStorage.setItem('test_user', 'noaccess@x.com'); });
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
@@ -2888,7 +2880,8 @@ test.describe('access control: user matching + fail-closed', () => {
     const nameField = page.locator('label:has-text("profile.your_name")').locator('..').locator('input');
     await nameField.fill('No Access Person');
     await nameField.blur();   // no Save button -> the name auto-saves on blur
-    await page.waitForTimeout(400);
+    await expect.poll(async () => page.evaluate(async () =>
+      (await backend_users.getMyProfile()).name)).toBe('No Access Person');
     const saved = await page.evaluate(() => backend_users.getMyProfile());
     // cleanup as admin
     await page.evaluate(() => { localStorage.setItem('test_user', 'local@dev'); });
@@ -4213,7 +4206,6 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
       app.strings['list.rsvp_status.coming'] = 'Tulossa';   // translate one status label
       app.selectTab('signup');
     });
-    await page.waitForTimeout(150);
     // picker: "chips" -> renders a chip group (not the default dropdown)
     await expect(page.locator('[data-testid="rsvp-toggle"].v-chip-group')).toBeVisible();
     // and the option label is translated via list.<statusList>.<value>
@@ -4244,7 +4236,6 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
       app.dataCache['rsvps'] = [];
       app.selectTab('signup');
     });
-    await page.waitForTimeout(150);
     // no picker set -> defaults to dropdown (v-select), same default as the column-level picker
     await expect(page.locator('[data-testid="rsvp-toggle"].v-select')).toBeVisible();
     await expect(page.locator('[data-testid="rsvp-toggle"].v-chip-group, [data-testid="rsvp-toggle"].v-btn-toggle')).toHaveCount(0);
@@ -4275,7 +4266,6 @@ test.describe('demo schema (dev/schema.json) is valid v3', () => {
       app.listsCache = Object.assign({}, app.listsCache, { rsvp_status: ['coming', 'maybe', 'out'] });
       app.selectTab('signup');
     });
-    await page.waitForTimeout(150);
     // desktop -> a real table with a header row + one row per event
     await expect(page.locator('[data-testid="rsvp-view"] table thead')).toBeVisible();
     await expect(page.locator('[data-testid="rsvp-view"] tbody tr')).toHaveCount(1);
@@ -6650,8 +6640,7 @@ test.describe('form view', () => {
     expect(row.tila).toBe('luonnos');          // `default` applies, exactly as for a grid Add
     // Asking again returns the SAME record rather than starting another.
     await page.evaluate(() => appInstance.formRecord('palaute'));
-    await page.waitForTimeout(400);
-    expect((await stored(page)).length).toBe(1);
+    await expect.poll(async () => (await stored(page)).length).toBe(1);
   });
 
   test('required fields block completion until they are answered', async ({ page }) => {
@@ -6680,7 +6669,6 @@ test.describe('form view', () => {
     await boot(page);
     // The start button, then the fields, through the real UI.
     await page.locator('.v-main button').first().click();
-    await page.waitForTimeout(400);
     await expect(page.locator('.v-main')).toContainText('Viesti');   // the section heading
     await expect(page.locator('[data-testid="form-submit"]')).toBeVisible();
 
