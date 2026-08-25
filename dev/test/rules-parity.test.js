@@ -278,7 +278,7 @@ describe('rules parity — both backends mirror the same schema-derived facts', 
 });
 
 describe('rules parity — the upload bucket is gated the same way on both backends', () => {
-  // CODE_REVIEW.md S1: "signed in" means any Google account on the internet, and the project config is
+  // "Signed in" means any Google account on the internet, and the project config is
   // distributed by shareable links by design. Both backends must require REGISTRATION, scope the write
   // to the caller's own email folder, and bound size + content type.
   it('Firebase Storage requires registration, own folder, size and content type', () => {

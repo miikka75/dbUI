@@ -482,6 +482,10 @@ const server = http.createServer(async (req, res) => {
       case 'uploadFile': {
         // Dev-only file store for the image column (the local counterpart of Firebase Storage): write the
         // base64 body to dev/uploads/ and return a same-origin URL. The row stores only that URL, not bytes.
+        // The extension is preserved, so an uploaded `evil.html` is served as text/html from this
+        // origin. Accepted rather than fixed: this server binds to loopback and authenticates nobody,
+        // so a caller able to upload here can already do anything else it offers. Do not copy this
+        // shape to a backend that faces a network.
         const uName = String(body.name || 'file').replace(/[^\w.\-]+/g, '_');
         const b64 = String(body.base64 || '');
         if (!b64) { res.writeHead(400); return res.end(JSON.stringify({ error: 'no file data' })); }
