@@ -118,6 +118,23 @@ async function mirrorUsersToPolicy() {
       'delete from public.kv where store = $1 and key = $2', ['_users', row.key]);
   }
 }
+// The routes gated on admin (and on self-or-admin) below, at module scope so a test can read the list
+// and so adding a route is a deliberate act of classifying it. See the gate itself for the reasoning.
+const ADMIN_ROUTES = [
+  'saveSchema', 'initSchema', 'setFolderConfig', 'saveConfig',
+  'getUsers', 'setUserRole', 'removeUser',
+  'getAccessRequests', 'getProfiles', 'getListUserLinks', 'setListUser'
+];
+// NOT here: `resetData`. It is the only route with no counterpart in any production backend -- it is
+// the local fixture reset, and storage-pglite runs it `asOwner` precisely so no policy applies. Gating
+// it on the roster it is about to delete is circular: after any test that registers an admin other than
+// the caller, nobody can reset, and the next test inherits the previous one's users. Loopback is the
+// gate on this one, as the header comment says.
+
+// The rules' other branch -- `myEmail() == email || role() == 'admin'` -- for the two records a member
+// legitimately acts on themselves: their own membership request, and their own profile name.
+const SELF_OR_ADMIN_ROUTES = ['removeAccessRequest', 'setProfileName'];
+
 function saveUsers() {
   fs.writeFileSync(USERS_PATH, JSON.stringify(backend._users || {}, null, 2));
   mirrorUsersToPolicy().catch(e => console.error('policy registry mirror failed:', e.message));
@@ -391,6 +408,21 @@ const server = http.createServer(async (req, res) => {
       if (id) await broadcast(_store(b.tableId, b.tab), id, await _rowById(b.tableId, b.tab, id) || b.data);
       return json(res, { ok: true });
     }
+    // Admin-only API surface, checked in ONE place so the list is auditable rather than scattered
+    // over ten route bodies. Every route named here is an admin operation in the Firestore/Postgres
+    // model: _meta writes (schema, config), _users reads and writes, and the whole-collection reads of
+    // _access_requests / _profiles that no per-document rule ever grants. The dev server accepted all
+    // of them from any X-User. The loopback bind means that was never remotely exploitable -- but the
+    // header IS the identity here, so an ungated `setUserRole` let any dev client make itself an admin,
+    // and that in turn meant the local suite could not express privilege-escalation DENIAL at all.
+    // Bootstrap still passes: isAdminReq() is true while no users exist, which is what lets a fresh
+    // database take its first schema and its first admin.
+    if (ADMIN_ROUTES.indexOf(route) >= 0 && !isAdminReq()) return json(res, { error: 'Access denied' }, 403);
+    // Self-or-admin, matching the rules' `myEmail() == email || role() == 'admin'` on the same
+    // documents: clearing your own membership request, and naming your own profile.
+    if (SELF_OR_ADMIN_ROUTES.indexOf(route) >= 0 && !isAdminReq() && !_mine(body.email)) {
+      return json(res, { error: 'Access denied' }, 403);
+    }
     try {
     switch (route) {
       case 'getSchema': return json(res, await backend.getSchema());
@@ -399,11 +431,8 @@ const server = http.createServer(async (req, res) => {
       case 'getFolderConfig': return json(res, await backend.getFolderConfig());
       case 'setFolderConfig': {
         // _meta/config is shared state for everyone using the database, and both rule layers restrict it
-        // to admins. The dev server did not, which made it the PERMISSIVE outlier -- a member could
-        // rewrite everyone's app config here and nowhere else. app-core already guards its own two call
-        // sites on isAdmin (and says why), so nothing legitimate is affected; this closes the hole a
-        // direct API call went through.
-        if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
+        // to admins -- so this route is in ADMIN_ROUTES. app-core already guards its own two call sites
+        // on isAdmin (and says why), so nothing legitimate is affected by the gate.
         await backend.setFolderConfig(body.config);
         return json(res, { ok: true });
       }
@@ -550,8 +579,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, LU.buildAvatarProjection(links, backend._profiles || {}, isAdminReq()));
       }
       case 'getListUserLinks': {
-        // Admin-only: the raw { value: email } links, for the Lookup editor's picker.
-        if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
+        // Admin-only (ADMIN_ROUTES): the raw { value: email } links, for the Lookup editor's picker.
         return json(res, backend.getListUsers ? await backend.getListUsers() : {});
       }
       case 'getMyListValues': {
@@ -566,8 +594,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, mine);
       }
       case 'setListUser': {
-        // Admin-only: link (email set) or unlink (email empty) a list value to a registered user.
-        if (!isAdminReq()) return json(res, { error: 'Access denied' }, 403);
+        // Admin-only (ADMIN_ROUTES): link (email set) or unlink (email empty) a list value to a user.
         const cur = backend.getListUsers ? await backend.getListUsers() : {};
         const next = LU.setLink(cur, body.listName, body.value, body.email || '');
         await backend.saveListUsers(next);
