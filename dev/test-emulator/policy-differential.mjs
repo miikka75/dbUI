@@ -24,7 +24,7 @@ import { initializeTestEnvironment } from '@firebase/rules-unit-testing';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const require = createRequire(import.meta.url);
-const { createPgliteStorage } = require('../storage-pglite.js');
+const { createPgliteStorage } = require('../../storage-pglite.js');
 
 // --- the world both engines are given -------------------------------------------------------------
 const ACTORS = {

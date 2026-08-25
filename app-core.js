@@ -213,6 +213,14 @@ function createVueApp() {
       firebaseConfigInput: localStorage.getItem('firebase_config') || '',
       supabaseUrlInput: '',
       supabaseKeyInput: '',
+      // Browser-local Postgres: the self-asserted identity the RLS policies will judge (see the note at
+      // the top of backend-local-pglite.js), and whatever stopped the WASM database from starting.
+      pgliteUserInput: localStorage.getItem('pglite_user') || 'you@local',
+      pgliteError: '',
+      // Browser-local Postgres: how much of the origin's storage the database occupies, and whether the
+      // browser has agreed not to evict it. `persisted: null` = unknown/unsupported, false = best-effort
+      // (the browser may delete it on its own), true = only the user can.
+      localStore: { persisted: null, usage: 0, quota: 0 },
       needsReauth: false,
       setupStep: (function() { var m = localStorage.getItem('app_mode'); return (m === 'firebase' || m === 'supabase') ? m : null; })(),
       mode: '',
@@ -1025,9 +1033,49 @@ function createVueApp() {
         this.showSetup = false;
         this.startApp();
       },
+      // Browser-local Postgres. Nothing to validate and nothing to reach: the identity is stored, the
+      // mode is stored, and the reload boots index.html straight into backend-local-pglite.js, which
+      // brings up the WASM database. `app_folder` is set for the same reason the other modes set it —
+      // init() reads it as "this app has been configured".
+      completeLocalPgliteSetup: function() {
+        var email = String(this.pgliteUserInput || '').trim().toLowerCase() || 'you@local';
+        localStorage.setItem('pglite_user', email);
+        localStorage.setItem('app_folder', 'pglite');
+        localStorage.setItem('app_mode', 'pglite');
+        location.reload();   // reload so index.html loads storage-pglite + backend-kv for mode=pglite
+      },
       backToSetup: function() {
         this.setupStep = null;
         try { localStorage.removeItem('app_mode'); } catch (e) {}
+      },
+
+      // --- Browser-local database: size, and whether the browser may evict it -------------------------
+      // Only meaningful in `pglite` mode; harmless elsewhere (every other backend keeps its data on a
+      // server, where none of this applies).
+      refreshLocalStore: function() {
+        var self = this;
+        if (!navigator.storage) return Promise.resolve();
+        return Promise.all([
+          navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(null),
+          navigator.storage.estimate ? navigator.storage.estimate() : Promise.resolve({})
+        ]).then(function(r) {
+          self.localStore = { persisted: r[0], usage: (r[1] && r[1].usage) || 0, quota: (r[1] && r[1].quota) || 0 };
+        }).catch(function() {});
+      },
+      // Ask again after a refusal. Chrome/WebKit re-evaluate their heuristics (installing the app as a
+      // PWA is the usual thing that flips it); Firefox re-prompts.
+      requestLocalPersistence: function() {
+        var self = this;
+        if (!navigator.storage || !navigator.storage.persist) return Promise.resolve();
+        return navigator.storage.persist()
+          .then(function() { return self.refreshLocalStore(); })
+          .catch(function() { return self.refreshLocalStore(); });
+      },
+      fmtBytes: function(n) {
+        n = Number(n) || 0;
+        var u = ['B', 'kB', 'MB', 'GB', 'TB'], i = 0;
+        while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+        return (i === 0 ? n : n.toFixed(n < 10 ? 1 : 0)) + ' ' + u[i];
       },
 
       // Boot
@@ -4797,7 +4845,7 @@ function createVueApp() {
       // actually be present. On a committed cloud backend (firebase/supabase) there is no /api
       // endpoint, so the probe would just log a spurious 404 to the console on every load.
       var appMode = (function() { try { return localStorage.getItem('app_mode'); } catch (e) { return null; } })();
-      if (appMode !== 'firebase' && appMode !== 'supabase' && _mayLocal()) {
+      if (appMode !== 'firebase' && appMode !== 'supabase' && appMode !== 'pglite' && _mayLocal()) {
         fetch(_u('/api/validateFolder'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{"id":"probe"}' })
           .then(function(r) { if (r.ok) self.hasLocalServer = true; })
           .catch(function() {});
@@ -6014,6 +6062,15 @@ function init() {
   var instance = appInstance;
   if (savedMode === 'firebase') {
     instance.mode = 'firebase';
+    instance.loading = true;
+    instance.startApp();
+    return;
+  }
+
+  // Browser-local Postgres: backend-local-pglite.js has already started the database and settled the
+  // identity by the time it calls init(), so there is no folder to validate and no server to probe.
+  if (savedMode === 'pglite') {
+    instance.mode = 'pglite';
     instance.loading = true;
     instance.startApp();
     return;

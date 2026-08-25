@@ -78,15 +78,44 @@ for (const { url, integrity } of scripts) {
   } catch (e) { fail(`fetch failed for ${url}: ${e.message}`); }
 }
 
+// One vendored file is not a byte copy of the CDN's, by design: update-vendor.sh (and the CI hook)
+// rewrite mdi.css's `../fonts/` to `./fonts/`, because we serve it flattened at /vendor/mdi.css where
+// `../fonts/` would resolve to /fonts/ and 404 every glyph. Comparing raw bytes therefore reported a
+// mismatch for a CORRECTLY vendored file and told you to re-run the script that had just produced it.
+// It went unnoticed because CI has no vendor/ at all (it is generated, not committed), so the
+// comparison was skipped there and only ever fired on a developer's populated tree. Apply the same
+// rewrite before comparing.
+const asVendored = (url, buf) => (url.includes('/@mdi/font@')
+  ? Buffer.from(buf.toString('utf8').replace(/\.\.\/fonts\//g, './fonts/'))
+  : buf);
+
 for (const { url } of styles) {
   try {
     const buf = await fetchBuf(url);
     okmsg(`reachable: ${url}`);
     const vp = vendorPathFor(url);
-    if (vp && existsSync(vp) && sri(readFileSync(vp)) !== sri(buf)) {
+    if (vp && existsSync(vp) && sri(readFileSync(vp)) !== sri(asVendored(url, buf))) {
       fail(`committed ${vp.replace(ROOT + '/', '')} differs from the CDN copy (re-run update-vendor.sh)`);
     }
   } catch (e) { fail(`fetch failed for ${url}: ${e.message}`); }
+}
+
+// The PGlite fallback, which lives in backend-local-pglite.js rather than index.html: it is a dynamic
+// import() reached only when /vendor/pglite is missing, so nothing exercises it in the offline suites
+// and rot here is invisible until the day it is needed. No SRI to verify -- the module fetches its own
+// pglite.wasm / pglite.data relative to itself, so the bytes that matter never pass through a pin we
+// control. What CAN be checked is that the URL still resolves and that its sibling binaries are there.
+const pgSrc = readFileSync(join(ROOT, 'backend-local-pglite.js'), 'utf8');
+const pgUrl = (/https:\/\/cdn\.jsdelivr\.net\/npm\/@electric-sql\/pglite@[0-9.]+\/dist\/index\.js/.exec(pgSrc) || [])[0];
+if (!pgUrl) fail('backend-local-pglite.js has no PGlite CDN fallback URL — parser drift?');
+else if (!pgUrl.includes('pglite@' + versions.PGLITE)) {
+  fail(`PGlite fallback pins ${pgUrl} but vendor/versions says PGLITE=${versions.PGLITE}`);
+} else {
+  okmsg(`PGLITE=${versions.PGLITE} referenced by the fallback URL`);
+  for (const u of [pgUrl, pgUrl.replace(/index\.js$/, 'pglite.wasm'), pgUrl.replace(/index\.js$/, 'pglite.data')]) {
+    try { await fetchBuf(u); okmsg(`reachable: ${u}`); }
+    catch (e) { fail(`fetch failed for ${u}: ${e.message}`); }
+  }
 }
 
 if (failed) { console.error(`\n${failed} CDN-fallback check(s) failed.`); process.exit(1); }

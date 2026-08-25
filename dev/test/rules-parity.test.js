@@ -257,10 +257,10 @@ describe('rules parity — both backends mirror the same schema-derived facts', 
   };
 
   const FIREBASE = read('backend-firebase.js');
-  const SUPABASE = read('backend-supabase.js');
+  const KV = read('backend-kv.js');   // the contract Supabase and browser-local PGlite share
 
-  it('backend-firebase and backend-supabase saveSchema mirror an identical key set', () => {
-    assert.deepEqual(mirrorKeys(SUPABASE), mirrorKeys(FIREBASE),
+  it('backend-firebase and backend-kv saveSchema mirror an identical key set', () => {
+    assert.deepEqual(mirrorKeys(KV), mirrorKeys(FIREBASE),
       'one backend mirrors a _meta doc the other does not — its rules layer will silently use the permissive fallback');
   });
 

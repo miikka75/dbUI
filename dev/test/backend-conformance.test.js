@@ -66,11 +66,26 @@ describe('backend contract — browser backends (source scan)', () => {
     return set;
   }
 
-  for (const file of ['backend-firebase.js', 'backend-supabase.js']) {
+  // backend-kv.js is where the contract is actually written for the two key-value backends (Supabase and
+  // the browser-local PGlite): they are PLATFORM files -- auth, realtime, uploads -- and share this one
+  // implementation. Scanning them individually would find nothing and pass vacuously.
+  for (const file of ['backend-firebase.js', 'backend-kv.js']) {
     it(file + ' defines every contract method', () => {
       const defined = definedMethods(file);
       const missing = CONTRACT.filter(m => !defined.has(m));
       assert.deepEqual(missing, [], file + ' is missing: ' + missing.join(', '));
+    });
+  }
+
+  // ...which only holds while they really do delegate. A platform file that grew its own copy of a
+  // contract method would satisfy nothing here and drift silently, so pin the delegation itself.
+  for (const file of ['backend-supabase.js', 'backend-local-pglite.js']) {
+    it(file + ' gets its contract from backend-kv.js rather than its own copy', () => {
+      const src = fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8');
+      assert.match(src, /createKvBackend\(/, file + ' no longer builds its backend from the shared factory');
+      const own = definedMethods(file);
+      const copied = CONTRACT.filter(m => own.has(m));
+      assert.deepEqual(copied, [], file + ' re-implements shared contract methods: ' + copied.join(', '));
     });
   }
 });
@@ -133,14 +148,15 @@ describe('backend contract — createLanguage never erases existing translations
 });
 
 describe('backend contract — the browser backends use the shared seed rule', () => {
-  // Firebase and Supabase are plain scripts that assign globals, so they cannot be exercised in Node.
+  // Firebase and the shared kv contract are plain scripts that assign globals, so they cannot be
+  // exercised in Node.
   // Asserted against the source instead, because the failure is silent data loss on a production
   // deployment and the runtime cases above cannot reach it.
   // backend-pglite is requireable, but exercising createLanguage on it means standing up a WASM
   // Postgres and applying the whole schema — supabase-rls.test.js already pays that cost for the
   // policies. Scanned here instead, alongside the two it mirrors, so all three document backends are
   // held to the rule in one place.
-  for (const file of ['backend-firebase.js', 'backend-supabase.js', 'dev/backend-pglite.js']) {
+  for (const file of ['backend-firebase.js', 'backend-kv.js', 'dev/backend-pglite.js']) {
     it(file + ' seeds translations without overwriting what is stored', () => {
       const src = fs.readFileSync(path.join(__dirname, '..', '..', ...file.split('/')), 'utf8');
       const at = Math.max(src.indexOf('createLanguage: function'), src.indexOf('async createLanguage('));

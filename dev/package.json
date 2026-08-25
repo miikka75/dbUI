@@ -1,7 +1,7 @@
 {
   "name": "dbui",
   "version": "1.0.0",
-  "description": "Schema-driven web app with 3 backends: Supabase Postgres, Firebase Firestore, local SQLite",
+  "description": "Schema-driven web app with 4 backends: in-browser PGlite, Supabase Postgres, Firebase Firestore, local dev server",
   "private": true,
   "scripts": {
     "start": "node server.js",

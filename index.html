@@ -140,6 +140,9 @@
       var backendFile;
       if (mode === 'firebase') { backendFile = '/backend-firebase.js'; }
       else if (mode === 'supabase') { backendFile = '/backend-supabase.js'; }
+      // Browser-local Postgres (PGlite in IndexedDB). Needs no server and no account, so unlike the dev
+      // -server mode below there is nothing to probe for — if it is chosen, it is available.
+      else if (mode === 'pglite') { backendFile = '/backend-local-pglite.js'; }
       else {
         if (mayHaveLocalServer()) {
           try {
@@ -232,9 +235,14 @@
       if (backendFile === '/backend-firebase.js') {
         await loadScript('/storage-firestore.js');
       }
-      // Load Supabase storage adapter for Supabase mode
+      // The two key-value backends share ONE contract implementation (backend-kv.js) and differ only in
+      // their storage adapter and their platform file. Load the adapter, then the shared contract — the
+      // platform file loaded below reads both as globals.
       if (backendFile === '/backend-supabase.js') {
-        await loadScript('/storage-supabase.js');
+        await loadScriptsOrdered(['/storage-supabase.js', '/backend-kv.js']);
+      }
+      if (backendFile === '/backend-local-pglite.js') {
+        await loadScriptsOrdered(['/storage-pglite.js', '/backend-kv.js']);
       }
       if (backendFile) {
         await loadScript(backendFile);

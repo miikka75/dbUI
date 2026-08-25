@@ -123,10 +123,14 @@ jobs:
     # page load, which makes this lane network-dependent and slow: the exact opposite of what the comment
     # above promises, and invisible because the fallback WORKS. Materialise them once, then the suite is
     # offline and deterministic as intended.
-    - name: Materialise the vendored Vue/Vuetify/MDI assets
+    - name: Materialise the vendored Vue/Vuetify/MDI/PGlite assets
       run: bash ../update-vendor.sh
+      # PGlite is checked too, and for a sharper reason than the others: the browser-local backend also
+      # falls back to jsdelivr, so without its dist the pglite suite still PASSES -- it just quietly
+      # tests the CDN path instead of the self-hosted one this lane exists to exercise. A silent
+      # fallback that works is exactly the failure this step is here to make loud.
     - name: Verify they are actually there (a silent CDN fallback is what this guards)
-      run: test -s ../vendor/vue.js && test -s ../vendor/vuetify.js && test -s ../vendor/vuetify.css && test -s ../vendor/mdi.css
+      run: test -s ../vendor/vue.js && test -s ../vendor/vuetify.js && test -s ../vendor/vuetify.css && test -s ../vendor/mdi.css && test -s ../vendor/pglite/pglite.wasm && test -s ../vendor/pglite/index.js
     - run: npx playwright install --with-deps chromium
     # Worker count is left to the config's min(8, cores/2), which is 2 on a 4-vCPU runner. Measured on
     # this job: 225s serial, 130s at 2 workers, 104s at 4 -- but at 4 the contention pushes the slowest
