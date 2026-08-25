@@ -64,13 +64,23 @@ jobs:
       # Publish the whole repo root. Excludes below keep secrets / dev-only files out of the public site.
       - name: Prune non-public files
         run: |
-          rm -rf .github dev node_modules tests test .git || true
-          rm -f supabase-schema.sql firebase-config.json supabase-config.json .env* firebase.json .firebaserc firestore.indexes.json split-supabase-commits.bat || true
+          rm -rf .github dev node_modules tests test .git scripts || true
+          rm -f supabase-schema.sql firebase-config.json supabase-config.json .env* firebase.json .firebaserc firestore.indexes.json || true
+          # Dot-DIRECTORIES. Editor and tooling folders hold local configuration, and .github above is
+          # only one of them: .claude/settings.local.json was being published. Keep .nojekyll and any
+          # other dotFILE Pages itself needs -- this deletes directories only.
+          find . -mindepth 1 -maxdepth 1 -type d -name '.*' ! -name '.git' -exec rm -rf {} + || true
+          # Executables, by CLASS. This list used to name split-supabase-commits.bat and nothing else,
+          # so make-supabase-pr.bat -- added later, next to it -- shipped. Naming files does not scale;
+          # naming extensions does. (update-vendor.sh is safe to drop: the vendor step above has
+          # already run, and a deploy must never re-run it.)
+          rm -f ./*.sh ./*.bat ./*.cmd ./*.ps1 ./*.exe || true
           # Data export / import bundles carry ROW data. This is the SECOND publish path for the repo
           # root (firebase.json hosting is the other), with its own hand-maintained exclusion list —
           # so the same patterns have to be refused here or the leak just moves to Pages.
           # dev/test/deploy-config.test.js checks both lists against the same filenames.
           rm -f drive-sync-export-*.json *-import.json *-export.json || true
+          ls -a
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
