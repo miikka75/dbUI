@@ -1,4 +1,10 @@
-// schema.js — Derives SCHEMA/VIEWS from schema.json, builds colMap for O(1) lookup
+// schema.js — the Node test harness's schema loader: SCHEMA/VIEWS/_columnOrders from schema.json.
+//
+// The CONVERSION is /schema-normalize.js — the same module schema-loader.js runs in the browser. This
+// file used to re-implement it (flatten + colMap + implicit id), which meant the unit suite normalized
+// schemas differently from the app: its view discriminator drifted a kind behind, and it ran neither
+// the migration chain nor convertViewFilters, so no test took a legacy schema through the real load
+// path. What is left here is genuinely harness-local: the module bindings, and the partition fields.
 var _defaultSchema;
 if (typeof require !== 'undefined') {
   _defaultSchema = require('./schema.json');
@@ -6,43 +12,23 @@ if (typeof require !== 'undefined') {
   _defaultSchema = window._loadedSchema;
 }
 
-var SCHEMA = _defaultSchema ? _defaultSchema.tables : {};
-var VIEWS = {};
-var _viewsNav = _defaultSchema ? (_defaultSchema.views || []) : [];
-var DEFAULT_LANGUAGE = _defaultSchema ? (_defaultSchema.defaultLanguage || 'en') : 'en';
+var SchemaNormalize = require('../schema-normalize');
+var _norm = SchemaNormalize.normalize(_defaultSchema || {});
 
-// Flatten views array into VIEWS object (keyed by name), recursing into items
-(function flattenViews(arr) {
-  (arr || []).forEach(function(v) {
-    if (v.name && (v.sources || typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp || v.board || v.form)) { VIEWS[v.name] = v; }
-    if (v.views) flattenViews(v.views);
-  });
-})(_viewsNav);
+var SCHEMA = _norm.tables;
+var VIEWS = _norm.viewsMap;
+var _viewsNav = _norm.views;
+var _columnOrders = _norm.orders;
+var DEFAULT_LANGUAGE = (_defaultSchema && _defaultSchema.defaultLanguage) || 'en';
 
-// Build colMap (object keyed by name) from array columns, preserving order
-var _columnOrders = {};
+// HARNESS-ONLY: the browser never sets these. `partition`/`archivePartition` name the storage tabs a
+// table occupies, and the Node backends (backend-local's initSchema, storage-fs) read them off the
+// table def to decide which physical tables to create — where the browser passes the tab around
+// explicitly. Kept here rather than in the shared normalizer so the app's schema does not grow two
+// fields it has no use for.
 for (var t in SCHEMA) {
   SCHEMA[t].partition = 'active';
   SCHEMA[t].archivePartition = (SCHEMA[t].archivable || SCHEMA[t].archivePartition) ? 'archive' : null;
-  if (Array.isArray(SCHEMA[t].columns)) {
-    var colMap = {};
-    _columnOrders[t] = [];
-    SCHEMA[t].columns.forEach(function(c) {
-      if (!c.name) return; // skip text/embed entries
-      var name = c.name;
-      _columnOrders[t].push(name);
-      var def = Object.assign({}, c);
-      delete def.name;
-      colMap[name] = Object.keys(def).length ? def : 'text';
-    });
-    SCHEMA[t].columns = colMap;
-  } else {
-    _columnOrders[t] = Object.keys(SCHEMA[t].columns || {});
-  }
-}
-// id is implicit: auto-inject so schemas needn't declare it (stays storage PK + join/archive key)
-for (var _t in SCHEMA) {
-  if (SCHEMA[_t].columns && !SCHEMA[_t].columns.id) { SCHEMA[_t].columns.id = 'text'; if (_columnOrders[_t] && _columnOrders[_t].indexOf('id') === -1) _columnOrders[_t].unshift('id'); }
 }
 
 // Column typing primitives come from the shared /columns.js module (also used by the browser app),

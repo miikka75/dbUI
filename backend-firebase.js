@@ -313,9 +313,7 @@ backend = {
         var schemaTables = parsed.tables || {};
         var wanted = {};
         tabs.forEach(function(t) {
-          var cols = (schemaTables[t] && schemaTables[t].columns) || {};
-          var defs = Array.isArray(cols) ? cols : Object.keys(cols).map(function(k) { return cols[k]; });
-          defs.forEach(function(d) {
+          Columns.columnDefList(schemaTables[t]).forEach(function(d) {
             if (d && typeof d === 'object') {
               if (d.list) wanted[d.list] = 1;
               if (d.listSwitch && d.listSwitch.list) wanted[d.listSwitch.list] = 1;

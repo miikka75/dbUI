@@ -13,6 +13,10 @@
 //   Node:    const Migrations = require('./migrations');
 (function (root) {
   var isNode = (typeof module !== 'undefined' && module.exports);
+  // Resolved on first use: columns.js executes before this file in the browser's module batch, but
+  // reading the global at load time would still couple the two files' order for no reason.
+  var _Cols = null;
+  function Cols() { return _Cols || (_Cols = isNode ? require('./columns') : root.Columns); }
 
   // Bump when a migration is added. A schema with no version is v1: everything written before this
   // existed.
@@ -66,14 +70,12 @@
   // to the ref editor). As a flag it composes with both.
   //
   // No column NAME changes, so no translation key moves and this step records no renames.
+  // Both column shapes (authored array / normalized map) via columns.js -- a migration runs over a
+  // schema in whichever shape it arrived in, and that branch belongs in one place.
   function eachColumnDef(schema, fn) {
     var tables = (schema && schema.tables) || {};
     Object.keys(tables).forEach(function (t) {
-      var cols = tables[t] && tables[t].columns;
-      if (Array.isArray(cols)) cols.forEach(function (d) { if (d && typeof d === 'object') fn(d); });
-      else if (cols && typeof cols === 'object') {
-        Object.keys(cols).forEach(function (k) { if (cols[k] && typeof cols[k] === 'object') fn(cols[k]); });
-      }
+      Cols().columnDefList(tables[t]).forEach(function (d) { if (d && typeof d === 'object') fn(d); });
     });
   }
 

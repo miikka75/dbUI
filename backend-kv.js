@@ -20,6 +20,7 @@
   var H = isNode ? require('./backend-helpers') : root.BackendHelpers;
   var LA = isNode ? require('./list-access') : root.ListAccess;
   var AF = isNode ? require('./access-features') : root.AccessFeatures;
+  var Cols = isNode ? require('./columns') : root.Columns;
 
   // S: the storage adapter (storage-supabase.js / storage-pglite.js) — get/put/delete/getAll/getMeta/
   //    setMeta/_all/_replace/_merge over kv.
@@ -164,9 +165,7 @@
             var schemaTables = parsed.tables || {};
             var wanted = {};
             tabs.forEach(function (t) {
-              var cols = (schemaTables[t] && schemaTables[t].columns) || {};
-              var defs = Array.isArray(cols) ? cols : Object.keys(cols).map(function (k) { return cols[k]; });
-              defs.forEach(function (d) {
+              Cols.columnDefList(schemaTables[t]).forEach(function (d) {
                 if (d && typeof d === 'object') {
                   if (d.list) wanted[d.list] = 1;
                   if (d.listSwitch && d.listSwitch.list) wanted[d.listSwitch.list] = 1;

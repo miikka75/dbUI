@@ -2,6 +2,7 @@
 const Database = require('better-sqlite3');
 const H = require('../backend-helpers');
 const LA = require('../list-access');
+const Columns = require('../columns');
 
 function createLocalBackend(dbPath) {
   const db = new Database(dbPath || ':memory:');
@@ -28,15 +29,9 @@ function createLocalBackend(dbPath) {
     try {
       var stored = _storedSchema();
       if (!stored) return {};
-      var def = (stored.tables || {})[tableId];
-      var out = {}, cols = def && def.columns;
-      if (Array.isArray(cols)) {
-        // Authored/stored form: columns is an array of {name,type,...} objects.
-        cols.forEach(function(d) { if (d && typeof d === 'object' && d.type === 'multiselect' && d.name) out[d.name] = true; });
-      } else if (cols) {
-        // Normalized colMap form: { <name>: {type,...} }.
-        Object.keys(cols).forEach(function(c) { var d = cols[c]; if (d && typeof d === 'object' && d.type === 'multiselect') out[c] = true; });
-      }
+      // Both column shapes (authored array / normalized colMap) through the shared reader.
+      var defs = Columns.columnDefs((stored.tables || {})[tableId]), out = {};
+      Object.keys(defs).forEach(function(c) { var d = defs[c]; if (d && typeof d === 'object' && d.type === 'multiselect') out[c] = true; });
       return out;
     } catch (e) { return {}; }
   }
@@ -122,6 +117,10 @@ function createLocalBackend(dbPath) {
     initSchema(schema) {
       const result = {};
       for (const [table, def] of Object.entries(schema)) {
+        // NOT Columns.columnDefs, deliberately: initSchema takes a STORAGE schema, and a storage schema
+        // may name its columns as a plain list of strings (`columns: ['id', 'v']`) as well as in the two
+        // app shapes. The shared reader answers "what is each column's DEFINITION", which a bare name
+        // does not have; this asks only for the names, over a third shape the app never produces.
         const declared = Array.isArray(def.columns) ? def.columns.map(c => typeof c === 'object' ? c.name : c).filter(Boolean) : Object.keys(def.columns);
         const columns = ['id'].concat(declared.filter(c => c !== 'id')); // id is implicit -> always present, first, PK
         const cols = columns.map(c => c === 'id' ? qid(c) + ' TEXT PRIMARY KEY' : qid(c) + ' TEXT').join(', ');

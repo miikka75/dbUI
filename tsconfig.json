@@ -31,6 +31,7 @@
     "rotation.js",
     "query.js",
     "migrations.js",
+    "schema-normalize.js",
     "writes.js",
     "rows.js",
     "embeds.js",

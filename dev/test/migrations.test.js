@@ -159,8 +159,11 @@ describe('migrations — the write-back is narrow on purpose', () => {
   });
 
   it('the loader records the result rather than discarding it', () => {
+    // Matched on the SHAPE, not on a variable name: the chain now runs inside SchemaNormalize and the
+    // loader binds what it returns, so pinning the old local (`_m`) would break on a rename while the
+    // two properties that matter -- gated on `applied.length`, null otherwise -- stayed intact.
     const loader = fs.readFileSync(path.join(ROOT, 'schema-loader.js'), 'utf8');
-    assert.match(loader, /window\._schemaMigration = _m\.applied\.length \? _m : null/,
+    assert.match(loader, /window\._schemaMigration = [^;]*\.applied\.length[^;]*: null/,
       'the loader must report an applied migration, and report nothing when none applied');
   });
 });

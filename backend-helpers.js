@@ -2,6 +2,16 @@
 // Browser: <script src="/backend-helpers.js">, then use via BackendHelpers.*
 // Node:    const BackendHelpers = require('../../backend-helpers');
 (function(root) {
+  // Column-shape reading (array of {name,...} vs. name->def map) comes from columns.js, so the schema
+  // mirrors below and the client agree on what a column IS. Resolved on FIRST USE, not at load: the
+  // boot order in index.html awaits this file before the pure-module batch that carries columns.js,
+  // so `root.Columns` does not exist yet while this IIFE runs — but it always does by the time a
+  // backend calls one of these.
+  var _Cols = null;
+  function Cols() {
+    return _Cols || (_Cols = (typeof module !== 'undefined' && module.exports) ? require('./columns') : root.Columns);
+  }
+
   var H = {
     // Storage key for a table partition: ('tasks','active') -> 'tasks__active'
     storeName: function(table, tab) { return table + '__' + (tab || 'active'); },
@@ -114,12 +124,8 @@
       for (var t in tables) {
         var def = tables[t] || {}, list = def.ownerWritable;
         if (!Array.isArray(list)) continue;
-        var cols = def.columns, defs = {};
-        if (Array.isArray(cols)) cols.forEach(function(c) { if (c && c.name) defs[c.name] = c; });
-        else for (var k in (cols || {})) defs[k] = cols[k];
-        var hasOwner = false;
-        for (var n in defs) { var d = defs[n]; if (d && typeof d === 'object' && d.type === 'owner') hasOwner = true; }
-        if (!hasOwner) continue;
+        var defs = Cols().columnDefs(def);
+        if (!Cols().ownerColOf(def)) continue;
         var locked = {};
         for (var c2 in defs) {
           var d2 = defs[c2];
@@ -174,9 +180,7 @@
     stampedOf: function(schema) {
       var tables = (schema && schema.tables) || {}, out = {};
       for (var t in tables) {
-        var cols = (tables[t] || {}).columns, defs = {}, order = [];
-        if (Array.isArray(cols)) cols.forEach(function(c) { if (c && c.name) { defs[c.name] = c; order.push(c.name); } });
-        else for (var k in (cols || {})) { defs[k] = cols[k]; order.push(k); }
+        var defs = Cols().columnDefs(tables[t]), order = Object.keys(defs);
         for (var i = 0; i < order.length; i++) {
           var d = defs[order[i]];
           if (!d || typeof d !== 'object' || !d.stamped) continue;
@@ -276,13 +280,7 @@
     // {name: 'text' | {type}}). A bare-string column def can't be `owner`, so only object defs count.
     ownerTablesOf: function(schema) {
       var tables = (schema && schema.tables) || {}, out = [];
-      var isOwner = function(def) { return !!(def && typeof def === 'object' && def.type === 'owner'); };
-      for (var t in tables) {
-        var cols = tables[t] && tables[t].columns, has = false;
-        if (Array.isArray(cols)) has = cols.some(isOwner);
-        else if (cols) { for (var c in cols) { if (isOwner(cols[c])) { has = true; break; } } }
-        if (has) out.push(t);
-      }
+      for (var t in tables) { if (Cols().ownerColOf(tables[t])) out.push(t); }
       return out.sort();
     },
 
