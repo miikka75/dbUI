@@ -9,6 +9,9 @@ const os = require('os');
 const { filterLists } = require('../list-access');
 const AccessFeatures = require('../access-features');
 const BackendHelpers = require('../backend-helpers');
+// Column typing — the same module the browser and the schema mirrors read, so "which column is the
+// owner column" is answered here exactly as it is answered there.
+const Columns = require('../columns');
 // User-linked lists (Option C): pure link/projection logic, shared with the browser app.
 const LU = require('../list-users');
 
@@ -227,11 +230,7 @@ function allowedTablesFor(email) {
   return AccessFeatures.readableTables(u.tables) || [];
 }
 async function ownerColNameOf(base) {
-  const cols = (((await backend.getSchema() || {}).tables || {})[base] || {}).columns;
-  if (!cols) return null;
-  if (Array.isArray(cols)) { const o = cols.find(c => c && c.type === 'owner'); return o ? o.name : null; }
-  for (const n in cols) { const d = cols[n]; if (d && typeof d === 'object' && d.type === 'owner') return n; }
-  return null;
+  return Columns.ownerColOf(((await backend.getSchema() || {}).tables || {})[base]);
 }
 
 // --- Live sync: an SSE stream of row changes ---------------------------------------------------------
@@ -420,12 +419,7 @@ const server = http.createServer(async (req, res) => {
     // selfServiceOwnerCol so the boot path can ask the plain question -- "does this table have an owner
     // column" -- without the writable-set answer folded in.
     async function ownerColOf(tableId) {
-      const base = tableId ? tableId.split('__')[0] : '';
-      const cols = (((await backend.getSchema() || {}).tables || {})[base] || {}).columns;
-      if (!cols) return null;
-      if (Array.isArray(cols)) { const o = cols.find(c => c && c.type === 'owner'); return o ? o.name : null; }
-      for (const n in cols) { const d = cols[n]; if (d && typeof d === 'object' && d.type === 'owner') return n; }
-      return null;
+      return await ownerColNameOf(tableId ? tableId.split('__')[0] : '');
     }
     async function selfServiceOwnerCol(tableId) {
       const base = tableId ? tableId.split('__')[0] : '';

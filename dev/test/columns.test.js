@@ -101,3 +101,96 @@ describe('columns.js — tableDefaultCols (seed-on-create columns)', () => {
     assert.deepEqual(Columns.tableDefaultCols(schema, 'nope'), []);
   });
 });
+
+// --- The two column shapes -----------------------------------------------------------------------
+// `columns` ships as the AUTHORED array of {name,...} defs and as the RUNTIME name->def map, and every
+// reader that walks a table's columns used to branch on which one it held -- eleven sites, five of them
+// character-for-character identical, which is how the shapes drifted apart in the first place (the
+// rules mirrors refused a bare-string `owner`, the client accepted one). These are that branch.
+describe('columns.js — the two column shapes', () => {
+  const arrayShape = { columns: [
+    { name: 'title', type: 'text' },
+    { name: 'mine', type: 'owner' },
+    { name: 'note' },                                    // a def carrying nothing but its name
+    { type: 'text' }                                     // no name -> not a column at all
+  ] };
+  const mapShape = { columns: {
+    title: { type: 'text' },
+    mine:  { type: 'owner' },
+    note:  'text'
+  } };
+
+  it('columnDefs reads both shapes, keyed by name', () => {
+    assert.deepEqual(Object.keys(Columns.columnDefs(arrayShape)), ['title', 'mine', 'note']);
+    assert.deepEqual(Object.keys(Columns.columnDefs(mapShape)), ['title', 'mine', 'note']);
+    assert.equal(Columns.columnDefs(arrayShape).mine.type, 'owner');
+    assert.equal(Columns.columnDefs(mapShape).mine.type, 'owner');
+  });
+
+  it('preserves the authored order, so "the first column that ..." means the same in both', () => {
+    const arr = { columns: [{ name: 'b', type: 'owner' }, { name: 'a', type: 'owner' }] };
+    assert.deepEqual(Columns.columnDefList(arr).map(d => d.name), ['b', 'a']);
+    assert.equal(Columns.ownerColOf(arr), 'b');
+  });
+
+  it('the map shape is returned as-is (hot paths must not pay for a copy)', () => {
+    assert.equal(Columns.columnDefs(mapShape), mapShape.columns);
+  });
+
+  it('a missing table, a table with no columns, and null are all empty — never a throw', () => {
+    assert.deepEqual(Columns.columnDefs(undefined), {});
+    assert.deepEqual(Columns.columnDefList(null), []);
+    assert.deepEqual(Columns.columnDefList({}), []);
+    assert.equal(Columns.ownerColOf(undefined), null);
+  });
+
+  it('ownerColOf finds the owner column in either shape, and null when there is none', () => {
+    assert.equal(Columns.ownerColOf(arrayShape), 'mine');
+    assert.equal(Columns.ownerColOf(mapShape), 'mine');
+    assert.equal(Columns.ownerColOf({ columns: { a: { type: 'text' } } }), null);
+  });
+
+  it('a BARE-STRING def is never the owner column — the mirrors have always refused one', () => {
+    // BackendHelpers.ownerTablesOf (what firestore.rules and the RLS policies read) counts object defs
+    // only. A client that disagreed would offer self-service on a table the store denies at write time,
+    // so the two agree here, fail-closed.
+    const bare = { columns: { mine: 'owner' } };
+    assert.equal(Columns.ownerColOf(bare), null);
+    assert.equal(Columns.tableOwnerCol({ t: bare }, 't'), null);
+  });
+
+  it('tableOwnerCol is ownerColOf bound to a schema, and tolerates a missing table', () => {
+    assert.equal(Columns.tableOwnerCol({ t: arrayShape }, 't'), 'mine');
+    assert.equal(Columns.tableOwnerCol({ t: mapShape }, 't'), 'mine');
+    assert.equal(Columns.tableOwnerCol({}, 'nope'), null);
+  });
+});
+
+// A source guard, like rules-parity's: re-implementing the branch would not fail any behavioural test.
+// It would just quietly become a twelfth answer to the same question, which is how the shapes drifted
+// apart the first time.
+describe('columns.js — nothing re-implements the shape branch', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const ROOT = path.join(__dirname, '..', '..');
+  // Every shipped module that reads a table's columns. columns.js itself is where the branch belongs.
+  const FILES = ['backend-firebase.js', 'backend-kv.js', 'backend-helpers.js', 'list-access.js',
+                 'migrations.js', 'schema-normalize.js', 'app-core.js', 'rows.js', 'embeds.js',
+                 'dev/server.js', 'dev/backend-local.js', 'dev/schema.js'];
+
+  it('the array-or-map conversion appears only in columns.js', () => {
+    for (const rel of FILES) {
+      const src = fs.readFileSync(path.join(ROOT, ...rel.split('/')), 'utf8');
+      assert.doesNotMatch(src, /Array\.isArray\(cols\)\s*\?\s*cols\s*:\s*Object\.keys\(cols\)/,
+        rel + ': use Columns.columnDefs / Columns.columnDefList');
+    }
+  });
+
+  it('nobody hand-rolls an owner-column scan either', () => {
+    for (const rel of FILES) {
+      const src = fs.readFileSync(path.join(ROOT, ...rel.split('/')), 'utf8');
+      assert.doesNotMatch(src, /c\.type === 'owner'\s*\)\s*;\s*return o \? o\.name : null/,
+        rel + ': use Columns.ownerColOf');
+    }
+  });
+});

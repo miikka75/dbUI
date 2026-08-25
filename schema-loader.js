@@ -6,49 +6,39 @@ var defaultSchema = {"tables":{},"views":[]};
 
 // Active schema — initially from defaultSchema, overwritten from Drive on boot
 var SCHEMA = defaultSchema.tables;
-var _viewsNav = Array.isArray(defaultSchema.views) ? defaultSchema.views : [];var VIEWS = {};
-function _flattenViews(arr) { (arr || []).forEach(function(v) { if (v.name && (v.sources || typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp || v.board || v.form)) VIEWS[v.name] = v; if (v.views) _flattenViews(v.views); }); }
+var _viewsNav = Array.isArray(defaultSchema.views) ? defaultSchema.views : [];
+// The nav-tree flattener, the column folding and the implicit `id` live in /schema-normalize.js, so
+// the Node test harness (dev/schema.js) loads a schema through the SAME code the app does instead of
+// its own copy. Loaded before this fragment; called as the global SchemaNormalize.
+var VIEWS = SchemaNormalize.flattenViews(_viewsNav);
 // (Legacy `pages` map / {page:} nav and `text` entries are removed features with no load-time
 //  handling; a legacy schema must be hand-upgraded to markdown doc-views. See SCHEMA.md.)
-_flattenViews(_viewsNav);
 var DEFAULT_LANGUAGE = defaultSchema.defaultLanguage || null;
 
 // Schema helpers
 function getColumns(table) { if (!SCHEMA[table]) return []; return window._columnOrders && window._columnOrders[table] ? window._columnOrders[table] : Object.keys(SCHEMA[table].columns); }
-// id is implicit: auto-inject into every table so schemas needn't declare it. It stays the storage PK and join/archive key.
-function ensureImplicitId(schema, orders) {
-  Object.keys(schema).forEach(function(t) {
-    var cols = schema[t].columns; if (!cols) return;
-    if (!cols.id) { cols.id = 'text'; if (orders && orders[t] && orders[t].indexOf('id') === -1) orders[t].unshift('id'); }
-  });
-}
-// Shared schema normalization: strip dead text entries + set globals + colMap + ensureImplicitId. Returns nothing; mutates globals.
+// id is implicit: auto-inject into every table so schemas needn't declare it. It stays the storage PK
+// and join/archive key. A global because app-core re-runs it after a column-order override.
+function ensureImplicitId(schema, orders) { SchemaNormalize.ensureImplicitId(schema, orders); }
+// Shared schema normalization: run the document through SchemaNormalize and bind the result to the
+// app's globals. Returns nothing; mutates globals.
 function _normalizeSchema(parsed) {
-  // Bring an older schema forward BEFORE anything reads it, so nothing downstream has to know which
-  // shape it was written in. Idempotent, because the result is not written back yet and so this runs on
-  // every load. convertViewFilters below is the pattern this replaces: a permanent shim, because there
-  // was no version to migrate past.
-  // The RESULT is recorded, not just applied: app-core writes the upgraded schema back once, when a
-  // caller who may save it is known. Until that happens the chain re-runs on every load, which is
-  // why every migration has to be idempotent.
-  if (typeof Migrations !== 'undefined' && Migrations.migrate) {
-    var _m = Migrations.migrate(parsed);
-    if (typeof window !== 'undefined') window._schemaMigration = _m.applied.length ? _m : null;
-  }
-  convertViewFilters(parsed.views);   // upgrade legacy array-IN ({col:[a,b]})->$or and shorthand conditional cols ({col:{cond}})->{name,when}
+  // The conversion itself (migrate -> convertViewFilters -> fold columns -> implicit id -> flatten) is
+  // SchemaNormalize.normalize. What stays here is what is BROWSER-specific: binding the result to the
+  // globals the app reads, and recording the migration for the UI.
+  //
+  // The migration RESULT is recorded, not just applied: app-core writes the upgraded schema back once,
+  // when a caller who may save it is known. Until that happens the chain re-runs on every load, which
+  // is why every migration has to be idempotent.
+  var n = SchemaNormalize.normalize(parsed);
+  if (typeof window !== 'undefined') window._schemaMigration = (n.migration && n.migration.applied.length) ? n.migration : null;
+  // `n` describes the DOCUMENT. A document carrying no `tables` / no `views` array leaves the previous
+  // ones in place (that fallback predates this extraction and boot relies on it), so bind against what
+  // SCHEMA/_viewsNav actually end up being rather than against a map built from nothing.
   SCHEMA = parsed.tables || SCHEMA;
   _viewsNav = Array.isArray(parsed.views) ? parsed.views : _viewsNav;
-  VIEWS = {};
-  _flattenViews(_viewsNav);
-  window._columnOrders = {};
-  Object.keys(SCHEMA).forEach(function(t) {
-    if (Array.isArray(SCHEMA[t].columns)) {
-      var colMap = {}; window._columnOrders[t] = [];
-      SCHEMA[t].columns.forEach(function(c) { if (!c.name) return; window._columnOrders[t].push(c.name); var def = Object.assign({}, c); delete def.name; colMap[c.name] = Object.keys(def).length ? def : 'text'; });
-      SCHEMA[t].columns = colMap;
-    } else { window._columnOrders[t] = Object.keys(SCHEMA[t].columns || {}); }
-  });
-  ensureImplicitId(SCHEMA, window._columnOrders);
+  VIEWS = Array.isArray(parsed.views) ? n.viewsMap : SchemaNormalize.flattenViews(_viewsNav);
+  window._columnOrders = parsed.tables ? n.orders : SchemaNormalize.foldColumns(SCHEMA);
 }
 // colName/isEmbed/isViewEmbed/isText (view column-entry shape predicates) are globals from columns.js.
 // Shared list-value seeding: ensure filter-referenced values exist in listsCache. Returns true if anything was added.

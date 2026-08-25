@@ -6,6 +6,41 @@
 // All functions are pure over `schema` (the tables map). The single-table accessors are null-guarded
 // (missing table -> text/null, never throws); columnList(schema, null, col) scans every table.
 (function(root) {
+  // --- The two column shapes -------------------------------------------------------------------
+  // A table's `columns` ships in TWO shapes and always has: the AUTHORED/stored array of {name,...}
+  // defs (what a schema.json file holds, what an export carries, what the rules mirrors are computed
+  // from), and the RUNTIME name->def map that _normalizeSchema builds for the browser. Every reader
+  // that walks a table's columns had to branch on which one it was holding, and that branch was
+  // hand-written in eleven places -- five of them character-for-character identical. This is that
+  // branch, written once.
+  //
+  // Order is preserved in both shapes (array order; key insertion order for the map), so a caller
+  // asking for "the first column that ..." gets the same answer whichever shape it was handed.
+  // The map shape is returned AS-IS rather than copied: these run on hot paths (per render, per nav
+  // item), and the copy would be pure waste. Treat the result as read-only.
+  function columnDefs(tableDef) {
+    var cols = (tableDef && tableDef.columns) || {};
+    if (!Array.isArray(cols)) return cols;
+    var out = {};
+    cols.forEach(function(c) { if (c && c.name) out[c.name] = c; });   // nameless entries are not columns
+    return out;
+  }
+  // The defs alone, for scans that never need the name (list references, ref targets, owner probes).
+  function columnDefList(tableDef) {
+    var m = columnDefs(tableDef);
+    return Object.keys(m).map(function(k) { return m[k]; });
+  }
+  // Name of a table def's `owner` column (type:'owner'), or null -- shape-agnostic, so the backends
+  // and the dev server can ask it of a STORED table def, which is not the map `tableOwnerCol` wants.
+  // Object defs only, deliberately: a bare-string def (`"mine": "owner"`) is what the rules MIRROR
+  // (BackendHelpers.ownerTablesOf) has always refused to count, and a table the client believed was
+  // self-service while the store did not is a denial at write time. The two now agree, fail-closed.
+  function ownerColOf(tableDef) {
+    var defs = columnDefs(tableDef);
+    for (var c in defs) { var d = defs[c]; if (d && typeof d === 'object' && d.type === 'owner') return c; }
+    return null;
+  }
+
   function columnType(schema, table, col) {
     var def = schema[table] && schema[table].columns[col];
     if (!def) return 'text';
@@ -36,10 +71,7 @@
   // Name of a table's `owner` column (type:'owner' — auto-stamped with the current user's email,
   // read-only, immutable; drives per-row self-service access), or null.
   function tableOwnerCol(schema, table) {
-    var cols = schema[table] && schema[table].columns;
-    if (!cols) return null;
-    for (var c in cols) { if (columnType(schema, table, c) === 'owner') return c; }
-    return null;
+    return ownerColOf(schema && schema[table]);
   }
   // Columns carrying a `defaultFrom` token -> [{ name, from }]. The token is resolved by the caller
   // (only '@me' = my profile display name today) and stamped on row CREATE only, so the value stays
@@ -169,16 +201,15 @@
   // bishopric-schema.json uses the array form). Normalizing to a list of defs handles both; defTables
   // reads only the def, never the key.
   function tableDeps(schema, table) {
-    var cols = (schema[table] && schema[table].columns) || {};
-    var defs = Array.isArray(cols) ? cols : Object.keys(cols).map(function(k) { return cols[k]; });
     var seen = {}, out = [];
-    defs.forEach(function(d) {
+    columnDefList(schema && schema[table]).forEach(function(d) {
       defTables(d).forEach(function(t) { if (t !== table && !seen[t]) { seen[t] = 1; out.push(t); } });
     });
     return out;
   }
 
   var C = {
+    columnDefs: columnDefs, columnDefList: columnDefList, ownerColOf: ownerColOf,
     columnType: columnType, columnList: columnList, columnRef: columnRef,
     isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol,
     tableDefaultCols: tableDefaultCols, tableRefCol: tableRefCol,

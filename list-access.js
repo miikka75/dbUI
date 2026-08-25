@@ -9,14 +9,14 @@
 //   Node:    const LA = require('../list-access')  (dev/server.js request filtering, backend-local stamping).
 //
 // Shape-agnostic: `columns` may be an object map (runtime/normalized) or an array of {name,...}
-// (stored/exported schema).
+// (stored/exported schema) -- resolved by Columns.columnDefList, not by a local branch (columns.js
+// loads before this file in the browser, and is required directly in Node).
 (function(root) {
+  var Cols = (typeof module !== 'undefined' && module.exports) ? require('./columns') : root.Columns;
   function listOwningTables(schemaTables, listName) {
     var out = [];
     Object.keys(schemaTables || {}).forEach(function(t) {
-      var cols = (schemaTables[t] && schemaTables[t].columns) || {};
-      var defs = Array.isArray(cols) ? cols : Object.keys(cols).map(function(k) { return cols[k]; });
-      var hit = defs.some(function(d) {
+      var hit = Cols.columnDefList(schemaTables[t]).some(function(d) {
         return d && typeof d === 'object' && (d.list === listName || (d.listSwitch && d.listSwitch.list === listName));
       });
       if (hit) out.push(t);
@@ -34,9 +34,7 @@
   function listOwnershipMap(schemaTables) {
     var out = {};
     Object.keys(schemaTables || {}).forEach(function(t) {
-      var cols = (schemaTables[t] && schemaTables[t].columns) || {};
-      var defs = Array.isArray(cols) ? cols : Object.keys(cols).map(function(k) { return cols[k]; });
-      defs.forEach(function(d) {
+      Cols.columnDefList(schemaTables[t]).forEach(function(d) {
         if (!d || typeof d !== 'object') return;
         [d.list, d.listSwitch && d.listSwitch.list].forEach(function(ln) {
           if (!ln) return;

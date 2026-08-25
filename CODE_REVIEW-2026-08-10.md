@@ -213,7 +213,7 @@ and make both layers say it. (I'd allow the create, gated on the incoming `table
 
 ## 3. De-duplication
 
-### R-A — The array-or-map column shape is now branched in 11 places, 5 of them identical
+### R-A [FIXED] — The array-or-map column shape is now branched in 11 places, 5 of them identical
 ```
 backend-firebase.js:217   var defs = Array.isArray(cols) ? cols : Object.keys(cols).map(k => cols[k]);
 backend-supabase.js:161   (verbatim identical)
@@ -231,7 +231,9 @@ grown to eleven. The cheap win, without touching the storage format: export
 sites. `dev/server.js:188-197` `selfServiceOwnerCol` then becomes a one-liner over
 `Columns.tableOwnerCol`.
 
-### R-B — `dev/schema.js` still re-implements `_normalizeSchema`, and has drifted
+**Fixed** — see *Applied 2026-08-25* below.
+
+### R-B [FIXED] — `dev/schema.js` still re-implements `_normalizeSchema`, and has drifted
 `dev/schema.js:15-46` duplicates `schema-loader.js`'s `_flattenViews` + colMap + implicit-id logic.
 Nine test files import it — so **the unit suite normalizes schemas differently from the app.**
 
@@ -247,6 +249,8 @@ sets.
 
 Extract the normalizer into a shared module (`schema-normalize.js`) that both `schema-loader.js` and
 `dev/schema.js` call, exactly as `list-access.js` and `columns.js` were extracted.
+
+**Fixed** — see *Applied 2026-08-25* below.
 
 ### R-C — The owner-column-bounds comparison is written three times
 `firestore.rules:228-238` (`diff().affectedKeys().hasOnly()`), `supabase-schema.sql:178-205`
@@ -377,11 +381,19 @@ Every consumer re-derives the kind by probing fields, invalid combinations remai
 `validateSchema` still doesn't reject them. `dev/schema.js:17` having drifted (R-B) is the predicted
 consequence: an implicit discriminator cannot be kept in sync, because there is nothing to sync.
 
+Partly overtaken: `migrations.js` now WRITES a `kind` (v1->v2) and every shipped schema declares
+`schemaVersion: 3`, so the discriminator exists in the data. It is not yet what the loader dispatches
+on, and cannot be until migration also labels nav GROUPS — `kindOf` defaults to `'data'`, so a named
+group carrying only nested `views` comes out labelled a data view. `SchemaNormalize.isView` is now the
+one presence sniff left (it was two), with that reason written next to it.
+
 Add an explicit `"kind"` and derive it at load for legacy schemas — `_normalizeSchema` is already the
 place migrations happen, and `resolveEmbed` (`embeds.js:99-136`) already dispatches on a `kind` field
 it computes itself. Half the pattern exists; the schema just doesn't carry it.
 
-**Dual column shapes** — see R-A. Eleven branch sites, growing.
+**Dual column shapes** — see R-A. ~~Eleven branch sites, growing.~~ Now read through one module
+(`Columns.columnDefs`); the SHAPES themselves are still two, which is the deeper point and is
+unchanged — the storage format still admits both.
 
 **Still no `schemaVersion`, still no meta-schema.** `validateSchema` is 150 lines of hand-rolled
 checks that have grown a genuinely good `archiveAfter` block (`schema-loader.js:125-134`, checking
@@ -467,6 +479,63 @@ passing.
 
 ---
 
+## Applied 2026-08-25 — R-A / R-B (the two de-duplication findings)
+
+**R-A — one reader for the two column shapes.** `columns.js` gained `columnDefs(tableDef)` (name->def,
+either shape), `columnDefList(tableDef)` (the defs alone) and `ownerColOf(tableDef)`. Every site the
+finding named now calls one of them: `backend-firebase.js`, `list-access.js` (x2),
+`backend-helpers.js` (`ownerWritableOf` / `stampedOf` / `ownerTablesOf`), `dev/server.js` (x2, which
+collapse to one function), `dev/backend-local.js`'s multiselect scan, and `columns.js`'s own
+`tableDeps` / `tableOwnerCol`. Two sites the finding did not have — `backend-kv.js` (which post-dates
+it and carries the identical clause) and `migrations.js`'s `eachColumnDef` — went with them.
+
+Three things worth knowing beyond the mechanical move:
+
+- **The map shape is returned as-is, not copied.** These run per render and per nav item (`P-D`), so a
+  defensive copy would have made a de-duplication into a slowdown. The result is documented read-only.
+- **A bare-string `owner` def is now refused everywhere.** `tableOwnerCol` went through `columnType`,
+  which types `"mine": "owner"` as an owner column; `ownerTablesOf` — what `firestore.rules` and the
+  RLS policies actually read — never counted one. A client that believed a table was self-service
+  while the store did not is a denial at write time, so the two agree now, in the fail-closed
+  direction. No shipped schema uses the string form.
+- **One site was deliberately NOT collapsed.** `dev/backend-local.js`'s `initSchema` takes a STORAGE
+  schema, whose `columns` may be a plain list of NAMES (`['id', 'v']`) — a third shape the app never
+  produces and the shared reader has no definition to return for. Converting it broke two fixtures;
+  it is back, with the reason written down. The count is nine collapsed, not ten.
+
+**R-B — `schema-normalize.js`.** The migrate -> `convertViewFilters` -> fold-columns -> implicit-id ->
+flatten-views chain is one module now; `schema-loader.js` keeps only what is browser-specific (binding
+the globals, recording the migration for the UI) and `dev/schema.js` keeps only what is genuinely
+harness-local (the `partition` / `archivePartition` fields the Node backends read off a table def).
+`app-core.js`'s import path called the loader-local `_flattenViews` and now calls the module — caught
+by the E2E suite, not by any unit test, which is worth remembering about globals.
+
+The gap the finding predicted is closed by construction: the harness now runs the migration chain and
+`convertViewFilters`, so a legacy schema finally goes through the real load path in Node.
+
+`dev/schema.js:17` had in fact caught up on `board` since the review was written — but not by any
+mechanism, which was the finding's actual point.
+
+New coverage: `dev/test/schema-normalize.test.js` (16 cases, including a source guard that neither
+loader re-implements the conversion, and a case pinning WHY the discriminator is still a presence
+sniff rather than `kind`) and 7 cases in `columns.test.js` (both shapes, order preservation, the
+no-copy contract, the bare-string rule, plus a source guard over twelve files that the array-or-map
+clause appears only in `columns.js`).
+
+**Also fixed, found on the way:** `dev/server.js` isolated a test server's sidecar files by
+`process.pid` alone. Nothing ever deleted them — a test kills its server, which on Windows runs no
+exit handler — so 2 700 had accumulated in the temp dir, and a fresh server whose pid matched a
+previous RUN's loaded that run's member registry. That ends bootstrap, and the symptom is the one the
+comment above that very line describes: `saveSchema` refused during setup, mirrors never written,
+gates silently permissive. `grant-edit-keeps-identity.test.js` failed 4-for-4 on it. The token is now
+pid + random, the four sidecars are unlinked on a graceful exit, and startup sweeps anything older
+than 24 h (longer than any suite holds a server open, so a live instance can never be swept).
+
+Suites: **1 181 unit, 124 rules, 23 policy-differential, 8 storage-rules, 265 E2E, 7 Firebase-emulator
+E2E — all passing**, plus `tsc` clean.
+
+---
+
 ## Remaining priorities
 
 ~~1. The access matrix (§5)~~ — **overtaken.** The premise was four hand-written case lists across four
@@ -481,13 +550,16 @@ passing.
 
 ~~2. S-F~~ — **done.** See S-F above.
 
+~~3. R-A / R-B~~ — **done 2026-08-25.** See *Applied 2026-08-25* above.
+
 **Still open, in value order**
-1. R-A / R-B — `Columns.columnDefs` (collapses 5 identical array-or-map conversions) + a shared schema
-   normalizer so `dev/schema.js` stops being a second, drifting implementation.
-2. P-A / P-B — index the `lookup` computed column; memoize the doc-view embed pipeline.
-2b. P-E — assert the boot READ COUNT (not just elapsed time), so the lazy-boot work has a guard that
+1. P-A / P-B — index the `lookup` computed column; memoize the doc-view embed pipeline.
+1b. P-E — assert the boot READ COUNT (not just elapsed time), so the lazy-boot work has a guard that
    can fail. The current 15s ceiling is ~10x the real boot and cannot.
-3. `kind` discriminator + `schemaVersion` + `schema.schema.json`.
+2. `schema.schema.json` — the remaining third of the schema-clarity item. `schemaVersion` and a written
+   `kind` both landed with `migrations.js`; what is still missing is (a) dispatching on `kind` instead
+   of sniffing, which needs migration to label nav GROUPS first (see §6), and (b) a meta-schema, so a
+   column `type` typo stops degrading to `text` in silence.
 4. S-G — one line in SCHEMA.md: `access:` on a doc-view is a read boundary, not a write one.
 5. `saveConfig`'s filename allowlist is `['firebase-config.json', 'config.json']`, but
    `saveSupabaseConfig` posts `supabase-config.json` — so "save it server-side for other users" has

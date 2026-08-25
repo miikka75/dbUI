@@ -4269,7 +4269,7 @@ function createVueApp() {
                 // Rebuild VIEWS from new schema so lockedListValues works
                 if (Array.isArray(imported.schema.views)) {
                   _viewsNav = imported.schema.views;
-                  VIEWS = {}; _flattenViews(_viewsNav);
+                  VIEWS = SchemaNormalize.flattenViews(_viewsNav);
                 }
                 return backend.saveSchema(imported.schema).then(function() {
                   _normalizeSchema(imported.schema);
