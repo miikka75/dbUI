@@ -150,8 +150,10 @@ describe('dev server — live-sync SSE stream', () => {
   it('a restricted subscriber receives only the tables they may READ', async () => {
     // Grant viewer read on `tasks` and nothing on `secrets`, then write to both. This is the assertion
     // that keeps the live stream inside the access model rather than beside it.
-    await post('setUserRole', { uid: 'viewer@dev', role: 'viewer', user: 'viewer@dev', tables: { tasks: 'r' } });
+    // The admin FIRST: the grant routes are admin-only, and `noUsers()` bootstrap grace is spent the
+    // moment the first user exists. Minting the viewer first left admin@dev an unregistered stranger.
     await post('setUserRole', { uid: 'admin@dev', role: 'admin', user: 'admin@dev', tables: 'all' });
+    await post('setUserRole', { uid: 'viewer@dev', role: 'viewer', user: 'viewer@dev', tables: { tasks: 'r' } });
     const s = await openStream('viewer@dev');
     await post('putRow', { tableId: 'secrets', tab: 'active', data: { id: 's1', title: 'Nope' } }, 'admin@dev');
     await post('putRow', { tableId: 'tasks', tab: 'active', data: { id: 't4', title: 'Yes' } }, 'admin@dev');

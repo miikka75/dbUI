@@ -1125,8 +1125,10 @@ test.describe('Permissions — restricted user UI gating', () => {
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: SCH } });
     await page.request.post('/api/saveLists', { data: { lists: { mkind: ['weekly'] } } });
+    // The first grant rides the bootstrap grace (resetData cleared the roster); the second has to be
+    // made BY the admin it just minted, because the grant routes are admin-only from then on.
     await page.request.post('/api/setUserRole', { data: { uid: 'admin@x', role: 'admin', user: 'admin@x', tables: 'all' } });
-    await page.request.post('/api/setUserRole', { data: { uid: 'ed@x', role: 'editor', user: 'ed@x', tables: ['music'] } });
+    await page.request.post('/api/setUserRole', { data: { uid: 'ed@x', role: 'editor', user: 'ed@x', tables: ['music'] }, headers: { 'X-User': 'admin@x' } });
   }
   async function bootAs(page, user) {
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -2740,8 +2742,11 @@ test.describe('access control: user matching + fail-closed', () => {
       const users = await backend_users.getUsers();
       localStorage.setItem('test_user', 'seed@x.com');
       const prof = await backend_users.getMyProfile();
-      const reqsAfter = await backend_users.getAccessRequests();
       localStorage.setItem('test_user', 'local@dev');
+      // The requests QUEUE is an admin read on every backend -- it carries everyone's email and note,
+      // and no per-document rule grants the whole collection. Reading it as the approved member worked
+      // only on the dev server, and only while the dev server did not check.
+      const reqsAfter = await backend_users.getAccessRequests();
       await backend_users.removeUser('seed@x.com');       // cleanup
       await backend_users.setProfileName('seed@x.com', '');
       return { registered: !!users['seed@x.com'], profName: prof.name, profShared: prof.shared, cleared: !reqsAfter['seed@x.com'] };

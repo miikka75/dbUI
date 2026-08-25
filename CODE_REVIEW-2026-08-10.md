@@ -109,7 +109,7 @@ suite ran that backend under `CSP=1`.
 
 Add `https://*.supabase.co wss://*.supabase.co` to `connect-src` (wss for realtime, if used).
 
-### S-F [LOW] — dev server: write routes with no role gate at all
+### S-F [LOW] [FIXED] — dev server: write routes with no role gate at all
 `dev/server.js` — `saveSchema` (204), `setFolderConfig` (207), `resetData` (229), `setUserRole` (360),
 `removeUser` (361), `getUsers` (354), `getAccessRequests` (368), `getProfiles` (388) accept any
 `X-User`. In the Firestore model every one of these is admin-only. `setUserRole` in particular means
@@ -120,6 +120,30 @@ file's *stated purpose* is "mirrors firestore.rules on the unauthenticated dev b
 demo behaves like Firebase" (line 183) — and the E2E suite runs against it. An ungated `setUserRole`
 means the local suite structurally cannot test privilege-escalation denial. Gate them on
 `isAdminReq()`; it already exists.
+
+**Fixed** as one `ADMIN_ROUTES` list checked in a single place before the route switch, rather than ten
+inline guards — the list is then auditable, and classifying a new route is a deliberate act. It covers
+`saveSchema`, `initSchema`, `setFolderConfig`, `saveConfig`, `getUsers`, `setUserRole`, `removeUser`,
+`getAccessRequests`, `getProfiles`, plus `getListUserLinks` / `setListUser`, whose own inline guards
+were folded in so there is one gate rather than two mechanisms. `removeAccessRequest` and
+`setProfileName` take the rules' other branch — `myEmail() == email || role() == 'admin'` — since both
+are things a member legitimately does to their own record. Bootstrap still passes, because
+`isAdminReq()` is true while no users exist; that is what lets a fresh database take its first schema
+and mint its first admin.
+
+`resetData` is deliberately **not** gated, and the code says why. It is the only route here with no
+counterpart in any production backend: it is the local fixture reset, and `storage-pglite` runs it
+`asOwner` precisely so no policy applies. Gating it on the roster it is about to delete is circular —
+after any test that registers an admin other than the caller, nobody can reset, and the next test
+inherits the previous one's users. Loopback is the gate on that one.
+
+`dev/test/dev-admin-routes.test.js` (7 cases) is the thing the finding was actually about: the local
+suite can now express privilege-escalation *denial*. All seven fail against the ungated server, which
+was checked rather than assumed. Two existing tests were relying on the hole and were corrected, not
+worked around: `sse-live.test.js` minted a viewer before the admin (spending the bootstrap grace on the
+wrong user, leaving `admin@dev` an unregistered stranger), and an `app.spec.js` case read the whole
+membership-requests queue as the member who had just been approved — an admin read on every backend,
+which passed only because the dev server did not check.
 
 ### S-G [note] — an editor can edit any page, including restricted ones
 `_pages__active` write is `role() == 'editor'` with no table qualifier, in all three layers
@@ -445,20 +469,30 @@ passing.
 
 ## Remaining priorities
 
+~~1. The access matrix (§5)~~ — **overtaken.** The premise was four hand-written case lists across four
+   layers. There are no longer four layers: dropping the legacy backends moved the dev server onto the
+   production policy, so its gates ARE `supabase-schema.sql`. And the case lists were merged where it
+   counts — `dev/test-emulator/policy-differential.mjs` runs ONE matrix through BOTH policy engines
+   (Firestore emulator and PGlite) and enforces a directional rule: the Firestore mirror may be
+   stricter, never looser. `dev/test/gate-parity.test.js` covers the remaining seam (the dev server over
+   HTTP vs. the policies in-process). What is still hand-written is the client UI's own list in
+   `dev/test/access.test.js`, which is a different question — what the UI OFFERS, not what the store
+   permits — and is not worth folding into the same matrix.
+
+~~2. S-F~~ — **done.** See S-F above.
+
 **Still open, in value order**
-1. The access matrix (§5) — the structural fix. Three of the four layers now have behavioural suites
-   (Firestore emulator, dev-server HTTP, Supabase RLS) and `rules-parity.test.js` guards the shared
-   constants — but each suite still carries its own hand-written case list. Driving all of them from
-   one declarative matrix is what makes a case added for one layer fail for the others by construction.
-2. S-F — gate the dev server's admin routes on the `isAdminReq()` that already exists, so the local
-   suite can express privilege-escalation denial.
-3. R-A / R-B — `Columns.columnDefs` (collapses 5 identical array-or-map conversions) + a shared schema
+1. R-A / R-B — `Columns.columnDefs` (collapses 5 identical array-or-map conversions) + a shared schema
    normalizer so `dev/schema.js` stops being a second, drifting implementation.
-4. P-A / P-B — index the `lookup` computed column; memoize the doc-view embed pipeline.
-4b. P-E — assert the boot READ COUNT (not just elapsed time), so the lazy-boot work has a guard that
+2. P-A / P-B — index the `lookup` computed column; memoize the doc-view embed pipeline.
+2b. P-E — assert the boot READ COUNT (not just elapsed time), so the lazy-boot work has a guard that
    can fail. The current 15s ceiling is ~10x the real boot and cannot.
-5. `kind` discriminator + `schemaVersion` + `schema.schema.json`.
-6. S-G — one line in SCHEMA.md: `access:` on a doc-view is a read boundary, not a write one.
+3. `kind` discriminator + `schemaVersion` + `schema.schema.json`.
+4. S-G — one line in SCHEMA.md: `access:` on a doc-view is a read boundary, not a write one.
+5. `saveConfig`'s filename allowlist is `['firebase-config.json', 'config.json']`, but
+   `saveSupabaseConfig` posts `supabase-config.json` — so "save it server-side for other users" has
+   always silently 403'd on the Supabase path. Noticed while gating that route (S-F); one word to fix,
+   and `deploy-config.test.js` already asserts that file must reach the deploy.
 
 **Carried in from outside the review** (raised while working, not findings of this audit; recorded here
 so this file is a complete handoff rather than half of one)
