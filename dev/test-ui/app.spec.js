@@ -94,39 +94,51 @@ test.describe('Data table', () => {
   });
 });
 
+// These two tests used to spend 2400ms and 1400ms of their 8000ms budget on unconditional sleeps, and
+// then fail -- not because archiving was broken, but because ensureAppReady plus a loaded machine had
+// already eaten the rest. Eight concurrent repeats failed ten times out of sixteen.
+//
+// Every sleep here was standing in for a condition that can simply be asserted: toHaveCount and
+// toBeVisible retry until the expect timeout, so they cost only as long as the app actually takes and
+// they say what they are waiting FOR. The waits that follow a tab switch are now stronger than what
+// they replaced, too: the archived view is identified by its restore buttons (which exist nowhere else)
+// rather than by "some rows are present after a second", which a still-rendered active view satisfies.
+//
+// The same 1000ms-sleep pattern appears ~125 times in this file. Only the two tests that were actually
+// failing are converted here; the rest is a bigger change than a bug fix should carry.
 test.describe('Archive / Restore', () => {
+  const rows = (page) => page.locator('.v-table tbody tr');
+  // Restore buttons appear only in the archived view -- the signal that the tab switch has landed.
+  const restoreButtons = (page) => page.locator('.v-table button:has(.mdi-archive-arrow-up-outline)');
+
   test('archive moves row to archived view', async ({ page }) => {
     await ensureAppReady(page);
-    const rowsBefore = await page.locator('.v-table tbody tr').count();
+    const rowsBefore = await rows(page).count();
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(200);
-    await expect(page.locator('.v-table tbody tr')).toHaveCount(rowsBefore + 1);
+    await expect(rows(page)).toHaveCount(rowsBefore + 1);
     await page.locator('button:has(.mdi-archive-outline)').first().click();
-    await page.waitForTimeout(1000);
-    await expect(page.locator('.v-table tbody tr')).toHaveCount(rowsBefore);
+    await expect(rows(page)).toHaveCount(rowsBefore);
     // Switch to archived view
     await page.locator('.v-tab:nth-child(2)').click();
-    await page.waitForTimeout(1000);
-    const archivedRows = await page.locator('.v-table tbody tr').count();
-    expect(archivedRows).toBeGreaterThanOrEqual(1);
+    await expect(restoreButtons(page).first()).toBeVisible();
+    await expect(rows(page)).not.toHaveCount(0);
   });
 
   test('restore moves row back to active', async ({ page }) => {
     await ensureAppReady(page);
     // Add and archive a row
+    const before = await rows(page).count();
     await page.locator('button:has(.mdi-plus)').click();
-    await page.waitForTimeout(200);
-    const activeBefore = await page.locator('.v-table tbody tr').count();
+    await expect(rows(page)).toHaveCount(before + 1);
+    const activeBefore = before + 1;
     await page.locator('button:has(.mdi-archive-outline)').first().click();
-    await page.waitForTimeout(200);
-    await expect(page.locator('.v-table tbody tr')).toHaveCount(activeBefore - 1);
+    await expect(rows(page)).toHaveCount(activeBefore - 1);
     // Go to archived, restore
     await page.locator('.v-tab:nth-child(2)').click();
-    await page.waitForTimeout(1000);
-    const archivedBefore = await page.locator('.v-table tbody tr').count();
-    await page.locator('button:has(.mdi-archive-arrow-up-outline)').first().click();
-    await page.waitForTimeout(200);
-    await expect(page.locator('.v-table tbody tr')).toHaveCount(archivedBefore - 1);
+    await expect(restoreButtons(page).first()).toBeVisible();
+    const archivedBefore = await rows(page).count();
+    await restoreButtons(page).first().click();
+    await expect(rows(page)).toHaveCount(archivedBefore - 1);
   });
 });
 
