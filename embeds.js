@@ -4,7 +4,9 @@
 //
 // Every function is pure over an explicit `ctx` built by the root (app-core `_embedCtx()`):
 //   { views, schema, getColumns, dataCache, currentTable, t, viewWithMe, anchorForView, rotationRowsFor,
-//     rotationColsFor }
+//     rotationColsFor, rowsMemo? }
+// `rowsMemo` (an empty Map) opts the ctx into the per-ctx row memo -- see embedRows for why that makes
+// the ctx single-use. Everything else here is read-only to this module.
 // The root keeps thin same-named wrappers, so components/templates/tests are unchanged.
 //   Browser: <script src="/embeds.js"> after columns.js + rows.js (needs their globals). Exposes
 //            Embeds.* plus mdToHtml as a bare global (schema-loader-era callers + the XSS test).
@@ -272,7 +274,34 @@
   }
 
   // Rows of an embedded view/table (@part reads the partition caches, e.g. tasks__archive).
+  //
+  // Memoized per CTX when the caller opted in by putting a `rowsMemo` Map on it (app-core's
+  // _embedCtx does; a caller that doesn't gets the plain pipeline). Worth doing because one doc embed
+  // runs this pipeline -- buildRows -> resolveComputed -> aggregateRows -> sortByCol -- twice for the
+  // same token: resolveEmbed asks mdBlocks whether to hide each `?` embed AND docHasData whether the
+  // whole doc-view has any data, and both answer by counting these rows.
+  //
+  // The cache key is the whole argument list bar the ctx, and the ctx is the rest of the input, so a
+  // memo may never outlive one. That is the entire invalidation story: a ctx is built fresh per call
+  // by whoever calls in, the pipeline is synchronous and pure over (view, dataCache), and so nothing
+  // can change under a memo that lives inside one call. A generation counter bumped on every dataCache
+  // write would cache across calls too, but it would have to be bumped by hand at ~80 mutation sites,
+  // and one missed bump is stale rows on screen -- a worse bug than the cost it saves. It would also
+  // buy little: the Vue computeds that call in here are themselves invalidated by any dataCache write,
+  // which is exactly when such a counter would move.
+  //
+  // Callers share the returned array, so it must not be mutated -- the same contract the unmemoized
+  // path already had (a table with no defaultSort returned partitionRows' array, and `rows` on the
+  // embed-view component hands it straight to the template).
   function embedRows(type, name, part, ctx) {
+    var memo = ctx && ctx.rowsMemo;   // a Map, so no key can collide with Object.prototype
+    if (!memo) return _embedRows(type, name, part, ctx);
+    var key = type + '|' + name + '|' + (part || 'active');
+    if (!memo.has(key)) memo.set(key, _embedRows(type, name, part, ctx));
+    return memo.get(key);
+  }
+
+  function _embedRows(type, name, part, ctx) {
     if (type === 'view' && ctx.views[name]) {
       var v = ctx.views[name];
       // A partition-scoped embed used to read the `<src>__<part>` store directly. `_status` moved that

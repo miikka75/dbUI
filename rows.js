@@ -307,6 +307,7 @@
   function buildRows(cfg, dataCache, part) {
     var want = part || 'active';
     var rows = [];
+    var byId = new Map();   // join mode only: id -> the merged row in `rows`
     var sources = cfg.sources || [];
     sources.forEach(function(src) {
       // `includeArchive` folds the archive partition in beside the active one. A view reads only the
@@ -320,7 +321,17 @@
       // `includeArchive` means "the history too", so it folds in whichever partition is NOT being read.
       if (cfg.includeArchive) srcRows = srcRows.concat(partitionRows(dataCache, src, want === 'active' ? 'archive' : 'active'));
       if (cfg.mode === 'join') {
-        srcRows.forEach(function(r) { var e = rows.find(function(x) { return x.id === r.id; }); if (e) Object.assign(e, r); else rows.push(Object.assign({ _source: src }, r)); });
+        // Indexed by id rather than a `rows.find` per source row: the scan made a join O(rows^2) in the
+        // number of rows already merged. `byId` spans the whole join (all sources), which is exactly the
+        // set `find` searched, and holds the SAME row objects the output does, so merging through it
+        // mutates the row in `rows`.
+        srcRows.forEach(function(r) {
+          var e = byId.get(r.id);
+          if (e) { Object.assign(e, r); return; }
+          var nr = Object.assign({ _source: src }, r);
+          byId.set(nr.id, nr);
+          rows.push(nr);
+        });
       } else {
         srcRows.forEach(function(r) { rows.push(Object.assign({}, r, { _source: src })); });
       }
@@ -385,6 +396,10 @@
     });
     if (!defs.length) return rows;
     var cache = (ctx && ctx.dataCache) || {};
+    // Per-CALL lookup indexes, keyed (table, on). Scoped to the call because `cache` cannot change
+    // during one -- the pipeline is synchronous and pure over it -- so nothing here can go stale, and
+    // nothing has to be invalidated. Built lazily: a view with no lookup def pays nothing.
+    var idx = Object.create(null);
     rows.forEach(function(r) {
       defs.forEach(function(d) {
         // Per-source compute (union views only): apply this def only to rows from `d.source`, which
@@ -393,7 +408,7 @@
         // (points earned minus points spent). Rows no def matched keep the column unset, and
         // aggregateRows skips non-numeric cells, so they contribute nothing rather than a zero.
         if (d.source && r._source !== d.source) return;
-        _computeInto(r, d, rows, cache, ctx);
+        _computeInto(r, d, rows, cache, ctx, idx);
         // `scale` multiplies a numeric result (use -1 to subtract in an aggregate). Left alone when the
         // computed value isn't numeric — scaling a name or a rotation array is meaningless, not an error.
         if (d.scale != null) { var sv = Number(r[d.name]); if (!isNaN(sv) && r[d.name] !== '' && r[d.name] != null) r[d.name] = sv * Number(d.scale); }
@@ -402,9 +417,20 @@
     return rows;
   }
 
+  // value -> FIRST row of `src` carrying it in `col`. First wins, because the linear scan this replaces
+  // stopped at the first hit; a keyed table with a duplicate key resolves to the same row it always did.
+  // Rows that aren't objects are skipped rather than thrown on: the index is built eagerly, so a broken
+  // row that the old scan would have stopped short of must not take down the whole render.
+  function _indexBy(src, col) {
+    var m = new Map();
+    for (var i = 0; i < src.length; i++) { var r = src[i]; if (!r || typeof r !== 'object') continue; var k = r[col]; if (!m.has(k)) m.set(k, r); }
+    return m;
+  }
+
   // One computed def resolved into one row. Split out of resolveComputed so the per-source / scale
   // wrapper above stays readable; the branches are unchanged and mutually exclusive.
-  function _computeInto(r, d, rows, cache, ctx) {
+  // `idx` is resolveComputed's per-CALL lookup index cache (see there); never null when called from it.
+  function _computeInto(r, d, rows, cache, ctx, idx) {
     var comp = d.computed;
     // Rotation columns: index into a pre-authored ordered list (rotationTable) by computed POSITION
     // (occurrence count or elapsed calendar intervals). Output is the slot's value (often an array).
@@ -441,8 +467,13 @@
     // column `lookup.match` against the target table's `lookup.on` column (defaults to the same name)
     // and copies `lookup.field`. General — reusable for chore->points, member->role/phone, etc.
     if (comp.lookup) {
-      var lk = comp.lookup, lsrc = cache[lk.table] || [], onCol = lk.on || lk.match, lkey = r[lk.match], lhit = null;
-      for (var li = 0; li < lsrc.length; li++) { if (lsrc[li][onCol] === lkey) { lhit = lsrc[li]; break; } }
+      // Indexed once per (table, on) per resolveComputed call, not scanned per row: this runs on every
+      // view render, and a chore-log row looking up points on the chores table made the render path
+      // O(rows x lookupTable) -- the only super-linear term in it. Map, not a plain object, because the
+      // scan compared with === : an object would coerce every key to a string and make 1 match "1".
+      var lk = comp.lookup, onCol = lk.on || lk.match, ikey = lk.table + '|' + onCol;
+      var lmap = idx[ikey] || (idx[ikey] = _indexBy(cache[lk.table] || [], onCol));
+      var lhit = lmap.get(r[lk.match]);
       r[d.name] = (lhit && lhit[lk.field] != null) ? lhit[lk.field] : (lk.default != null ? lk.default : '');
       return;
     }
