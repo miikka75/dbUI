@@ -1,7 +1,9 @@
 # Code Review — dbUI (2026-08-10, branch `access-gate-fixes`)
 
 Scope as requested: **security, de-duplication, performance, architecture, schema clarity**.
-This is a follow-up to `CODE_REVIEW.md` (2026-07-17); items already fixed there are not repeated.
+This followed an earlier review (2026-07-17) whose findings were all resolved or overtaken -- the
+legacy Sheets/Drive/CRDT backends it discussed were deleted -- so that document has been removed and
+the parts still worth keeping were moved into the code they describe.
 The headline change since then is the per-table `r`/`rw` grant split, `ownerWritable`, and a fourth
 access implementation (Supabase RLS). Most findings below are on that seam.
 
@@ -261,6 +263,32 @@ embedded doc-view with N optional embeds costs up to 2N pipeline passes per rend
 The pipeline is pure over `(view, dataCache)`. Memoize on a data-generation counter bumped on every
 `dataCache` mutation: `embedRows(type, name, part)` keyed `name|part|gen`.
 
+### P-E [MED] — the boot read budget has no test that would notice it regressing
+`dev/test-ui/boot-time.spec.js` is the only guard on boot, and it asserts one thing:
+
+```js
+expect(data.bootMs).toBeLessThan(15000);
+```
+
+Boot is roughly 1.5s in that harness, so the ceiling is an order of magnitude above the real value. It
+cannot fail except on a machine so loaded that every other test has already failed, which makes it a
+report rather than a budget.
+
+That matters more than a stale number usually would, because boot cost IS the Firestore bill: every
+document read at boot is billed, and several phases of work went into making boot lazy (`bootTableNames`,
+fetch-a-partition-once, the listener's first snapshot counted as the load rather than a second fetch).
+None of that is pinned. A regression that reintroduces "fetch every granted table at boot" would pass
+this suite and show up as a bigger invoice.
+
+Two assertions worth having, in value order:
+
+1. **Count the reads, not the milliseconds.** The Firebase-emulator spec already proves "a viewed table
+   is read ONCE" by spying; the same spy over a boot, asserting the number of tables fetched, is what
+   actually guards the work. Time is a proxy that drifts with hardware; the read count is the thing
+   being bought.
+2. **Then tighten the clock** to something near the observed value with headroom (2-3x, not 10x), so a
+   genuine slowdown is visible even when the read count is unchanged.
+
 ### P-C [LOW] — Firestore rules `get()` budget on owner-bounded writes
 A create on an `ownerWritable` table touches `_meta/users` (bootstrap probe), `_users/<me>`,
 `_meta/ownerTables`, `_meta/ownerWritable` — roughly 4 distinct documents, and Firestore caps a
@@ -427,5 +455,22 @@ passing.
 3. R-A / R-B — `Columns.columnDefs` (collapses 5 identical array-or-map conversions) + a shared schema
    normalizer so `dev/schema.js` stops being a second, drifting implementation.
 4. P-A / P-B — index the `lookup` computed column; memoize the doc-view embed pipeline.
+4b. P-E — assert the boot READ COUNT (not just elapsed time), so the lazy-boot work has a guard that
+   can fail. The current 15s ceiling is ~10x the real boot and cannot.
 5. `kind` discriminator + `schemaVersion` + `schema.schema.json`.
 6. S-G — one line in SCHEMA.md: `access:` on a doc-view is a read boundary, not a write one.
+
+**Carried in from outside the review** (raised while working, not findings of this audit; recorded here
+so this file is a complete handoff rather than half of one)
+
+- `test:all` starts the Firebase emulators **four separate times** (~6s each). One instance can serve
+  all four suites — their distinct project ids already keep the data apart. Worth ~20s a run.
+- `SUPABASE.md` is current but linked from nowhere; the README never mentions it, so nobody finds it.
+- **No documentation for binding a fresh clone to a Firebase project** — `firebase login`,
+  `firebase use --add`, what `.firebaserc` is and whether to commit it. None is committed, so a new
+  clone cannot deploy without guessing. The README's deploy section assumes the link already exists.
+- **Per-database PWA identity.** The runtime manifest sets `start_url`/`scope` to the origin root and
+  declares no `id`, so two databases served by one deployment install as ONE app, wearing whichever
+  schema's icon was active at install time. Per-schema *tab* icons already work. The fix is path-based
+  hosting rewrites plus per-database config storage (`firebase_config` is currently a single key, which
+  is also why one browser profile can only hold one database at a time).

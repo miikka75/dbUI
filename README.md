@@ -88,6 +88,9 @@ First user is auto-registered as admin (bootstrap mode). After that, only regist
 > ⚠️ **Sign in yourself immediately after publishing the rules.** The first Google account to sign
 > in becomes the admin — so never share the app URL or a pre-configured link before you have signed
 > in once. Anyone holding the link during the bootstrap window could claim the admin role.
+>
+> A stronger fix, if you would rather not rely on timing: seed the admin `/_users/<email>` document
+> at deploy time, which closes the window entirely rather than shortening it.
 
 ### Deploying (and why plain `firebase deploy` may fail)
 

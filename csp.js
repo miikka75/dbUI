@@ -4,7 +4,7 @@
 // static copy in firebase.json's Report-Only header never drifts from this builder), and — after
 // the production Report-Only soak — the enforcing header / meta tag.
 //
-// Decisions behind the shape (see CODE_REVIEW.md S6):
+// Decisions behind the shape:
 //   - Modes: FIREBASE ONLY (plus same-origin local dev/emulators). Sheets-OAuth / Drive-CRDT modes
 //     would need accounts.google.com + www.googleapis.com additions — add them if those modes ship.
 //   - Multi-database: users connect one URL to ANY Firebase project, so Google origins are

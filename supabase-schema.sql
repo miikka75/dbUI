@@ -657,8 +657,8 @@ grant execute on function public.app_kv_merge(text, text, jsonb) to authenticate
 --
 -- WRITE requires REGISTRATION, not merely a signed-in session. With the Google provider enabled,
 -- "authenticated" means any Google account on the internet, and the project config is distributed by
--- shareable links by design -- so a registration-less bucket is free image hosting for strangers (this
--- is finding S1 in CODE_REVIEW.md, and it applies verbatim here). app_is_registered() is SECURITY
+-- shareable links by design -- so a registration-less bucket is free image hosting for strangers.
+-- app_is_registered() is SECURITY
 -- DEFINER over public.kv, so it answers the same question the kv policies do.
 --
 -- Size and MIME limits live on the BUCKET rather than in a policy: storage.objects.metadata is populated
