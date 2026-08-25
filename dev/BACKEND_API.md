@@ -4,8 +4,14 @@ Every backend adapter must implement these methods. The app (`app-core.js`) call
 via the global `backend` object. All return Promises (except `backend-local.js` which is
 synchronous — the local-client HTTP adapter wraps it in Promises).
 
-Three adapters implement it: `backend-supabase.js` (reference), `backend-firebase.js`, and the
-dev-server pair `backend-local.js` / `backend-local-client.js`.
+Implementations: `backend-kv.js` (the reference — one contract over a key-value table, run by BOTH
+`backend-supabase.js` and the browser-local `backend-local-pglite.js`, which supply only a *platform*:
+identity, realtime, uploads), `backend-firebase.js`, and the dev-server pair `backend-local.js` /
+`backend-local-client.js`.
+
+A new key-value host therefore writes a platform, not a backend — see the `P` contract documented at the
+top of `backend-kv.js`. `dev/test/backend-conformance.test.js` pins that split: a platform file that grows
+its own copy of a contract method fails the suite.
 
 ## Required Methods
 

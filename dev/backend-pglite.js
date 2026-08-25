@@ -13,7 +13,7 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const BackendHelpers = require(path.join(ROOT, 'backend-helpers'));
 const ListAccess = require(path.join(ROOT, 'list-access'));
-const { createPgliteStorage } = require('./storage-pglite');
+const { createPgliteStorage } = require('../storage-pglite');
 
 const store = (table, tab) => BackendHelpers.storeName(table, tab);
 

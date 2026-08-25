@@ -61,11 +61,25 @@ jobs:
           rm -rf "$tmp"
           ls -l vendor/ vendor/fonts/
 
+      # PGlite — the WASM Postgres behind the "In this browser" backend. Not fetched above because it is
+      # a directory of interdependent files (ESM entry + content-hashed chunks + three binaries loaded by
+      # relative URL), so the copy list lives in one script shared with update-vendor.sh. Missing it does
+      # not kill the backend (it falls back to jsdelivr, as Vue and Vuetify do) but it does hand every
+      # visitor's boot to a third party, which is the one thing that mode exists to avoid. ~17 MB of the
+      # published artifact. Runs BEFORE the prune below, which deletes scripts/.
+      - name: Materialise the PGlite WASM dist
+        run: bash scripts/vendor-pglite.sh --force
+
       # Publish the whole repo root. Excludes below keep secrets / dev-only files out of the public site.
       - name: Prune non-public files
         run: |
           rm -rf .github dev node_modules tests test .git scripts || true
-          rm -f supabase-schema.sql firebase-config.json supabase-config.json .env* firebase.json .firebaserc firestore.indexes.json || true
+          # NOT pruned any more: supabase-schema.sql. It was listed here as a "server-side" file — but
+          # the browser-local Postgres backend FETCHES it at boot and applies it (storage-pglite.js), so
+          # deleting it published an app whose "In this browser" mode 404s on its own access policy. It
+          # carries no secrets (it is the policy source, like firestore.rules, which the setup dialog
+          # already fetches and displays), and Firebase Hosting has always served it.
+          rm -f firebase-config.json supabase-config.json .env* firebase.json .firebaserc firestore.indexes.json || true
           # Dot-DIRECTORIES. Editor and tooling folders hold local configuration, and .github above is
           # only one of them: .claude/settings.local.json was being published. Keep .nojekyll and any
           # other dotFILE Pages itself needs -- this deletes directories only.

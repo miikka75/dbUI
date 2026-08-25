@@ -48,12 +48,21 @@
     opts = opts || {};
     var d = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-eval' " + (opts.scriptHashes || []).join(' ')
+      // 'wasm-unsafe-eval' is redundant TODAY -- 'unsafe-eval' already permits WebAssembly compilation --
+      // and is here so it does not stop being redundant by accident. The browser-local Postgres backend
+      // (backend-local-pglite.js) compiles a 10 MB .wasm on boot, so dropping 'unsafe-eval' once Vue no
+      // longer needs it would silently kill that backend. Naming the narrower grant separately makes that
+      // cleanup safe to do. Unknown source expressions are ignored, so older browsers are unaffected.
+      "script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' " + (opts.scriptHashes || []).join(' ')
         + " https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net",
       "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
       "font-src 'self' data: https://cdn.jsdelivr.net",
       "img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*",
-      "connect-src 'self' blob: https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",   // blob: -> fetch of the runtime (Blob-URL) manifest
+      // jsdelivr is in connect-src as well as script-src for ONE reason: the PGlite CDN fallback. That
+      // module fetches its own pglite.wasm / pglite.data by URL relative to itself, and those fetches
+      // are connect-src, not script-src — so without this the fallback loads and then dies fetching its
+      // engine. It grants nothing script-src did not already: the app can execute jsdelivr code today.
+      "connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",   // blob: -> fetch of the runtime (Blob-URL) manifest
       "frame-src https://*.firebaseapp.com https://accounts.google.com",
       "manifest-src 'self' blob:",   // the runtime PWA manifest is a Blob URL
       "worker-src 'self'",

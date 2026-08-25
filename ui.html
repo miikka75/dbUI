@@ -20,6 +20,10 @@
               <v-icon start>mdi-database</v-icon>
               <div><strong>Dev Server (SQLite)</strong><br><small style="opacity:0.6">SQLite on the local dev server — fastest for development</small></div>
             </v-btn>
+            <v-btn block variant="outlined" class="mb-3 text-left mode-btn" @click="setupStep = 'pglite'">
+              <v-icon start>mdi-laptop</v-icon>
+              <div><strong>In this browser</strong><br><small style="opacity:0.6">PostgreSQL in WebAssembly, stored here — no account, no server, nothing to install</small></div>
+            </v-btn>
             <v-btn block variant="outlined" class="mb-3 text-left mode-btn" @click="selectSetupMode('firebase')">
               <v-icon start>mdi-firebase</v-icon>
               <div><strong>Firebase</strong><br><small style="opacity:0.6">Real-time sync via Firestore with offline support</small></div>
@@ -34,6 +38,30 @@
             <p class="mb-4">Dev Server mode — data stored in the local server's SQLite database.</p>
             <v-btn color="primary" @click="completeLocalSetup">Create Database</v-btn>
             <v-btn variant="text" @click="backToSetup" class="ml-2">Back</v-btn>
+          </div>
+          <!-- Step 2: Browser-local Postgres (PGlite in IndexedDB) -->
+          <div v-if="setupStep === 'pglite'">
+            <v-alert v-if="pgliteError" type="error" density="compact" class="mb-3" style="font-size:0.8rem">{{ pgliteError }}</v-alert>
+            <div class="mb-3 pa-2" style="background:rgb(var(--v-theme-surface-variant),0.3);border-radius:8px;font-size:0.8rem">
+              A real PostgreSQL — compiled to WebAssembly — runs inside this tab, with the app's own
+              access policies (<code>supabase-schema.sql</code>) applied to it. Nothing is installed and
+              no data leaves this browser.<br><br>
+              <strong>Worth knowing:</strong><br>
+              • The first start downloads about 17&nbsp;MB and takes a few seconds; later ones are quick and work offline.<br>
+              • The database lives in this browser's storage, and another browser or device sees nothing.
+              Clearing site data deletes it — and so, on its own, can the browser: storage is "best-effort"
+              until granted persistence, which this app requests on first start. <strong>Settings → Local
+              database</strong> shows what you got; <strong>Settings → Export</strong> keeps a copy either way.<br>
+              • One tab at a time: a second tab writing the same files would corrupt them, so it will
+              refuse to open instead.<br>
+              • The address below is <em>not verified</em> — it is what the policies judge, so you can
+              rehearse the access model as anyone. That is fine here and only here: the database is
+              yours. Move to Firebase or Supabase before a second person is involved.
+            </div>
+            <v-text-field v-model="pgliteUserInput" name="pglite-user" label="Act as (email)" variant="outlined" density="compact" class="mb-2" placeholder="you@local"></v-text-field>
+            <v-btn color="primary" prepend-icon="mdi-database-plus" @click="completeLocalPgliteSetup()">Create Database</v-btn>
+            <v-btn variant="text" @click="backToSetup" class="ml-2">Back</v-btn>
+            <div class="mt-3" style="font-size:0.8rem;opacity:0.7">You become the admin automatically (the member registry starts empty). Then: Settings → Import from JSON to load a schema and demo data.</div>
           </div>
           <!-- Step 2: Supabase -->
           <div v-if="setupStep === 'supabase'">
@@ -529,6 +557,30 @@
             <v-btn variant="outlined" prepend-icon="mdi-download" @click="a.exportData" class="mr-2 mb-2">{{ a.t('settings.export') }}</v-btn>
             <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()" class="mb-2">{{ a.t('settings.import') }}</v-btn>
             <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
+            <!-- Browser-local Postgres only. Deliberately next to Export, because the honest answer to
+                 "can I lose this?" is a backup, and the second-best answer is the persistence request
+                 below. Literal English rather than t() keys, matching the other backend-specific copy
+                 (the setup dialog): these strings are about one backend, not about the user's data. -->
+            <template v-if="a.mode === 'pglite'">
+              <v-divider class="my-4"></v-divider>
+              <p class="text-subtitle-2 mb-2">Local database</p>
+              <div style="font-size:0.85rem" data-testid="local-store">
+                <div>Using <strong>{{ a.fmtBytes(a.localStore.usage) }}</strong><span v-if="a.localStore.quota"> of the {{ a.fmtBytes(a.localStore.quota) }} this browser allows</span>.</div>
+                <div v-if="a.localStore.persisted === true" class="mt-1" data-testid="local-store-persisted">
+                  <v-icon size="small" color="success">mdi-shield-check</v-icon>
+                  Marked <strong>persistent</strong> — the browser will not delete it to reclaim space. Only you can.
+                </div>
+                <div v-else-if="a.localStore.persisted === false" class="mt-1" data-testid="local-store-besteffort">
+                  <v-icon size="small" color="warning">mdi-alert</v-icon>
+                  <strong>Best-effort storage.</strong> The browser may delete this database on its own —
+                  when the device runs low on space, or (on Safari) after a long spell without visits.
+                  <div class="mt-2">
+                    <v-btn size="small" variant="outlined" prepend-icon="mdi-shield-lock" data-testid="local-store-persist" @click="a.requestLocalPersistence()">Keep permanently</v-btn>
+                    <span class="ml-2" style="opacity:0.7">Installing this app (PWA) usually persuades the browser to grant it.</span>
+                  </div>
+                </div>
+              </div>
+            </template>
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.theme') }}</p>
             <v-text-field :label="a.t('settings.theme_palette')" @change="a.applyPalette($event.target.value)" @keydown.enter="a.applyPalette($event.target.value)" data-testid="theme-palette" spellcheck="false" density="compact" hide-details variant="outlined" style="max-width:320px" class="mb-3 font-monospace"></v-text-field>

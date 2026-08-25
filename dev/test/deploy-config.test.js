@@ -148,8 +148,13 @@ describe('deploy config — hosting ignore list', () => {
     'some-backup-export.json'
   ];
   // What the site needs. An exclusion list that breaks boot is the other way to get this wrong.
+  // supabase-schema.sql is here because the browser-local Postgres backend FETCHES it at boot and
+  // applies it (storage-pglite.js). It used to be pruned by the Pages workflow as a "server-side" file,
+  // which published an app whose "In this browser" mode 404s on its own access policy — a denylist
+  // maintained by hand will eventually delete something the app needs, and this list is the other half.
   const MUST_PUBLISH = ['index.html', 'app-core.js', 'sw.js', 'manifest.json', 'favicon.svg',
-                        'icon-512.png', 'vendor/vue.js', 'examples/chores-schema.json'];
+                        'icon-512.png', 'vendor/vue.js', 'examples/chores-schema.json',
+                        'supabase-schema.sql', 'backend-kv.js', 'storage-pglite.js'];
 
   for (const f of MUST_NOT_PUBLISH) {
     it(`hosting ignores ${f}`, () => {
@@ -185,5 +190,40 @@ describe('deploy config — hosting ignore list', () => {
     fs.rmSync(dir, { recursive: true, force: true });
     assert.deepEqual(leaked, [], 'GitHub Pages would publish these');
     assert.deepEqual(missing, [], 'the Pages prune deleted files the site needs');
+  });
+});
+
+describe('deploy config — the browser-local Postgres backend', () => {
+  const versions = Object.fromEntries(fs.readFileSync(path.join(ROOT, 'vendor', 'versions'), 'utf8')
+    .split(/\r?\n/).filter(Boolean).map((l) => l.split('=')));
+
+  // vendor/ is generated rather than committed, so a deploy has to MAKE the assets it serves. Missing
+  // this step is not fatal -- the backend falls back to jsdelivr -- but it hands every visitor's boot to
+  // a third party, which is the one thing this mode exists to avoid, and it does so silently.
+  it('the Pages deploy materialises the vendored dists it does not commit', () => {
+    const wf = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'deploy-pages.yml'), 'utf8');
+    assert.match(wf, /npm pack .*vue@/, 'deploy-pages.yml no longer materialises vendor/vue.js');
+    assert.match(wf, /scripts\/vendor-pglite\.sh/, 'deploy-pages.yml no longer materialises vendor/pglite');
+  });
+
+  // The fallback pins a version in backend-local-pglite.js, and a half-done bump (vendor/versions moved,
+  // the URL not) is invisible until the day /vendor is missing -- at which point the fallback quietly
+  // serves a DIFFERENT Postgres build than the one everything was tested against. update-vendor.sh
+  // rewrites it; this is what notices when vendor/versions is edited by hand.
+  it('the PGlite CDN fallback pins the version in vendor/versions', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'backend-local-pglite.js'), 'utf8');
+    const m = /cdn\.jsdelivr\.net\/npm\/@electric-sql\/pglite@([0-9.]+)\//.exec(src);
+    assert.ok(m, 'backend-local-pglite.js has no jsdelivr fallback URL to check');
+    assert.equal(m[1], versions.PGLITE, 'the CDN fallback and vendor/versions name different PGlite versions');
+  });
+
+  // ...and the fallback only works if the policy lets that module fetch its OWN binaries. It pulls
+  // pglite.wasm / pglite.data by URL relative to itself, which is connect-src, not script-src -- so
+  // without this it loads and then dies fetching its engine.
+  it('the CSP lets the PGlite CDN fallback fetch its wasm, not just execute its script', () => {
+    const connect = /connect-src ([^;]+)/.exec(require('../../csp').buildPolicy({}));
+    assert.ok(connect, 'no connect-src in the policy');
+    assert.match(connect[1], /https:\/\/cdn\.jsdelivr\.net/,
+      'jsdelivr is missing from connect-src — the fallback would load and then die fetching pglite.wasm');
   });
 });

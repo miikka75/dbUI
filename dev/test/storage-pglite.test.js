@@ -7,7 +7,7 @@
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createPgliteStorage } = require('../storage-pglite');
+const { createPgliteStorage } = require('../../storage-pglite');
 
 let S;
 before(async () => { S = await createPgliteStorage(); });

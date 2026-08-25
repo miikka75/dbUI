@@ -84,6 +84,11 @@ else
   echo "[session-start] vendor dists already present."
 fi
 
+# 3b. PGlite — the WASM Postgres the browser-local backend runs. A directory of interdependent files
+#     rather than a single dist, so the copy list lives in scripts/vendor-pglite.sh (shared with
+#     update-vendor.sh and the Pages deploy workflow). Skips itself when already materialised.
+bash "$ROOT/scripts/vendor-pglite.sh" || echo "[session-start] warn: vendor/pglite not materialised (the 'In this browser' backend won't boot)"
+
 echo "[session-start] done. Offline-capable suites (run from dev/): npm test, test:rules, test:storage-rules, test:ui."
 echo "[session-start] note: test:e2e-firebase (Firebase JS SDK from gstatic) and test:cdn (jsdelivr integrity)"
 echo "[session-start]       reach external CDNs the web container's network policy blocks — run those in GitHub CI."

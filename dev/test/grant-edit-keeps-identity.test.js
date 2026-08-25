@@ -109,10 +109,11 @@ describe('dev server — editing a grant preserves the identity link', () => {
 });
 
 describe('backend contract — the browser backends preserve identity across a grant edit', () => {
-  // Firebase and Supabase are plain scripts that assign globals, so they cannot be exercised in Node.
+  // Firebase and the shared kv contract (which Supabase and the browser-local PGlite both run) are
+  // plain scripts that assign globals, so they cannot be exercised in Node.
   // Asserted against the source instead, the way the createLanguage rule is: the failure is a silent
   // permission hole on a production deployment, which the dev-server case above cannot reach.
-  for (const file of ['backend-firebase.js', 'backend-supabase.js']) {
+  for (const file of ['backend-firebase.js', 'backend-kv.js']) {
     it(file + ' reads the stored grant and carries its identity forward', () => {
       const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
       const at = src.indexOf('setUserRole: function');

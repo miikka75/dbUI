@@ -5,7 +5,7 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 ## Features
 
 - **Schema-driven**: JSON config defines tables, columns, views, and behavior
-- **Three backends**: Supabase (Postgres + RLS), Firebase (Firestore), Dev Server (PGlite — runs the *real* `supabase-schema.sql` policies locally)
+- **Four backends**: In-browser Postgres (PGlite in IndexedDB — no account, no server, nothing to install), Supabase (Postgres + RLS), Firebase (Firestore), Dev Server (PGlite — runs the *real* `supabase-schema.sql` policies locally)
 - **i18n**: multi-language with auto-generated translation keys from schema
 - **Views**: flat union, join, and aggregate views, plus **rotationView** (generated rotating roster), **calendar** (month/week/list), **pivot** (cross-tab grid), **rsvp** (self-service signup sheet), and **board** (kanban — group a table's rows into lanes by a `select` column; drag a card between lanes to write that column); columns can embed named views/inline tables
 - **Rotating rosters**: `multiselect` columns hold a group of people; rotation tables cycle a group per occurrence (tied to another table's rows) or per calendar interval (`daily/weekly/monthly/yearly` or `<n><unit>` like `3w`), with the anchor stored as editable data
@@ -23,9 +23,45 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 
 | Backend | Storage | Auth | Offline | Real-time | Setup |
 |---------|---------|------|---------|-----------|-------|
+| **In this browser** | PGlite (WASM Postgres) in IndexedDB | none — a self-asserted email | ✅ (it *is* local) | n/a — one tab | none |
 | **Firebase** | Firestore | Firebase Auth | ✅ | ✅ Instant | Firebase Console |
 | **Dev Server (PGlite)** | PostgreSQL-in-WASM | Trusted `X-User` header (loopback only) | N/A | ✅ SSE | `npm start` |
 | **Dev Server (SQLite)** | SQLite | **none — every request permitted** | N/A | ✅ SSE | `npm start -- --sqlite` |
+
+## Quick Start (nothing to install)
+
+Open the deployed app, pick **In this browser**, and you have a working database. There is no account to
+create, no server to run and nothing to install: PostgreSQL compiled to WebAssembly starts inside the
+tab, its cluster is persisted in IndexedDB, and `supabase-schema.sql` — the same policy file a Supabase
+project runs — is applied to it. So the access model is not simulated here; it is the production one,
+evaluated by a real Postgres.
+
+The one thing that is *not* production-grade is the identity. It comes from `localStorage`, typed in on
+the setup screen, and nothing verifies it — you can act as anyone and rehearse exactly what a viewer, an
+editor or a stranger would see. That is safe precisely because the database is in your own browser and
+belongs to you; the moment a second person is involved, deploy the same app against Supabase or Firebase,
+where the same policies judge a signed token instead.
+
+Worth knowing before you rely on it:
+
+- **First start downloads ~17 MB** (the WASM engine plus its Postgres data image) and takes a few
+  seconds; after that it is quick and works offline.
+- **The data lives in this browser**, and another device sees nothing. Use *Settings → Export* for a
+  copy — and *Settings → Import* to move it into Firebase or Supabase later.
+- **The browser can delete it without asking.** Origin storage is "best-effort" by default: every engine
+  evicts least-recently-used origins when the device runs low on space, and WebKit also clears
+  script-writable storage for sites that go unvisited for a while. The app therefore calls
+  `navigator.storage.persist()` on boot, which moves the origin to *persistent* — after which only the
+  user deletes it. Browsers decide differently whether to grant it: Chrome and Safari from engagement
+  heuristics (installing the app as a PWA is the reliable one), Firefox by asking. *Settings → Local
+  database* shows which mode you got, how much space is used, and offers to ask again. Export anyway.
+- **One tab at a time.** Two tabs writing one IndexedDB cluster corrupts it, so a second tab takes a Web
+  Lock, fails to get it, and says so rather than opening.
+- **Self-hosting it wants the vendored dist.** `vendor/pglite/` is generated, not committed — run
+  `./update-vendor.sh` (or `scripts/vendor-pglite.sh`) locally; the GitHub Pages workflow materialises it
+  on every deploy. If it is missing the app falls back to jsdelivr, the same way Vue and Vuetify do, so a
+  fresh fork still boots — but self-hosted stays the intended path, because reaching a CDN is the one
+  thing this mode otherwise never does.
 
 ## Quick Start (Local Development)
 
@@ -166,6 +202,7 @@ Generate the link from Settings tab (shown under "Share link" for Firebase mode)
 
 | Backend | How to add users | Admin UI? |
 |---------|-----------------|:---:|
+| **In this browser** | Settings → User Access panel (identity is self-asserted — see below) | ✅ Yes |
 | **Firebase** | Settings → User Access panel | ✅ Yes |
 | **Dev Server** | Settings → User Access panel (test with `?user=`) | ✅ Yes |
 | **Supabase** | Settings → User Access panel | ✅ Yes |
@@ -385,8 +422,12 @@ ui.html                        ← Vue template (data views, forms, setup)
 style.html                     ← CSS styles
 backend-firebase.js          ← adapter: Firestore + Firebase Auth
 storage-firestore.js         ← Firestore storage adapter
-backend-supabase.js          ← adapter: Postgres/RLS + Supabase Auth
+backend-kv.js                ← THE contract over a kv table, shared by both Postgres backends below
+backend-supabase.js          ← platform: Supabase Auth + realtime + Storage (contract from backend-kv)
 storage-supabase.js          ← Supabase kv storage adapter
+backend-local-pglite.js      ← platform: in-browser Postgres, identity from localStorage, single tab
+storage-pglite.js            ← PGlite kv storage; applies supabase-schema.sql verbatim (Node + browser)
+vendor/pglite/               ← generated: the WASM Postgres dist (scripts/vendor-pglite.sh)
 ────────────────────────────────────────────
 firebase.json                  ← Firebase Hosting config
 firestore.rules                ← Firestore Security Rules
@@ -399,7 +440,6 @@ dev/                           ← Local development (dev-server-only files live
   package.json                 ← dependencies + scripts (npm start/test)
   server.js                    ← HTTP server (port 3000; --fs for JSON-file storage)
   backend-pglite.js            ← DEFAULT: dev contract over the kv table (no access checks of its own)
-  storage-pglite.js            ← PGlite storage; applies supabase-schema.sql verbatim at startup
   backend-local.js             ← SQLite backend (better-sqlite3), via --sqlite
   storage-fs.js                ← JSON-file backend (node server.js --fs)
   backend-local-client.js    ← client adapter for local server (direct SQLite)
@@ -448,11 +488,20 @@ markdown documents and their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens
 ├────────────────┬─────────────────────────────────┤
 │  app-core.js │         ui.html                 │  ← Vue 3 app + template
 ├────────────────┼─────────────────────────────────┤
-│ backend-*.html │   schema.json / firebase-config │  ← adapter + config
+│  backend-*.js  │   schema.json / firebase-config │  ← platform + config
 ├────────────────┴─────────────────────────────────┤
-│ Supabase │ Firestore │ PGlite / SQLite │
+│  backend-kv.js (Supabase + in-browser PGlite)    │  ← one contract, two hosts
+├──────────────────────────────────────────────────┤
+│ Supabase │ Firestore │ PGlite (browser / dev)    │
 └──────────────────────────────────────────────────┘
 ```
+
+The two Postgres backends are split along one line: **backend-kv.js is the contract** (which store a row
+lives in, what shape it has, which schema-derived facts the schema-blind policies need mirrored) and the
+`backend-*.js` file above it is the **platform** (who the caller is, whether other clients exist, where an
+uploaded file goes). `backend-supabase.js` and `backend-local-pglite.js` are platforms only — they share
+that one contract, and both run `supabase-schema.sql` underneath it, so a policy question has a single
+answer whether the database is in São Paulo or in the tab.
 
 **Schema flow:**
 1. Server loads `schema.json` from disk (dev) or the database (Supabase/Firebase)

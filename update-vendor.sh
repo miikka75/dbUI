@@ -18,10 +18,18 @@ mkdir -p fonts
 curl -sfo fonts/materialdesignicons-webfont.woff2 "https://cdn.jsdelivr.net/npm/@mdi/font@${MDI}/fonts/materialdesignicons-webfont.woff2"
 cd ..
 
+# PGlite (the browser-local Postgres backend) is a DIRECTORY of interdependent files — an ESM entry, its
+# content-hashed chunks and three binaries it loads by relative URL — so it comes from npm rather than a
+# per-file curl, and the copy list lives in one script the deploy workflow and the CI hook share.
+./scripts/vendor-pglite.sh --force
+
 # Update CDN fallback URLs in index.html
 sed -i "s|vue@[0-9.]*|vue@${VUE}|g" index.html
 sed -i "s|vuetify@[0-9.]*|vuetify@${VUETIFY}|g" index.html style.html
 sed -i "s|@mdi/font@[0-9.]*|@mdi/font@${MDI}|g" style.html
+# The PGlite CDN fallback lives in the backend rather than index.html (it is a dynamic import, reached
+# only when /vendor/pglite is missing). deploy-config.test.js fails if this drifts from vendor/versions.
+sed -i "s|pglite@[0-9.]*|pglite@${PGLITE}|g" backend-local-pglite.js
 
 # Refresh the SRI hashes on the CDN fallbacks (index.html pins integrity for vue.js/vuetify.js;
 # jsdelivr /npm/ serves the npm-package bytes verbatim, so hash the downloaded files). Without this,
