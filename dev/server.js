@@ -51,6 +51,9 @@ const CSP_POLICY = process.env.CSP === '1' ? (() => {
 // resetData) overwrote the real dev users.json — the registration you were running as. A custom APP_DB
 // now derives its own sidecars (chores-demo.db -> chores-demo.users.json). Defaults and the in-memory
 // test paths are unchanged.
+// Unique per PROCESS INSTANCE, not just per pid (see sidecarPath). Computed once so the four sidecars
+// of one server share a token and `_cleanupSidecars` can find them again.
+const _RUN_ID = process.pid + '-' + Math.random().toString(36).slice(2, 10);
 function sidecarPath(name) {
   // An in-memory database is a THROWAWAY instance, so its sidecars must be throwaway too -- and unique
   // per process. They used to share one fixed path, which quietly undid the isolation the :memory: DB
@@ -63,7 +66,14 @@ function sidecarPath(name) {
   // intermittently PERMISSIVE identity check, because a missing ownerWritable mirror means "no bound".
   //
   // In the OS temp dir rather than the repo: nothing to gitignore, nothing to accidentally commit.
-  if (APP_DB === ':memory:') return path.join(os.tmpdir(), 'dbui-test-' + process.pid + '-' + name + '.json');
+  //
+  // The token is pid PLUS a random suffix, and that second half is load-bearing: nothing deletes these
+  // files (a test kills the server, which on Windows runs no exit handler), the OS recycles pids within
+  // hours, and a fresh server whose pid matched a previous RUN's read that run's registry back in --
+  // reproducing the exact leak described above, one layer up. Thousands of them accumulate in the temp
+  // dir over a project's life, so the odds are not small: `grant-edit-keeps-identity` failed on this
+  // deterministically, with "saveSchema was refused during setup", until the suffix was added.
+  if (APP_DB === ':memory:') return path.join(os.tmpdir(), 'dbui-test-' + _RUN_ID + '-' + name + '.json');
   if (DB_PATH) return DB_PATH.replace(/\.db$/i, '') + '.' + name + '.json';
   return path.join(__dirname, name + '.json');
 }
@@ -157,6 +167,34 @@ function saveProfiles() { fs.writeFileSync(PROF_PATH, JSON.stringify(backend._pr
 // one fact, disagreeing, with the visible half wrong.
 const LINKS_PATH = sidecarPath('list-users');
 function saveLinks(map) { fs.writeFileSync(LINKS_PATH, JSON.stringify(map || {}, null, 2)); }
+
+// Throwaway sidecars are swept, not just uniquely named. Two halves, because neither alone is enough:
+// the exit handlers cover a server that is asked to stop (npm test's own, Ctrl-C), and the age sweep
+// covers the ones nothing could clean -- a test kills its server outright, and on Windows that runs no
+// handler at all. 24 hours is chosen to be longer than any suite could plausibly hold a server open,
+// so a sweep can never delete a LIVE instance's registry out from under it.
+function _cleanupSidecars() {
+  if (APP_DB !== ':memory:') return;                       // a real database's sidecars are its data
+  [USERS_PATH, REQ_PATH, PROF_PATH, LINKS_PATH].forEach(function(f) {
+    try { fs.unlinkSync(f); } catch (e) { /* never written, or already gone */ }
+  });
+}
+function _sweepStaleSidecars() {
+  if (APP_DB !== ':memory:') return;
+  var dir = os.tmpdir(), cutoff = Date.now() - 24 * 3600 * 1000;
+  try {
+    fs.readdirSync(dir).forEach(function(f) {
+      if (!/^dbui-test-.*\.json$/.test(f)) return;
+      try { if (fs.statSync(path.join(dir, f)).mtimeMs < cutoff) fs.unlinkSync(path.join(dir, f)); } catch (e) { /* raced another sweep */ }
+    });
+  } catch (e) { /* no temp dir to sweep */ }
+}
+if (APP_DB === ':memory:') {                                // only a throwaway instance installs these:
+  process.on('exit', _cleanupSidecars);                    // a normal dev server must keep Node's own
+  ['SIGINT', 'SIGTERM'].forEach(function(sig) {            // signal behaviour (and its exit code).
+    process.on(sig, function() { _cleanupSidecars(); process.exit(0); });
+  });
+}
 
 function parseBody(req) {
   return new Promise((resolve, reject) => {
@@ -721,6 +759,7 @@ async function startup() {
     backend = await require('./backend-pglite').createPgliteBackend(
       APP_DB && APP_DB !== ':memory:' ? { dataDir: DB_PATH + '.pgdata' } : {});
   }
+  _sweepStaleSidecars();
   loadSidecars();
   await mirrorUsersToPolicy();
   await restoreListUsers();
