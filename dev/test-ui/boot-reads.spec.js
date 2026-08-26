@@ -12,6 +12,13 @@
 // the adapter is refactored, and it can record whether each call happened before or after boot
 // finished by reading `window.__bootMs` synchronously at call time.
 //
+// Not the only guard, and deliberately a different one. app.spec.js's `lazy boot` describe already
+// asserts that nothing outside the landing view is CACHED after boot — read off `dataCache`, which is
+// the effect. This asserts the reads themselves, which the cache cannot show: a table fetched twice and
+// cached once passes there and fails here, and so does a navigation that re-reads what it already
+// holds. Cache state answers "what did we end up with"; a read count answers "what did we pay for", and
+// on Firestore only the second one is the bill.
+//
 // The fixture schema has six tables. The landing view reaches three of them. That gap is the whole
 // assertion: the three untouched tables are what lazy boot buys, and the day someone re-adds a boot
 // preload they will be read here.

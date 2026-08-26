@@ -144,6 +144,21 @@ const ADMIN_ROUTES = [
 // the caller, nobody can reset, and the next test inherits the previous one's users. Loopback is the
 // gate on this one, as the header comment says.
 
+// The only filenames `saveConfig` may write into the hosting root. At module scope beside the route
+// lists above for the same reason: the list is then auditable, and adding a filename is a deliberate
+// act rather than a literal buried in a switch case.
+//
+// It is a security boundary -- `saveConfig` writes into STATIC_DIR, which is served -- so it stays an
+// explicit allowlist rather than a pattern, and `path.basename` strips any traversal before the check.
+//
+// It must hold every filename the app POSTS. `supabase-config.json` was missing, so "save it
+// server-side for other users" had always 403'd silently on the Supabase path (the fetch is
+// `.catch(function(){})`, since on static hosting a 404 there is expected) -- while
+// `backend-supabase.js` fetches `/supabase-config.json` at boot to find the project. The write end and
+// the read end of the same file disagreed, and nothing said so; dev/test/save-config-allowlist.test.js
+// is what says so now.
+const CONFIG_FILES = ['firebase-config.json', 'supabase-config.json', 'config.json'];
+
 // The rules' other branch -- `myEmail() == email || role() == 'admin'` -- for the two records a member
 // legitimately acts on themselves: their own membership request, and their own profile name.
 const SELF_OR_ADMIN_ROUTES = ['removeAccessRequest', 'setProfileName'];
@@ -661,7 +676,7 @@ const server = http.createServer(async (req, res) => {
         }
         return json(res, { ok: true });
       }
-      case 'saveConfig': { var allowed = ['firebase-config.json', 'config.json']; var fn = path.basename(body.filename || 'config.json'); if (!allowed.includes(fn)) return json(res, { error: 'filename not allowed' }, 403); fs.writeFileSync(path.join(STATIC_DIR, fn), JSON.stringify(body.data, null, 2)); return json(res, { ok: true }); }
+      case 'saveConfig': { var fn = path.basename(body.filename || 'config.json'); if (!CONFIG_FILES.includes(fn)) return json(res, { error: 'filename not allowed' }, 403); fs.writeFileSync(path.join(STATIC_DIR, fn), JSON.stringify(body.data, null, 2)); return json(res, { ok: true }); }
       case 'getUsers': return json(res, backend._users || {});
       case 'getMyAccess': {
         if (!backend._users || !Object.keys(backend._users).length) return json(res, { bootstrap: true });
