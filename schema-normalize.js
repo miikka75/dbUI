@@ -25,23 +25,46 @@
   function deps() {
     if (!_deps) {
       _deps = isNode
-        ? { migrate: require('./migrations').migrate, convertViewFilters: require('./rows').convertViewFilters }
-        : { migrate: (root.Migrations && root.Migrations.migrate) || null, convertViewFilters: root.convertViewFilters || null };
+        ? { migrate: require('./migrations').migrate, kindOf: require('./migrations').kindOf,
+            convertViewFilters: require('./rows').convertViewFilters }
+        : { migrate: (root.Migrations && root.Migrations.migrate) || null,
+            kindOf: (root.Migrations && root.Migrations.kindOf) || null,
+            convertViewFilters: root.convertViewFilters || null };
     }
     return _deps;
   }
 
-  // Does this nav entry carry a renderable body — i.e. is it a VIEW rather than a folder? This is the
-  // presence discriminator every consumer used to re-derive by probing fields; there is now one copy.
+  // What KIND of thing a nav entry is: 'data' | 'page' | 'rotation' | 'calendar' | 'pivot' | 'rsvp' |
+  // 'board' | 'form' | 'group'. THE discriminator — every consumer that used to work the answer out by
+  // probing for a `calendar`/`rotation`/... key asks this instead.
   //
-  // It is deliberately NOT `v.kind`, even though migration v1->v2 writes one: `kindOf` defaults to
-  // 'data', and it stamps every NAMED entry, so a named nav group carrying only nested `views` comes
-  // out labelled `kind: "data"` while it is not a view at all. Switching the discriminator over needs
-  // the migration to name groups too; until then `kind` is a record of what a view IS, and this is the
-  // answer to whether it is one.
+  // It prefers the `kind` the schema carries (migration v1->v2 writes one, and v3->v4 corrected it for
+  // nav groups — that single wrong answer is why this could not read `kind` before), and derives one
+  // through Migrations.kindOf otherwise: schema-loader flattens the bundled `defaultSchema` at module
+  // load, before anything migrates it. Deriving is DELEGATED rather than copied. A local copy of the
+  // eight-way test is exactly the drift this whole change exists to remove, and it would be invisible
+  // in Node, where migrations.js is always present and the copy would never run.
+  //
+  // The label only works while it is TRUE, so dev/test/view-kind.test.js asserts every shipped
+  // schema's stored `kind` still matches what the entry is.
+  function viewKind(v) {
+    if (!v || typeof v !== 'object') return null;
+    if (v.kind) return v.kind;
+    var k = deps().kindOf;
+    return k ? k(v) : null;
+  }
+
+  // Does this nav entry render something — i.e. is it a VIEW rather than a folder? A named entry of any
+  // kind but 'group' is one. This used to be a hand-written disjunction over the same six body fields
+  // `kindOf` probes, re-derived by every consumer; there is now one answer and one place it comes from.
+  //
+  // The null branch is for a caller that loaded this module WITHOUT migrations.js, so no kind can be
+  // derived. It falls back to the one distinction this function actually needs — a folder carries
+  // nested `views` and no body — rather than to a second copy of the kind vocabulary.
   function isView(v) {
-    return !!(v && v.name && (v.sources || typeof v.markdown === 'string' ||
-              v.rotation || v.calendar || v.pivot || v.rsvp || v.board || v.form));
+    if (!v || !v.name) return false;
+    var k = viewKind(v);
+    return k === null ? !Array.isArray(v.views) : k !== 'group';
   }
 
   // Flatten the nested nav tree into { name: view }. Recurses through `views` (nav groups nest).
@@ -113,7 +136,7 @@
     return { tables: tables, views: views, viewsMap: flattenViews(views), orders: orders, migration: migration };
   }
 
-  var N = { isView: isView, flattenViews: flattenViews, foldColumns: foldColumns,
+  var N = { isView: isView, viewKind: viewKind, flattenViews: flattenViews, foldColumns: foldColumns,
             ensureImplicitId: ensureImplicitId, normalize: normalize };
   if (isNode) module.exports = N;
   else root.SchemaNormalize = N;

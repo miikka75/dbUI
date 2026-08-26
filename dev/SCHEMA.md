@@ -225,6 +225,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | View identifier |
+| `kind` | string | **What this view IS**, and what the loader dispatches on: `data`, `page`, `rotation`, `calendar`, `pivot`, `rsvp`, `board`, `form`, or `group` (a nav folder). Written by migration, so you normally omit it and get one at load — set it only to override. It used to be *inferred* by probing for a `rotation`/`calendar`/… key, in every consumer that needed the answer |
 | `sources` | string[] | Table names to pull data from |
 | `mode` | string | `"union"` (stack rows) or `"join"` (merge by `id`) |
 | `columns` | array | Column names, embeds, conditional/computed columns (below) |

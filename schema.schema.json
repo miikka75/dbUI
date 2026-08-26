@@ -181,12 +181,17 @@
 
     "view": {
       "type": "object",
-      "description": "One view. Its KIND is still selected by which field it carries — sources/columns (data), markdown (document), rotation, calendar, pivot, rsvp, board, form — rather than by the `kind` field migrations now write, so this property list is deliberately OPEN: closing it would either be wrong today or would freeze a vocabulary the kind-dispatch work is about to restructure. The properties below are the ones common to every kind; each kind's own object is documented in dev/SCHEMA.md.",
+      "description": "One view. Its `kind` is what the loader dispatches on; migration writes it, so a hand-authored view normally omits it and gets one at load. The property list is deliberately OPEN: each kind carries its own configuration object (rotation, calendar, pivot, rsvp, board, form), and a TABLE answers to the same presentation properties a view does — `currentConfig` is `VIEWS[x] || SCHEMA[x]`, so the two occupy one object position. The properties below are the ones common to every kind; each kind's own object is documented in dev/SCHEMA.md.",
       "additionalProperties": true,
       "required": ["name"],
       "properties": {
         "name": { "type": "string", "description": "View identifier — what `nav` and {{view:…}} embeds reference." },
-        "kind": { "type": "string", "description": "The view kind, written by the v1->v2 migration. Not yet what the loader dispatches on (it still sniffs the fields), so treat it as descriptive." },
+        "views": { "type": "array", "items": { "$ref": "#/$defs/view" }, "description": "LEGACY nesting: a named nav folder holding views. Hierarchy belongs in `nav` — this shape survives only because old documents carry it, and is what `kind: \"group\"` labels." },
+        "kind": {
+          "type": "string",
+          "enum": ["data", "page", "rotation", "calendar", "pivot", "rsvp", "board", "form", "group"],
+          "description": "What this entry IS — the discriminator the loader dispatches on (SchemaNormalize.viewKind). Written by migration, so a hand-authored view normally omits it and gets one at load; set it only to override. \"group\" is a nav folder carrying nested `views` and no body of its own."
+        },
         "sources": { "type": "array", "items": { "type": "string" }, "description": "Table names to pull data from." },
         "mode": { "type": "string", "enum": ["union", "join"], "description": "How several sources combine: stack rows, or merge them by id." },
         "columns": { "type": "array", "description": "Column names, embeds, conditional columns ({name, when}) and computed columns." },

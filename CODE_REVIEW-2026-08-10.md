@@ -679,6 +679,57 @@ Suites: **1 218 unit, 270 E2E (7 skipped) -- all passing**, plus `tsc` clean.
 
 ---
 
+## Applied 2026-08-26 — dispatch on `kind` (§6, the last part)
+
+**The loader dispatches on `kind` now, and nine copies of the discriminator became one.** A view's kind
+was worked out by probing for a `rotation`/`calendar`/`pivot`/... key in every consumer that needed the
+answer: app-core's seven `is*View` computeds, `SchemaNormalize.isView`, and `Migrations.kindOf`. That
+is what an implicit discriminator costs -- there is nothing to sync, so nothing notices when a copy
+falls behind, which is precisely how `dev/schema.js`'s copy ended up a kind behind before it was
+deleted.
+
+`SchemaNormalize.viewKind(v)` is the one answer. It reads the `kind` the schema carries and derives one
+through `Migrations.kindOf` when the document has not been migrated yet (schema-loader flattens the
+bundled `defaultSchema` at module load, before anything migrates it). Deriving is **delegated, not
+copied** -- the first draft of this change put a local eight-way sniff in `schema-normalize.js` as a
+fallback, which is the very duplication being removed, and would have been invisible: in Node
+migrations.js is always present, so the copy would never have run.
+
+**The blocker was one wrong label, on a shape nothing ships.** `kindOf` had no answer for a nav folder,
+so v1->v2 stamped a named group carrying only nested `views` as `kind: "data"` -- a data view with no
+sources and nothing to render. One wrong answer disqualifies a discriminator, so `isView` went on
+probing for a body instead. **v3 -> v4** gives the folder its own kind and repairs the mislabel, and
+`CURRENT_VERSION` is 4.
+
+The repair is deliberately narrow -- only `'data'` -> `'group'`, only when the entry really is a folder
+-- so a hand-written kind is never overruled, and it does two jobs because a document can have missed
+either: stamp an entry with no `kind` at all (a hand-authored schema declaring `schemaVersion: 3` never
+ran v1->v2) and fix the one v1->v2 got wrong. The three shipped schemas are re-stamped to v4.
+
+**One thing checked and deliberately left alone.** `dev/schema.json`'s `task_doc` carries BOTH
+`markdown` and `sources`, and `kindOf` labels it `page` while `isDocViewName` says it is not a doc-view
+-- which looks like exactly the mismatch that would break a switch to `kind`. It is not: `currentPage`
+renders any view with markdown as a page, so `page` is right for the top-level dispatch, and
+`isDocViewName` answers a different question (how the view EMBEDS -- a sourced markdown view's
+`{{self}}` must render the grid, not recurse). Two questions, two names, both correct. `resolveEmbed`
+is untouched for the same reason: it discriminates on an embed CONFIG, which includes inline embeds
+that are not views and have no kind.
+
+`kind` is now a closed enum in `schema.schema.json`, and `dev/test/view-kind.test.js` asserts the
+published vocabulary lists every kind `kindOf` can produce -- a kind the app writes but the editor does
+not know would put a red underline under a schema the app wrote itself, which is exactly how `group`
+would have looked.
+
+New coverage: 8 cases in `dev/test/view-kind.test.js` (every shipped schema's stored label still
+matching its shape, derivation for an unmigrated document, precedence when an entry has both a body and
+nested views, and the enum parity) and 6 rewritten in `schema-normalize.test.js` (the group case that
+was previously asserted as a LIMITATION, the legacy repair, non-override of a hand-written kind, and
+chain idempotence).
+
+Suites: **1 230 unit, 270 E2E (7 skipped) -- all passing**, plus `tsc` clean.
+
+---
+
 ## Remaining priorities
 
 ~~1. The access matrix (§5)~~ — **overtaken.** The premise was four hand-written case lists across four
@@ -703,14 +754,8 @@ Suites: **1 218 unit, 270 E2E (7 skipped) -- all passing**, plus `tsc` clean.
    above.
 
 **Still open, in value order**
-1. **Dispatch on `kind`** — the remaining part (a) of the schema-clarity item, and now the only part.
-   `schemaVersion`, a written `kind` and a meta-schema have all landed; what is left is making the
-   loader dispatch on `kind` instead of sniffing which field a view carries, which needs migration to
-   label nav GROUPS first (`kindOf` defaults to `'data'`, so a named group carrying only nested `views`
-   comes out labelled a data view — see §6). Closing the view/table property lists in
-   `schema.schema.json` is blocked on the same thing, and is the payoff for doing it.
-2. S-G — one line in SCHEMA.md: `access:` on a doc-view is a read boundary, not a write one.
-3. `saveConfig`'s filename allowlist is `['firebase-config.json', 'config.json']`, but
+1. S-G — one line in SCHEMA.md: `access:` on a doc-view is a read boundary, not a write one.
+2. `saveConfig`'s filename allowlist is `['firebase-config.json', 'config.json']`, but
    `saveSupabaseConfig` posts `supabase-config.json` — so "save it server-side for other users" has
    always silently 403'd on the Supabase path. Noticed while gating that route (S-F); one word to fix,
    and `deploy-config.test.js` already asserts that file must reach the deploy.
