@@ -92,6 +92,21 @@ describe('rows.js — buildRows (union / join / filter)', () => {
     assert.equal(joined.author, 'me');         // merged in from notes
   });
 
+  it('join keeps source order and the first-source row identity across three sources', () => {
+    // The join merges through an id index now rather than re-scanning the merged rows. Same answers:
+    // output order is first-seen, a later source overwrites the fields it carries, and _source stays
+    // the source the row was FIRST seen in (it is stamped once, on creation).
+    const c = {
+      a: [{ id: '2', v: 'a2' }, { id: '1', v: 'a1' }],
+      b: [{ id: '1', w: 'b1' }],
+      c: [{ id: '1', v: 'c1' }, { id: '3', v: 'c3' }]
+    };
+    const rows = Rows.buildRows({ sources: ['a', 'b', 'c'], mode: 'join' }, c);
+    assert.deepEqual(rows.map(r => r.id), ['2', '1', '3']);
+    assert.deepEqual(rows.map(r => r._source), ['a', 'a', 'c']);
+    assert.deepEqual(rows[1], { _source: 'a', id: '1', v: 'c1', w: 'b1' });
+  });
+
   it('includeArchive folds the archive partition in, so a total survives archiving', () => {
     // Without it, `archiveAfter` silently drains a balance: the row leaves the active partition and
     // its points leave the sum, while anything it was netted against stays.
@@ -210,6 +225,42 @@ describe('rows.js — resolveComputed', () => {
     Rows.resolveComputed(rows, cols, { dataCache: cache });
     assert.equal(rows[0].pts, 3);
     assert.equal(rows[1].pts, 0);
+  });
+
+  it('lookup indexes the target table ONCE per call, not once per row', () => {
+    // The guard on P-A. Each lookup row counts every read of its key column, so a per-row linear scan
+    // shows up as rows x table reads and the index as one pass. Without this the fix is invisible:
+    // the values it produces are identical either way, which is exactly why the scan survived so long.
+    const reads = { n: 0 };
+    const chore = (name, points) => {
+      const o = { points };
+      Object.defineProperty(o, 'name', { get() { reads.n++; return name; }, enumerable: true });
+      return o;
+    };
+    const chores = Array.from({ length: 50 }, (_, i) => chore('c' + i, i));
+    const rows = Array.from({ length: 40 }, (_, i) => ({ chore: 'c' + (i % 50) }));
+    const cols = [{ name: 'pts', computed: { lookup: { table: 'chores', match: 'chore', on: 'name', field: 'points', default: 0 } } }];
+
+    Rows.resolveComputed(rows, cols, { dataCache: { chores } });
+    assert.deepEqual(rows.map(r => r.pts), rows.map((_, i) => i % 50));   // still the right answers
+    assert.equal(reads.n, 50);                                           // one pass, not 40 x 50
+
+    // ...and the index does NOT outlive the call: a table edited between calls is seen.
+    reads.n = 0;
+    const later = [{ chore: 'c0' }];
+    Rows.resolveComputed(later, cols, { dataCache: { chores: [{ name: 'c0', points: 99 }] } });
+    assert.equal(later[0].pts, 99);
+    assert.equal(reads.n, 0);
+  });
+
+  it('lookup keeps the FIRST match on a duplicate key, and does not coerce 1 to "1"', () => {
+    // Both are properties of the scan the index replaced: it broke at the first hit and compared with
+    // ===. A plain object as the index would have made the second assertion fail (every key stringifies).
+    const cache = { chores: [{ name: 'dishes', points: 3 }, { name: 'dishes', points: 99 }, { name: 1, points: 'num' }, { name: '1', points: 'str' }] };
+    const cols = [{ name: 'pts', computed: { lookup: { table: 'chores', match: 'chore', on: 'name', field: 'points', default: 0 } } }];
+    const rows = [{ chore: 'dishes' }, { chore: 1 }, { chore: '1' }];
+    Rows.resolveComputed(rows, cols, { dataCache: cache });
+    assert.deepEqual(rows.map(r => r.pts), [3, 'num', 'str']);
   });
 
   it('daysSince ages a date column against today (negative in the future, blank stays blank)', () => {

@@ -236,6 +236,50 @@ describe('embeds.js — embedCols / embedRows', () => {
   });
 });
 
+describe('embeds.js — the per-ctx row memo', () => {
+  // Counts pipeline passes by counting viewWithMe calls: embedRows calls it exactly once per pass,
+  // before buildRows. app-core's _embedCtx supplies `rowsMemo`; a ctx without one is unmemoized.
+  function counting(over) {
+    const calls = { n: 0 };
+    const ctx = makeCtx(Object.assign({ viewWithMe: v => { calls.n++; return v; } }, over || {}));
+    return [ctx, calls];
+  }
+
+  it('a doc embed resolves each token ONCE, not once for mdBlocks and again for docHasData', () => {
+    // P-B: resolveEmbed's doc branch asks mdBlocks whether to hide the `?` embed AND docHasData
+    // whether the doc-view has any data at all, and both answer by running the row pipeline.
+    const md = '# Doc\n\n{{view:open?}}';
+    const [plain, plainCalls] = counting();
+    Embeds.resolveEmbed({ name: 'doc', markdown: md }, Object.assign(plain, { rowsMemo: null }));
+    assert.equal(plainCalls.n, 2);                       // the cost the finding measured
+
+    const [memo, memoCalls] = counting({ rowsMemo: new Map() });
+    const spec = Embeds.resolveEmbed({ name: 'doc', markdown: md }, memo);
+    assert.equal(memoCalls.n, 1);
+    assert.equal(spec.show, true);                       // and the same answers
+    assert.equal(spec.blocks.length, 2);
+  });
+
+  it('keys on the partition, so a @both embed still counts both halves', () => {
+    // One memo, two questions: active is empty and archive is not. Sharing an entry between them
+    // would hide a block whose history is exactly what the toggle exists to reveal.
+    const [ctx] = counting({ rowsMemo: new Map() });
+    assert.equal(Embeds.embedRowCount('table', 'logs', 'both', ctx), 1);
+    assert.equal(Embeds.embedRows('table', 'logs', null, ctx).length, 0);
+    assert.equal(Embeds.embedRows('table', 'logs', 'archive', ctx).length, 1);
+  });
+
+  it('never outlives its ctx: a fresh ctx sees a changed dataCache', () => {
+    // The whole invalidation story. app-core builds a ctx per call for this reason.
+    const first = makeCtx({ rowsMemo: new Map() });
+    assert.deepEqual(Embeds.embedRows('view', 'open', null, first).map(r => r.id), ['t1']);
+    first.dataCache.tasks[0].status = 'done';
+    assert.deepEqual(Embeds.embedRows('view', 'open', null, first).map(r => r.id), ['t1']); // memo held
+    const second = makeCtx({ rowsMemo: new Map(), dataCache: first.dataCache });
+    assert.deepEqual(Embeds.embedRows('view', 'open', null, second).map(r => r.id), []);    // ctx per call
+  });
+});
+
 describe('embeds.js — per-row slicing + visibility', () => {
   const ei = { kind: 'data', config: { filterBy: { assigned: 'person' } }, rows: [{ assigned: 'Ann' }, { assigned: 'Bob' }] };
 

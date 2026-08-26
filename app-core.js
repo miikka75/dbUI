@@ -1674,10 +1674,14 @@ function createVueApp() {
       },
       // Embed resolution lives in /embeds.js (pure over this ctx). The root keeps same-named thin
       // wrappers so components/templates/tests are unchanged; only root-state reads cross this seam.
+      // A ctx is SINGLE-USE: it carries `rowsMemo`, which embeds.js fills with resolved row lists, and
+      // that is only safe for as long as the dataCache it was built from cannot change. Building one
+      // per wrapper call (rather than caching one on the instance) is what makes that true. The memo
+      // is what stops a doc embed running the row pipeline twice per token -- see embedRows.
       _embedCtx: function() {
         var self = this;
         return {
-          views: VIEWS, schema: SCHEMA, getColumns: getColumns,
+          views: VIEWS, schema: SCHEMA, getColumns: getColumns, rowsMemo: new Map(),
           dataCache: this.dataCache, currentTable: this.currentTable,
           t: function(k) { return self.t(k); },
           viewWithMe: function(v) { return self._viewWithMe(v); },

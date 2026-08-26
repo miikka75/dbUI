@@ -536,6 +536,56 @@ E2E — all passing**, plus `tsc` clean.
 
 ---
 
+## Applied 2026-08-25 — P-A / P-B (the two performance findings)
+
+**P-A — the lookup computed column is indexed, not scanned.** `resolveComputed` now keeps a per-CALL
+index cache keyed `(lookup.table, lookup.on)` and `_computeInto` reads through it, so the target table
+is walked once per call instead of once per row. The scope is the call, not the app: the pipeline is
+synchronous and pure over `dataCache`, so nothing can change under the index and there is nothing to
+invalidate. It is built lazily, so a view with no lookup def pays nothing.
+
+Two properties of the scan it replaces are preserved deliberately, and pinned by tests:
+
+- **First hit wins.** The scan `break`s; a keyed table with a duplicate key must still resolve to the
+  row it always did.
+- **A `Map`, not an object.** The scan compared with `===`. An object index would stringify every key
+  and make a row keyed `1` match a lookup of `"1"` — a silent wrong answer on any table whose key is
+  numeric.
+
+`buildRows` join mode went with it: the `rows.find(x => x.id === r.id)` per source row was O(n²) in the
+rows already merged, and is now an id `Map` spanning the join. It holds the same row objects the output
+does, so merging through it still mutates the row in place.
+
+The guard is a read counter, not a timing: each lookup row counts every read of its key column, so 40
+view rows over a 50-row table read 50 times (one pass) where the scan read 2 000. Without that
+assertion the fix is invisible — both versions produce identical values, which is why the scan lasted.
+
+**P-B — the doc-embed pipeline is memoized per ctx.** `embedRows` takes its answer from a `rowsMemo`
+on the ctx when the caller supplies one; `app-core`'s `_embedCtx()` puts a fresh `Map` on every ctx it
+builds. That halves a doc embed: `resolveEmbed` asks `mdBlocks` whether to hide each `?` token and
+`docHasData` whether the doc-view has any data at all, and both answered by running
+`buildRows -> resolveComputed -> aggregateRows -> sortByCol` over the same token. The unmemoized cost is
+pinned by a test that counts pipeline passes (2 for one token) beside the memoized one (1).
+
+**The generation counter the finding proposed was deliberately not built.** Keying on a counter bumped
+at every `dataCache` write would cache across calls, but the bump would be hand-written at ~80 mutation
+sites and one missed bump is stale rows on screen — a correctness bug traded for a render cost. It
+would also buy little: the Vue computeds that reach this code are themselves invalidated by any
+`dataCache` write, which is exactly when such a counter would move. What is left after Vue's own
+computed caching is the duplication *inside* one evaluation, and that is what the per-ctx memo removes,
+with an invalidation story that is a proof rather than a discipline: a ctx is built fresh per call, the
+pipeline is pure over it, so nothing can go stale inside one. The cost is that a ctx is now single-use,
+which is written down at both ends.
+
+New coverage: 3 cases in `rows.test.js` (the read-count guard, first-wins + no `1`/`"1"` coercion, and
+a three-source join pinning order, `_source` identity and overwrite precedence) and 3 in
+`embeds.test.js` (the 2-passes-to-1 count, the memo keying on partition so a `@both` embed still counts
+both halves, and a fresh ctx seeing a changed `dataCache`).
+
+Suites: **1 187 unit, 265 E2E — all passing**, plus `tsc` clean.
+
+---
+
 ## Remaining priorities
 
 ~~1. The access matrix (§5)~~ — **overtaken.** The premise was four hand-written case lists across four
@@ -552,9 +602,10 @@ E2E — all passing**, plus `tsc` clean.
 
 ~~3. R-A / R-B~~ — **done 2026-08-25.** See *Applied 2026-08-25* above.
 
+~~4. P-A / P-B~~ — **done 2026-08-25.** See *Applied 2026-08-25 — P-A / P-B* above.
+
 **Still open, in value order**
-1. P-A / P-B — index the `lookup` computed column; memoize the doc-view embed pipeline.
-1b. P-E — assert the boot READ COUNT (not just elapsed time), so the lazy-boot work has a guard that
+1. P-E — assert the boot READ COUNT (not just elapsed time), so the lazy-boot work has a guard that
    can fail. The current 15s ceiling is ~10x the real boot and cannot.
 2. `schema.schema.json` — the remaining third of the schema-clarity item. `schemaVersion` and a written
    `kind` both landed with `migrations.js`; what is still missing is (a) dispatching on `kind` instead
