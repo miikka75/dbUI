@@ -586,42 +586,35 @@ Suites: **1 187 unit, 265 E2E — all passing**, plus `tsc` clean.
 
 ---
 
-## Applied 2026-08-26 — P-E (the boot read budget)
+## Applied 2026-08-26 — P-E (the boot read budget) — CORRECTED 2026-08-26
 
-**The boot budget is now a count, not a clock.** `dev/test-ui/boot-reads.spec.js` asserts three things
-the old 15 s ceiling could not:
+**P-E's premise was wrong, and this is what was actually needed.** The finding said
+`dev/test-ui/boot-time.spec.js` "is the only guard on boot". It was not: `app.spec.js` already carried
+a `read budget` describe — added with *Fetch a partition once* — that spies `backend.getTableData`
+through a property setter on `window.backend` installed before any page script runs, and asserts
+exactly the three things P-E asked for: boot reads nothing the landing view does not need, no
+table+partition is read twice, and opening a second view reads only what it adds. Its own comment names
+the trap that makes the property setter necessary ("wrapping it after boot cannot tell 'the read
+happened before I was watching' from 'the read did not happen'").
 
-1. **`bootData` carries no table data.** Read from the boot payload observed during a real app boot,
-   not from a spy: `data` must be `{}`, which is the contract all three backends share and the exact
-   thing a reintroduced preload would break.
-2. **The landing view reads its own tables, once each, and no others.** The fixture schema has six
-   tables; the landing view reaches three (`tasks`, `notes`, and `cities` because `tasks.city` refs it).
-   Those three are named, and so are the three that must stay untouched — the gap IS what lazy boot
-   bought. "Once each" catches the fetch-and-subscribe double read from the other direction.
-3. **Navigating to a second view re-reads nothing already cached**, which is what makes `_ensureCached`
-   worth having.
+The first attempt at P-E added `boot-reads.spec.js`, which re-asserted all three from a `fetch` wrapper
+— a second, more brittle copy (it hard-coded the landing tables where the existing suite derives them
+from `_viewTables` plus `Columns.tableDeps`). That file is deleted. What survives is the one assertion
+the existing suite genuinely lacked, folded into `read budget` where it belongs:
 
-Reads are counted at the TRANSPORT — a `fetch` wrapper installed by `addInitScript` before any app code
-runs — rather than by wrapping `backend.getTableData`, so the count survives an adapter refactor.
+**`bootData` carries no table data** — read from the boot PAYLOAD, not from a spy. This matters because
+a client-side spy *cannot see this regression*: a server-side preload never goes through
+`backend.getTableData` at all, since the rows arrive inside the boot response. Restoring the old
+`bootData` leaves the stray-read and read-twice checks with nothing to report. It pins the contract all
+three backends share (`data: {}`) at the source rather than one backend's habits.
 
-**The boot/after-boot split is deliberately not taken from a timestamp.** The obvious version of test 1
-("no table was read before `window.__bootMs`") was written first and failed: `__bootMs` is set by a Vue
-watcher on `loading`, which flushes a tick after `loading` is set, and `_autoSelectTab()` issues its
-fetches synchronously in between. The landing view's three reads land *before* the marker while being
-caused by the view rather than by boot. Timestamps cannot separate those two; the payload can, so the
-question "what did BOOT fetch" is asked of `bootData`'s own response.
+**The clock was tightened**, 15 000 ms → 3 000 ms, against a measured boot of 189-192 ms solo and
+282-440 ms with eight workers contending, with a note saying what a clock can and cannot see. That part
+of P-E stands: against a fixture database, reading every table costs about fifteen milliseconds, so no
+clock set anywhere sane would catch the regression that costs money.
 
-**Verified by regression, not by passing.** With `dev/server.js`'s `bootData` temporarily restored to
-reading every table's active partition before returning, all three new tests fail — and
-`boot-time.spec.js` still passes, reporting `boot_ms=205`. That is the finding demonstrated rather than
-argued: against a fixture database, reading every table costs about fifteen milliseconds, so no clock
-set anywhere sane would ever have caught the regression that costs money.
-
-**The clock was tightened anyway**, 15 000 ms → 3 000 ms, with the measurements written beside it
-(189-192 ms solo, 282-440 ms with eight workers contending) and a note saying what it can and cannot
-see. It now guards a genuine slowdown at unchanged read count; the read count guards the bill.
-
-Suites: **1 187 unit, 268 E2E (7 skipped) — all passing**, plus `tsc` clean.
+**The lesson worth keeping**: the review was taken at its word about existing coverage, and it was wrong.
+Check what is already there before writing the guard a review says is missing.
 
 ---
 
@@ -764,6 +757,48 @@ Suites: **1 234 unit, 270 E2E (7 skipped) -- all passing**, plus `tsc` clean.
 
 ---
 
+## Applied 2026-08-26 — the carried-in list
+
+**The emulators start twice, not four times.** `run-with-emulators.mjs` takes several commands per
+start (`--and` between them), and `test:emulated` runs the four emulator-backed suites across two
+instances instead of four. **72s -> 55s measured.**
+
+The carried-in note said one instance could serve all four. It cannot, and finding out why is the
+useful part: the Storage emulator's cross-service Firestore lookup — the registration gate in
+`storage.rules`, written `firestore.exists(/databases/(default)/documents/_users/$(email))` — carries no
+project component and resolves against the emulator's DEFAULT project, the one `--project` names at
+start. So `storage-rules.mjs` (projectId `demo-image`) and the Firebase E2E spec (`demo-app`) each pass
+only when the default is theirs; both arrangements were run, and each broke the other's storage test in
+mirror image. Everything else namespaces per project correctly — the E2E suite's denial assertions all
+held on a shared instance, which is what proves Firestore rules stayed enforced.
+
+So: `firestore-rules` + `policy-differential` + the Firebase E2E share one start, and `storage-rules`
+keeps its own. A failing suite no longer stops the ones after it inside a shared start — the time was
+already spent, so the run reports everything that is broken and exits non-zero if any did.
+
+CI is deliberately left on the per-suite scripts: a failed step there should say WHICH suite failed in
+the job list, which is worth more than the seconds.
+
+**SUPABASE.md is linked, and Supabase is in the backends table at all** — it was missing from it, so
+the README described "four backends" and listed four rows that did not include one of them. That is
+worse than an unlinked file: the guide was unreachable AND the backend looked unimplemented.
+
+**Binding a fresh clone to a Firebase project is documented** (`firebase login`, `firebase use --add`,
+what `.firebaserc` is). It is now in `.gitignore` too, with the reason: it names ONE developer's
+project, so a committed one would aim every fork's `firebase deploy` at whoever wrote it — and the
+README now tells people to create one, so it will exist locally.
+
+`dev/test/docs-reachable.test.js` guards both directions: every user-facing document is linked from the
+README, and every relative link the README makes resolves. It fails with the reason when a doc goes
+unlinked, which is the only way anyone would notice.
+
+**Not done: per-database PWA identity.** It is not a fix, it is a feature — path-based hosting rewrites
+plus per-database config storage (`firebase_config` is a single localStorage key, which is also why one
+browser profile can only hold one database at a time). It stays on the list below rather than being
+half-started here.
+
+---
+
 ## Remaining priorities
 
 ~~1. The access matrix (§5)~~ — **overtaken.** The premise was four hand-written case lists across four
@@ -795,12 +830,8 @@ decision not to do it. What remains below is the carried-in list, which was neve
 **Carried in from outside the review** (raised while working, not findings of this audit; recorded here
 so this file is a complete handoff rather than half of one)
 
-- `test:all` starts the Firebase emulators **four separate times** (~6s each). One instance can serve
-  all four suites — their distinct project ids already keep the data apart. Worth ~20s a run.
-- `SUPABASE.md` is current but linked from nowhere; the README never mentions it, so nobody finds it.
-- **No documentation for binding a fresh clone to a Firebase project** — `firebase login`,
-  `firebase use --add`, what `.firebaserc` is and whether to commit it. None is committed, so a new
-  clone cannot deploy without guessing. The README's deploy section assumes the link already exists.
+Three of the four are done — see *Applied 2026-08-26 — the carried-in list* above. What is left:
+
 - **Per-database PWA identity.** The runtime manifest sets `start_url`/`scope` to the origin root and
   declares no `id`, so two databases served by one deployment install as ONE app, wearing whichever
   schema's icon was active at install time. Per-schema *tab* icons already work. The fix is path-based

@@ -25,8 +25,13 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 |---------|---------|------|---------|-----------|-------|
 | **In this browser** | PGlite (WASM Postgres) in IndexedDB | none — a self-asserted email | ✅ (it *is* local) | n/a — one tab | none |
 | **Firebase** | Firestore | Firebase Auth | ✅ | ✅ Instant | Firebase Console |
+| **Supabase** | Postgres (`kv` table + RLS) | Supabase Auth (Google) | ❌ | ✅ Realtime | Supabase dashboard — see **[SUPABASE.md](SUPABASE.md)** |
 | **Dev Server (PGlite)** | PostgreSQL-in-WASM | Trusted `X-User` header (loopback only) | N/A | ✅ SSE | `npm start` |
 | **Dev Server (SQLite)** | SQLite | **none — every request permitted** | N/A | ✅ SSE | `npm start -- --sqlite` |
+
+The Supabase backend has its own guide: **[SUPABASE.md](SUPABASE.md)** — project setup, the Google
+OAuth redirect, running `supabase-schema.sql`, GitHub Pages hosting, and how each Firestore rule maps
+to an RLS policy.
 
 ## Quick Start (nothing to install)
 
@@ -127,6 +132,22 @@ First user is auto-registered as admin (bootstrap mode). After that, only regist
 >
 > A stronger fix, if you would rather not rely on timing: seed the admin `/_users/<email>` document
 > at deploy time, which closes the window entirely rather than shortening it.
+
+### Linking a clone to your project (do this once)
+
+`firebase deploy` needs to know *which* project, and a fresh clone does not say — nothing here names one.
+The link lives in `.firebaserc`, which is **not committed**: it would name whoever wrote it, and a fork
+running `firebase deploy` would then aim at somebody else's project. So each clone makes its own:
+
+```bash
+npm install -g firebase-tools
+firebase login                 # once per machine
+firebase use --add             # pick your project, give it an alias (e.g. `default`)
+```
+
+`firebase use --add` writes `.firebaserc` in the repo root. It is in `.gitignore` for the reason above —
+leave it there. `firebase use` with no arguments shows which project you are currently pointed at, which
+is worth checking before any deploy that matters.
 
 ### Deploying (and why plain `firebase deploy` may fail)
 

@@ -60,3 +60,8 @@ functions/node_modules/
 
 # Local browser-preview launch config (per-machine tooling)
 .claude/launch.json
+
+# Which Firebase project this clone deploys to (`firebase use --add`). Per-developer, never shared:
+# a committed one would aim every fork's `firebase deploy` at whoever wrote it. See README, "Linking a
+# clone to your project".
+.firebaserc
