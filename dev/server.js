@@ -389,7 +389,6 @@ const server = http.createServer(async (req, res) => {
     // Which columns an owner-scoped write may touch (mirrors firestore.rules ownerCreateOk/ownerUpdateOk).
     // null = the table sets no bound. Read straight from the schema here; the rules layers read the
     // _meta mirror because they cannot see the schema.
-    const OWNER_SYSTEM = ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic', '_status'];
     // Same comparison the rules make: diff the incoming row against what it is allowed to differ from —
     // the existing row on an update, the gated columns' create-time defaults on a create — and require
     // every field that actually changes to be listed (or system bookkeeping).
@@ -416,14 +415,11 @@ const server = http.createServer(async (req, res) => {
       // reaching it at all — no field of it, not even a listed one. Checked against `existing`, so the
       // owner cannot escape the gate by sending a compliant new state in the same write.
       if (!BackendHelpers.ownerRowInState(bounds, existing)) return false;
-      const baseline = existing || bounds.locked;
-      const keys = new Set([...Object.keys(incoming || {}), ...Object.keys(baseline || {})]);
-      for (const k of keys) {
-        if (bounds.cols.includes(k) || OWNER_SYSTEM.includes(k)) continue;
-        const a = incoming && incoming[k], b = baseline && baseline[k];
-        if (String(a === undefined ? '' : a) !== String(b === undefined ? '' : b)) return false;
-      }
-      return true;
+      // The field comparison itself is BackendHelpers.ownerFieldsOk, which names the coercion the
+      // SQL uses — this was an inline loop coercing with String(), where `null` became 'null' and so
+      // differed from the RLS's coalesce-to-''. Stricter than production is the safe direction, but it
+      // was a divergence nothing was watching.
+      return BackendHelpers.ownerFieldsOk(bounds, incoming, existing);
     }
     // Self-service (mirrors firestore.rules on the unauthenticated dev backend so the local demo behaves
     // like Firebase): a member with no WRITE grant on a table that declares an `owner` column may still

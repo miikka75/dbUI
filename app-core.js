@@ -210,7 +210,7 @@ function createVueApp() {
       periodOffset: 0,          // leaderboard ‹ › navigation: periods back from now (0 = current)
       importProgress: null,     // {done,total,icon,detail,errors,finished} while an import runs; null otherwise
       firestoreRules: '',
-      firebaseConfigInput: localStorage.getItem('firebase_config') || '',
+      firebaseConfigInput: (function() { var c = Databases.config('firebase'); return c ? JSON.stringify(c) : ''; })(),
       supabaseUrlInput: '',
       supabaseKeyInput: '',
       // Browser-local Postgres: the self-asserted identity the RLS policies will judge (see the note at
@@ -563,30 +563,35 @@ function createVueApp() {
           return { value: r, title: self.t('role.' + r) };
         });
       },
+      // Every database this browser profile holds, active one flagged. Storage that nothing can list
+      // is storage nobody can reach: before the per-database layout there was only ever one, so there
+      // was nothing to show — now there can be several and the only other way back to one is to still
+      // have its shared link.
+      knownDatabases: function() {
+        var active = Databases.activeKey();
+        return Databases.list().map(function(d) {
+          return { key: d.key, label: d.label, mode: d.mode, active: d.key === active };
+        });
+      },
       hasFirebaseConfig: function() {
         if (window.FIREBASE_CONFIG) return true;
-        var s = localStorage.getItem('firebase_config');
-        if (!s) return false;
-        try { var c = JSON.parse(s); return !!(c && c.apiKey); } catch(e) { return false; }
+        var c = Databases.config('firebase');
+        return !!(c && c.apiKey);
       },
       shareLink: function() {
         var base = location.origin + location.pathname;
         var mode = localStorage.getItem('app_mode');
         if (mode === 'firebase') {
-          var cfg = localStorage.getItem('firebase_config');
-          if (!cfg) return base;
-          try { var c = JSON.parse(cfg);
-            // Only emit d= when authDomain is NOT the default <projectId>.firebaseapp.com (derived on load).
-            var d = (c.authDomain && c.authDomain !== c.projectId + '.firebaseapp.com') ? '&d=' + encodeURIComponent(c.authDomain) : '';
-            return base + '?mode=firebase&k=' + encodeURIComponent(c.apiKey) + d + '&p=' + encodeURIComponent(c.projectId); }
-          catch(e) { return base + '?mode=firebase&config=' + btoa(cfg); } // fallback to full encoding
+          var c = Databases.config('firebase');
+          if (!c) return base;
+          // Only emit d= when authDomain is NOT the default <projectId>.firebaseapp.com (derived on load).
+          var d = (c.authDomain && c.authDomain !== c.projectId + '.firebaseapp.com') ? '&d=' + encodeURIComponent(c.authDomain) : '';
+          return base + '?mode=firebase&k=' + encodeURIComponent(c.apiKey) + d + '&p=' + encodeURIComponent(c.projectId);
         }
         if (mode === 'supabase') {
-          var sc = localStorage.getItem('supabase_config');
+          var sc = Databases.config('supabase');
           if (!sc) return base;
-          try { var s = JSON.parse(sc);
-            return base + '?mode=supabase&url=' + encodeURIComponent(s.url) + '&key=' + encodeURIComponent(s.anonKey); }
-          catch (e) { return base; }
+          return base + '?mode=supabase&url=' + encodeURIComponent(sc.url) + '&key=' + encodeURIComponent(sc.anonKey);
         }
         // Dev-server mode is loopback-only: there is nothing shareable about the link.
         return base;
@@ -795,6 +800,7 @@ function createVueApp() {
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
          'settings.backgrounds',
+         'settings.databases', 'settings.databases_hint', 'settings.switch', 'settings.forget',
          'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.tables_view', 'settings.add_user', 'settings.all',
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset',
@@ -4085,8 +4091,9 @@ function createVueApp() {
           jsonStr = jsonStr.replace(/,\s*}/g, '}').replace(/^\s*(\w+)\s*:/gm, '"$1":');
           var config = JSON.parse(jsonStr);
           if (!config.apiKey || !config.projectId) { this.notify(this.t('msg.invalid_config')); return; }
-          localStorage.setItem('firebase_config', JSON.stringify(config));
-          localStorage.setItem('app_mode', 'firebase');
+          // remember() stores it UNDER ITS KEY and makes it active, so connecting to a second
+          // database no longer overwrites the first — and sets app_mode, which it used to do here.
+          Databases.remember('firebase', config);
           // Try saving server-side for other users
           fetch(_u('/api/saveConfig'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({filename:'firebase-config.json', data:config}) }).catch(function(){});
           location.reload();
@@ -4096,12 +4103,28 @@ function createVueApp() {
         var url = (this.supabaseUrlInput || '').trim().replace(/\/+$/, '');
         var key = (this.supabaseKeyInput || '').trim();
         if (!url || !key) return;
-        localStorage.setItem('supabase_config', JSON.stringify({ url: url, anonKey: key }));
-        localStorage.setItem('app_mode', 'supabase');
+        Databases.remember('supabase', { url: url, anonKey: key });
         localStorage.setItem('app_folder', 'supabase');
         // Try saving server-side for other users (dev server only; harmless 404 on static hosting).
         fetch(_u('/api/saveConfig'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({filename:'supabase-config.json', data:{url:url, anonKey:key}}) }).catch(function(){});
         location.reload();   // reload so index.html loads the SDK + backend for mode=supabase
+      },
+      // Switch database. A full reload rather than a re-init: the backend module, its SDK and every
+      // cache in the app were chosen for the OLD database at boot, and there is no unwinding that
+      // safely — a half-switched app reading one project's schema against another's rows is the kind
+      // of bug that corrupts data rather than showing an error.
+      switchDatabase: function(key) {
+        if (!key || key === Databases.activeKey()) return;
+        if (!Databases.setActive(key)) { this.notify(this.t('msg.error')); return; }
+        location.reload();
+      },
+      // Forget a database: drops the stored config, not the data — the database itself is untouched,
+      // and a shared link brings it back. Only the active one needs a reload (there is nothing left
+      // for the app to be pointed at).
+      forgetDatabase: function(key) {
+        var wasActive = Databases.activeKey() === key;
+        Databases.forget(key);
+        if (wasActive) location.reload();
       },
       exportData: function() {
         var self = this;
@@ -4683,8 +4706,16 @@ function createVueApp() {
           var sIcons = (this.schemaData && this.schemaData.icons) || {};
           var icon512 = new URL(sIcons.png512 || './icon-512.png', location.href).href;
           var icon512Sizes = sIcons.png512Sizes || '512x512';
+          // PER-DATABASE IDENTITY. A web app IS its manifest `id` (its `start_url` in a browser too
+          // old for `id`), and both used to be the origin root for every database this deployment
+          // serves — so two databases installed as ONE app, wearing whichever icon happened to be
+          // active at install time, and launching it opened whichever database localStorage held.
+          // Databases.manifestIdentity puts the database key in both fields; `scope` stays the bare
+          // base, because the CODE really is shared and start_url must live inside scope.
+          var ident = Databases.manifestIdentity(base, Databases.activeKey());
           var manifest = {
-            name: title, short_name: title, start_url: base, scope: base,
+            name: title, short_name: title,
+            id: ident.id, start_url: ident.start_url, scope: ident.scope,
             display: 'standalone', background_color: bg, theme_color: tc,
             icons: [
               { src: icon512, sizes: icon512Sizes, type: 'image/png', purpose: 'any maskable' }

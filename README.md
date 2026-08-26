@@ -24,14 +24,16 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 | Backend | Storage | Auth | Offline | Real-time | Setup |
 |---------|---------|------|---------|-----------|-------|
 | **In this browser** | PGlite (WASM Postgres) in IndexedDB | none — a self-asserted email | ✅ (it *is* local) | n/a — one tab | none |
-| **Firebase** | Firestore | Firebase Auth | ✅ | ✅ Instant | Firebase Console |
+| **Firebase** | Firestore | Firebase Auth | ✅ | ✅ Instant | Firebase Console — see **[FIREBASE.md](FIREBASE.md)** |
 | **Supabase** | Postgres (`kv` table + RLS) | Supabase Auth (Google) | ❌ | ✅ Realtime | Supabase dashboard — see **[SUPABASE.md](SUPABASE.md)** |
 | **Dev Server (PGlite)** | PostgreSQL-in-WASM | Trusted `X-User` header (loopback only) | N/A | ✅ SSE | `npm start` |
 | **Dev Server (SQLite)** | SQLite | **none — every request permitted** | N/A | ✅ SSE | `npm start -- --sqlite` |
 
-The Supabase backend has its own guide: **[SUPABASE.md](SUPABASE.md)** — project setup, the Google
-OAuth redirect, running `supabase-schema.sql`, GitHub Pages hosting, and how each Firestore rule maps
-to an RLS policy.
+Each hosted backend has its own guide:
+**[FIREBASE.md](FIREBASE.md)** — project setup, publishing rules, linking a clone, deploying on the
+free plan, and the Firefox sign-in problem.
+**[SUPABASE.md](SUPABASE.md)** — project setup, the Google OAuth redirect, running
+`supabase-schema.sql`, GitHub Pages hosting, and how each Firestore rule maps to an RLS policy.
 
 ## Quick Start (nothing to install)
 
@@ -117,84 +119,16 @@ load an example schema into it, import a bundle from `examples/` via Settings �
 ## Quick Start (Firebase)
 
 1. Create project at [console.firebase.google.com](https://console.firebase.google.com)
-2. Enable Firestore Database + Google Auth provider
-3. Add your domain to Authentication → Authorized domains (e.g. `127.0.0.1`)
-4. Register Web app → copy config JSON
-5. Firestore → Rules → paste contents of `firestore.rules` → Publish
-6. Run the app, select Firebase mode, paste config → Sign in with Google
-7. Settings → Import from JSON to load schema + data
+2. Enable Firestore Database + Google Auth provider, publish `firestore.rules`
+3. Run the app, select Firebase mode, paste the web config → Sign in with Google
+4. Settings → Import from JSON to load schema + data
 
-First user is auto-registered as admin (bootstrap mode). After that, only registered users can access. Per-table permissions configurable per user.
+The first Google account to sign in becomes the admin, so sign in yourself immediately after
+publishing the rules — see the warning in the full guide.
 
-> ⚠️ **Sign in yourself immediately after publishing the rules.** The first Google account to sign
-> in becomes the admin — so never share the app URL or a pre-configured link before you have signed
-> in once. Anyone holding the link during the bootstrap window could claim the admin role.
->
-> A stronger fix, if you would rather not rely on timing: seed the admin `/_users/<email>` document
-> at deploy time, which closes the window entirely rather than shortening it.
-
-### Linking a clone to your project (do this once)
-
-`firebase deploy` needs to know *which* project, and a fresh clone does not say — nothing here names one.
-The link lives in `.firebaserc`, which is **not committed**: it would name whoever wrote it, and a fork
-running `firebase deploy` would then aim at somebody else's project. So each clone makes its own:
-
-```bash
-npm install -g firebase-tools
-firebase login                 # once per machine
-firebase use --add             # pick your project, give it an alias (e.g. `default`)
-```
-
-`firebase use --add` writes `.firebaserc` in the repo root. It is in `.gitignore` for the reason above —
-leave it there. `firebase use` with no arguments shows which project you are currently pointed at, which
-is worth checking before any deploy that matters.
-
-### Deploying (and why plain `firebase deploy` may fail)
-
-```bash
-firebase deploy --only firestore:rules          # rules FIRST — see the note below
-firebase deploy --only hosting,storage          # `storage` here is storage.rules
-```
-
-Rules before the app, always: the app is what starts making requests, so a deploy that ships new code
-against yesterday's rules is a window where the two disagree.
-
-**On the free (Spark) plan, deploy with `--only`.** A bare `firebase deploy` also deploys
-`functions/`, and the CSP report collector there declares a Secret Manager secret — both Cloud
-Functions and Secret Manager need the **Blaze** plan, so the deploy dies before it gets to your app:
-
-```
-Error: Request to https://secretmanager.googleapis.com/v1/.../DBUI_CSP_REPORT_TOKEN
-had HTTP Error: 403, This API method requires billing to be enabled.
-```
-
-Nothing about the app needs that function. The `/csp-report` Hosting rewrite pointing at a function
-that was never deployed is not a deploy error and not a runtime one either — the path 404s, and a
-browser drops an undeliverable CSP report silently. The only thing you lose is the aggregated
-violation counts described under [Violation reports](#violation-reports); the Report-Only header
-still works, so you can still watch violations in DevTools while you soak the policy.
-
-Firebase config is stored in browser localStorage. Share a pre-configured URL to onboard users without manual setup.
-
-### Firefox: "Sign in with Google" fails (third-party cookies)
-
-Google sign-in (`signInWithPopup`) loads Firebase's auth handler from `<projectId>.firebaseapp.com`.
-When the app is hosted on a **different origin** (e.g. GitHub Pages) that handler runs as a
-*third party*, and Firefox's **Enhanced Tracking Protection** + **Total Cookie Protection** (default
-since FF 103) block its cookies/storage — so sign-in silently fails. Same applies to Safari ITP.
-
-User-side fixes (easiest first):
-
-1. **Per-site (recommended):** click the **shield icon** left of the address bar → turn
-   **Enhanced Tracking Protection OFF** for this site → reload.
-2. **Cookie exception:** Settings → Privacy & Security → Cookies and Site Data →
-   **Manage Exceptions** → add `https://<projectId>.firebaseapp.com` → **Allow**.
-3. **Global:** set ETP to **Standard** (not Strict) — least reliable, since Standard still
-   partitions third-party storage; prefer the exception in (2).
-
-Robust fix (no per-user setting): serve the auth handler **same-origin** with the app — host on
-**Firebase Hosting** (or a custom domain whose `authDomain` matches the app's origin). Then the auth
-popup is first-party and no third-party cookies are involved.
+**[FIREBASE.md](FIREBASE.md)** has the rest: project setup step by step, linking a clone with
+`firebase use --add`, why a bare `firebase deploy` fails on the free plan, and the Firefox
+third-party-cookie problem with Google sign-in.
 
 ## Sharing & Access
 
@@ -274,80 +208,55 @@ standalone window with no browser address bar.
   baseline name/icons/`display: standalone` before the app boots.
 - **Runtime manifest**: once the schema loads, `_updateManifest()` rebuilds the manifest with the
   live **app title** (per-database name) + theme colors and swaps in a Blob URL.
-  `start_url`/`scope`/icon `src` are written as **absolute** URLs (a Blob-URL manifest can't
-  resolve relative paths). `background_color`/`theme_color` follow the current Vuetify theme; a
+  `id`/`start_url`/`scope`/icon `src` are written as **absolute** URLs (a Blob-URL manifest can't
+  resolve relative paths) — which is also why a relative `schema.icons` path is fine to *write*: the
+  app resolves it against the deployment root before it reaches the manifest. `background_color`/`theme_color` follow the current Vuetify theme; a
   dynamic `theme-color` meta tracks the in-app light/dark toggle. The runtime manifest's install
   icons come from **`schema.icons` when set, else the bundled static files** (below).
 - **Service worker** (`sw.js`): minimal pass-through `fetch` (no offline caching) — its purpose
   is to satisfy the browser installability check so the install prompt appears reliably.
-- **Per-database icons via `schema.icons` (optional).** All three icon surfaces can be driven
-  from the database schema using **absolute URLs** to PNG/SVG files hosted **anywhere** (a CDN,
-  Firebase Storage, S3, GitHub raw, …). This works with the *Firebase-for-database-only, no app
-  server* model because the icon files are just static objects on some HTTPS host — no runtime
-  rasterization or app server is required. Schema shape (every field optional):
+- **Per-database icons via `schema.icons` (optional).** All three icon surfaces — tab favicon,
+  apple-touch tile, and the manifest install icon — are driven from the database schema, so one
+  deployment serving several databases gives each its own. The fields, defaults and authoring advice
+  are in [SCHEMA.md → icons](SCHEMA.md#icons-title); any field you omit falls back to the bundled
+  static file below, so a deployment can mix or skip `icons` entirely.
 
-  ```json
-  "icons": {
-    "favicon":     "https://cdn.example.com/db/icon-512.png",
-    "appleTouch":  "https://cdn.example.com/db/icon-512.png",
-    "png512":      "https://cdn.example.com/db/icon-512.png",
-    "png512Sizes": "512x512"
-  }
-  ```
+  What the **browser** requires, which is what makes this a PWA note rather than a schema note:
 
-  The **manifest install icon is a single 512×512 PNG** (`png512`) — Chromium only needs one square
-  PNG ≥144px and 512 also covers the splash/maskable role, so no separate small icon is required.
-  `png512Sizes` (optional, default `"512x512"`) lets a differently-sized source be declared
-  accurately (e.g. a 256×256 PNG → `"256x256"`) to avoid a DevTools size-mismatch warning.
-  `_applyIconLinks()` sets `<link rel="icon">` / `<link rel="apple-touch-icon">` and
-  `_updateManifest()` emits the manifest install icons from these URLs. **Any missing field falls
-  back to the bundled static file**, so a deployment can mix (e.g. per-database favicon, shared
-  bundled install icon) or omit `icons` entirely for the all-static default.
+  - The manifest **install** icon must be a **square raster PNG** ≥144px. An SVG, or `sizes: "any"`,
+    is skipped for install — fine as a `favicon`, useless as a home-screen tile.
+  - It must end up at a **network URL**. Relative paths are fine to write (the app resolves them), but
+    a `data:` or `blob:` URI is not: Chromium's manifest-icon downloader runs outside the document and
+    cannot fetch renderer-minted URLs — both log *"Icon … failed to load"*. A real cross-origin URL
+    works, including one on another host: icons are exempt from the same-origin rule that binds
+    `start_url`/`scope`, which is what makes this usable when Firebase holds the database and the app
+    is hosted elsewhere.
+  - Production must be **HTTPS→HTTPS**: a cross-origin `http:` icon on an HTTPS page is
+    mixed-content blocked.
 
-  Hard rules that still apply (why `data:`/`blob:` don't work):
-  - The manifest **install** icon must be a **square raster PNG** (`png192`/`png512`); SVG /
-    `sizes:"any"` is skipped for install (fine as a `favicon`).
-  - URLs must be **absolute `http(s)`** and reachable. Chromium's manifest icon downloader runs
-    outside the document and **cannot fetch renderer-minted `data:`/`blob:` URLs** (both log
-    *"Icon … failed to load"*) — but it **can** fetch a real network URL, including cross-origin
-    (icons are exempt from the same-origin rule that binds `start_url`/`scope`).
-  - Production must be **HTTPS→HTTPS** (a cross-origin `http:` icon on an HTTPS page is
-    mixed-content blocked).
-
-  > Note: automated headless tests verify the manifest/links carry the URLs and that the browser
-  > fetches+decodes the cross-origin PNG (no-CORS image path — the same mode the install-icon
-  > downloader uses), but headless Chromium does **not** run the desktop install-icon download.
-  > Confirm the actual install icon once in real Chrome → DevTools → Application → Manifest.
+  > The E2E suite verifies the manifest and `<link>` tags carry the right URLs, and that the browser
+  > fetches and decodes a cross-origin PNG through the same no-CORS path the install downloader uses.
+  > Headless Chromium does **not** run the desktop install-icon download itself, so confirm the real
+  > install icon once in Chrome → DevTools → Application → Manifest.
 
 ### Bundled static icon files (default / fallback)
-When `schema.icons` is absent (or a field is omitted), the app uses these files shipped **at the
-deploy root** (next to `index.html`); the host must serve them with correct image MIME types:
+
+When `schema.icons` is absent, or a field is omitted, the app uses these files shipped **at the deploy
+root** next to `index.html`. The host must serve them with correct image MIME types.
 
 | File | Size | Purpose |
 |------|------|---------|
 | `favicon.svg` | any | browser-tab favicon (`<link rel="icon">`) |
 | `icon-512.png` | 512×512 | apple-touch-icon + manifest install / splash / maskable icon |
 
-These two are the **generic dbUI mark** — Material Design Icons' `database-eye`, on a **transparent**
-background — so an unbranded database looks like the app rather than like whichever schema happened to
-ship its artwork at the repo root. (It used to be a beehive, which is bishopric iconography; that now
-travels with `examples/bishopric-schema.json`, where it belongs.) The path is taken from `@mdi/svg` at
-the version `vendor/mdi.css` pins, so it is the same icon set the app already draws with.
+Both are the generic dbUI mark — Material Design Icons' `database-eye` on a transparent background —
+so an unbranded database looks like the app rather than like whichever schema happened to ship its
+artwork at the repo root. To brand ONE database prefer `schema.icons`; replacing these files changes
+the default for every unbranded database at once, which is right only when the whole deployment is a
+single product. [SCHEMA.md → icons](SCHEMA.md#icons-title) covers the trade-offs, including why the
+transparent default can look different on each Android launcher.
 
-> The bundled icons — the default and both examples — are **transparent**, which is right for a tab
-> and for the `any` manifest purpose. The manifest also declares `maskable`, and an Android launcher
-> applying an adaptive-icon mask composites a transparent icon onto a background it picks, so the
-> installed tile can look different from device to device. A schema that wants its installed icon to
-> look identical everywhere should point `png512` at a full-bleed **opaque** PNG of its own; nothing
-> in the app requires it.
-
-To brand a deployment, prefer **`schema.icons`** above: it is per-database, so one deployment serving
-several schemas gives each its own tab and home-screen icon. Replacing these two files instead changes
-the default for every unbranded database at once, which is the right tool only when the whole
-deployment is one product.
-
-Either way the install icon must be a real PNG, square and ≥144px. Regenerate one from any SVG with
-the Chromium the E2E suite already ships:
+Regenerate a square PNG from any SVG with the Chromium the E2E suite already ships:
 
 ```bash
 node dev/make-icon-png.mjs favicon.svg icon-512.png 512
@@ -356,8 +265,8 @@ node dev/make-icon-png.mjs favicon.svg icon-512.png 512
 It renders full-bleed and inset to the inner 80%, because the manifest declares
 `purpose: "any maskable"` and a round launcher crops to that.
 
-- **Requirements**: install needs HTTPS (Firebase Hosting provides it) and a valid manifest;
-  the icon files must be reachable and served as `image/*`.
+- **Requirements**: install needs HTTPS (Firebase Hosting provides it), a valid manifest, and icon
+  files that are reachable and served as `image/*`.
 
 ## Content-Security-Policy
 
@@ -391,7 +300,7 @@ Function (`functions/`), which aggregates them into the client-inaccessible `_cs
 Firestore collection (one doc per distinct violation, counted at write time). Requires the
 **Blaze plan** (Cloud Functions) — and note that this is what makes a bare `firebase deploy` fail on
 the free plan, since it tries to deploy `functions/` too. See
-[Deploying](#deploying-and-why-plain-firebase-deploy-may-fail). Setup:
+[Deploying](FIREBASE.md#deploying-and-why-plain-firebase-deploy-may-fail). Setup:
 
 ```bash
 firebase functions:secrets:set DBUI_CSP_REPORT_TOKEN   # long random string; gates the read endpoint
@@ -430,74 +339,17 @@ HTTPS-terminating proxy, and point `csp.js` `REPORT_URI` at its absolute URL.
 The dev/CI **enforcing** policy deliberately omits `report-uri` so test runs never post to the
 real collector; `dev/test/csp.test.js` pins that split.
 
-## Project Structure
+## Schema Reference
 
-```
-index.html                     ← unified entry point (auto-detects backend)
-manifest.json                  ← static PWA manifest (baseline name/icons, display: standalone)
-sw.js                          ← minimal service worker (enables install prompt; no caching)
-favicon.svg                    ← static favicon (replace to rebrand)
-icon-512.png                   ← static apple-touch + manifest install/splash/maskable icon (512×512)
-app-core.js                  ← Vue app logic + computeds + helpers
-ui.html                        ← Vue template (data views, forms, setup)
-style.html                     ← CSS styles
-backend-firebase.js          ← adapter: Firestore + Firebase Auth
-storage-firestore.js         ← Firestore storage adapter
-backend-kv.js                ← THE contract over a kv table, shared by both Postgres backends below
-backend-supabase.js          ← platform: Supabase Auth + realtime + Storage (contract from backend-kv)
-storage-supabase.js          ← Supabase kv storage adapter
-backend-local-pglite.js      ← platform: in-browser Postgres, identity from localStorage, single tab
-storage-pglite.js            ← PGlite kv storage; applies supabase-schema.sql verbatim (Node + browser)
-vendor/pglite/               ← generated: the WASM Postgres dist (scripts/vendor-pglite.sh)
-────────────────────────────────────────────
-firebase.json                  ← Firebase Hosting config
-firestore.rules                ← Firestore Security Rules
-supabase-schema.sql            ← Postgres kv table + RLS (run once in Supabase)
-dev/                           ← Local development (dev-server-only files live here)
-  schema.json                  ← schema definition (tables, views, settings)
-  schema.js                    ← test helper (parses schema.json)
-  demo-bundle.json             ← portable demo DATA (rows/lists/translations), imported over schema.json
-  seed-import.js               ← applies demo-bundle.json to the dev server (--regen rebuilds it)
-  package.json                 ← dependencies + scripts (npm start/test)
-  server.js                    ← HTTP server (port 3000; --fs for JSON-file storage)
-  backend-pglite.js            ← DEFAULT: dev contract over the kv table (no access checks of its own)
-  backend-local.js             ← SQLite backend (better-sqlite3), via --sqlite
-  storage-fs.js                ← JSON-file backend (node server.js --fs)
-  backend-local-client.js    ← client adapter for local server (direct SQLite)
-  test/                        ← node:test backend tests
-  test-ui/                     ← Playwright E2E tests
-```
+Everything about the schema document — tables and column types, the view kinds, embeds, filters,
+computed and rotation columns, markdown documents and their tokens, `nav`, lists and translations,
+access and self-service — is in **[SCHEMA.md](SCHEMA.md)**, the single source of truth.
 
----
-
-## Schema Reference (`schema.json`)
-
-The complete schema reference is maintained in **[`dev/SCHEMA.md`](dev/SCHEMA.md)** — the single
-source of truth. It covers: `icon`/title, `theme` (brand palette), tables (column types incl.
-`multiselect`, `owner` & properties), views (data, document, rotationView, calendar, pivot, rsvp & board),
-embeds (inline / named-view / `filterBy`), filters (`$or`/`$and`/`matchList`), aggregate views
-(`groupBy`/`collect`/`collectWith`), computed columns (incl. rotation columns — occurrence/calendar),
-markdown documents and their `{{view:}}`/`{{table:}}`/`{{self}}`/`{{t:}}` tokens, `nav` (layout, groups,
-`bottomNav`), and lists & translations.
+Point your editor at the meta-schema and it will complete and check the vocabulary as you type:
 
 ```json
-{
-  "icons": { "favicon": "https://…", "appleTouch": "https://…", "png512": "https://…" },
-  "theme": { "light": { "primary": "#..." }, "dark": { "primary": "#..." } },
-  "tables": { "...": { "columns": [ ... ], "archivable": true } },
-  "views":  [ { "name": "...", "sources": [ ... ], "columns": [ ... ] } ],
-  "nav":    { "layout": "drawer", "items": [ ... ], "bottomNav": [ ... ] }
-}
+{ "$schema": "./schema.schema.json", "tables": { ... }, "views": [ ... ], "nav": { ... } }
 ```
-
-> `icons` values must be **absolute `http(s)` URLs**, not `data:` URIs — see the per-database icon
-> section above for why the PWA install icon in particular cannot be a renderer-minted URL. (A view's
-> `background` image is a different mechanism and *does* accept in-database bytes; see SCHEMA.md.)
-
-> `nav` is **required**; `views` are flat (hierarchy lives in `nav`). Each view is one **kind**, chosen
-> by which field it carries: a **data view** (`sources`/`columns`), a **document** (`markdown`), a
-> **rotationView** (`rotation`), a **calendar** (`calendar`), a **pivot** (`pivot`), an **rsvp**
-> (`rsvp`), or a **board** (`board`).
 
 ---
 

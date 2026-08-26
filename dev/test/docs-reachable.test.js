@@ -16,10 +16,9 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..', '..');
 const README = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 
-// The documents a person is expected to find. Named rather than globbed: `CODE_REVIEW-*.md` is a
-// worklist for whoever is working on the code, not a guide, and linking it from the README would be
-// telling users to read our to-do list.
-const USER_DOCS = ['SUPABASE.md', 'dev/SCHEMA.md', 'examples/README.md'];
+// The documents a person is expected to find. Named rather than globbed, so adding a doc is a
+// deliberate act of deciding whether readers are meant to reach it.
+const USER_DOCS = ['FIREBASE.md', 'SUPABASE.md', 'SCHEMA.md', 'examples/README.md'];
 
 describe('docs are reachable from the README', () => {
   for (const doc of USER_DOCS) {
@@ -45,6 +44,36 @@ describe('docs are reachable from the README', () => {
       .filter((l) => l && !fs.existsSync(path.join(ROOT, l)));
     assert.deepEqual([...new Set(missing)], [], 'README links to files that are not there');
   });
+});
+
+// Splitting FIREBASE.md out of the README left two links pointing at headings that had moved with it,
+// and the check above could not see them: it strips the #fragment before testing the path, so a link
+// to a real file with a dead heading passes. GitHub renders those as a silent no-op — the reader
+// clicks and stays where they are.
+const DOCS = ['README.md', 'FIREBASE.md', 'SUPABASE.md', 'SCHEMA.md'];
+
+// GitHub's heading slug: lowercase, drop punctuation, spaces to dashes. Close enough for our headings,
+// and wrong in the safe direction — an over-strict slug would report a link that actually works, which
+// someone would notice, rather than passing one that does not.
+const slugsOf = (md) => (md.match(/^#{1,6}\s+.*$/gm) || [])
+  .map((h) => h.replace(/^#{1,6}\s+/, ''))
+  .map((h) => h.toLowerCase().replace(/[^\w\s-]/g, '').trim().split(/\s+/).join('-'));
+
+describe('anchor links between the docs resolve', () => {
+  for (const doc of DOCS) {
+    it(doc, () => {
+      const src = fs.readFileSync(path.join(ROOT, doc), 'utf8');
+      const broken = [];
+      for (const m of src.matchAll(/\]\(([^)\s#]*)#([^)\s]+)\)/g)) {
+        const target = m[1] || doc;
+        if (/^([a-z]+:)?\/\//i.test(target)) continue;          // external link, not ours to check
+        const file = path.join(ROOT, target);
+        if (!fs.existsSync(file)) { broken.push(target + '#' + m[2] + ' (no such file)'); continue; }
+        if (!slugsOf(fs.readFileSync(file, 'utf8')).includes(m[2])) broken.push(target + '#' + m[2]);
+      }
+      assert.deepEqual(broken, [], doc + ' links to headings that are not there');
+    });
+  }
 });
 
 describe('.firebaserc stays out of the repo', () => {

@@ -85,10 +85,26 @@
     window.mayHaveLocalServer = mayHaveLocalServer;
 
     async function loadApp() {
+      // /databases.js first, and on its own: everything below decides WHICH database this visit is
+      // for, and that is what the module owns. It is a few hundred bytes from the same origin, so the
+      // extra round trip in front of boot is cheaper than the alternative — every branch below
+      // re-deriving the storage layout for itself, which is how a single `firebase_config` key ended
+      // up read in thirteen places.
+      await loadScript('/databases.js');
+      // Fold a pre-`db.` install into the per-database layout. Idempotent, and it does NOT change
+      // which database is active — see Databases.migrate.
+      Databases.migrate();
       // Shared-link support: persist URL params to localStorage, then read mode.
       // shareLink generates: ?mode=firebase&k=<apiKey>&d=<authDomain>&p=<projectId>
       try {
         var qp = new URLSearchParams(location.search);
+        // `?db=<key>` — how an INSTALLED app says which database it is. The manifest's start_url
+        // carries it (see _updateManifest), so launching one of two installed apps lands here and
+        // switches before any backend loads. A key this profile does not hold is ignored rather than
+        // trusted: it names a database, it does not carry one, so the worst it could do is leave the
+        // app pointing at nothing.
+        var dbKey = qp.get('db');
+        if (dbKey) Databases.setActive(dbKey);
         var urlMode = qp.get('mode');
         if (urlMode) {
           if (urlMode === 'supabase') {
@@ -98,11 +114,11 @@
             if (qp.get('config')) { try { sbIncoming = JSON.parse(atob(qp.get('config'))); } catch(e) {} }
             else if (qp.get('url') && qp.get('key')) { sbIncoming = { url: qp.get('url'), anonKey: qp.get('key') }; }
             if (sbIncoming && sbIncoming.url && sbIncoming.anonKey) {
-              var sbTrusted = null; try { sbTrusted = JSON.parse(localStorage.getItem('supabase_config') || 'null'); } catch(e) {}
-              var sbKnown = sbTrusted && sbTrusted.url === sbIncoming.url;
+              // Known if this profile holds it AT ALL, not just if it is the active one: a link to the
+              // other database you already use should switch, not re-ask.
+              var sbKnown = !!Databases.record(Databases.keyFor('supabase', sbIncoming));
               if (sbKnown || confirm('Connect this app to Supabase project "' + sbIncoming.url + '"?\n\nOnly continue if you recognize this project — a shared link can point the app at someone else’s database.')) {
-                localStorage.setItem('supabase_config', JSON.stringify(sbIncoming));
-                localStorage.setItem('app_mode', 'supabase');
+                Databases.remember('supabase', sbIncoming);
               }
               // Declined -> nothing persisted; app_mode stays whatever it already was.
             }
@@ -119,11 +135,9 @@
               incoming = { apiKey: qp.get('k'), authDomain: qp.get('d') || (qp.get('p') + '.firebaseapp.com'), projectId: qp.get('p') };
             }
             if (incoming && incoming.projectId) {
-              var trusted = null; try { trusted = JSON.parse(localStorage.getItem('firebase_config') || 'null'); } catch(e) {}
-              var known = trusted && trusted.projectId === incoming.projectId;
+              var known = !!Databases.record(Databases.keyFor('firebase', incoming));
               if (known || confirm('Connect this app to Firebase project "' + incoming.projectId + '"?\n\nOnly continue if you recognize this project — a shared link can point the app at someone else’s database.')) {
-                localStorage.setItem('firebase_config', JSON.stringify(incoming));
-                localStorage.setItem('app_mode', 'firebase');
+                Databases.remember('firebase', incoming);
               }
               // Declined -> nothing persisted; app_mode stays whatever it already was (setup screen on a fresh visit).
             }
@@ -131,9 +145,13 @@
             localStorage.setItem('app_mode', urlMode);
             if (qp.get('folder')) localStorage.setItem('app_folder', qp.get('folder'));
           }
-          // Strip params from the URL so a refresh doesn't re-apply / leak config
-          history.replaceState(null, '', location.origin + location.pathname);
         }
+        // Strip params from the URL so a refresh doesn't re-apply / leak config. Outside the
+        // `if (urlMode)` above because `?db=` arrives WITHOUT a mode — it is how an installed app
+        // names itself, and it has to be cleaned up for the same reason as the rest: the choice is
+        // persisted the moment it is applied, so a param left in the bar can only go stale and
+        // contradict it on the next reload.
+        if (urlMode || dbKey) history.replaceState(null, '', location.origin + location.pathname);
       } catch(e) {}
 
       var mode = localStorage.getItem('app_mode');

@@ -152,7 +152,7 @@ describe('deploy config — hosting ignore list', () => {
   // applies it (storage-pglite.js). It used to be pruned by the Pages workflow as a "server-side" file,
   // which published an app whose "In this browser" mode 404s on its own access policy — a denylist
   // maintained by hand will eventually delete something the app needs, and this list is the other half.
-  const MUST_PUBLISH = ['index.html', 'app-core.js', 'sw.js', 'manifest.json', 'favicon.svg',
+  const MUST_PUBLISH = ['index.html', 'app-core.js', 'databases.js', 'sw.js', 'manifest.json', 'favicon.svg',
                         'icon-512.png', 'vendor/vue.js', 'examples/chores-schema.json',
                         'supabase-schema.sql', 'backend-kv.js', 'storage-pglite.js'];
 

@@ -33,7 +33,14 @@ function loadBackend(email) {
     BackendHelpers: require(path.join(ROOT, 'backend-helpers.js')),
     AccessFeatures: require(path.join(ROOT, 'access-features.js')),
     // initFirebase() runs on load; give it just enough to take its harmless "no config" path.
+    // The REAL Databases module, bound to an empty store, rather than a stub: it is what decides
+    // which database's config the backend starts with, and a stub would let that decision drift.
     localStorage: { getItem: () => null, setItem: () => {} },
+    Databases: (function() {
+      const D = require(path.join(ROOT, 'databases.js'));
+      D._bind({ length: 0, key: () => null, getItem: () => null, setItem: () => {}, removeItem: () => {} });
+      return D;
+    })(),
     fetch: () => Promise.reject(new Error('no network in test')),
     appInstance: {},
     _auth: { currentUser: { email: email } }

@@ -659,6 +659,22 @@
                             @update:model-value="a.saveViewBackground(tgt.id, { fixed: !!$event })"></v-checkbox>
               </div>
             </div>
+            <v-divider v-if="a.knownDatabases.length > 1" class="my-4"></v-divider>
+            <template v-if="a.knownDatabases.length > 1">
+              <p class="text-subtitle-2 mb-1">{{ a.t('settings.databases') }}</p>
+              <p class="text-caption text-medium-emphasis mb-2">{{ a.t('settings.databases_hint') }}</p>
+              <v-list density="compact" class="mb-2" data-testid="database-list">
+                <v-list-item v-for="db in a.knownDatabases" :key="db.key" :title="db.label" :subtitle="db.mode">
+                  <template #prepend>
+                    <v-icon :icon="db.active ? 'mdi-check-circle' : 'mdi-database-outline'" :color="db.active ? 'primary' : undefined"></v-icon>
+                  </template>
+                  <template #append>
+                    <v-btn v-if="!db.active" size="small" variant="text" @click="a.switchDatabase(db.key)">{{ a.t('settings.switch') }}</v-btn>
+                    <v-btn size="small" variant="text" color="error" @click="a.forgetDatabase(db.key)">{{ a.t('settings.forget') }}</v-btn>
+                  </template>
+                </v-list-item>
+              </v-list>
+            </template>
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.share') }}</p>
             <v-text-field :model-value="a.shareLink" name="share-link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="a.copyText(a.shareLink)"></v-text-field>

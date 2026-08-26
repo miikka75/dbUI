@@ -46,11 +46,16 @@ describe('rules parity — owner-writable system columns', () => {
   it('supabase-schema.sql app_owner_fields_ok', () => {
     assert.deepEqual(fromQuoted(SQL, /k\.key <> all \(array\[([^\]]+)\]\)/), EXPECTED);
   });
-  it('dev/server.js OWNER_SYSTEM', () => {
-    assert.deepEqual(fromQuoted(SERVER, /const OWNER_SYSTEM = \[([^\]]+)\]/), EXPECTED);
+  it('backend-helpers.js OWNER_SYSTEM_COLS', () => {
+    assert.deepEqual(fromQuoted(HELPERS, /OWNER_SYSTEM_COLS: \[([^\]]+)\]/), EXPECTED);
   });
-  it('backend-helpers.js ownerWritableOf SYSTEM', () => {
-    assert.deepEqual(fromQuoted(HELPERS, /var SYSTEM = \[([^\]]+)\]/), EXPECTED);
+  it('dev/server.js keeps no list of its own', () => {
+    // It had one, and it was the fourth copy of a list that has to be identical in every layer. The
+    // dev server is the one layer written in the same language as backend-helpers, so it is the one
+    // copy that could simply go — it calls BackendHelpers.ownerFieldsOk now. The three that remain are
+    // three languages and genuinely irreducible; this suite is what keeps them equal.
+    assert.equal(/OWNER_SYSTEM\s*=\s*\[/.test(SERVER), false,
+      'dev/server.js has re-grown its own system-column list — use BackendHelpers.OWNER_SYSTEM_COLS');
   });
 });
 

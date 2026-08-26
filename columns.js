@@ -250,6 +250,36 @@
     return out;
   }
 
+  // Every table joined to `table` by a mirror column (`syncFrom`), in BOTH directions and transitively:
+  // the upstream masters this table copies from, and the downstream tables copying from it. A mirror
+  // cluster is one logical row spread over several tables, so anything that creates, deletes, archives
+  // or access-checks a row has to see the whole cluster.
+  //
+  // Memoized per schema, for the same reason scanSchema is: this is O(tables x columns) and it is asked
+  // per nav item, per embed source and per table load — sidebarTabs alone ran it once for every entry on
+  // every recompute. The schema object is built once at load and any runtime change forces a full page
+  // reload, so a WeakMap keyed on it can never go stale.
+  //
+  // The returned array is CACHED, so it is read-only. schema-loader's withMirrors copies out of it.
+  var _mirrorCache = (typeof WeakMap !== 'undefined') ? new WeakMap() : null;
+  function mirrorCluster(schema, table) {
+    var per = _mirrorCache && _mirrorCache.get(schema);
+    if (!per && _mirrorCache) { per = {}; _mirrorCache.set(schema, per); }
+    if (per && per[table]) return per[table];
+    var set = [table];
+    for (var i = 0; i < set.length; i++) {          // grows as tables are discovered -> transitive closure
+      var t = set[i], cols = (schema[t] && schema[t].columns) || {};
+      for (var c in cols) { var d = cols[c]; if (d && typeof d === 'object' && d.syncFrom && set.indexOf(d.syncFrom) < 0) set.push(d.syncFrom); }
+      for (var mt in schema) {                      // downstream tables mirroring t
+        if (set.indexOf(mt) >= 0) continue;
+        var mc = (schema[mt] && schema[mt].columns) || {};
+        for (var k in mc) { var md = mc[k]; if (md && typeof md === 'object' && md.syncFrom === t) { set.push(mt); break; } }
+      }
+    }
+    if (per) per[table] = set;
+    return set;
+  }
+
   // Union of defTables over one table's own column definitions, EXCLUDING itself: a self-reference is
   // already the table being loaded, and returning it would make callers re-request what they hold.
   // `columns` ships in BOTH shapes -- a name->def map, and an array of {name,...} defs (examples/
@@ -273,7 +303,7 @@
     colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted,
     colIsImage: colIsImage, colIsUrl: colIsUrl, colPicker: colPicker,
     colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText,
-    defTables: defTables, entryTables: entryTables, tableDeps: tableDeps
+    defTables: defTables, entryTables: entryTables, tableDeps: tableDeps, mirrorCluster: mirrorCluster
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
   else { root.Columns = C; root.colName = colName; root.isEmbed = isEmbed; root.isViewEmbed = isViewEmbed; root.isText = isText; } // shape predicates as bare globals (schema-loader + app-core call them unqualified)
