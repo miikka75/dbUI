@@ -239,7 +239,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `icon` | string | MDI icon for the sidebar |
 | `printable` | `"view"` \| `"cards"` \| `["view","cards"]` | Opt-in print buttons. `"view"` = view toolbar print only; `"cards"` = per-card buttons only; `["view","cards"]` = both. **Off by default** — omit to hide all print buttons. Note: per-card buttons only render in `card`/`list` layout, so `"cards"` on a `table` layout shows nothing. Applies to views and tables |
 | `markdown` | string | Makes this a **document** view (see below) instead of a data grid |
-| `access` | string[] | **Doc-views only.** Restrict the page to users granted at least one of these tables (see "Restricting a page to some users" below). Omit = visible to all registered users |
+| `access` | string[] | **Doc-views only.** Restrict who may **read** the page to users granted at least one of these tables (see "Restricting a page to some users" below). Omit = visible to all registered users. A read boundary only — any *editor* may edit any page |
 | `rotation` | object | Makes this a **rotationView** (third view kind) — a generated rotating-roster table (see below) |
 | `search` | boolean \| string[] | Offer a **runtime search box** over this view's rows: `true` = every column, an array = only those. Narrows what is rendered, never the data. See **search** below |
 | `obscureNames` | boolean \| string[] | Display-only privacy: abbreviate person names to "First L." in this view. `true` = all list/multiselect columns (or all area columns of a rotationView); an array = exactly those columns. Stored data is untouched |
@@ -671,6 +671,12 @@ of table names — the page is then visible only to users **granted at least one
   `_meta/pageAccess`, and the `_pages__active` read rule denies the stored body to users without a
   listed grant. Supabase enforces it in RLS and the dev server mirrors it from the schema, so every
   backend gates this on the server; the client-side hiding is a UI hint on top, never the gate.
+- **A READ boundary, not a write one.** `access` decides who may *see* the page. It does not decide who
+  may *change* it: writing a page body is `role() == 'editor'` with no table qualifier, in all three
+  layers alike (`firestore.rules` `_pages__active`, `supabase-schema.sql`, and the dev server running
+  the same policies). So any editor can edit any page, restricted or not. That is deliberate — editors
+  are trusted with content, and the alternative is a second permission model just for pages — but it
+  means `access` is audience-scoping, **not confidentiality against your own editors**.
 - **Protects the stored (edited) body, not the page's existence.** The page name/title and the
   schema-defined *seed* markdown live in the schema every registered user reads — so a restricted
   user can learn the page exists and see its seed, just never its edited body. **Don't put secrets

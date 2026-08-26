@@ -6057,6 +6057,10 @@ test.describe('lazy boot', () => {
   // boot is billed against the free plan's scarcest quota, and it was reading every granted table on
   // every session including the ones nobody opened. If this test ever goes back to passing with a
   // populated cache, the bill came back.
+  //
+  // This reads the CACHE — what boot ended up holding. boot-reads.spec.js counts the READS that got
+  // it there, which is the half a cache check cannot see: a table fetched twice and cached once looks
+  // identical here. The two are complementary, not duplicates.
   test('boot fetches no table data; opening a view loads exactly that view', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });

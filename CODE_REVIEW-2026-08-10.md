@@ -730,6 +730,40 @@ Suites: **1 230 unit, 270 E2E (7 skipped) -- all passing**, plus `tsc` clean.
 
 ---
 
+## Applied 2026-08-26 — S-G and the `saveConfig` allowlist (the last two)
+
+**S-G — `access` is a read boundary, written down as one.** Reading a doc-view is grant-scoped;
+writing one is `role() == 'editor'` with no table qualifier, in `firestore.rules`, `supabase-schema.sql`
+and the dev server running the same policies. Verified in all three before writing the line, because a
+doc that says "not confidentiality" has to be right about which layers agree. SCHEMA.md's `access`
+section now says it, and the view-properties table says it in passing, so the reader who never scrolls
+to the section still gets it.
+
+**The `saveConfig` allowlist accepts `supabase-config.json`.** One word, and a genuinely invisible
+failure: `saveSupabaseConfig` posted a filename the server refused with 403, the client fires that
+request with `.catch(function(){})` (on static hosting there is no `/api` at all, so a failure there is
+expected), and `backend-supabase.js` fetches `/supabase-config.json` at boot to find the project. The
+write end and the read end of one file disagreed and nothing could say so.
+
+So the fix is not just the word. `CONFIG_FILES` moved to module scope beside `ADMIN_ROUTES`, for the
+reason that list is there -- an auditable list, and adding a filename is a deliberate act rather than a
+literal buried in a switch case -- and `dev/test/save-config-allowlist.test.js` names the two ends to
+each other: every filename app-core POSTS must be writable, and every filename the server ALLOWS must
+be one something actually asks for, so the list cannot grow dead entries either. It also pins that the
+list stays explicit basenames normalized through `path.basename`, since this is a write primitive
+aimed at a served directory. Reverting the one word fails it with the reason.
+
+**Also corrected here: P-E's premise was half wrong, and so was this document's.** The finding said
+`boot-time.spec.js` "is the only guard on boot". It was not -- app.spec.js's `lazy boot` describe
+already asserted that nothing outside the landing view is CACHED after boot. That does not make P-E
+wrong (a table fetched twice and cached once passes a cache check and fails a read count, which is what
+the Firestore bill actually is), but the two tests now reference each other rather than looking like
+duplicates to whoever finds them next.
+
+Suites: **1 234 unit, 270 E2E (7 skipped) -- all passing**, plus `tsc` clean.
+
+---
+
 ## Remaining priorities
 
 ~~1. The access matrix (§5)~~ — **overtaken.** The premise was four hand-written case lists across four
@@ -754,11 +788,9 @@ Suites: **1 230 unit, 270 E2E (7 skipped) -- all passing**, plus `tsc` clean.
    above.
 
 **Still open, in value order**
-1. S-G — one line in SCHEMA.md: `access:` on a doc-view is a read boundary, not a write one.
-2. `saveConfig`'s filename allowlist is `['firebase-config.json', 'config.json']`, but
-   `saveSupabaseConfig` posts `supabase-config.json` — so "save it server-side for other users" has
-   always silently 403'd on the Supabase path. Noticed while gating that route (S-F); one word to fix,
-   and `deploy-config.test.js` already asserts that file must reach the deploy.
+
+Nothing. Every finding in this review is now either fixed, overtaken, or recorded above as a deliberate
+decision not to do it. What remains below is the carried-in list, which was never part of the audit.
 
 **Carried in from outside the review** (raised while working, not findings of this audit; recorded here
 so this file is a complete handoff rather than half of one)
