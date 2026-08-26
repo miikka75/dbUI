@@ -586,6 +586,45 @@ Suites: **1 187 unit, 265 E2E — all passing**, plus `tsc` clean.
 
 ---
 
+## Applied 2026-08-26 — P-E (the boot read budget)
+
+**The boot budget is now a count, not a clock.** `dev/test-ui/boot-reads.spec.js` asserts three things
+the old 15 s ceiling could not:
+
+1. **`bootData` carries no table data.** Read from the boot payload observed during a real app boot,
+   not from a spy: `data` must be `{}`, which is the contract all three backends share and the exact
+   thing a reintroduced preload would break.
+2. **The landing view reads its own tables, once each, and no others.** The fixture schema has six
+   tables; the landing view reaches three (`tasks`, `notes`, and `cities` because `tasks.city` refs it).
+   Those three are named, and so are the three that must stay untouched — the gap IS what lazy boot
+   bought. "Once each" catches the fetch-and-subscribe double read from the other direction.
+3. **Navigating to a second view re-reads nothing already cached**, which is what makes `_ensureCached`
+   worth having.
+
+Reads are counted at the TRANSPORT — a `fetch` wrapper installed by `addInitScript` before any app code
+runs — rather than by wrapping `backend.getTableData`, so the count survives an adapter refactor.
+
+**The boot/after-boot split is deliberately not taken from a timestamp.** The obvious version of test 1
+("no table was read before `window.__bootMs`") was written first and failed: `__bootMs` is set by a Vue
+watcher on `loading`, which flushes a tick after `loading` is set, and `_autoSelectTab()` issues its
+fetches synchronously in between. The landing view's three reads land *before* the marker while being
+caused by the view rather than by boot. Timestamps cannot separate those two; the payload can, so the
+question "what did BOOT fetch" is asked of `bootData`'s own response.
+
+**Verified by regression, not by passing.** With `dev/server.js`'s `bootData` temporarily restored to
+reading every table's active partition before returning, all three new tests fail — and
+`boot-time.spec.js` still passes, reporting `boot_ms=205`. That is the finding demonstrated rather than
+argued: against a fixture database, reading every table costs about fifteen milliseconds, so no clock
+set anywhere sane would ever have caught the regression that costs money.
+
+**The clock was tightened anyway**, 15 000 ms → 3 000 ms, with the measurements written beside it
+(189-192 ms solo, 282-440 ms with eight workers contending) and a note saying what it can and cannot
+see. It now guards a genuine slowdown at unchanged read count; the read count guards the bill.
+
+Suites: **1 187 unit, 268 E2E (7 skipped) — all passing**, plus `tsc` clean.
+
+---
+
 ## Remaining priorities
 
 ~~1. The access matrix (§5)~~ — **overtaken.** The premise was four hand-written case lists across four
@@ -604,10 +643,10 @@ Suites: **1 187 unit, 265 E2E — all passing**, plus `tsc` clean.
 
 ~~4. P-A / P-B~~ — **done 2026-08-25.** See *Applied 2026-08-25 — P-A / P-B* above.
 
+~~5. P-E~~ — **done 2026-08-26.** See *Applied 2026-08-26 — P-E* above.
+
 **Still open, in value order**
-1. P-E — assert the boot READ COUNT (not just elapsed time), so the lazy-boot work has a guard that
-   can fail. The current 15s ceiling is ~10x the real boot and cannot.
-2. `schema.schema.json` — the remaining third of the schema-clarity item. `schemaVersion` and a written
+1. `schema.schema.json` — the remaining third of the schema-clarity item. `schemaVersion` and a written
    `kind` both landed with `migrations.js`; what is still missing is (a) dispatching on `kind` instead
    of sniffing, which needs migration to label nav GROUPS first (see §6), and (b) a meta-schema, so a
    column `type` typo stops degrading to `text` in silence.

@@ -93,8 +93,19 @@ test('boot time + phase breakdown reported', async ({ page }) => {
 
   // Budget assertion only when the instrumented data-ready marker exists (local runs).
   // For un-instrumented/external targets the test is a reporter, not a guard.
+  //
+  // The ceiling was 15000 ms against a boot of ~190 ms — an order of magnitude of slack, so it could
+  // not fail except on a machine so loaded that every other test had already timed out. Measured on
+  // this harness: 189-192 ms solo, 282-440 ms with eight workers contending. 3000 ms is ~7x the
+  // loaded worst case, which leaves room for a slower CI runner while still failing a genuine
+  // slowdown.
+  //
+  // Note what this number can and cannot see. It is a proxy that drifts with hardware, and a boot
+  // that reads EVERY table still comes in around 200 ms against a fixture database — so no clock set
+  // anywhere sane would catch the regression that actually costs money. That is boot-reads.spec.js's
+  // job: it counts the reads, which is the thing being bought. This asserts the wall clock only.
   if (data.bootMs != null) {
-    expect(data.bootMs).toBeLessThan(15000);
+    expect(data.bootMs).toBeLessThan(3000);
   } else {
     // At minimum the page should have painted something.
     expect(data.firstPaint != null || data.firstContentfulPaint != null).toBeTruthy();
