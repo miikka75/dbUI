@@ -41,6 +41,61 @@
     return null;
   }
 
+  // --- The column vocabulary -------------------------------------------------------------------
+  // What a column def is ALLOWED to say. Both lists are closed, and both are enforced at load by
+  // validateSchema -- the point of writing them down is that neither failure mode is visible without
+  // a check: `columnType` defaults to 'text', so `"type": "slect"` renders a working text column and
+  // the author never learns why their dropdown is missing; and an unrecognised KEY is simply never
+  // read, so `"allowNews": true` is a silent no-op. That is the class of bug that kept `ref`
+  // validation broken for months.
+  //
+  // They live here, next to the readers, because every one of these names is read within a few lines
+  // of this comment -- a list kept anywhere else would be a list nobody updates when a reader is
+  // added. `schema.schema.json` carries the same two vocabularies for the author's EDITOR, and
+  // dev/test/schema-meta.test.js compares the two so the copy cannot drift.
+  //
+  // `multiselect` is here despite being legacy (migration v3 rewrites it to select + multiple): the
+  // migration is idempotent and runs at load, but a schema on disk may still spell it, and rejecting
+  // what the migration accepts would fail the document before it got the chance to be upgraded.
+  var COLUMN_TYPES = ['text', 'number', 'date', 'select', 'multiselect', 'ref', 'url', 'image', 'owner'];
+  var COLUMN_KEYS = [
+    'name', 'type', 'hidden',                                   // identity + display
+    'list', 'listSwitch', 'allowNew', 'sorted', 'picker',        // list-backed columns
+    'table', 'valueCol', 'filterBy',                             // ref columns
+    'multiple',                                                  // cardinality (composes with select AND ref)
+    'default', 'defaultFrom', 'stamped',                         // what a new row starts with, and who may rewrite it
+    'syncFrom'                                                   // mirror columns
+  ];
+
+  // Every way a column def can be wrong ABOUT ITSELF, as a list of messages. Pure over the tables map
+  // (either column shape), so validateSchema in the browser and the unit suite in Node ask the same
+  // function rather than each owning a copy of the vocabulary -- which is the mistake this check
+  // exists to catch, made one layer up.
+  //
+  // A bare-string def (`"id": "text"`) IS the type -- that is how ensureImplicitId injects `id` -- so
+  // it gets the enum check and has no keys to check.
+  function vocabularyErrors(tables) {
+    var errors = [];
+    for (var t in (tables || {})) {
+      var defs = columnDefs(tables[t]);
+      for (var c in defs) {
+        var d = defs[c], typ = (typeof d === 'string') ? d : (d && d.type);
+        if (typ !== undefined && COLUMN_TYPES.indexOf(typ) < 0) {
+          errors.push('table "' + t + '": column "' + c + '" has unknown type "' + typ + '" — must be one of ' +
+                      COLUMN_TYPES.join('/') + ' (an unknown type silently reads as "text")');
+        }
+        if (!d || typeof d !== 'object') continue;
+        Object.keys(d).forEach(function(k) {
+          if (COLUMN_KEYS.indexOf(k) < 0) {
+            errors.push('table "' + t + '": column "' + c + '" has unknown property "' + k +
+                        '" — nothing reads it, so it does nothing (see SCHEMA.md, "column properties")');
+          }
+        });
+      }
+    }
+    return errors;
+  }
+
   function columnType(schema, table, col) {
     var def = schema[table] && schema[table].columns[col];
     if (!def) return 'text';
@@ -209,6 +264,7 @@
   }
 
   var C = {
+    COLUMN_TYPES: COLUMN_TYPES, COLUMN_KEYS: COLUMN_KEYS, vocabularyErrors: vocabularyErrors,
     columnDefs: columnDefs, columnDefList: columnDefList, ownerColOf: ownerColOf,
     columnType: columnType, columnList: columnList, columnRef: columnRef,
     isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol,

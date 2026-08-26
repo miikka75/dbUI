@@ -1,4 +1,5 @@
 {
+  "$schema": "../schema.schema.json",
   "icons": {
     "favicon": "./examples/chores-favicon.svg",
     "appleTouch": "./examples/chores-icon-512.png",

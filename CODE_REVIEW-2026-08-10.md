@@ -625,6 +625,60 @@ Suites: **1 187 unit, 268 E2E (7 skipped) — all passing**, plus `tsc` clean.
 
 ---
 
+## Applied 2026-08-26 — the meta-schema (§6, the `schema.schema.json` half)
+
+**`schema.schema.json` ships at the repo root**, and schemas point at it with `"$schema":
+"./schema.schema.json"`. Users hand-edit this document; that is the stated design, so the vocabulary is
+now stated where they actually work.
+
+**The column vocabulary is closed in BOTH places, and they are held together.** `Columns.COLUMN_TYPES`
+and `COLUMN_KEYS` live next to the readers that consume them, and `Columns.vocabularyErrors(tables)` --
+a pure function, so the unit suite runs the same one the browser does -- is concatenated into
+`validateSchema`. The meta-schema states the same two lists for the editor, and
+`dev/test/schema-meta.test.js` fails if they ever differ. That is the answer to the obvious objection:
+a vocabulary written twice is the thing this repo spends its effort not having, so the second copy is
+pinned to the first rather than trusted.
+
+Both findings the review named are now reported at load:
+
+- an unknown `type`, which `columnType` otherwise degrades to `"text"` -- the message says so, because
+  "unknown type" alone leaves the author wondering whether the column works at all. It does; that is
+  the problem.
+- an unknown KEY, which is simply never read.
+
+**The meta-schema is checked against real documents, not just written.** `schema-meta.test.js`
+validates every schema the repo ships (ajv, a devDependency -- test-only, nothing new reaches the
+browser). That is not ceremony: the first draft typed `listSwitch` as a string, and `dev/schema.json`
+is what said otherwise. A meta-schema nobody validates against is decoration that puts red underlines
+under working JSON.
+
+**The `access` sentinel is expressed as the review suggested**, and slightly more sharply: either
+exactly `["all"]` or an array containing no `"all"`. The mixed form is rejected in the editor though
+the app tolerates it, because it cannot mean anything -- a full-access user already passes any
+non-empty list, so `["all", "tasks"]` IS `["tasks"]`, and an author writing it believes it does
+something it does not. That reasoning is in the meta-schema's own `description`, so it does not read
+as an app rule.
+
+**What is deliberately NOT closed: tables and views.** A view's kind is still chosen by which field it
+carries, and `currentConfig` is `VIEWS[x] || SCHEMA[x]` -- a table answers to the same presentation
+vocabulary a view does, so the two are literally the same object position. Closing that list today
+would either be wrong or would freeze a vocabulary the `kind`-dispatch work is about to restructure.
+Both are described (completion, enums, per-property prose) with `additionalProperties: true`, and the
+file says why.
+
+Two documentation gaps fell out of writing it: `listSwitch` and `stamped` were **never** in SCHEMA.md's
+column-properties table. Both are there now, next to a line saying the list is closed.
+
+New coverage: 13 cases in `dev/test/schema-vocabulary.test.js` (the two mistakes, both column shapes,
+the bare-string shorthand, legacy `multiselect`, and silence over every shipped schema), 14 in
+`dev/test/schema-meta.test.js` (vocabulary parity, every shipped document validating, the sentinel), and
+2 E2E in `dev/test-ui/schema-vocabulary.spec.js` -- which assert both halves at once: the app boots and
+edits a table with a mistyped column perfectly happily, and reports it anyway.
+
+Suites: **1 218 unit, 270 E2E (7 skipped) -- all passing**, plus `tsc` clean.
+
+---
+
 ## Remaining priorities
 
 ~~1. The access matrix (§5)~~ — **overtaken.** The premise was four hand-written case lists across four
@@ -645,13 +699,18 @@ Suites: **1 187 unit, 268 E2E (7 skipped) — all passing**, plus `tsc` clean.
 
 ~~5. P-E~~ — **done 2026-08-26.** See *Applied 2026-08-26 — P-E* above.
 
+~~6. `schema.schema.json`~~ (part b) — **done 2026-08-26.** See *Applied 2026-08-26 — the meta-schema*
+   above.
+
 **Still open, in value order**
-1. `schema.schema.json` — the remaining third of the schema-clarity item. `schemaVersion` and a written
-   `kind` both landed with `migrations.js`; what is still missing is (a) dispatching on `kind` instead
-   of sniffing, which needs migration to label nav GROUPS first (see §6), and (b) a meta-schema, so a
-   column `type` typo stops degrading to `text` in silence.
-4. S-G — one line in SCHEMA.md: `access:` on a doc-view is a read boundary, not a write one.
-5. `saveConfig`'s filename allowlist is `['firebase-config.json', 'config.json']`, but
+1. **Dispatch on `kind`** — the remaining part (a) of the schema-clarity item, and now the only part.
+   `schemaVersion`, a written `kind` and a meta-schema have all landed; what is left is making the
+   loader dispatch on `kind` instead of sniffing which field a view carries, which needs migration to
+   label nav GROUPS first (`kindOf` defaults to `'data'`, so a named group carrying only nested `views`
+   comes out labelled a data view — see §6). Closing the view/table property lists in
+   `schema.schema.json` is blocked on the same thing, and is the payoff for doing it.
+2. S-G — one line in SCHEMA.md: `access:` on a doc-view is a read boundary, not a write one.
+3. `saveConfig`'s filename allowlist is `['firebase-config.json', 'config.json']`, but
    `saveSupabaseConfig` posts `supabase-config.json` — so "save it server-side for other users" has
    always silently 403'd on the Supabase path. Noticed while gating that route (S-F); one word to fix,
    and `deploy-config.test.js` already asserts that file must reach the deploy.

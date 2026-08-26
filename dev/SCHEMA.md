@@ -15,6 +15,31 @@ tables  ← raw data + partitions
 nav     ← navigation tree + layout, references views/tables by name
 ```
 
+## the meta-schema (`schema.schema.json`)
+
+Hand-editing this document is the design, so the vocabulary is also published as a JSON Schema at the
+repo root. Point at it from the top of your schema and your editor does the rest — completion on every
+property, the column-type enum, and a red underline under a key that does nothing:
+
+```json
+{ "$schema": "./schema.schema.json", "tables": { ... } }
+```
+
+The app ignores the key; nothing else changes. Adjust the path to wherever the file sits relative to
+your schema (`../schema.schema.json` from `dev/`, and so on).
+
+It exists because two whole classes of mistake are invisible without it. A **column type** that is not
+one of the nine below reads as `"text"` — so `"type": "slect"` renders a perfectly working text column
+and the dropdown simply never appears. And an unrecognised **key** is never read, so `"allowNews": true`
+changes nothing and says nothing. The document stays valid JSON and the app keeps working, which is why
+neither can be found by looking at the result.
+
+The column vocabulary is therefore **closed**, in the editor *and* at load: `validateSchema` rejects an
+unknown column type or property when the schema loads, so the two mistakes above are reported even to an
+author who never opens the meta-schema. Table and view properties are described but not closed — a view's
+kind is still chosen by which field it carries, and closing that list would freeze a vocabulary that is
+mid-restructure.
+
 ## icons + title
 ```json
 { "icons": {
@@ -135,6 +160,8 @@ hand. Reversible from the archive tab like any other archived row.
 | `owner` | Per-row access primitive — **auto-stamped** with the current user's email on create, **read-only** thereafter. Backs the `rsvp` view and owner-scoped Firestore rules (a member may write only their own owner-stamped rows). See `## rsvp` and **Self-service tables** below. |
 
 ### column properties
+This list is **closed** — a property not on it is never read, and `validateSchema` says so at load (see **the meta-schema** above).
+
 | Property | Description |
 |----------|-------------|
 | `name` | Column identifier (required) |
@@ -146,6 +173,8 @@ hand. Reversible from the archive tab like any other archived row.
 | `multiple` | Hold **several** values instead of one; stored as an **array** of strings, edited as a chip input. Cardinality is all that ever separated `multiselect` from `select`, so it is a flag rather than a type — which means it also composes with **`ref`**: `{"type": "ref", "table": "ref_chores", "valueCol": "chore", "multiple": true}` is a reference holding several values, which no type name could express. Before this, a schema wanting that had to point a `multiselect` at the lookup table through `list`; the values were right but nothing knew a reference was involved — `filterBy` could not apply, the ref editor did not see it, and the lookup table was invisible to the dependency loader. Ignored with `picker` (a multi-value cell is already chips) |
 | `picker` | Input widget for a single `select` column: `"chips"` (selectable chips) or `"toggle"` (segmented buttons); omit for the default dropdown. Applies wherever the column is edited (any view). Deselecting the current value clears the cell. Ignored with `allowNew` (which needs free-text entry) and for `multiselect` (already chips). Same widget vocabulary as the `rsvp` view's `picker`. |
 | `syncFrom` | Mirror this column's value from another table |
+| `listSwitch` | An **alternate** list the cell can be toggled to: `{ "label": "External", "list": "external_workers" }`. The label is the toggle's text; the list is auto-seeded like any other |
+| `stamped` | The app fills this column in and **nobody rewrites it** — it binds a grant-holder, not just an owner. Needs `defaultFrom: "@me"` and a `list`; at most one per table, because the rules layers resolve ONE column and cannot loop a map. See **`stamped`** below |
 | `default` | A literal seeded into the cell when a row is **created** (`"default": "logged"`), then freely editable. Use it so a new row starts in a sensible state — a status column that begins blank leaves the row outside every lane and filter that names a value. Prefer an explicit value over "whatever is first in the list": list order is data and can be reordered |
 | `defaultFrom` | Seed the cell when a row is **created**. Only token: `"@me"` = the signed-in user's identity, resolved exactly as the `@me` filter does for that column (a `userlink` list's curated value, else the profile display name) (blank when they have none, like the `@me` filter). Takes precedence over `default` if both are set. Unlike `owner`, the value stays editable afterwards — use it so a self-service row is attributed to its author by default without hard-wiring it |
 | `table` | Reference table name (for `ref`) |
