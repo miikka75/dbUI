@@ -21,6 +21,7 @@
     "@electric-sql/pglite": "^0.5.4",
     "@firebase/rules-unit-testing": "^5.0.1",
     "@playwright/test": "1.56.0",
+    "ajv": "^8.20.0",
     "better-sqlite3": "^12.11.1",
     "firebase": "^12.16.0",
     "typescript": "^7.0.2"

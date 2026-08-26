@@ -1,4 +1,5 @@
 {
+  "$schema": "../../schema.schema.json",
   "defaultLanguage": "en",
   "tables": {
     "tasks": {

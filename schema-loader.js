@@ -119,6 +119,17 @@ function validateSchema() {
   var errors = [];
   var allCols = {};
   for (var t in SCHEMA) { for (var c in SCHEMA[t].columns) allCols[c] = t; }
+  // The column VOCABULARY. Both halves of a column def fail silently when they are wrong, which is why
+  // they are checked at all: `columnType` defaults to 'text', so `"type": "slect"` renders a perfectly
+  // working text column and the author is left wondering where their dropdown went; and a key nobody
+  // reads is a no-op, so `"allowNews": true` changes nothing and says nothing. Neither is detectable
+  // downstream -- the document is valid JSON either way, and the app behaves.
+  //
+  // The lists themselves are in columns.js, next to the readers that consume them, and the check is a
+  // pure function over the tables map so the unit suite runs the SAME one (dev/test/schema-vocabulary
+  // .test.js) rather than a copy. `schema.schema.json` states the same vocabulary for the author's
+  // editor, and schema-meta.test.js holds the two together.
+  errors = errors.concat(Columns.vocabularyErrors(SCHEMA));
   // `archiveAfter` is easy to write and easy to have silently do nothing: it needs somewhere to move
   // rows TO (an archivable table) and a clock to measure (`updated_at`, which a columnar backend only
   // persists when the table declares it). Both are load-time detectable, so say so rather than let the

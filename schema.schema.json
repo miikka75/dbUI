@@ -1,0 +1,287 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/miikka75/dbUI/blob/main/schema.schema.json",
+  "title": "dbUI schema",
+  "description": "The schema document a dbUI database is built from: tables (data + partitions), views (presentation), and nav (structure). Hand-editing this file is the stated design, so this meta-schema exists to make the vocabulary visible where authors actually work — their editor. Point at it from a schema with \"$schema\": \"./schema.schema.json\". Full prose: dev/SCHEMA.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string", "description": "Pointer to this meta-schema. Ignored by the app." },
+    "schemaVersion": { "type": "integer", "minimum": 1, "description": "Document version. Older documents are brought forward at load by migrations.js; the result is written back once, by a caller who may save." },
+    "title": { "type": "string", "description": "Document/tab title." },
+    "defaultLanguage": { "type": "string", "description": "Language code used as the base string set (e.g. \"en\")." },
+    "icon": { "type": "string", "description": "MDI icon name for the app itself." },
+    "icons": {
+      "type": "object",
+      "description": "Per-database branding. Every field is optional and falls back to the bundled default, which is what lets one schema brand itself without every other schema having to opt out.",
+      "additionalProperties": false,
+      "properties": {
+        "favicon": { "type": "string", "description": "<link rel=\"icon\"> — the browser tab." },
+        "appleTouch": { "type": "string", "description": "<link rel=\"apple-touch-icon\"> — the iOS home-screen tile." },
+        "png512": { "type": "string", "description": "The PWA install/splash icon. Must be a PNG, square, >=144px." },
+        "png512Sizes": { "type": "string", "description": "Declares a differently-sized png512 accurately, e.g. \"512x512\" (avoids a DevTools size-mismatch warning)." }
+      }
+    },
+    "theme": {
+      "type": "object",
+      "description": "Partially overrides the built-in Vuetify light/dark palettes. Only the keys you set change.",
+      "additionalProperties": false,
+      "properties": {
+        "light": { "$ref": "#/$defs/palette" },
+        "dark": { "$ref": "#/$defs/palette" }
+      }
+    },
+    "tables": {
+      "type": "object",
+      "description": "Raw data, one entry per table. The key is the table name and IS its storage id.",
+      "additionalProperties": { "$ref": "#/$defs/table" }
+    },
+    "views": {
+      "type": "array",
+      "description": "Flat, named units of presentation. Hierarchy lives in `nav` — there is no views.views nesting.",
+      "items": { "$ref": "#/$defs/view" }
+    },
+    "nav": { "$ref": "#/$defs/nav" },
+    "lists": {
+      "type": "object",
+      "description": "Seed values for named lists, by list name. Values referenced by a view filter are auto-seeded and become non-deletable.",
+      "additionalProperties": { "type": "array" }
+    },
+    "listSources": {
+      "type": "object",
+      "description": "Lists whose values are read from a table column instead of being maintained by hand.",
+      "additionalProperties": true
+    },
+    "translatableLists": {
+      "type": "array",
+      "description": "Lists whose values carry translation keys rather than being shown verbatim.",
+      "items": { "type": "string" }
+    },
+    "userWritableLists": {
+      "type": "array",
+      "description": "Free-form vocabularies an ordinary user may extend as they work, rather than admin-only ones.",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "palette": {
+      "type": "object",
+      "description": "Vuetify colour roles. Only the keys you set are overridden.",
+      "additionalProperties": { "type": "string" }
+    },
+
+    "columnType": {
+      "description": "An unknown type is NOT an error the app can see on its own — it silently reads as \"text\", so a typo renders a working text column and the dropdown just never appears. Kept in step with Columns.COLUMN_TYPES by dev/test/schema-meta.test.js.",
+      "type": "string",
+      "enum": ["text", "number", "date", "select", "multiselect", "ref", "url", "image", "owner"]
+    },
+
+    "column": {
+      "description": "A column definition. The property list is CLOSED: an unrecognised key is never read, so it does nothing and says nothing — which is why both this list and Columns.COLUMN_KEYS exist, and why validateSchema rejects anything outside them at load.",
+      "oneOf": [
+        { "$ref": "#/$defs/columnType" },
+        {
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "description": "Column identifier (required)." },
+            "type": { "$ref": "#/$defs/columnType" },
+            "hidden": { "type": "boolean", "description": "Don't display in the UI (e.g. created_at)." },
+            "list": { "type": "string", "description": "List name backing a `select` column." },
+            "listSwitch": {
+              "type": "object",
+              "description": "An ALTERNATE list the cell can be toggled to, e.g. { \"label\": \"External\", \"list\": \"external_workers\" }. The label is the toggle's text; the list is seeded like any other.",
+              "required": ["label", "list"],
+              "additionalProperties": false,
+              "properties": {
+                "label": { "type": "string" },
+                "list": { "type": "string" }
+              }
+            },
+            "allowNew": { "type": "boolean", "description": "Allow adding new list values (combobox)." },
+            "sorted": { "type": "boolean", "description": "Sort dropdown items alphabetically." },
+            "picker": {
+              "type": "string",
+              "enum": ["chips", "toggle"],
+              "description": "Input widget for a single `select` column; omit for the default dropdown. Ignored with `allowNew` (which needs free-text entry) and with `multiple` (already chips)."
+            },
+            "multiple": { "type": "boolean", "description": "Hold several values instead of one, stored as an array. Cardinality is all that ever separated `multiselect` from `select`, so it is a flag rather than a type — which is what lets it compose with `ref` too." },
+            "table": { "type": "string", "description": "Lookup table a `ref` column points at." },
+            "valueCol": { "type": "string", "description": "Column of the lookup table used as the value (for `ref`)." },
+            "filterBy": {
+              "type": "object",
+              "description": "Narrow a `ref` column's options by another column: { \"<this table's column>\": \"<ref table's column>\" }.",
+              "additionalProperties": { "type": "string" }
+            },
+            "default": { "description": "Literal seeded into the cell when a row is CREATED, then freely editable. Prefer an explicit value over \"whatever is first in the list\" — list order is data and can be reordered." },
+            "defaultFrom": {
+              "type": "string",
+              "enum": ["@me"],
+              "description": "Seed the cell on create from a token. \"@me\" resolves the signed-in identity exactly as the @me filter does. Takes precedence over `default`. Unlike `owner`, the value stays editable."
+            },
+            "stamped": { "type": "boolean", "description": "The app fills this column in and nobody rewrites it — it binds a grant-holder, not just an owner. Needs `defaultFrom: \"@me\"` and a `list`; at most one per table, because the rules layers resolve ONE column and cannot loop a map." },
+            "syncFrom": { "type": "string", "description": "Mirror this column's value from another table." }
+          }
+        }
+      ]
+    },
+
+    "partitionLabels": {
+      "type": "object",
+      "description": "Renames the two tabs of a {{view:x@both}} embed. The values are TRANSLATION KEYS, and both halves fail silently when wrong: an unknown partition key is never read, and a non-string value resolves to no label at all.",
+      "additionalProperties": false,
+      "properties": {
+        "active": { "type": "string" },
+        "archive": { "type": "string" }
+      }
+    },
+
+    "table": {
+      "type": "object",
+      "description": "One table: its columns, and how the app treats its rows. A table also answers to the presentation properties a view carries (layout, printable, defaultSort, search, background, …) — `currentConfig` is `VIEWS[x] || SCHEMA[x]`, so the two vocabularies occupy the same object position. That is why this property list is not closed; see the note on `view`.",
+      "additionalProperties": true,
+      "properties": {
+        "columns": {
+          "description": "The table's columns, in either shape: the authored array of defs, or a name->def map.",
+          "oneOf": [
+            { "type": "array", "items": { "$ref": "#/$defs/column" } },
+            { "type": "object", "additionalProperties": { "$ref": "#/$defs/column" } }
+          ]
+        },
+        "archivable": { "type": "boolean", "description": "Enable archive/restore. Archiving sets _status: \"archive\" on the row; the row itself does not move." },
+        "archiveAfter": {
+          "type": "object",
+          "description": "File finished rows away on their own. Needs `archivable: true` (somewhere to move rows to) and a declared `updated_at` column (a clock to measure) — both are checked at load, because without either the sweep silently finds no eligible rows forever.",
+          "required": ["column", "values", "days"],
+          "additionalProperties": false,
+          "properties": {
+            "column": { "type": "string", "description": "Column whose value says the row is finished." },
+            "values": { "type": "array", "minItems": 1, "description": "The values that count as finished." },
+            "days": { "type": "number", "minimum": 0, "description": "How long after `updated_at` a finished row is filed away." }
+          }
+        },
+        "isLookup": { "type": "boolean", "description": "Marks a reference/lookup table — managed in the Lookup tab, not the sidebar." },
+        "reorderable": { "type": "boolean", "description": "Rows may be dragged into a new order, stored in a `number` position column." },
+        "ownerWritable": {
+          "type": "array",
+          "description": "Columns an owner-scoped write may touch on their own row. Mirrored to both rules layers.",
+          "items": { "type": "string" }
+        },
+        "ownerWritableWhile": {
+          "type": "object",
+          "description": "Freezes an owner's own row once it leaves the listed states. Exactly ONE column, because it is mirrored to the rules layers as one column plus a value list and more cannot be enforced there. Inert without `ownerWritable`.",
+          "minProperties": 1,
+          "maxProperties": 1
+        },
+        "privateRoster": { "type": "boolean", "description": "Rows of this response table are not visible to other participants (the rosterPublic default flips)." },
+        "partitionLabels": { "$ref": "#/$defs/partitionLabels" }
+      }
+    },
+
+    "view": {
+      "type": "object",
+      "description": "One view. Its KIND is still selected by which field it carries — sources/columns (data), markdown (document), rotation, calendar, pivot, rsvp, board, form — rather than by the `kind` field migrations now write, so this property list is deliberately OPEN: closing it would either be wrong today or would freeze a vocabulary the kind-dispatch work is about to restructure. The properties below are the ones common to every kind; each kind's own object is documented in dev/SCHEMA.md.",
+      "additionalProperties": true,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "description": "View identifier — what `nav` and {{view:…}} embeds reference." },
+        "kind": { "type": "string", "description": "The view kind, written by the v1->v2 migration. Not yet what the loader dispatches on (it still sniffs the fields), so treat it as descriptive." },
+        "sources": { "type": "array", "items": { "type": "string" }, "description": "Table names to pull data from." },
+        "mode": { "type": "string", "enum": ["union", "join"], "description": "How several sources combine: stack rows, or merge them by id." },
+        "columns": { "type": "array", "description": "Column names, embeds, conditional columns ({name, when}) and computed columns." },
+        "filter": { "type": "object", "description": "Static row filter — the unified condition language." },
+        "search": {
+          "description": "Offer a runtime search box over this view's rows: true = every column, an array = only those. Narrows what is rendered, never the data.",
+          "oneOf": [{ "type": "boolean" }, { "type": "array", "items": { "type": "string" } }]
+        },
+        "readonly": { "type": "boolean", "description": "Disable editing (report views)." },
+        "includeArchive": { "type": "boolean", "description": "Read the archive partition alongside the active one. A view sees only active rows by default, which is right for a worklist and wrong for a TOTAL: with archiveAfter in play, a sum that nets one thing against another goes wrong the moment either side ages out." },
+        "layout": { "type": "string", "enum": ["table", "card", "list"], "description": "`list` is a READING layout: values render read-only, so a row added there has no editor. Use table/card for anything people actually enter data into." },
+        "collapsed": { "type": "boolean", "description": "Cards start collapsed (accordion)." },
+        "defaultSort": { "type": "string", "description": "Default sort column." },
+        "hideEmpty": { "type": "boolean", "description": "Hide empty columns. Table layout drops a column empty across ALL rows; card/board layouts drop it per row." },
+        "icon": { "type": "string", "description": "MDI icon for the sidebar." },
+        "printable": {
+          "description": "Opt-in print buttons. Off by default. \"cards\" only renders in card/list layout.",
+          "oneOf": [
+            { "type": "string", "enum": ["view", "cards"] },
+            { "type": "array", "items": { "type": "string", "enum": ["view", "cards"] } }
+          ]
+        },
+        "markdown": { "type": "string", "description": "Makes this a DOCUMENT view instead of a data grid. May carry {{view:x}} / {{table:x}} embeds." },
+        "access": {
+          "description": "Doc-views only. Restrict the page to users granted at least one of these tables. Omit = visible to every registered user. \"all\" is a first-class sentinel, not a table name: it means full-access users only (tables: 'all' plus admins), which is why it is exempt from the existence check every other entry gets. Mixing it with table names is rejected HERE though the app tolerates it, because it cannot mean anything: a full-access user already passes any non-empty list, so [\"all\", \"tasks\"] is exactly [\"tasks\"] and an author writing it believes it does something it does not.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "oneOf": [
+            { "const": ["all"], "title": "full-access users only" },
+            { "items": { "not": { "const": "all" } }, "title": "table names — a grant on any one of them unlocks the page" }
+          ]
+        },
+        "obscureNames": {
+          "description": "Display-only privacy: abbreviate person names to \"First L.\" in this view. true = all list columns; an array = exactly those. Stored data is untouched.",
+          "oneOf": [{ "type": "boolean" }, { "type": "array", "items": { "type": "string" } }]
+        },
+        "mineOnly": {
+          "description": "rotationViews only. Show a viewer just the slot column that IS them. An object rather than a bare string so it cannot be misread as the column array obscureNames takes.",
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "object", "additionalProperties": false, "properties": { "list": { "type": "string" } } }
+          ]
+        },
+        "background": {
+          "type": "object",
+          "description": "Background image for this view's card. Works on every view kind. Presentation, so nothing downstream fails loudly when it is malformed — the image just silently doesn't appear, which is why it is validated at load.",
+          "required": ["image"],
+          "additionalProperties": false,
+          "properties": {
+            "image": { "type": "string", "minLength": 1, "description": "An https URL, a raster data: URI, or \"asset:<id>\" (bytes in the _assets table — the no-bucket tier)." },
+            "fit": { "type": "string", "enum": ["cover", "contain", "tile", "width"] },
+            "width": { "type": "number", "minimum": 1, "maximum": 100, "description": "Percentage, with fit: \"width\"." },
+            "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+            "position": { "type": "string", "enum": ["center", "top", "bottom", "left", "right", "top left", "top right", "bottom left", "bottom right"] }
+          }
+        },
+        "partitionLabels": { "$ref": "#/$defs/partitionLabels" }
+      }
+    },
+
+    "nav": {
+      "type": "object",
+      "description": "The navigation tree. References views and tables by name; system tabs (Lookup / Languages / Settings) are appended automatically.",
+      "additionalProperties": false,
+      "properties": {
+        "layout": { "type": "string", "enum": ["drawer", "tabs"], "description": "Side drawer (default) or top tabs on desktop." },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/navItem" } },
+        "bottomNav": {
+          "type": "array",
+          "description": "MOBILE ONLY: view/table ids in the bottom bar, in this order. More than 5 -> the first 4 plus a \"More\" button. Omit to auto-pick the first 5 flattened items. Unresolved ids are silently dropped.",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "navItem": {
+      "type": "object",
+      "description": "One entry: a view, a table, or a group of them (one level deep). Access-filtered — a view needs all its sources.",
+      "additionalProperties": false,
+      "properties": {
+        "view": { "type": "string", "description": "Name of a view — a data view or a document." },
+        "table": { "type": "string", "description": "Name of a table, shown as its own tab." },
+        "group": { "type": "string", "description": "Group label; its children go in `items`." },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/navItem" }, "description": "Children of a group. One level only." },
+        "icon": { "type": "string", "description": "MDI icon name." },
+        "title": { "type": "string", "description": "Override the entry's label." },
+        "adminOnly": { "type": "boolean", "description": "Hide the entry from non-admins; on a group, the whole branch. TIDINESS, NOT ACCESS CONTROL — what a member may read is decided by their table grants, and a hidden entry is still reachable if something links to it." },
+        "hideFromAdmin": { "type": "boolean", "description": "The mirror, for views about being a PARTICIPANT: an admin is exempt from mineOnly, so a personal page embedding a mineOnly rotation would show them everyone else's column under a heading reading \"My tasks\". Setting both flags hides the entry from every user and is rejected at load." }
+      },
+      "oneOf": [
+        { "required": ["view"] },
+        { "required": ["table"] },
+        { "required": ["group"] }
+      ]
+    }
+  }
+}
