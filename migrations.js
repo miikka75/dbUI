@@ -20,7 +20,7 @@
 
   // Bump when a migration is added. A schema with no version is v1: everything written before this
   // existed.
-  var CURRENT_VERSION = 3;
+  var CURRENT_VERSION = 4;
 
   // Walk the nested view tree (nav groups nest views inside `views`), applying fn to each leaf.
   function eachView(list, fn) {
@@ -47,6 +47,12 @@
     if (v.board) return 'board';
     if (v.form) return 'form';
     if (typeof v.markdown === 'string') return 'page';
+    // A nav GROUP is a folder, not a view: nested `views` and no body of its own. Checked after
+    // every body so an entry carrying both is labelled by what it RENDERS, which is the question
+    // a kind answers. Without this case the 'data' fallback below stamped every named folder
+    // `kind: "data"`, and that -- one wrong answer on a shape no shipped schema even uses -- is
+    // the whole reason the loader could not dispatch on `kind` and went on sniffing fields.
+    if (Array.isArray(v.views)) return 'group';
     return 'data';
   }
 
@@ -89,9 +95,32 @@
     return schema;
   }
 
+  // ---- v3 -> v4: a nav group is a kind too ---------------------------------------------------------
+  // v1->v2 wrote a `kind` on every NAMED entry, and `kindOf` had no answer for a folder, so a named nav
+  // group carrying only nested `views` was stamped `kind: "data"` -- a data view with no sources, no
+  // columns and nothing to render. That single wrong answer is what kept `kind` descriptive: a
+  // discriminator that mislabels one shape cannot be the one the loader dispatches on, so
+  // SchemaNormalize.isView went on probing for a body instead.
+  //
+  // Two jobs, because a document can arrive having missed either: stamp an entry that has no `kind` at
+  // all (a hand-written schema declaring schemaVersion 3 never ran v1->v2), and REPAIR the one v1->v2
+  // got wrong. The repair is deliberately narrow -- only 'data' -> 'group', only when the entry really
+  // is a folder -- so a hand-written kind is never overruled, and re-running changes nothing.
+  //
+  // No column identity moves, so no translation key moves and this step records no renames.
+  function v3_to_v4(schema, renames) {           // eslint-disable-line no-unused-vars
+    eachView(schema.views, function (v) {
+      if (!v.name) return;                       // an unnamed group was never stamped; leave it so
+      var k = kindOf(v);
+      if (!v.kind || (v.kind === 'data' && k === 'group')) v.kind = k;
+    });
+    return schema;
+  }
+
   var CHAIN = [
     { to: 2, apply: v1_to_v2, describes: 'name each view kind instead of inferring it from key presence' },
-    { to: 3, apply: v2_to_v3, describes: 'make multi-value a `multiple` flag rather than its own column type' }
+    { to: 3, apply: v2_to_v3, describes: 'make multi-value a `multiple` flag rather than its own column type' },
+    { to: 4, apply: v3_to_v4, describes: 'label a nav group as its own kind, so `kind` can be dispatched on' }
   ];
 
   // ---- Translation keys move with the schema ------------------------------------------------------

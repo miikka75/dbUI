@@ -334,16 +334,25 @@ function createVueApp() {
         return tabs.slice(0, 5);
       },
       bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
+      // The view-kind computeds, all off ONE discriminator (SchemaNormalize.viewKind, which reads the
+      // `kind` the schema carries). They used to be seven independent probes for seven fields, plus an
+      // eighth in schema-normalize and a ninth in migrations -- an implicit discriminator cannot be kept
+      // in sync, because there is nothing to sync.
+      //
+      // `currentKind` is null for a bare TABLE, which is not a view and has no kind. isDataView keeps
+      // its own shape for that reason: a table renders through the data view, so "no kind" counts.
+      currentKind: function() { return SchemaNormalize.viewKind(VIEWS[this.currentTable]); },
       isDataView: function() {
-        var v = VIEWS[this.currentTable];
-        return this.currentTable && this.currentTable[0] !== '_' && !(v && (typeof v.markdown === 'string' || v.rotation || v.calendar || v.pivot || v.rsvp || v.board || v.form)) && (v || SCHEMA[this.currentTable]);
+        if (!this.currentTable || this.currentTable[0] === '_') return false;
+        var k = this.currentKind;
+        return k ? k === 'data' : !!SCHEMA[this.currentTable];
       },
-      isRotationView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rotation); },
-      isCalendarView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.calendar); },
-      isPivotView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.pivot); },
-      isRsvpView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.rsvp); },
-      isBoardView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.board); },
-      isFormView: function() { var v = VIEWS[this.currentTable]; return !!(v && v.form); },
+      isRotationView: function() { return this.currentKind === 'rotation'; },
+      isCalendarView: function() { return this.currentKind === 'calendar'; },
+      isPivotView: function() { return this.currentKind === 'pivot'; },
+      isRsvpView: function() { return this.currentKind === 'rsvp'; },
+      isBoardView: function() { return this.currentKind === 'board'; },
+      isFormView: function() { return this.currentKind === 'form'; },
       // Curated palette tokens exposed in the admin theme editor (Vuetify color names + friendly labels).
       themeTokens: function() {
         return [
@@ -1421,7 +1430,7 @@ function createVueApp() {
       },
       isCalendarName: function(name) { return !!(VIEWS[name] && VIEWS[name].calendar); },
       isRotationName: function(name) { return !!(VIEWS[name] && VIEWS[name].rotation); },
-      isPivotName: function(name) { return !!(VIEWS[name] && VIEWS[name].pivot); },
+      isPivotName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'pivot'; },
       // Build a pivot view's grid: resolve its source (a table or view) through the embed row pipeline
       // (so filters/aggregates/computed columns apply), then Pivot.build cross-tabs it. Pure module +
       // thin root wrapper, like calEventsFor / rotationRowsFor.
@@ -1433,7 +1442,7 @@ function createVueApp() {
         if (v.includeArchive && !VIEWS[src]) rows = rows.concat(this.dataCache[src + '__archive'] || []);
         return Pivot.build(rows, p);
       },
-      isRsvpName: function(name) { return !!(VIEWS[name] && VIEWS[name].rsvp); },
+      isRsvpName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'rsvp'; },
       // A doc-view (markdown page). Embedding one inside another page (`{{view:x}}`) renders its
       // ACCESS-GATED server body -- see embed-view's doc branch: it hides the block via canAccessPage
       // and pulls pageCache (loadPage, server-filtered) rather than the world-readable schema seed.

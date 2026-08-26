@@ -31,14 +31,51 @@ describe('schema-normalize — the view discriminator', () => {
     assert.equal(SchemaNormalize.isView({ sources: ['t'] }), false, 'a body with no name cannot be addressed');
   });
 
-  it('does NOT use `kind`, because a named group gets one too', () => {
-    // migrate() stamps `kind` on every NAMED entry and kindOf defaults to 'data', so a nav group that
-    // only holds nested views comes out labelled `kind: "data"` while being no view at all. Trusting
-    // the label here would register folders as views.
+  it('DOES use `kind` now that migrate labels a group as one', () => {
+    // This is the case that kept the discriminator sniffing for years. v1->v2 stamped `kind` on every
+    // NAMED entry and `kindOf` had no answer for a folder, so a nav group holding only nested views came
+    // out `kind: "data"` — a data view with nothing to render. One wrong label is enough to disqualify a
+    // discriminator, so isView went on probing for a body instead. v3->v4 gives the folder its own kind.
     const schema = { views: [{ name: 'Reports', views: [{ name: 'inner', pivot: {} }] }] };
     Migrations.migrate(schema);
-    assert.equal(schema.views[0].kind, 'data', 'the premise: migrate labels the group');
-    assert.equal(SchemaNormalize.isView(schema.views[0]), false, 'and the discriminator still says no');
+    assert.equal(schema.views[0].kind, 'group', 'the premise: migrate now labels the group');
+    assert.equal(schema.views[0].views[0].kind, 'pivot', 'and still labels what is inside it');
+    assert.equal(SchemaNormalize.isView(schema.views[0]), false);
+    assert.equal(SchemaNormalize.isView(schema.views[0].views[0]), true);
+  });
+
+  it('repairs a group a previous migration mislabelled `data`', () => {
+    // A schema saved between v2 and v3 carries the wrong label already, and the app writes the migrated
+    // schema back only once — so the repair has to be part of the chain, not a one-off.
+    const schema = { schemaVersion: 3, views: [{ name: 'Reports', kind: 'data', views: [{ name: 'inner', kind: 'pivot', pivot: {} }] }] };
+    Migrations.migrate(schema);
+    assert.equal(schema.views[0].kind, 'group');
+    assert.equal(SchemaNormalize.isView(schema.views[0]), false);
+  });
+
+  it('never overrules a hand-written kind on something that renders', () => {
+    // The repair is narrow on purpose: only 'data' -> 'group', and only when the entry really is a
+    // folder. An author who wrote a kind meant it.
+    const schema = { schemaVersion: 3, views: [{ name: 'x', kind: 'data', sources: ['t'] }] };
+    Migrations.migrate(schema);
+    assert.equal(schema.views[0].kind, 'data');
+  });
+
+  it('re-running the chain changes nothing', () => {
+    const schema = { views: [{ name: 'Reports', views: [{ name: 'inner', pivot: {} }] }, { name: 'd', sources: ['t'] }] };
+    Migrations.migrate(schema);
+    const once = JSON.stringify(schema);
+    Migrations.migrate(schema);
+    assert.equal(JSON.stringify(schema), once, 'every step has to be idempotent — the chain re-runs on every load until a caller who may save writes it back');
+  });
+
+  it('falls back to the sniff for a document that never met the migration chain', () => {
+    // schema-loader flattens the bundled defaultSchema at module load, before anything migrates it, and
+    // a caller may load schema-normalize without migrations.js at all. Both paths must agree.
+    assert.equal(SchemaNormalize.viewKind({ name: 'c', calendar: {} }), 'calendar');
+    assert.equal(SchemaNormalize.viewKind({ name: 'g', views: [] }), 'group');
+    assert.equal(SchemaNormalize.viewKind({ name: 'd', sources: ['t'] }), 'data');
+    assert.equal(SchemaNormalize.viewKind(null), null, 'a bare table is not a view and has no kind');
   });
 
   it('flattenViews walks the nested nav tree', () => {
