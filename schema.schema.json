@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/miikka75/dbUI/blob/main/schema.schema.json",
   "title": "dbUI schema",
-  "description": "The schema document a dbUI database is built from: tables (data + partitions), views (presentation), and nav (structure). Hand-editing this file is the stated design, so this meta-schema exists to make the vocabulary visible where authors actually work — their editor. Point at it from a schema with \"$schema\": \"./schema.schema.json\". Full prose: dev/SCHEMA.md.",
+  "description": "The schema document a dbUI database is built from: tables (data + partitions), views (presentation), and nav (structure). Hand-editing this file is the stated design, so this meta-schema exists to make the vocabulary visible where authors actually work — their editor. Point at it from a schema with \"$schema\": \"./schema.schema.json\". Full prose: SCHEMA.md.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -181,7 +181,7 @@
 
     "view": {
       "type": "object",
-      "description": "One view. Its `kind` is what the loader dispatches on; migration writes it, so a hand-authored view normally omits it and gets one at load. The property list is deliberately OPEN: each kind carries its own configuration object (rotation, calendar, pivot, rsvp, board, form), and a TABLE answers to the same presentation properties a view does — `currentConfig` is `VIEWS[x] || SCHEMA[x]`, so the two occupy one object position. The properties below are the ones common to every kind; each kind's own object is documented in dev/SCHEMA.md.",
+      "description": "One view. Its `kind` is what the loader dispatches on; migration writes it, so a hand-authored view normally omits it and gets one at load. The property list is deliberately OPEN: each kind carries its own configuration object (rotation, calendar, pivot, rsvp, board, form), and a TABLE answers to the same presentation properties a view does — `currentConfig` is `VIEWS[x] || SCHEMA[x]`, so the two occupy one object position. The properties below are the ones common to every kind; each kind's own object is documented in SCHEMA.md.",
       "additionalProperties": true,
       "required": ["name"],
       "properties": {

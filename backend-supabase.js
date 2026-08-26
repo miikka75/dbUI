@@ -97,12 +97,11 @@ function _sbUpload(file) {
 }
 
 function initSupabase() {
-  var stored = localStorage.getItem('supabase_config');
-  var config;
-  try { config = (stored && JSON.parse(stored)) || window.SUPABASE_CONFIG || {}; } catch (e) { config = window.SUPABASE_CONFIG || {}; }
+  // The ACTIVE database's config — see the same note in backend-firebase.js.
+  var config = Databases.config('supabase') || window.SUPABASE_CONFIG || {};
   if (config.url && config.anonKey) { _startSupabase(config); return; }
   fetch(_u('/supabase-config.json')).then(function(r) { return r.ok ? r.json() : null; }).then(function(c) {
-    if (c && c.url && c.anonKey) { localStorage.setItem('supabase_config', JSON.stringify(c)); _startSupabase(c); }
+    if (c && c.url && c.anonKey) { Databases.remember('supabase', c); _startSupabase(c); }
     else { appInstance.showSetup = true; appInstance.setupStep = 'supabase'; appInstance.loading = false; }
   }).catch(function() { appInstance.showSetup = true; appInstance.setupStep = 'supabase'; appInstance.loading = false; });
 }

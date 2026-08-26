@@ -1,6 +1,20 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // THE ACCESS-CALL BUDGET. Firestore caps a single-document request at 10 get()/exists() calls, and
+    // every schema-derived mirror this file reads spends from it. Counted on the hottest path, an
+    // owner-scoped create on a data table: _meta/users (the bootstrap probe), _users/<me>,
+    // _meta/ownerTables, _meta/ownerWritable, _meta/stamped — FIVE of ten. (Distinct documents; a
+    // repeated read of the same one is cached within an evaluation. _meta/pageAccess is only on the
+    // _pages read path, and _meta/listTables / _meta/listWritable only on _lists writes.)
+    //
+    // Eight mirror documents exist in total, so the headroom is real but no longer generous — it was
+    // four on this path before `stamped` was added. The failure mode is a hard denial at write time,
+    // not a slow write, so it is worth knowing the number before adding the next one.
+    //
+    // If a mirror ever has to be added to the owner-write path, merge them into ONE _meta/rulesMirror
+    // document rather than adding a key: saveSchema already writes all of them in a single
+    // Promise.all, so the write side costs nothing, and one get() replaces five.
     function noUsers() { return !exists(/databases/$(database)/documents/_meta/users); }
     function myEmail() { return request.auth.token.email.lower(); }
     // Per-user access lives in /_users/<lowercased-email>. Fall back to the legacy _meta/users map

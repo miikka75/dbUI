@@ -4462,6 +4462,15 @@ test.describe('Shared-link URL params', () => {
     expect(loc.pathname).toBe('/');
   });
 
+  // A shared link no longer writes ONE `firebase_config` key — it stores the database under its own
+  // key (`db.firebase:<projectId>`) so a second link adds a database instead of replacing the first.
+  // These read it back the way the app does.
+  const storedDb = (page, key) => page.evaluate((k) => {
+    const r = JSON.parse(localStorage.getItem('db.' + k) || 'null');
+    return r && r.config;
+  }, key);
+  const activeDb = (page) => page.evaluate(() => localStorage.getItem('app_db'));
+
   // Firebase branch with discrete k/d/p params. The firebase backend + external
   // SDK scripts are stubbed empty so the param-restoration contract can be
   // asserted without a real firebase boot (which can't run in the test env).
@@ -4472,8 +4481,8 @@ test.describe('Shared-link URL params', () => {
     await page.goto('/?mode=firebase&k=API_KEY_1&d=app.example.com&p=proj-123');
     await page.waitForFunction(() => localStorage.getItem('app_mode') === 'firebase', { timeout: 6000 });
 
-    const cfg = await page.evaluate(() => JSON.parse(localStorage.getItem('firebase_config') || 'null'));
-    expect(cfg).toEqual({ apiKey: 'API_KEY_1', authDomain: 'app.example.com', projectId: 'proj-123' });
+    expect(await storedDb(page, 'firebase:proj-123')).toEqual({ apiKey: 'API_KEY_1', authDomain: 'app.example.com', projectId: 'proj-123' });
+    expect(await activeDb(page), 'the link should also SELECT the database it carries').toBe('firebase:proj-123');
 
     const loc = await page.evaluate(() => ({ search: location.search, pathname: location.pathname }));
     expect(loc.search).toBe('');
@@ -4488,8 +4497,7 @@ test.describe('Shared-link URL params', () => {
     await page.goto('/?mode=firebase&k=API_KEY_9&p=proj-999');
     await page.waitForFunction(() => localStorage.getItem('app_mode') === 'firebase', { timeout: 6000 });
 
-    const cfg = await page.evaluate(() => JSON.parse(localStorage.getItem('firebase_config') || 'null'));
-    expect(cfg).toEqual({ apiKey: 'API_KEY_9', authDomain: 'proj-999.firebaseapp.com', projectId: 'proj-999' });
+    expect(await storedDb(page, 'firebase:proj-999')).toEqual({ apiKey: 'API_KEY_9', authDomain: 'proj-999.firebaseapp.com', projectId: 'proj-999' });
   });
   test('firebase base64 config link restores firebase_config', async ({ page }) => {
     page.on('dialog', d => d.accept());   // user confirms the projectId connect prompt (the onboarding path)
@@ -4500,8 +4508,7 @@ test.describe('Shared-link URL params', () => {
     await page.goto('/?mode=firebase&config=' + encodeURIComponent(b64));
     await page.waitForFunction(() => localStorage.getItem('app_mode') === 'firebase', { timeout: 6000 });
 
-    const cfg = await page.evaluate(() => JSON.parse(localStorage.getItem('firebase_config') || 'null'));
-    expect(cfg).toEqual(config);
+    expect(await storedDb(page, 'firebase:p2')).toEqual(config);
   });
 
   // Guard: with no mode param the restore block is skipped — existing localStorage

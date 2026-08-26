@@ -89,18 +89,19 @@ function aKey(table) { return table + '__archive'; }
 // Full mirror cluster: all tables sharing a logical row via syncFrom, both directions, transitively
 // (a detail's master, a master's details, and their other details).
 function withMirrors(base) {
-  var set = base.slice();
-  for (var i = 0; i < set.length; i++) {           // grows as tables are discovered -> transitive closure
-    var t = set[i], cols = (SCHEMA[t] && SCHEMA[t].columns) || {};
-    for (var c in cols) { var d = cols[c]; if (d && typeof d === 'object' && d.syncFrom && set.indexOf(d.syncFrom) < 0) set.push(d.syncFrom); } // upstream masters
-    for (var mt in SCHEMA) {                        // downstream tables mirroring t
-      if (set.indexOf(mt) >= 0) continue;
-      var mc = SCHEMA[mt].columns || {};
-      for (var k in mc) { var md = mc[k]; if (md && typeof md === 'object' && md.syncFrom === t) { set.push(mt); break; } }
-    }
-  }
-  return set;
+  // The walk itself is Columns.mirrorCluster, memoized per schema — it used to run here on every call,
+  // which meant O(tables x columns) per nav item, per embed source and per table load. The union is
+  // taken in `base` order, and a cluster starts with its own table, so a single-table base comes back
+  // exactly as it always did (which is what _createBlankRow relies on: the primary must stay first).
+  //
+  // Copies out of the cluster rather than returning it: the cached array is shared.
+  var out = [];
+  (base || []).forEach(function(t) {
+    Columns.mirrorCluster(SCHEMA, t).forEach(function(x) { if (out.indexOf(x) < 0) out.push(x); });
+  });
+  return out;
 }
+
 // The view row pipeline (condMatches/_withinPeriod, filterRows, filterToOr, convertViewFilters,
 // sortByCol, buildRows, aggregateRows, resolveComputed) lives in /rows.js, loaded before this
 // fragment; _normalizeSchema (convertViewFilters) and app-core call those as globals from that module.

@@ -118,9 +118,14 @@
     //     server-side rule can know what to expect. List them in `ownerWritable` if the owner sets them.
     //   - Only tables that BOTH declare ownerWritable and have an owner column are emitted; anywhere
     //     else the key would be inert and the rules should not pay to read it.
+    // The keys an owner-scoped write may carry regardless of `ownerWritable`: identity and bookkeeping
+    // the app stamps itself. Must stay in step with the same array in supabase-schema.sql's
+    // app_owner_fields_ok — `_status` is permitted as a KEY here and constrained by VALUE separately,
+    // because the app stamps it on every row it creates.
+    OWNER_SYSTEM_COLS: ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic', '_status'],
     ownerWritableOf: function(schema) {
       var tables = (schema && schema.tables) || {}, out = {};
-      var SYSTEM = ['id', 'owner', 'created_at', 'updated_at', 'rosterPublic', '_status'];
+      var SYSTEM = H.OWNER_SYSTEM_COLS;
       for (var t in tables) {
         var def = tables[t] || {}, list = def.ownerWritable;
         if (!Array.isArray(list)) continue;
@@ -233,6 +238,41 @@
       if (!bounds || !bounds.whileCol) return true;
       if (!existing) return true;                       // create: nothing to be out of state yet
       return (bounds.whileVals || []).indexOf(String(existing[bounds.whileCol] == null ? '' : existing[bounds.whileCol])) >= 0;
+    },
+
+
+    // May this owner-scoped write touch the fields it touches? Every key in either the incoming row or
+    // the baseline must be either owner-writable, a system key, or UNCHANGED.
+    //
+    // This comparison exists in three languages and cannot be reduced to one: firestore.rules uses
+    // `diff().affectedKeys().hasOnly()`, supabase-schema.sql a `jsonb_each` union with `is distinct
+    // from`, and this. What CAN be shared is the JS copy, which the dev server and the client both
+    // needed — and what has to be written down is the coercion, because the three disagree on it and
+    // nothing would report the disagreement.
+    //
+    // THE CONTRACT, which is the SQL's (`coalesce(x ->> k, '')`), because the RLS is what runs in
+    // production:
+    //   null and undefined and ''  are the SAME value  (jsonb null ->> gives SQL NULL -> coalesced)
+    //   0 and '0'                  are the SAME value  (->> renders a number as its text)
+    //   false and 'false'          are the SAME value  (likewise)
+    // The rules layer is STRICTER than all of this — it compares structurally, so 0 and '0' are a
+    // change there. That direction is safe (the mirror may refuse what the RLS allows, never the
+    // reverse) and is what dev/test-emulator/policy-differential.mjs enforces.
+    ownerFieldsOk: function(bounds, incoming, existing) {
+      if (!bounds) return true;
+      var self = this;
+      var baseline = existing || bounds.locked || {};
+      var seen = {}, keys = [];
+      [incoming || {}, baseline].forEach(function(o) {
+        Object.keys(o).forEach(function(k) { if (!seen[k]) { seen[k] = 1; keys.push(k); } });
+      });
+      var text = function(v) { return String(v == null ? '' : v); };
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if ((bounds.cols || []).indexOf(k) >= 0 || self.OWNER_SYSTEM_COLS.indexOf(k) >= 0) continue;
+        if (text(incoming && incoming[k]) !== text(baseline[k])) return false;
+      }
+      return true;
     },
 
     // Lists a NON-ADMIN may add values to. Editing a list is editing shared vocabulary — the member

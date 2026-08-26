@@ -1,10 +1,13 @@
 # Schema Reference — views + nav/layout
 
-A schema has three layers. Views are the unit of presentation: each view is one **kind**, selected by
-which field it carries — a **data view** (sources/columns), a **document** (`markdown`), a
-**rotationView** (`rotation` — a generated rotating-duty-roster table), a **calendar** (`calendar`),
-a **pivot** (`pivot` — a cross-tab grid), or an **rsvp** (`rsvp` — a self-service signup sheet).
-All of these are documented below.
+A schema has three layers. Views are the unit of presentation, and each view has one **`kind`**:
+a **data view** (`sources`/`columns`), a **document** (`markdown`), a **rotationView** (`rotation` — a
+generated rotating-duty-roster table), a **calendar** (`calendar`), a **pivot** (`pivot` — a cross-tab
+grid), an **rsvp** (`rsvp` — a self-service signup sheet), a **board** (`board`), or a **form**
+(`form`). All of these are documented below.
+
+You do not normally write `kind` — the migration chain fills it in from the configuration object the
+view carries, and the loader dispatches on it from then on.
 
 ```
 icons   ← optional per-database favicon / apple-touch / install icon (see ## icons)
@@ -13,6 +16,20 @@ theme   ← optional brand palette (light/dark colors — see ## theme)
 views   ← flat, named components: data views, or views with markdown (documents)
 tables  ← raw data + partitions
 nav     ← navigation tree + layout, references views/tables by name
+```
+
+All together, a schema document looks like this:
+
+```json
+{
+  "$schema": "./schema.schema.json",
+  "title":   "…",
+  "icons":   { "favicon": "./my-icon.svg", "png512": "./my-icon-512.png" },
+  "theme":   { "light": { "primary": "#..." }, "dark": { "primary": "#..." } },
+  "tables":  { "…": { "columns": [ … ], "archivable": true } },
+  "views":   [ { "name": "…", "sources": [ … ], "columns": [ … ] } ],
+  "nav":     { "layout": "drawer", "items": [ … ], "bottomNav": [ … ] }
+}
 ```
 
 ## the meta-schema (`schema.schema.json`)

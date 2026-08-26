@@ -480,12 +480,12 @@ backend = {
 };
 
 function initFirebase() {
-  var stored = localStorage.getItem('firebase_config');
-  var config;
-  try { config = (stored && JSON.parse(stored)) || window.FIREBASE_CONFIG || {}; } catch(e) { config = window.FIREBASE_CONFIG || {}; }
+  // The ACTIVE database's config (Databases.config), not a single global key: one browser profile may
+  // hold several Firebase projects, and which one this is was decided before the backend loaded.
+  var config = Databases.config('firebase') || window.FIREBASE_CONFIG || {};
   if (config.apiKey) { _startFirebase(config); return; }
   fetch(_u('/firebase-config.json')).then(function(r) { return r.ok ? r.json() : null; }).then(function(c) {
-    if (c && c.apiKey) { localStorage.setItem('firebase_config', JSON.stringify(c)); _startFirebase(c); }
+    if (c && c.apiKey) { Databases.remember('firebase', c); _startFirebase(c); }
     else { appInstance.showSetup = true; appInstance.setupStep = 'firebase'; appInstance.loading = false; }
   }).catch(function() { appInstance.showSetup = true; appInstance.setupStep = 'firebase'; appInstance.loading = false; });
 }
