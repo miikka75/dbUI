@@ -6058,9 +6058,9 @@ test.describe('lazy boot', () => {
   // every session including the ones nobody opened. If this test ever goes back to passing with a
   // populated cache, the bill came back.
   //
-  // This reads the CACHE — what boot ended up holding. boot-reads.spec.js counts the READS that got
-  // it there, which is the half a cache check cannot see: a table fetched twice and cached once looks
-  // identical here. The two are complementary, not duplicates.
+  // This reads the CACHE — what boot ended up holding. The `read budget` describe further down counts
+  // the READS that got it there, which is the half a cache check cannot see: a table fetched twice and
+  // cached once looks identical here.
   test('boot fetches no table data; opening a view loads exactly that view', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -6361,6 +6361,29 @@ test.describe('read budget', () => {
     // And nothing already cached was fetched again.
     const dup = added.filter((r) => before.includes(r));
     expect([...new Set(dup)], 'a table already loaded was read again on navigation').toEqual([]);
+  });
+
+  test('bootData carries no table data, which is where the budget comes from', async ({ page }) => {
+    // The tests above measure the EFFECT — what got read. This pins the CAUSE, in the payload itself:
+    // `bootData` returns `data: {}` on all three backends (see the note in backend-firebase.js), and it
+    // used to return the active partition of every granted table. Read from the response of a real
+    // boot rather than from a spy, so it is the contract being asserted and not one backend's habits.
+    //
+    // Worth having beside the spy because the spy CANNOT see this one. A server-side preload does not
+    // go through `backend.getTableData` at all — the rows arrive inside the boot payload — so restoring
+    // the old `bootData` leaves the stray-read and read-twice checks above with nothing to report. (It
+    // does trip "the spy sees the reads at all", but only because a fully preloaded boot leaves the
+    // landing view with nothing left to fetch; that is a symptom, and it names the wrong cause.)
+    // Verified by putting the preload back: this fails with its own message, and the two read checks
+    // pass.
+    const payloads = [];
+    page.on('response', async (r) => {
+      if (r.url().indexOf('/api/bootData') === -1) return;
+      try { payloads.push(await r.json()); } catch (e) { /* not JSON — the assertion below reports it */ }
+    });
+    await boot(page);
+    expect(payloads.length, 'expected exactly one bootData round-trip').toBe(1);
+    expect(Object.keys(payloads[0].data || {}), 'bootData returned table rows — boot is preloading again').toEqual([]);
   });
 });
 
