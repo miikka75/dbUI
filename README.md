@@ -91,11 +91,13 @@ re-implemented here in JavaScript so that dev behaved like production; running t
 that copy redundant, and it has been deleted rather than left to drift. Use the default whenever the
 question is "can this member actually do that?".
 
-Browser: click "Create Local Database" → app loads with schema from `schema.json`.
-Optionally run `npm run seed:import` (with the server running) to layer the demo data — rows, lists,
-translations, rotation config, plus example users/profiles — on top of the schema. The importable data
-lives in `dev/demo-bundle.json` (the same bundle shape as Settings → Import); regenerate its
-date-relative rows with `node seed-import.js --regen`.
+Browser: click "Create Local Database" → app loads with the schema from
+[`examples/demo-schema.json`](examples/demo-schema.json). Optionally run `npm run seed:import` (with the
+server running) to layer the demo data — rows, lists, translations, rotation config, plus example
+users/profiles — on top of it. The importable parts live in `examples/demo-data.json` and
+`examples/demo-lang-<code>.json` (the same bundle shape as Settings → Import, and the same three files
+the in-app example picker installs); regenerate its date-relative rows with
+`node seed-import.js --regen`.
 
 **Reset**: delete `dev/local.db*` and `dev/*.pgdata/` + browser `localStorage.clear(); location.reload()`
 
@@ -361,7 +363,7 @@ Point your editor at the meta-schema and it will complete and check the vocabula
 ├────────────────┬─────────────────────────────────┤
 │  app-core.js │         ui.html                 │  ← Vue 3 app + template
 ├────────────────┼─────────────────────────────────┤
-│  backend-*.js  │   schema.json / firebase-config │  ← platform + config
+│  backend-*.js  │  demo-schema.json / firebase-cfg │  ← platform + config
 ├────────────────┴─────────────────────────────────┤
 │  backend-kv.js (Supabase + in-browser PGlite)    │  ← one contract, two hosts
 ├──────────────────────────────────────────────────┤
@@ -377,7 +379,7 @@ that one contract, and both run `supabase-schema.sql` underneath it, so a policy
 answer whether the database is in São Paulo or in the tab.
 
 **Schema flow:**
-1. Server loads `schema.json` from disk (dev) or the database (Supabase/Firebase)
+1. Server loads `examples/demo-schema.json` from disk (dev) or the database (Supabase/Firebase)
 2. Client receives schema via `getSchema()`
 3. `validateSchema()` checks for errors
 4. Tables auto-created if missing (`initSchema`)

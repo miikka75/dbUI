@@ -3,16 +3,35 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-// Guards dev/demo-bundle.json (the importable demo data) against schema drift: every table/list it
-// targets must exist in schema.json, rows must be well-formed, and it must stay data-only (no schema).
-const bundle = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'demo-bundle.json'), 'utf8'));
-const schema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'schema.json'), 'utf8'));
+// Guards the DEMO example (examples/demo-data.json + its demo-lang-<code>.json packs) against schema
+// drift: every table/list it targets must exist in demo-schema.json, rows must be well-formed, and the
+// data file must stay data-only (no schema).
+//
+// The three concerns are three files, as they are for every other bundle in examples/ — so the packs
+// are folded back together here, the same way seed-import.js and the example picker fold them.
+const EXAMPLES = path.join(__dirname, '..', '..', 'examples');
+const bundle = JSON.parse(fs.readFileSync(path.join(EXAMPLES, 'demo-data.json'), 'utf8'));
+const schema = JSON.parse(fs.readFileSync(path.join(EXAMPLES, 'demo-schema.json'), 'utf8'));
 const tableNames = Object.keys(schema.tables || {});
 
-describe('demo-bundle.json', () => {
-  it('is a data-only bundle (no schema; carries tables/lists/translations/config)', () => {
-    assert.equal(bundle.schema, undefined);                 // schema lives in schema.json; this layers on top
-    for (const k of ['tables', 'lists', 'translations', 'config']) assert.ok(bundle[k], 'missing ' + k);
+const packs = fs.readdirSync(EXAMPLES).filter(n => /^demo-lang-.*[.]json$/.test(n))
+  .map(n => JSON.parse(fs.readFileSync(path.join(EXAMPLES, n), 'utf8')));
+const languages = packs.flatMap(p => p.languages || []);
+const translations = Object.assign({}, ...packs.map(p => p.translations || {}));
+
+describe('the demo example bundle', () => {
+  it('demo-data.json is data-only (no schema, no labels; carries tables/lists/config)', () => {
+    assert.equal(bundle.schema, undefined);                 // structure lives in demo-schema.json
+    assert.equal(bundle.translations, undefined);           // labels live in the demo-lang-* packs
+    for (const k of ['tables', 'lists', 'config']) assert.ok(bundle[k], 'missing ' + k);
+  });
+
+  it('ships one language pack per declared language, each carrying only its own', () => {
+    assert.ok(packs.length >= 2, 'the demo should ship more than one language');
+    for (const pack of packs) {
+      assert.equal((pack.languages || []).length, 1, 'a pack declares exactly the language it carries');
+      assert.deepEqual(Object.keys(pack.translations || {}), [pack.languages[0].code]);
+    }
   });
 
   it('targets only tables that exist in the schema; rows have ids', () => {
@@ -43,19 +62,19 @@ describe('demo-bundle.json', () => {
   });
 
   it('translation keys are non-empty strings mapped to strings', () => {
-    for (const [code, map] of Object.entries(bundle.translations)) {
+    for (const [code, map] of Object.entries(translations)) {
       assert.ok(code && typeof map === 'object');
       for (const [k, v] of Object.entries(map)) { assert.ok(k.length, 'empty key'); assert.equal(typeof v, 'string'); }
     }
   });
 
   it('every declared language has a translation map with the same key set', () => {
-    const codes = bundle.languages.map(l => l.code);
+    const codes = languages.map(l => l.code);
     assert.ok(codes.length >= 2, 'demo should ship more than one language');
-    const enKeys = Object.keys(bundle.translations.en).sort().join(',');
+    const enKeys = Object.keys(translations.en).sort().join(',');
     for (const code of codes) {
-      assert.ok(bundle.translations[code], 'no translations for declared language ' + code);
-      assert.equal(Object.keys(bundle.translations[code]).sort().join(','), enKeys, code + ' key set differs from en');
+      assert.ok(translations[code], 'no translations for declared language ' + code);
+      assert.equal(Object.keys(translations[code]).sort().join(','), enKeys, code + ' key set differs from en');
     }
   });
 

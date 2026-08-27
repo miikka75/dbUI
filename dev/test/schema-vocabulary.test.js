@@ -96,7 +96,7 @@ describe('Columns.vocabularyErrors — against what the repo actually ships', ()
   // The check is only worth having if it is silent on every real schema. A false positive here is
   // worse than no check at all: it makes a working document report errors on load.
   const SHIPPED = [
-    ['dev/schema.json', (j) => j.tables],
+    ['examples/demo-schema.json', (j) => j.tables],
     ['dev/test-ui/fixture-schema.json', (j) => j.tables],
     ['examples/chores-schema.json', (j) => j.tables],
     ['examples/bishopric-schema.json', (j) => j.schema.tables],

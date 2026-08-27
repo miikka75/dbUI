@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-// Seed the local dev server from a portable DATA bundle (dev/demo-bundle.json) layered on top of the
-// schema (dev/schema.json). The bundle is the same shape the app's Settings -> Import consumes
-// (tables rows + lists + translations + config), so it is also importable in-browser on top of schema.json.
+// Seed the local dev server from the DEMO example — rows and lists (examples/demo-data.json) plus its
+// language packs (examples/demo-lang-<code>.json), layered on top of its schema
+// (examples/demo-schema.json). Each file is the shape the app's Settings -> Import consumes, so the
+// same three concerns are equally installable in-browser from the example picker.
 //
-//   npm run seed:import            apply the committed demo-bundle.json to the running dev server
-//   node seed-import.js --regen    rebuild demo-bundle.json with dates relative to *today*, then exit
-//                                  (the leaderboard/calendar demos are date-relative; --regen keeps them fresh)
+//   npm run seed:import            apply the committed demo files to the running dev server
+//   node seed-import.js --regen    rebuild demo-data.json + the language packs with dates relative to
+//                                  *today*, then exit (the leaderboard/calendar demos are
+//                                  date-relative; --regen keeps them fresh)
 //
 // Users + profiles are seeded here too but are DELIBERATELY NOT in the bundle: access grants and identity
 // are per-deployment security data, not portable content you would import.
@@ -14,7 +16,11 @@ const fs = require('fs');
 const path = require('path');
 const PORT = process.env.PORT || 3000;
 const BASE = 'http://127.0.0.1:' + PORT + '/api/';
-const BUNDLE = path.join(__dirname, 'demo-bundle.json');
+// examples/ rather than dev/: dev/ is pruned from both publish paths, so a schema kept there can
+// never be fetched by the running app -- which is what the example picker does. See examples/README.md.
+const EXAMPLES = path.join(__dirname, '..', 'examples');
+const DATA = path.join(EXAMPLES, 'demo-data.json');
+const langFile = code => path.join(EXAMPLES, 'demo-lang-' + code + '.json');
 
 // --- demo dataset — used only by --regen to (re)build the bundle with dates relative to "today" -------
 const pad = n => String(n).padStart(2, '0');
@@ -211,13 +217,17 @@ function buildBundle() {
     for (const [t, rows] of Object.entries(map)) out[arch ? t + '__archive' : t] = rows.map((r, i) => Object.assign({ id: 'seed-' + t + (arch ? '-arch-' : '-') + (i + 1) }, r));
     return out;
   };
+  // Split along the seam the other example bundles use: DATA (rows, lists, config) apart from the
+  // LABELS (one pack per language), so a deployment can take the demo's structure and rows without
+  // its Spanish and Swedish, exactly as it can with chores.
   return {
-    tables: Object.assign({}, withIds(ROWS, false), withIds(ARCHIVED, true)),
-    lists: LISTS,
-    languages: LANGS,
-    translations: translations,
-    config: { rotationAnchors: { crewrota: iso(monday) }, rotationRanges: { crewrota: { from: iso(rangeFrom), periods: 8 } } },
-    generatedAt: new Date().toISOString()
+    data: {
+      tables: Object.assign({}, withIds(ROWS, false), withIds(ARCHIVED, true)),
+      lists: LISTS,
+      config: { rotationAnchors: { crewrota: iso(monday) }, rotationRanges: { crewrota: { from: iso(rangeFrom), periods: 8 } } },
+      generatedAt: new Date().toISOString()
+    },
+    langs: LANGS.map(l => ({ languages: [l], translations: { [l.code]: translations[l.code] } }))
   };
 }
 
@@ -241,13 +251,27 @@ const postAs = (email, action, body) => fetch(BASE + action, { method: 'POST', h
 
 (async () => {
   if (process.argv.includes('--regen')) {
-    fs.writeFileSync(BUNDLE, JSON.stringify(buildBundle(), null, 2) + '\n');
-    console.log('Regenerated demo-bundle.json (dates relative to today). Run `npm run seed:import` to apply it.');
+    const built = buildBundle();
+    fs.writeFileSync(DATA, JSON.stringify(built.data, null, 2) + '\n');
+    for (const pack of built.langs) fs.writeFileSync(langFile(pack.languages[0].code), JSON.stringify(pack, null, 2) + '\n');
+    console.log('Regenerated demo-data.json + ' + built.langs.length + ' language packs (dates relative to today).'
+      + ' Run `npm run seed:import` to apply them.');
+    // The per-file hashes in examples/index.json are now stale, and the app compares against those.
+    console.log('Then: node ../scripts/examples-manifest.js  (the manifest carries a hash per file).');
     return;
   }
 
-  const bundle = JSON.parse(fs.readFileSync(BUNDLE, 'utf8'));
-  const schema = JSON.parse(fs.readFileSync(path.join(__dirname, 'schema.json'), 'utf8'));
+  const bundle = JSON.parse(fs.readFileSync(DATA, 'utf8'));
+  const schema = JSON.parse(fs.readFileSync(path.join(EXAMPLES, 'demo-schema.json'), 'utf8'));
+  // The language packs are separate files now, one per language, so fold them back into the bundle
+  // shape the loop below (and Settings -> Import) reads.
+  bundle.languages = [];
+  bundle.translations = {};
+  for (const f of fs.readdirSync(EXAMPLES).filter(n => /^demo-lang-.*[.]json$/.test(n))) {
+    const pack = JSON.parse(fs.readFileSync(path.join(EXAMPLES, f), 'utf8'));
+    bundle.languages.push(...(pack.languages || []));
+    Object.assign(bundle.translations, pack.translations || {});
+  }
 
   // 1) Ensure tables exist (idempotent), then apply the bundle's DATA on top of the schema.
   await post('initSchema', { schema: schema.tables });
@@ -280,7 +304,7 @@ const postAs = (email, action, body) => fetch(BASE + action, { method: 'POST', h
   for (const p of PROFILES) await postAs(p.email, 'setMyProfile', { name: p.name, shared: p.shared });
 
   const tCount = Object.keys((bundle.translations && bundle.translations.en) || {}).length;
-  console.log('Imported demo-bundle.json: ' + rowCount + ' rows, ' + listCount + ' list options, ' + tCount + ' translations, '
+  console.log('Imported the demo example: ' + rowCount + ' rows, ' + listCount + ' list options, ' + tCount + ' translations, '
     + USERS.length + ' users, ' + PROFILES.length + ' profiles.');
   console.log('  Switch user in the URL: ?user=cara@dev (chores only) | ?user=dan@dev (tasks/notes) | ?user=new@dev (unregistered).');
 })().catch(e => {

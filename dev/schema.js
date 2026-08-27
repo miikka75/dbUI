@@ -1,4 +1,6 @@
-// schema.js — the Node test harness's schema loader: SCHEMA/VIEWS/_columnOrders from schema.json.
+// schema.js — the Node test harness's schema loader: SCHEMA/VIEWS/_columnOrders from the demo
+// example's schema (examples/demo-schema.json — it lived in dev/ until the app itself had to be
+// able to fetch it, and dev/ is pruned from both publish paths).
 //
 // The CONVERSION is /schema-normalize.js — the same module schema-loader.js runs in the browser. This
 // file used to re-implement it (flatten + colMap + implicit id), which meant the unit suite normalized
@@ -7,7 +9,7 @@
 // path. What is left here is genuinely harness-local: the module bindings, and the partition fields.
 var _defaultSchema;
 if (typeof require !== 'undefined') {
-  _defaultSchema = require('./schema.json');
+  _defaultSchema = require('../examples/demo-schema.json');
 } else if (typeof window !== 'undefined' && window._loadedSchema) {
   _defaultSchema = window._loadedSchema;
 }

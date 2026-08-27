@@ -95,7 +95,7 @@ describe('migrations — every schema shipped in this repo survives it', () => {
   const bundles = [];
   const add = (p) => { if (fs.existsSync(p)) bundles.push(p); };
   add(path.join(ROOT, 'dev', 'data', 'schema.json'));
-  add(path.join(ROOT, 'dev', 'schema.json'));
+  add(path.join(ROOT, 'examples', 'demo-schema.json'));
   const exDir = path.join(ROOT, 'examples');
   if (fs.existsSync(exDir)) {
     for (const f of fs.readdirSync(exDir)) if (f.endsWith('.json')) add(path.join(exDir, f));

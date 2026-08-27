@@ -434,7 +434,7 @@ Instead of `collect`, use `aggregate` to produce one **numeric** row per group, 
   (`{ "$or": [ {"status":"approved"}, {"status":"granted"} ] }`) rather than a flat equality.
 
 ##### Worked example — chores with per-chore points → ranked leaderboard
-The demo schema (`dev/schema.json`) wires this up: a `chores` ref table holds each chore's point value,
+The demo schema (`examples/demo-schema.json`) wires this up: a `chores` ref table holds each chore's point value,
 `chore_log.chore` is a `ref` into it, and the `leaderboard` view sums the looked-up points per person.
 Structure is in the schema; you add the rows at runtime. Example data:
 
