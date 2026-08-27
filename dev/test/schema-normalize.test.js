@@ -186,10 +186,10 @@ describe('schema-normalize — both loaders go through it', () => {
   });
 
   it('the harness and the app agree on the shipped schema', () => {
-    // The drift that motivated all of this, asserted directly: load dev/schema.json through the module
+    // The drift that motivated all of this, asserted directly: load the demo schema through the module
     // and compare the view set with what the harness exposes.
     const { VIEWS } = require('../schema');
-    const doc = JSON.parse(fs.readFileSync(path.join(ROOT, 'dev', 'schema.json'), 'utf8'));
+    const doc = JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', 'demo-schema.json'), 'utf8'));
     const n = SchemaNormalize.normalize(doc);
     assert.deepEqual(Object.keys(n.viewsMap).sort(), Object.keys(VIEWS).sort());
     assert.ok(Object.keys(VIEWS).length > 0, 'this test would pass vacuously on an empty schema');

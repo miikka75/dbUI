@@ -50,7 +50,7 @@ describe('schema.schema.json — the meta-schema and the load-time check agree',
 // `dev/data/schema.json` is deliberately absent: `dev/data/` is gitignored runtime state, so it does
 // not exist on a fresh clone and a test naming it would pass locally and fail in CI.
 const SHIPPED = [
-  ['dev/schema.json', (j) => j],
+  ['examples/demo-schema.json', (j) => j],
   ['dev/test-ui/fixture-schema.json', (j) => j],
   ['examples/chores-schema.json', (j) => j],
   ['examples/bishopric-schema.json', (j) => j.schema],
@@ -58,7 +58,7 @@ const SHIPPED = [
 
 describe('schema.schema.json — every schema this repo ships validates against it', () => {
   // A meta-schema nobody checks against real documents is decoration: it will be subtly wrong (the
-  // first draft of this one had `listSwitch` as a string, which is an object, and dev/schema.json is
+  // first draft of this one had `listSwitch` as a string, which is an object, and demo-schema.json is
   // what said so) and the only person to find out would be an author seeing red underlines under
   // working JSON.
   for (const [file, pick] of SHIPPED) {

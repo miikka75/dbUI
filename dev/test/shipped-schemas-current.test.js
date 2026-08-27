@@ -21,7 +21,7 @@ const Migrations = require('../../migrations.js');
 
 // Every file in the repo that carries a schema. `bishopric-schema.json` is a bundle whose schema sits
 // under `.schema`; the others are bare.
-const SHIPPED = ['examples/chores-schema.json', 'examples/bishopric-schema.json', 'dev/schema.json'];
+const SHIPPED = ['examples/chores-schema.json', 'examples/bishopric-schema.json', 'examples/demo-schema.json'];
 
 describe('shipped schemas are written in the current version', () => {
   for (const rel of SHIPPED) {

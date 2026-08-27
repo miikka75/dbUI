@@ -24,7 +24,7 @@ const read = (rel) => JSON.parse(fs.readFileSync(path.join(ROOT, ...rel.split('/
 const SHIPPED = [
   ['examples/chores-schema.json', (d) => d],
   ['examples/bishopric-schema.json', (d) => d.schema],
-  ['dev/schema.json', (d) => d],
+  ['examples/demo-schema.json', (d) => d],
 ];
 
 const eachNamed = (schema, fn) => Migrations.eachView(schema.views, (v) => { if (v && v.name) fn(v); });

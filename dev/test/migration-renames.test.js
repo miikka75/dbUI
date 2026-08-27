@@ -131,8 +131,8 @@ describe('migrations — no shipped language loses a string', () => {
       addTranslations(f, d.translations);
     }
   }
-  const bundle = path.join(ROOT, 'dev', 'demo-bundle.json');
-  if (fs.existsSync(bundle)) addTranslations('demo-bundle.json', JSON.parse(fs.readFileSync(bundle, 'utf8')).translations);
+  const bundle = path.join(ROOT, 'examples', 'demo-lang-en.json');
+  if (fs.existsSync(bundle)) addTranslations('demo-lang-en.json', JSON.parse(fs.readFileSync(bundle, 'utf8')).translations);
 
   it('found language packs to check', () => {
     assert.ok(packs.length > 0, 'no committed translation packs — this suite would pass vacuously');

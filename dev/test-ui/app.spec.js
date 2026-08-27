@@ -3546,8 +3546,8 @@ test.describe('calendar view', () => {
   });
 });
 
-test.describe('demo schema (dev/schema.json) is valid v3', () => {
-  const DEMO = require('../schema.json');
+test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
+  const DEMO = require('../../examples/demo-schema.json');
   test('boots and nav exposes a group + nested items', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });

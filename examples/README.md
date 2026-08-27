@@ -13,6 +13,9 @@ schema, and a schema's labels carry no UI prose.
 | `chores-schema.json` | a household chore tracker — points, approvals, rewards, a weekly rota and a shopping list |
 | `chores-lang-en.json` | labels for the chores schema |
 | `chores-data.json` | optional **sample rows** for the chores schema — a household of four, a chore catalogue, a fortnight of logged chores, rewards and a shopping list |
+| `demo-schema.json` | the **demo** — the widest of the three, and the one the test suite runs against: rotations, RSVPs, a board, embeds, doc-views, archive partitions, mirrored tables |
+| `demo-lang-en.json` / `-es.json` / `-sv.json` | labels for the demo schema, in three languages |
+| `demo-data.json` | sample rows, lists and rotation config for the demo. Dates are relative to when it was generated — `cd dev && node seed-import.js --regen` refreshes them |
 | `app-lang-en.json` / `-fi.json` | the **app's own UI**: buttons, messages, settings, calendar. Schema-independent — the browser-tab title lives in the *schema* bundle (`app.title`), since it names the deployment |
 
 ## Import order
@@ -29,7 +32,13 @@ order. Add a second language any time by importing the other pair.
 
 `chores-data.json` is a fourth, optional step for the chores schema: import it last for a database
 that already has something in it. It is the same bundle shape Export produces, so it layers onto the
-schema without touching it.
+schema without touching it. `demo-data.json` plays the same part for the demo.
+
+> The demo files lived in `dev/` until the app itself needed to be able to fetch them. `dev/` is pruned
+> from both publish paths (`hosting.ignore` in `firebase.json`, and the prune step in
+> `.github/workflows/deploy-pages.yml`), so nothing kept there is reachable from a browser — while
+> everything here is served by the deployment itself. The dev server still seeds from these files;
+> `cd dev && npm run seed:import` reads them from here.
 
 ## Icons
 
