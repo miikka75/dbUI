@@ -18,9 +18,34 @@ schema, and a schema's labels carry no UI prose.
 | `demo-data.json` | sample rows, lists and rotation config for the demo. Dates are relative to when it was generated — `cd dev && node seed-import.js --regen` refreshes them |
 | `app-lang-en.json` / `-fi.json` | the **app's own UI**: buttons, messages, settings, calendar. Schema-independent — the browser-tab title lives in the *schema* bundle (`app.title`), since it names the deployment |
 
-## Import order
+## Installing one from the app
 
-Settings → **Import JSON**, one file at a time:
+**Settings → Examples**, or the offer an empty database makes on its first screen. The picker reads
+`index.json` — a generated index of everything here — and installs the files you choose in one run:
+the schema, a language pack per language you tick, the matching app-UI pack, and optionally the sample
+rows.
+
+`index.json` carries a hash per file, and an install records which files it took and what each unit of
+them (every column, view, list and translation string) looked like at the time. So when the deployment
+is redeployed with newer examples, **Settings** says which of the files you installed have moved, and
+offers to reinstall.
+
+> Reinstalling **replaces** the schema and merges the labels — a schema edit you made in the app is
+> lost. Export first. (The recorded fingerprints exist so this can become a merge rather than a
+> replace; that part is not built yet.)
+
+Regenerate the index after changing anything here:
+
+```bash
+node scripts/examples-manifest.js
+```
+
+A test fails if you forget — and another fails if a file in this folder is not named so the generator
+can place it (`<id>-schema.json`, `<id>-lang-<code>.json`, `<id>-data.json`, `app-lang-<code>.json`).
+
+## Import order, by hand
+
+Settings → **Import JSON**, one file at a time — the long way round, and what the picker automates:
 
 1. **`bishopric-schema.json`** — the structure. The UI will show raw keys (`view.meeting_program`) until
    a language is loaded; that's expected.

@@ -114,16 +114,18 @@ APP_DB=chores-demo.db PORT=3200 node server.js     # own DB + own sidecars, dev/
 APP_DB=:memory: PORT=0    node server.js           # throwaway; PORT=0 = any free port, printed on boot
 ```
 
-The startup banner prints the database actually in use, so you can confirm which one you are on. To
-load an example schema into it, import a bundle from `examples/` via Settings → Import JSON (see
-[examples/README.md](examples/README.md)).
+The startup banner prints the database actually in use, so you can confirm which one you are on. An
+empty database offers the shipped examples on its first screen — pick one and it installs, no files to
+download (Settings → Examples reopens the picker). Settings → Import JSON still takes a bundle of your
+own; see [examples/README.md](examples/README.md).
 
 ## Quick Start (Firebase)
 
 1. Create project at [console.firebase.google.com](https://console.firebase.google.com)
 2. Enable Firestore Database + Google Auth provider, publish `firestore.rules`
 3. Run the app, select Firebase mode, paste the web config → Sign in with Google
-4. Settings → Import from JSON to load schema + data
+4. Pick one of the shipped examples on the empty-database screen — or Settings → Import from JSON for
+   a bundle of your own
 
 The first Google account to sign in becomes the admin, so sign in yourself immediately after
 publishing the rules — see the warning in the full guide.
