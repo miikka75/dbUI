@@ -1706,8 +1706,7 @@ referencing it become **assignable to registered users** — no manual list upke
 
 The other way to tie a list to real people, and the **opposite trade-off** from `"users"` (a list is one
 or the other — the key holds a single string). The list keeps its own **curated** values as the display
-name; an admin links each value to an account email in the Lookup tab. Design notes:
-[USER-LINKED-LISTS.md](USER-LINKED-LISTS.md).
+name; an admin links each value to an account email in the Lookup tab.
 
 | | `"users"` | `"userlink"` |
 |---|---|---|
@@ -1725,8 +1724,8 @@ stance as an empty profile name.
 - The resolution needs the caller's **own** link, which they may read (`getMyListValues` — a rules-provable
   equality query on their own email; see the `_list_users` read rule). The full value→email map stays
   admin-only, and the avatar projection still never carries an email.
-- **Renaming a list value** migrates the link with it, but the identity is keyed by the old string — see
-  the fragile-case row in USER-LINKED-LISTS.md.
+- **Renaming a list value** migrates the link with it, but the identity is keyed by the old string, so a
+  rename that races another writer can leave the link behind.
 
 ### Membership requests (self-service, admin-approved)
 An unregistered (but signed-in) user submits a request from the "not registered" banner: a **required**
