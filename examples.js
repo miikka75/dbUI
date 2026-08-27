@@ -69,7 +69,7 @@
   // byte-identical content differently, and the manifest drift guard would then fail on Windows and
   // pass in CI.
   function hashText(text) {
-    return hash(String(text).replace(/^﻿/, '').replace(/\r\n/g, '\n'));
+    return hash(String(text).replace(/^\uFEFF/, '').replace(/\r\n/g, '\n'));
   }
 
   // --- Folding files into one import ---------------------------------------------------------------
