@@ -29,11 +29,9 @@ A schema-driven web app with multiple backend options. No build step — Vue 3 +
 | **Dev Server (PGlite)** | PostgreSQL-in-WASM | Trusted `X-User` header (loopback only) | N/A | ✅ SSE | `npm start` |
 | **Dev Server (SQLite)** | SQLite | **none — every request permitted** | N/A | ✅ SSE | `npm start -- --sqlite` |
 
-Each hosted backend has its own guide:
-**[FIREBASE.md](FIREBASE.md)** — project setup, publishing rules, linking a clone, deploying on the
-free plan, and the Firefox sign-in problem.
-**[SUPABASE.md](SUPABASE.md)** — project setup, the Google OAuth redirect, running
-`supabase-schema.sql`, GitHub Pages hosting, and how each Firestore rule maps to an RLS policy.
+Each hosted backend has its own end-to-end guide — see **Quick Start (a hosted backend)** below.
+Writing a new backend is a different document: [BACKEND_API.md](BACKEND_API.md) is the contract every
+adapter implements.
 
 ## Quick Start (nothing to install)
 
@@ -120,20 +118,24 @@ empty database offers the shipped examples on its first screen — pick one and 
 download (Settings → Examples reopens the picker). Settings → Import JSON still takes a bundle of your
 own; see [examples/README.md](examples/README.md).
 
-## Quick Start (Firebase)
+## Quick Start (a hosted backend)
 
-1. Create project at [console.firebase.google.com](https://console.firebase.google.com)
-2. Enable Firestore Database + Google Auth provider, publish `firestore.rules`
-3. Run the app, select Firebase mode, paste the web config → Sign in with Google
-4. Pick one of the shipped examples on the empty-database screen — or Settings → Import from JSON for
-   a bundle of your own
+Both hosted backends follow the same three beats — create the project, publish the access policy, then
+paste the project's public config into the app's setup screen and sign in. **The first account to sign
+in becomes the admin**, so do that yourself immediately after publishing the policy; until you do, the
+database is open to whoever gets there first.
 
-The first Google account to sign in becomes the admin, so sign in yourself immediately after
-publishing the rules — see the warning in the full guide.
+The setup itself is per-provider, and each guide carries it end to end rather than a summary here:
 
-**[FIREBASE.md](FIREBASE.md)** has the rest: project setup step by step, linking a clone with
-`firebase use --add`, why a bare `firebase deploy` fails on the free plan, and the Firefox
-third-party-cookie problem with Google sign-in.
+- **[FIREBASE.md](FIREBASE.md)** — Firestore + Google auth, publishing `firestore.rules`, linking a
+  clone with `firebase use --add`, why a bare `firebase deploy` fails on the free plan, and the Firefox
+  third-party-cookie problem with Google sign-in.
+- **[SUPABASE.md](SUPABASE.md)** — Postgres + Google auth, the OAuth redirect URIs, running
+  `supabase-schema.sql`, which project key to paste, hosting on GitHub Pages, and how each Firestore
+  rule maps to an RLS policy.
+
+Then fill the database: pick one of the shipped examples on the empty-database screen, or
+Settings → Import from JSON for a bundle of your own.
 
 ## Sharing & Access
 
@@ -391,4 +393,5 @@ answer whether the database is in São Paulo or in the tab.
 **Key design decisions:**
 - Schema is pure JSON (user-editable via Settings → Import without code access)
 - `defaultSchema` in app-core.js is minimal empty fallback only
-- All backends implement the same contract (see `dev/BACKEND_API.md`)
+- All backends implement the same contract — [BACKEND_API.md](BACKEND_API.md) is that contract, and
+  `dev/test/backend-conformance.test.js` enforces it
