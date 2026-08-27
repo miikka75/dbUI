@@ -507,7 +507,7 @@
     },
     "views": [
       {
-        "markdown": "# Welcome\n\nThis site carries the sacrament meeting program and the ward duty rosters.\n\n{{view:doc_internal}}",
+        "markdown": "{{t:text.about}}\n\n{{view:doc_internal}}",
         "name": "doc_about",
         "kind": "page"
       },
@@ -517,7 +517,7 @@
         ],
         "name": "doc_internal",
         "bare": true,
-        "markdown": "# Bishopric tool",
+        "markdown": "{{t:text.internal}}",
         "kind": "page"
       },
       {
