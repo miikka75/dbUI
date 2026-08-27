@@ -61,7 +61,7 @@
             <v-text-field v-model="pgliteUserInput" name="pglite-user" label="Act as (email)" variant="outlined" density="compact" class="mb-2" placeholder="you@local"></v-text-field>
             <v-btn color="primary" prepend-icon="mdi-database-plus" @click="completeLocalPgliteSetup()">Create Database</v-btn>
             <v-btn variant="text" @click="backToSetup" class="ml-2">Back</v-btn>
-            <div class="mt-3" style="font-size:0.8rem;opacity:0.7">You become the admin automatically (the member registry starts empty). Then: Settings → Import from JSON to load a schema and demo data.</div>
+            <div class="mt-3" style="font-size:0.8rem;opacity:0.7">You become the admin automatically (the member registry starts empty). The empty database then offers the examples this deployment ships — or import your own JSON from Settings.</div>
           </div>
           <!-- Step 2: Supabase -->
           <div v-if="setupStep === 'supabase'">
@@ -125,6 +125,85 @@
     <!-- Deliberately WORDLESS: the import runs before any translations are loaded (and can be the very
          thing installing them), so prose here would be stuck in one language. Every label is an icon plus
          data that reads the same everywhere — counts, table names, language codes. -->
+    <!-- The example picker. Reads examples/index.json (same origin -- examples/ is published by the
+         deployment itself) and installs a bundle through the ordinary import.
+
+         LITERAL ENGLISH, deliberately, like the setup dialog above it and the progress dialog below:
+         this thing installs the language pack it would need in order to translate itself, so on the
+         database where it matters most t() has nothing to return but raw keys. The Settings BUTTON
+         that opens it is translated -- that one only ever appears on a database that already has a
+         language. -->
+    <v-dialog v-model="examples.open" max-width="640" scrollable>
+      <v-card data-testid="example-picker">
+        <v-card-title>Start from an example</v-card-title>
+        <v-card-text>
+          <div class="mb-3" style="font-size:0.85rem;opacity:0.8">
+            These ship with this deployment. Installing one writes its tables, views and labels into
+            <strong>this</strong> database — the structure, not the data.
+          </div>
+          <v-alert v-if="examples.error" type="error" density="compact" class="mb-3" style="font-size:0.8rem"
+                   data-testid="example-error">{{ examples.error }}</v-alert>
+          <v-progress-linear v-if="examples.busy" indeterminate color="primary" class="mb-3"></v-progress-linear>
+
+          <div v-for="b in (examples.manifest && examples.manifest.bundles) || []" :key="b.id"
+               class="d-flex align-start pa-3 mb-2" :data-testid="'example-' + b.id"
+               @click="pickExample(b)"
+               :style="'gap:12px; cursor:pointer; border-radius:8px; border:1px solid rgb(var(--v-theme-outline),' +
+                       (examples.pick && examples.pick.id === b.id ? '0.9)' : '0.25)') +
+                       (examples.pick && examples.pick.id === b.id ? '; background:rgb(var(--v-theme-surface-variant),0.35)' : '')">
+            <v-icon v-if="!b.icon" size="28" style="opacity:0.5">mdi-table-large</v-icon>
+            <img v-else :src="b.icon" alt="" style="width:28px;height:28px;object-fit:contain">
+            <div style="flex:1 1 0; min-width:0">
+              <div style="font-weight:600">{{ b.title }}</div>
+              <div style="font-size:0.8rem; opacity:0.75">{{ b.description }}</div>
+              <div style="font-size:0.72rem; opacity:0.6" class="mt-1">
+                {{ b.tables }} tables · {{ b.views }} views ·
+                {{ b.languages.map(l => l.name).join(', ') }}<span v-if="b.data"> · sample rows available</span>
+              </div>
+            </div>
+          </div>
+
+          <template v-if="examples.pick">
+            <v-divider class="my-3"></v-divider>
+            <!-- Every pack is preselected: they are a few kB each, and a language you did not install
+                 shows as raw keys (`view.chore_board`) the moment someone switches to it. -->
+            <p class="text-subtitle-2 mb-1">Languages</p>
+            <div class="d-flex flex-wrap mb-3" style="gap:6px">
+              <v-chip v-for="l in examples.pick.languages" :key="l.code" size="small"
+                      :variant="exampleLangSelected(l.code) ? 'flat' : 'outlined'"
+                      :color="exampleLangSelected(l.code) ? 'primary' : undefined"
+                      :data-testid="'example-lang-' + l.code" @click="toggleExampleLang(l.code)">{{ l.name }}</v-chip>
+            </div>
+            <div style="font-size:0.75rem;opacity:0.65" class="mb-3">
+              The app's own UI text (buttons, messages, settings) installs alongside, for each language
+              this deployment ships it in.
+            </div>
+
+            <v-checkbox v-if="examples.pick.data" v-model="examples.withData" density="compact" hide-details
+                        data-testid="example-with-data" class="mb-2"
+                        label="Also install its sample rows"></v-checkbox>
+            <div v-if="examples.pick.data && examples.withData" style="font-size:0.75rem;opacity:0.65" class="mb-2">
+              Sample rows carry fixed ids, so importing them again later overwrites whatever those rows
+              have become. Fine on an empty database; think twice on one in use.
+            </div>
+
+            <v-alert v-if="hasAnyTables" type="warning" variant="tonal" density="compact" style="font-size:0.8rem"
+                     data-testid="example-replace-warning">
+              This database already has a structure. Installing replaces the schema and merges the
+              labels — anything you changed in the schema editor is lost. <strong>Export first.</strong>
+            </v-alert>
+          </template>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn variant="text" @click="examples.open = false">Cancel</v-btn>
+          <v-btn color="primary" variant="flat" prepend-icon="mdi-download"
+                 :disabled="!examples.pick || examples.busy" :loading="examples.busy"
+                 data-testid="example-install" @click="installExample()">Install</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-dialog :model-value="!!importProgress" persistent max-width="480">
       <v-card v-if="importProgress" data-testid="import-progress">
         <v-card-text class="pt-5">
@@ -221,6 +300,26 @@
           </div>
           <div v-else class="mt-2">{{ t('access.request_sent') }} — an administrator will review it.</div>
         </v-alert>
+        <!-- An empty database, seen by an admin. This is the moment the shipped examples are worth
+             offering unprompted: setup writes an EMPTY schema and reloads, so without this the app's
+             first screen is a blank nav and the only way forward is knowing that Settings -> Import
+             exists and that there are files on GitHub to feed it. English for the same reason the
+             dialog is: there are no translations in a database with no schema. -->
+        <v-card v-if="offerExamples" variant="outlined" class="mb-4" data-testid="empty-db-offer">
+          <v-card-text>
+            <div class="d-flex align-center mb-2" style="gap:10px">
+              <v-icon color="primary">mdi-database-plus-outline</v-icon>
+              <span style="font-weight:600">This database is empty</span>
+            </div>
+            <div style="font-size:0.85rem;opacity:0.8" class="mb-3">
+              Install one of the examples this deployment ships — a working set of tables, views and
+              labels you can then edit — or import a JSON bundle of your own from Settings.
+            </div>
+            <v-btn color="primary" variant="flat" prepend-icon="mdi-shape-outline"
+                   data-testid="empty-db-examples" @click="openExamples()">Browse examples</v-btn>
+          </v-card-text>
+        </v-card>
+
         <!-- Archive Toggle -->
         <v-tabs v-if="hasArchive" v-model="viewingArchive" density="compact" class="mb-3">
           <v-tab :value="false">{{ t('btn.show_active') }}</v-tab>
@@ -555,8 +654,28 @@
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.import_export') }}</p>
             <v-btn variant="outlined" prepend-icon="mdi-download" @click="a.exportData" class="mr-2 mb-2">{{ a.t('settings.export') }}</v-btn>
-            <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()" class="mb-2">{{ a.t('settings.import') }}</v-btn>
+            <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()" class="mr-2 mb-2">{{ a.t('settings.import') }}</v-btn>
             <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
+            <v-btn variant="outlined" prepend-icon="mdi-shape-outline" class="mb-2"
+                   data-testid="settings-examples" @click="a.openExamples()">{{ a.t('settings.examples') }}</v-btn>
+            <!-- Checked on the way into Settings (selectTab), once per session, admin only: this is the
+                 screen that answers "is anything out of date?", and putting the request here keeps it
+                 off every visitor's boot. -->
+            <v-alert v-if="a.exampleUpdate" type="info" variant="tonal" density="compact" class="mb-2"
+                     icon="mdi-package-up" data-testid="example-update">
+              <div style="font-size:0.85rem">
+                <strong>{{ a.exampleUpdate.title }}</strong> —
+                {{ a.t('settings.examples_update') }}
+                <span class="font-monospace" style="opacity:0.7">
+                  r{{ a.exampleUpdate.installedRevision }} → r{{ a.exampleUpdate.revision }}
+                </span>
+              </div>
+              <div class="font-monospace mt-1" style="font-size:0.72rem;opacity:0.7">
+                {{ a.exampleUpdate.changed.join(', ') }}
+              </div>
+              <v-btn size="small" variant="outlined" class="mt-2" prepend-icon="mdi-download"
+                     data-testid="example-update-apply" @click="a.reinstallExample()">{{ a.t('settings.examples_reinstall') }}</v-btn>
+            </v-alert>
             <!-- Browser-local Postgres only. Deliberately next to Export, because the honest answer to
                  "can I lose this?" is a backup, and the second-best answer is the persistence request
                  below. Literal English rather than t() keys, matching the other backend-specific copy

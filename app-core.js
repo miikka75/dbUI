@@ -209,6 +209,12 @@ function createVueApp() {
       myListValues: {},         // self-scoped { listName: myValue } — what `@me` means on a userlink list
       periodOffset: 0,          // leaderboard ‹ › navigation: periods back from now (0 = current)
       importProgress: null,     // {done,total,icon,detail,errors,finished} while an import runs; null otherwise
+      // The example picker (Settings -> Examples, and the first-boot prompt on an empty database).
+      // `manifest` is examples/index.json once fetched -- one same-origin GET per session, never at
+      // boot. `update` is what Examples.compare() found, or null.
+      examples: { open: false, manifest: null, busy: false, error: '', pick: null, langs: [], withData: true },
+      exampleUpdate: null,
+      exampleUpdateChecked: false,
       firestoreRules: '',
       firebaseConfigInput: (function() { var c = Databases.config('firebase'); return c ? JSON.stringify(c) : ''; })(),
       supabaseUrlInput: '',
@@ -285,6 +291,13 @@ function createVueApp() {
 
     computed: {
       appTitle: function() { return this.t('app.title'); },
+      // Does this database have a structure yet? An empty one is what a freshly created database looks
+      // like -- setup writes the empty defaultSchema and reloads -- and it is the moment the example
+      // picker is worth offering unprompted.
+      hasAnyTables: function() { return !!(this.schemaData && Object.keys(this.schemaData.tables || {}).length); },
+      // Offer the examples to an admin looking at an empty database. Not a modal at boot: it renders in
+      // the empty main area, so it can be ignored by anyone who came here to import their own file.
+      offerExamples: function() { return !this.loading && this.isAdmin && !this.hasAnyTables && !this.isUnregisteredUser; },
       langItems: function() { return this.languages.map(function(l) { return { title: l.name, value: l.code }; }); },
       // All sidebar group ids (parents with children) — used to expand all on the mobile "More" drawer.
       allGroupIds: function() { return this.sidebarTabs.filter(function(t) { return t.children; }).map(function(t) { return t.id; }); },
@@ -797,6 +810,7 @@ function createVueApp() {
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
+         'settings.examples', 'settings.examples_update', 'settings.examples_reinstall',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
          'settings.backgrounds',
@@ -1286,6 +1300,7 @@ function createVueApp() {
       openMoreDrawer: function() { this.openedGroups = this.allGroupIds.slice(); this.drawerOpen = true; },
       selectTab: function(id) {
         this.currentTable = id;
+        if (id === '__settings') this.checkExampleUpdates();
         if (this.mobile) this.drawerOpen = false;
         this.editingLang = null;
         this.currentRefTable = null;
@@ -4216,192 +4231,333 @@ function createVueApp() {
           });
         });
       },
+      // --- The shipped examples ------------------------------------------------------------------
+      // examples/ is served by the deployment itself (it survives both publish paths' exclusion lists),
+      // so this is a same-origin GET: no CORS, no CDN, nothing to allow in the CSP, and it resolves
+      // under a project-Pages subpath because _u() puts APP_BASE in front of it.
+      //
+      // `no-cache` revalidates rather than refetches. Both hosts serve JSON with a max-age long enough
+      // to hide a fresh manifest for an hour, which is exactly the window in which someone redeploys
+      // and then goes looking for the update this is meant to report.
+      fetchExampleManifest: function() {
+        var self = this;
+        if (self.examples.manifest) return Promise.resolve(self.examples.manifest);
+        return fetch(_u('/examples/index.json'), { cache: 'no-cache' })
+          .then(function(r) {
+            // fetch() resolves on 404, and a host's error page is not a manifest.
+            if (!r.ok) throw new Error('examples/index.json: HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function(m) { self.examples.manifest = m; return m; });
+      },
+      // Open the picker. Deliberately does the fetch here rather than at boot: nobody but an admin
+      // installing something needs it, and a boot is the one moment this app cannot afford another
+      // round-trip.
+      openExamples: function() {
+        var self = this;
+        self.examples.open = true;
+        self.examples.error = '';
+        if (self.examples.manifest) return;
+        self.examples.busy = true;
+        self.fetchExampleManifest()
+          .then(function(m) { self.pickExample((m.bundles || [])[0]); })
+          .catch(function(err) { self.examples.error = String((err && err.message) || err); })
+          .then(function() { self.examples.busy = false; });
+      },
+      // Choosing a bundle preselects its languages: every one it ships, since a language pack is small
+      // and a missing one shows raw keys. Sample rows default ON only for a database with nothing in
+      // it -- layering demo rows onto real ones is a different, deliberate act.
+      pickExample: function(bundle) {
+        if (!bundle) return;
+        this.examples.pick = bundle;
+        this.examples.langs = (bundle.languages || []).map(function(l) { return l.code; });
+        this.examples.withData = !!bundle.data && !this.hasAnyTables;
+      },
+      exampleLangSelected: function(code) { return this.examples.langs.indexOf(code) >= 0; },
+      toggleExampleLang: function(code) {
+        var at = this.examples.langs.indexOf(code);
+        if (at >= 0) this.examples.langs.splice(at, 1); else this.examples.langs.push(code);
+      },
+      // Fetch the chosen files, fold them into one bundle, and hand it to the same import the file
+      // picker uses. The ORDER is the documented one (structure, then its labels, then the app's own
+      // UI text, then sample rows) because that is what mergeFiles resolves conflicts by.
+      installExample: function() {
+        var self = this;
+        var manifest = self.examples.manifest;
+        var bundle = self.examples.pick;
+        if (!manifest || !bundle) return Promise.resolve();
+        var codes = self.examples.langs;
+
+        var files = [bundle.schema];
+        (bundle.languages || []).forEach(function(l) { if (codes.indexOf(l.code) >= 0) files.push(l); });
+        (manifest.appLanguages || []).forEach(function(l) { if (codes.indexOf(l.code) >= 0) files.push(l); });
+        if (self.examples.withData && bundle.data) files.push(bundle.data);
+
+        self.examples.busy = true;
+        self.examples.error = '';
+        return Promise.all(files.map(function(f) {
+          return fetch(_u('/examples/' + f.file), { cache: 'no-cache' }).then(function(r) {
+            if (!r.ok) throw new Error(f.file + ': HTTP ' + r.status);
+            return r.json();
+          });
+        })).then(function(parsed) {
+          var merged = Examples.mergeFiles(parsed);
+          self.examples.open = false;
+          self.applyBundle(merged, { provenance: {
+            bundle: bundle.id,
+            revision: bundle.revision || 1,
+            importedAt: new Date().toISOString(),
+            // Only the files actually installed: a database that skipped the sample rows must not be
+            // told later that the sample rows have changed.
+            files: files.reduce(function(acc, f) { acc[f.file] = f.hash; return acc; }, {}),
+            units: Examples.fingerprint(merged)
+          } });
+        }).catch(function(err) {
+          self.examples.error = String((err && err.message) || err);
+        }).then(function() { self.examples.busy = false; });
+      },
+      // Has this deployment's examples moved on since one was installed here? Checked when Settings is
+      // opened -- the place that answers "is anything out of date?" -- and once per session, by an
+      // admin only. Failure is silence: an offline tab or a deployment that ships no manifest is not
+      // something to interrupt anyone about.
+      checkExampleUpdates: function() {
+        var self = this;
+        if (self.exampleUpdateChecked || !self.isAdmin) return;
+        var installed = self.appConfig && self.appConfig.example;
+        if (!installed || !installed.bundle) return;
+        self.exampleUpdateChecked = true;
+        self.fetchExampleManifest()
+          .then(function(m) { self.exampleUpdate = Examples.compare(installed, m); })
+          .catch(function() {});
+      },
+      // Reinstalling is the update path for now: the same files, imported over the top. It REPLACES
+      // the schema and the labels, which is why it asks first and why the dialog says so -- the
+      // fingerprints recorded at install exist so a later change can merge instead of replace.
+      reinstallExample: function() {
+        var self = this;
+        var found = (this.examples.manifest.bundles || []).filter(function(b) { return b.id === self.exampleUpdate.bundle; })[0];
+        if (!found) return;
+        this.pickExample(found);
+        this.examples.withData = false;      // never re-lay sample rows over a database in use
+        this.examples.open = true;
+      },
+      // Import from a FILE the user picked. The bundle half of the work is applyBundle, which the
+      // example picker drives with files it fetched instead.
       importData: function(event) {
         var self = this;
         var file = event.target.files[0];
         if (!file) return;
         var reader = new FileReader();
         reader.onload = function(e) {
-          try {
-            var imported = JSON.parse(e.target.result);
-            // Detect if file is a raw schema.json (has tables with column definitions, not row arrays)
-            var isRawSchema = imported.tables && !imported.schema && Object.values(imported.tables).some(function(t) { return t && t.columns; });
-            if (isRawSchema) { imported = { schema: imported, tables: {} }; }
-            // Structural check: block import if the schema has dangling view/table references
-            if (imported.schema) {
-              var refErrs = validateRefs(imported.schema);
-              if (refErrs.length) { self.notify(self.t('msg.import_blocked') + ' ' + refErrs[0] + (refErrs.length > 1 ? ' (+' + (refErrs.length - 1) + ' more)' : '')); return; }
-            }
-
-            // Flatten the row work up front: it dominates the run (two round-trips per row) and so defines
-            // both the ordering and the progress total.
-            var tables = imported.tables || {};
-            var rowJobs = [];
-            // This is also the MIGRATION route from partition-as-store to partition-as-field, which is
-            // why every row now imports into the active store whatever key it arrived under. A suffixed
-            // key -- `tasks__archive` -- becomes a `_status` stamp instead of a second collection, so
-            // exporting a deployment and importing the bundle back is what moves it over. Deliberately
-            // through the bundle rather than in place: an in-place sweep would have to rewrite live rows
-            // across two backends with no transaction, which is the thing this change exists to stop
-            // doing.
-            //
-            // `_status` on the row wins if the bundle already carries one, so re-importing an
-            // already-migrated bundle changes nothing.
-            Object.keys(tables).forEach(function(key) {
-              var rows = Array.isArray(tables[key]) ? tables[key] : (tables[key].rows || []);
-              var parts = key.split('__');
-              var archived = parts.length > 1;
-              rows.forEach(function(row) {
-                rowJobs.push({
-                  table: parts[0],
-                  tab: 'active',
-                  // The old collection has to be cleared as the row lands in the new one, or the id
-                  // exists in both and the archive partition shows it twice.
-                  clearArchive: archived,
-                  row: archived ? Object.assign({}, row, { _status: row._status || 'archive' }) : row
-                });
-              });
-            });
-            var langCodes = imported.translations ? Object.keys(imported.translations) : [];
-            var pages = (imported.pages && Array.isArray(imported.pages))
-              ? imported.pages.filter(function(p) { return p.id && p.markdown; }) : [];
-            // Stored image assets (view backgrounds / image-cell bytes as data URIs). Over-cap entries are
-            // dropped here rather than attempted: both production rule layers reject them, so importing one
-            // would only produce a failure row in the progress report.
-            var assets = (imported.assets && Array.isArray(imported.assets))
-              ? imported.assets.filter(function(a) { return a && a.id && typeof a.src === 'string' && a.src.length <= ASSET_CAP; }) : [];
-
-            // Progress + failure state. Two things were wrong before: the run gave no sign of life for the
-            // ~minute it takes on a real database, and — worse — the whole thing was ONE serial promise
-            // chain with no .catch(), so a single rejected write silently abandoned every step after it.
-            // That is how an import could land schema + rows and then no translations at all, with no
-            // error shown. (The old try/catch only ever caught synchronous errors while BUILDING the chain.)
-            var prog = {
-              active: true, done: 0, icon: 'mdi-timer-sand', detail: '', errors: [], finished: false,
-              total: (imported.schema ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
-                   + langCodes.length + pages.length + assets.length + (imported.config ? 1 : 0) + 1
-            };
-            self.importProgress = prog;
-            prog = self.importProgress;   // Vue hands back a reactive proxy; mutate THAT or the UI never updates
-
-            // One unit of work: record a failure and CARRY ON, so one bad row can't cost you the
-            // translations, pages and config that come after it.
-            // An import runs BEFORE any translations are loaded — and is often the very thing installing
-            // them — so it can't describe itself in words. Each step carries an mdi icon plus `detail`
-            // that reads the same in any language: counts, table names, language codes.
-            function step(icon, detail, fn) {
-              return function() {
-                prog.icon = icon; prog.detail = detail;
-                return Promise.resolve().then(fn).catch(function(err) {
-                  prog.errors.push({ icon: icon, detail: detail, message: (err && err.message) || String(err) });
-                }).then(function() { prog.done++; });
-              };
-            }
-
-            var chain = Promise.resolve();
-            // Import schema if present (initializes empty databases)
-            if (imported.schema && backend.saveSchema) {
-              chain = chain.then(step('mdi-table-cog', '', function() {
-                // Rebuild VIEWS from new schema so lockedListValues works
-                if (Array.isArray(imported.schema.views)) {
-                  _viewsNav = imported.schema.views;
-                  VIEWS = SchemaNormalize.flattenViews(_viewsNav);
-                }
-                return backend.saveSchema(imported.schema).then(function() {
-                  _normalizeSchema(imported.schema);
-                  self.schemaData = Object.freeze(imported.schema); // mirror boot: refresh the reactive schema (invalidates lockedListValues et al.)
-                  return backend.initSchema(SCHEMA);
-                }).then(function() {
-                });
-              }));
-            }
-            rowJobs.forEach(function(job, i) {
-              chain = chain.then(step('mdi-table-row', (i + 1) + '/' + rowJobs.length + ' · ' + job.table, function() {
-                var target = job.table;
-                // Delete first to force change detection on re-import.
-                return Writes.deleteRow(target, job.row.id, job.tab).catch(function() {})
-                  .then(function() {
-                    // A row arriving from a `__archive` key is being MOVED out of that collection, so
-                    // clear it there too. Failures are swallowed like the delete above: the row not
-                    // being there is the normal case on a fresh import.
-                    return job.clearArchive ? Writes.deleteRow(target, job.row.id, 'archive').catch(function() {}) : null;
-                  })
-                  .then(function() { return Writes.putRow(target, job.row, job.tab); });
-              }));
-            });
-            if (imported.lists) {
-              chain = chain.then(step('mdi-format-list-bulleted', '', function() {
-                self.listsCache = imported.lists;
-                return backend.saveLists(imported.lists);
-              }));
-            }
-            langCodes.forEach(function(code) {
-              chain = chain.then(step('mdi-translate', code, function() {
-                // Ensure language exists before writing translations
-                var langName = (imported.languages || []).find(function(l) { return l.code === code; });
-                return backend.createLanguage(code, langName ? langName.name : code, Object.keys(imported.translations[code]))
-                  .catch(function() {})   // already present is fine; the merge below still writes the strings
-                  .then(function() { return backend.updateTranslations(code, imported.translations[code]); });
-              }));
-            });
-            pages.forEach(function(page) {
-              chain = chain.then(step('mdi-file-document-outline', page.id, function() {
-                return Writes.putRow('_pages', { id: page.id, markdown: page.markdown }, 'active');
-              }));
-            });
-            assets.forEach(function(asset) {
-              chain = chain.then(step('mdi-image-outline', asset.id, function() {
-                return Writes.putRow('_assets', { id: asset.id, src: asset.src }, 'active');
-              }));
-            });
-            // Restore portable folder config (rotationAnchors, rotationRanges, any future portable key),
-            // preserving this environment's `mode`. Excluded keys never cross the import boundary.
-            if (imported.config && backend.setFolderConfig) {
-              chain = chain.then(step('mdi-cog', '', function() {
-                var merged = mergeImportedConfig(self.appConfig, imported.config, self.mode);
-                self.appConfig = merged;
-                return backend.setFolderConfig(merged);
-              }));
-            }
-            chain = chain.then(step('mdi-format-list-checks', '', function() {
-              var locked = self.lockedListValues;
-              var needSave = false;
-              for (var ln in locked) {
-                if (!self.listsCache[ln]) { self.listsCache[ln] = []; needSave = true; }
-                for (var lv in locked[ln]) {
-                  if (self.listsCache[ln].indexOf(lv) < 0) { self.listsCache[ln].push(lv); needSave = true; }
-                }
-              }
-              return needSave ? backend.saveLists(self.listsCache) : Promise.resolve();
-            }));
-
-            chain.then(function() {
-              prog.finished = true;
-              prog.icon = prog.errors.length ? 'mdi-alert' : 'mdi-check';
-              prog.detail = '';
-              if (prog.errors.length) {
-                // Hold the dialog open: a PARTIAL import has to be seen and acted on, not flashed past.
-                // The console copy stays plain text — it's for a developer, not the UI.
-                console.error('[import] ' + prog.errors.length + '/' + prog.total + ' failed:\n' +
-                  prog.errors.map(function(e) {
-                    return '  ' + e.icon.replace(/^mdi-/, '') + (e.detail ? ' ' + e.detail : '') + ' — ' + e.message;
-                  }).join('\n'));
-                return;
-              }
-              self.importProgress = null;
-              self.notify(self.t('msg.import_complete'));   // translated key, not an assembled English sentence
-              setTimeout(function() { self.finishImportReload(); }, 1500); // delay reload so the snackbar is visible
-            }).catch(function(err) {
-              // Last-resort net: step() already absorbs per-step failures, so reaching here means the
-              // bookkeeping itself broke. Surface it rather than leaving a spinner up forever.
-              prog.finished = true;
-              prog.icon = 'mdi-alert';
-              prog.errors.push({ icon: 'mdi-alert-circle', detail: '', message: (err && err.message) || String(err) });
-            });
-          } catch(err) { self.importProgress = null; self.notify(self.t('msg.import_error') + ' ' + err.message); }
+          try { self.applyBundle(JSON.parse(e.target.result)); }
+          catch (err) { self.importProgress = null; self.notify(self.t('msg.import_error') + ' ' + err.message); }
         };
         reader.readAsText(file);
         event.target.value = '';
+      },
+      // THE import: everything that turns a parsed bundle into a database. Two callers -- the file
+      // input above, and installExample() with a bundle fetched from examples/ -- so the progress
+      // dialog, the reference check, the row/translation/page/asset ordering and the reload are
+      // written once.
+      //
+      // `opts.provenance`, when given, is recorded in the folder config as the last step: WHICH
+      // example this database was installed from, and the per-unit fingerprints of what it looked
+      // like at the time. Written inside the same chain so a half-finished install cannot claim to
+      // be a finished one.
+      applyBundle: function(imported, opts) {
+        var self = this;
+        try {
+          // A file may be a bare schema document rather than an export-shaped bundle; Examples.asBundle
+          // is the one place that distinction is made.
+          imported = Examples.asBundle(imported);
+          // Structural check: block import if the schema has dangling view/table references
+          if (imported.schema) {
+            var refErrs = validateRefs(imported.schema);
+            if (refErrs.length) { self.notify(self.t('msg.import_blocked') + ' ' + refErrs[0] + (refErrs.length > 1 ? ' (+' + (refErrs.length - 1) + ' more)' : '')); return; }
+          }
+
+          // Flatten the row work up front: it dominates the run (two round-trips per row) and so defines
+          // both the ordering and the progress total.
+          var tables = imported.tables || {};
+          var rowJobs = [];
+          // This is also the MIGRATION route from partition-as-store to partition-as-field, which is
+          // why every row now imports into the active store whatever key it arrived under. A suffixed
+          // key -- `tasks__archive` -- becomes a `_status` stamp instead of a second collection, so
+          // exporting a deployment and importing the bundle back is what moves it over. Deliberately
+          // through the bundle rather than in place: an in-place sweep would have to rewrite live rows
+          // across two backends with no transaction, which is the thing this change exists to stop
+          // doing.
+          //
+          // `_status` on the row wins if the bundle already carries one, so re-importing an
+          // already-migrated bundle changes nothing.
+          Object.keys(tables).forEach(function(key) {
+            var rows = Array.isArray(tables[key]) ? tables[key] : (tables[key].rows || []);
+            var parts = key.split('__');
+            var archived = parts.length > 1;
+            rows.forEach(function(row) {
+              rowJobs.push({
+                table: parts[0],
+                tab: 'active',
+                // The old collection has to be cleared as the row lands in the new one, or the id
+                // exists in both and the archive partition shows it twice.
+                clearArchive: archived,
+                row: archived ? Object.assign({}, row, { _status: row._status || 'archive' }) : row
+              });
+            });
+          });
+          var langCodes = imported.translations ? Object.keys(imported.translations) : [];
+          var pages = (imported.pages && Array.isArray(imported.pages))
+            ? imported.pages.filter(function(p) { return p.id && p.markdown; }) : [];
+          // Stored image assets (view backgrounds / image-cell bytes as data URIs). Over-cap entries are
+          // dropped here rather than attempted: both production rule layers reject them, so importing one
+          // would only produce a failure row in the progress report.
+          var assets = (imported.assets && Array.isArray(imported.assets))
+            ? imported.assets.filter(function(a) { return a && a.id && typeof a.src === 'string' && a.src.length <= ASSET_CAP; }) : [];
+
+          // Progress + failure state. Two things were wrong before: the run gave no sign of life for the
+          // ~minute it takes on a real database, and — worse — the whole thing was ONE serial promise
+          // chain with no .catch(), so a single rejected write silently abandoned every step after it.
+          // That is how an import could land schema + rows and then no translations at all, with no
+          // error shown. (The old try/catch only ever caught synchronous errors while BUILDING the chain.)
+          var prog = {
+            active: true, done: 0, icon: 'mdi-timer-sand', detail: '', errors: [], finished: false,
+            total: (imported.schema ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
+                 + langCodes.length + pages.length + assets.length + (imported.config ? 1 : 0)
+                 + ((opts && opts.provenance) ? 1 : 0) + 1
+          };
+          self.importProgress = prog;
+          prog = self.importProgress;   // Vue hands back a reactive proxy; mutate THAT or the UI never updates
+
+          // One unit of work: record a failure and CARRY ON, so one bad row can't cost you the
+          // translations, pages and config that come after it.
+          // An import runs BEFORE any translations are loaded — and is often the very thing installing
+          // them — so it can't describe itself in words. Each step carries an mdi icon plus `detail`
+          // that reads the same in any language: counts, table names, language codes.
+          function step(icon, detail, fn) {
+            return function() {
+              prog.icon = icon; prog.detail = detail;
+              return Promise.resolve().then(fn).catch(function(err) {
+                prog.errors.push({ icon: icon, detail: detail, message: (err && err.message) || String(err) });
+              }).then(function() { prog.done++; });
+            };
+          }
+
+          var chain = Promise.resolve();
+          // Import schema if present (initializes empty databases)
+          if (imported.schema && backend.saveSchema) {
+            chain = chain.then(step('mdi-table-cog', '', function() {
+              // Rebuild VIEWS from new schema so lockedListValues works
+              if (Array.isArray(imported.schema.views)) {
+                _viewsNav = imported.schema.views;
+                VIEWS = SchemaNormalize.flattenViews(_viewsNav);
+              }
+              return backend.saveSchema(imported.schema).then(function() {
+                _normalizeSchema(imported.schema);
+                self.schemaData = Object.freeze(imported.schema); // mirror boot: refresh the reactive schema (invalidates lockedListValues et al.)
+                return backend.initSchema(SCHEMA);
+              }).then(function() {
+              });
+            }));
+          }
+          rowJobs.forEach(function(job, i) {
+            chain = chain.then(step('mdi-table-row', (i + 1) + '/' + rowJobs.length + ' · ' + job.table, function() {
+              var target = job.table;
+              // Delete first to force change detection on re-import.
+              return Writes.deleteRow(target, job.row.id, job.tab).catch(function() {})
+                .then(function() {
+                  // A row arriving from a `__archive` key is being MOVED out of that collection, so
+                  // clear it there too. Failures are swallowed like the delete above: the row not
+                  // being there is the normal case on a fresh import.
+                  return job.clearArchive ? Writes.deleteRow(target, job.row.id, 'archive').catch(function() {}) : null;
+                })
+                .then(function() { return Writes.putRow(target, job.row, job.tab); });
+            }));
+          });
+          if (imported.lists) {
+            chain = chain.then(step('mdi-format-list-bulleted', '', function() {
+              self.listsCache = imported.lists;
+              return backend.saveLists(imported.lists);
+            }));
+          }
+          langCodes.forEach(function(code) {
+            chain = chain.then(step('mdi-translate', code, function() {
+              // Ensure language exists before writing translations
+              var langName = (imported.languages || []).find(function(l) { return l.code === code; });
+              return backend.createLanguage(code, langName ? langName.name : code, Object.keys(imported.translations[code]))
+                .catch(function() {})   // already present is fine; the merge below still writes the strings
+                .then(function() { return backend.updateTranslations(code, imported.translations[code]); });
+            }));
+          });
+          pages.forEach(function(page) {
+            chain = chain.then(step('mdi-file-document-outline', page.id, function() {
+              return Writes.putRow('_pages', { id: page.id, markdown: page.markdown }, 'active');
+            }));
+          });
+          assets.forEach(function(asset) {
+            chain = chain.then(step('mdi-image-outline', asset.id, function() {
+              return Writes.putRow('_assets', { id: asset.id, src: asset.src }, 'active');
+            }));
+          });
+          // Restore portable folder config (rotationAnchors, rotationRanges, any future portable key),
+          // preserving this environment's `mode`. Excluded keys never cross the import boundary.
+          if (imported.config && backend.setFolderConfig) {
+            chain = chain.then(step('mdi-cog', '', function() {
+              var merged = mergeImportedConfig(self.appConfig, imported.config, self.mode);
+              self.appConfig = merged;
+              return backend.setFolderConfig(merged);
+            }));
+          }
+          // Where this database came from. AFTER the config merge above, since a data file may carry a
+          // config of its own and this must not be merged away; and inside the chain, so a run that
+          // fell over half way does not leave the database claiming a clean install.
+          //
+          // It rides appConfig (the _meta/config doc): admin-writable on every backend, already read
+          // at boot, and portable through export/import for free -- an exported database remembers
+          // which example it was built from.
+          if (opts && opts.provenance && backend.setFolderConfig) {
+            chain = chain.then(step('mdi-tag-outline', opts.provenance.bundle, function() {
+              var merged = Object.assign({}, self.appConfig, { example: opts.provenance });
+              self.appConfig = merged;
+              return backend.setFolderConfig(merged);
+            }));
+          }
+
+          chain = chain.then(step('mdi-format-list-checks', '', function() {
+            var locked = self.lockedListValues;
+            var needSave = false;
+            for (var ln in locked) {
+              if (!self.listsCache[ln]) { self.listsCache[ln] = []; needSave = true; }
+              for (var lv in locked[ln]) {
+                if (self.listsCache[ln].indexOf(lv) < 0) { self.listsCache[ln].push(lv); needSave = true; }
+              }
+            }
+            return needSave ? backend.saveLists(self.listsCache) : Promise.resolve();
+          }));
+
+          chain.then(function() {
+            prog.finished = true;
+            prog.icon = prog.errors.length ? 'mdi-alert' : 'mdi-check';
+            prog.detail = '';
+            if (prog.errors.length) {
+              // Hold the dialog open: a PARTIAL import has to be seen and acted on, not flashed past.
+              // The console copy stays plain text — it's for a developer, not the UI.
+              console.error('[import] ' + prog.errors.length + '/' + prog.total + ' failed:\n' +
+                prog.errors.map(function(e) {
+                  return '  ' + e.icon.replace(/^mdi-/, '') + (e.detail ? ' ' + e.detail : '') + ' — ' + e.message;
+                }).join('\n'));
+              return;
+            }
+            self.importProgress = null;
+            self.notify(self.t('msg.import_complete'));   // translated key, not an assembled English sentence
+            setTimeout(function() { self.finishImportReload(); }, 1500); // delay reload so the snackbar is visible
+          }).catch(function(err) {
+            // Last-resort net: step() already absorbs per-step failures, so reaching here means the
+            // bookkeeping itself broke. Surface it rather than leaving a spinner up forever.
+            prog.finished = true;
+            prog.icon = 'mdi-alert';
+            prog.errors.push({ icon: 'mdi-alert-circle', detail: '', message: (err && err.message) || String(err) });
+          });
+        } catch(err) { self.importProgress = null; self.notify(self.t('msg.import_error') + ' ' + err.message); }
       },
       // Reload so the freshly imported data is picked up. Extracted from importData so the progress
       // dialog's "Reload" button can trigger it after a partial import the user has read.
