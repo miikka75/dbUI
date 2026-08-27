@@ -32,6 +32,7 @@
     "query.js",
     "migrations.js",
     "schema-normalize.js",
+    "examples.js",
     "writes.js",
     "rows.js",
     "embeds.js",
