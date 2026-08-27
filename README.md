@@ -96,8 +96,9 @@ Browser: click "Create Local Database" → app loads with the schema from
 server running) to layer the demo data — rows, lists, translations, rotation config, plus example
 users/profiles — on top of it. The importable parts live in `examples/demo-data.json` and
 `examples/demo-lang-<code>.json` (the same bundle shape as Settings → Import, and the same three files
-the in-app example picker installs); regenerate its date-relative rows with
-`node seed-import.js --regen`.
+the in-app example picker installs). Its dates are fixed in the file, so the demo's "this week" and
+"upcoming" drift as it ages — edit `examples/demo-data.json` when that matters, then re-run
+`node scripts/examples-manifest.js`.
 
 **Reset**: delete `dev/local.db*` and `dev/*.pgdata/` + browser `localStorage.clear(); location.reload()`
 

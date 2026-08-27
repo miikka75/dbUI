@@ -72,7 +72,7 @@
       "title": "Team Demo",
       "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
       "icon": null,
-      "revision": 1,
+      "revision": 2,
       "tables": 10,
       "views": 25,
       "schema": {
@@ -101,7 +101,7 @@
       ],
       "data": {
         "file": "demo-data.json",
-        "hash": "b98b6343341f72d1"
+        "hash": "b3882e649780cf22"
       }
     }
   ]
