@@ -5,9 +5,15 @@
 // same three concerns are equally installable in-browser from the example picker.
 //
 //   npm run seed:import            apply the committed demo files to the running dev server
-//   node seed-import.js --regen    rebuild demo-data.json + the language packs with dates relative to
-//                                  *today*, then exit (the leaderboard/calendar demos are
-//                                  date-relative; --regen keeps them fresh)
+//
+// This script used to CONTAIN the demo -- every row, list and translation, as constants, rebuilt on
+// `--regen` with dates relative to today. That made the dataset exist twice, and the two drifted: the
+// board demo (tickets/ticket_stages) was added to the JSON and never to the generator, so regenerating
+// silently deleted it. The files are the only copy now, and this only applies them.
+//
+// The cost of that is dates: they are fixed at whatever the files say, so the leaderboard's "this
+// week" and the RSVP demo's "upcoming" drift out of the current period as the files age. Edit the
+// dates in examples/demo-data.json when it matters (and re-run scripts/examples-manifest.js after).
 //
 // Users + profiles are seeded here too but are DELIBERATELY NOT in the bundle: access grants and identity
 // are per-deployment security data, not portable content you would import.
@@ -20,216 +26,6 @@ const BASE = 'http://127.0.0.1:' + PORT + '/api/';
 // never be fetched by the running app -- which is what the example picker does. See examples/README.md.
 const EXAMPLES = path.join(__dirname, '..', 'examples');
 const DATA = path.join(EXAMPLES, 'demo-data.json');
-const langFile = code => path.join(EXAMPLES, 'demo-lang-' + code + '.json');
-
-// --- demo dataset — used only by --regen to (re)build the bundle with dates relative to "today" -------
-const pad = n => String(n).padStart(2, '0');
-const iso = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-function buildBundle() {
-  const now = new Date();
-  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7)); // Mon of this week
-  const rangeFrom = new Date(monday); rangeFrom.setDate(monday.getDate() - 14);
-  const D = {
-    today:          iso(now),
-    yesterday:      iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)),
-    thisMonthEarly: iso(new Date(now.getFullYear(), now.getMonth(), 2)),
-    lastMonthA:     iso(new Date(now.getFullYear(), now.getMonth() - 1, 10)),
-    lastMonthB:     iso(new Date(now.getFullYear(), now.getMonth() - 1, 20))
-  };
-  const plus = n => iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() + n)); // n days from today
-  const P = { p1: plus(3), p2: plus(7), p3: plus(12) };                                   // upcoming practice dates
-  const PID = { p1: 'seed-practices-1', p2: 'seed-practices-2', p3: 'seed-practices-3' };  // practice ids (withIds order) — responses link by id, not date
-  const LISTS = { members: ['Ann', 'Bob', 'Cara'], crew: ['Ann', 'Bob', 'Cara', 'Dan'], status: ['open', 'in_progress', 'done'], assigned_to: ['Ann', 'Bob', 'Cara'], rsvp_status: ['coming', 'maybe', 'out'] };
-  // Translations: en + two more languages, with UI keys (tab.*/view.*/field.*/list.*) and the demo's
-  // {{t:}} page-prose. `en` is the default/base; switching language in the Languages tab shows es/sv.
-  const TR = {
-    'app.title':                    ['Team Demo', 'Demo de Equipo', 'Team-demo'],
-    'view.combined.header':         ['# Tasks & Notes', '# Tareas y Notas', '# Uppgifter & Anteckningar'],
-    'view.combined.footer':         ['_Tasks are synced from notes._', '_Las tareas se sincronizan desde las notas._', '_Uppgifter synkas från anteckningar._'],
-    'view.progress_report.header':  ['# Progress Report', '# Informe de Progreso', '# Lägesrapport'],
-    'view.progress_report.footer':  ['_End of report._', '_Fin del informe._', '_Slut på rapport._'],
-    'embed.open.title':             ['Open', 'Abierto', 'Öppen'],
-    'embed.ip.title':               ['In Progress', 'En Progreso', 'Pågår'],
-    'embed.ip.attention':           ['_Items above need attention._', '_Los elementos anteriores necesitan atención._', '_Objekten ovan behöver uppmärksamhet._'],
-    'tab.tasks':      ['Tasks', 'Tareas', 'Uppgifter'],
-    'tab.notes':      ['Notes', 'Notas', 'Anteckningar'],
-    'tab.practices':  ['Practices', 'Entrenamientos', 'Träningar'],
-    'tab.chore_log':  ['Chore Log', 'Registro de Tareas', 'Sysslologg'],
-    'tab.chores':     ['Chores', 'Tareas Domésticas', 'Sysslor'],
-    'tab.cities':     ['Cities', 'Ciudades', 'Städer'],
-    'view.combined':          ['Tasks & Notes', 'Tareas y Notas', 'Uppgifter & Anteckningar'],
-    'view.attendance':        ['Attendance', 'Asistencia', 'Närvaro'],
-    'view.my_rsvp':           ['My RSVP', 'Mi Confirmación', 'Min Anmälan'],
-    'view.my_chores':         ['My Chores', 'Mis Tareas', 'Mina Sysslor'],
-    'view.leaderboard':       ['Leaderboard (Month)', 'Clasificación (Mes)', 'Topplista (Månad)'],
-    'view.leaderboard_week':  ['Leaderboard (Week)', 'Clasificación (Semana)', 'Topplista (Vecka)'],
-    'view.chores_last_month': ['Last Month', 'Mes Pasado', 'Förra Månaden'],
-    'view.chore_calendar':    ['Chore Calendar', 'Calendario de Tareas', 'Sysslokalender'],
-    'view.chore_heatmap':     ['Chore Heatmap', 'Mapa de Calor', 'Värmekarta'],
-    'field.date':        ['Date', 'Fecha', 'Datum'],
-    'field.title':       ['Title', 'Título', 'Titel'],
-    'field.status':      ['Status', 'Estado', 'Status'],
-    'field.assigned_to': ['Assigned To', 'Asignado A', 'Tilldelad'],
-    'field.city':        ['City', 'Ciudad', 'Stad'],
-    'field.content':     ['Content', 'Contenido', 'Innehåll'],
-    'field.author':      ['Author', 'Autor', 'Författare'],
-    'field.chore':       ['Chore', 'Tarea', 'Syssla'],
-    'field.person':      ['Person', 'Persona', 'Person'],
-    'field.done_on':     ['Done On', 'Hecho El', 'Utförd'],
-    'field.points':      ['Points', 'Puntos', 'Poäng'],
-    'field.opponent':    ['Opponent', 'Oponente', 'Motståndare'],
-    'field.people':      ['People', 'Personas', 'Personer'],
-    'field.note':        ['Note', 'Nota', 'Anteckning'],
-    'field.total':       ['Total', 'Total', 'Totalt'],
-    // RSVP view chrome (table headers). rsvp.date/title reuse the wording of the field.* keys.
-    'rsvp.date':          ['Date', 'Fecha', 'Datum'],
-    'rsvp.title':         ['Title', 'Título', 'Titel'],
-    'rsvp.your_response': ['Your response', 'Tu respuesta', 'Ditt svar'],
-    'rsvp.responses':     ['Responses', 'Respuestas', 'Svar'],
-    'rsvp.who':           ['Who', 'Quién', 'Vilka'],
-    'rsvp.none':          ['No upcoming events', 'No hay eventos próximos', 'Inga kommande händelser'],
-    'list.status.open':        ['Open', 'Abierto', 'Öppen'],
-    'list.status.in_progress': ['In Progress', 'En Progreso', 'Pågår'],
-    'list.status.done':        ['Done', 'Hecho', 'Klar'],
-    // Calendar chrome + period navigation (translation keys; untranslated languages show the key).
-    'cal.today':     ['Today', 'Hoy', 'Idag'],
-    'cal.month':     ['Month', 'Mes', 'Månad'],
-    'cal.week':      ['Week', 'Semana', 'Vecka'],
-    'cal.list':      ['List', 'Lista', 'Lista'],
-    'cal.undated':   ['Undated', 'Sin fecha', 'Utan datum'],
-    'cal.no_events': ['No events', 'Sin eventos', 'Inga händelser'],
-    'cal.items':     ['items', 'elementos', 'poster'],
-    'cal.add_on_day': ['Add on this day', 'Añadir en este día', 'Lägg till denna dag'],
-    'period.this_week': ['This week', 'Esta semana', 'Denna vecka'],
-    'period.weeks_ago': ['weeks ago', 'semanas atrás', 'veckor sedan'],
-    'period.current':   ['Current', 'Actual', 'Nuvarande'],
-    'list.rsvp_status.coming': ['Coming', 'Voy', 'Kommer'],
-    'list.rsvp_status.maybe':  ['Maybe', 'Quizás', 'Kanske'],
-    'list.rsvp_status.out':    ['Out', 'No voy', 'Kommer inte'],
-    // App chrome (btn/col/img/pivot/access) + toast/error messages (msg.*). These are keyed t() with no
-    // English fallback, so they render as raw keys unless translated — seed them here so the demo (image
-    // column, pivot header, page Edit toolbar, action toasts, access-request banner) shows real text.
-    'btn.edit':    ['Edit', 'Editar', 'Redigera'],
-    'btn.preview': ['Preview', 'Vista previa', 'Förhandsgranska'],
-    'btn.save':    ['Save', 'Guardar', 'Spara'],
-    'col.switch_list': ['Switch list', 'Cambiar lista', 'Byt lista'],
-    'img.upload':  ['Upload image', 'Subir imagen', 'Ladda upp bild'],
-    'img.replace': ['Replace image', 'Reemplazar imagen', 'Ersätt bild'],
-    'img.remove':  ['Remove image', 'Eliminar imagen', 'Ta bort bild'],
-    'img.url':     ['Image URL', 'URL de imagen', 'Bild-URL'],
-    'pivot.total': ['Total', 'Total', 'Totalt'],
-    'pivot.empty': ['No data', 'Sin datos', 'Inga data'],
-    'access.your_name':      ['Your name', 'Tu nombre', 'Ditt namn'],
-    'access.request_access': ['Request access', 'Solicitar acceso', 'Begär åtkomst'],
-    'access.request_sent':   ['Access request sent', 'Solicitud de acceso enviada', 'Åtkomstbegäran skickad'],
-    'access.name_required':  ['Please enter your name first', 'Por favor, introduce tu nombre primero', 'Ange ditt namn först'],
-    'msg.saved':          ['Saved', 'Guardado', 'Sparat'],
-    'msg.save_failed':    ['Save failed', 'Error al guardar', 'Sparandet misslyckades'],
-    'msg.upload_failed':  ['Upload failed', 'Error al subir', 'Uppladdningen misslyckades'],
-    'msg.choose_image':   ['Please choose an image file', 'Elige un archivo de imagen', 'Välj en bildfil'],
-    'msg.image_too_large':['Image is too large, please choose a smaller one', 'La imagen es demasiado grande, elige una más pequeña', 'Bilden är för stor, välj en mindre'],
-    'msg.image_read_failed':   ['Could not read image', 'No se pudo leer la imagen', 'Kunde inte läsa bilden'],
-    'msg.image_invalid':       ['That file is not a valid image', 'Ese archivo no es una imagen válida', 'Filen är inte en giltig bild'],
-    'msg.image_process_failed':['Could not process image', 'No se pudo procesar la imagen', 'Kunde inte bearbeta bilden'],
-    'msg.row_added':      ['Row added', 'Fila añadida', 'Rad tillagd'],
-    'msg.deleted':        ['Deleted', 'Eliminado', 'Borttagen'],
-    'msg.restored':       ['Restored', 'Restaurado', 'Återställd'],
-    'msg.renamed':        ['Renamed', 'Renombrado', 'Omdöpt'],
-    'msg.archived':       ['Archived', 'Archivado', 'Arkiverad'],
-    'msg.copied':         ['Copied', 'Copiado', 'Kopierad'],
-    'msg.exported':       ['Exported', 'Exportado', 'Exporterad'],
-    'msg.synced':         ['Synced', 'Sincronizado', 'Synkad'],
-    'msg.sync_failed':    ['Sync failed', 'Error de sincronización', 'Synkningen misslyckades'],
-    'msg.load_failed':    ['Failed to load app', 'Error al cargar la aplicación', 'Kunde inte ladda appen'],
-    'msg.request_failed': ['Request failed', 'La solicitud falló', 'Begäran misslyckades'],
-    'msg.approve_failed': ['Approve failed', 'Error al aprobar', 'Godkännandet misslyckades'],
-    'msg.import_complete':['Import complete', 'Importación completa', 'Importen klar'],
-    'msg.group_added':    ['Group added', 'Grupo añadido', 'Grupp tillagd'],
-    'msg.item_added':     ['Item added', 'Elemento añadido', 'Objekt tillagt'],
-    'msg.translation_saved':['Translation saved', 'Traducción guardada', 'Översättning sparad'],
-    'msg.language_added': ['Language added', 'Idioma añadido', 'Språk tillagt'],
-    'msg.language_renamed':['Language renamed', 'Idioma renombrado', 'Språk omdöpt'],
-    'msg.language_exists':['Language already added', 'El idioma ya está añadido', 'Språket är redan tillagt'],
-    'msg.sign_in_respond':['Sign in to respond', 'Inicia sesión para responder', 'Logga in för att svara'],
-    'msg.registered_admin':['You are registered as admin', 'Estás registrado como administrador', 'Du är registrerad som administratör'],
-    'msg.invalid_json':   ['Invalid JSON', 'JSON no válido', 'Ogiltig JSON'],
-    'msg.invalid_color':  ['Invalid color', 'Color no válido', 'Ogiltig färg'],
-    'msg.invalid_config': ['Invalid config: needs apiKey and projectId', 'Configuración no válida: requiere apiKey y projectId', 'Ogiltig konfiguration: kräver apiKey och projectId'],
-    'msg.paste_hex':      ['Paste 2+ #hex colors', 'Pega 2+ colores #hex', 'Klistra in 2+ #hex-färger'],
-    'msg.schema_error':   ['Schema:', 'Esquema:', 'Schema:'],
-    'msg.server_error':   ['Server error:', 'Error del servidor:', 'Serverfel:'],
-    'msg.import_blocked': ['Import blocked:', 'Importación bloqueada:', 'Import blockerad:'],
-    'msg.import_error':   ['Import error:', 'Error de importación:', 'Importfel:'],
-    'msg.palette_applied':['Palette applied', 'Paleta aplicada', 'Palett tillämpad'],
-    'msg.error':          ['Error:', 'Error:', 'Fel:']
-  };
-  const LANGS = [{ code: 'en', name: 'English' }, { code: 'es', name: 'Español' }, { code: 'sv', name: 'Svenska' }];
-  const translations = {};
-  LANGS.forEach((l, i) => { translations[l.code] = {}; for (const k in TR) translations[l.code][k] = TR[k][i]; });
-  const ROWS = {
-    cities: [ { state: 'IL', city: 'Springfield' }, { state: 'IL', city: 'Chicago' }, { state: 'CA', city: 'Fresno' } ],
-    chores: [ { chore: 'Dishes', points: 2 }, { chore: 'Vacuum', points: 3 }, { chore: 'Mow lawn', points: 5 }, { chore: 'Trash', points: 1 }, { chore: 'Laundry', points: 4 } ],
-    chore_log: [
-      { chore: 'Dishes',   person: 'Ann',  done_on: D.today },
-      { chore: 'Vacuum',   person: 'Ann',  done_on: D.today },          // Ann, this week -> richer "My chores"
-      { chore: 'Mow lawn', person: 'Cara', done_on: D.today },
-      { chore: 'Trash',    person: 'Ann',  done_on: D.yesterday },      // Ann, this week
-      { chore: 'Vacuum',   person: 'Bob',  done_on: D.yesterday },
-      { chore: 'Mow lawn', person: 'Ann',  done_on: D.thisMonthEarly },
-      { chore: 'Trash',    person: 'Bob',  done_on: D.thisMonthEarly },
-      { chore: 'Laundry',  person: 'Ann',  done_on: D.lastMonthA },
-      { chore: 'Dishes',   person: 'Ann',  done_on: D.lastMonthB },
-      { chore: 'Dishes',   person: 'Bob',  done_on: D.lastMonthA },
-      { chore: 'Vacuum',   person: 'Cara', done_on: D.lastMonthB }
-    ],
-    crew_rotation: [ { position: 0, people: ['Ann', 'Bob'] }, { position: 1, people: ['Cara', 'Dan'] } ],
-    tasks: [
-      { date: D.today,     title: 'Fix roof',    status: 'open',        assigned_to: 'Ann', city: 'Springfield' },
-      { date: D.yesterday, title: 'Paint fence', status: 'in_progress', assigned_to: 'Bob', city: 'Chicago' }
-    ],
-    notes: [
-      { date: D.today, title: 'Weekly sync', content: 'Discussed the roster and open tasks.', author: 'Cara', photo: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAQklEQVR4nO3OQQ0AIAwAselDHRpRgguOR5MK6Kx9vjL5QEhISKgeCAkJCdUDISEhoXogJCQkVA+EhISE6oGQkNBjF9JpnOKvnMJVAAAAAElFTkSuQmCC', link: 'https://example.com/weekly-sync' },
-      { date: D.yesterday, title: 'Design review', content: 'Reviewed the new list layout with thumbnails.', author: 'Dan', photo: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAQklEQVR4nO3OQQ0AIAwAselDGjJRgguOR5MK6Jy9vjL5QEhISKgeCAkJCdUDISEhoXogJCQkVA+EhISE6oGQkNBjF0gMZuIiFOH8AAAAAElFTkSuQmCC' }
-    ],
-    // RSVP demo: upcoming events (practices) + everyone's owner-stamped responses (rsvps). The current
-    // user (local@dev) has responded to p1/p2 but not p3 -> the my_rsvp view offers to set a status there.
-    // rosterPublic marks each response readable by all (the roster:"all" gate; ignored by the dev server).
-    practices: [
-      { date: P.p1, title: 'League match', opponent: 'Riverside' },
-      { date: P.p2, title: 'Home game',    opponent: 'Lakeside' },
-      { date: P.p3, title: 'Cup fixture',  opponent: 'Hillcrest' }
-    ],
-    rsvps: [
-      { owner: 'local@dev', practice: PID.p1, response: 'coming', note: 'Bringing water', rosterPublic: true },
-      { owner: 'bob@dev',   practice: PID.p1, response: 'coming', note: '', rosterPublic: true },
-      { owner: 'cara@dev',  practice: PID.p1, response: 'maybe',  note: 'Depends on work', rosterPublic: true },
-      { owner: 'local@dev', practice: PID.p2, response: 'maybe',  note: '', rosterPublic: true },
-      { owner: 'dan@dev',   practice: PID.p2, response: 'out',    note: 'Away', rosterPublic: true },
-      { owner: 'bob@dev',   practice: PID.p3, response: 'coming', note: '', rosterPublic: true }
-    ]
-  };
-  const ARCHIVED = {
-    tasks:     [ { date: D.lastMonthA, title: 'Old audit', status: 'done', assigned_to: 'Cara', city: 'Fresno' } ],
-    chore_log: [ { chore: 'Trash', person: 'Cara', done_on: D.lastMonthA } ]
-  };
-  const withIds = (map, arch) => {
-    const out = {};
-    for (const [t, rows] of Object.entries(map)) out[arch ? t + '__archive' : t] = rows.map((r, i) => Object.assign({ id: 'seed-' + t + (arch ? '-arch-' : '-') + (i + 1) }, r));
-    return out;
-  };
-  // Split along the seam the other example bundles use: DATA (rows, lists, config) apart from the
-  // LABELS (one pack per language), so a deployment can take the demo's structure and rows without
-  // its Spanish and Swedish, exactly as it can with chores.
-  return {
-    data: {
-      tables: Object.assign({}, withIds(ROWS, false), withIds(ARCHIVED, true)),
-      lists: LISTS,
-      config: { rotationAnchors: { crewrota: iso(monday) }, rotationRanges: { crewrota: { from: iso(rangeFrom), periods: 8 } } },
-      generatedAt: new Date().toISOString()
-    },
-    langs: LANGS.map(l => ({ languages: [l], translations: { [l.code]: translations[l.code] } }))
-  };
-}
 
 // --- users + access grants + opt-in profiles: NOT bundle content (security/identity, seeded via the API).
 // local@dev MUST stay admin (default current user) or the app shows the unregistered banner.
@@ -250,17 +46,6 @@ const post = (action, body) => fetch(BASE + action, { method: 'POST', headers: {
 const postAs = (email, action, body) => fetch(BASE + action, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user': email }, body: JSON.stringify(body || {}) }).then(r => r.json());
 
 (async () => {
-  if (process.argv.includes('--regen')) {
-    const built = buildBundle();
-    fs.writeFileSync(DATA, JSON.stringify(built.data, null, 2) + '\n');
-    for (const pack of built.langs) fs.writeFileSync(langFile(pack.languages[0].code), JSON.stringify(pack, null, 2) + '\n');
-    console.log('Regenerated demo-data.json + ' + built.langs.length + ' language packs (dates relative to today).'
-      + ' Run `npm run seed:import` to apply them.');
-    // The per-file hashes in examples/index.json are now stale, and the app compares against those.
-    console.log('Then: node ../scripts/examples-manifest.js  (the manifest carries a hash per file).');
-    return;
-  }
-
   const bundle = JSON.parse(fs.readFileSync(DATA, 'utf8'));
   const schema = JSON.parse(fs.readFileSync(path.join(EXAMPLES, 'demo-schema.json'), 'utf8'));
   // The language packs are separate files now, one per language, so fold them back into the bundle

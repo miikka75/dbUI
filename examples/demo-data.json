@@ -49,67 +49,67 @@
         "id": "seed-chore_log-1",
         "chore": "Dishes",
         "person": "Ann",
-        "done_on": "2026-07-26"
+        "done_on": "2026-08-27"
       },
       {
         "id": "seed-chore_log-2",
         "chore": "Vacuum",
         "person": "Ann",
-        "done_on": "2026-07-26"
+        "done_on": "2026-08-27"
       },
       {
         "id": "seed-chore_log-3",
         "chore": "Mow lawn",
         "person": "Cara",
-        "done_on": "2026-07-26"
+        "done_on": "2026-08-27"
       },
       {
         "id": "seed-chore_log-4",
         "chore": "Trash",
         "person": "Ann",
-        "done_on": "2026-07-25"
+        "done_on": "2026-08-26"
       },
       {
         "id": "seed-chore_log-5",
         "chore": "Vacuum",
         "person": "Bob",
-        "done_on": "2026-07-25"
+        "done_on": "2026-08-26"
       },
       {
         "id": "seed-chore_log-6",
         "chore": "Mow lawn",
         "person": "Ann",
-        "done_on": "2026-07-02"
+        "done_on": "2026-08-03"
       },
       {
         "id": "seed-chore_log-7",
         "chore": "Trash",
         "person": "Bob",
-        "done_on": "2026-07-02"
+        "done_on": "2026-08-03"
       },
       {
         "id": "seed-chore_log-8",
         "chore": "Laundry",
         "person": "Ann",
-        "done_on": "2026-06-10"
+        "done_on": "2026-07-12"
       },
       {
         "id": "seed-chore_log-9",
         "chore": "Dishes",
         "person": "Ann",
-        "done_on": "2026-06-20"
+        "done_on": "2026-07-22"
       },
       {
         "id": "seed-chore_log-10",
         "chore": "Dishes",
         "person": "Bob",
-        "done_on": "2026-06-10"
+        "done_on": "2026-07-12"
       },
       {
         "id": "seed-chore_log-11",
         "chore": "Vacuum",
         "person": "Cara",
-        "done_on": "2026-06-20"
+        "done_on": "2026-07-22"
       }
     ],
     "crew_rotation": [
@@ -133,7 +133,7 @@
     "tasks": [
       {
         "id": "seed-tasks-1",
-        "date": "2026-07-26",
+        "date": "2026-08-27",
         "title": "Fix roof",
         "status": "open",
         "assigned_to": "Ann",
@@ -141,7 +141,7 @@
       },
       {
         "id": "seed-tasks-2",
-        "date": "2026-07-25",
+        "date": "2026-08-26",
         "title": "Paint fence",
         "status": "in_progress",
         "assigned_to": "Bob",
@@ -151,7 +151,7 @@
     "notes": [
       {
         "id": "seed-notes-1",
-        "date": "2026-07-26",
+        "date": "2026-08-27",
         "title": "Weekly sync",
         "content": "Discussed the roster and open tasks.",
         "author": "Cara",
@@ -160,7 +160,7 @@
       },
       {
         "id": "seed-notes-2",
-        "date": "2026-07-25",
+        "date": "2026-08-26",
         "title": "Design review",
         "content": "Reviewed the new list layout with thumbnails.",
         "author": "Dan",
@@ -170,19 +170,19 @@
     "practices": [
       {
         "id": "seed-practices-1",
-        "date": "2026-07-29",
+        "date": "2026-08-30",
         "title": "League match",
         "opponent": "Riverside"
       },
       {
         "id": "seed-practices-2",
-        "date": "2026-08-02",
+        "date": "2026-09-03",
         "title": "Home game",
         "opponent": "Lakeside"
       },
       {
         "id": "seed-practices-3",
-        "date": "2026-08-07",
+        "date": "2026-09-08",
         "title": "Cup fixture",
         "opponent": "Hillcrest"
       }
@@ -240,7 +240,7 @@
     "tasks__archive": [
       {
         "id": "seed-tasks-arch-1",
-        "date": "2026-06-10",
+        "date": "2026-07-12",
         "title": "Old audit",
         "status": "done",
         "assigned_to": "Cara",
@@ -252,7 +252,7 @@
         "id": "seed-chore_log-arch-1",
         "chore": "Trash",
         "person": "Cara",
-        "done_on": "2026-06-10"
+        "done_on": "2026-07-12"
       }
     ],
     "tickets": [
@@ -353,14 +353,14 @@
   },
   "config": {
     "rotationAnchors": {
-      "crewrota": "2026-07-20"
+      "crewrota": "2026-08-24"
     },
     "rotationRanges": {
       "crewrota": {
-        "from": "2026-07-06",
+        "from": "2026-08-10",
         "periods": 8
       }
     }
   },
-  "generatedAt": "2026-07-26T17:54:38.853Z"
+  "generatedAt": "2026-08-27T05:05:40.292Z"
 }

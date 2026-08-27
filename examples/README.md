@@ -15,7 +15,7 @@ schema, and a schema's labels carry no UI prose.
 | `chores-data.json` | optional **sample rows** for the chores schema — a household of four, a chore catalogue, a fortnight of logged chores, rewards and a shopping list |
 | `demo-schema.json` | the **demo** — the widest of the three, and the one the test suite runs against: rotations, RSVPs, a board, embeds, doc-views, archive partitions, mirrored tables |
 | `demo-lang-en.json` / `-es.json` / `-sv.json` | labels for the demo schema, in three languages |
-| `demo-data.json` | sample rows, lists and rotation config for the demo. Dates are relative to when it was generated — `cd dev && node seed-import.js --regen` refreshes them |
+| `demo-data.json` | sample rows, lists and rotation config for the demo. The dates are literal, so the leaderboard's *this week* and the RSVP demo's *upcoming* age out of the current period — edit them here when it matters |
 | `app-lang-en.json` / `-fi.json` | the **app's own UI**: buttons, messages, settings, calendar. Schema-independent — the browser-tab title lives in the *schema* bundle (`app.title`), since it names the deployment |
 
 ## Installing one from the app
