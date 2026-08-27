@@ -33,6 +33,36 @@ describe('backend contract — Node backends (runtime)', () => {
   }
 });
 
+// BACKEND_API.md is the contract as PROSE, and prose rots quietly: it had fallen eighteen methods
+// behind -- uploads, profiles, membership requests, user-linked lists, doc-view bodies and the
+// self-scoped access read were all undocumented, so anyone writing a backend from it would have
+// shipped one that boots and then fails at the first feature.
+//
+// The floor above (CONTRACT) is what a backend MUST have; this is the other direction -- what a
+// backend HAS must be written down somewhere a reader can find it.
+describe('BACKEND_API.md documents the methods the backends actually expose', () => {
+  const doc = fs.readFileSync(path.join(__dirname, '..', '..', 'BACKEND_API.md'), 'utf8');
+
+  // `_`-prefixed members are internals, deliberately not part of the contract.
+  const methodsIn = (file) => {
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8');
+    return [...src.matchAll(/^\s{2,6}([a-zA-Z][a-zA-Z0-9_]*)\s*:\s*function/gm)].map((m) => m[1]);
+  };
+
+  for (const file of ['backend-firebase.js', 'backend-kv.js']) {
+    it(file + ': every method it exposes appears in the doc', () => {
+      const undocumented = [...new Set(methodsIn(file))].filter((m) => !doc.includes('`' + m)).sort();
+      assert.deepEqual(undocumented, [], file + ' exposes methods BACKEND_API.md never mentions: '
+        + undocumented.join(', '));
+    });
+  }
+
+  it('the doc lists every method the CONTRACT floor requires', () => {
+    const missing = CONTRACT.filter((m) => !doc.includes('`' + m));
+    assert.deepEqual(missing, [], 'BACKEND_API.md omits required methods: ' + missing.join(', '));
+  });
+});
+
 describe('backend contract — putRow merge semantics', () => {
   // Pinned contract: a PARTIAL putRow (a subset of columns) MERGES onto the stored row — it must not
   // blank the columns it omits. This is what Firestore ({merge:true}) and the CRDT engine (per-field

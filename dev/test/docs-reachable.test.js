@@ -18,7 +18,7 @@ const README = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 
 // The documents a person is expected to find. Named rather than globbed, so adding a doc is a
 // deliberate act of deciding whether readers are meant to reach it.
-const USER_DOCS = ['FIREBASE.md', 'SUPABASE.md', 'SCHEMA.md', 'examples/README.md'];
+const USER_DOCS = ['FIREBASE.md', 'SUPABASE.md', 'SCHEMA.md', 'BACKEND_API.md', 'examples/README.md'];
 
 describe('docs are reachable from the README', () => {
   for (const doc of USER_DOCS) {

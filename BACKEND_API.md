@@ -4,6 +4,11 @@ Every backend adapter must implement these methods. The app (`app-core.js`) call
 via the global `backend` object. All return Promises (except `backend-local.js` which is
 synchronous — the local-client HTTP adapter wraps it in Promises).
 
+`dev/test/backend-conformance.test.js` holds the machine-readable version of the **Required** table
+below (its `CONTRACT` array) and fails a backend that is missing one. Everything under **Optional** is
+per-feature: absent means the feature degrades, not that the backend is broken — the app checks for the
+method before calling it.
+
 Implementations: `backend-kv.js` (the reference — one contract over a key-value table, run by BOTH
 `backend-supabase.js` and the browser-local `backend-local-pglite.js`, which supply only a *platform*:
 identity, realtime, uploads), `backend-firebase.js`, and the dev-server pair `backend-local.js` /
@@ -30,6 +35,7 @@ its own copy of a contract method fails the suite.
 | `getLists()` | `() → Promise` | `{listName: string[]}` | All dropdown lists. |
 | `saveLists(lists)` | `(object) → Promise` | void | Full replacement. Values must be strings. |
 | `putListItem(listName, value)` | `(string, string) → Promise` | void | Append single value. |
+| `getAvailableTables()` | `() → Promise` | `[{id, name}]` | Setup wizard (detect existing tables). Required to EXIST — returning `[]` is the right answer where it does not apply (Firebase). |
 | `getAvailableLanguages()` | `() → Promise` | `[{code, name}]` | Extra fields (fileId) allowed, ignored by caller. |
 | `getTranslations(langCode)` | `(string) → Promise` | `{key: string} \| null` | Null = no translations for that language. |
 | `updateTranslations(code, translations)` | `(string, object) → Promise` | void | |
@@ -41,11 +47,51 @@ its own copy of a contract method fails the suite.
 | Method | When used | Notes |
 |--------|-----------|-------|
 | `bootData()` | One-round-trip boot | Returns `{schema, languages, lists, data, tableOrder?, columnOrders?}`. If present, skips sequential loading. Implemented by Firebase and Supabase. |
-| `getAvailableTables()` | Setup wizard (detect existing tables) | Returns `[{id, name}]`. OK to return `[]` if not applicable (Firebase/CRDT). |
-| `getUsers()` | User access panel | Returns `[{key, addr, role, tables}]`. See **grant shapes** below. |
-| `setUserRole(key, role, email, tables)` | User management | Build the stored record with `BackendHelpers.userGrantDoc(...)` — it also denormalizes `rwTables`, which the server-side rules need. |
-| `removeUser(key)` | User management | |
 | `subscribeTable(tableId, partition, onChange)` | Live sync between clients | Returns an **unsubscribe function**. Absent = no live updates (manual refresh only); implemented by Firebase, Supabase and the dev-server backends. See **Live sync** below. |
+| `renameLanguage(code, name)` | Languages tab | Renames the entry in the languages index only; the translations document is untouched. |
+
+### Reads of the system stores
+
+Rows in `_pages` / `_assets` are written through the ordinary `putRow` (they are stores, not schema
+tables), but reading one by id is its own method so a backend can answer from a document get rather
+than a whole-table scan.
+
+| Method | When used | Notes |
+|--------|-----------|-------|
+| `getPage(name)` | Doc-view bodies | `{markdown} \| null`. Missing or denied must resolve `null`, never reject. |
+| `getAsset(id)` | View backgrounds, image cells | `{src} \| null` — a data URI. Same rule: `null`, never reject. |
+| `uploadFile(file, opts)` | `image` / `url` column uploads | Resolves the **URL to store in the row**; the bytes go to the host's object store. Absent = the app falls back to pasting a URL by hand. |
+
+### Identity, access and profiles
+
+The registry methods split by AUDIENCE, and the split is load-bearing: an admin roster read is denied
+to everyone else, so a member needs a self-scoped call for the same facts about themselves. A backend
+that answers the admin call for non-admins leaks the whole membership list.
+
+| Method | Audience | Returns |
+|--------|----------|---------|
+| `getMyAccess()` | the caller | `{role, tables}`, `{registered: false}`, or `{bootstrap: true}` when no users exist yet. Fails **closed**: a denied read resolves `{registered: false}` rather than rejecting. |
+| `getUsers()` | admin | `{email: {role, user, tables}}`. See **grant shapes** below. |
+| `setUserRole(key, role, email, tables)` | admin | Build the record with `BackendHelpers.userGrantDoc(...)` — it also denormalizes `rwTables`, which the rules layers need. |
+| `removeUser(key)` | admin | |
+| `requestAccess(name, note)` | any signed-in caller | Writes exactly `{email, name, note, ts}` for their OWN address. Inert until an admin approves it. |
+| `getAccessRequests()` | admin | `{email: {email, name, note, ts}}` |
+| `removeAccessRequest(email)` | admin | Approve or deny both end here. |
+| `getMyProfile()` | the caller | `{name, shared, picture}` |
+| `setMyProfile(name, shared, picture)` | the caller | `shared` is the opt-in that publishes the display name. |
+| `setProfileName(email, name)` | admin | Merge-writes the name only, leaving the share flag alone. |
+| `getProfiles()` | admin | `{email: {name, shared, picture}}` — every profile. |
+| `getSharedNames()` | any member | `[name]`, opted-in only. Backs a `"users"` list. |
+| `getSharedProfiles()` | any member | `{email: {name, picture}}`, opted-in only. **Never carries an email to a caller who could not already read it.** |
+
+### User-linked lists (`listSources: "userlink"`)
+
+| Method | Audience | Returns |
+|--------|----------|---------|
+| `getListUserLinks()` | admin | `{list: {value: email}}` — the raw map, for the Lookup editor. |
+| `getMyListValues()` | the caller | `{list: myValue}`. The equality query on the caller's own email that lets `@me` resolve to a curated list value. Must be answerable to any member; the map above must not. |
+| `setListUser(listName, value, email)` | admin | Empty `email` unlinks. |
+| `getListAvatars()` | any member | `{list: {value: pictureUrl}}` — the avatar projection, which carries no email. |
 
 ## Live sync (`subscribeTable`)
 
