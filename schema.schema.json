@@ -91,8 +91,8 @@
             "list": { "type": "string", "description": "List name backing a `select` column." },
             "listSwitch": {
               "type": "object",
-              "description": "An ALTERNATE list the cell can be toggled to, e.g. { \"label\": \"External\", \"list\": \"external_workers\" }. The label is the toggle's text; the list is seeded like any other.",
-              "required": ["label", "list"],
+              "description": "An ALTERNATE list the cell can be toggled to, e.g. { \"list\": \"external_workers\" }. The list is seeded like any other. `label` names the toggle and is OPTIONAL: it is prose, and prose in a schema cannot be translated, so a bundle meant to be read in more than one language leaves it out and gets the translated `col.switch_list` tooltip instead.",
+              "required": ["list"],
               "additionalProperties": false,
               "properties": {
                 "label": { "type": "string" },
