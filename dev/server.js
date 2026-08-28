@@ -619,7 +619,7 @@ const server = http.createServer(async (req, res) => {
         // Viewer-safe projection: { listName: { value: pictureDataUrl } }. Non-admins get only SHARED
         // linked users; no email is ever included. Safe for everyone to read.
         const links = backend.getListUsers ? await backend.getListUsers() : {};
-        return json(res, LU.buildAvatarProjection(links, backend._profiles || {}, isAdminReq()));
+        return json(res, LU.buildLinkProjection(links, backend._profiles || {}, isAdminReq()));
       }
       case 'getListUserLinks': {
         // Admin-only (ADMIN_ROUTES): the raw { value: email } links, for the Lookup editor's picker.

@@ -49,8 +49,8 @@
     },
     "listSources": {
       "type": "object",
-      "description": "Lists whose values are read from a table column instead of being maintained by hand.",
-      "additionalProperties": true
+      "description": "Where a list's values come from, and what a link to an account means. \"users\": the values ARE the opted-in display names, maintained automatically. \"userlink\": the values stay curated and an admin maps each to an account, which drives `@me` and the avatar. \"userlink-name\": the same link, but the cell displays the linked account's profile name instead of the value \u2014 for a list of roles, where the reader wants to know who holds one.",
+      "additionalProperties": { "enum": ["users", "userlink", "userlink-name"] }
     },
     "translatableLists": {
       "type": "array",

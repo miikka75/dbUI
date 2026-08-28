@@ -2452,10 +2452,7 @@ function createVueApp() {
         var listName = altList || this.colIsList(col);
         var fromLookup = this.lookupListValues(listName);
         var items = fromLookup || (listName && this.listsCache[listName] ? this.listsCache[listName] : []);
-        var result = items.map(function(v) {
-          var translated = self.t('list.' + listName + '.' + v);
-          return { title: translated !== ('list.' + listName + '.' + v) ? translated : v, value: v };
-        });
+        var result = items.map(function(v) { return { title: self.listLabel(listName, v), value: v }; });
         if (this.colIsSorted(col)) result.sort(function(a, b) { return a.title.localeCompare(b.title); });
         return result;
       },
@@ -2489,12 +2486,28 @@ function createVueApp() {
         // `list.<ns>.<value>` keys as list values do. Either way it falls back to the raw value.
         var ns = this.listNameForCol(col);
         if (!ns && this.colIsRef(col)) { var rf = this.colRef(col); ns = rf && rf.table; }
-        if (ns) {
-          var key = 'list.' + ns + '.' + val;
-          var translated = this.t(key);
-          out = translated !== key ? translated : val;
-        }
+        if (ns) out = this.listLabel(ns, val);
         return this.shouldObscure(col) ? obscureName(out) : out;
+      },
+      // THE label for a list value in namespace `ns`, in precedence order:
+      //
+      //   1. the linked account's profile name -- only for a `userlink-name` list, which exists to ask
+      //      exactly this question ("who is the bishop?") of a value that names a role, not a person.
+      //   2. the `list.<ns>.<value>` translation.
+      //   3. the raw value.
+      //
+      // Steps 2 and 3 used to be written twice: once here (for the rendered cell) and once in
+      // getListOptions (for the dropdown that edits it). Two copies of a label rule is two answers the
+      // moment one of them grows a case -- which is precisely what happened when the linked name was
+      // added and the cell started disagreeing with its own editor.
+      listLabel: function(ns, val) {
+        if (!ns) return val;
+        var linked = (this.isUserNameList(ns) && window.ListUsers)
+          ? window.ListUsers.nameFor(this.listAvatars, ns, val) : '';
+        if (linked) return linked;
+        var key = 'list.' + ns + '.' + val;
+        var translated = this.t(key);
+        return translated !== key ? translated : val;
       },
       // Whether the CURRENT view obscures person names in `col`. obscureNames: true = all list/multiselect
       // columns (or all area columns for a rotationView); an array = exactly those columns. Display-only.
@@ -3892,9 +3905,20 @@ function createVueApp() {
         if (!list) return '';
         return window.ListUsers.pictureFor(this.listAvatars, list, value);
       },
-      // Lists opted in to user linking (Lookup-editor picker): `listSources[name] === 'userlink'`. Distinct
-      // from 'users' (auto-populated shared names) -- these keep curated values and just map value -> account.
-      isUserLinkList: function(name) { return (((this.schemaData || {}).listSources) || {})[name] === 'userlink'; },
+      // Lists opted in to user linking (Lookup-editor picker), and what the link is FOR:
+      //
+      //   'userlink'       map value -> account. The value is what you see; the link drives `@me` and
+      //                    the avatar. A rename of the linked person's profile moves nothing.
+      //   'userlink-name'  the same link, but the cell DISPLAYS the linked account's profile name.
+      //                    For a list whose values are roles rather than people ("bishop"), where the
+      //                    question a reader has is who currently holds it.
+      //
+      // Both are distinct from 'users', where the list VALUES are themselves the shared display names.
+      isUserLinkList: function(name) {
+        var src = (((this.schemaData || {}).listSources) || {})[name];
+        return src === 'userlink' || src === 'userlink-name';
+      },
+      isUserNameList: function(name) { return (((this.schemaData || {}).listSources) || {})[name] === 'userlink-name'; },
       // Admin only: the raw value -> email links, for the editor's current-selection display. Denied for
       // non-admins by the server/rules -> caught into {} (they never need it; rendering uses listAvatars).
       // Self-scoped link lookup, loaded for EVERY member (unlike loadListUserLinks, which is admin-only):

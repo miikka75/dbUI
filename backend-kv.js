@@ -219,8 +219,10 @@
         function join(rows, profiles) {
           profiles = profiles || {}; var out = {};
           (rows || []).forEach(function (row) {
-            var v = row.value; var pic = (profiles[String(v.email || '').toLowerCase()] || {}).picture || '';
-            if (pic) { (out[v.list] || (out[v.list] = {}))[v.value] = pic; }
+            var v = row.value, p = profiles[String(v.email || '').toLowerCase()] || {}, entry = {};
+            if (p.picture) entry.picture = p.picture;
+            if (p.name) entry.name = p.name;   // `userlink-name` lists display this instead of the value
+            if (entry.picture || entry.name) { (out[v.list] || (out[v.list] = {}))[v.value] = entry; }
           });
           return out;
         }

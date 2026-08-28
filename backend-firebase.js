@@ -371,8 +371,10 @@ backend = {
     function join(snap, profiles) {
       profiles = profiles || {}; var out = {};
       snap.forEach(function(d) {
-        var v = d.data(); var pic = (profiles[String(v.email || '').toLowerCase()] || {}).picture || '';
-        if (pic) { (out[v.list] || (out[v.list] = {}))[v.value] = pic; }
+        var v = d.data(), p = profiles[String(v.email || '').toLowerCase()] || {}, entry = {};
+        if (p.picture) entry.picture = p.picture;
+        if (p.name) entry.name = p.name;      // `userlink-name` lists display this instead of the value
+        if (entry.picture || entry.name) { (out[v.list] || (out[v.list] = {}))[v.value] = entry; }
       });
       return out;
     }
