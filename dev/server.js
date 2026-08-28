@@ -99,7 +99,12 @@ function loadSidecars() {
 async function restoreListUsers() {
   if (!backend.getListUsers || !backend.saveListUsers) return;
   if (!fs.existsSync(LINKS_PATH)) return;
-  const cur = await backend.getListUsers().catch(() => ({}));
+  // await, then catch -- not `.catch()` on the return value. The SQLite backend's getListUsers is
+  // SYNCHRONOUS (it reads a row and parses it), so calling .catch on what it returns is a TypeError
+  // that escapes startup() and stops the server from booting at all. It only bites once a link
+  // sidecar exists, which is why it survived until someone linked a value and restarted.
+  let cur = {};
+  try { cur = await backend.getListUsers(); } catch (e) { cur = {}; }
   if (cur && Object.keys(cur).length) return;
   try {
     const saved = JSON.parse(fs.readFileSync(LINKS_PATH, 'utf8'));
