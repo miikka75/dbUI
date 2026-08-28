@@ -27,6 +27,19 @@ const colDef = META.$defs.column.oneOf[1];
 const fail = (errs) => (errs || []).map((e) => (e.instancePath || '/') + ' ' + e.message).join('\n  ');
 
 describe('schema.schema.json — the meta-schema and the load-time check agree', () => {
+  // `listSwitch.label` was REQUIRED here while the runtime never asked for it: it is only the swap
+  // icon's tooltip, and that falls back to the translated `col.switch_list` when absent. Two unit
+  // suites (list-access, local-lists) have always written the label-less form, so the meta-schema was
+  // rejecting a shape the app not only accepts but prefers for anything multilingual.
+  it('accepts a listSwitch with no label, which is the form the app prefers', () => {
+    const doc = {
+      schemaVersion: 1,
+      tables: { t: { columns: [{ name: 'person', type: 'select', list: 'staff', listSwitch: { list: 'guests' } }] } },
+      views: []
+    };
+    assert.ok(validate(doc), fail(validate.errors));
+  });
+
   it('states the same column types the loader accepts', () => {
     // If these ever differ, one of the two is lying to somebody: the editor accepts a type the app
     // will silently read as "text", or the app rejects a type the editor offered.
