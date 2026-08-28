@@ -31,13 +31,7 @@
         },
         {
           "icon": "mdi-clipboard-account-outline",
-          "view": "admin_callings",
-          "items": [
-            {
-              "view": "admin_callings_board",
-              "icon": "mdi-view-column-outline"
-            }
-          ]
+          "view": "admin_callings"
         },
         {
           "view": "admin_bishopric",
@@ -187,6 +181,12 @@
             "allowNew": true,
             "sorted": true,
             "type": "select"
+          },
+          {
+            "name": "stake_business",
+            "type": "select",
+            "list": "visitors",
+            "sorted": true
           },
           {
             "name": "testimony1",
@@ -585,6 +585,7 @@
             "name": "opening_prayer",
             "hideEmpty": false
           },
+          "stake_business",
           {
             "sources": [
               "admin_callings"
@@ -680,6 +681,7 @@
           "presiding",
           "responsible",
           "opening_prayer",
+          "stake_business",
           "testimony1",
           "testimony2",
           "talk1",
@@ -743,25 +745,7 @@
         "kind": "data"
       },
       {
-        "defaultSort": "date",
         "name": "admin_callings",
-        "columns": [
-          "date",
-          "status",
-          "person",
-          "organization",
-          "calling",
-          "responsible",
-          "notes"
-        ],
-        "sources": [
-          "admin_callings"
-        ],
-        "mode": "join",
-        "kind": "data"
-      },
-      {
-        "name": "admin_callings_board",
         "sources": [
           "admin_callings"
         ],
@@ -1006,7 +990,7 @@
     ],
     "listSources": {
       "members": "userlink",
-      "bishopric": "userlink"
+      "bishopric": "userlink-name"
     },
     "translatableLists": [
       "ref_statuses",
