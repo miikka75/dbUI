@@ -31,13 +31,7 @@
         },
         {
           "icon": "mdi-clipboard-account-outline",
-          "view": "admin_callings",
-          "items": [
-            {
-              "view": "admin_callings_board",
-              "icon": "mdi-view-column-outline"
-            }
-          ]
+          "view": "admin_callings"
         },
         {
           "view": "admin_bishopric",
@@ -743,25 +737,7 @@
         "kind": "data"
       },
       {
-        "defaultSort": "date",
         "name": "admin_callings",
-        "columns": [
-          "date",
-          "status",
-          "person",
-          "organization",
-          "calling",
-          "responsible",
-          "notes"
-        ],
-        "sources": [
-          "admin_callings"
-        ],
-        "mode": "join",
-        "kind": "data"
-      },
-      {
-        "name": "admin_callings_board",
         "sources": [
           "admin_callings"
         ],
