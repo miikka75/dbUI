@@ -990,7 +990,7 @@
     ],
     "listSources": {
       "members": "userlink",
-      "bishopric": "userlink"
+      "bishopric": "userlink-name"
     },
     "translatableLists": [
       "ref_statuses",
