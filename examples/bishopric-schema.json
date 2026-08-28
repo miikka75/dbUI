@@ -183,6 +183,12 @@
             "type": "select"
           },
           {
+            "name": "stake_business",
+            "type": "select",
+            "list": "visitors",
+            "sorted": true
+          },
+          {
             "name": "testimony1",
             "listSwitch": {
               "list": "visitors"
@@ -579,6 +585,7 @@
             "name": "opening_prayer",
             "hideEmpty": false
           },
+          "stake_business",
           {
             "sources": [
               "admin_callings"
@@ -674,6 +681,7 @@
           "presiding",
           "responsible",
           "opening_prayer",
+          "stake_business",
           "testimony1",
           "testimony2",
           "talk1",
