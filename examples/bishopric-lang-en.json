@@ -58,6 +58,7 @@
       "list.ref_statuses.called": "Called to a position",
       "list.ref_statuses.consideration": "Consideration",
       "list.ref_statuses.declined": "Declined",
+      "list.ref_statuses.needs_calling": "Needs a calling",
       "list.ref_statuses.needs_release": "Needs release",
       "list.ref_statuses.praying_about_it": "Praying about it",
       "list.ref_statuses.release": "Release",

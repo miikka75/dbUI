@@ -58,6 +58,7 @@
       "list.ref_statuses.called": "Kutsutaan tehtävään",
       "list.ref_statuses.consideration": "Harkinta",
       "list.ref_statuses.declined": "Kieltäytyminen",
+      "list.ref_statuses.needs_calling": "Tarvitsee tehtävän",
       "list.ref_statuses.needs_release": "Tarvitsee vapauttaa",
       "list.ref_statuses.praying_about_it": "Rukoillaan",
       "list.ref_statuses.release": "Vapautus",
