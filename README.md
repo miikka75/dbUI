@@ -275,6 +275,22 @@ It renders full-bleed and inset to the inner 80%, because the manifest declares
 - **Requirements**: install needs HTTPS (Firebase Hosting provides it), a valid manifest, and icon
   files that are reachable and served as `image/*`.
 
+## Caching
+
+The app is a set of separately cached files that have to come from the same deploy: `index.html` names
+the module list, `ui.html` holds the templates, and `app-core.js` holds the state those templates bind
+to. On a default `max-age`, each expires on its own clock — so for as long as that lasts, a returning
+visitor can hold a **new template bound to an old instance**, which fails on the first render and is
+not fixed by reloading, because each file is individually still "fresh".
+
+`firebase.json` therefore serves the app's own sources (`*.html`, the root `*.js` and `*.json`,
+`firestore.rules`, `supabase-schema.sql` and `examples/**`) with `Cache-Control: no-cache` — revalidate,
+not "don't cache": the browser keeps the bytes and Hosting answers `304` when nothing changed.
+`vendor/**` is left on the default, since those change only on a deliberate dependency bump.
+
+> **GitHub Pages cannot set headers.** It serves everything with `max-age=600`, so that deployment keeps
+> a ten-minute window after each push where a visitor can pick up a mixed set. A hard reload clears it.
+
 ## Content-Security-Policy
 
 The app ships a CSP built in **`/csp.js`** (one source of truth — rationale documented in the file):

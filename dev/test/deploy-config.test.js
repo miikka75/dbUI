@@ -227,3 +227,86 @@ describe('deploy config — the browser-local Postgres backend', () => {
       'jsdelivr is missing from connect-src — the fallback would load and then die fetching pglite.wasm');
   });
 });
+
+// --- Cache policy -------------------------------------------------------------------------------
+// The app is a set of separately cached files that MUST come from the same deploy: index.html names
+// the module list, ui.html holds the templates, and app-core.js holds the state those templates bind
+// to. On Firebase's default `max-age=3600` each expires on its own clock, so for an hour after every
+// deploy a returning visitor can hold a NEW template bound to an OLD instance -- which is not a
+// subtle failure, it is `Cannot read properties of undefined` on the first render, and no amount of
+// reloading fixes it because each file is individually still "fresh".
+//
+// `no-cache` does not mean "do not cache": it means revalidate, so the browser keeps the bytes and
+// Hosting answers 304 when nothing changed. The cost is one conditional request per file per load;
+// the thing it buys is that a mixed set cannot happen.
+//
+// vendor/** is deliberately NOT here. Those change only on a deliberate dependency bump, they are the
+// large files, and they are consistent with each other by construction. If they ever do need this,
+// the better fix is versioned paths, not revalidation of a megabyte.
+describe('deploy config — cache policy', () => {
+  const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'firebase.json'), 'utf8'));
+
+  // Enough glob to read the patterns this config actually uses: a leading `**/`, `*` that does not
+  // cross a slash, a trailing `**`, and `@(a|b)` alternation. Deliberately not a general matcher --
+  // if someone writes a pattern this cannot read, the assertion below fails and says so.
+  function matches(pattern, filePath) {
+    let re = '';
+    for (let i = 0; i < pattern.length; i++) {
+      const c = pattern[i];
+      if (c === '*' && pattern[i + 1] === '*') { re += (pattern[i + 2] === '/' ? '(?:.*/)?' : '.*'); i += (pattern[i + 2] === '/' ? 2 : 1); }
+      else if (c === '*') re += '[^/]*';
+      else if (c === '@' && pattern[i + 1] === '(') {
+        const close = pattern.indexOf(')', i);
+        re += '(?:' + pattern.slice(i + 2, close).split('|').map((x) => x.replace(/[.]/g, '[.]')).join('|') + ')';
+        i = close;
+      } else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    }
+    return new RegExp('^' + re + '$').test(filePath);
+  }
+
+  const headerFor = (filePath, key) => (cfg.hosting.headers || [])
+    .filter((h) => matches(h.source, filePath))
+    .flatMap((h) => h.headers || [])
+    .filter((h) => h.key === key)
+    .map((h) => h.value)
+    .pop();
+
+  it('the matcher understands every pattern the config uses', () => {
+    for (const h of cfg.hosting.headers || []) {
+      assert.doesNotThrow(() => matches(h.source, 'probe'), 'unreadable pattern: ' + h.source);
+    }
+    // Sanity that it is not vacuously true.
+    assert.ok(matches('**/*.html', 'index.html'));
+    assert.ok(!matches('*.@(js|json)', 'vendor/vue.js'), 'a single * must not cross a slash');
+  });
+
+  // Every file whose CONTENT the running app depends on being the same generation as the others.
+  const MUST_REVALIDATE = [
+    'index.html',        // names the module list and carries the inline boot script
+    'ui.html',           // the templates
+    'style.html',
+    'app-core.js',       // the state those templates bind to
+    'columns.js', 'schema-normalize.js', 'examples.js', 'backend-firebase.js',
+    'manifest.json',     // PWA identity, rewritten per database
+    'sw.js',
+    'firestore.rules',        // fetched and DISPLAYED by the setup dialog
+    'supabase-schema.sql',    // fetched and APPLIED by the browser-local backend at boot
+    'examples/index.json',    // what the picker reads, and what the update check compares against
+    'examples/bishopric-schema.json'
+  ];
+
+  for (const file of MUST_REVALIDATE) {
+    it(file + ' revalidates rather than sitting in a cache for an hour', () => {
+      assert.equal(headerFor(file, 'Cache-Control'), 'no-cache',
+        file + ' can go stale independently of the files it has to agree with');
+    });
+  }
+
+  it('the HTML entry keeps its CSP — the cache header is added to it, not instead of it', () => {
+    assert.ok(headerFor('index.html', 'Content-Security-Policy-Report-Only'));
+  });
+
+  it('leaves vendor/** alone, so a dependency bump is the only thing that pays for it', () => {
+    assert.equal(headerFor('vendor/vue.js', 'Cache-Control'), undefined);
+  });
+});
