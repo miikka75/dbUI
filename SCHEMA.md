@@ -1715,6 +1715,32 @@ name; an admin links each value to an account email in the Lookup tab.
 | Setup | users tick *share my name* | an admin links each value once |
 | Extra | — | avatars, resolved live from the profile |
 
+#### `"userlink-name"` — the value names a ROLE, the cell shows who holds it
+
+The same link, with one difference: the cell displays the **linked account's profile name** instead of
+the value. For a list whose values are positions rather than people (`bishop`, `counselor1`), where the
+question a reader has is who currently holds one.
+
+```json
+"listSources": {
+  "members":   "userlink",        // values are curated names; the link drives @me and the avatar
+  "bishopric": "userlink-name"    // values are roles; the cell shows the linked person
+}
+```
+
+Precedence for a value's label, in `listLabel`: the linked account's name, else the
+`list.<list>.<value>` translation, else the raw value. So it degrades rather than breaks — an unlinked
+value, a linked account that shares no name, and a viewer who may not see that profile all read as the
+label, exactly as a plain `userlink` list does.
+
+Two consequences worth knowing:
+
+- **It is per-viewer.** Non-admins only see profiles whose owner ticked *share my name*; admins see
+  every link. An officer who has not opted in shows the label to everyone else.
+- **It resolves live, so it re-labels history.** A meeting archived in 2024 stores `bishop` and will
+  show whoever is linked *today*. That is also true of naming the person in the translation; the only
+  way to keep the person who actually presided is to store their name in the row.
+
 **`@me` works in both**, resolving per column: on a `userlink` list it becomes the curated value linked
 to the caller's account, otherwise their profile display name. So a household can keep calling someone
 "Ann" while the account behind her is `ann@example.test`, and `{ "person": "@me" }` still finds her rows.

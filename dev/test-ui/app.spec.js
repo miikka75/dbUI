@@ -4049,8 +4049,11 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
 
     const adminProj  = await (await api('getListAvatars', {}, 'admin@x.com')).json();
     const viewerProj = await (await api('getListAvatars', {}, 'viewer@x.com')).json();
-    expect(adminProj).toEqual({ people: { Ann: 'PIC_ANN', Cara: 'PIC_CARA' } });  // admin sees both linked photos
-    expect(viewerProj).toEqual({ people: { Ann: 'PIC_ANN' } });                    // non-admin: shared linked only
+    expect(adminProj).toEqual({ people: {                                          // admin sees both links
+      Ann:  { picture: 'PIC_ANN',  name: 'Ann'  },
+      Cara: { picture: 'PIC_CARA', name: 'Cara' }
+    } });
+    expect(viewerProj).toEqual({ people: { Ann: { picture: 'PIC_ANN', name: 'Ann' } } });   // non-admin: shared linked only
     expect(JSON.stringify(viewerProj)).not.toContain('@');                         // ...and never an email
 
     const links = await (await api('getListUserLinks', {}, 'admin@x.com')).json();
@@ -4078,12 +4081,84 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
       app.selectTab('roster');
       return { proj: app.listAvatars, resolved: app.listValuePicture('who', 'Ann') };
     });
-    expect(seeded.proj).toEqual({ people: { Ann: 'PIC_ANN' } });   // projection loaded at boot
+    expect(seeded.proj).toEqual({ people: { Ann: { picture: 'PIC_ANN', name: 'Ann' } } });   // projection loaded at boot
     expect(seeded.resolved).toBe('PIC_ANN');                        // client resolver maps col->list->picture
     // the cell renders the avatar image AND still shows the value text
     const avatarImg = page.locator('.v-main .user-avatar img').first();
     await expect(avatarImg).toHaveAttribute('src', 'PIC_ANN');
     await expect(page.locator('.v-main')).toContainText('Ann');
+  });
+
+  test('userlink-name: the cell shows WHO holds the value, not the value or its label', async ({ page }) => {
+    // The bishopric pattern. `bishopric` holds roles (bishop/counselor1), the row stores the role, and
+    // the question a reader of the program has is who currently holds it. A `userlink` list would show
+    // the role's label; `userlink-name` resolves the linked account's profile name instead, live.
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
+    await api('resetData');
+    await api('setMyProfile', { name: 'Miikka Tuppurainen', shared: true, picture: '' }, 'bishop@x.com');
+    await api('setListUser', { listName: 'bishopric', value: 'bishop', email: 'bishop@x.com' });
+    await api('saveSchema', { schema: {
+      tables: { meetings: { columns: [{ name: 'presiding', type: 'select', list: 'bishopric' }, { name: 'd', type: 'date' }] } },
+      views: [{ name: 'programme', mode: 'union', sources: ['meetings'], columns: ['d', 'presiding'] }],
+      listSources: { bishopric: 'userlink-name' },
+      nav: { items: [{ view: 'programme' }] }
+    } });
+    // On the SERVER, so the grid renders it for real rather than from a cache selectTab would refetch.
+    await api('putListItem', { listName: 'bishopric', value: 'bishop' });
+    await api('putListItem', { listName: 'bishopric', value: 'counselor1' });
+    await api('putRow', { tableId: 'meetings', data: { id: 'm1', presiding: 'bishop', d: '2026-01-01' }, tab: 'active' });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // A label for the ROLE exists, exactly as the shipped Finnish pack has one. The linked name must
+      // win over it — that is the whole point of the opt-in.
+      app.strings = Object.assign({}, app.strings, { 'list.bishopric.bishop': 'Piispa', 'list.bishopric.counselor1': '1. neuvonantaja' });
+      app.selectTab('programme');
+      return {
+        linked: app.displayValue('presiding', 'bishop'),
+        unlinked: app.displayValue('presiding', 'counselor1'),
+        flags: [app.isUserLinkList('bishopric'), app.isUserNameList('bishopric')]
+      };
+    });
+
+    expect(r.linked).toBe('Miikka Tuppurainen');      // the linked account's profile name
+    expect(r.unlinked).toBe('1. neuvonantaja');       // no link -> the label, as before
+    expect(r.flags).toEqual([true, true]);            // userlink-name still links (@me, avatars)
+    // selectTab loads asynchronously; wait for the row before reading the DOM.
+    await page.waitForFunction(() => (window.appInstance.sortedData || []).length > 0, { timeout: 8000 });
+    // The rendered cell AND the dropdown that edits it must agree — they read the same label rule.
+    const mainText = await page.evaluate(() => document.querySelector('.v-main').innerText);
+    expect(mainText).toContain('Miikka Tuppurainen');
+    expect(mainText).not.toContain('Piispa');
+    const optionTitles = await page.evaluate(() => window.appInstance.getListOptions('presiding').map((o) => o.title));
+    expect(optionTitles).toEqual(['Miikka Tuppurainen', '1. neuvonantaja']);
+  });
+
+  test('userlink-name falls back to the label when the viewer may not see the profile', async ({ page }) => {
+    // Non-admins only see profiles whose owner opted in. An unshared officer must not leak through the
+    // projection; the cell reads as the role instead.
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
+    await api('resetData');
+    await api('setMyProfile', { name: 'Unshared Officer', shared: false, picture: '' }, 'bishop@x.com');
+    await api('setListUser', { listName: 'bishopric', value: 'bishop', email: 'bishop@x.com' });
+    await api('setUserRole', { uid: 'local@dev', user: 'local@dev', role: 'admin', tables: 'all' });
+    await api('setUserRole', { uid: 'viewer@x.com', user: 'viewer@x.com', role: 'viewer', tables: 'all' });
+
+    const projFor = async (user) => (await (await api('getListAvatars', {}, user)).json());
+    const asAdmin = await projFor('local@dev');
+    const asViewer = await projFor('viewer@x.com');
+
+    expect(asAdmin.bishopric.bishop.name).toBe('Unshared Officer');   // admins see every link
+    expect(asViewer.bishopric).toBeUndefined();                        // a viewer learns nothing
+    expect(JSON.stringify(asViewer)).not.toContain('Unshared');
   });
 
   test('user-linked lists: an aggregate group card shows the linked avatar in its title (piispakunta pattern)', async ({ page }) => {
@@ -4152,7 +4227,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
       return { links: await backend.getListUserLinks(), avatars: window.appInstance.listAvatars, uiLinks: window.appInstance.listUserLinks };
     });
     expect(r.links).toEqual({ people: { Ann: 'ann@x.com' } });   // persisted (raw admin links)
-    expect(r.avatars).toEqual({ people: { Ann: 'PIC_ANN' } });   // projected for cell rendering
+    expect(r.avatars).toEqual({ people: { Ann: { picture: 'PIC_ANN', name: 'Ann' } } });   // projected for cell rendering
     expect(r.uiLinks).toEqual({ people: { Ann: 'ann@x.com' } }); // editor state refreshed
   });
 
