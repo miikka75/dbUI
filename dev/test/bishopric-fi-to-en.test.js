@@ -128,19 +128,21 @@ describe('bishopric fi -> en conversion', () => {
     assert.equal(shipped.get('st-11').status, 'released');
   });
 
-  it('gives the one status the example never shipped a fresh id, and says so', () => {
-    const novel = bundle.tables.ref_statuses.find((r) => r.status === 'needs_calling');
-    assert.equal(novel.id, 'st-15');
-    assert.ok(!EXAMPLE.tables.ref_statuses.some((r) => r.id === 'st-15'), 'st-15 is genuinely free');
-    assert.ok(notes.some((n) => n.includes('list.ref_statuses.needs_calling')));
+  it('every status and position it produces is exactly what the example ships', () => {
+    const shipped = new Map(EXAMPLE.tables.ref_statuses.map((r) => [r.id, r]));
+    for (const row of bundle.tables.ref_statuses) {
+      const its = shipped.get(row.id);
+      assert.ok(its, 'produced a row the example does not ship: ' + row.id);
+      assert.equal(row.status, its.status, row.id + ' status');
+      assert.equal(row.phase, its.phase, row.id + ' phase');
+      assert.equal(row.position, its.position, row.id + ' position — the board lane order');
+    }
   });
 
-  it('every status it produces is one the example schema knows about', () => {
-    const shipped = new Set(EXAMPLE.tables.ref_statuses.map((r) => r.status));
-    for (const row of bundle.tables.ref_statuses) {
-      if (row.status === 'needs_calling') continue;              // the ward's own addition
-      assert.ok(shipped.has(row.status), 'unknown status produced: ' + row.status);
-    }
+  it('maps the status the example gained after it was derived', () => {
+    const row = bundle.tables.ref_statuses.find((r) => r.status === 'needs_calling');
+    assert.equal(row.id, 'st-15');
+    assert.equal(row.position, '1', 'first lane on the board, as in the Finnish original');
   });
 
   it('renames lists, and every name it produces is one the example schema uses', () => {

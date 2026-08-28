@@ -88,12 +88,11 @@ const BISHOPRIC = { piispa: 'bishop', '1na': 'counselor1', '2na': 'counselor2' }
 // and confirmed by the two the meeting program filters on: `vastaanotettu` -> accepted (sustainings)
 // and `kiitetään` -> released (releases).
 //
-// `id` is the shipped example's row id, so an imported row OVERWRITES the example's rather than
-// landing beside it as a duplicate lane. `Tarvitsee tehtävän` is the one status this ward has that
-// the example never shipped; it gets a fresh id and is reported at the end, because no shipped
-// language pack has a label for it.
+// `id` and `position` are the shipped example's, so an imported row OVERWRITES the example's rather
+// than landing beside it as a duplicate lane -- and the board's lane ORDER ends up the example's
+// order, which this ward's numbering already agreed with.
 const STATUSES = {
-  'Tarvitsee tehtävän':        { status: 'needs_calling',           phase: 'consideration',  id: 'st-15', position: '1',  novel: true },
+  'Tarvitsee tehtävän':        { status: 'needs_calling',           phase: 'consideration',  id: 'st-15', position: '1' },
   'Keskustellaan':             { status: 'under_discussion',        phase: 'consideration',  id: 'st-1',  position: '2' },
   'Rukoillaan':                { status: 'praying_about_it',        phase: 'consideration',  id: 'st-2',  position: '3' },
   'Hyväksytty piispakunnassa': { status: 'approved_by_bishopric',   phase: 'consideration',  id: 'st-3',  position: '4' },
@@ -198,12 +197,6 @@ function convert(src) {
   const fi = (src.translations && (src.translations.Suomi || src.translations.fi)) || {};
   for (const [oldKey, newKey] of [['app.title', 'app.title'], ['tervetuloa', 'text.welcome']]) {
     if (fi[oldKey]) notes.push(newKey + ' = ' + JSON.stringify(fi[oldKey]));
-  }
-  // A status this ward has and the example never shipped has no label in any shipped pack.
-  for (const row of (src.tables && src.tables.tilat) || []) {
-    const m = STATUSES[row && row.tila];
-    if (m && m.novel) notes.push('list.ref_statuses.' + m.status + ' = ' + JSON.stringify(row.tila)
-      + '   (new status: no shipped pack labels it)');
   }
 
   return { bundle: out, problems, notes };
