@@ -4161,6 +4161,47 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     expect(JSON.stringify(asViewer)).not.toContain('Unshared');
   });
 
+  test('the share-my-name switch appears for ANY account-linked list, not just a `users` one', async ({ page }) => {
+    // Sharing is what lets other members see a linked person at all: a non-admin may read a profile
+    // only when its owner shared it. The switch used to render for `users` lists alone, so a schema
+    // whose linked lists are all `userlink` (the bishopric example is exactly that) gave its members
+    // no way to opt in -- and then showed them no avatar and no linked name, with nothing on screen
+    // saying why.
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
+    const SCHEMA = (sources) => ({
+      tables: { t: { columns: [{ name: 'who', type: 'select', list: 'people' }] } },
+      views: [{ name: 'v', mode: 'union', sources: ['t'], columns: ['who'] }],
+      listSources: sources,
+      nav: { items: [{ view: 'v' }] }
+    });
+
+    const switchVisible = async (sources) => {
+      await api('resetData');
+      await api('saveSchema', { schema: SCHEMA(sources) });
+      await page.goto('/');
+      await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+      await page.reload();
+      await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 15000 });
+      await page.evaluate(() => appInstance.selectTab('__settings'));
+      return page.evaluate(() => ({
+        matters: appInstance.sharingMatters(),
+        rendered: !!document.querySelector('[data-testid="profile-share-name"]')
+      }));
+    };
+
+    for (const source of ['users', 'userlink', 'userlink-name']) {
+      const r = await switchVisible({ people: source });
+      expect(r.matters, 'sharingMatters for ' + source).toBe(true);
+      expect(r.rendered, 'switch rendered for ' + source).toBe(true);
+    }
+
+    // A schema that links nothing to an account has no use for the switch.
+    const none = await switchVisible({});
+    expect(none.matters).toBe(false);
+  });
+
   test('user-linked lists: an aggregate group card shows the linked avatar in its title (piispakunta pattern)', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });

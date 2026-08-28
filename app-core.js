@@ -3647,6 +3647,23 @@ function createVueApp() {
         var ls = (this.schemaData && this.schemaData.listSources) || {};
         return Object.keys(ls).filter(function(n) { return ls[n] === 'users'; });
       },
+      // Does anything in this schema depend on people opting in to share their display name?
+      //
+      // Every account-linked list does, and not only the `users` kind that takes its VALUES from
+      // shared names: both userlink kinds resolve a LINKED profile, and a non-admin may read that
+      // profile only when its owner shared it. So a member's avatar -- and, on a `userlink-name`
+      // list, the name shown in place of the value -- exists for other members only if they opted in.
+      //
+      // The profile switch used to key off userBackedLists(), i.e. `users` alone. A deployment whose
+      // linked lists are all `userlink` (the bishopric example is exactly that) therefore never
+      // rendered the switch: nobody could opt in, so nobody but an admin ever saw a linked name or
+      // face, with nothing on screen to explain why.
+      sharingMatters: function() {
+        var ls = (this.schemaData && this.schemaData.listSources) || {};
+        return Object.keys(ls).some(function(n) {
+          return ls[n] === 'users' || ls[n] === 'userlink' || ls[n] === 'userlink-name';
+        });
+      },
       // Merge the opted-in shared names ON TOP of the list's curated values rather than replacing them:
       // replacing meant a list emptied itself whenever nobody had opted in yet (a fresh deployment, or
       // a getSharedNames failure), leaving the column unusable with no hint why.
