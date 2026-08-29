@@ -1,25 +1,39 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-// Pure copies of the folder-config export/import helpers in app-core.js. The design is a DENYLIST:
-// everything in appConfig is round-tripped EXCEPT keys listed here (environment-specific). This is what
-// makes a NEW appConfig parameter survive export/import with zero export-code changes — the guard test
-// at the bottom verifies exactly that property, so a future param can't silently get dropped.
-const FOLDER_CONFIG_EXPORT_EXCLUDE = { mode: true };
-
-function exportableConfig(appConfig) {
-  var out = {};
-  Object.keys(appConfig || {}).forEach(function(k) { if (!FOLDER_CONFIG_EXPORT_EXCLUDE[k]) out[k] = appConfig[k]; });
-  return out;
-}
-function mergeImportedConfig(currentConfig, importedConfig, mode) {
-  var merged = Object.assign({}, currentConfig || {});
-  Object.keys(importedConfig || {}).forEach(function(k) { if (!FOLDER_CONFIG_EXPORT_EXCLUDE[k]) merged[k] = importedConfig[k]; });
-  if (mode !== undefined && mode !== null && mode !== '') merged.mode = mode; else delete merged.mode;
-  return merged;
-}
+// The folder-config export/import helpers, pulled OUT OF app-core.js rather than copied here. The
+// design is a DENYLIST: everything in appConfig is round-tripped EXCEPT keys listed there
+// (environment-specific), which is what makes a NEW appConfig parameter survive export/import with
+// zero export-code changes -- the guard test at the bottom verifies exactly that property.
+//
+// It used to be a copy, which is a test that agrees with the implementation by construction: the copy
+// would have kept passing while the real function grew the `example.units` strip below.
+const fs = require('node:fs');
+const path = require('node:path');
+const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'app-core.js'), 'utf8');
+const grab = (name, kind) => {
+  const re = kind === 'var'
+    ? new RegExp('^var ' + name + ' = [^;]+;', 'm')
+    : new RegExp('^function ' + name + '\\([\\s\\S]*?\\n\\}', 'm');
+  const m = SRC.match(re);
+  if (!m) throw new Error('could not find ' + name + ' in app-core.js');
+  return m[0];
+};
+const { FOLDER_CONFIG_EXPORT_EXCLUDE, exportableConfig, mergeImportedConfig } = (0, eval)(
+  '(function () {' + grab('FOLDER_CONFIG_EXPORT_EXCLUDE', 'var') + grab('exportableConfig') + grab('mergeImportedConfig')
+  + ' return { FOLDER_CONFIG_EXPORT_EXCLUDE: FOLDER_CONFIG_EXPORT_EXCLUDE, exportableConfig: exportableConfig,'
+  + ' mergeImportedConfig: mergeImportedConfig }; })()');
 
 describe('Folder config export/import round-trip', () => {
+  it('drops the example fingerprints, which nothing reads and every viewer would fetch at boot', () => {
+    const withUnits = { example: { bundle: 'chores', revision: 2, files: { 'a.json': 'h' }, units: { 'views/x': 'abc' } } };
+    const exp = exportableConfig(withUnits);
+    assert.equal(exp.example.units, undefined, 'units must not cross the export boundary');
+    assert.equal(exp.example.bundle, 'chores', '...but the provenance itself still does');
+    assert.deepEqual(exp.example.files, { 'a.json': 'h' }, 'the file hashes are what the update check needs');
+    assert.ok(withUnits.example.units, 'the caller\'s own config is not mutated');
+  });
+
   const appConfig = {
     mode: 'firebase',
     rotationAnchors: { cleaning: '2026-01-05', ushers: '2026-02-01' },
