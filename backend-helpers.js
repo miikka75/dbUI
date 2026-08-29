@@ -16,6 +16,19 @@
     // Storage key for a table partition: ('tasks','active') -> 'tasks__active'
     storeName: function(table, tab) { return table + '__' + (tab || 'active'); },
 
+    // THE inverse: 'tasks__active' -> 'tasks', and a bare 'tasks' -> 'tasks' (callers pass either).
+    // This existed only as a hand-written `split('__')[0]` at a dozen call sites, in three languages:
+    // here and in dev/server.js as JavaScript, in firestore.rules as `collection.split('__')[0]`, and
+    // in supabase-schema.sql as `split_part(coll, '__', 1)`. The two rules layers cannot share this
+    // function -- they are not JavaScript -- so the point is not to reach them but to make the
+    // convention nameable on the side that can, and to have ONE place documenting what it assumes.
+    //
+    // What it assumes is that a table name contains no '__' of its own. That is not a convention the
+    // caller can be trusted to keep, so validateSchema now REFUSES such a name (schema-loader.js):
+    // without it `x__y__active` truncates to `x`, and a grant on `x` silently carries read and write
+    // on table `x__y` in every layer at once.
+    tableOf: function(store) { return String(store == null ? '' : store).split('__')[0]; },
+
     // Column headers from row objects (first row's keys); [] when empty
     deriveHeaders: function(rows) { return rows && rows.length ? Object.keys(rows[0]) : []; },
 

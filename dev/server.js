@@ -264,7 +264,7 @@ const sseClients = new Set();   // { res, email }
 // Would this subscriber have received this row from getTableData? Mirrors, in order: the grant check,
 // the _pages/_assets registered-user carve-out, and the self-service slice (own rows + public roster).
 async function canSeeRow(email, store, value) {
-  const base = store ? store.split('__')[0] : '';
+  const base = BackendHelpers.tableOf(store);
   const allowed = allowedTablesFor(email);
   if (!allowed) return true;                                        // admin / unrestricted
   if (allowed.indexOf(base) >= 0) return true;                      // granted
@@ -373,7 +373,7 @@ const server = http.createServer(async (req, res) => {
     // Doc-view bodies (_pages) mirror firestore.rules' dedicated block: any REGISTERED user reads
     // (content pages; each embedded table's rows stay gated by their own access), admins/editors write.
     // Without this, hasTableAccess('_pages') — which no grant ever satisfies — denied restricted reads.
-    function pagesTable(tableId) { return (tableId ? tableId.split('__')[0] : '') === '_pages'; }
+    function pagesTable(tableId) { return BackendHelpers.tableOf(tableId) === '_pages'; }
     // Reads and writes are gated by the policies the storage layer runs, not here. What remains is
     // the shape of the response, never who may see it.
     function canReadPages() { return true; }
@@ -387,7 +387,7 @@ const server = http.createServer(async (req, res) => {
     // reads (decoration; the referencing row stays gated by its own access), admins/editors write. Needs
     // the same carve-out _pages does — hasTableAccess('_assets'), which no grant ever satisfies, would
     // deny every read. Read/write reuse the page predicates: identical role tests on both sides.
-    function assetsTable(tableId) { return (tableId ? tableId.split('__')[0] : '') === '_assets'; }
+    function assetsTable(tableId) { return BackendHelpers.tableOf(tableId) === '_assets'; }
     function checkTableAccess() { return true; }
     // Write gate: the 'rw' subset only, so a read-only grant can be seen and not changed.
     function checkTableWrite() { return true; }
@@ -409,7 +409,7 @@ const server = http.createServer(async (req, res) => {
       return (p && p.name) || '';
     }
     async function ownerFieldsOk(tableId, incoming, existing) {
-      const base = tableId ? tableId.split('__')[0] : '';
+      const base = BackendHelpers.tableOf(tableId);
       const bounds = BackendHelpers.ownerWritableOf(await backend.getSchema() || {})[base];
       if (!bounds) return true;
       // An identity column (`defaultFrom: "@me"`, owner-writable) may only ever carry the CALLER'S own
@@ -435,17 +435,17 @@ const server = http.createServer(async (req, res) => {
     // selfServiceOwnerCol so the boot path can ask the plain question -- "does this table have an owner
     // column" -- without the writable-set answer folded in.
     async function ownerColOf(tableId) {
-      return await ownerColNameOf(tableId ? tableId.split('__')[0] : '');
+      return await ownerColNameOf(BackendHelpers.tableOf(tableId));
     }
     async function selfServiceOwnerCol(tableId) {
-      const base = tableId ? tableId.split('__')[0] : '';
+      const base = BackendHelpers.tableOf(tableId);
       const allowed = getWritableTables();
       if (!allowed || allowed.indexOf(base) >= 0) return null;      // unrestricted or writable -> normal path
       return await ownerColOf(tableId);
     }
     const _mine = (v) => String(v == null ? '' : v).toLowerCase() === String(userEmail || '').toLowerCase();
     const _rowById = async (tableId, tab, id) => ((await backend.getTableData(tableId, tab) || {}).rows || []).find(r => r.id === id);
-    const _store = (tableId, tab) => BackendHelpers.storeName((tableId || '').split('__')[0], tab || 'active');
+    const _store = (tableId, tab) => BackendHelpers.storeName(BackendHelpers.tableOf(tableId), tab || 'active');
     // Answer the caller AND tell the live subscribers. Broadcasts the STORED row, re-read after the
     // write, never the request payload: a partial putRow's patch is not a row, and a subscriber applies
     // what it receives as that row's new state — handing it the patch would be fine for the columns it
@@ -591,7 +591,7 @@ const server = http.createServer(async (req, res) => {
         const existing = oc ? prior : null;   // may delete only my own owned row
         // ...and only while it is still in an owner-writable state: an approved row is out of my hands,
         // so deleting it must be refused for exactly the reason editing it is.
-        const dBounds = BackendHelpers.ownerWritableOf(await backend.getSchema() || {})[String(body.tableId || '').split('__')[0]];
+        const dBounds = BackendHelpers.ownerWritableOf(await backend.getSchema() || {})[BackendHelpers.tableOf(body.tableId)];
         if (!oc || !existing || !_mine(existing[oc]) || !BackendHelpers.ownerRowInState(dBounds, existing)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'Access denied' })); }
         return await delOk();
       }
