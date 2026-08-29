@@ -21,6 +21,7 @@
   var LA = isNode ? require('./list-access') : root.ListAccess;
   var AF = isNode ? require('./access-features') : root.AccessFeatures;
   var Cols = isNode ? require('./columns') : root.Columns;
+  var LU = isNode ? require('./list-users') : root.ListUsers;
 
   // S: the storage adapter (storage-supabase.js / storage-pglite.js) — get/put/delete/getAll/getMeta/
   //    setMeta/_all/_replace/_merge over kv.
@@ -212,28 +213,21 @@
 
       // --- User-linked lists: each row `_list_users/<id>` links a list VALUE to a user's email + cached
       // `shared` flag, mirroring backend-firebase.js. Only avatars (never emails) reach non-admin viewers. ---
-      _linkDocId: function (listName, value) {
-        return encodeURIComponent(String(listName)) + '~' + encodeURIComponent(String(value));
-      },
+      _linkDocId: function (listName, value) { return LU.linkDocId(listName, value); },
+      // The join is LU.projectLinks -- the same one backend-firebase uses, over the same flat link
+      // records. A kv row wraps the document in `.value`, which is the ONLY thing that ever differed
+      // between the two copies this replaces.
+      //
+      // RLS returns only shared links to non-admins and every link to admins; join against whatever
+      // profiles are readable (admins: all via getProfiles; others: the shared set).
       getListAvatars: function () {
-        function join(rows, profiles) {
-          profiles = profiles || {}; var out = {};
-          (rows || []).forEach(function (row) {
-            var v = row.value, p = profiles[String(v.email || '').toLowerCase()] || {}, entry = {};
-            if (p.picture) entry.picture = p.picture;
-            if (p.name) entry.name = p.name;   // `userlink-name` lists display this instead of the value
-            if (entry.picture || entry.name) { (out[v.list] || (out[v.list] = {}))[v.value] = entry; }
-          });
-          return out;
-        }
-        // RLS returns only shared links to non-admins and every link to admins; join against whatever profiles
-        // are readable (admins: all via getProfiles; others: the shared set).
+        var docs = function (rows) { return (rows || []).map(function (row) { return row.value; }); };
         return S._all('_list_users').then(function (rows) {
           return users.getProfiles().then(function (p) {
-            if (p && Object.keys(p).length) return join(rows, p);
-            return users.getSharedProfiles().then(function (sp) { return join(rows, sp); });
+            if (p && Object.keys(p).length) return LU.projectLinks(docs(rows), p);
+            return users.getSharedProfiles().then(function (sp) { return LU.projectLinks(docs(rows), sp); });
           }).catch(function () {
-            return users.getSharedProfiles().then(function (sp) { return join(rows, sp); });
+            return users.getSharedProfiles().then(function (sp) { return LU.projectLinks(docs(rows), sp); });
           });
         }).catch(function () { return {}; });
       },

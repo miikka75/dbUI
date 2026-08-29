@@ -22,22 +22,51 @@
   // admin-only by design. It discloses nothing further -- every member can already read the shared
   // links and the shared profiles, which is exactly what this joins.
   function buildLinkProjection(listUsers, profiles, isAdmin) {
-    profiles = profiles || {};
-    var out = {};
+    var records = [];
     Object.keys(listUsers || {}).forEach(function(list) {
-      var links = listUsers[list] || {}, o = {};
+      var links = listUsers[list] || {};
       Object.keys(links).forEach(function(val) {
-        var p = profiles[String(links[val] || '').toLowerCase()];
+        var p = (profiles || {})[String(links[val] || '').toLowerCase()];
         if (!p) return;                        // linked account unknown/deregistered -> value only
         if (!isAdmin && !p.shared) return;     // non-admins can't see an unshared profile
-        var entry = {};
-        if (p.picture) entry.picture = p.picture;
-        if (p.name) entry.name = p.name;
-        if (entry.picture || entry.name) o[val] = entry;
+        records.push({ list: list, value: val, email: links[val] });
       });
-      if (Object.keys(o).length) out[list] = o;
+    });
+    return projectLinks(records, profiles);
+  }
+
+  // THE join, over a FLAT list of link records [{ list, value, email }] rather than the nested map
+  // above. Same output, same disclosure rule -- picture and name only, never an email -- and
+  // buildLinkProjection is now this function plus the shared/isAdmin gate it has to apply itself.
+  //
+  // It takes records because that is the shape a STORE hands back: a Firestore query snapshot
+  // (backend-firebase) and a kv row list (backend-kv) are both a flat sequence of link documents, and
+  // both re-implemented this join inline rather than reshape into the nested map. Three copies of one
+  // privacy projection is three places to edit when the disclosure rule changes -- and the two inline
+  // ones had drifted already, in that neither applied a shared/isAdmin gate at all.
+  //
+  // That last part is not a bug there and is not fixed by moving the code: a backend's records have
+  // been filtered by Firestore rules or by RLS before they arrive, so the gate has already been
+  // applied by something that cannot be talked out of it. The gate stays in buildLinkProjection
+  // because the DEV SERVER holds the whole map in process and has no policy layer under it.
+  function projectLinks(records, profiles) {
+    profiles = profiles || {};
+    var out = {};
+    (records || []).forEach(function(r) {
+      if (!r || !r.list) return;
+      var p = profiles[String(r.email || '').toLowerCase()] || {}, entry = {};
+      if (p.picture) entry.picture = p.picture;
+      if (p.name) entry.name = p.name;         // `userlink-name` lists display this instead of the value
+      if (entry.picture || entry.name) (out[r.list] || (out[r.list] = {}))[r.value] = entry;
     });
     return out;
+  }
+
+  // The document id a value's link is stored under: 'list~value', both halves percent-encoded so a
+  // value containing the separator (or a slash, which Firestore refuses in a doc id) cannot collide
+  // with another list's. Byte-identical in both backends before it lived here.
+  function linkDocId(listName, value) {
+    return encodeURIComponent(String(listName)) + '~' + encodeURIComponent(String(value));
   }
 
   // Set (email truthy) or clear (falsy) a value's link, returning a NEW map (no mutation). Prunes a list
@@ -75,8 +104,8 @@
     return (entry && typeof entry === 'object' && entry.name) || '';
   }
 
-  var M = { buildLinkProjection: buildLinkProjection, setLink: setLink, renameValue: renameValue,
-            pictureFor: pictureFor, nameFor: nameFor };
+  var M = { buildLinkProjection: buildLinkProjection, projectLinks: projectLinks, linkDocId: linkDocId,
+            setLink: setLink, renameValue: renameValue, pictureFor: pictureFor, nameFor: nameFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else root.ListUsers = M;
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));
