@@ -893,10 +893,18 @@ function createVueApp() {
                 // discover it can be translated at all), and one who wrote a key must see it or the key
                 // renders raw with nothing on screen saying where to fix it. A perRow tile's caption
                 // comes from a COLUMN, so it is already covered by field.<col> below.
-                (v.stats.tiles || []).forEach(function(t) { if (t && t.label) keys.push(t.label); });
+                // A goal LADDER names its levels ("Bronze"/"Silver"/"Gold"), and those render on the
+                // tile as a badge -- so they are user-visible text and belong here too. A ladder can be
+                // set view-wide, per tile, or on perRow, so all three are swept.
+                var stTier = function(goal) {
+                  if (Array.isArray(goal)) goal.forEach(function(e) { if (e && typeof e === 'object' && e.label) keys.push(e.label); });
+                };
+                stTier(v.stats.goal);
+                (v.stats.tiles || []).forEach(function(t) { if (t && t.label) keys.push(t.label); if (t) stTier(t.goal); });
                 if (v.stats.perRow) {
                   if (v.stats.perRow.label) keys.push('field.' + v.stats.perRow.label);
                   if (v.stats.perRow.value) keys.push('field.' + v.stats.perRow.value);
+                  stTier(v.stats.perRow.goal);
                 }
               }
               (v.columns || []).forEach(function(c) {

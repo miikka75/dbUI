@@ -47,7 +47,7 @@
       "title": "Our Home",
       "description": "A household chore tracker — points, approvals, rewards, a weekly rota and a shopping list.",
       "icon": "./examples/chores-favicon.svg",
-      "revision": 3,
+      "revision": 4,
       "tables": 9,
       "views": 17,
       "schema": {
@@ -60,6 +60,12 @@
           "name": "English",
           "file": "chores-lang-en.json",
           "hash": "fa95c845ac75aa9b"
+        },
+        {
+          "code": "fi",
+          "name": "Suomi",
+          "file": "chores-lang-fi.json",
+          "hash": "e720e51b6dfd2e31"
         }
       ],
       "data": {
