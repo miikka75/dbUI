@@ -63,7 +63,14 @@ schema without touching it. `demo-data.json` plays the same part for the demo.
 > from both publish paths (`hosting.ignore` in `firebase.json`, and the prune step in
 > `.github/workflows/deploy-pages.yml`), so nothing kept there is reachable from a browser — while
 > everything here is served by the deployment itself. The dev server still seeds from these files;
-> `cd dev && npm run seed:import` reads them from here.
+> `cd dev && npm run seed:import` reads them from here (`-- chores` for the household bundle).
+
+**What a bundle may not contain: users.** Accounts, grants, profiles and user-linked-list links are
+per-deployment security data, not portable content. The importer has no branch for them, so adding them
+to a `*-data.json` would be inert — and if it read them, importing an example would become a way to hand
+somebody a grant. `dev/seed-import.js` seeds them through the local dev server's admin API instead,
+which is the one context where that trade is safe. Its `SEED` table is where a bundle's demo family
+lives.
 
 ## Icons
 
