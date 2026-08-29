@@ -90,6 +90,7 @@ function stampedBoundsFor(table) {
 //     SCHEMA/VIEWS so every existing call site (grantFeatureChips, selectedFeatures, canAccess, ...)
 //     stays unchanged. See access-features.js for the full rationale. ---
 function viewRosters(v) { return AccessFeatures.viewRosters(v); }
+function rotationTables(v) { return AccessFeatures.rotationTables(v); }  // every table a rotation READS (all three shapes)
 function viewComputedHelpers(v) { return AccessFeatures.viewComputedHelpers(v); }
 function viewHelperTables(v) { return AccessFeatures.viewHelperTables(v); }
 function viewTables(v) { return AccessFeatures.viewTables(v); }
@@ -1472,7 +1473,7 @@ function createVueApp() {
         // Rotation sources -> generated read-only duty events, bounded to the visible window.
         if (window) this.calRotationSources(name).forEach(function(rs) {
           var v = VIEWS[rs.view]; if (!v || !v.rotation) return;
-          var rv = v.rotation, rosters = rv.rosterRef ? [rv.rosterRef] : (rv.rosters || []);
+          var rv = v.rotation, rosters = viewRosters(v);
           if (rosters.length && !rosters.some(function(t) { return self.canReachTable(t); })) return; // per-roster access (fail-closed)
           var range = self.rangeForView(rs.view);
           var fromStr = (!range.from || range.from === 'today') ? self._calToday() : range.from;
@@ -2120,8 +2121,7 @@ function createVueApp() {
             self.calSources(self.currentTable).forEach(function(s) { if (s && s.table && calTables.indexOf(s.table) < 0) calTables.push(s.table); });
             // Also preload each rotationSource's rosters so generated duty events can resolve.
             self.calRotationSources(self.currentTable).forEach(function(rs) {
-              var rvv = VIEWS[rs.view] && VIEWS[rs.view].rotation;
-              ((rvv && (rvv.rosterRef ? [rvv.rosterRef] : rvv.rosters)) || []).forEach(function(tbl) { if (tbl && calTables.indexOf(tbl) < 0) calTables.push(tbl); });
+              rotationTables(VIEWS[rs.view]).forEach(function(tbl) { if (calTables.indexOf(tbl) < 0) calTables.push(tbl); });
             });
             self._ensureCached(calTables, null, self._viewNeedsArchive(self.currentTable));
             return;
@@ -2136,9 +2136,7 @@ function createVueApp() {
             };
             regen();
             var rvDef = view.rotation;
-            self._ensureCached(rvDef.rosterRef ? [rvDef.rosterRef]
-              : rvDef.rosters ? rvDef.rosters.slice()
-              : (rvDef.columns || []).map(function(c) { return c.rotationTable; }), regen);
+            self._ensureCached(rotationTables(view), regen);
             return;
           }
           // Pivot view: cross-tab of a source table/view. Load the source's table(s) into the reactive
@@ -2744,12 +2742,7 @@ function createVueApp() {
       // so the honest question is whether the viewer may write them.
       writeBaseFor: function(id) {
         var v = VIEWS[id];
-        if (v && v.rotation) {
-          var rv = v.rotation;
-          if (rv.rosterRef) return [rv.rosterRef];
-          return rv.rosters ? rv.rosters.slice()
-            : (rv.columns || []).map(function(c) { return c && c.rotationTable; }).filter(Boolean);
-        }
+        if (v && v.rotation) return rotationTables(v);
         return v ? (v.sources || []) : (SCHEMA[id] ? [id] : []);
       },
       // Shared gate for whether a data cell renders read-only (ownerId defaults to currentTable).
