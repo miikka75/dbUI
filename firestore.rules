@@ -433,6 +433,20 @@ service cloud.firestore {
       // the field from erroring the whole expression, which is what the ternary was guarding against.
       // Note this makes `rosterPublic: true` mean "public row" on its own rather than only on an
       // owner-stamped one; the app stamps the two together (see app-core _createBlankRow).
+      //
+      // WHAT THIS ENFORCES IS THE FLAG, NOT THE TABLE'S POLICY. `privateRoster` is a schema property,
+      // and no mirror of it reaches here -- the stamp is computed on the CLIENT
+      // (`rosterPublic = !privateRoster`, app-core) and `rosterPublic` is in ownerSystemCols(), which
+      // is what lets the app write it at all. So a member writing through the SDK rather than the app
+      // may mark a row they OWN public on a privateRoster table, and this rule will honour it.
+      // Bounded to their own rows -- update still requires `resource.data.owner == myEmail()` -- so it
+      // is self-disclosure, not a way to publish anyone else's submission.
+      //
+      // Verifying the stamp needs the policy mirrored to _meta and checked on create/update. That is
+      // a SIXTH mirror document on the owner-write path, which already spends five of ten: see THE
+      // ACCESS-CALL BUDGET at the top of this file -- do the _meta/rulesMirror merge it prescribes
+      // first. A write-time check would also leave rows already stored as they are, so a table
+      // switched to privateRoster later keeps its existing public rows until they are swept.
       allow read: if base(collection) && (
         noUsers() || role() == 'admin' || hasTableAccess(collection) ||
         resource.data.get('owner', '') == myEmail() ||

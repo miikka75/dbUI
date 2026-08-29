@@ -1248,6 +1248,9 @@ The events live in one table; responses in another that has an **`owner` column*
   *responses* table to make each response readable only by its owner + organizers; otherwise the app
   stamps `rosterPublic: true` on each row so everyone can read it. Rules are schema-blind, so this flag
   must be carried on the rows — the `rosterVisibility` view option alone does not restrict reads.
+  What the rules enforce is the **flag**, not the table's policy; see
+  [What `privateRoster` actually guarantees](#what-privateroster-actually-guarantees) for the limit
+  that puts on it.
 - With owner-scoped reads a non-organizer receives only their own response from the backend, so the
   rendered tally/roster reflects exactly what that user is permitted to see.
 
@@ -1665,6 +1668,39 @@ table — the `rsvp` view is one presentation of it; a plain data grid over an o
   `rosterPublic: true` marks a row public on its own; and a **grantless** member sees only those two
   slices, never a third condition someone might expect to work. Supabase RLS filters rows natively and so
   has no such restriction, but its policy is written to the same shape deliberately.
+
+#### What `privateRoster` actually guarantees
+
+Both rules layers enforce the **flag on the row**. The flag is written by the **client** — app-core
+stamps `rosterPublic = !privateRoster` when it creates the row — and neither layer holds a mirror of
+the table's policy to check that stamp against. `rosterPublic` is also one of the system columns an
+owner may always write (`ownerSystemCols` in firestore.rules, `OWNER_SYSTEM_COLS` in
+backend-helpers.js), on create and on a later update alike, and being listed there is what lets the
+app stamp it at all.
+
+So the honest statement of the guarantee is:
+
+- **`privateRoster` stops the app from publishing your submissions**, which is what it is for and what
+  it does reliably. Every row written through the UI carries the table's policy.
+- It does **not** stop a member from publishing **their own** rows. A client talking to Firestore or
+  Supabase directly — which any signed-in member's browser can do — may write `rosterPublic: true` on
+  a row it owns, and the rules will honour it.
+- The exposure is bounded to rows that member owns. `update` still requires
+  `resource.data.owner == myEmail()`, so nobody can publish anybody else's response, and
+  `selfServiceTable` confines the whole owner branch to tables that declare an `owner` column.
+- **Switching `privateRoster` on later does not retroactively hide existing rows.** They keep the
+  `rosterPublic: true` they were stamped with and stay readable until they are re-saved. This is the
+  mirror image of the note above about rows predating the flag.
+
+Closing the gap means mirroring the table's policy to `_meta` and verifying the stamp at write time.
+That is deliberately not a one-line rule change: the owner-create path already spends five of
+Firestore's ten `get()` calls per request, so a sixth mirror document has to wait for the
+`_meta/rulesMirror` consolidation that *THE ACCESS-CALL BUDGET* comment at the top of firestore.rules
+prescribes. Verifying on write would also not fix rows already stored, so it needs a sweep beside it.
+
+If a submission must be secret from other members regardless of what they can be talked into sending,
+the boundary to reach for is a **table grant** — a table only organizers hold — not this flag. That is
+the same distinction `mineOnly` and `obscureNames` draw: display intent is not a security boundary.
 
 ## Access modes (`r` / `rw`)
 
