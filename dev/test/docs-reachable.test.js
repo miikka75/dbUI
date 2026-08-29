@@ -18,7 +18,7 @@ const README = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 
 // The documents a person is expected to find. Named rather than globbed, so adding a doc is a
 // deliberate act of deciding whether readers are meant to reach it.
-const USER_DOCS = ['FIREBASE.md', 'SUPABASE.md', 'SCHEMA.md', 'BACKEND_API.md', 'examples/README.md'];
+const USER_DOCS = ['FIREBASE.md', 'SUPABASE.md', 'SCHEMA.md', 'BACKEND_API.md', 'ROADMAP.md', 'examples/README.md'];
 
 describe('docs are reachable from the README', () => {
   for (const doc of USER_DOCS) {
@@ -50,7 +50,7 @@ describe('docs are reachable from the README', () => {
 // and the check above could not see them: it strips the #fragment before testing the path, so a link
 // to a real file with a dead heading passes. GitHub renders those as a silent no-op — the reader
 // clicks and stays where they are.
-const DOCS = ['README.md', 'FIREBASE.md', 'SUPABASE.md', 'SCHEMA.md'];
+const DOCS = ['README.md', 'FIREBASE.md', 'SUPABASE.md', 'SCHEMA.md', 'ROADMAP.md'];
 
 // GitHub's heading slug: lowercase, drop punctuation, spaces to dashes. Close enough for our headings,
 // and wrong in the safe direction — an over-strict slug would report a link that actually works, which
