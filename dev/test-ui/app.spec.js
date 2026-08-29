@@ -1534,6 +1534,25 @@ test.describe('Rotation rosters from a 2-D lookup', () => {
     await expect.poll(() => page.evaluate(() => appInstance.rotationSlotCols), { timeout: 6000 })
       .toEqual(['Ann', 'Bob', 'Eve']);
   });
+
+  test('cells resolve their labels through the roster valueCol, so translations reach the matrix', async ({ page }) => {
+    // The slot column ('Ann') is not a schema column, so a cell had no list to resolve against and the
+    // matrix showed raw values -- the one surface a translated vocabulary never reached.
+    const LISTED = JSON.parse(JSON.stringify(DUTY));
+    LISTED.tables.ref_duties.columns[2] = { name: 'task', type: 'select', list: 'duties' };
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: LISTED } });
+    await page.request.post('/api/putListItem', { data: { listName: 'duties', value: 'Wash up' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'ref_duties', tab: 'active',
+      data: { id: 'd1', position: 1, person: 'Ann', task: 'Wash up' } } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => { appInstance.strings['list.duties.Wash up'] = 'Tiskaus'; appInstance.selectTab('rota'); });
+    await expect(page.locator('table tbody')).toContainText('Tiskaus');
+    await expect(page.locator('table tbody')).not.toContainText('Wash up');
+  });
 });
 
 test.describe('v3 nav + pages + tabs layout', () => {
@@ -6089,6 +6108,24 @@ test.describe('obscureNames (privacy)', () => {
     expect(r.empty).toBe('');
     expect(r.disp).toBe('John S.');            // per-view obscuring via displayValue
     expect(r.arr).toBe('Charlie G., Alice B.');      // multiselect: each member obscured then joined
+  });
+
+  test('a namespace override relabels the value but never moves the obscure decision', async ({ page }) => {
+    // Rotation cells resolve their LABEL from the roster's valueCol (the slot is not a schema column,
+    // so its values rendered raw) while `obscureNames` keeps asking about the SLOT -- it means "this
+    // column holds names". Wire those to the same argument and a rotation would quietly stop obscuring.
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.crewrota.obscureNames = true;
+      app.currentTable = 'crewrota';
+      return {
+        withNs: app.displayValue('crew', 'John Smith', 'people'),   // label via `people`, obscure via `crew`
+        nsIsNotASlot: app.displayValue('people', 'John Smith')      // `people` alone is not obscured
+      };
+    });
+    expect(r.withNs).toBe('John S.');
+    expect(r.nsIsNotASlot).toBe('John Smith');
   });
 });
 

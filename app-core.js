@@ -2543,15 +2543,22 @@ function createVueApp() {
         if (!listName) { var v = VIEWS[this.currentTable]; if (v && v.groupBy && typeof v.groupBy === 'object' && v.groupBy.column === col && v.groupBy.from) { for (var i = 0; i < v.groupBy.from.length && !listName; i++) listName = this.colIsList(v.groupBy.from[i]); } }
         return listName;
       },
-      displayValue: function(col, val) {
-        if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x); }).filter(Boolean).join(', '); }
+      // `nsCol` resolves the translation NAMESPACE from a different column than the one being rendered.
+      // A rotation cell is the case that needs it: the column is a SLOT ('Ann'), which is not a schema
+      // column at all, while the values come from the roster's `valueCol` and carry its list. Without
+      // the split the matrix showed raw values -- the one surface where a translated vocabulary did not
+      // reach. Obscuring deliberately still keys on `col`, because `obscureNames` on a rotation asks
+      // "does this COLUMN hold names?", which is a question about the slot, not about the value's origin.
+      displayValue: function(col, val, nsCol) {
+        if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x, nsCol); }).filter(Boolean).join(', '); }
         if (!val) return '';
         var out = val;
         // Translation namespace: a list column uses its list name; a `ref` column uses its lookup TABLE name,
         // so ref-backed values (e.g. a board's 2-D ref lane and its group dimension) localize through the same
         // `list.<ns>.<value>` keys as list values do. Either way it falls back to the raw value.
-        var ns = this.listNameForCol(col);
-        if (!ns && this.colIsRef(col)) { var rf = this.colRef(col); ns = rf && rf.table; }
+        var nsSrc = nsCol || col;
+        var ns = this.listNameForCol(nsSrc);
+        if (!ns && this.colIsRef(nsSrc)) { var rf = this.colRef(nsSrc); ns = rf && rf.table; }
         if (ns) out = this.listLabel(ns, val);
         return this.shouldObscure(col) ? obscureName(out) : out;
       },
@@ -3494,6 +3501,20 @@ function createVueApp() {
         if (rv && rv.rosterRef) return this.tOr('list.' + rv.rosterRef + '.' + col, col);
         return this.tOr('field.' + col, col);
       },
+      // Which column a rotation's cells are read from, and therefore which column's list labels them.
+      // The `columns` form gives each slot its own roster and its own valueCol, so this is per-slot.
+      // `people` is the documented default for both shapes.
+      rotationValueColFor: function(name, slotCol) {
+        var rv = (VIEWS[name] || {}).rotation;
+        if (!rv) return null;
+        if (rv.columns) {
+          for (var i = 0; i < rv.columns.length; i++) {
+            if (rv.columns[i] && rv.columns[i].name === slotCol) return rv.columns[i].valueCol || 'people';
+          }
+          return null;
+        }
+        return rv.valueCol || 'people';
+      },
       rotationColsFor: function(name, rows, cfg) {
         var v = cfg || VIEWS[name];
         var rv = v && v.rotation;
@@ -4000,9 +4021,9 @@ function createVueApp() {
       },
       // The linked user's avatar for a single-select list VALUE, or '' — used to draw a face beside the
       // value while the displayed text stays the value itself. Multiselect (array) values are skipped here.
-      listValuePicture: function(col, value) {
+      listValuePicture: function(col, value, nsCol) {
         if (!value || typeof value !== 'string' || !window.ListUsers) return '';
-        var list = this.listNameForCol(col);   // resolves aggregate group columns too (e.g. piispakunta)
+        var list = this.listNameForCol(nsCol || col);   // resolves aggregate group columns too (e.g. piispakunta)
         if (!list) return '';
         return window.ListUsers.pictureFor(this.listAvatars, list, value);
       },
@@ -5209,7 +5230,7 @@ function createVueApp() {
   var ROOT_PROXY = {
     t: function(k) { return appInstance ? appInstance.t(k) : k; },
     tOr: function(k, f) { return appInstance ? appInstance.tOr(k, f) : f; },
-    displayValue: function(c, v) { return appInstance ? appInstance.displayValue(c, v) : v; },
+    displayValue: function(c, v, n) { return appInstance ? appInstance.displayValue(c, v, n) : v; },
     colIsDate: function(c) { return appInstance ? appInstance.colIsDate(c) : false; },
     colIsImage: function(c) { return appInstance ? appInstance.colIsImage(c) : false; },
     colIsUrl: function(c) { return appInstance ? appInstance.colIsUrl(c) : false; },
@@ -5620,7 +5641,12 @@ function createVueApp() {
   // Shared by all three bodies: `_period` is a generated column, everything else is a slot, and a slot's
   // label depends on which SHAPE the rotation is (schema-named -> field.<slot>; rosterRef -> the
   // lookup's own list.<table>.<value>, the same keys its task values use).
-  var ROT_LABEL = { slotHead: function(col) { return appInstance.rotationSlotLabel(this.view, col); } };
+  var ROT_LABEL = {
+    slotHead: function(col) { return appInstance.rotationSlotLabel(this.view, col); },
+    // The column whose list labels THIS slot's cells (see rotationValueColFor). '' for `_period`,
+    // which is a generated date and has no list behind it.
+    valueNs: function(col) { return col === '_period' ? '' : (appInstance.rotationValueColFor(this.view, col) || ''); }
+  };
 
   app.component('rotation-table', {
     props: ROT_BODY_PROPS,
@@ -5628,7 +5654,7 @@ function createVueApp() {
     template: ''
       + '<v-table density="compact"><template v-slot:default>'
       + '<thead><tr><th v-for="col in cols" :key="col">{{ head(col) }}</th></tr></thead>'
-      + '<tbody><tr v-for="row in rows" :key="row.id"><td v-for="col in cols" :key="col" style="padding:3px 8px"><list-value :col="col" :value="row[col]"></list-value></td></tr></tbody>'
+      + '<tbody><tr v-for="row in rows" :key="row.id"><td v-for="col in cols" :key="col" style="padding:3px 8px"><list-value :col="col" :ns-col="valueNs(col)" :value="row[col]"></list-value></td></tr></tbody>'
       + '</template></v-table>'
   });
 
@@ -5638,7 +5664,7 @@ function createVueApp() {
       + '<div style="display:grid; gap:8px; padding:8px">'
       + '<div v-for="row in rows" :key="row.id" style="padding:8px 12px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:8px">'
       + '<div style="font-weight:600; margin-bottom:4px">{{ toDateStr(row._period) }}</div>'
-      + '<div v-for="col in slotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ slotHead(col) }}: </span><list-value :col="col" :value="row[col]"></list-value></div>'
+      + '<div v-for="col in slotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ slotHead(col) }}: </span><list-value :col="col" :ns-col="valueNs(col)" :value="row[col]"></list-value></div>'
       + '</div></div>'
   });
 
@@ -5648,7 +5674,7 @@ function createVueApp() {
       + '<div style="padding:4px 0">'
       + '<div v-for="row in rows" :key="row.id" style="padding:4px 12px; border-bottom:1px solid rgb(var(--v-theme-outline),0.08); font-size:0.9rem">'
       + '<span style="font-weight:600; margin-right:8px">{{ toDateStr(row._period) }}</span>'
-      + '<span v-for="(col, i) in slotCols" :key="col"><span style="opacity:0.6">{{ slotHead(col) }}: </span><list-value :col="col" :value="row[col]"></list-value><span v-if="i < slotCols.length - 1" style="opacity:0.3"> · </span></span>'
+      + '<span v-for="(col, i) in slotCols" :key="col"><span style="opacity:0.6">{{ slotHead(col) }}: </span><list-value :col="col" :ns-col="valueNs(col)" :value="row[col]"></list-value><span v-if="i < slotCols.length - 1" style="opacity:0.3"> · </span></span>'
       + '</div></div>'
   });
 
@@ -5904,14 +5930,16 @@ function createVueApp() {
   // layout, rotation slots, the pivot axes, and group-card titles. Non-list columns just render their text;
   // dates (and the synthetic _period) pass through toDateStr. Drop-in for `{{ displayValue(col, val) }}`.
   app.component('list-value', {
-    props: { col: { type: String, required: true }, value: {}, size: { type: [Number, String], default: 18 } },
+    props: { col: { type: String, required: true }, value: {}, size: { type: [Number, String], default: 18 },
+             nsCol: { type: String, default: '' } },   // resolve labels/avatars from THIS column's list instead
     computed: {
       items: function() {
         var col = this.col, v = this.value, a = appInstance;
         if (col === '_period' || a.colIsDate(col)) return (v == null || v === '') ? [] : [{ text: a.toDateStr(v), pic: '' }];
         var arr = Array.isArray(v) ? v : ((v == null || v === '') ? [] : [v]);
+        var ns = this.nsCol || '';
         return arr.filter(function(x) { return x != null && x !== ''; }).map(function(x) {
-          return { text: a.displayValue(col, x), pic: a.listValuePicture(col, x) };
+          return { text: a.displayValue(col, x, ns), pic: a.listValuePicture(col, x, ns) };
         });
       }
     },
