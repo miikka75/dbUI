@@ -2679,6 +2679,43 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.bad).toContain('leading underscore is reserved');
     expect(r.good).toBe('');
   });
+
+  // A stats tile naming a column that does not exist reads every row's `undefined` and shows an em
+  // dash forever -- which looks like "no data yet", not like a typo. A stats view has no header row
+  // to look wrong either, so load time is where it has to be said.
+  test('validateSchema names a stats column that resolves to nothing', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = () => window.validateSchema();
+      window.VIEWS.st_tiles = { name: 'st_tiles', sources: ['tasks'], stats: { tiles: [
+        { label: 'Total', agg: 'sum', column: 'noSuchCol' },
+        { label: 'How many', agg: 'count' },                   // count reads no column: nothing to check
+        { label: 'Latest', agg: 'latest', column: 'title' }    // a real column: silent
+      ] } };
+      window.VIEWS.st_prow = { name: 'st_prow', sources: ['tasks'], stats: { perRow: { label: 'alsoMissing', value: 'title' } } };
+      const bad = errs().filter((e) => e.indexOf('st_tiles') >= 0 || e.indexOf('st_prow') >= 0).join(' | ');
+
+      // An AGGREGATE stats view is exempt, for the same reason the data-view column check above skips
+      // one: its rows carry the group key and the aggregate outputs, which no table declares.
+      window.VIEWS.st_agg = { name: 'st_agg', sources: ['tasks'], groupBy: { column: 'status' },
+        stats: { perRow: { label: 'status', value: 'howMany' } } };
+      // ...and a column the VIEW declares itself (a computed) is a real column of its rows.
+      window.VIEWS.st_comp = { name: 'st_comp', sources: ['tasks'],
+        columns: [{ name: 'derived', computed: { fromColumns: ['title'] } }],
+        stats: { tiles: [{ label: 'D', agg: 'latest', column: 'derived' }] } };
+      const quiet = errs().filter((e) => e.indexOf('st_agg') >= 0 || e.indexOf('st_comp') >= 0).join(' | ');
+
+      ['st_tiles', 'st_prow', 'st_agg', 'st_comp'].forEach((n) => delete window.VIEWS[n]);
+      return { bad, quiet };
+    });
+    expect(r.bad).toContain('noSuchCol');
+    expect(r.bad).toContain('tile 0');
+    expect(r.bad).toContain('alsoMissing');
+    expect(r.bad).toContain('perRow.label');
+    expect(r.bad).not.toContain('tile 1');    // count needs no column
+    expect(r.bad).not.toContain('tile 2');    // `title` is a real one
+    expect(r.quiet).toBe('');
+  });
 });
 
 test.describe('v3 page body stored on server', () => {

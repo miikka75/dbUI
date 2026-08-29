@@ -253,12 +253,19 @@ function validateSchema() {
         if (bgv.position !== undefined && ['center', 'top', 'bottom', 'left', 'right', 'top left', 'top right', 'bottom left', 'bottom right'].indexOf(bgv.position) < 0) errors.push('View "' + v + '": `background.position` must be one of center/top/bottom/left/right or a corner pair like "top left"');
       }
     }
+    // Does `col` name something this view's rows will actually carry? Either a column of one of its
+    // sources, or one the view declares itself (a `computed`). Shared by the column check below and by
+    // the stats-tile check further down, so the two cannot disagree about what a column IS.
+    var colInSources = function(col) {
+      return (view.sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].columns && SCHEMA[s].columns[col]; });
+    };
+    var viewDeclaresCol = function(col) {
+      return (view.columns || []).some(function(c) { return !isEmbed(c) && !isViewEmbed(c) && !isText(c) && colName(c) === col; });
+    };
     // Check columns exist in at least one source (skip aggregate views)
     if (!view.groupBy) (view.columns || []).forEach(function(c) {
       if (isEmbed(c) || isViewEmbed(c) || isText(c) || (c && typeof c === 'object' && c.computed)) return;
-      var col = colName(c);
-      var found = (view.sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].columns && SCHEMA[s].columns[col]; });
-      if (!found) errors.push('View "' + v + '": column "' + col + '" not found in sources [' + (view.sources || []).join(', ') + ']');
+      if (!colInSources(colName(c))) errors.push('View "' + v + '": column "' + colName(c) + '" not found in sources [' + (view.sources || []).join(', ') + ']');
     });
     // An explicit `valueCol` must name a real column on the roster table it reads, or every cell
     // silently renders empty (the resolvers fall back to [] for a missing column). Only checked when
@@ -412,9 +419,26 @@ function validateSchema() {
         if (Array.isArray(g)) { stTiersOk(g, where); return; }
         if (typeof g !== 'number' || !(g > 0)) errors.push('stats "' + v + '" ' + where + ': `goal` must be a positive number, an ascending list of levels, or "max"');
       };
+      // A column name that resolves to nothing fails the same silent way a missing one does: the tile
+      // reads every row's `undefined` and shows an em dash forever, which looks like "no data yet".
+      // Every neighbouring check names this class of mistake (`valueCol` is not a column of...), and
+      // a tile is where it is hardest to spot, since a stats view has no header row to look wrong.
+      //
+      // Skipped on an aggregate view, for exactly the reason the data-view column check above skips
+      // one: its rows carry synthetic columns -- the group key, the aggregate outputs -- that no table
+      // declares, so there is nothing here to check them against. That is also the case perRow exists
+      // for, so in practice this catches the explicit-tiles mistakes and stays quiet on leaderboards.
+      var stCol = function(col, where) {
+        if (!col || view.groupBy) return;
+        if (!colInSources(col) && !viewDeclaresCol(col)) {
+          errors.push('stats "' + v + '" ' + where + ': column "' + col + '" not found in sources [' + (view.sources || []).join(', ') + ']');
+        }
+      };
       stGoalOk(st.goal, 'view');
       if (st.perRow) {
         if (!st.perRow.label || !st.perRow.value) errors.push('stats "' + v + '": `perRow` needs both `label` and `value` column names');
+        stCol(st.perRow.label, 'perRow.label');
+        stCol(st.perRow.value, 'perRow.value');
         stGoalOk(st.perRow.goal, 'perRow');
       }
       (st.tiles || []).forEach(function(t, ti) {
@@ -425,6 +449,7 @@ function validateSchema() {
         // Every aggregate but `count` reads a column. Without one they return null and the tile shows
         // an em dash forever, which looks like "no data yet" rather than like a schema mistake.
         else if (ag !== 'count' && !t.column) errors.push('stats "' + v + '" ' + at + ': `' + ag + '` needs a `column`');
+        stCol(t.column, at);
         stGoalOk(t.goal, at);
       });
     }
