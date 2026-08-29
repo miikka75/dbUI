@@ -74,8 +74,9 @@ test('an empty database offers the examples, and installing one fills it', async
   expect(state.example.bundle).toBe('chores');
   expect(Object.keys(state.example.files)).toContain('chores-schema.json');
   expect(Object.keys(state.example.files)).toContain('app-lang-en.json');
-  expect(state.example.units['views/_tree']).toBeTruthy();
-  expect(state.example.units['tables/chore_log/columns/person']).toBeTruthy();
+  // No per-unit fingerprints: they were written for a merge that does not exist yet, and they are the
+  // bulk of this object in a folder config every registered user reads at boot.
+  expect(state.example.units).toBeUndefined();
 });
 
 test('Settings reports an example the deployment has moved on from', async ({ page }) => {

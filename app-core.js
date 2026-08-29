@@ -93,6 +93,13 @@ var FOLDER_CONFIG_EXPORT_EXCLUDE = { mode: true };
 function exportableConfig(appConfig) {
   var out = {};
   Object.keys(appConfig || {}).forEach(function(k) { if (!FOLDER_CONFIG_EXPORT_EXCLUDE[k]) out[k] = appConfig[k]; });
+  // A database installed before the fingerprints were dropped still carries them; they are inert, and
+  // on a real bundle they are ~18 kB of hashes nobody reads. Strip them on the way out rather than
+  // copying them into every export and into whatever database that export is imported to.
+  if (out.example && out.example.units) {
+    out.example = Object.assign({}, out.example);
+    delete out.example.units;
+  }
   return out;
 }
 // Merge imported portable config over the current config, preserving this environment's excluded
@@ -4350,8 +4357,14 @@ function createVueApp() {
             importedAt: new Date().toISOString(),
             // Only the files actually installed: a database that skipped the sample rows must not be
             // told later that the sample rows have changed.
-            files: files.reduce(function(acc, f) { acc[f.file] = f.hash; return acc; }, {}),
-            units: Examples.fingerprint(merged)
+            files: files.reduce(function(acc, f) { acc[f.file] = f.hash; return acc; }, {})
+            // NO `units:` here. Examples.fingerprint(merged) produces one hash per column, view, list
+            // and translation string -- the third point a three-way merge needs, to tell "upstream
+            // changed this" from "you changed this". It was written from the first install so the
+            // merge could arrive without a migration, but nothing reads it yet, and on a real bundle
+            // it is ~18 kB sitting in the folder config that EVERY registered user fetches at boot.
+            // Paying that for a feature that does not exist is the wrong way round: re-enable it here
+            // (the function and its tests are intact) when the merge is actually being built.
           } });
         }).catch(function(err) {
           self.examples.error = String((err && err.message) || err);
