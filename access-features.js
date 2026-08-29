@@ -9,11 +9,30 @@
 (function(root) {
   // Helper tables a view needs beyond its own `sources`: rotation rosters (each independently
   // grantable — its own chip) + computed rotationTable / occurrenceSource targets (satellites).
-  function viewRosters(v) {
+  // THE tables a rotation reads, over all three shapes it can be written in. This is the single place
+  // the shape vocabulary appears: everything that needs to know which tables feed a rotation -- the
+  // access chips below, the calendar overlay's per-roster gate, the row-cache preload, the write gate
+  // -- asks here instead of re-deriving it. `rosterRef` arrived by adding a branch at five separate
+  // call sites, which is precisely the cost that shape was introduced to remove (a new family member
+  // should be a row, not a schema edit); a fourth shape must not cost five more.
+  //
+  //   (a) rosterRef          one 2-D lookup feeds every slot
+  //   (b) slots + rosters    one table per slot
+  //   (c) columns[]          LEGACY per-column rotationTable
+  function rotationTables(v) {
     var rv = v && v.rotation;
     if (!rv) return [];
-    if (rv.rosterRef) return [rv.rosterRef];               // one 2-D lookup feeds every slot
-    return Array.isArray(rv.rosters) ? rv.rosters.slice() : [];
+    if (rv.rosterRef) return [rv.rosterRef];
+    if (rv.rosters) return rv.rosters.slice();
+    return (rv.columns || []).map(function(c) { return c && c.rotationTable; }).filter(Boolean);
+  }
+  // The GRANTABLE subset: shapes (a) and (b), where each roster is a table an admin ticks on its own.
+  // Shape (c)'s targets are satellites instead -- viewComputedHelpers collects them, and widening this
+  // to include them would change what a grant chip materializes.
+  function viewRosters(v) {
+    var rv = v && v.rotation;
+    if (!rv || (!rv.rosterRef && !Array.isArray(rv.rosters))) return [];
+    return rotationTables(v);
   }
   function viewComputedHelpers(v) {
     var out = [];
@@ -172,7 +191,7 @@
   }
 
   var AF = {
-    viewRosters: viewRosters, viewComputedHelpers: viewComputedHelpers, viewHelperTables: viewHelperTables,
+    viewRosters: viewRosters, rotationTables: rotationTables, viewComputedHelpers: viewComputedHelpers, viewHelperTables: viewHelperTables,
     viewTables: viewTables, viewImplicitTables: viewImplicitTables,
     isPureMirror: isPureMirror, satelliteTables: satelliteTables,
     grantFeatures: grantFeatures, featureClosure: featureClosure,

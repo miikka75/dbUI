@@ -357,6 +357,29 @@ describe('Permission features (primary chips + materialized closure)', () => {
     assert.equal(canAccessRotationView('cleaning', views, ['team_a']), true);
     assert.equal(canAccessRotationView('cleaning', views, []), false);            // neither roster -> hidden
   });
+  // rotationTables is THE answer to "which tables feed this rotation", over all three shapes. The
+  // app asks it in four places (the calendar overlay's access gate, two row-cache preloads, the write
+  // gate); each used to re-derive it, and adding `rosterRef` meant adding a branch to each.
+  it('rotationTables covers all three rotation shapes', () => {
+    const AFT = AF.rotationTables;
+    assert.deepEqual(AFT({ rotation: { rosters: ['team_a', 'team_b'] } }), ['team_a', 'team_b']);
+    assert.deepEqual(AFT({ rotation: { rosterRef: 'ref_duties', rosterBy: 'person', valueCol: 'tasks' } }), ['ref_duties']);
+    assert.deepEqual(AFT({ rotation: { columns: [{ name: 'a', rotationTable: 'team_a' }, { name: 'b', rotationTable: 'team_b' }] } }),
+      ['team_a', 'team_b']);
+    // A columns entry with no rotationTable contributes nothing rather than an `undefined` table name
+    // — one preload passed that straight into the row cache before this was in one place.
+    assert.deepEqual(AFT({ rotation: { columns: [{ name: 'a' }, { name: 'b', rotationTable: 'team_b' }] } }), ['team_b']);
+    assert.deepEqual(AFT({ sources: ['todos'] }), []);   // not a rotation at all
+    assert.deepEqual(AFT(null), []);
+  });
+  it('viewRosters is the GRANTABLE subset: shapes (a) and (b), never the legacy per-column one', () => {
+    // Shape (c)'s targets are satellites (viewComputedHelpers grants them); promoting them to chips
+    // would change what an existing grant materializes, so the two answers stay deliberately apart.
+    assert.deepEqual(viewRosters({ rotation: { rosterRef: 'ref_duties' } }), ['ref_duties']);
+    assert.deepEqual(viewRosters({ rotation: { rosters: ['team_a'] } }), ['team_a']);
+    assert.deepEqual(viewRosters({ rotation: { columns: [{ name: 'a', rotationTable: 'team_a' }] } }), []);
+  });
+
   it('team_b coordinator cannot access the team_a table (server-enforced blanking)', () => {
     var allowed = featureClosure('team_b', schema, views);
     assert.equal(allowed.indexOf('team_a'), -1);
