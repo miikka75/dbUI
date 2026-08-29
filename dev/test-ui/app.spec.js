@@ -1445,6 +1445,55 @@ test.describe('Translation keys for view columns', () => {
   });
 });
 
+test.describe('Translatable lists', () => {
+  // A lookup TABLE may be named in `translatableLists`, and then its values become list.<table>.<value>
+  // keys. Two things went wrong with that, both of which look like the feature working.
+  const VOCAB = {
+    defaultLanguage: 'en',
+    translatableLists: ['ref_chores'],
+    tables: {
+      ref_chores: { isLookup: true, columns: [{ name: 'chore', type: 'text' }, { name: 'points', type: 'number' }] },
+      log: { columns: [{ name: 'chore', type: 'ref', table: 'ref_chores', valueCol: 'chore' }] }
+    },
+    views: [{ name: 'logs', sources: ['log'], mode: 'union', columns: ['chore'] }],
+    nav: { items: [{ view: 'logs' }] }
+  };
+
+  async function openWithVocab(page) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: VOCAB } });
+    for (const [id, chore, points] of [['c1', 'Wash up', 2], ['c2', 'Mow the lawn', 5]])
+      await page.request.post('/api/putRow', { data: { tableId: 'ref_chores', data: { id, chore, points }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+  }
+
+  test('the Languages screen loads the vocabularies, wherever you came from', async ({ page }) => {
+    // The values are enumerated out of dataCache, and a lookup is otherwise cached only as a side
+    // effect of some view referencing it -- so which vocabularies you could translate depended on
+    // where you had been. Landing on a view that does NOT touch ref_chores must still offer it.
+    await openWithVocab(page);
+    await page.evaluate(() => appInstance.selectTab('logs'));
+    await page.evaluate(() => appInstance.selectTab('__languages'));
+    await expect.poll(() => page.evaluate(
+      () => appInstance.schemaTranslationKeys.filter((k) => k.startsWith('list.ref_chores.'))
+    ), { timeout: 6000 }).toEqual(['list.ref_chores.Mow the lawn', 'list.ref_chores.Wash up']);
+  });
+
+  test('a number column contributes no values -- only text is translatable', async ({ page }) => {
+    // `points` sits beside `chore` in the same lookup, so sweeping the table offered list.ref_chores.2
+    // and .5 for translation: entries that can only ever sit empty, burying the ones that matter.
+    await openWithVocab(page);
+    await page.evaluate(() => appInstance.selectTab('__languages'));
+    await page.waitForTimeout(500);
+    const keys = await page.evaluate(() => appInstance.schemaTranslationKeys);
+    expect(keys.filter((k) => /^list\.ref_chores\.\d+$/.test(k))).toEqual([]);
+    expect(keys).toContain('field.points');   // the column HEADER is still translatable
+  });
+});
+
 test.describe('v3 nav + pages + tabs layout', () => {
   const V3 = {
     defaultLanguage: 'en',

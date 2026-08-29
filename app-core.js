@@ -14,6 +14,23 @@ function _untranslatableCol(cols, name) {
   return !!(def && typeof def === 'object' && def.hidden);
 }
 
+// Column types whose VALUES are never translatable text. A `field.<col>` HEADER is still wanted for all
+// of them -- "Points" needs a Finnish label like every other column heading -- so this is deliberately a
+// second, narrower predicate rather than a widening of the one above.
+//
+// It exists because opting a lookup TABLE into `translatableLists` sweeps the distinct values of its
+// columns, and ref_chores carries `points` beside `chore`: without this, the Languages editor offered
+// `list.ref_chores.2` and `list.ref_chores.5` for translation. That is the padding-the-editor failure
+// translation-keys.test.js already names, and worse than noise -- a number has no translation, so the
+// entries can only ever sit there empty, hiding the values that do need one.
+var _UNTRANSLATABLE_VALUE_TYPES = { number: 1, date: 1, owner: 1, url: 1, image: 1 };
+function _untranslatableValueCol(cols, name) {
+  if (_untranslatableCol(cols, name)) return true;
+  var def = cols && cols[name];
+  var type = (typeof def === 'string') ? def : (def && def.type);
+  return !!_UNTRANSLATABLE_VALUE_TYPES[type];
+}
+
 // Guard for the /api probes below: skip them on origins where no dev server can exist (see
 // mayHaveLocalServer in index.html), so a static host doesn't log a 405 on every load. Defaults to
 // true if the boot didn't define it, preserving the old always-probe behaviour.
@@ -865,7 +882,7 @@ function createVueApp() {
           // so a 2-D ref lane (its group + value dimensions) is fully translatable via the same list.<name>.<value> keys.
           if (SCHEMA[name]) {
             var rcols = SCHEMA[name].columns || {}, seenv = {};
-            (dc[name] || []).forEach(function(r) { for (var c in r) { if (_untranslatableCol(rcols, c)) continue; var v = r[c]; if (v && !seenv[v]) { seenv[v] = 1; keys.push('list.' + name + '.' + v); } } });
+            (dc[name] || []).forEach(function(r) { for (var c in r) { if (_untranslatableValueCol(rcols, c)) continue; var v = r[c]; if (v && !seenv[v]) { seenv[v] = 1; keys.push('list.' + name + '.' + v); } } });
           }
         });
         var views = schema.views || {};
@@ -1331,6 +1348,7 @@ function createVueApp() {
       selectTab: function(id) {
         this.currentTable = id;
         if (id === '__settings') this.checkExampleUpdates();
+        if (id === '__languages') this._ensureTranslatableLookups();
         if (this.mobile) this.drawerOpen = false;
         this.editingLang = null;
         this.currentRefTable = null;
@@ -4408,6 +4426,22 @@ function createVueApp() {
         }).catch(function(err) {
           self.examples.error = String((err && err.message) || err);
         }).then(function() { self.examples.busy = false; });
+      },
+      // A lookup TABLE named in `translatableLists` has its values enumerated straight out of dataCache
+      // (schemaTranslationKeys), and nothing else guarantees that table is loaded -- a lookup is cached
+      // as a side effect of some view that happens to reference it. So the Languages editor offered the
+      // vocabularies whose tables the home page pulled in and silently omitted the rest: `ref_rewards`
+      // appeared because doc_home embeds reward_shop, `ref_chores` did not. Which values you could
+      // translate depended on where you had been, which is the worst kind of missing -- it looks like
+      // the feature working.
+      //
+      // Declaring a table translatable IS the declaration that its values must be enumerable, so the
+      // Languages screen loads them. Lookup tables are small controlled vocabularies and _ensureCached
+      // is a no-op for the ones already there.
+      _ensureTranslatableLookups: function() {
+        var names = ((this.schemaData && this.schemaData.translatableLists) || [])
+          .filter(function(n) { return SCHEMA[n] && SCHEMA[n].isLookup; });
+        if (names.length) this._ensureCached(names);
       },
       // Has this deployment's examples moved on since one was installed here? Checked when Settings is
       // opened -- the place that answers "is anything out of date?" -- and once per session, by an

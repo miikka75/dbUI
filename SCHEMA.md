@@ -1487,7 +1487,12 @@ lists are open data you would never localize (member names, song titles), so the
    current value of each named list becomes a translation key. Use this for controlled vocabularies you
    want fully localized (status lifecycles, organisations, roles) while leaving open/data lists out. An
    entry may also name a **lookup/ref table** (e.g. a board's 2-D ref-lane table): its distinct cell values
-   across all non-system columns are exposed the same way, so both dimensions of a ref lane are translatable.
+   across all **text-valued** columns are exposed the same way, so both dimensions of a ref lane are
+   translatable. `number`, `date`, `owner`, `url` and `image` columns contribute no values — a chore
+   catalogue's `points` has no translation, and offering `list.ref_chores.2` would only bury the values
+   that do. Their column **headers** (`field.points`) stay translatable like any other.
+   Opening **Languages** loads every lookup table named here, so the vocabularies offered do not depend
+   on which views you happened to visit first.
 
 ```json
 { "defaultLanguage": "Suomi",
