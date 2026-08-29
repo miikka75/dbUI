@@ -1486,11 +1486,19 @@ function createVueApp() {
           var mine = self.mineOnlySlot(v);
           var slots = self.rotationSlotsFor(rv).filter(function(s) { return mine === null || String(s).toLowerCase() === mine; });
           var tag = rs.label || self.tOr('tab.' + rs.view, rs.view);
+          // Slot -> the column whose list labels ITS cells. Both halves of an overlay event's title are
+          // shape-dependent, and both are the rotation view's own question, not the calendar's: a
+          // `rosterRef` slot is a VALUE of the lookup (so `field.<slot>` never matches) and its cells
+          // come from the roster's valueCol (so the slot name resolves no list). Asked through the same
+          // two resolvers the matrix renders with, or the same duties read differently in the two
+          // places the app shows them. Hoisted out of the row loop: it depends only on the view.
+          var slotNs = {};
+          slots.forEach(function(sl) { slotNs[sl] = self.rotationValueColFor(rs.view, sl) || ''; });
           rows.forEach(function(r) {
             if (r._period < window.from || r._period >= window.toExclusive) return; // clip to visible grid
             slots.forEach(function(slot) {
               var ppl = r[slot]; if (!(ppl && ppl.length)) return;
-              var title = self.tOr('field.' + slot, slot) + ': ' + self.displayValue(slot, ppl);
+              var title = self.rotationSlotLabel(rs.view, slot) + ': ' + self.displayValue(slot, ppl, slotNs[slot]);
               (out[r._period] = out[r._period] || []).push({ id: 'rot:' + rs.view + ':' + slot + ':' + r._period, title: title, label: tag, color: self.hashColor(rs.label || rs.view), table: null, readOnly: true, row: r });
             });
           });

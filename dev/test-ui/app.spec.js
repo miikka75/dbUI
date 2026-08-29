@@ -1553,6 +1553,43 @@ test.describe('Rotation rosters from a 2-D lookup', () => {
     await expect(page.locator('table tbody')).toContainText('Tiskaus');
     await expect(page.locator('table tbody')).not.toContainText('Wash up');
   });
+
+  test('a calendar overlaying the same rotation reads it the same way', async ({ page }) => {
+    // The overlay builds its own event titles rather than rendering the matrix's cells, so it had its
+    // own copy of the resolution -- `field.<slot>` for the heading and displayValue with no namespace
+    // for the value. Neither matches a rosterRef rotation, whose slot is a lookup VALUE and whose
+    // cells come from the roster's valueCol. The shipped chores example has exactly this pairing, so
+    // one screen showed translated chores and the other showed raw ones, from the same rows.
+    const WITH_CAL = JSON.parse(JSON.stringify(DUTY));
+    WITH_CAL.tables.ref_duties.columns[2] = { name: 'task', type: 'select', list: 'duties' };
+    WITH_CAL.views.push({
+      name: 'cal', kind: 'calendar',
+      calendar: { sources: [], rotationSources: [{ view: 'rota', label: 'Duties' }], defaultView: 'month' }
+    });
+    WITH_CAL.nav.items.push({ view: 'cal' });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: WITH_CAL } });
+    await page.request.post('/api/putListItem', { data: { listName: 'duties', value: 'Wash up' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'ref_duties', tab: 'active',
+      data: { id: 'd1', position: 1, person: 'Ann', task: 'Wash up' } } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    const titles = await page.evaluate(async () => {
+      appInstance.strings['list.duties.Wash up'] = 'Tiskaus';
+      appInstance.selectTab('cal');
+      await new Promise((r) => setTimeout(r, 600));
+      // Straight from the overlay builder: the grid only draws what this returns.
+      const ev = appInstance.calEventsFor('cal', { from: '2026-08-24', toExclusive: '2026-09-14' });
+      return Object.keys(ev).flatMap((d) => ev[d].map((e) => e.title));
+    });
+    expect(titles.length).toBeGreaterThan(0);
+    expect(titles.join(' | ')).toContain('Tiskaus');       // the value, through the roster's valueCol
+    expect(titles.join(' | ')).not.toContain('Wash up');   // never the raw stored value
+    expect(titles.join(' | ')).toContain('Ann');           // the slot, as the lookup's own value
+    expect(titles.join(' | ')).not.toContain('field.');    // never a raw translation key
+  });
 });
 
 test.describe('v3 nav + pages + tabs layout', () => {
