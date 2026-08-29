@@ -108,6 +108,7 @@
     return (def && typeof def === 'object') ? def.list : null;
   }
   function columnRef(schema, table, col) {
+    if (!table) return colInfo(schema, col).refDef;  // any-table scan -> memoized, exactly like columnList
     var def = schema[table] && schema[table].columns[col];
     return (def && typeof def === 'object' && def.type === 'ref') ? def : null;
   }
@@ -165,7 +166,7 @@
     for (var t in schema) {
       var cols = (schema[t] && schema[t].columns) || {};
       for (var c in cols) {
-        var e = info[c] || (info[c] = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null });
+        var e = info[c] || (info[c] = { list: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null });
         var typ = columnType(schema, t, c), d = cols[c];
         if (typ === 'multiselect') e.multiselect = true;
         if (typ === 'date') e.date = true;
@@ -178,7 +179,11 @@
           // values, which no type name could express -- schemas wanting one had to point a
           // `multiselect` at a lookup table through `list` and lose every ref behaviour on the way.
           if (d.multiple) e.multiselect = true;
-          if (d.type === 'ref') e.ref = true;   // object-only, matching columnRef (a bare 'ref' string is not a ref)
+          // object-only, matching columnRef (a bare 'ref' string is not a ref). The DEF is kept beside
+          // the flag so the any-table lookup is one map read too: `colIsRef` was O(1) here while its
+          // partner `colRef` stayed an O(tables) loop in app-core, and the two are called together on
+          // the per-cell path (displayValue asks "is it a ref?" and then "which table?").
+          if (d.type === 'ref') { e.ref = true; if (e.refDef == null) e.refDef = d; }   // first table wins, as the loop it replaces did
           if (e.list == null && d.list) e.list = d.list;
           if (e.listSwitch == null && d.listSwitch) e.listSwitch = d.listSwitch;
           if (d.allowNew) e.allowNew = true;
@@ -189,7 +194,7 @@
     }
     return info;
   }
-  var _EMPTY = { list: null, listSwitch: null, multiselect: false, date: false, ref: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null };
+  var _EMPTY = { list: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null };
   function colInfo(schema, col) {
     var m = _scanCache && _scanCache.get(schema);
     if (!m) { m = scanSchema(schema); if (_scanCache) _scanCache.set(schema, m); }

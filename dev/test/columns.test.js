@@ -48,6 +48,29 @@ describe('columns.js — image/url column scanners', () => {
     assert.equal(Columns.colPicker(schema, 'nope'), null);
   });
 
+  // columnRef's `null` table is the any-table scan its sibling columnList already had. The point of
+  // pinning it here is the EQUIVALENCE: it must answer exactly what the `for (var t in SCHEMA)` loop
+  // it replaced answered, including first-table-wins, or a ref cell resolves its lookup elsewhere.
+  it('columnRef(schema, null, col) matches the any-table loop it replaces', () => {
+    const s = {
+      events: { columns: { date: { type: 'date' } } },
+      a:      { columns: { link: { type: 'ref', table: 'events', valueCol: 'date' }, plain: 'text' } },
+      b:      { columns: { link: { type: 'ref', table: 'other', valueCol: 'x' } } },
+      other:  { columns: { x: 'text' } }
+    };
+    const loop = (col) => { for (const t in s) { const r = Columns.columnRef(s, t, col); if (r) return r; } return null; };
+    ['link', 'plain', 'date', 'nope'].forEach((col) => assert.deepEqual(Columns.columnRef(s, null, col), loop(col), col));
+    assert.equal(Columns.columnRef(s, null, 'link').table, 'events');   // first table wins, as the loop did
+    assert.equal(Columns.columnRef(s, null, 'plain'), null);            // not a ref -> null, not undefined
+    assert.equal(Columns.columnRef(s, null, 'nope'), null);             // unknown column -> null, no throw
+  });
+
+  it('colIsRef and columnRef(null) agree — they are read together on the per-cell path', () => {
+    const s = { t: { columns: { r: { type: 'ref', table: 'u' }, s: 'ref', n: 'text' } }, u: { columns: { n: 'text' } } };
+    ['r', 's', 'n'].forEach((c) => assert.equal(Columns.colIsRef(s, c), !!Columns.columnRef(s, null, c), c));
+    assert.equal(Columns.colIsRef(s, 's'), false);   // a bare 'ref' STRING is not a ref, in both
+  });
+
   it('tableRefCol finds a table\'s ref column pointing at a target table', () => {
     const s = {
       events: { columns: { date: { type: 'date' } } },

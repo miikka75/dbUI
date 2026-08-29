@@ -2667,7 +2667,10 @@ function createVueApp() {
       colIsRef: function(col) { return Columns.colIsRef(SCHEMA, col); },
       // The `ref` config for a column, found across whichever table declares it (columns aren't view-scoped).
       // Shared by displayValue's ref-translation namespace and the board's 2-D ref lane grouping.
-      colRef: function(col) { for (var t in SCHEMA) { var r = getColumnRef(t, col); if (r) return r; } return null; },
+      // The any-table ref def for a column. `null` table = the memoized scan in columns.js, the same
+      // one colIsList/colIsRef/colIsDate use — this was the last hand-written O(tables) loop of that
+      // family, and it sits on the per-cell path (displayValue, right after the O(1) colIsRef).
+      colRef: function(col) { return getColumnRef(null, col); },
       colIsMirrorForTable: function(col) {
         var table = this.currentTable;
         if (VIEWS[table]) return false;
@@ -2875,8 +2878,7 @@ function createVueApp() {
         return this.colIsRef(col) ? this.getRefOptions(col, item) : this.getListOptions(col);
       },
       getRefOptions: function(col, item) {
-        var ref = null;
-        for (var t in SCHEMA) { ref = getColumnRef(t, col); if (ref) break; }
+        var ref = getColumnRef(null, col);   // memoized any-table scan (see colRef); was the same loop
         if (!ref) return [];
         var rows = this.dataCache[ref.table] || [];
         if (ref.filterBy) {
