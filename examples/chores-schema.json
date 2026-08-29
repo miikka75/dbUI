@@ -391,9 +391,29 @@
         }
       },
       "readonly": true,
-      "icon": "mdi-trophy",
+      "icon": "mdi-medal",
       "includeArchive": true,
-      "kind": "data"
+      "kind": "stats",
+      "stats": {
+        "perRow": {
+          "label": "person",
+          "value": "total"
+        },
+        "goal": [
+          {
+            "at": 10,
+            "label": "text.tier_bronze"
+          },
+          {
+            "at": 20,
+            "label": "text.tier_silver"
+          },
+          {
+            "at": 30,
+            "label": "text.tier_gold"
+          }
+        ]
+      }
     },
     {
       "name": "doc_scoreboard",

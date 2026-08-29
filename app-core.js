@@ -5801,7 +5801,10 @@ function createVueApp() {
         if (t.value == null) return '—';
         if (t.column && typeof t.value !== 'number') return appInstance.displayValue(t.column, t.value);
         return t.value;
-      }
+      },
+      // A rung's name, translatable like a tile label. A ladder authored as bare numbers has no name,
+      // so it shows the threshold reached — which still says which rung is held.
+      tierLabel: function(tier) { return tier.label ? appInstance.tOr(tier.label, tier.label) : tier.at; }
     }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'pa-4\'" data-testid="stats-view">'
@@ -5817,6 +5820,7 @@ function createVueApp() {
       +   '<div style="display:flex;align-items:baseline;gap:6px">'
       +     '<span style="font-size:1.7rem;font-weight:700;line-height:1.1" data-testid="stat-value">{{ fmt(t) }}</span>'
       +     '<span v-if="t.goal !== null" style="font-size:0.8rem;opacity:0.6">/ {{ t.goal }}</span>'
+      +     '<span v-if="t.tier" data-testid="stat-tier" style="font-size:0.68rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;padding:1px 7px;border-radius:10px;background:rgba(var(--v-theme-primary),0.16);color:rgb(var(--v-theme-primary))">{{ tierLabel(t.tier) }}</span>'
       +   '</div>'
       // The bar is drawn only when there is a goal to measure against; a tile without one is a number
       // and gets no empty track suggesting a target nobody set. `over` recolours rather than overflows —

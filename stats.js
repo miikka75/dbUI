@@ -72,6 +72,41 @@
     return Math.round(v * f) / f;
   }
 
+  // --- Tiered goals -------------------------------------------------------------------------------
+  // A `goal` may be a LADDER instead of one number: [100, 200, 300], or with names,
+  // [{at:100,label:"Bronze"}, …]. The bar then measures against the next rung up, so reaching a level
+  // re-targets it at the one after — which is what a points scheme wants, since a fixed goal stops
+  // saying anything the moment it is met.
+  //
+  // The bar runs from ZERO to the next rung, not from the previous rung. "Bar max sets to the next
+  // level" is the literal reading, and it keeps the whole ladder legible: at 250 of 100/200/300 the bar
+  // is 83% of the way up the scheme, not 50% through one band. (Measuring within the band is the other
+  // defensible choice; it is simply not this one.)
+  function normTiers(list) {
+    var out = [];
+    (list || []).forEach(function(e) {
+      var at = num(e && typeof e === 'object' ? e.at : e);
+      if (at === null || !(at > 0)) return;            // validateSchema reports these; skip rather than throw
+      out.push({ at: at, label: (e && typeof e === 'object' && e.label) ? e.label : null });
+    });
+    // Sorted rather than trusted: the resolution below is a scan, so an out-of-order ladder would
+    // otherwise pick a nonsense rung. validateSchema rejects one at load; this keeps the engine total.
+    return out.sort(function(a, b) { return a.at - b.at; });
+  }
+
+  // -> { goal, tier } : the rung being worked toward, and the highest rung actually reached (or null).
+  // Past the top rung the goal STAYS there, so the bar reads full and `over` carries the overshoot —
+  // the same contract a plain numeric goal has.
+  function resolveTiers(value, tiers) {
+    if (!tiers.length) return { goal: null, tier: null };
+    var reached = null, next = null;
+    for (var i = 0; i < tiers.length; i++) {
+      if (tiers[i].at <= value) reached = tiers[i];
+      else if (next === null) next = tiers[i];
+    }
+    return { goal: (next || tiers[tiers.length - 1]).at, tier: reached };
+  }
+
   function build(rows, opts) {
     rows = rows || [];
     opts = opts || {};
@@ -113,8 +148,20 @@
     out.forEach(function(t) { if (typeof t.value === 'number' && t.value > peak) peak = t.value; });
 
     out.forEach(function(t) {
-      var g = t.rawGoal === 'max' ? peak : num(t.rawGoal);
+      var raw = t.rawGoal;
       delete t.rawGoal;
+      t.tier = null;
+      var g;
+      if (Array.isArray(raw)) {
+        // A ladder is per-TILE by nature: on a perRow leaderboard each person is measured against the
+        // rung they are personally working toward, so the bars answer "how close am I to the next
+        // level" rather than "how do I compare". `goal: "max"` is the one that answers the other.
+        var r = resolveTiers(typeof t.value === 'number' ? t.value : -Infinity, normTiers(raw));
+        g = r.goal;
+        t.tier = r.tier;
+      } else {
+        g = raw === 'max' ? peak : num(raw);
+      }
       t.goal = (g && g > 0) ? g : null;
       // A bar is only drawn for a numeric value against a positive goal. `pct` is clamped to 0..100 so
       // the bar cannot overflow its track, and `over` carries the fact that it would have — the two
