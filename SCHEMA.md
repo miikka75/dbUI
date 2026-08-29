@@ -1405,12 +1405,47 @@ The two are mutually exclusive; declaring both is a load-time error.
 |-----|---------|
 | `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals }` |
 | `perRow` | `{ label, value, goal? }` — one tile per row instead |
-| `goal` | Default bar target for every tile: a positive number, or `"max"` (scale to the largest tile — what a leaderboard wants). No goal = no bar, just a number |
+| `goal` | Default bar target for every tile: a positive number, `"max"` (scale to the largest tile), or a **ladder** of levels (below). No goal = no bar, just a number |
 | `display` | `"bar"` (default) or `"number"`. Per-tile, or view-wide as a default |
 | `limit` | `perRow` only: cap the tile count (a top-N board) |
 
 **Aggregates**: `count` (needs no `column`), `sum`, `avg`, `min`, `max`, `latest`. Everything but
 `count` requires a `column`, and says so at load rather than showing an em dash forever.
+
+### Tiered goals (bronze / silver / gold)
+
+A fixed `goal` stops saying anything the moment it is met. A **ladder** re-targets the bar at the next
+level instead:
+
+```json
+"stats": {
+  "perRow": { "label": "person", "value": "total" },
+  "goal": [
+    { "at": 10, "label": "text.tier_bronze" },
+    { "at": 20, "label": "text.tier_silver" },
+    { "at": 30, "label": "text.tier_gold" }
+  ]
+}
+```
+
+Bare numbers work too — `"goal": [10, 20, 30]` — and the level then shows its threshold as its own name.
+Labels are translation keys, falling back to the literal, like tile labels.
+
+At 19 points that tile reads **19 / 20** with a *Bronze* badge and a 95% bar; crossing 20 re-targets it
+at 30 and the badge becomes *Silver*.
+
+- **Levels must ascend.** The level being worked toward is found by scanning, so an out-of-order list
+  would pick a nonsense one. It is a load-time error (the engine sorts defensively anyway).
+- **The bar runs from zero to the next level, not within the band.** At 250 of 100/200/300 it is 83% of
+  the way up the whole scheme, not 50% through one band. Measuring within the band is the other
+  defensible reading and is deliberately not what this does.
+- **Past the top level the goal stays there**, so the bar reads full and `over` carries the overshoot —
+  the same contract a plain numeric goal has.
+- **On `perRow`, each row is measured against the level IT is working toward.** That makes the bars
+  answer *"how close am I to the next level"*, and it means two rows can have different scales — Ann at
+  19/20 beside Cara at 6/10. `goal: "max"` is the one that answers *"how do I compare"* by putting
+  everyone on one scale. Pick per view according to which question the page is asking; the shipped
+  chores scoreboard has one of each, deliberately.
 
 - **`when`** narrows the rows for **one tile**, using the same condition language as `filter`. This is
   what lets "awaiting approval" and "approved this week" be two tiles over one view instead of two views.

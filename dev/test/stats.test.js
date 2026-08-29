@@ -150,3 +150,68 @@ describe('stats.js — defensive', () => {
     assert.equal(s.tiles[0].value, null);
   });
 });
+
+describe('stats.js — tiered goals (bronze / silver / gold)', () => {
+  const TIERS = [{ at: 100, label: 'Bronze' }, { at: 200, label: 'Silver' }, { at: 300, label: 'Gold' }];
+  const at = (v, goal = TIERS) => Stats.build([{ n: v }], { tiles: [{ agg: 'sum', column: 'n', goal }] }).tiles[0];
+
+  it('targets the next rung up, and re-targets once one is reached', () => {
+    assert.equal(at(50).goal, 100);
+    assert.equal(at(100).goal, 200);   // bronze reached -> aim at silver
+    assert.equal(at(200).goal, 300);   // silver reached -> aim at gold
+  });
+
+  it('reports the highest rung actually reached', () => {
+    assert.equal(at(50).tier, null);
+    assert.deepEqual(at(100).tier, { at: 100, label: 'Bronze' });
+    assert.deepEqual(at(250).tier, { at: 200, label: 'Silver' });
+    assert.deepEqual(at(300).tier, { at: 300, label: 'Gold' });
+  });
+
+  it('the bar runs from zero to the next rung, not within the band', () => {
+    // 250 is 83% of the way up a 300-point scheme. The other reading (halfway through the 200-300
+    // band, 50%) is defensible and is deliberately not what this does.
+    assert.equal(at(250).pct, 83);
+    assert.equal(at(150).pct, 75);
+  });
+
+  it('past the top rung the goal stays there and `over` carries the overshoot', () => {
+    assert.equal(at(300).pct, 100);
+    assert.equal(at(300).over, false);
+    assert.equal(at(350).goal, 300);
+    assert.equal(at(350).pct, 100);
+    assert.equal(at(350).over, true);
+    assert.equal(at(350).value, 350);
+  });
+
+  it('bare numbers work as a ladder too — the rung is then its own name', () => {
+    const t = at(150, [100, 200, 300]);
+    assert.deepEqual(t.tier, { at: 100, label: null });
+    assert.equal(t.goal, 200);
+  });
+
+  it('an out-of-order ladder is sorted rather than picking a nonsense rung', () => {
+    // validateSchema rejects this at load; the engine still has to be total.
+    assert.equal(at(150, [300, 100, 200]).goal, 200);
+  });
+
+  it('a non-numeric value sits below every rung', () => {
+    const t = Stats.build([{ d: '2026-08-29' }], { tiles: [{ agg: 'latest', column: 'd', goal: TIERS }] }).tiles[0];
+    assert.equal(t.tier, null);
+    assert.equal(t.pct, null);
+  });
+
+  it('per-row: each row is measured against the rung IT is working toward', () => {
+    // The difference from goal:"max" -- these bars answer "how close am I to the next level", not
+    // "how do I compare to the leader", so two rows can have different scales.
+    const s = Stats.build([{ who: 'Ann', total: 250 }, { who: 'Bob', total: 40 }],
+      { perRow: { label: 'who', value: 'total' }, goal: TIERS });
+    assert.deepEqual(s.tiles.map(t => t.goal), [300, 100]);
+    assert.deepEqual(s.tiles.map(t => t.tier && t.tier.label), ['Silver', null]);
+  });
+
+  it('an empty ladder yields no bar rather than throwing', () => {
+    assert.equal(at(50, []).goal, null);
+    assert.equal(at(50, []).pct, null);
+  });
+});

@@ -356,10 +356,24 @@ function validateSchema() {
       // A goal is either a number to measure against or the string "max" (scale to the largest tile).
       // Any other string is silently treated as "no goal" by the engine, so the bar the author asked
       // for simply never appears.
+      // A ladder ([100,200,300], or [{at,label}]) must ASCEND: the rung being worked toward is found by
+      // scanning, so an out-of-order list picks a nonsense one. The engine sorts defensively; saying so
+      // here is what stops the author wondering why their bar re-targeted the wrong way.
+      var stTiersOk = function(g, where) {
+        if (!g.length) { errors.push('stats "' + v + '" ' + where + ': `goal` list is empty'); return; }
+        var prev = null;
+        g.forEach(function(e, i) {
+          var at = (e && typeof e === 'object' && !Array.isArray(e)) ? e.at : e;
+          if (typeof at !== 'number' || !(at > 0)) { errors.push('stats "' + v + '" ' + where + ': `goal` step ' + i + ' must be a positive number (or { at, label })'); return; }
+          if (prev !== null && at <= prev) errors.push('stats "' + v + '" ' + where + ': `goal` steps must ascend — ' + at + ' comes after ' + prev);
+          prev = at;
+        });
+      };
       var stGoalOk = function(g, where) {
         if (g === undefined || g === null) return;
         if (g === 'max') return;
-        if (typeof g !== 'number' || !(g > 0)) errors.push('stats "' + v + '" ' + where + ': `goal` must be a positive number or "max"');
+        if (Array.isArray(g)) { stTiersOk(g, where); return; }
+        if (typeof g !== 'number' || !(g > 0)) errors.push('stats "' + v + '" ' + where + ': `goal` must be a positive number, an ascending list of levels, or "max"');
       };
       stGoalOk(st.goal, 'view');
       if (st.perRow) {
