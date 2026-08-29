@@ -174,7 +174,7 @@
           "minProperties": 1,
           "maxProperties": 1
         },
-        "privateRoster": { "type": "boolean", "description": "Rows of this response table are not visible to other participants (the rosterPublic default flips)." },
+        "privateRoster": { "type": "boolean", "description": "Rows of this response table are not visible to other participants: the app stamps rosterPublic:false on each row instead of true. The rules enforce that per-row FLAG, not this policy — an owner may still publish a row they own. See \"What privateRoster actually guarantees\" in SCHEMA.md." },
         "partitionLabels": { "$ref": "#/$defs/partitionLabels" }
       }
     },
