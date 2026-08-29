@@ -411,3 +411,9 @@ answer whether the database is in São Paulo or in the tab.
 - `defaultSchema` in app-core.js is minimal empty fallback only
 - All backends implement the same contract — [BACKEND_API.md](BACKEND_API.md) is that contract, and
   `dev/test/backend-conformance.test.js` enforces it
+
+## Roadmap
+
+Features that have been proposed but not built — the candidate view kinds, the column types several of
+them are really waiting on, and what has been declined and why — are in
+**[ROADMAP.md](ROADMAP.md)**, along with the five-step seam every new view kind goes through.
