@@ -2615,6 +2615,33 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.bad).toContain('must be a translation key');    // archive: 3
     expect(r.good).toBe('');
   });
+
+  // A table NAME is a storage identifier. `<table>__<partition>` is the store name everywhere, and
+  // every access layer inverts it by truncating at the first '__' -- so `a__b` shares table `a`'s
+  // grant in Firestore AND in Postgres, and `a__archive` collides with a's archive partition. A
+  // leading underscore hits the other reserve: firestore.rules' base() refuses `^_.*` outright.
+  // Neither shape can be detected downstream -- both look like a table that simply never loads.
+  test('validateSchema refuses a table name that collides with the partition convention', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      window.SCHEMA.a__b = { columns: { title: 'text' } };        // shares table "a"'s grant key
+      window.SCHEMA.tasks__archive = { columns: { title: 'text' } }; // collides with tasks' archive store
+      window.SCHEMA._secret = { columns: { title: 'text' } };     // reserved: the app's own collections
+      const bad = window.validateSchema().join(' | ');
+      delete window.SCHEMA.a__b; delete window.SCHEMA.tasks__archive; delete window.SCHEMA._secret;
+      // control: an ordinary name (underscores INSIDE are fine — ref_chores, list_users) raises nothing
+      window.SCHEMA.ref_ok = { columns: { title: 'text' } };
+      const good = window.validateSchema().filter(e => e.indexOf('ref_ok') >= 0).join(' | ');
+      delete window.SCHEMA.ref_ok;
+      return { bad, good };
+    });
+    expect(r.bad).toContain('"a__b"');
+    expect(r.bad).toContain('"tasks__archive"');
+    expect(r.bad).toContain('may not contain "__"');
+    expect(r.bad).toContain('"_secret"');
+    expect(r.bad).toContain('leading underscore is reserved');
+    expect(r.good).toBe('');
+  });
 });
 
 test.describe('v3 page body stored on server', () => {

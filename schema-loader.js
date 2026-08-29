@@ -131,6 +131,27 @@ function validateSchema() {
   // .test.js) rather than a copy. `schema.schema.json` states the same vocabulary for the author's
   // editor, and schema-meta.test.js holds the two together.
   errors = errors.concat(Columns.vocabularyErrors(SCHEMA));
+  // A table NAME is a storage identifier, not a label. Every partition store is `<table>__<part>`
+  // (BackendHelpers.storeName), and all three access layers invert that by TRUNCATION at the first
+  // `__`: `collection.split('__')[0]` in firestore.rules, `split_part(coll, '__', 1)` in the Postgres
+  // RLS mirror, BackendHelpers.tableOf in JavaScript. Two names therefore fail in ways nothing
+  // downstream can notice:
+  //
+  //   `a__b`        collapses onto table `a`. A grant on `a` silently carries read AND WRITE on `a__b`
+  //                 in Firestore and in Postgres alike -- the grant key is the truncation, so the two
+  //                 tables are one table to every rule. And `a__archive` collides outright with the
+  //                 archive partition of table `a`.
+  //   `_x`          is reserved: the app's own collections are `_meta`, `_users`, `_lists`, `_pages`,
+  //                 `_assets`, `_profiles`, `_list_users`, and firestore.rules' base() refuses
+  //                 `^_.*` wholesale -- so such a table is denied every read and write, with no
+  //                 diagnostic on any layer.
+  //
+  // Checked here because there is nowhere else it could be: table names come from an authored schema
+  // document (there is no create-a-table UI), so load time is the only moment anyone is watching.
+  for (var tn in SCHEMA) {
+    if (tn.indexOf('__') >= 0) errors.push('table "' + tn + '": a table name may not contain "__" — it is the separator between a table and its partition in every store name, so this name collides with another table\'s archive partition and shares its access grant');
+    else if (tn.charAt(0) === '_') errors.push('table "' + tn + '": a leading underscore is reserved for the app\'s own collections (_meta, _users, _lists, _pages, _assets); the access rules refuse such a name outright');
+  }
   // `archiveAfter` is easy to write and easy to have silently do nothing: it needs somewhere to move
   // rows TO (an archivable table) and a clock to measure (`updated_at`, which a columnar backend only
   // persists when the table declares it). Both are load-time detectable, so say so rather than let the

@@ -8,6 +8,35 @@ describe('backend-helpers - storeName', () => {
   it('supports custom partitions', () => assert.equal(H.storeName('music', 'upcoming'), 'music__upcoming'));
 });
 
+describe('backend-helpers - tableOf (the inverse of storeName)', () => {
+  it('drops the partition suffix', () => {
+    assert.equal(H.tableOf('tasks__active'), 'tasks');
+    assert.equal(H.tableOf('tasks__archive'), 'tasks');
+    assert.equal(H.tableOf('music__upcoming'), 'music');
+  });
+  // Callers pass either a store name or a bare table id (dev/server.js takes body.tableId, which is
+  // both depending on the route), so this has to be idempotent rather than assume a suffix is there.
+  it('leaves a bare table name alone, and is idempotent', () => {
+    assert.equal(H.tableOf('tasks'), 'tasks');
+    assert.equal(H.tableOf(H.tableOf('tasks__active')), 'tasks');
+  });
+  it('round-trips storeName for every partition', () => {
+    ['active', 'archive', 'upcoming'].forEach((p) => assert.equal(H.tableOf(H.storeName('tasks', p)), 'tasks'));
+  });
+  it('null/undefined/empty -> empty string, never a throw', () => {
+    assert.equal(H.tableOf(null), '');
+    assert.equal(H.tableOf(undefined), '');
+    assert.equal(H.tableOf(''), '');
+  });
+  // The assumption this function rests on, stated as a test so the reason validateSchema refuses a
+  // '__' in a table name is recorded where the truncation lives: `x__y` is INDISTINGUISHABLE from
+  // table `x`, which is why the name is rejected at load rather than mishandled here.
+  it('truncates at the FIRST separator — which is why a table name may not contain one', () => {
+    assert.equal(H.tableOf('x__y__active'), 'x');
+    assert.equal(H.tableOf('x__archive'), 'x');
+  });
+});
+
 describe('backend-helpers - deriveHeaders', () => {
   it('keys of first row', () => assert.deepEqual(H.deriveHeaders([{ id: 'a', name: 'x' }]), ['id', 'name']));
   it('empty array -> []', () => assert.deepEqual(H.deriveHeaders([]), []));
