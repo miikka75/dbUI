@@ -62,6 +62,9 @@ describe('Union view data access', () => {
     for (const [name, view] of Object.entries(VIEWS)) {
       if (!Array.isArray(view.sources)) continue; // only data views have sources+columns (skip doc/calendar/rotation)
       if (view.groupBy && (view.collect || view.aggregate)) continue; // aggregate views have computed output columns (collect Nth values, or count/sum `into`)
+      // A stats view carries `sources` but renders TILES, not columns — there is no column list to check
+      // (and iterating a missing one threw rather than reporting anything).
+      if (!Array.isArray(view.columns)) continue;
       for (const col of view.columns) {
         if (typeof col === 'object' && col.view) continue; // named-view embed
         if (typeof col === 'object' && col.sources && !col.name) continue; // inline embed

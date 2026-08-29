@@ -121,7 +121,13 @@ describe('migrations — every schema shipped in this repo survives it', () => {
       Migrations.eachView(schema.views, (v) => { if (v.name) after.push([v.name, v.kind]); });
       assert.deepEqual(after, before, 'migrating changed what a view is');
 
-      const KNOWN = ['calendar', 'rotation', 'pivot', 'rsvp', 'board', 'page', 'data'];
+      // Read from the published vocabulary rather than a literal. A hand-written copy here lags
+      // silently -- this one had gone two kinds stale ('form' and 'group' were both missing) without
+      // failing, because no shipped schema happened to use them, so it would only have started
+      // reporting on the day someone added one. view-kind.test.js already holds this enum equal to
+      // what Migrations.kindOf can return, which makes it the one list worth reading.
+      const KNOWN = JSON.parse(fs.readFileSync(path.join(ROOT, 'schema.schema.json'), 'utf8'))
+        .$defs.view.properties.kind.enum;
       for (const [name, kind] of after) {
         assert.ok(KNOWN.includes(kind), name + ' migrated to an unknown kind: ' + kind);
       }

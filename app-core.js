@@ -373,6 +373,7 @@ function createVueApp() {
       isRsvpView: function() { return this.currentKind === 'rsvp'; },
       isBoardView: function() { return this.currentKind === 'board'; },
       isFormView: function() { return this.currentKind === 'form'; },
+      isStatsView: function() { return this.currentKind === 'stats'; },
       // Curated palette tokens exposed in the admin theme editor (Vuetify color names + friendly labels).
       themeTokens: function() {
         return [
@@ -813,6 +814,7 @@ function createVueApp() {
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
          'pivot.total', 'pivot.empty',
+         'stats.empty',
          'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.edit', 'board.archive', 'board.delete', 'board.confirm_delete',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
@@ -884,6 +886,19 @@ function createVueApp() {
                 if (v.pivot.column) keys.push('field.' + v.pivot.column);
               }
               if (v.groupBy && v.groupBy.column) keys.push('field.' + v.groupBy.column);  // aggregate/leaderboard group column
+              if (v.stats) {                                                         // stats: tile captions are authored, not column-derived
+                // An explicit tile's `label` is the ONLY user-visible string in this kind, and it is
+                // resolved with tOr -- so a key works and prose works. Collect it either way: an author
+                // who wrote prose still sees it offered in the Languages editor (which is how they
+                // discover it can be translated at all), and one who wrote a key must see it or the key
+                // renders raw with nothing on screen saying where to fix it. A perRow tile's caption
+                // comes from a COLUMN, so it is already covered by field.<col> below.
+                (v.stats.tiles || []).forEach(function(t) { if (t && t.label) keys.push(t.label); });
+                if (v.stats.perRow) {
+                  if (v.stats.perRow.label) keys.push('field.' + v.stats.perRow.label);
+                  if (v.stats.perRow.value) keys.push('field.' + v.stats.perRow.value);
+                }
+              }
               (v.columns || []).forEach(function(c) {
                 if (typeof c !== 'object') { keys.push('field.' + c); return; }          // plain column name
                 if (c.sources && c.columns) {                                            // inline embed
@@ -1318,7 +1333,7 @@ function createVueApp() {
         this.sortCol = cfg.defaultSort || null;
         this.sortAsc = true;
         if (this.isCalendarView || this.isPivotView || this.isRsvpView || this.isFormView) { this.loadTableData(); }
-        else if (this.isDataView || this.isRotationView || this.isBoardView) { this.periodOffset = 0; this.loadTableData(); }
+        else if (this.isDataView || this.isRotationView || this.isBoardView || this.isStatsView) { this.periodOffset = 0; this.loadTableData(); }
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
       // --- Calendar helpers (used by the calendar view + calendar embeds) ---
@@ -1471,6 +1486,22 @@ function createVueApp() {
         return Pivot.build(rows, p);
       },
       isRsvpName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'rsvp'; },
+      isStatsName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'stats'; },
+      // KPI tiles for a stats view. Unlike pivot/rsvp there is no separate source config to resolve: a
+      // stats view IS a data view -- same sources/filter/groupBy/aggregate/compute -- with a different
+      // renderer, so the rows come from the pipeline that already ran.
+      //
+      // Which pipeline depends on WHERE it is rendered, and both readings are the right one:
+      //   top-level  -> currentData, the rows loadTableData just built. That is what carries the `period`
+      //                 back-offset, so the ‹ › navigation the header already shows (hasPeriodNav only
+      //                 tests `view.period`) actually moves the tiles.
+      //   embedded   -> embedRows, the same path every other {{view:x}} embed takes. currentData belongs
+      //                 to the page being viewed, which for an embed is somebody else entirely.
+      statsFor: function(name) {
+        var v = VIEWS[name]; if (!v || !v.stats) return { tiles: [] };
+        var rows = (name === this.currentTable && !this.viewingArchive) ? (this.currentData || []) : this.embedRows('view', name);
+        return Stats.build(rows, v.stats);
+      },
       // A doc-view (markdown page). Embedding one inside another page (`{{view:x}}`) renders its
       // ACCESS-GATED server body -- see embed-view's doc branch: it hides the block via canAccessPage
       // and pulls pageCache (loadPage, server-filtered) rather than the world-readable schema seed.
@@ -5168,9 +5199,10 @@ function createVueApp() {
       isRot: function() { return this.type === 'view' && !!(appInstance && appInstance.isRotationName(this.name)); },
       isPiv: function() { return this.type === 'view' && !!(appInstance && appInstance.isPivotName(this.name)); },
       isRsvp: function() { return this.type === 'view' && !!(appInstance && appInstance.isRsvpName(this.name)); },
+      isStats: function() { return this.type === 'view' && !!(appInstance && appInstance.isStatsName(this.name)); },
       // A doc-view embedded inside another page (only via the no-spec page path; the spec path pre-tags kind='doc').
       isDoc: function() { return !this.spec && this.type === 'view' && !!(appInstance && appInstance.isDocViewName(this.name)); },
-      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : this.isRsvp ? 'rsvp' : this.isDoc ? 'doc' : 'data'); },
+      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : this.isRsvp ? 'rsvp' : this.isStats ? 'stats' : this.isDoc ? 'doc' : 'data'); },
       // Render blocks for a doc embed. Spec path carries its own blocks (built from the schema seed by
       // resolveEmbed); the page path builds them here from the ACCESS-GATED body: hidden entirely unless
       // canAccessPage passes, then the server-filtered pageCache body (seed only as a pre-load fallback).
@@ -5261,6 +5293,7 @@ function createVueApp() {
       + '<rotation-view v-else-if="kind===\'rotation\'" :name="calName" :embed="true"></rotation-view>'
       + '<pivot-view v-else-if="kind===\'pivot\'" :name="calName" :embed="true"></pivot-view>'
       + '<rsvp-view v-else-if="kind===\'rsvp\'" :name="calName" :embed="true"></rsvp-view>'
+      + '<stats-view v-else-if="kind===\'stats\'" :name="calName" :embed="true"></stats-view>'
       + '<template v-else-if="kind===\'doc\'">'
       + '<div v-if="canEditDoc" class="d-flex align-center"><v-spacer></v-spacer>'
       + '<v-btn size="x-small" variant="text" density="comfortable" :icon="editing ? \'mdi-eye\' : \'mdi-pencil\'" :title="editing ? t(\'btn.preview\') : t(\'btn.edit\')" @click="toggleDocEdit()" data-testid="doc-edit"></v-btn>'
@@ -5451,7 +5484,7 @@ function createVueApp() {
   // Top-level view-kind registry: kind -> the component that renders that whole view. Every kind is
   // componentized; the top-level dispatch is a single <component :is="viewComponent"> lookup in ui.html.
   window.VIEW_KINDS = {
-    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', form: 'form-view', page: 'page-view', data: 'data-view',
+    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', form: 'form-view', stats: 'stats-view', page: 'page-view', data: 'data-view',
     languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view'   // system screens
   };
 
@@ -5737,6 +5770,61 @@ function createVueApp() {
       + '<td style="text-align:center;font-weight:800">{{ grid.grandTotal }}</td>'
       + '</tr></tfoot>'
       + '</template></v-table>'
+      + '</component>'
+  });
+
+  // Stats view: the aggregate pipeline's output as headline numbers instead of a table. Same two input
+  // modes every other kind has -- top-level (no props) or embedded ({{view:x}} passes :name + :embed) --
+  // and no local state, because a tile has nothing to interact with. Read-only by nature: there is no
+  // row to edit, only a number derived from rows that are edited somewhere else.
+  app.component('stats-view', {
+    props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    computed: {
+      a: function() { return appInstance; },
+      viewName: function() { return this.name || appInstance.currentTable; },
+      tiles: function() { return appInstance.statsFor(this.viewName).tiles || []; },
+      // perRow tiles are a leaderboard: one per row, so they stack full-width and stay readable at any
+      // count. Explicit `tiles` are a scorecard: a handful of them, side by side. Same component, and
+      // the difference is a single grid-template rather than two templates to keep in step.
+      perRow: function() { return !!((VIEWS[this.viewName] || {}).stats || {}).perRow; },
+      gridStyle: function() {
+        return this.perRow
+          ? 'display:grid;grid-template-columns:1fr;gap:10px'
+          : 'display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px';
+      }
+    },
+    methods: Object.assign({}, ROOT_PROXY, {
+      // A tile's number, formatted the way the same value would render in a cell: a `latest` tile over a
+      // date column should read like that date, not like an ISO string, and a list-backed column should
+      // show its label. Numbers with no column behind them (count, or a perRow total) pass through.
+      fmt: function(t) {
+        if (t.value == null) return '—';
+        if (t.column && typeof t.value !== 'number') return appInstance.displayValue(t.column, t.value);
+        return t.value;
+      }
+    }),
+    template: ''
+      + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'pa-4\'" data-testid="stats-view">'
+      + '<div :style="gridStyle">'
+      + '<div v-for="(t, i) in tiles" :key="i" data-testid="stat-tile" style="padding:10px 12px;border:1px solid rgb(var(--v-theme-outline),0.25);border-radius:8px">'
+      // perRow labels come from a COLUMN, so they route through list-value for the same display text
+      // (and linked-user avatar) the pivot axes and the grid cells give that column. An explicit tile's
+      // label is authored prose and is printed as written.
+      +   '<div style="font-size:0.72rem;opacity:0.7;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px">'
+      +     '<list-value v-if="t.labelCol" :col="t.labelCol" :value="t.label"></list-value>'
+      +     '<span v-else>{{ tOr(t.label, t.label) }}</span>'
+      +   '</div>'
+      +   '<div style="display:flex;align-items:baseline;gap:6px">'
+      +     '<span style="font-size:1.7rem;font-weight:700;line-height:1.1" data-testid="stat-value">{{ fmt(t) }}</span>'
+      +     '<span v-if="t.goal !== null" style="font-size:0.8rem;opacity:0.6">/ {{ t.goal }}</span>'
+      +   '</div>'
+      // The bar is drawn only when there is a goal to measure against; a tile without one is a number
+      // and gets no empty track suggesting a target nobody set. `over` recolours rather than overflows —
+      // pct is already clamped, so a 138%-of-goal tile shows a full bar plus its real number above it.
+      +   '<v-progress-linear v-if="t.display === \'bar\' && t.pct !== null" :model-value="t.pct" :color="t.over ? \'success\' : \'primary\'" height="6" rounded class="mt-2" data-testid="stat-bar"></v-progress-linear>'
+      + '</div>'
+      + '<div v-if="!tiles.length" style="opacity:0.6;font-size:0.85rem;padding:8px">{{ a.t(\'stats.empty\') }}</div>'
+      + '</div>'
       + '</component>'
   });
 

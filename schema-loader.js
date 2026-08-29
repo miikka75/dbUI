@@ -344,6 +344,39 @@ function validateSchema() {
       }
       (bd.laneGroups || []).forEach(function(g) { if (!g || !Array.isArray(g.lanes)) errors.push('board "' + v + '" laneGroups entries need a `lanes` array'); });
     }
+    // Stats view: every mistake here renders a tile showing nothing, or a bar with no track, and the
+    // view still "works" -- which is exactly the class of silent failure the rest of this function
+    // exists for. A stats view is a data view plus a render config, so its sources/filter/aggregate are
+    // already checked by the data-view rules above; what is checked here is only the `stats` object.
+    if (view.stats) {
+      var st = view.stats;
+      var stAggs = ['count', 'sum', 'avg', 'min', 'max', 'latest'];
+      if (st.perRow && st.tiles) errors.push('stats "' + v + '": use `perRow` OR `tiles`, not both');
+      else if (!st.perRow && !Array.isArray(st.tiles)) errors.push('stats "' + v + '" needs `tiles` (an array) or `perRow`');
+      // A goal is either a number to measure against or the string "max" (scale to the largest tile).
+      // Any other string is silently treated as "no goal" by the engine, so the bar the author asked
+      // for simply never appears.
+      var stGoalOk = function(g, where) {
+        if (g === undefined || g === null) return;
+        if (g === 'max') return;
+        if (typeof g !== 'number' || !(g > 0)) errors.push('stats "' + v + '" ' + where + ': `goal` must be a positive number or "max"');
+      };
+      stGoalOk(st.goal, 'view');
+      if (st.perRow) {
+        if (!st.perRow.label || !st.perRow.value) errors.push('stats "' + v + '": `perRow` needs both `label` and `value` column names');
+        stGoalOk(st.perRow.goal, 'perRow');
+      }
+      (st.tiles || []).forEach(function(t, ti) {
+        var at = 'tile ' + ti;
+        if (!t || typeof t !== 'object') { errors.push('stats "' + v + '" ' + at + ' must be an object'); return; }
+        var ag = t.agg || 'count';
+        if (stAggs.indexOf(ag) < 0) errors.push('stats "' + v + '" ' + at + ': unknown agg "' + ag + '" (' + stAggs.join('/') + ')');
+        // Every aggregate but `count` reads a column. Without one they return null and the tile shows
+        // an em dash forever, which looks like "no data yet" rather than like a schema mistake.
+        else if (ag !== 'count' && !t.column) errors.push('stats "' + v + '" ' + at + ': `' + ag + '` needs a `column`');
+        stGoalOk(t.goal, at);
+      });
+    }
   }
   // Check list references
   for (var t2 in SCHEMA) { for (var c2 in SCHEMA[t2].columns) {
