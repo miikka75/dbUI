@@ -1455,6 +1455,9 @@ function createVueApp() {
       // given, rotationSources' generated duties are added (bounded to that window).
       calEventsFor: function(name, window) {
         var self = this, out = {};
+        // The calendar being drawn, for obscureNames. Named rather than left to default: this builder
+        // runs for an embedded calendar too, where the current screen is the page it sits on.
+        var calCfg = VIEWS[name] || null;
         this.calSources(name).forEach(function(s) {
           if (!s || !s.table || !s.dateColumn) return;
           // Reachability, not a bare grant: the calendar is in this member's nav BECAUSE one of its
@@ -1463,7 +1466,7 @@ function createVueApp() {
           var rows = filterRows(self.dataCache[s.table] || [], self.resolveMeTokens(s.filter));
           var tag = s.label || self.t('tab.' + s.table);
           rows.forEach(function(r) {
-            var title = (s.titleColumns || []).map(function(c) { return self.displayValue(c, r[c]); }).filter(Boolean).join(' — ');
+            var title = (s.titleColumns || []).map(function(c) { return self.displayValue(c, r[c], '', calCfg); }).filter(Boolean).join(' — ');
             var ev = { id: s.table + ':' + s.dateColumn + ':' + r.id, title: title || tag, label: tag, color: self.hashColor(s.label || s.table), table: s.table, dateCol: s.dateColumn, row: r };
             var d = toDateStr(r[s.dateColumn]);
             var key = d || '__undated__';
@@ -1498,7 +1501,7 @@ function createVueApp() {
             if (r._period < window.from || r._period >= window.toExclusive) return; // clip to visible grid
             slots.forEach(function(slot) {
               var ppl = r[slot]; if (!(ppl && ppl.length)) return;
-              var title = self.rotationSlotLabel(rs.view, slot) + ': ' + self.displayValue(slot, ppl, slotNs[slot]);
+              var title = self.rotationSlotLabel(rs.view, slot) + ': ' + self.displayValue(slot, ppl, slotNs[slot], v);
               (out[r._period] = out[r._period] || []).push({ id: 'rot:' + rs.view + ':' + slot + ':' + r._period, title: title, label: tag, color: self.hashColor(rs.label || rs.view), table: null, readOnly: true, row: r });
             });
           });
@@ -2555,8 +2558,14 @@ function createVueApp() {
       // the split the matrix showed raw values -- the one surface where a translated vocabulary did not
       // reach. Obscuring deliberately still keys on `col`, because `obscureNames` on a rotation asks
       // "does this COLUMN hold names?", which is a question about the slot, not about the value's origin.
-      displayValue: function(col, val, nsCol) {
-        if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x, nsCol); }).filter(Boolean).join(', '); }
+      // `viewCfg` is the view whose `obscureNames` governs this rendering. It defaults to the CURRENT
+      // view, which is right for the top-level grid and wrong everywhere else: an embedded view and a
+      // calendar's rotation overlay both render one view's rows inside another view's screen, and
+      // `currentTable` names the host. So a view that asked for abbreviated names printed them in full
+      // the moment it was embedded, and the host's own obscureNames array reached across into columns
+      // it was never written for.
+      displayValue: function(col, val, nsCol, viewCfg) {
+        if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x, nsCol, viewCfg); }).filter(Boolean).join(', '); }
         if (!val) return '';
         var out = val;
         // Translation namespace: a list column uses its list name; a `ref` column uses its lookup TABLE name,
@@ -2566,7 +2575,7 @@ function createVueApp() {
         var ns = this.listNameForCol(nsSrc);
         if (!ns && this.colIsRef(nsSrc)) { var rf = this.colRef(nsSrc); ns = rf && rf.table; }
         if (ns) out = this.listLabel(ns, val);
-        return this.shouldObscure(col) ? obscureName(out) : out;
+        return this.shouldObscure(col, viewCfg) ? obscureName(out) : out;
       },
       // THE label for a list value in namespace `ns`, in precedence order:
       //
@@ -2588,10 +2597,15 @@ function createVueApp() {
         var translated = this.t(key);
         return translated !== key ? translated : val;
       },
-      // Whether the CURRENT view obscures person names in `col`. obscureNames: true = all list/multiselect
+      // Whether a view obscures person names in `col`. obscureNames: true = all list/multiselect
       // columns (or all area columns for a rotationView); an array = exactly those columns. Display-only.
-      shouldObscure: function(col) {
-        var v = VIEWS[this.currentTable];
+      //
+      // Takes the view CONFIG rather than looking one up, because the caller is the only one who knows
+      // which view is being rendered: an inline embed carries its own config and has no name at all.
+      // Falls back to the current view for the top-level screens, which is every caller that has no
+      // other view in play.
+      shouldObscure: function(col, viewCfg) {
+        var v = viewCfg || VIEWS[this.currentTable];
         if (!v || !v.obscureNames) return false;
         if (Array.isArray(v.obscureNames)) return v.obscureNames.indexOf(col) >= 0;
         if (v.rotation) { return this.rotationSlotsFor(v.rotation).indexOf(col) >= 0; }
@@ -5233,7 +5247,7 @@ function createVueApp() {
   var ROOT_PROXY = {
     t: function(k) { return appInstance ? appInstance.t(k) : k; },
     tOr: function(k, f) { return appInstance ? appInstance.tOr(k, f) : f; },
-    displayValue: function(c, v, n) { return appInstance ? appInstance.displayValue(c, v, n) : v; },
+    displayValue: function(c, v, n, vc) { return appInstance ? appInstance.displayValue(c, v, n, vc) : v; },
     colIsDate: function(c) { return appInstance ? appInstance.colIsDate(c) : false; },
     colIsImage: function(c) { return appInstance ? appInstance.colIsImage(c) : false; },
     colIsUrl: function(c) { return appInstance ? appInstance.colIsUrl(c) : false; },
@@ -5281,6 +5295,15 @@ function createVueApp() {
       }
     },
     computed: {
+      // The view whose `obscureNames` governs THIS embed's cells. An inline embed (`{sources,columns}`
+      // in a column list) carries its own config and has no name to look up; a `{{view:x}}` embed is
+      // governed by view x; a `{{table:x}}` embed by the table, which answers the same presentation
+      // properties a view does. What it is NOT is the page the embed sits on -- which is exactly what
+      // displayValue assumed before it could be told otherwise.
+      obscureCfg: function() {
+        if (this.spec) return this.spec.config || null;
+        return (this.type === 'view' ? VIEWS[this.name] : SCHEMA[this.name]) || null;
+      },
       isCal: function() { return this.type === 'view' && !!(appInstance && appInstance.isCalendarName(this.name)); },
       isRot: function() { return this.type === 'view' && !!(appInstance && appInstance.isRotationName(this.name)); },
       isPiv: function() { return this.type === 'view' && !!(appInstance && appInstance.isPivotName(this.name)); },
@@ -5396,13 +5419,13 @@ function createVueApp() {
       + '<template v-if="spec.inlineBlocks" v-for="(blk, bi) in spec.inlineBlocks" :key="\'ib\'+bi">'
       + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
       + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
+      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]" :view-cfg="obscureCfg"></list-value></td></tr></tbody></table>'
       + '</template>'
       + '<template v-else>'
       + '<div v-if="header" style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t(\'tab.\' + spec.config.table) || spec.config.table }} ({{ rows.length }})</div>'
       + '<table v-if="roLayout===\'table\'" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]"></list-value></td></tr></tbody></table>'
-      + '<div v-else-if="roLayout===\'card\'" style="display:grid; gap:6px"><div v-for="er in rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in colsFor(er)" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span><list-value :col="ec" :value="er[ec]"></list-value></span></div></div>'
+      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]" :view-cfg="obscureCfg"></list-value></td></tr></tbody></table>'
+      + '<div v-else-if="roLayout===\'card\'" style="display:grid; gap:6px"><div v-for="er in rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in colsFor(er)" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span><list-value :col="ec" :value="er[ec]" :view-cfg="obscureCfg"></list-value></span></div></div>'
       + '<div v-else class="d-flex align-center flex-wrap ga-1"><v-chip v-for="er in rows" :key="er.id" size="small" variant="tonal" color="secondary" label><span v-for="(ec, i) in colsFor(er)" :key="ec">{{ er[ec] }}<span v-if="i < colsFor(er).length - 1" style="opacity:0.4"> · </span></span></v-chip></div>'
       + '</template>'
       + '</template>'
@@ -5415,12 +5438,12 @@ function createVueApp() {
       + '</v-tabs>'
       + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
       + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
-      + '<template v-slot:default><span v-for="(col, i) in colsFor(item)" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]"></list-value><span v-if="i < colsFor(item).length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
+      + '<template v-slot:default><span v-for="(col, i) in colsFor(item)" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]" :view-cfg="obscureCfg"></list-value><span v-if="i < colsFor(item).length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
       + '<template v-slot:append><template v-if="canMutateRow(item)"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></template></template>'
       + '</v-list-item></v-list>'
       + '<div v-else-if="layout===\'card\'" class="my-2">'
       + '<v-card v-for="(item, ri) in rows" :key="item.id || ri" variant="flat" class="ma-2 pa-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">'
-      + '<div v-for="col in colsFor(item)" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8"><list-value :col="col" :value="item[col]"></list-value></span></div>'
+      + '<div v-for="col in colsFor(item)" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8"><list-value :col="col" :value="item[col]" :view-cfg="obscureCfg"></list-value></span></div>'
       + '<div v-if="canMutateRow(item)" style="text-align:right"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></div>'
       + '</v-card></div>'
       + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
@@ -5506,15 +5529,21 @@ function createVueApp() {
     data: function() { return { uploading: false, uploadErr: '' }; },
     // An upload button appears whenever the file can be stored SOMEWHERE — a blob store, or the _assets
     // table via putRow. Only a backend that can do neither falls back to the paste-a-URL field.
-    computed: { canUpload: function() { return appInstance.canUploadFiles() || !!(typeof backend !== 'undefined' && backend && backend.putRow); } },
+    computed: {
+      canUpload: function() { return appInstance.canUploadFiles() || !!(typeof backend !== 'undefined' && backend && backend.putRow); },
+      // `owner` already names the view or table this cell belongs to -- an embed passes its own name --
+      // so the config governing obscureNames is there for the asking, rather than defaulting to
+      // whatever screen is open. Same rule as currentConfig: a VIEW and a TABLE occupy one position.
+      ownerCfg: function() { return this.owner ? (VIEWS[this.owner] || SCHEMA[this.owner] || null) : null; }
+    },
     template: ''
       + '<span v-if="cellRO(item, col)" :style="{ opacity: embed ? 0.4 : 0.75 }">'
       +   '<img v-if="colIsImage(col) && item[col] && isAsset(item[col])" :src="imgSrc(item[col])" class="cell-thumb" alt="">'
       +   '<a v-else-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="imgSrc(item[col])" class="cell-thumb" alt=""></a>'
       +   '<a v-else-if="colIsUrl(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop>{{ item[col] }}</a>'
-      +   '<template v-else><list-value :col="col" :value="item[col]"></list-value></template>'
+      +   '<template v-else><list-value :col="col" :value="item[col]" :view-cfg="ownerCfg"></list-value></template>'
       + '</span>'
-      + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82"><list-value :col="col" :value="item[col]"></list-value></span>'
+      + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82"><list-value :col="col" :value="item[col]" :view-cfg="ownerCfg"></list-value></span>'
       + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col) && !colIsRef(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
       + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="cellOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
       + '<v-btn-toggle v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'toggle\'" :name="col" :model-value="item[col] || \'\'" density="compact" variant="outlined" divided @update:model-value="save(item, col, $event || \'\')">'
@@ -5648,7 +5677,10 @@ function createVueApp() {
     slotHead: function(col) { return appInstance.rotationSlotLabel(this.view, col); },
     // The column whose list labels THIS slot's cells (see rotationValueColFor). '' for `_period`,
     // which is a generated date and has no list behind it.
-    valueNs: function(col) { return col === '_period' ? '' : (appInstance.rotationValueColFor(this.view, col) || ''); }
+    valueNs: function(col) { return col === '_period' ? '' : (appInstance.rotationValueColFor(this.view, col) || ''); },
+    // The rotation view being rendered, for obscureNames -- which is this view's own setting whether it
+    // is the whole screen or one block on somebody else's page.
+    viewCfg: function() { return VIEWS[this.view] || null; }
   };
 
   app.component('rotation-table', {
@@ -5657,7 +5689,7 @@ function createVueApp() {
     template: ''
       + '<v-table density="compact"><template v-slot:default>'
       + '<thead><tr><th v-for="col in cols" :key="col">{{ head(col) }}</th></tr></thead>'
-      + '<tbody><tr v-for="row in rows" :key="row.id"><td v-for="col in cols" :key="col" style="padding:3px 8px"><list-value :col="col" :ns-col="valueNs(col)" :value="row[col]"></list-value></td></tr></tbody>'
+      + '<tbody><tr v-for="row in rows" :key="row.id"><td v-for="col in cols" :key="col" style="padding:3px 8px"><list-value :col="col" :ns-col="valueNs(col)" :value="row[col]" :view-cfg="viewCfg()"></list-value></td></tr></tbody>'
       + '</template></v-table>'
   });
 
@@ -5667,7 +5699,7 @@ function createVueApp() {
       + '<div style="display:grid; gap:8px; padding:8px">'
       + '<div v-for="row in rows" :key="row.id" style="padding:8px 12px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:8px">'
       + '<div style="font-weight:600; margin-bottom:4px">{{ toDateStr(row._period) }}</div>'
-      + '<div v-for="col in slotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ slotHead(col) }}: </span><list-value :col="col" :ns-col="valueNs(col)" :value="row[col]"></list-value></div>'
+      + '<div v-for="col in slotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ slotHead(col) }}: </span><list-value :col="col" :ns-col="valueNs(col)" :value="row[col]" :view-cfg="viewCfg()"></list-value></div>'
       + '</div></div>'
   });
 
@@ -5677,7 +5709,7 @@ function createVueApp() {
       + '<div style="padding:4px 0">'
       + '<div v-for="row in rows" :key="row.id" style="padding:4px 12px; border-bottom:1px solid rgb(var(--v-theme-outline),0.08); font-size:0.9rem">'
       + '<span style="font-weight:600; margin-right:8px">{{ toDateStr(row._period) }}</span>'
-      + '<span v-for="(col, i) in slotCols" :key="col"><span style="opacity:0.6">{{ slotHead(col) }}: </span><list-value :col="col" :ns-col="valueNs(col)" :value="row[col]"></list-value><span v-if="i < slotCols.length - 1" style="opacity:0.3"> · </span></span>'
+      + '<span v-for="(col, i) in slotCols" :key="col"><span style="opacity:0.6">{{ slotHead(col) }}: </span><list-value :col="col" :ns-col="valueNs(col)" :value="row[col]" :view-cfg="viewCfg()"></list-value><span v-if="i < slotCols.length - 1" style="opacity:0.3"> · </span></span>'
       + '</div></div>'
   });
 
@@ -5705,7 +5737,7 @@ function createVueApp() {
       + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" class="d-inline-flex align-center" style="font-size:0.85rem">'
       +   '<img v-if="colIsImage(col) && item[col] && isAsset(item[col])" :src="imgSrc(item[col])" class="cell-thumb" alt="">'
       +   '<a v-else-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="imgSrc(item[col])" class="cell-thumb" alt=""></a>'
-      +   '<list-value v-else :col="col" :value="item[col]"></list-value>'
+      +   '<list-value v-else :col="col" :value="item[col]" :view-cfg="ownerCfg"></list-value>'
       +   '<span v-if="i < cols.length - 1" style="opacity:0.3; margin:0 6px">·</span>'
       + '</span></template>'
       + '<template v-slot:append>'
@@ -5825,6 +5857,7 @@ function createVueApp() {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
       cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].pivot) || {}; },
+      viewCfg: function() { return VIEWS[this.viewName] || null; },   // whose obscureNames applies to the axes
       grid: function() { return appInstance.pivotFor(this.viewName); },
       hasTotals: function() { return !!this.grid.columnTotals; },
       // Row order: the grid's own key order until a header is clicked. Cells are counts/sums (real
@@ -5839,21 +5872,21 @@ function createVueApp() {
     },
     methods: Object.assign({}, SORT_UI, {
       head: function(col) { return appInstance.tOr('field.' + col, col); },
-      colLabel: function(k) { return appInstance.displayValue(this.cfg.column, k); },
-      rowLabel: function(k) { return appInstance.displayValue(this.cfg.row, k); },
-      cellFmt: function(v) { return (v === '' || v == null) ? '' : (this.cfg.cell ? appInstance.displayValue(this.cfg.cell, v) : v); }
+      colLabel: function(k) { return appInstance.displayValue(this.cfg.column, k, '', this.viewCfg); },
+      rowLabel: function(k) { return appInstance.displayValue(this.cfg.row, k, '', this.viewCfg); },
+      cellFmt: function(v) { return (v === '' || v == null) ? '' : (this.cfg.cell ? appInstance.displayValue(this.cfg.cell, v, '', this.viewCfg) : v); }
     }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="pivot-view">'
       + '<v-table density="compact" class="my-1"><template v-slot:default>'
       + '<thead><tr>'
       + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));cursor:pointer" @click="toggleSort(\'__row__\')" data-testid="pivot-sort-row">{{ head(cfg.row) }}{{ sortIcon(\'__row__\') }}</th>'
-      + '<th v-for="(c, ci) in grid.columns" :key="c" style="text-align:center;cursor:pointer" @click="toggleSort(ci)"><list-value :col="cfg.column" :value="c"></list-value>{{ sortIcon(ci) }}</th>'
+      + '<th v-for="(c, ci) in grid.columns" :key="c" style="text-align:center;cursor:pointer" @click="toggleSort(ci)"><list-value :col="cfg.column" :value="c" :view-cfg="viewCfg"></list-value>{{ sortIcon(ci) }}</th>'
       + '<th v-if="hasTotals" style="text-align:center;font-weight:700;cursor:pointer" @click="toggleSort(\'__total__\')">{{ a.t(\'pivot.total\') }}{{ sortIcon(\'__total__\') }}</th>'
       + '</tr></thead>'
       + '<tbody>'
       + '<tr v-for="r in rows" :key="r.key">'
-      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:600"><list-value :col="cfg.row" :value="r.key"></list-value></th>'
+      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:600"><list-value :col="cfg.row" :value="r.key" :view-cfg="viewCfg"></list-value></th>'
       + '<td v-for="(v, ci) in r.cells" :key="ci" style="text-align:center">{{ cellFmt(v) }}</td>'
       + '<td v-if="hasTotals" style="text-align:center;font-weight:700">{{ r.total }}</td>'
       + '</tr>'
@@ -5877,6 +5910,7 @@ function createVueApp() {
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
+      viewCfg: function() { return VIEWS[this.viewName] || null; },   // whose obscureNames applies to perRow captions
       tiles: function() { return appInstance.statsFor(this.viewName).tiles || []; },
       // perRow tiles are a leaderboard: one per row, so they stack full-width and stay readable at any
       // count. Explicit `tiles` are a scorecard: a handful of them, side by side. Same component, and
@@ -5894,7 +5928,7 @@ function createVueApp() {
       // show its label. Numbers with no column behind them (count, or a perRow total) pass through.
       fmt: function(t) {
         if (t.value == null) return '—';
-        if (t.column && typeof t.value !== 'number') return appInstance.displayValue(t.column, t.value);
+        if (t.column && typeof t.value !== 'number') return appInstance.displayValue(t.column, t.value, '', this.viewCfg);
         return t.value;
       },
       // A rung's name, translatable like a tile label. A ladder authored as bare numbers has no name,
@@ -5909,7 +5943,7 @@ function createVueApp() {
       // (and linked-user avatar) the pivot axes and the grid cells give that column. An explicit tile's
       // label is authored prose and is printed as written.
       +   '<div style="font-size:0.72rem;opacity:0.7;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px">'
-      +     '<list-value v-if="t.labelCol" :col="t.labelCol" :value="t.label"></list-value>'
+      +     '<list-value v-if="t.labelCol" :col="t.labelCol" :value="t.label" :view-cfg="viewCfg"></list-value>'
       +     '<span v-else>{{ tOr(t.label, t.label) }}</span>'
       +   '</div>'
       +   '<div style="display:flex;align-items:baseline;gap:6px">'
@@ -5934,15 +5968,16 @@ function createVueApp() {
   // dates (and the synthetic _period) pass through toDateStr. Drop-in for `{{ displayValue(col, val) }}`.
   app.component('list-value', {
     props: { col: { type: String, required: true }, value: {}, size: { type: [Number, String], default: 18 },
-             nsCol: { type: String, default: '' } },   // resolve labels/avatars from THIS column's list instead
+             nsCol: { type: String, default: '' },     // resolve labels/avatars from THIS column's list instead
+             viewCfg: { type: Object, default: null } },  // the view whose obscureNames applies (null = the current one)
     computed: {
       items: function() {
-        var col = this.col, v = this.value, a = appInstance;
+        var col = this.col, v = this.value, a = appInstance, cfg = this.viewCfg;
         if (col === '_period' || a.colIsDate(col)) return (v == null || v === '') ? [] : [{ text: a.toDateStr(v), pic: '' }];
         var arr = Array.isArray(v) ? v : ((v == null || v === '') ? [] : [v]);
         var ns = this.nsCol || '';
         return arr.filter(function(x) { return x != null && x !== ''; }).map(function(x) {
-          return { text: a.displayValue(col, x, ns), pic: a.listValuePicture(col, x, ns) };
+          return { text: a.displayValue(col, x, ns, cfg), pic: a.listValuePicture(col, x, ns) };
         });
       }
     },

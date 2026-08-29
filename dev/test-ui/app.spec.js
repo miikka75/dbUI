@@ -6191,6 +6191,35 @@ test.describe('obscureNames (privacy)', () => {
     expect(r.withNs).toBe('John S.');
     expect(r.nsIsNotASlot).toBe('John Smith');
   });
+
+  test('the setting follows the VIEW being rendered, not the screen it is rendered on', async ({ page }) => {
+    // obscureNames used to be read off `currentTable`, which names the HOST. So a view that asked for
+    // abbreviated names printed them in full the moment it was embedded in a page or overlaid on a
+    // calendar -- and the host's own array reached across into the embedded view's columns, obscuring
+    // there instead. Neither is visible from the code that renders the cell.
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      window.VIEWS.crewrota.obscureNames = true;   // the embedded view asks for it
+      app.currentTable = 'combined';               // ...while the view being looked at does not
+      delete window.VIEWS.combined.obscureNames;
+      const embedded = app.displayValue('crew', 'John Smith', '', window.VIEWS.crewrota);
+      const hostDefault = app.displayValue('crew', 'John Smith');
+
+      // ...and the reverse: the host obscures, the embedded view does not. The host's setting must not
+      // reach into it.
+      window.VIEWS.combined.obscureNames = ['crew'];   // named explicitly: `crew` is a slot, not a list column
+      delete window.VIEWS.crewrota.obscureNames;
+      const hostAsks = app.displayValue('crew', 'John Smith');
+      const embeddedDoesNot = app.displayValue('crew', 'John Smith', '', window.VIEWS.crewrota);
+      delete window.VIEWS.combined.obscureNames;
+      return { embedded, hostDefault, hostAsks, embeddedDoesNot };
+    });
+    expect(r.embedded).toBe('John S.');          // the embedded view's own setting is honoured
+    expect(r.hostDefault).toBe('John Smith');    // the host asks for nothing -> nothing obscured
+    expect(r.hostAsks).toBe('John S.');          // the host's own cells still follow the host
+    expect(r.embeddedDoesNot).toBe('John Smith');// ...and it does not leak into the embed
+  });
 });
 
 test.describe('archive tab reverse sort', () => {
