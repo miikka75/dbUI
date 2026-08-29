@@ -183,6 +183,34 @@ describe('rotation — rosters from one 2-D lookup (rosterRef)', () => {
     assert.deepEqual(g.groups, [[{ v: 1 }], []]);
   });
 
+  // isSlot is the cheap form of `rosterGroups(rv, cache).slots.indexOf(col) >= 0`, for the one caller
+  // that asks per rendered CELL (obscureNames). It has to give the same answer on every shape, or a
+  // rotation quietly stops abbreviating names in some configurations and not others.
+  it('isSlot agrees with the slot list it replaces, on every shape', () => {
+    // The oracle is app-core's rotationSlotsFor, which is what shouldObscure called: rosterGroups for
+    // the rosterRef shape, the schema's own names for the other two (rosterGroups answers only the
+    // first two shapes -- the legacy per-column form never had groups to speak of).
+    const slotList = (r, c) => (r.rosterRef ? R.rosterGroups(r, c).slots
+      : r.slots ? r.slots.slice() : (r.columns || []).map((x) => x.name));
+    const viaList = (r, c, col) => slotList(r, c).indexOf(col) >= 0;
+    const shapes = [
+      [rv, cache],                                                            // rosterRef
+      [rv, { ref_duties: DUTIES.concat([{ id: 'x', position: 9, person: '', task: 'orphan' }]) }],
+      [rv, {}],                                                               // table not loaded
+      [{ slots: ['a', 'b'], rosters: ['t1', 't2'] }, { t1: [], t2: [] }],     // slots + rosters
+      [{ columns: [{ name: 'a', rotationTable: 't1' }, { name: 'b' }] }, {}]  // legacy per-column
+    ];
+    ['Ann', 'Bob', 'Cara', 'Eve', 'a', 'b', 'nope', ''].forEach((col) => {
+      shapes.forEach(([r, c], i) => assert.equal(R.isSlot(r, c, col), viaList(r, c, col), col + ' / shape ' + i));
+    });
+  });
+
+  it('isSlot is total: no config, no dataCache, a roster row that is not an object', () => {
+    assert.equal(R.isSlot(null, cache, 'Ann'), false);
+    assert.equal(R.isSlot(rv, undefined, 'Ann'), false);
+    assert.equal(R.isSlot(rv, { ref_duties: [null, { person: 'Ann' }] }, 'Ann'), true);
+  });
+
   it('produces exactly the rotation the equivalent slots+rosters config does', () => {
     // The whole point of the change is that it is a RESOLVER swap: same duties, same anchor, same
     // interval must mean the same matrix, or migrating a schema silently reshuffles the household.

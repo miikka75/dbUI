@@ -2608,7 +2608,10 @@ function createVueApp() {
         var v = viewCfg || VIEWS[this.currentTable];
         if (!v || !v.obscureNames) return false;
         if (Array.isArray(v.obscureNames)) return v.obscureNames.indexOf(col) >= 0;
-        if (v.rotation) { return this.rotationSlotsFor(v.rotation).indexOf(col) >= 0; }
+        // A membership test, not the ordered slot list: this runs once per rendered CELL, and for a
+        // rosterRef rotation the list costs a copy, a sort and a bucketing of the whole roster --
+        // each of which also makes every cell a reactive reader of the entire roster table.
+        if (v.rotation) { return Rotation.isSlot(v.rotation, this.dataCache, col); }
         return !!this.colIsList(col) || this.colIsMultiselect(col);
       },
       isLockedValue: function(listName, val) {

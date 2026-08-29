@@ -164,6 +164,25 @@
     return { slots: (rv.slots || []).slice(), groups: names.map(function(n) { return dataCache[n] || []; }) };
   }
 
+  // Is `col` one of this rotation's slots? A MEMBERSHIP test, deliberately not "build the slot list and
+  // indexOf it". obscureNames asks this once per rendered CELL, and for a rosterRef rotation building
+  // the list means copying, sorting and bucketing the whole roster -- an allocation and O(R log R) per
+  // cell, to answer a question a scan settles at the first match. Same answer as
+  // `rosterGroups(rv, dataCache).slots.indexOf(col) >= 0` for every shape; the test asserts it.
+  function isSlot(rv, dataCache, col) {
+    if (!rv) return false;
+    if (rv.rosterRef) {
+      var rows = (dataCache || {})[rv.rosterRef] || [], by = rv.rosterBy;
+      for (var i = 0; i < rows.length; i++) {
+        var k = rows[i] && rows[i][by];
+        if (k != null && k !== '' && String(k) === col) return true;
+      }
+      return false;
+    }
+    if (rv.slots) return rv.slots.indexOf(col) >= 0;
+    return (rv.columns || []).some(function(c) { return c && c.name === col; });
+  }
+
   function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor, rangeOverride, rotateEveryOverride) {
     var rv = view && view.rotation; if (!rv) return [];
     var range = rangeOverride || rv.range || {}; // DB-backed per-view range override (folder config) wins over schema
@@ -227,7 +246,7 @@
     resolveByOccurrence: resolveByOccurrence, sortRosterRows: sortRosterRows, resolveByCalendar: resolveByCalendar,
     resolveAnchorDate: resolveAnchorDate, parseInterval: parseInterval, isValidInterval: isValidInterval,
     wholeIntervalsBetween: wholeIntervalsBetween, addIntervals: addIntervals, buildRotationViewRows: buildRotationViewRows,
-    rosterGroups: rosterGroups
+    rosterGroups: rosterGroups, isSlot: isSlot
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else { root.Rotation = M; for (var k in M) root[k] = M[k]; } // also expose each as a global for bare callers
