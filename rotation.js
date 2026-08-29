@@ -128,6 +128,42 @@
   // Either form reads each roster row's `people` column unless `valueCol` names another (form (a)
   // per-column, form (b) once for all rosters) — see cellValue. Slots are just column names, so
   // slots-as-PEOPLE + rosters-of-TASKS gives the transpose: a period x person matrix of task lists.
+  // Slots + their row-groups, from either shape. THE resolver: everything below (and the slot columns
+  // the view renders) reads rotations through this, so the two shapes cannot drift apart.
+  //
+  //   (a) slots + rosters   -- N named slots, each fed by its own TABLE. The schema encodes the roster
+  //                            COUNT, so a fifth person is a fifth table plus four other schema edits.
+  //   (b) rosterRef         -- ONE two-column lookup: `rosterBy` names the grouping column (the slot),
+  //                            `valueCol` the value. Slots become the distinct values found in the data,
+  //                            so adding a person is a row in the Lookup editor and no schema edit at
+  //                            all. This is the app's existing hierarchical-ref shape (parent/child),
+  //                            which is why the Lookup editor already renders and reorders it.
+  //
+  // Slot ORDER is first-appearance in `position` order, which is the order the Lookup editor shows and
+  // reorders. It has to be stable and data-driven: the rotation assigns slot k <- group (k+s) % N, so a
+  // reshuffle here would silently reassign everyone's duties.
+  function rosterGroups(rv, dataCache) {
+    dataCache = dataCache || {};
+    if (rv.rosterRef) {
+      var by = rv.rosterBy, rows = (dataCache[rv.rosterRef] || []).slice();
+      // Sorted here rather than trusted: dataCache holds whatever order the backend returned, while the
+      // Lookup editor renders `position` order. Without this the groups could come out in a different
+      // order than the screen the admin edits them on.
+      rows.sort(function(a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0); });
+      var slots = [], groups = [], index = {};
+      rows.forEach(function(r) {
+        var k = r[by];
+        if (k == null || k === '') return;              // an unassigned row belongs to no slot
+        k = String(k);
+        if (!(k in index)) { index[k] = slots.length; slots.push(k); groups.push([]); }
+        groups[index[k]].push(r);
+      });
+      return { slots: slots, groups: groups };
+    }
+    var names = rv.rosters || [];
+    return { slots: (rv.slots || []).slice(), groups: names.map(function(n) { return dataCache[n] || []; }) };
+  }
+
   function buildRotationViewRows(view, dataCache, todayStr, rotationAnchor, rangeOverride, rotateEveryOverride) {
     var rv = view && view.rotation; if (!rv) return [];
     var range = rangeOverride || rv.range || {}; // DB-backed per-view range override (folder config) wins over schema
@@ -135,8 +171,8 @@
     var from = (!range.from || range.from === 'today') ? todayStr : range.from;
     var out = [], i, target, row;
 
-    if (rv.slots && rv.rosters) {
-      var slots = rv.slots, rosters = rv.rosters, N = rosters.length;
+    if ((rv.slots && rv.rosters) || rv.rosterRef) {
+      var rg = rosterGroups(rv, dataCache), slots = rg.slots, groups = rg.groups, N = groups.length;
       var interval = rv.interval || 'weekly';
       // DB-backed per-view rotateEvery override (folder config) wins over schema, like anchor/range.
       // undefined override = use schema; a present value (incl. []) is a full replacement.
@@ -153,7 +189,7 @@
       // advances one step per period (resolveByCalendar) independent of these offsets.
       var sources = (rotateEveryEff == null) ? []
         : (Array.isArray(rotateEveryEff) ? rotateEveryEff : [rotateEveryEff]);
-      var cycleLen = sources.indexOf('cycle') >= 0 ? ((dataCache[rosters[0]] || []).length || 0) : 0;
+      var cycleLen = sources.indexOf('cycle') >= 0 ? ((groups[0] || []).length || 0) : 0;
       // Absolute period index origin: periods from the rotation ANCHOR to the window start. Both swap
       // sources key off this absolute index so the assignment for a given date is invariant to `from`
       // (the display window) -- moving the window never reshuffles who is in which slot.
@@ -168,8 +204,8 @@
           else if (typeof src === 'number' && src > 0) { s += Math.floor(abs / src) % N; }
         });
         slots.forEach(function(slot, k) {
-          var rosterName = N ? rosters[(((k + s) % N) + N) % N] : null;
-          row[slot] = resolveByCalendar(dataCache[rosterName] || [], target, anchor, interval, rv.valueCol);
+          var group = N ? groups[(((k + s) % N) + N) % N] : [];
+          row[slot] = resolveByCalendar(group || [], target, anchor, interval, rv.valueCol);
         });
         out.push(row);
       }
@@ -190,7 +226,8 @@
   var M = {
     resolveByOccurrence: resolveByOccurrence, sortRosterRows: sortRosterRows, resolveByCalendar: resolveByCalendar,
     resolveAnchorDate: resolveAnchorDate, parseInterval: parseInterval, isValidInterval: isValidInterval,
-    wholeIntervalsBetween: wholeIntervalsBetween, addIntervals: addIntervals, buildRotationViewRows: buildRotationViewRows
+    wholeIntervalsBetween: wholeIntervalsBetween, addIntervals: addIntervals, buildRotationViewRows: buildRotationViewRows,
+    rosterGroups: rosterGroups
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else { root.Rotation = M; for (var k in M) root[k] = M[k]; } // also expose each as a global for bare callers

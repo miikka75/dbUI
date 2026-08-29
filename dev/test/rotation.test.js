@@ -143,3 +143,65 @@ describe('rotation.js — buildRotationViewRows', () => {
     assert.deepEqual({ a: rows[1].a, b: rows[1].b }, { a: ['A'], b: ['B'] });
   });
 });
+
+describe('rotation — rosters from one 2-D lookup (rosterRef)', () => {
+  // parent = person (the slot), child = the duty. Deliberately interleaved and out of position order
+  // in the array, because dataCache holds whatever the backend returned.
+  const DUTIES = [
+    { id: 'd3', position: 3, person: 'Bob', task: 'Bins' },
+    { id: 'd1', position: 1, person: 'Ann', task: 'Wash up' },
+    { id: 'd5', position: 5, person: 'Cara', task: 'Plants' },
+    { id: 'd2', position: 2, person: 'Ann', task: 'Hoover' },
+    { id: 'd4', position: 4, person: 'Cara', task: 'Dusting' }
+  ];
+  const cache = { ref_duties: DUTIES };
+  const rv = { rosterRef: 'ref_duties', rosterBy: 'person' };
+
+  it('slots are the distinct parent values, in position order', () => {
+    // Position order, not array order — it is what the Lookup editor renders and reorders, and the
+    // rotation assigns slot k <- group (k+s)%N, so a different order silently reassigns everyone.
+    const g = R.rosterGroups(rv, cache);
+    assert.deepEqual(g.slots, ['Ann', 'Bob', 'Cara']);
+    assert.deepEqual(g.groups.map((rows) => rows.map((r) => r.task)),
+      [['Wash up', 'Hoover'], ['Bins'], ['Dusting', 'Plants']]);
+  });
+
+  it('a row with no slot value belongs to no group', () => {
+    const g = R.rosterGroups(rv, { ref_duties: DUTIES.concat([{ id: 'x', position: 9, person: '', task: 'orphan' }]) });
+    assert.deepEqual(g.slots, ['Ann', 'Bob', 'Cara']);
+    assert.equal(g.groups.reduce((n, rows) => n + rows.length, 0), DUTIES.length);
+  });
+
+  it('missing table / missing dataCache yields no slots rather than throwing', () => {
+    assert.deepEqual(R.rosterGroups(rv, {}), { slots: [], groups: [] });
+    assert.deepEqual(R.rosterGroups(rv, undefined), { slots: [], groups: [] });
+  });
+
+  it('the slots+rosters form still resolves through the same helper', () => {
+    const g = R.rosterGroups({ slots: ['a', 'b'], rosters: ['t1', 't2'] }, { t1: [{ v: 1 }], t2: [] });
+    assert.deepEqual(g.slots, ['a', 'b']);
+    assert.deepEqual(g.groups, [[{ v: 1 }], []]);
+  });
+
+  it('produces exactly the rotation the equivalent slots+rosters config does', () => {
+    // The whole point of the change is that it is a RESOLVER swap: same duties, same anchor, same
+    // interval must mean the same matrix, or migrating a schema silently reshuffles the household.
+    const opts = { valueCol: 'task', interval: 'weekly', rotateEvery: 1, range: { from: '2026-08-24', periods: 6 } };
+    const viaRef = R.buildRotationViewRows({ rotation: Object.assign({}, rv, opts) }, cache, '2026-08-24', '2026-08-03');
+    const split = {
+      t_ann: DUTIES.filter((r) => r.person === 'Ann'),
+      t_bob: DUTIES.filter((r) => r.person === 'Bob'),
+      t_cara: DUTIES.filter((r) => r.person === 'Cara')
+    };
+    const viaTables = R.buildRotationViewRows(
+      { rotation: Object.assign({ slots: ['Ann', 'Bob', 'Cara'], rosters: ['t_ann', 't_bob', 't_cara'] }, opts) },
+      split, '2026-08-24', '2026-08-03');
+    assert.deepEqual(viaRef, viaTables);
+  });
+
+  it('adding a person adds a slot — no schema change involved', () => {
+    // The reason the shape exists: a fifth group appears from a row, and the rotation widens to it.
+    const withEve = { ref_duties: DUTIES.concat([{ id: 'd6', position: 6, person: 'Eve', task: 'Recycling' }]) };
+    assert.deepEqual(R.rosterGroups(rv, withEve).slots, ['Ann', 'Bob', 'Cara', 'Eve']);
+  });
+});

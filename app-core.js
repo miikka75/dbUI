@@ -1472,7 +1472,7 @@ function createVueApp() {
         // Rotation sources -> generated read-only duty events, bounded to the visible window.
         if (window) this.calRotationSources(name).forEach(function(rs) {
           var v = VIEWS[rs.view]; if (!v || !v.rotation) return;
-          var rv = v.rotation, rosters = rv.rosters || [];
+          var rv = v.rotation, rosters = rv.rosterRef ? [rv.rosterRef] : (rv.rosters || []);
           if (rosters.length && !rosters.some(function(t) { return self.canReachTable(t); })) return; // per-roster access (fail-closed)
           var range = self.rangeForView(rs.view);
           var fromStr = (!range.from || range.from === 'today') ? self._calToday() : range.from;
@@ -1483,7 +1483,7 @@ function createVueApp() {
           // Honor the rotation's own mineOnly here too — an overlay that showed every slot would hand
           // back exactly what the narrowed view withholds.
           var mine = self.mineOnlySlot(v);
-          var slots = (rv.slots || []).filter(function(s) { return mine === null || String(s).toLowerCase() === mine; });
+          var slots = self.rotationSlotsFor(rv).filter(function(s) { return mine === null || String(s).toLowerCase() === mine; });
           var tag = rs.label || self.tOr('tab.' + rs.view, rs.view);
           rows.forEach(function(r) {
             if (r._period < window.from || r._period >= window.toExclusive) return; // clip to visible grid
@@ -2121,7 +2121,7 @@ function createVueApp() {
             // Also preload each rotationSource's rosters so generated duty events can resolve.
             self.calRotationSources(self.currentTable).forEach(function(rs) {
               var rvv = VIEWS[rs.view] && VIEWS[rs.view].rotation;
-              ((rvv && rvv.rosters) || []).forEach(function(tbl) { if (tbl && calTables.indexOf(tbl) < 0) calTables.push(tbl); });
+              ((rvv && (rvv.rosterRef ? [rvv.rosterRef] : rvv.rosters)) || []).forEach(function(tbl) { if (tbl && calTables.indexOf(tbl) < 0) calTables.push(tbl); });
             });
             self._ensureCached(calTables, null, self._viewNeedsArchive(self.currentTable));
             return;
@@ -2136,7 +2136,9 @@ function createVueApp() {
             };
             regen();
             var rvDef = view.rotation;
-            self._ensureCached(rvDef.rosters ? rvDef.rosters.slice() : (rvDef.columns || []).map(function(c) { return c.rotationTable; }), regen);
+            self._ensureCached(rvDef.rosterRef ? [rvDef.rosterRef]
+              : rvDef.rosters ? rvDef.rosters.slice()
+              : (rvDef.columns || []).map(function(c) { return c.rotationTable; }), regen);
             return;
           }
           // Pivot view: cross-tab of a source table/view. Load the source's table(s) into the reactive
@@ -2579,7 +2581,7 @@ function createVueApp() {
         var v = VIEWS[this.currentTable];
         if (!v || !v.obscureNames) return false;
         if (Array.isArray(v.obscureNames)) return v.obscureNames.indexOf(col) >= 0;
-        if (v.rotation) { var rv = v.rotation; var areas = rv.slots || (rv.columns || []).map(function(c) { return c.name; }); return areas.indexOf(col) >= 0; }
+        if (v.rotation) { return this.rotationSlotsFor(v.rotation).indexOf(col) >= 0; }
         return !!this.colIsList(col) || this.colIsMultiselect(col);
       },
       isLockedValue: function(listName, val) {
@@ -2734,6 +2736,7 @@ function createVueApp() {
         var v = VIEWS[id];
         if (v && v.rotation) {
           var rv = v.rotation;
+          if (rv.rosterRef) return [rv.rosterRef];
           return rv.rosters ? rv.rosters.slice()
             : (rv.columns || []).map(function(c) { return c && c.rotationTable; }).filter(Boolean);
         }
@@ -3474,11 +3477,28 @@ function createVueApp() {
       // Slot columns for a rotationView (['_period', ...slots]); narrowed to my own slot when mineOnly,
       // then all-empty slots dropped when hideEmpty. `cfg` overrides the named view for an inline embed
       // config (which carries its own rotation/hideEmpty/mineOnly), mirroring rotationRowsFor's rotationDef.
+      // THE slot-name resolver. A `slots`/`rosters` rotation names them in the schema; a `rosterRef`
+      // one does not -- they are whatever distinct values the lookup holds, so they come from the data
+      // via the same pure resolver the row builder uses (never a second copy of the grouping rule).
+      rotationSlotsFor: function(rv) {
+        if (!rv) return [];
+        if (rv.rosterRef) return Rotation.rosterGroups(rv, this.dataCache).slots;
+        return rv.slots ? rv.slots.slice() : (rv.columns || []).map(function(c) { return c.name; });
+      },
+      // The header a slot column renders under. A rosterRef slot is a VALUE of the lookup, so its label
+      // lives in that table's own `list.<table>.<value>` namespace -- the same keys `translatableLists`
+      // exposes for a 2-D ref lane, and the same ones its task values use. A schema-named slot keeps
+      // `field.<slot>`. Falls back to the raw name either way.
+      rotationSlotLabel: function(name, col) {
+        var rv = (VIEWS[name] || {}).rotation;
+        if (rv && rv.rosterRef) return this.tOr('list.' + rv.rosterRef + '.' + col, col);
+        return this.tOr('field.' + col, col);
+      },
       rotationColsFor: function(name, rows, cfg) {
         var v = cfg || VIEWS[name];
         var rv = v && v.rotation;
         if (!rv) return [];
-        var names = rv.slots ? rv.slots.slice() : (rv.columns || []).map(function(c) { return c.name; });
+        var names = this.rotationSlotsFor(rv);
         var mine = this.mineOnlySlot(v);
         if (mine !== null) names = names.filter(function(n) { return String(n).toLowerCase() === mine; });
         if (v.hideEmpty) {
@@ -5596,11 +5616,15 @@ function createVueApp() {
   // --- Rotation view body parts (read-only generated periods) -----------------------------------
   // Same registry-selected pattern as the calendar body: table / cards / list share one prop contract
   // { cols, slotCols, rows } and are swapped via VIEW_PARTS.rotation[rotationDisplayLayout].
-  var ROT_BODY_PROPS = { cols: Array, slotCols: Array, rows: Array };
+  var ROT_BODY_PROPS = { cols: Array, slotCols: Array, rows: Array, view: String };
+  // Shared by all three bodies: `_period` is a generated column, everything else is a slot, and a slot's
+  // label depends on which SHAPE the rotation is (schema-named -> field.<slot>; rosterRef -> the
+  // lookup's own list.<table>.<value>, the same keys its task values use).
+  var ROT_LABEL = { slotHead: function(col) { return appInstance.rotationSlotLabel(this.view, col); } };
 
   app.component('rotation-table', {
     props: ROT_BODY_PROPS,
-    methods: Object.assign({ head: function(col) { return col === '_period' ? this.t('field.period') : (this.t('field.' + col) || col); } }, ROOT_PROXY),
+    methods: Object.assign({ head: function(col) { return col === '_period' ? this.t('field.period') : this.slotHead(col); } }, ROT_LABEL, ROOT_PROXY),
     template: ''
       + '<v-table density="compact"><template v-slot:default>'
       + '<thead><tr><th v-for="col in cols" :key="col">{{ head(col) }}</th></tr></thead>'
@@ -5609,22 +5633,22 @@ function createVueApp() {
   });
 
   app.component('rotation-cards', {
-    props: ROT_BODY_PROPS, methods: ROOT_PROXY,
+    props: ROT_BODY_PROPS, methods: Object.assign({}, ROT_LABEL, ROOT_PROXY),
     template: ''
       + '<div style="display:grid; gap:8px; padding:8px">'
       + '<div v-for="row in rows" :key="row.id" style="padding:8px 12px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:8px">'
       + '<div style="font-weight:600; margin-bottom:4px">{{ toDateStr(row._period) }}</div>'
-      + '<div v-for="col in slotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span><list-value :col="col" :value="row[col]"></list-value></div>'
+      + '<div v-for="col in slotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ slotHead(col) }}: </span><list-value :col="col" :value="row[col]"></list-value></div>'
       + '</div></div>'
   });
 
   app.component('rotation-list', {
-    props: ROT_BODY_PROPS, methods: ROOT_PROXY,
+    props: ROT_BODY_PROPS, methods: Object.assign({}, ROT_LABEL, ROOT_PROXY),
     template: ''
       + '<div style="padding:4px 0">'
       + '<div v-for="row in rows" :key="row.id" style="padding:4px 12px; border-bottom:1px solid rgb(var(--v-theme-outline),0.08); font-size:0.9rem">'
       + '<span style="font-weight:600; margin-right:8px">{{ toDateStr(row._period) }}</span>'
-      + '<span v-for="(col, i) in slotCols" :key="col"><span style="opacity:0.6">{{ t(\'field.\'+col) || col }}: </span><list-value :col="col" :value="row[col]"></list-value><span v-if="i < slotCols.length - 1" style="opacity:0.3"> · </span></span>'
+      + '<span v-for="(col, i) in slotCols" :key="col"><span style="opacity:0.6">{{ slotHead(col) }}: </span><list-value :col="col" :value="row[col]"></list-value><span v-if="i < slotCols.length - 1" style="opacity:0.3"> · </span></span>'
       + '</div></div>'
   });
 
@@ -5754,7 +5778,7 @@ function createVueApp() {
       + '<v-btn v-if="a.canPrintView" icon="mdi-printer" size="small" variant="text" @click="a.printView()"></v-btn></div>'
       + '<v-divider></v-divider>'
       + '</template>'
-      + '<component :is="bodyComponent" :cols="cols" :slot-cols="slotCols" :rows="rows"></component>'
+      + '<component :is="bodyComponent" :cols="cols" :slot-cols="slotCols" :rows="rows" :view="viewName"></component>'
       + '</component>'
   });
 

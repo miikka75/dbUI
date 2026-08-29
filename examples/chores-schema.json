@@ -59,6 +59,31 @@
         }
       ]
     },
+    "ref_duties": {
+      "isLookup": true,
+      "reorderable": true,
+      "defaultSort": "position",
+      "columns": [
+        {
+          "name": "position",
+          "type": "number",
+          "hidden": true
+        },
+        {
+          "name": "person",
+          "type": "select",
+          "list": "members",
+          "sorted": true
+        },
+        {
+          "name": "tasks",
+          "type": "select",
+          "list": "ref_chores",
+          "sorted": true,
+          "multiple": true
+        }
+      ]
+    },
     "chore_log": {
       "archivable": true,
       "defaultSort": "done_on",
@@ -165,78 +190,6 @@
       "ownerWritableWhile": {
         "claim_status": "requested"
       }
-    },
-    "tasks_ann": {
-      "reorderable": true,
-      "defaultSort": "position",
-      "columns": [
-        {
-          "name": "position",
-          "type": "number",
-          "hidden": true
-        },
-        {
-          "name": "tasks",
-          "type": "select",
-          "list": "ref_chores",
-          "sorted": true,
-          "multiple": true
-        }
-      ]
-    },
-    "tasks_bob": {
-      "reorderable": true,
-      "defaultSort": "position",
-      "columns": [
-        {
-          "name": "position",
-          "type": "number",
-          "hidden": true
-        },
-        {
-          "name": "tasks",
-          "type": "select",
-          "list": "ref_chores",
-          "sorted": true,
-          "multiple": true
-        }
-      ]
-    },
-    "tasks_cara": {
-      "reorderable": true,
-      "defaultSort": "position",
-      "columns": [
-        {
-          "name": "position",
-          "type": "number",
-          "hidden": true
-        },
-        {
-          "name": "tasks",
-          "type": "select",
-          "list": "ref_chores",
-          "sorted": true,
-          "multiple": true
-        }
-      ]
-    },
-    "tasks_dan": {
-      "reorderable": true,
-      "defaultSort": "position",
-      "columns": [
-        {
-          "name": "position",
-          "type": "number",
-          "hidden": true
-        },
-        {
-          "name": "tasks",
-          "type": "select",
-          "list": "ref_chores",
-          "sorted": true,
-          "multiple": true
-        }
-      ]
     },
     "home_shopping": {
       "archivable": true,
@@ -639,18 +592,8 @@
         "list": "members"
       },
       "rotation": {
-        "slots": [
-          "ann",
-          "bob",
-          "cara",
-          "dan"
-        ],
-        "rosters": [
-          "tasks_ann",
-          "tasks_bob",
-          "tasks_cara",
-          "tasks_dan"
-        ],
+        "rosterRef": "ref_duties",
+        "rosterBy": "person",
         "valueCol": "tasks",
         "interval": "weekly",
         "range": {
@@ -841,18 +784,6 @@
         "items": [
           {
             "view": "duty_matrix"
-          },
-          {
-            "table": "tasks_ann"
-          },
-          {
-            "table": "tasks_bob"
-          },
-          {
-            "table": "tasks_cara"
-          },
-          {
-            "table": "tasks_dan"
           }
         ]
       }
