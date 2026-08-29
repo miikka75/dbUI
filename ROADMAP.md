@@ -215,53 +215,6 @@ will be disappointed by a feed, and better served by the export.
 Suggested split: build **A** on its own, and treat **B** as blocked on the `events.js` extraction plus
 an explicit decision about per-user feed tokens.
 
-### Rotation rosters from one 2-D lookup, so adding a person is not a schema edit
-
-`duty_matrix` encodes the family in its own shape: four slots, four `tasks_<name>` tables, four nav
-entries. A fifth person is therefore **five schema edits** — a new table, a new `slots` entry, a new
-`rosters` entry, a nav item, and the translations — and none of it can be done in the app. There is no
-runtime table creation at all; `saveSchema` is called only by the theme editor, the nav toggle and
-import. So today the answer is Settings → Export JSON, edit by hand, Import.
-
-The fix is not to automate those five edits. It is to stop the schema encoding the roster COUNT.
-
-**Use a two-column lookup table — parent = person, child = task.** The app already has this primitive
-and does not use it here: a lookup whose visible columns number exactly two is a *hierarchical ref*
-(`isHierarchicalRef`), grouped by its first column (`refGroupedData`) and rendered in the Lookup editor
-as parents with children, reorderable within each group. It is fully admin-editable at runtime, and
-both of its dimensions are already translatable (the "2-D ref lane" case in SCHEMA.md).
-
-So `ref_duties` with `person` + `task` gives, for free: adding Eve is **typing a new group in the
-Lookup editor**. No table, no schema edit, no deploy, no nav entry, no untranslated key.
-
-What is missing is only that `rotation` cannot read one. It takes `rosters: [tableName, …]` and
-resolves each with `dataCache[rosterName]` — literally one line. The change is to derive the roster set
-from the lookup instead:
-
-```json
-"rotation": {
-  "rosterRef": "ref_duties",   // 2-column lookup: parent = slot, child = the value
-  "valueCol": "task",
-  "interval": "weekly"
-}
-```
-
-`slots` become the distinct parent values in position order, `N` their count, and `rosters[k]` the rows
-of group `k`. Everything downstream — the `rotateEvery` swap sources, `cycle` length, `resolveByCalendar`
-— already works off those, so it is a resolver swap rather than a rewrite. Keep the `rosters` form
-working; this is an added shape, not a replacement.
-
-Two things to settle when building it:
-
-- **Per-person write access.** Today `tasks_ann` is a whole table an admin can grant Ann. Collapsed into
-  one lookup, "Ann may edit only her own list" has to come from the row instead — an `owner` column with
-  `ownerWritable`, which is the machinery `rsvp` and the chores log already use. That is arguably better
-  than the table grant, but it is a real design step, not a free consequence.
-- **Slot names must match the `members` list**, because `mineOnly: { list: "members" }` narrows the view
-  to the current user by slot name. Two sources for one set of names is exactly the drift that causes;
-  worth deriving the parent column from `members` (a `select` backed by the list) rather than leaving it
-  free text.
-
 ### `timeline` / `gantt`
 
 Rows with a start *and* end date, drawn as bars across periods. This fills the calendar's documented
@@ -307,6 +260,10 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   it was proposed on: the data half already existed, so the whole feature is a renderer over the
   aggregate pipeline. `chore_points_week` became bars by gaining three lines and changing no data
   config at all, which is the adoption story the entry predicted.
+- **`rosterRef`** — a rotation's rosters from one 2-D lookup instead of a table per slot. Adding a
+  family member went from five schema edits nobody could make in the app to one row in the Lookup
+  editor. It was a resolver swap in `rotation.js`, as the entry predicted; the tests assert both shapes
+  produce the same matrix from the same duties.
 - **`board`** (kanban) — was the top pick; `board.js` + `chore_board`.
 - **`form`** (single-record intake) — `form.js`.
 - **`image` / `url` column types** — with an `asset:<id>` tier so a deployment with no storage bucket

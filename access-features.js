@@ -9,7 +9,12 @@
 (function(root) {
   // Helper tables a view needs beyond its own `sources`: rotation rosters (each independently
   // grantable — its own chip) + computed rotationTable / occurrenceSource targets (satellites).
-  function viewRosters(v) { return (v && v.rotation && Array.isArray(v.rotation.rosters)) ? v.rotation.rosters.slice() : []; }
+  function viewRosters(v) {
+    var rv = v && v.rotation;
+    if (!rv) return [];
+    if (rv.rosterRef) return [rv.rosterRef];               // one 2-D lookup feeds every slot
+    return Array.isArray(rv.rosters) ? rv.rosters.slice() : [];
+  }
   function viewComputedHelpers(v) {
     var out = [];
     if (v && v.rotation && Array.isArray(v.rotation.columns)) v.rotation.columns.forEach(function(c) { if (c && c.rotationTable) out.push(c.rotationTable); });

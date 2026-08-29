@@ -900,6 +900,60 @@ For equal-length lists the older `R = L` trick still works; `"cycle"` generalize
 With **unequal, independently-maintained** lengths only "eventually covers both" is achievable (per-turn
 balance drifts), so equal lengths remains the requirement for a strict per-turn guarantee.
 
+### `rosterRef` — one 2-D lookup instead of a table per slot
+
+`slots` + `rosters` names the slots in the schema and gives each its own table, so the schema encodes
+the roster **count**: a fifth person means a fifth table, a fifth `slots` entry, a fifth `rosters` entry,
+a nav item and its translations — five edits, none of which can be made from inside the app.
+
+`rosterRef` puts the whole roster in **one two-column lookup** instead:
+
+```json
+"duty_matrix": {
+  "kind": "rotation",
+  "rotation": {
+    "rosterRef": "ref_duties",   // a lookup whose two visible columns are the two dimensions
+    "rosterBy": "person",        // parent: its distinct values ARE the slots
+    "valueCol": "tasks",         // child: what lands in the cell
+    "interval": "weekly"
+  }
+}
+```
+
+```json
+"ref_duties": {
+  "isLookup": true, "reorderable": true, "defaultSort": "position",
+  "columns": [
+    { "name": "position", "type": "number", "hidden": true },
+    { "name": "person", "type": "select", "list": "members", "sorted": true },
+    { "name": "tasks", "type": "select", "list": "ref_chores", "sorted": true, "multiple": true }
+  ]
+}
+```
+
+Two visible columns make it a **hierarchical ref**, which the Lookup editor already renders as parents
+with children and reorders within a group. So **adding a person is a row**, typed in the app — no table,
+no schema edit, no deploy, no untranslated key. Removing one is deleting their rows.
+
+- **Slot order is `position` order**, first appearance wins. It has to be stable and data-driven,
+  because the rotation assigns slot *k* ← group *(k+s) mod N*: a reshuffle would silently reassign
+  everyone's duties. That is the same order the Lookup editor shows, so what you drag is what you get.
+- **A row with a blank `rosterBy` belongs to no slot** — it is parked, not silently added to the first.
+- **Slot headers** render through the lookup's own `list.<table>.<value>` namespace (the 2-D ref-lane
+  keys), falling back to the raw value. Personal names usually want no translation at all, which is why
+  the shipped chores example leaves `ref_duties` out of `translatableLists`, exactly as it leaves
+  `members` out.
+- `rotateEvery`, `cycle`, `interval`, `range`, `mineOnly` and `anchorDate` behave identically — this is a
+  resolver swap, not a second rotation engine. `dev/test/rotation.test.js` asserts the two shapes produce
+  the same matrix from the same duties.
+- **`rosterRef` and `slots`+`rosters` are mutually exclusive**; declaring both is a load-time error. The
+  older shape is unchanged and still supported.
+
+**One thing that genuinely changes.** With a table per person, "Ann may edit only her own list" was a
+table grant. Collapsed into one lookup it is a lookup the Lookup editor gates as a whole, so per-person
+editing has to come from the row instead — an `owner` column with `ownerWritable`, the machinery `rsvp`
+and the chores log already use. Worth deciding before migrating a deployment that relied on those grants.
+
 ### Worked example (occurrence + calendar end-to-end)
 An event needs **security** (one team per session — occurrence-driven) and a two-zone **cleanup**
 rota (every week regardless of sessions — calendar-driven). Three rotation tables, one data view with

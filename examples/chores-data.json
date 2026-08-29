@@ -97,6 +97,74 @@
         "points": 3
       }
     ],
+    "ref_duties": [
+      {
+        "id": "duty-1",
+        "position": 1,
+        "person": "Ann",
+        "tasks": [
+          "Wash up",
+          "Take out bins"
+        ]
+      },
+      {
+        "id": "duty-2",
+        "position": 2,
+        "person": "Ann",
+        "tasks": [
+          "Hoover"
+        ]
+      },
+      {
+        "id": "duty-3",
+        "position": 3,
+        "person": "Bob",
+        "tasks": [
+          "Laundry load",
+          "Clean bathroom"
+        ]
+      },
+      {
+        "id": "duty-4",
+        "position": 4,
+        "person": "Cara",
+        "tasks": [
+          "Water plants"
+        ]
+      },
+      {
+        "id": "duty-5",
+        "position": 5,
+        "person": "Cara",
+        "tasks": [
+          "Dust + tidy"
+        ]
+      },
+      {
+        "id": "duty-6",
+        "position": 6,
+        "person": "Cara",
+        "tasks": [
+          "Change bedding"
+        ]
+      },
+      {
+        "id": "duty-7",
+        "position": 7,
+        "person": "Dan",
+        "tasks": [
+          "Empty dishwasher"
+        ]
+      },
+      {
+        "id": "duty-8",
+        "position": 8,
+        "person": "Dan",
+        "tasks": [
+          "Mow the lawn"
+        ]
+      }
+    ],
     "ref_rewards": [
       {
         "id": "reward-icecream",
@@ -117,72 +185,6 @@
         "id": "reward-daytrip",
         "reward": "Choose a day out",
         "cost": 25
-      }
-    ],
-    "tasks_ann": [
-      {
-        "id": "ta-1",
-        "position": 1,
-        "tasks": [
-          "Wash up",
-          "Take out bins"
-        ]
-      },
-      {
-        "id": "ta-2",
-        "position": 2,
-        "tasks": [
-          "Hoover"
-        ]
-      }
-    ],
-    "tasks_bob": [
-      {
-        "id": "tb-1",
-        "position": 1,
-        "tasks": [
-          "Laundry load",
-          "Clean bathroom"
-        ]
-      }
-    ],
-    "tasks_cara": [
-      {
-        "id": "tc-1",
-        "position": 1,
-        "tasks": [
-          "Water plants"
-        ]
-      },
-      {
-        "id": "tc-2",
-        "position": 2,
-        "tasks": [
-          "Dust + tidy"
-        ]
-      },
-      {
-        "id": "tc-3",
-        "position": 3,
-        "tasks": [
-          "Change bedding"
-        ]
-      }
-    ],
-    "tasks_dan": [
-      {
-        "id": "td-1",
-        "position": 1,
-        "tasks": [
-          "Empty dishwasher"
-        ]
-      },
-      {
-        "id": "td-2",
-        "position": 2,
-        "tasks": [
-          "Mow the lawn"
-        ]
       }
     ],
     "chore_log": [
@@ -341,32 +343,6 @@
         "updated_at": "2026-07-21T18:30:00.000Z"
       }
     ],
-    "reward_claim": [
-      {
-        "id": "claim-1",
-        "owner": "ann@example.test",
-        "person": "Ann",
-        "reward": "Ice cream",
-        "claimed_on": "2026-08-06",
-        "claim_status": "granted"
-      },
-      {
-        "id": "claim-2",
-        "owner": "bob@example.test",
-        "person": "Bob",
-        "reward": "Pick the film",
-        "claimed_on": "2026-08-04",
-        "claim_status": "granted"
-      },
-      {
-        "id": "claim-3",
-        "owner": "cara@example.test",
-        "person": "Cara",
-        "reward": "Stay up an hour",
-        "claimed_on": "2026-08-08",
-        "claim_status": "requested"
-      }
-    ],
     "home_shopping": [
       {
         "id": "shop-1",
@@ -411,6 +387,32 @@
         "added_by": "Ann",
         "needed_by": "",
         "shop_status": "bought"
+      }
+    ],
+    "reward_claim": [
+      {
+        "id": "claim-1",
+        "owner": "ann@example.test",
+        "person": "Ann",
+        "reward": "Ice cream",
+        "claimed_on": "2026-08-06",
+        "claim_status": "granted"
+      },
+      {
+        "id": "claim-2",
+        "owner": "bob@example.test",
+        "person": "Bob",
+        "reward": "Pick the film",
+        "claimed_on": "2026-08-04",
+        "claim_status": "granted"
+      },
+      {
+        "id": "claim-3",
+        "owner": "cara@example.test",
+        "person": "Cara",
+        "reward": "Stay up an hour",
+        "claimed_on": "2026-08-08",
+        "claim_status": "requested"
       }
     ]
   },

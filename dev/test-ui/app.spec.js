@@ -1494,6 +1494,48 @@ test.describe('Translatable lists', () => {
   });
 });
 
+test.describe('Rotation rosters from a 2-D lookup', () => {
+  // The point of `rosterRef`: the schema stops encoding the roster COUNT, so a new person is a ROW.
+  const DUTY = {
+    defaultLanguage: 'en',
+    tables: {
+      ref_duties: {
+        isLookup: true, reorderable: true, defaultSort: 'position',
+        columns: [{ name: 'position', type: 'number', hidden: true },
+                  { name: 'person', type: 'select', list: 'members' },
+                  { name: 'task', type: 'text' }]
+      }
+    },
+    views: [{ name: 'rota', kind: 'rotation', layout: 'table',
+              rotation: { rosterRef: 'ref_duties', rosterBy: 'person', valueCol: 'task',
+                          interval: 'weekly', anchorDate: '2026-08-03', range: { from: '2026-08-24', periods: 3 } } }],
+    nav: { items: [{ view: 'rota' }] }
+  };
+
+  test('slots come from the data, and adding a person widens the matrix', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DUTY } });
+    const put = (d) => page.request.post('/api/putRow', { data: { tableId: 'ref_duties', data: d, tab: 'active' } });
+    await put({ id: 'd1', position: 1, person: 'Ann', task: 'Wash up' });
+    await put({ id: 'd2', position: 2, person: 'Bob', task: 'Bins' });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => appInstance.selectTab('rota'));
+    await expect.poll(() => page.evaluate(() => appInstance.rotationSlotCols), { timeout: 6000 })
+      .toEqual(['Ann', 'Bob']);
+    // Slot headers render the person, not a raw `field.<slot>` key.
+    await expect(page.locator('table thead th').nth(1)).toHaveText('Ann');
+
+    // A fifth family member is one row in the Lookup editor -- no table, no schema edit, no deploy.
+    await put({ id: 'd3', position: 3, person: 'Eve', task: 'Recycling' });
+    await page.evaluate(() => appInstance.loadTableData());
+    await expect.poll(() => page.evaluate(() => appInstance.rotationSlotCols), { timeout: 6000 })
+      .toEqual(['Ann', 'Bob', 'Eve']);
+  });
+});
+
 test.describe('v3 nav + pages + tabs layout', () => {
   const V3 = {
     defaultLanguage: 'en',

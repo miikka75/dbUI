@@ -258,6 +258,22 @@ function validateSchema() {
     // rotationView (third view kind): calendar-mode columns only.
     if (view.rotation) {
       var rvv = view.rotation;
+      // `rosterRef`: one 2-D lookup replaces the slots+rosters pair. Slots are DATA (the distinct values
+      // of `rosterBy`), so nothing here can check them — what is checkable is that the table and the two
+      // columns exist, which is every way to get this wrong that yields a silently empty matrix.
+      if (rvv.rosterRef) {
+        if (rvv.slots || rvv.rosters) errors.push('rotationView "' + v + '": use `rosterRef` OR `slots`+`rosters`, not both');
+        if (!SCHEMA[rvv.rosterRef]) errors.push('rotationView "' + v + '" references non-existent rosterRef table "' + rvv.rosterRef + '"');
+        else {
+          var rrCols = SCHEMA[rvv.rosterRef].columns || {};
+          if (!rvv.rosterBy) errors.push('rotationView "' + v + '": `rosterRef` needs `rosterBy` (the column whose values are the slots)');
+          else if (!(rvv.rosterBy in rrCols)) errors.push('rotationView "' + v + '": rosterBy "' + rvv.rosterBy + '" is not a column of "' + rvv.rosterRef + '"');
+          if (!rvv.valueCol) errors.push('rotationView "' + v + '": `rosterRef` needs `valueCol` (the column holding the duty)');
+          else if (badValueCol(rvv.rosterRef, rvv.valueCol)) errors.push('rotationView "' + v + '": valueCol "' + rvv.valueCol + '" is not a column of "' + rvv.rosterRef + '"');
+          if (rvv.rosterBy && rvv.valueCol && rvv.rosterBy === rvv.valueCol) errors.push('rotationView "' + v + '": `rosterBy` and `valueCol` must be different columns');
+        }
+        if (!isValidInterval(rvv.interval)) errors.push('rotationView "' + v + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
+      }
       if (rvv.slots && rvv.rosters) {
         if (rvv.advanceBy && rvv.advanceBy !== 'calendar') errors.push('rotationView "' + v + '" supports advanceBy "calendar" only (use a data view for occurrence mode)');
         if (!isValidInterval(rvv.interval)) errors.push('rotationView "' + v + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
