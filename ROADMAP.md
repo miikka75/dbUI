@@ -68,11 +68,50 @@ the existing rules; a copied or photographed code buys nothing, because using it
 verifier who is standing there looking at the person. **No new access primitive, no server, no CSP
 change** — it works on the free Spark plan and on a GitHub Pages deployment.
 
-The opposite arrangement — a code posted at the door that attendees scan with their own phones — is
-the one to avoid. It requires making the attendance column owner-writable, which throws away the
-verification property the whole feature exists to provide, and a poster code can be photographed and
-sent to someone sitting at home. Making *that* honest needs time-boxed rotating codes, hence a server
-to mint and validate them, hence the same Blaze/Edge-Function dependency the calendar feed carries.
+#### The other arrangement: attendees check themselves in with a shared code
+
+A code shown at the event — on a slide, a poster, a QR — that attendees scan or type on their own
+phones. This was first written off here as needing a server. **That was wrong**, and the correction
+matters because this is the arrangement that scales: no queue at the door, and the organizer does not
+have to touch every phone.
+
+Two things make it work without one.
+
+**Separate the claim from the verdict.** The mistake is thinking self-service means making
+`attendance` owner-writable, which does throw the verification property away. It does not have to. Add
+a SECOND column — `checkin_code` — and put only that one in `ownerWritable`. The attendee writes what
+they typed; `attendance` stays editor-only. An organizer's screen then compares the claims against the
+real code and stamps the verdict for every matching row at once. That is one button for the whole
+room, it needs **no rules change at all**, and it is the version to build first.
+
+**A rule can check a secret the client cannot read.** For the stricter version, where the attendee's
+own write sets `attendance` directly, the enforcement point already exists: rules `get()` runs with
+full read access, not the caller's. `selfServiceTable()` and `ownerBounds()` already read
+`_meta/ownerWritable` on behalf of members who are denied that document — and `base()` denies clients
+every underscore-prefixed collection outright. So a `_checkin/<eventId>` document can hold the live
+code, be completely invisible to the app, and still be the thing the rule compares against. Rules also
+have `request.time`, so a `validUntil` on that document expires a code without any clock on the
+client.
+
+What rules *cannot* do is derive a code — no HMAC, no loops. So a rotating code means something
+periodically WRITES the current one (an organizer's device with the page open), rather than both sides
+computing it from a shared secret. Stateless TOTP-style rotation is the only variant that genuinely
+needs a function.
+
+Worth being clear about what each step buys, because the ladder has a flat top:
+
+| Step | Stops | Cost |
+|---|---|---|
+| Per-event code, editor stamps the verdict | Marking yourself present from home without at least asking someone | One column + one screen. No rules change |
+| Same, but the rule checks the code | The editor's button-press | New `_meta` mirror + a rule branch, mirrored into RLS, the dev server and `backend-helpers` — four layers, the real cost |
+| Code expires (`validUntil`) | Checking in tomorrow for yesterday | One timestamp comparison in the same rule |
+| Code rotates during the event | Narrows relaying, does not close it | An organizer device writing a heartbeat |
+
+**No step closes relaying.** Someone at the event can always text the code to someone who is not. A
+30-second window narrows it; it does not shut it. Every "type the code on the screen" system has this,
+and it is worth deciding up front that it is acceptable rather than buying rotation expecting it to be
+the fix. What the code genuinely buys is that presence takes *effort and a confederate* instead of
+being free — which for a household, a congregation or a club is the whole requirement.
 
 Decomposition follows the usual seam: a pure `checkin.js` over
 `(scanned payload, rows, config) -> which row to update and to what`, Node-tested, with the camera as
@@ -99,8 +138,10 @@ Non-issues, checked: camera access is **not** governed by CSP — a `MediaStream
 amending. `getUserMedia` needs a secure context, which Firebase Hosting, GitHub Pages and loopback dev
 all satisfy.
 
-Sequencing: this is only worth building after the attendance column it writes into exists, since
-without that there is nothing for a scan to do.
+Sequencing: either arrangement is only worth building after the attendance column it writes into
+exists, since without that there is nothing for a scan to do. Of the two, the shared-code one is the
+better first build — it needs no camera at all in its typed form, so it can ship and be used at a real
+event before any of the decoding work above is done.
 
 ### Calendar export (`.ics`) and subscribable feeds
 
