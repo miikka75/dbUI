@@ -93,9 +93,36 @@ code, be completely invisible to the app, and still be the thing the rule compar
 have `request.time`, so a `validUntil` on that document expires a code without any clock on the
 client.
 
-What rules *cannot* do is derive a code — no HMAC, no loops. So a rotating code means something
-periodically WRITES the current one (an organizer's device with the page open), rather than both sides
-computing it from a shared secret. Stateless TOTP-style rotation is the only variant that genuinely
+What rules *cannot* do is derive a code — no HMAC, no loops. The obvious workaround is a device at the
+entrance writing a fresh code every few minutes, and it does work, but **a browser tab is a poor
+clock**: hidden tabs are timer-throttled to about once a minute and harder after five minutes,
+a locked screen or a sleeping device stops it dead, and a backgrounded mobile PWA can be suspended
+outright. `sw.js` cannot rescue it either — it is a pass-through stub, and `periodicSync` is
+Chrome-only, install-gated, and has a minimum interval measured in hours. `navigator.wakeLock` holds
+the screen on but still requires the page to be visible. The failure mode is the bad one: check-ins
+start being rejected the moment the tablet drops off, silently, while nobody is watching it.
+
+**So do not heartbeat — pre-write the schedule.** Rules have no loops, but they do have arithmetic on
+`request.time.toMillis()` and map indexing by a computed key. So one write when the event starts can
+store every window's code at once:
+
+```
+_checkin/<eventId> = { codes: { "<windowIndex>": "<code>", … }, from, until }
+```
+
+and the rule derives the current `windowIndex` itself and looks the code up. Nothing has to stay
+awake, nothing expires because a device slept, and the entrance screen becomes a pure DISPLAY — it
+reads the map and shows whichever code is current. If it dies, people can still be checked in; only
+the display is gone.
+
+Two things this needs, both precedented: a `match /_checkin/{event}` block (the catch-all `base()`
+denies clients every underscore collection, so it needs its own block, exactly as `_meta` has one)
+granting read+write to editors and nothing to members; and the same logic mirrored into RLS for
+Supabase. **Verify the rules arithmetic in `npm run test:rules` before building on it** — integer
+division and computed-key map access are the two details worth proving in the emulator rather than
+assuming.
+
+Stateless TOTP-style rotation, where nothing is stored at all, remains the one variant that genuinely
 needs a function.
 
 Worth being clear about what each step buys, because the ladder has a flat top:
