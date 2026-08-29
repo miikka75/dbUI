@@ -90,13 +90,23 @@ describe('translation keys', () => {
     assert.equal(untranslatable({}, 'whatever'), false, 'unknown columns default to translatable');
   });
 
-  it('both key-derivation sites go through the helper', () => {
-    // field.* labels and list.<refTable>.<value> values must apply the SAME rule, or a hidden column
-    // disappears from one and lingers in the other.
+  it('both key-derivation sites go through a helper, and the value one delegates', () => {
+    // field.* labels and list.<refTable>.<value> values must agree about SYSTEM and HIDDEN columns, or
+    // a hidden column disappears from one and lingers in the other.
+    //
+    // They are no longer the same predicate: a value site must additionally drop non-text columns (a
+    // number has no translation), while the header site must keep them (`field.points` needs a label
+    // like any other). So the shared part is guaranteed by DELEGATION instead — _untranslatableValueCol
+    // calls _untranslatableCol and narrows from there. That is the invariant worth pinning: without it
+    // the two would be free copies of the system/hidden rule, which is the drift this test exists for.
     const derivation = appCore.slice(appCore.indexOf('schemaTranslationKeys: function'),
                                      appCore.indexOf('var views = schema.views'));
-    const calls = derivation.match(/_untranslatableCol\(/g) || [];
-    assert.equal(calls.length, 2, 'expected both the field.* and list.* derivations to use _untranslatableCol');
+    assert.match(derivation, /_untranslatableCol\(/, 'the field.* derivation should use _untranslatableCol');
+    assert.match(derivation, /_untranslatableValueCol\(/, 'the list.* derivation should use _untranslatableValueCol');
+    const helper = appCore.slice(appCore.indexOf('function _untranslatableValueCol'),
+                                 appCore.indexOf('function _mayLocal'));
+    assert.match(helper, /_untranslatableCol\(cols, name\)/,
+      '_untranslatableValueCol must delegate to _untranslatableCol, not re-state the system/hidden rule');
     assert.ok(!/\{ id: 1, created_at: 1, updated_at: 1 \}/.test(derivation),
       'the hand-rolled system-column map should be gone — it skipped the hidden check');
   });

@@ -65,3 +65,11 @@ functions/node_modules/
 # a committed one would aim every fork's `firebase deploy` at whoever wrote it. See README, "Linking a
 # clone to your project".
 .firebaserc
+
+# Throwaway artifacts from driving the app by hand (screenshots, one-off specs). They are written into
+# dev/ so Playwright can resolve them, which puts them straight in `git add -A`'s path -- one of them
+# reached a commit that way.
+dev/*.png
+dev/*-check.png
+dev/test-ui/tmp-*.spec.js
+dev/tmp-*.mjs

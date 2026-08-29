@@ -21,7 +21,10 @@
   "translatableLists": [
     "chore_status",
     "claim_status",
-    "shop_status"
+    "shop_status",
+    "shop_items",
+    "ref_chores",
+    "ref_rewards"
   ],
   "userWritableLists": [
     "shop_items"
