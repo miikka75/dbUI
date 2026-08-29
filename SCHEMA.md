@@ -1422,8 +1422,17 @@ The two are mutually exclusive; declaring both is a load-time error.
 - **A tile label may be a translation key.** It falls back to the literal, so plain prose works too.
 - **Exceeding a goal fills the bar and keeps the real number**: the bar is clamped to 100% and the tile
   still reads `138 / 120`, rather than overflowing its track or pretending the goal was met exactly.
-- **`period` works**, because the rows come from the same pipeline a data view uses — the ‹ › navigation
-  above the view moves the tiles.
+- **`period` works** when the view is opened at TOP LEVEL: the rows come from the same pipeline a data
+  view uses, so the ‹ › navigation moves the tiles. It does **not** appear on an EMBEDDED stats view —
+  `hasPeriodNav()` tests the view currently open, which for `{{view:x}}` inside a document is the
+  document, and a page has no `period`. This is not specific to stats (an embedded aggregate table has
+  never had the arrows either), but it is worth knowing before relying on it: a period-filtered stats
+  view embedded in a page shows the CURRENT period and offers no way to move off it. If readers need to
+  browse back, put the view in `nav` as well.
+- **A period filter can leave it legitimately empty.** `within: "@week"` over seed data written weeks
+  ago matches nothing, and an empty stats view renders the `stats.empty` message rather than a header
+  row — so it looks more "missing" than an empty table does. Check the data's dates before concluding
+  the view is broken.
 - **Embedding**: `{{view:x}}` in any document renders the tiles, like every other kind.
 
 ## Translatable lists (`translatableLists`)
