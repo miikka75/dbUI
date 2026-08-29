@@ -79,6 +79,7 @@
       "img.url": "URL de imagen",
       "pivot.total": "Total",
       "pivot.empty": "Sin datos",
+      "stats.empty": "Sin datos",
       "access.your_name": "Tu nombre",
       "access.request_access": "Solicitar acceso",
       "access.request_sent": "Solicitud de acceso enviada",

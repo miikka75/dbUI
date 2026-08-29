@@ -3,11 +3,19 @@
   "schemaVersion": 4,
   "icon": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>📋</text></svg>",
   "theme": {
-    "light": { "primary": "#00695c", "secondary": "#26a69a" },
-    "dark": { "primary": "#4db6ac", "secondary": "#26a69a" }
+    "light": {
+      "primary": "#00695c",
+      "secondary": "#26a69a"
+    },
+    "dark": {
+      "primary": "#4db6ac",
+      "secondary": "#26a69a"
+    }
   },
   "defaultLanguage": "en",
-  "translatableLists": ["ticket_stages"],
+  "translatableLists": [
+    "ticket_stages"
+  ],
   "listSources": {
     "members": "users"
   },
@@ -182,37 +190,100 @@
       "archivable": true,
       "defaultSort": "date",
       "columns": [
-        { "name": "date", "type": "date" },
-        { "name": "title", "type": "text" },
-        { "name": "opponent", "type": "text" }
+        {
+          "name": "date",
+          "type": "date"
+        },
+        {
+          "name": "title",
+          "type": "text"
+        },
+        {
+          "name": "opponent",
+          "type": "text"
+        }
       ]
     },
     "rsvps": {
       "columns": [
-        { "name": "owner", "type": "owner" },
-        { "name": "practice", "type": "ref", "table": "practices", "valueCol": "id" },
-        { "name": "response", "type": "select", "list": "rsvp_status" },
-        { "name": "note", "type": "text" }
+        {
+          "name": "owner",
+          "type": "owner"
+        },
+        {
+          "name": "practice",
+          "type": "ref",
+          "table": "practices",
+          "valueCol": "id"
+        },
+        {
+          "name": "response",
+          "type": "select",
+          "list": "rsvp_status"
+        },
+        {
+          "name": "note",
+          "type": "text"
+        }
       ]
     },
     "tickets": {
       "archivable": true,
       "columns": [
-        { "name": "title", "type": "text" },
-        { "name": "status", "type": "select", "list": "ticket_status" },
-        { "name": "assignee", "type": "select", "list": "assigned_to", "allowNew": true },
-        { "name": "stage", "type": "ref", "table": "ticket_stages", "valueCol": "stage" },
-        { "name": "created_at", "type": "text", "hidden": true },
-        { "name": "updated_at", "type": "text", "hidden": true }
+        {
+          "name": "title",
+          "type": "text"
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "list": "ticket_status"
+        },
+        {
+          "name": "assignee",
+          "type": "select",
+          "list": "assigned_to",
+          "allowNew": true
+        },
+        {
+          "name": "stage",
+          "type": "ref",
+          "table": "ticket_stages",
+          "valueCol": "stage"
+        },
+        {
+          "name": "created_at",
+          "type": "text",
+          "hidden": true
+        },
+        {
+          "name": "updated_at",
+          "type": "text",
+          "hidden": true
+        }
       ]
     },
     "ticket_stages": {
       "isLookup": true,
       "columns": [
-        { "name": "phase", "type": "text" },
-        { "name": "stage", "type": "text" },
-        { "name": "created_at", "type": "text", "hidden": true },
-        { "name": "updated_at", "type": "text", "hidden": true }
+        {
+          "name": "phase",
+          "type": "text"
+        },
+        {
+          "name": "stage",
+          "type": "text"
+        },
+        {
+          "name": "created_at",
+          "type": "text",
+          "hidden": true
+        },
+        {
+          "name": "updated_at",
+          "type": "text",
+          "hidden": true
+        }
       ]
     }
   },
@@ -444,7 +515,7 @@
     {
       "name": "showcase",
       "kind": "page",
-      "markdown": "# Showcase\n\nA single markdown page-view that embeds **every** kind of element — data view, table, calendar, rotation, pivot, RSVP, aggregate, a nested doc-view, and an archive partition — to demonstrate that any view can be composed into one.\n\n## Data view (union + inline embeds)\n\n{{view:combined}}\n\n## Table\n\n{{table:notes}}\n\n## Calendar\n\n{{view:chore_calendar}}\n\n## Rotation\n\n{{view:crewrota}}\n\n## Pivot (chore heatmap)\n\n{{view:chore_heatmap}}\n\n## RSVP (self-service sign-up)\n\n{{view:my_rsvp}}\n\n## Aggregate (leaderboard)\n\n{{view:leaderboard}}\n\n## Nested doc-view\n\n{{view:task_doc}}\n\n## Archived tasks (hidden when empty)\n\n{{table:tasks@archive?}}"
+      "markdown": "# Showcase\n\nA single markdown page-view that embeds **every** kind of element — data view, table, calendar, rotation, pivot, RSVP, aggregate, stats, a nested doc-view, and an archive partition — to demonstrate that any view can be composed into one.\n\n## Data view (union + inline embeds)\n\n{{view:combined}}\n\n## Table\n\n{{table:notes}}\n\n## Calendar\n\n{{view:chore_calendar}}\n\n## Rotation\n\n{{view:crewrota}}\n\n## Pivot (chore heatmap)\n\n{{view:chore_heatmap}}\n\n## RSVP (self-service sign-up)\n\n{{view:my_rsvp}}\n\n## Aggregate (leaderboard)\n\n{{view:leaderboard}}\n\n## Stats (KPI tiles + progress bars)\n\n{{view:chore_stats}}\n\n## Nested doc-view\n\n{{view:task_doc}}\n\n## Archived tasks (hidden when empty)\n\n{{table:tasks@archive?}}"
     },
     {
       "name": "in_progress_block",
@@ -582,7 +653,10 @@
       "rsvp": {
         "events": "practices",
         "dateColumn": "date",
-        "titleColumns": ["title", "opponent"],
+        "titleColumns": [
+          "title",
+          "opponent"
+        ],
         "responses": "rsvps",
         "statusColumn": "response",
         "picker": "toggle",
@@ -629,6 +703,70 @@
         "done_on": {
           "within": "@month"
         }
+      }
+    },
+    {
+      "name": "chore_stats",
+      "sources": [
+        "chore_log"
+      ],
+      "mode": "union",
+      "compute": [
+        {
+          "name": "points",
+          "computed": {
+            "lookup": {
+              "table": "chores",
+              "match": "chore",
+              "on": "chore",
+              "field": "points"
+            }
+          }
+        }
+      ],
+      "readonly": true,
+      "icon": "mdi-gauge",
+      "kind": "stats",
+      "stats": {
+        "tiles": [
+          {
+            "label": "Chores this month",
+            "agg": "count",
+            "when": {
+              "done_on": {
+                "within": "@month"
+              }
+            },
+            "goal": 20
+          },
+          {
+            "label": "Points this month",
+            "agg": "sum",
+            "column": "points",
+            "when": {
+              "done_on": {
+                "within": "@month"
+              }
+            },
+            "goal": 60
+          },
+          {
+            "label": "Done today",
+            "agg": "count",
+            "when": {
+              "done_on": {
+                "within": "@today"
+              }
+            },
+            "display": "number"
+          },
+          {
+            "label": "Last logged",
+            "agg": "latest",
+            "column": "done_on",
+            "display": "number"
+          }
+        ]
       }
     },
     {

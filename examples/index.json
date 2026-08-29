@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "38786505e6c66d2f"
+      "hash": "92faf31a6653e9f4"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "225fcb8017a50c5e"
+      "hash": "035ed854bed2196e"
     }
   ],
   "bundles": [
@@ -47,19 +47,19 @@
       "title": "Our Home",
       "description": "A household chore tracker — points, approvals, rewards, a weekly rota and a shopping list.",
       "icon": "./examples/chores-favicon.svg",
-      "revision": 1,
+      "revision": 2,
       "tables": 9,
-      "views": 16,
+      "views": 17,
       "schema": {
         "file": "chores-schema.json",
-        "hash": "38f04ee37294bb61"
+        "hash": "0f7615cff33d2d39"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "chores-lang-en.json",
-          "hash": "aee1c05d73e9172f"
+          "hash": "0e44726500a27323"
         }
       ],
       "data": {
@@ -72,31 +72,31 @@
       "title": "Team Demo",
       "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
       "icon": null,
-      "revision": 2,
+      "revision": 3,
       "tables": 10,
-      "views": 25,
+      "views": 26,
       "schema": {
         "file": "demo-schema.json",
-        "hash": "a972a7ba444b0a2c"
+        "hash": "14f7222e2d668e88"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "demo-lang-en.json",
-          "hash": "abdc2981e0f19247"
+          "hash": "bbdb166a1b544620"
         },
         {
           "code": "es",
           "name": "Español",
           "file": "demo-lang-es.json",
-          "hash": "bdeed52e3122a924"
+          "hash": "e8e253778197485d"
         },
         {
           "code": "sv",
           "name": "Svenska",
           "file": "demo-lang-sv.json",
-          "hash": "2f5a011490fef702"
+          "hash": "2c8f671fbb67979d"
         }
       ],
       "data": {

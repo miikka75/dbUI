@@ -398,7 +398,7 @@
     {
       "name": "doc_scoreboard",
       "icon": "mdi-trophy",
-      "markdown": "## {{t:text.score_week}}\n\n{{view:chore_points_week}}\n\n## {{t:text.score_month}}\n\n{{view:chore_points_month}}\n\n## {{t:text.score_balance}}\n\n{{view:chore_balance}}\n\n## {{t:text.score_who}}\n\n{{view:chore_heatmap}}\n",
+      "markdown": "## {{t:text.score_pulse}}\n\n{{view:chore_pulse}}\n\n## {{t:text.score_week}}\n\n{{view:chore_points_week}}\n\n## {{t:text.score_month}}\n\n{{view:chore_points_month}}\n\n## {{t:text.score_balance}}\n\n{{view:chore_balance}}\n\n## {{t:text.score_who}}\n\n{{view:chore_heatmap}}\n",
       "kind": "page"
     },
     {
@@ -443,9 +443,58 @@
         }
       },
       "readonly": true,
-      "icon": "mdi-trophy-variant",
+      "icon": "mdi-chart-bar",
       "includeArchive": true,
-      "kind": "data"
+      "kind": "stats",
+      "stats": {
+        "perRow": {
+          "label": "person",
+          "value": "total"
+        },
+        "goal": "max"
+      }
+    },
+    {
+      "name": "chore_pulse",
+      "sources": [
+        "chore_log"
+      ],
+      "mode": "union",
+      "readonly": true,
+      "includeArchive": true,
+      "icon": "mdi-gauge",
+      "kind": "stats",
+      "stats": {
+        "display": "number",
+        "tiles": [
+          {
+            "label": "text.pulse_awaiting",
+            "agg": "count",
+            "when": {
+              "status": "logged"
+            }
+          },
+          {
+            "label": "text.pulse_approved_week",
+            "agg": "count",
+            "when": {
+              "status": "approved",
+              "done_on": {
+                "within": "@week"
+              }
+            }
+          },
+          {
+            "label": "text.pulse_today",
+            "agg": "count",
+            "when": {
+              "done_on": {
+                "within": "@today"
+              }
+            }
+          }
+        ]
+      }
     },
     {
       "name": "chore_balance",

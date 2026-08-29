@@ -1353,6 +1353,79 @@ once rather than toggled — surveys, applications, intake, feedback.
   anonymous submission: without an identity there is nothing to stamp, and matching blank owners would
   hand one visitor another's draft.
 
+## stats (ninth view kind)
+
+A view with a `stats` field renders its rows as **headline numbers** — optionally each measured against
+a goal and drawn as a progress bar — instead of a table. Engine: `stats.js`.
+
+It is the **zero-dimensional** member of the aggregate family: `groupBy`/`aggregate` collapses rows to a
+list (one row per group), `pivot` to a grid (two axes), and `stats` to single numbers.
+
+The important part is what it does **not** do. A stats view is an ordinary data view — same `sources`,
+`mode`, `filter`, `compute`, `groupBy`, `aggregate`, `period`, `includeArchive` — with a different
+renderer bolted on the end. It reads no tables of its own and re-implements no filtering. So an existing
+leaderboard becomes bars by **adding three lines to it**, not by writing a second view:
+
+```json
+{
+  "name": "chore_points_week",
+  "sources": ["chore_log"], "mode": "union",
+  "groupBy": { "column": "person" },
+  "compute": [{ "name": "points", "computed": { "lookup": { "table": "ref_chores", "match": "chore", "on": "chore", "field": "points", "default": 0 } } }],
+  "aggregate": { "sum": "points", "into": "total" },
+  "filter": { "status": "approved", "done_on": { "within": "@week" } },
+  "period": "week",
+  "includeArchive": true,
+
+  "kind": "stats",
+  "stats": { "perRow": { "label": "person", "value": "total" }, "goal": "max" }
+}
+```
+
+### Two modes
+
+**`perRow`** — one tile per row, for a view that has already aggregated. `label` and `value` name the
+columns holding the caption and the number, so a `person -> total` leaderboard renders as a column of
+labelled bars. `label` is run through the same display path a cell uses, so list values, translations
+and linked-user avatars all appear.
+
+**`tiles`** — explicit tiles over the whole row set, for a scorecard. Each names an aggregate:
+
+```json
+"stats": { "tiles": [
+  { "label": "text.pulse_awaiting",  "agg": "count", "when": { "status": "logged" } },
+  { "label": "text.pulse_today",     "agg": "count", "when": { "done_on": { "within": "@today" } } },
+  { "label": "Points this month",    "agg": "sum", "column": "points", "goal": 60 }
+]}
+```
+
+The two are mutually exclusive; declaring both is a load-time error.
+
+| Key | Meaning |
+|-----|---------|
+| `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals }` |
+| `perRow` | `{ label, value, goal? }` — one tile per row instead |
+| `goal` | Default bar target for every tile: a positive number, or `"max"` (scale to the largest tile — what a leaderboard wants). No goal = no bar, just a number |
+| `display` | `"bar"` (default) or `"number"`. Per-tile, or view-wide as a default |
+| `limit` | `perRow` only: cap the tile count (a top-N board) |
+
+**Aggregates**: `count` (needs no `column`), `sum`, `avg`, `min`, `max`, `latest`. Everything but
+`count` requires a `column`, and says so at load rather than showing an em dash forever.
+
+- **`when`** narrows the rows for **one tile**, using the same condition language as `filter`. This is
+  what lets "awaiting approval" and "approved this week" be two tiles over one view instead of two views.
+- **Blank cells are skipped, not read as zero** — matching aggregate views. An average over a column
+  half the rows never filled in would otherwise be dragged toward zero, which reads as a real decline
+  rather than as missing data.
+- **Only `avg` is rounded** (to `decimals`, default 1). It is the one aggregate that manufactures digits
+  the data never had. Rounding a `sum` or a `min` would corrupt a decimal quantity to make it tidier.
+- **A tile label may be a translation key.** It falls back to the literal, so plain prose works too.
+- **Exceeding a goal fills the bar and keeps the real number**: the bar is clamped to 100% and the tile
+  still reads `138 / 120`, rather than overflowing its track or pretending the goal was met exactly.
+- **`period` works**, because the rows come from the same pipeline a data view uses — the ‹ › navigation
+  above the view moves the tiles.
+- **Embedding**: `{{view:x}}` in any document renders the tiles, like every other kind.
+
 ## Translatable lists (`translatableLists`)
 
 List **values** (the options behind a `select`/`multiselect` column) are translated through

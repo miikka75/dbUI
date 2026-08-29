@@ -3592,11 +3592,11 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     expect(layouts).toEqual({ all_items: 'table', summary_cards: 'card', quick_list: 'list' });
   });
 
-  // data view + table + calendar + rotation + pivot + rsvp + aggregate view + nested doc-view
+  // data view + table + calendar + rotation + pivot + rsvp + aggregate view + stats + nested doc-view
   // + archive-partition table
-  const EMBEDS = ['combined', 'notes', 'chore_calendar', 'crewrota', 'chore_heatmap', 'my_rsvp', 'leaderboard', 'task_doc', 'tasks'];
+  const EMBEDS = ['combined', 'notes', 'chore_calendar', 'crewrota', 'chore_heatmap', 'my_rsvp', 'leaderboard', 'chore_stats', 'task_doc', 'tasks'];
 
-  test('the showcase page embeds every element kind (data/table/calendar/rotation/pivot/rsvp/aggregate/doc)', async ({ page }) => {
+  test('the showcase page embeds every element kind (data/table/calendar/rotation/pivot/rsvp/aggregate/stats/doc)', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');
@@ -3622,7 +3622,8 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
         cal: app.isCalendarName('chore_calendar'),   // page-view routes this to <calendar-view :embed>
         rot: app.isRotationName('crewrota'),          // ...and this to <rotation-view :embed>
         piv: app.isPivotName('chore_heatmap'),
-        rsvp: app.isRsvpName('my_rsvp')               // ...and {{view:my_rsvp}} to <rsvp-view :embed>
+        rsvp: app.isRsvpName('my_rsvp'),              // ...and {{view:my_rsvp}} to <rsvp-view :embed>
+        stats: app.isStatsName('chore_stats')         // ...and {{view:chore_stats}} to <stats-view :embed>
       };
     });
     expect(r.kind).toBe('page');
@@ -3630,6 +3631,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     expect(r.rot).toBe(true);
     expect(r.piv).toBe(true);
     expect(r.rsvp).toBe(true);
+    expect(r.stats).toBe(true);
   });
 
   test('pivot view (chore_heatmap): person x chore counts + row/col/grand totals', async ({ page }) => {

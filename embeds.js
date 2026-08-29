@@ -239,6 +239,9 @@
     if (cfg.rsvp) { // rsvpView embed -> delegate to the rsvp-view component (embed mode)
       return { config: cfg, kind: 'rsvp', name: cfg.view || cfg.name || ctx.currentTable };
     }
+    if (cfg.stats) { // statsView embed -> delegate to the stats-view component (embed mode)
+      return { config: cfg, kind: 'stats', name: cfg.view || cfg.name || ctx.currentTable };
+    }
     if (cfg.rotation) { // rotationView embed (a {view:x} where x is a rotationView) -> generate period rows
       var anchorName = cfg.view || cfg.name || ctx.currentTable;
       var rrows = ctx.rotationRowsFor(anchorName, cfg.rotation);
@@ -335,7 +338,7 @@
   // relevant rows (per-row filterBy slice when an `item` context is given) must be non-empty.
   function embedVisible(ei, item) {
     if (ei.kind === 'doc') return !!ei.show;
-    if (ei.kind === 'calendar' || ei.kind === 'pivot' || ei.kind === 'rsvp') return true;
+    if (ei.kind === 'calendar' || ei.kind === 'pivot' || ei.kind === 'rsvp' || ei.kind === 'stats') return true;
     var rows = (ei.config.filterBy && item) ? embedRowsForItem(ei, item) : ei.rows;
     return !!(rows && rows.length);
   }

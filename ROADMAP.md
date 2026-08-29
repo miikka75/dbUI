@@ -26,32 +26,6 @@ Embedding is free: `embed-view` dispatches on the same classifier, so a new kind
 
 ## Proposed
 
-### `stats` — KPI tiles and progress bars *(top pick)*
-
-A row of big-number tiles — count / sum / latest, optionally against a goal, rendered as a bar.
-
-The reason this is the top pick is that **the data half already exists**. `chore_points_month` in
-[examples/chores-schema.json](examples/chores-schema.json) already does group → lookup → sum → period
-filter and renders inside `doc_scoreboard` via `{{view:chore_points_week}}`. It produces a *table*.
-`stats` is a second renderer over that identical pipeline output — no new data plumbing, no new
-markdown syntax:
-
-```json
-"signins_today": {
-  "sources": ["signins"],
-  "filter": { "date": { "within": "@today" } },
-  "stats": { "tiles": [
-    { "label": "Signed in today", "agg": "count", "goal": 120, "display": "bar" }
-  ]}
-}
-```
-
-Render with `v-progress-linear` (Vuetify is already loaded) or inline SVG. Both stay inside the
-no-build and CSP constraints; a charting library does not — see *Declined*.
-
-Watch for: a total that omits archived rows is silently wrong, so tiles need the same
-`includeArchive` discipline the aggregate views already document.
-
 ### RSVP attendance verification *(schema pattern, not code)*
 
 "Did the people who signed up actually turn up?" — a verifier marks attendance, and only verified
@@ -214,6 +188,10 @@ stops working offline. Everything above it stays inside the app boundary.
 
 Recorded so the roadmap shows what graduated rather than silently shrinking.
 
+- **`stats`** (KPI tiles / progress bars) — `stats.js` + the `stats` view kind. Confirmed the premise
+  it was proposed on: the data half already existed, so the whole feature is a renderer over the
+  aggregate pipeline. `chore_points_week` became bars by gaining three lines and changing no data
+  config at all, which is the adoption story the entry predicted.
 - **`board`** (kanban) — was the top pick; `board.js` + `chore_board`.
 - **`form`** (single-record intake) — `form.js`.
 - **`image` / `url` column types** — with an `asset:<id>` tier so a deployment with no storage bucket
@@ -224,16 +202,15 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
 ## Declined
 
 - **Bundling a charting library.** Incompatible with the no-build constraint (static files, CDN Vue,
-  no bundler) and with the CSP. Inline SVG plus the existing `hashColor` is the supported answer, and
-  is what `stats` should use.
+  no bundler) and with the CSP. The supported answer is the Vuetify primitives already loaded, plus
+  inline SVG and the existing `hashColor` where a real mark is needed. `stats` shipped on
+  `v-progress-linear` and pulled in nothing — which is the evidence this trade is affordable.
 
 ## Suggested order
 
-`stats` first — it is the smallest (the aggregate pipeline it renders already exists and ships), and
-it is the one that makes documents useful for reporting rather than only for listing. Then `.ics`
-export, which is similarly small and self-contained. Then `timeline`, which closes a gap the calendar
-documents about itself. Then `tree` and `gallery`, both
-gated mainly on a column type.
+`.ics` export next — it is small, self-contained, and has no security surface. Then `timeline`, which
+closes a gap the calendar documents about itself. Then `tree` and `gallery`, both gated mainly on a
+column type.
 
 The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
 schema today.

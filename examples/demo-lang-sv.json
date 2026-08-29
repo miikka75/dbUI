@@ -79,6 +79,7 @@
       "img.url": "Bild-URL",
       "pivot.total": "Totalt",
       "pivot.empty": "Inga data",
+      "stats.empty": "Inga data",
       "access.your_name": "Ditt namn",
       "access.request_access": "Begär åtkomst",
       "access.request_sent": "Åtkomstbegäran skickad",
