@@ -940,7 +940,10 @@ no schema edit, no deploy, no untranslated key. Removing one is deleting their r
   everyone's duties. That is the same order the Lookup editor shows, so what you drag is what you get.
 - **A row with a blank `rosterBy` belongs to no slot** — it is parked, not silently added to the first.
 - **Slot headers** render through the lookup's own `list.<table>.<value>` namespace (the 2-D ref-lane
-  keys), falling back to the raw value. Personal names usually want no translation at all, which is why
+  keys), falling back to the raw value. **Cell values** resolve through `valueCol`'s own list — so a
+  translated duty vocabulary reaches the matrix, which it could not before: the slot column is not a
+  schema column, so a cell had no list to look itself up in. `obscureNames` still keys on the slot,
+  because it asks "does this column hold names?" — a question about the column, not the value's origin. Personal names usually want no translation at all, which is why
   the shipped chores example leaves `ref_duties` out of `translatableLists`, exactly as it leaves
   `members` out.
 - `rotateEvery`, `cycle`, `interval`, `range`, `mineOnly` and `anchorDate` behave identically — this is a
