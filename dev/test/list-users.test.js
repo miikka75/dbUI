@@ -50,6 +50,66 @@ describe('list-users: buildLinkProjection', () => {
   });
 });
 
+// projectLinks is the join both client backends used to keep an inline copy of: backend-firebase over
+// a Firestore snapshot, backend-kv over kv rows, each reshaping to the same flat link records. The
+// tests below are about the two properties that make one copy safe -- it agrees with
+// buildLinkProjection, and it still never emits an email.
+describe('list-users: projectLinks (the flat-record join both backends share)', () => {
+  // Flatten the nested map into the record sequence a store returns, WITHOUT the shared gate — which
+  // is the backends' situation exactly: Firestore rules / RLS have already filtered what arrives.
+  const records = [];
+  Object.keys(listUsers).forEach((list) => {
+    Object.keys(listUsers[list]).forEach((value) => records.push({ list, value, email: listUsers[list][value] }));
+  });
+
+  it('agrees with buildLinkProjection on the same links — one join, two entry points', () => {
+    // Admin case: buildLinkProjection's gate lets everything through, so the two must match exactly.
+    assert.deepEqual(LU.projectLinks(records, profiles), LU.buildLinkProjection(listUsers, profiles, true));
+  });
+
+  it('pre-filtered records (the shared-only query) give the non-admin projection', () => {
+    // What a member's read actually returns: rules/RLS hand back only the shared links, joined against
+    // only the shared profiles. That must equal what the gated map path produces for a non-admin.
+    const shared = Object.fromEntries(Object.entries(profiles).filter(([, p]) => p.shared));
+    const sharedRecords = records.filter((r) => (profiles[r.email] || {}).shared);
+    assert.deepEqual(LU.projectLinks(sharedRecords, shared), LU.buildLinkProjection(listUsers, profiles, false));
+  });
+
+  it('never emits an email, and skips a link whose profile offers neither picture nor name', () => {
+    const proj = LU.projectLinks(records, profiles);
+    assert.equal(JSON.stringify(proj).includes('@'), false);
+    assert.equal('Dave' in proj.seurakuntalaiset, false);   // no profile at all (deregistered)
+    assert.equal('Eve' in proj.seurakuntalaiset, false);    // profile with nothing to show
+  });
+
+  it('is total over junk: no records, no profiles, a record with no list', () => {
+    assert.deepEqual(LU.projectLinks(null, profiles), {});
+    assert.deepEqual(LU.projectLinks(records, null), {});
+    assert.deepEqual(LU.projectLinks([{ value: 'x', email: 'ann@x.com' }, null], profiles), {});
+  });
+});
+
+describe('list-users: linkDocId', () => {
+  it('joins list and value with ~, both percent-encoded', () => {
+    assert.equal(LU.linkDocId('members', 'Ann'), 'members~Ann');
+  });
+  // A Firestore document id may not contain '/', which is what the encoding is really for.
+  it('encodes a value Firestore would refuse in a doc id', () => {
+    assert.equal(LU.linkDocId('a', 'b/c'), 'a~b%2Fc');
+  });
+  // KNOWN LIMITATION, asserted so it is recorded rather than rediscovered: encodeURIComponent leaves
+  // the unreserved marks alone, and '~' is one of them (embeds.js says the same thing about using it
+  // as an escaper). So a list NAME or list VALUE containing '~' collides with the separator, and two
+  // different links can land on one document id -- the second write clobbers the first.
+  //
+  // Not fixed here on purpose: the id is the STORED key of every existing _list_users document, so
+  // changing the scheme is a data migration, not an escaping tweak. Left exactly as it behaved before
+  // this join moved into one place.
+  it('does NOT escape the separator itself — a "~" in a name or value collides', () => {
+    assert.equal(LU.linkDocId('a~b', 'c'), LU.linkDocId('a', 'b~c'));
+  });
+});
+
 describe('list-users: setLink', () => {
   it('adds a link (lowercasing the email) without mutating the input', () => {
     const base = {};

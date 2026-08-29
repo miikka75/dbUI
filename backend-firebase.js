@@ -361,28 +361,22 @@ backend = {
   // Each link is its own doc { list, value, email, shared }; `shared` caches the linked user's current
   // opt-in so a non-admin can query ONLY shared links (whose emails are already world-readable via
   // /_profiles) — mirroring getSharedProfiles. Admins read all; only admins write.
-  _linkDocId: function(listName, value) {
-    return encodeURIComponent(String(listName)) + '~' + encodeURIComponent(String(value));
-  },
-  // Viewer-safe { list: { value: picture } } projection. Tries the admin read (all links, joined against
-  // every profile's picture incl. unshared); on denial falls back to the shared-only query any registered
-  // user may run. Never returns an email. Join is inline (no list-users.js load-order dependency).
+  _linkDocId: function(listName, value) { return ListUsers.linkDocId(listName, value); },
+  // Viewer-safe { list: { value: { picture, name } } } projection. Tries the admin read (all links,
+  // joined against every profile incl. unshared); on denial falls back to the shared-only query any
+  // registered user may run. Never returns an email.
+  //
+  // The join is ListUsers.projectLinks -- the one this file used to keep an inline copy of, on the
+  // grounds of a load-order dependency that no longer exists: index.html awaits appModulesReady (which
+  // carries list-users.js) BEFORE it loads any backend file. Both reads are gated by the rules before
+  // they get here, so what arrives is already the viewer's slice.
   getListAvatars: function() {
-    function join(snap, profiles) {
-      profiles = profiles || {}; var out = {};
-      snap.forEach(function(d) {
-        var v = d.data(), p = profiles[String(v.email || '').toLowerCase()] || {}, entry = {};
-        if (p.picture) entry.picture = p.picture;
-        if (p.name) entry.name = p.name;      // `userlink-name` lists display this instead of the value
-        if (entry.picture || entry.name) { (out[v.list] || (out[v.list] = {}))[v.value] = entry; }
-      });
-      return out;
-    }
+    function records(snap) { var out = []; snap.forEach(function(d) { out.push(d.data()); }); return out; }
     return _db.collection('_list_users').get()
-      .then(function(snap) { return backend_users.getProfiles().then(function(p) { return join(snap, p); }); })
+      .then(function(snap) { return backend_users.getProfiles().then(function(p) { return ListUsers.projectLinks(records(snap), p); }); })
       .catch(function() {
         return _db.collection('_list_users').where('shared', '==', true).get()
-          .then(function(snap) { return backend_users.getSharedProfiles().then(function(p) { return join(snap, p); }); })
+          .then(function(snap) { return backend_users.getSharedProfiles().then(function(p) { return ListUsers.projectLinks(records(snap), p); }); })
           .catch(function() { return {}; });
       });
   },
