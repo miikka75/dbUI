@@ -92,9 +92,15 @@ question is "can this member actually do that?".
 Browser: click "Create Local Database" → app loads with the schema from
 [`examples/demo-schema.json`](examples/demo-schema.json). Optionally run `npm run seed:import` (with the
 server running) to layer the demo data — rows, lists, translations, rotation config, plus example
-users/profiles — on top of it. The importable parts live in `examples/demo-data.json` and
-`examples/demo-lang-<code>.json` (the same bundle shape as Settings → Import, and the same three files
-the in-app example picker installs). Its dates are fixed in the file, so the demo's "this week" and
+users/profiles — on top of it. `npm run seed:import -- chores` seeds the household example instead,
+with its whole family: five accounts, their profiles, and the **`members` list-user links** that make
+`@me` and the duty matrix's `mineOnly` resolve (`?user=ann@dev` then sees only Ann's column).
+
+The importable parts live in `examples/<id>-data.json` and `examples/<id>-lang-<code>.json` (the same
+bundle shape as Settings → Import, and the same files the in-app example picker installs). **Users,
+grants and identity links are deliberately not among them** — the importer has no branch for them, and
+if it did, importing an example would be a way to hand somebody a grant. They are seeded through the
+local dev server's admin API by this script alone. Its dates are fixed in the file, so the demo's "this week" and
 "upcoming" drift as it ages — edit `examples/demo-data.json` when that matters, then re-run
 `node scripts/examples-manifest.js`.
 
