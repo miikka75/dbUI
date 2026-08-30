@@ -226,6 +226,52 @@ Sequencing: `goalFrom` on its own is honest but partial — chores that get done
 and neglected ones stay invisible. Seeding the groups is what turns the view into a reminder. Worth
 building the two together.
 
+### Prose that names its rows — a per-row template for an embed
+
+A `markdown` view is prose **plus** grids: `{{self}}` and `{{view:x}}` render a table, a card stack or
+a `list` layout, and every one of them puts the data *under* the sentence. Nothing puts a cell *inside*
+one.
+
+The sacrament-meeting program is where that shows. The handbook's wording for presenting a member to be
+ordained is a sentence about one person — "We propose that [name] receive the Aaronic Priesthood and be
+ordained a priest" — and the bishopric schema can only approximate it: a header sentence phrased in the
+plural, the names and offices listed beneath it, a footer sentence after. It reads correctly. It is not
+what the conductor is meant to say.
+
+**Proposed shape** — a per-row template beside `markdown`, rendered once per matching row in place of
+the grid:
+
+```json
+{ "sources": ["admin_callings"],
+  "filter": { "$and": [ { "status": "accepted" }, { "calling_type": "ordination" } ] },
+  "rowMarkdown": "{{t:text.ordination_line}}",
+  "hideEmpty": true }
+```
+
+with the sentence itself living in the Languages tab (`text.ordination_line` = "We propose that
+**{{person}}** … be ordained a {{calling}}."), because a sentence with a name in the middle of it is
+per-language prose, not schema. Values interpolate through their own translations, the way a grid cell
+already resolves `list.<list>.<value>`.
+
+**The hard half is grammar, not interpolation.** A list value has one stored form and a sentence needs
+several: Finnish wants the office inflected (`pappi` → *asetetaan **papin** virkaan*), English wants the
+article to agree (*a deacon*, *an elder*). This is precisely why the current program lists the names
+under the sentence — a list needs no case. Three ways out, none free: phrase every template around
+inflection (works, constrains the wording), give inflected forms their own translation namespace
+(`list.callings.priest#gen` — a real vocabulary, and every schema pays for it), or leave it to the
+author and accept that some languages cannot use the feature. Worth deciding before building, because
+it decides whether the value is worth the branch.
+
+**Access is not free either.** A grid hides what a viewer may not see — `obscureNames` blanks a column,
+access gating drops a block. An interpolated sentence has to route every value through the same checks
+or it becomes the way to read a name the grid would have masked. The template path must reuse the cell
+renderer, not `String(row[col])`.
+
+Cost: no engine module, no classifier, no component — this is not a view kind. A rendering branch in the
+read-only data path beside the inline-`{{self}}` block, the same branch again in `print.js` (a program is
+printed more often than read on screen), a `schema.schema.json` property, a `validateSchema` check that
+every `{{col}}` names a real column, and a test. Read-only by nature: a sentence has no cells to edit.
+
 ### Calendar export (`.ics`) and subscribable feeds
 
 Two features that sound like one. They differ by roughly an order of magnitude in cost, and the
