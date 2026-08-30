@@ -170,6 +170,62 @@ exists, since without that there is nothing for a scan to do. Of the two, the sh
 better first build — it needs no camera at all in its typed form, so it can ship and be used at a real
 event before any of the decoding work above is done.
 
+### Per-row goals — a target that lives in the data, not in the view
+
+`stats` measures every tile against **one goal per view**. The `perRow` branch reads `pr.goal` once and
+hands the same value to every row (`stats.js:127`), so a leaderboard can ask "how close
+is each person to 30 points" but not "how close is each *chore* to the cadence *that chore* keeps".
+
+The second question is the one a chores database actually has. Bedding once a month, bins once a week,
+windows twice a year — different targets, one view.
+
+**What already works, and is worth knowing before building anything.** A ladder goal resolves per
+*tile*, against that tile's own value, and the renderer prints the reached rung as a chip. So
+"five meals this week earns a badge" is config today, no code:
+
+```json
+"stats": { "perRow": { "label": "person", "value": "total" },
+           "goal": [ { "at": 5, "label": "text.chef_of_the_week" } ] }
+```
+
+Likewise a fixed per-chore target is expressible in `tiles` mode, one hand-written tile per chore with
+`when: { "chore": "Bedding", "done_on": { "within": "@month" } }` and `goal: 1`. It renders correctly;
+it just names every chore in the schema, so adding a row to `ref_chores` silently gains no tile. The
+gap is not the bar — it is that the target is authored in the view instead of looked up per group.
+
+**Proposed shape:**
+
+```json
+"perRow": { "label": "chore", "value": "total", "goalFrom": "target" }
+```
+
+`target` is an ordinary `computed.lookup` off a new `ref_chores.target_per_month`, the same lookup
+shape the scoreboard already uses for `points`. A **separate key**, not an overload of `goal`: `goal`
+already means number | `"max"` | ladder, and a bare column name would be indistinguishable from the
+literal `"max"`.
+
+Cost: one branch in the `perRow` loop, a `schema.schema.json` property, a `validateSchema` check, a
+test. It does not go through the view-kind seam above — no engine module, no component, no classifier.
+
+**Two things it does not fix, and one of them is the important half.**
+
+- **A group with no rows produces no tile.** `aggregateRows` builds its groups from the rows handed to
+  it, so a chore nobody has done this month is absent from the view entirely — which is precisely the
+  chore the reminder exists for. An empty bar is the whole feature; a missing bar is the bug. The fix
+  is to seed the group keys from the referenced lookup table (`chore` is a `ref` to `ref_chores`, so
+  the key set is known independently of the data) rather than from the rows. Larger than `goalFrom`,
+  and independently useful: the same hole makes any leaderboard omit everyone who scored nothing.
+- **"Days since last done" is not expressible.** `aggregate` supports `count` and `sum` only, so a
+  per-chore group can say "done twice this month" but not "last done 47 days ago". The per-row half
+  already exists as `computed.daysSince`; there is simply no `min`/`latest` aggregate to collapse it
+  per group. Adding one is small. Deciding what the bar then *means* is not — today a full bar is
+  success and overshoot recolours to `success`, whereas an overdue bar filling up is bad news, and
+  inverting that per tile is a renderer decision this entry does not make.
+
+Sequencing: `goalFrom` on its own is honest but partial — chores that get done show their own targets,
+and neglected ones stay invisible. Seeding the groups is what turns the view into a reminder. Worth
+building the two together.
+
 ### Calendar export (`.ics`) and subscribable feeds
 
 Two features that sound like one. They differ by roughly an order of magnitude in cost, and the
@@ -283,6 +339,10 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
 `.ics` export next — it is small, self-contained, and has no security surface. Then `timeline`, which
 closes a gap the calendar documents about itself. Then `tree` and `gallery`, both gated mainly on a
 column type.
+
+Per-row goals sits outside that line: it is the cheapest thing on this page and touches no seam, but
+it extends a shipped kind rather than adding one, so it competes for attention with nothing. Take it
+whenever a schema wants it.
 
 The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
 schema today.
