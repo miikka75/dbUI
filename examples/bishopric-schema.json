@@ -186,6 +186,7 @@
             "name": "stake_business",
             "type": "select",
             "list": "visitors",
+            "allowNew": true,
             "sorted": true
           },
           {
@@ -298,7 +299,7 @@
         "columns": [
           {
             "name": "organization",
-            "list": "organizations",
+            "list": "ref_callings",
             "type": "select",
             "sorted": true
           },
@@ -433,12 +434,16 @@
           {
             "name": "organization",
             "type": "select",
-            "list": "organizations"
+            "list": "ref_callings"
           },
           {
             "name": "calling",
-            "type": "select",
-            "list": "callings"
+            "type": "ref",
+            "table": "ref_callings",
+            "valueCol": "calling",
+            "filterBy": {
+              "organization": "organization"
+            }
           },
           {
             "name": "status",
@@ -477,6 +482,36 @@
           },
           {
             "name": "status",
+            "type": "text"
+          },
+          {
+            "name": "position",
+            "type": "number",
+            "hidden": true
+          },
+          {
+            "name": "created_at",
+            "type": "text",
+            "hidden": true
+          },
+          {
+            "name": "updated_at",
+            "type": "text",
+            "hidden": true
+          }
+        ],
+        "reorderable": true,
+        "defaultSort": "position"
+      },
+      "ref_callings": {
+        "isLookup": true,
+        "columns": [
+          {
+            "name": "organization",
+            "type": "text"
+          },
+          {
+            "name": "calling",
             "type": "text"
           },
           {
@@ -608,7 +643,16 @@
           },
           {
             "filter": {
-              "status": "accepted"
+              "$and": [
+                {
+                  "status": "accepted"
+                },
+                {
+                  "organization": {
+                    "ne": "aaronic_priesthood"
+                  }
+                }
+              ]
             },
             "hideEmpty": true,
             "markdown": "{{t:text.sustaining_header}}\n\n{{self}}\n\n{{t:text.sustaining_footer}}",
@@ -641,6 +685,30 @@
             "markdown": "{{t:text.releases_header}}\n\n{{self}}\n\n{{t:text.releases_footer}}",
             "hideEmpty": true,
             "readonly": true
+          },
+          {
+            "mode": "union",
+            "bare": true,
+            "readonly": true,
+            "hideEmpty": true,
+            "columns": [
+              "person",
+              "calling"
+            ],
+            "sources": [
+              "admin_callings"
+            ],
+            "filter": {
+              "$and": [
+                {
+                  "status": "accepted"
+                },
+                {
+                  "organization": "aaronic_priesthood"
+                }
+              ]
+            },
+            "markdown": "{{t:text.ordination_header}}\n\n{{self}}\n\n{{t:text.ordination_footer}}"
           },
           {
             "view": "doc_sacrament_intro"
@@ -994,10 +1062,9 @@
     },
     "translatableLists": [
       "ref_statuses",
-      "organizations",
-      "callings",
       "bishopric",
-      "interview_topics"
+      "interview_topics",
+      "ref_callings"
     ],
     "schemaVersion": 4
   },
@@ -1005,7 +1072,6 @@
     "interview_topics": [],
     "choristers": [],
     "hymns": [],
-    "organizations": [],
     "bishopric": [
       "bishop",
       "counselor1",
@@ -1014,7 +1080,6 @@
     "members": [],
     "cleaners": [],
     "accompanists": [],
-    "callings": [],
     "interpreters": [],
     "visitors": []
   },
@@ -1109,6 +1174,26 @@
         "position": "15",
         "phase": "declined",
         "status": "declined"
+      }
+    ],
+    "ref_callings": [
+      {
+        "id": "rc-1",
+        "position": "1",
+        "organization": "aaronic_priesthood",
+        "calling": "deacon"
+      },
+      {
+        "id": "rc-2",
+        "position": "2",
+        "organization": "aaronic_priesthood",
+        "calling": "teacher"
+      },
+      {
+        "id": "rc-3",
+        "position": "3",
+        "organization": "aaronic_priesthood",
+        "calling": "priest"
       }
     ]
   }
