@@ -146,6 +146,13 @@ and `"accepted"`. **A value the schema names is part of the schema**, so those s
   value stable when the wording changes, and lets the same row read correctly in every language.
   Because the table is listed in `translatableLists`, this applies to **both** its columns: the app
   exposes the distinct values of every non-system column, so the `phase` codes are translatable too.
+- **`ref_callings`** ships the whole catalogue — 99 rows, a ward's organizations crossed with the
+  callings each one has. It used to carry only the three Aaronic Priesthood offices, which left the
+  `admin_callings` board with an organization dropdown of one and a calling dropdown that emptied as
+  soon as you picked anything else. Same discipline as `ref_statuses`, and for the same reason: both
+  columns store codes (`relief_society`, `first_counselor`), and both are translatable, so the same
+  row reads *Apuyhdistys / 1. neuvonantaja* in Finnish and *Relief Society / First Counselor* in
+  English. A ward adds its own rows where the catalogue is thin; nothing here has to be deleted first.
 
 Every other list is empty — those are yours to fill (`members`, `hymns`, `visitors`, …).
 
