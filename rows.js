@@ -66,6 +66,17 @@
     return true;
   }
 
+  // Every COLUMN a condition names, walking $or/$and groups exactly as the matcher walks them, with the
+  // condition it carries. What counts as a column key — a key that is not an operator — is the condition
+  // language's own rule, so the traversal lives beside condMatches rather than being re-derived by each
+  // consumer: schema-loader's forEachFilterListValue (seeding + locking list values) and validateSchema's
+  // filter-column check both walk filters, and each used to hand-roll this same shape.
+  function forEachCondCol(cond, cb) {
+    if (!cond || typeof cond !== 'object') return;
+    if (cond.$or || cond.$and) { (cond.$or || cond.$and).forEach(function(s) { forEachCondCol(s, cb); }); return; }
+    for (var k in cond) { if (k[0] === '$') continue; cb(k, cond[k]); }
+  }
+
   // Ordered comparison behind lt/gt/lte/gte. Numeric when BOTH sides parse as numbers (so 9 < 10, not
   // "9" > "10"), otherwise a plain string compare — which orders ISO YYYY-MM-DD dates correctly, so a
   // date column works without a separate operator. Returns NaN when either side is blank or missing:
@@ -500,7 +511,7 @@
   function isFilterToken(v) { return v === '@me'; }
 
   var M = {
-    condMatches: condMatches, _withinPeriod: _withinPeriod, filterRows: filterRows, filterToOr: filterToOr,
+    condMatches: condMatches, forEachCondCol: forEachCondCol, _withinPeriod: _withinPeriod, filterRows: filterRows, filterToOr: filterToOr,
     convertViewFilters: convertViewFilters, sortByCol: sortByCol, buildRows: buildRows,
     aggregateRows: aggregateRows, resolveComputed: resolveComputed, isFilterToken: isFilterToken,
     compareValues: compareValues, listOrderFor: listOrderFor,

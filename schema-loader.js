@@ -52,19 +52,18 @@ function _normalizeSchema(parsed) {
 // that covered any `{col: [a, b]}`. Walking once removes the possibility.
 // Tokens ('@me' — isFilterToken, rows.js) are skipped here once, for both callers.
 function forEachFilterListValue(cb) {
+  // The walk over $or/$and and over which keys are columns is forEachCondCol (rows.js), beside the
+  // matcher that defines it — this callback is only what to do with each column it finds.
   function walk(filter) {
-    if (!filter || typeof filter !== 'object') return;
-    if (filter.$or || filter.$and) { (filter.$or || filter.$and).forEach(walk); return; }
-    for (var col in filter) {
-      if (col[0] === '$') continue;
+    forEachCondCol(filter, function(col, cond) {
       var ln = Columns.colIsList(SCHEMA, col);   // memoized any-table scan; was hand-rolled in 4 places
       if (!ln && Columns.colIsRef(SCHEMA, col)) {                          // a ref filter column (e.g. a 2-D board
         for (var rt in SCHEMA) { var rf = Columns.columnRef(SCHEMA, rt, col); if (rf && rf.table) { ln = rf.table; break; } }
       }                                                                    // lane): pin under its lookup TABLE name
-      if (!ln) continue;
-      var vals = Array.isArray(filter[col]) ? filter[col] : [filter[col]];
+      if (!ln) return;
+      var vals = Array.isArray(cond) ? cond : [cond];
       vals.forEach(function(val) { if (typeof val === 'string' && !isFilterToken(val)) cb(ln, val); });
-    }
+    });
   }
   for (var vn in VIEWS) {
     var view = VIEWS[vn];
@@ -213,6 +212,46 @@ function validateSchema() {
     });
   };
   for (var pt in SCHEMA) partLabelCheck('table', pt, SCHEMA[pt]);
+  // "Is `col` a column of any of these tables" — the one predicate behind the view-column check, the
+  // stats-tile check and the filter check below, so the three cannot come to disagree about it.
+  var colOfTables = function(tables, col) {
+    return (tables || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].columns && SCHEMA[s].columns[col]; });
+  };
+  // A `filter` naming a column that is not there fails the same silent way every check around it does:
+  // condMatches compares each row's `undefined` against the value, no row matches, and the view renders
+  // an empty list — which reads as "no rows yet", not as a typo. Nothing downstream can notice, because
+  // the filter is valid JSON and the matcher answers false for every row exactly as it would for a real
+  // column nobody has filled in yet. (The inverse spelling, `{ typo: { empty: true } }`, is worse: every
+  // row matches and the filter quietly does nothing at all.)
+  //
+  // Only what can be PROVEN wrong. A filter runs inside buildRows, over the rows of `sources`, BEFORE
+  // `compute` and before aggregation — so the columns available to it are the declared columns of those
+  // tables and nothing else. Carriers whose rows are not built that way are left alone: a rotationView's
+  // `filter` matches GENERATED period rows, and `groupBy.filter` matches the aggregated key row (the same
+  // reason the stats check further down skips an aggregate view).
+  var filterColCheck = function(cfg, what) {
+    var tables = cfg.sources || [];
+    forEachCondCol(cfg.filter, function(col) {
+      // `_source` / `_status` are row fields the pipeline itself adds; a leading underscore is reserved
+      // from column names (above), so nothing declared can collide with one and nothing here can prove
+      // one wrong.
+      if (col.charAt(0) === '_') return;
+      if (colOfTables(tables, col)) return;
+      // A computed column of this very view is the near-miss worth naming apart: it IS a column of the
+      // rendered rows, so "not found in sources" would send the author looking in the wrong place for a
+      // name that is spelled right and can still never match.
+      var computed = (cfg.columns || []).concat(cfg.compute || []).some(function(c) {
+        return c && typeof c === 'object' && c.computed && c.name === col;
+      });
+      errors.push(what + ': filter column "' + col + '"' + (computed
+        ? ' is computed by this view — `filter` runs on the source rows, before computed values exist, so it can never match'
+        : ' not found in sources [' + tables.join(', ') + ']'));
+    });
+  };
+  // The kinds whose rows ARE their `sources` rows passed through `filter` — loadTableData's union/join
+  // branch, which data, board, form and stats all fall through to. Every other kind either generates its
+  // rows (rotation) or reads through a config of its own that this `filter` is no part of.
+  var FILTERS_SOURCE_ROWS = { data: 1, board: 1, form: 1, stats: 1 };
   for (var v in VIEWS) {
     var view = VIEWS[v];
     partLabelCheck('View', v, view);
@@ -256,9 +295,7 @@ function validateSchema() {
     // Does `col` name something this view's rows will actually carry? Either a column of one of its
     // sources, or one the view declares itself (a `computed`). Shared by the column check below and by
     // the stats-tile check further down, so the two cannot disagree about what a column IS.
-    var colInSources = function(col) {
-      return (view.sources || []).some(function(s) { return SCHEMA[s] && SCHEMA[s].columns && SCHEMA[s].columns[col]; });
-    };
+    var colInSources = function(col) { return colOfTables(view.sources, col); };
     var viewDeclaresCol = function(col) {
       return (view.columns || []).some(function(c) { return !isEmbed(c) && !isViewEmbed(c) && !isText(c) && colName(c) === col; });
     };
@@ -266,6 +303,17 @@ function validateSchema() {
     if (!view.groupBy) (view.columns || []).forEach(function(c) {
       if (isEmbed(c) || isViewEmbed(c) || isText(c) || (c && typeof c === 'object' && c.computed)) return;
       if (!colInSources(colName(c))) errors.push('View "' + v + '": column "' + colName(c) + '" not found in sources [' + (view.sources || []).join(', ') + ']');
+    });
+    // The view's own row filter, and the filter each of its embeds carries. An inline embed declares its
+    // own `sources`; a named-view embed inherits the named view's, with the entry's own keys winning —
+    // the same merge embedConfigs performs to build it. A `{view:...}` pointing nowhere is skipped
+    // rather than reported twice: with no view to inherit from there is nothing left to check against.
+    if (FILTERS_SOURCE_ROWS[SchemaNormalize.viewKind(view)]) filterColCheck(view, 'View "' + v + '"');
+    (view.columns || []).forEach(function(c) {
+      if (!c || typeof c !== 'object' || !c.filter) return;
+      var ecfg = isViewEmbed(c) ? (VIEWS[c.view] ? Object.assign({}, VIEWS[c.view], c) : null) : (isEmbed(c) ? c : null);
+      if (!ecfg || !FILTERS_SOURCE_ROWS[SchemaNormalize.viewKind(ecfg)]) return;
+      filterColCheck(ecfg, 'View "' + v + '" embed ' + (c.view ? '"' + c.view + '"' : '[' + (c.sources || []).join(', ') + ']'));
     });
     // An explicit `valueCol` must name a real column on the roster table it reads, or every cell
     // silently renders empty (the resolvers fall back to [] for a missing column). Only checked when
@@ -360,6 +408,10 @@ function validateSchema() {
           else if (dt !== 'date') errors.push('calendar "' + v + '" dateColumn "' + s.dateColumn + '" in "' + s.table + '" must be a date column');
         }
         (s.titleColumns || []).forEach(function(tc) { if (!ccols[tc]) errors.push('calendar "' + v + '" titleColumns references non-existent column "' + tc + '" in "' + s.table + '"'); });
+        // A calendar source's `filter` runs over that ONE table's rows (calEventsFor), so the same proof
+        // holds: its columns are that table's columns. A wrong one drops every event of that source off
+        // the grid, and a calendar with one source left is still a working calendar — nothing looks broken.
+        filterColCheck({ sources: [s.table], filter: s.filter }, 'calendar "' + v + '" source "' + s.table + '"');
       });
       (cvv.rotationSources || []).forEach(function(rs) { if (!rs || !rs.view) errors.push('calendar "' + v + '": each rotationSources entry needs a view'); });
     }

@@ -2716,6 +2716,63 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.bad).not.toContain('tile 2');    // `title` is a real one
     expect(r.quiet).toBe('');
   });
+
+  // A `filter` naming a column that is not there matches NO row -- the view renders an empty list,
+  // which reads as "no rows yet" and not as a typo. Spelled the other way round (`{ typo: { empty:
+  // true } }`) every row matches and the filter quietly does nothing. Neither is visible downstream:
+  // the document is valid JSON and condMatches answers exactly as it would for a real column nobody
+  // has filled in yet.
+  test('validateSchema names a filter column that is not there', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = (n) => window.validateSchema().filter((e) => e.indexOf(n) >= 0).join(' | ');
+      // Nested in $and/$or: the walk is condMatches' own, so a grouped filter is reached like a flat one.
+      window.VIEWS.f_bad = { name: 'f_bad', sources: ['tasks'], columns: ['title'],
+        filter: { $and: [{ status: 'open' }, { $or: [{ assigned_to: '@me' }, { assinged_to: 'x' }] }] } };
+      const bad = errs('f_bad');
+
+      // A computed column of the view is spelled right and can still never match -- `filter` runs on the
+      // SOURCE rows, before computed values exist -- so it is named apart from a column that is simply
+      // not there, or the author goes looking in the table for a name that is right in front of them.
+      window.VIEWS.f_comp = { name: 'f_comp', sources: ['tasks'],
+        columns: [{ name: 'derived', computed: { fromColumns: ['title'] } }],
+        filter: { derived: { notEmpty: true } } };
+      const comp = errs('f_comp');
+
+      // An embed carries its own filter: an inline one over the `sources` it declares, a named-view one
+      // over the sources it inherits from the view it names.
+      window.VIEWS.f_emb = { name: 'f_emb', sources: ['tasks'], columns: ['title',
+        { sources: ['notes'], filter: { noSuchNoteCol: 'x' } },
+        { view: 'f_bad', filter: { alsoMissing: 'y' } }] };
+      const emb = errs('f_emb');
+
+      // A calendar source's filter runs over that one table's rows; a wrong column drops every event of
+      // that source off the grid while the calendar goes on looking like a working calendar.
+      window.VIEWS.f_cal = { name: 'f_cal', calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { notAColumn: 'x' } }] } };
+      const cal = errs('f_cal');
+
+      // Silent: real columns, an `@me` VALUE, a row field the pipeline adds (`_source`), the group KEY
+      // (`groupBy.filter` matches the aggregated row, which no table declares)...
+      window.VIEWS.f_ok = { name: 'f_ok', sources: ['tasks'], columns: ['title'],
+        filter: { $or: [{ status: 'open' }, { assigned_to: '@me' }, { _source: 'tasks' }] },
+        groupBy: { column: 'assigned_to', filter: { total: { gt: 1 } } } };
+      // ...and a rotationView's filter, which matches GENERATED period rows rather than source rows.
+      window.VIEWS.f_rot = { name: 'f_rot', rotation: { slots: ['a'], rosters: ['tasks'], valueCol: 'title', interval: 'weekly' },
+        filter: { period_start: { gte: '2026-01-01' } } };
+      const quiet = window.validateSchema()
+        .filter((e) => (e.indexOf('f_ok') >= 0 || e.indexOf('f_rot') >= 0) && e.indexOf('filter column') >= 0).join(' | ');
+
+      ['f_bad', 'f_comp', 'f_emb', 'f_cal', 'f_ok', 'f_rot'].forEach((n) => delete window.VIEWS[n]);
+      return { bad, comp, emb, cal, quiet };
+    });
+    expect(r.bad).toContain('filter column "assinged_to" not found in sources [tasks]');
+    expect(r.bad).not.toContain('"status"');        // a real column, and `@me` is a value not a column
+    expect(r.comp).toContain('"derived" is computed by this view');
+    expect(r.emb).toContain('embed [notes]: filter column "noSuchNoteCol"');
+    expect(r.emb).toContain('embed "f_bad": filter column "alsoMissing"');
+    expect(r.cal).toContain('source "tasks": filter column "notAColumn"');
+    expect(r.quiet).toBe('');
+  });
 });
 
 test.describe('v3 page body stored on server', () => {
