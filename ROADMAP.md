@@ -272,6 +272,65 @@ read-only data path beside the inline-`{{self}}` block, the same branch again in
 printed more often than read on screen), a `schema.schema.json` property, a `validateSchema` check that
 every `{{col}}` names a real column, and a test. Read-only by nature: a sentence has no cells to edit.
 
+### Leftovers — data the schema no longer refers to
+
+A schema moves on; the database does not. When the bishopric example replaced its `callings` list with
+a catalogue, a deployment that upgraded was left holding an `organizations` list and a `callings` list
+that nothing reads any more, beside a stray list minted by a seeder that no longer exists, beside
+`_pages` bodies orphaned when their doc-views were renamed. None of it announces itself. The Lists tab
+renders a retired vocabulary exactly like a live one, and the only way to know which is which is to
+read the schema.
+
+**What can be computed** by walking the schema once — the same traversal `_seedSchemaLists` and
+`forEachFilterListValue` already do:
+
+- lists no column's `list` or `listSwitch.list` names
+- collections holding rows for a table the schema no longer declares (and their archive partitions)
+- `_pages` rows whose view is gone
+- translation keys whose referent is gone — `field.<col>`, `tab.<table>`, `view.<name>`,
+  `list.<ns>.<value>` for a value no longer in that list or lookup
+- `_list_users` links pointing at a list value that no longer exists
+
+**It must be a report, not a sweep.** A rename is indistinguishable from a deletion plus a creation, so
+anything automatic would delete a vocabulary the moment someone renamed a list and had not yet
+reimported. The data is the only copy. The app already has one wrong-way-round precedent here: the
+prune in `saveLists` is how a list is deliberately retired, and it is also how a reinstall emptied the
+vocabularies a deployment had spent a year filling in (fixed in `Examples.listsForInstall` — an example
+fills gaps, an import replaces).
+
+**Start with the badge, not the panel.** The cheaper half of this answers the question where the person
+is already standing: mark a list in the Lists tab, and a lookup table in the Lookup tab, that the schema
+does not refer to. Mark the NEGATIVE — on a healthy database every vocabulary but a handful is live, so
+colouring the live ones paints the whole screen and the eye stops reading it, while a chip on the three
+leftovers is a glance. Colour cannot be the only channel: the Lists editor already carries a locked
+badge for filter-pinned values and a translate badge, so a "not referenced" chip in that same slot
+survives both themes, a screenshot, and a reader who cannot separate the hues.
+
+It has to fail safe, and that is the whole difficulty. A plain list is reached by `list` or
+`listSwitch.list` and nothing else, which is easy to prove. A lookup TABLE is reached by a `ref` column,
+by a `list:` naming it, by `translatableLists`, by a board's ref lane, by a rotation's `rosterRef` and by
+a `computed.lookup` — miss one and the badge tells someone their live catalogue is dead. So: mark only
+what can be PROVEN unreferenced, and stay silent when unsure. The badge is allowed to say nothing; it is
+not allowed to be wrong.
+
+The badge does not subsume the report. It answers "is this one used?" for things that have a tab; the
+report answers "what is left over?" for the things that do not — orphaned page bodies, dead translation
+keys, links pointing at deleted values.
+
+**Shape:** a panel in Settings beside Examples. One inventory, each entry with what it is and how much
+of it there is ("`hymns` — a list of 200 values, referenced by no column"), and a per-item delete using
+the grid's arm-then-confirm. Never a "delete all", never a prompt on boot; the answer to "is this
+finished with?" belongs to the person, and the cost of getting it wrong is asymmetric.
+
+One subtlety worth building in from the start: a list and a lookup TABLE may share a name — the
+bishopric example has both a `ref_statuses` table and, on older deployments, a `ref_statuses` list.
+The report has to say which of the two it means, and must never offer the table when the leftover is
+the list.
+
+Cost: a pure function (schema + what the database holds -> an inventory), Node-tested; the panel; the
+deletes reuse writes that already exist. No engine module, no view kind. The same panel is the natural
+home for the example-drift notice Settings already shows.
+
 ### Calendar export (`.ics`) and subscribable feeds
 
 Two features that sound like one. They differ by roughly an order of magnitude in cost, and the
