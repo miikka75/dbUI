@@ -50,6 +50,41 @@ describe('asBundle', () => {
   });
 });
 
+describe('listsForInstall', () => {
+  // Reinstalling an example to pick up a schema change used to hand the bundle's lists straight to
+  // saveLists. Every shipped bundle ships them EMPTY, and the Firestore backend prunes what the map
+  // omits -- so reinstalling emptied every vocabulary the deployment had filled in, and deleted every
+  // list the bundle had never heard of. These cases are that bug, from several directions.
+  it('fills a vocabulary the database has not started', () => {
+    assert.deepEqual(Examples.listsForInstall({ hymns: [] }, { hymns: ['1. Hymn'] }), { hymns: ['1. Hymn'] });
+  });
+
+  it('fills one the database does not have at all', () => {
+    assert.deepEqual(Examples.listsForInstall({}, { bishopric: ['bishop'] }), { bishopric: ['bishop'] });
+  });
+
+  it('leaves a vocabulary that already has values exactly as it is', () => {
+    const existing = { hymns: ['1. Hymn', '2. Hymn'] };
+    assert.deepEqual(Examples.listsForInstall(existing, { hymns: [] }), existing);
+    assert.deepEqual(Examples.listsForInstall(existing, { hymns: ['something else'] }), existing);
+  });
+
+  it('keeps a list the bundle never mentions, which is what pruning would delete', () => {
+    assert.deepEqual(Examples.listsForInstall({ ward_only: ['a'] }, { hymns: [] }),
+      { ward_only: ['a'], hymns: [] });
+  });
+
+  it('costs the bishopric example nothing on a filled-in database', () => {
+    const shipped = read('bishopric-schema.json').lists;
+    // Every shipped list is empty except `bishopric` -- which is exactly why applying them verbatim hurt.
+    assert.deepEqual(Object.keys(shipped).filter((n) => shipped[n].length), ['bishopric']);
+    const ward = { hymns: ['1. Hymn'], members: ['Someone'], bishopric: ['bishop', 'counselor1'], retired: ['x'] };
+    const after = Examples.listsForInstall(ward, shipped);
+    for (const name of Object.keys(ward)) assert.deepEqual(after[name], ward[name], name + ' survived');
+    assert.deepEqual(after.cleaners, [], 'a vocabulary the ward never started still arrives');
+  });
+});
+
 describe('mergeFiles', () => {
   it('folds the demo bundle — schema, three language packs, sample rows — into one import', () => {
     const merged = Examples.mergeFiles([

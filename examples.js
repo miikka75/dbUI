@@ -84,6 +84,28 @@
     return raw ? { schema: parsed, tables: {} } : (parsed || {});
   }
 
+  // --- What an example install may do to a live database's vocabularies ---------------------------
+  // A bundle ships its lists EMPTY on purpose: a ward types its own members, hymns and organisations,
+  // and the schema only says which vocabularies exist. Applied verbatim to a database that has been
+  // filled in, that is destructive twice over -- the empty array replaces a vocabulary someone has spent
+  // a year typing, and the Firestore
+  // backend PRUNES every list absent from the map it is handed, so a list the bundle never mentions is
+  // deleted outright. Reinstalling to pick up a schema change is a routine thing to do; losing the
+  // ward's vocabularies for it is not.
+  //
+  // So an example FILLS GAPS: a list that is missing or empty takes the bundle's values, a list that
+  // already has values is left exactly as it is, and a list the bundle does not mention survives.
+  // Hand-picked file imports keep replace-and-prune -- that is a RESTORE, and pruning is how an export
+  // taken before a list was retired can remove it again. The caller decides which of the two it is.
+  function listsForInstall(existing, incoming) {
+    var out = Object.assign({}, existing || {});
+    Object.keys(incoming || {}).forEach(function (name) {
+      var have = out[name];
+      if (!Array.isArray(have) || !have.length) out[name] = incoming[name];
+    });
+    return out;
+  }
+
   // Rows are merged by id rather than concatenated: two files may legitimately carry the same table,
   // and an import writes each row by id anyway, so a duplicate would only be written twice.
   function mergeRows(into, key, rows) {
@@ -227,7 +249,7 @@
 
   var E = {
     hash: hash, hashText: hashText, canonical: canonical,
-    asBundle: asBundle, mergeFiles: mergeFiles,
+    asBundle: asBundle, mergeFiles: mergeFiles, listsForInstall: listsForInstall,
     fingerprint: fingerprint, compare: compare, fileHashes: fileHashes
   };
   if (isNode) module.exports = E;

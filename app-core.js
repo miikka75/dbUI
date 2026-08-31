@@ -4663,8 +4663,13 @@ function createVueApp() {
           });
           if (imported.lists) {
             chain = chain.then(step('mdi-format-list-bulleted', '', function() {
-              self.listsCache = imported.lists;
-              return backend.saveLists(imported.lists);
+              // An EXAMPLE fills the vocabularies this database has not started and leaves the rest
+              // alone; a hand-picked file replaces them (and prunes what it omits), because that is a
+              // restore. See Examples.listsForInstall for why the difference matters.
+              var next = (opts && opts.provenance)
+                ? Examples.listsForInstall(self.listsCache, imported.lists) : imported.lists;
+              self.listsCache = next;
+              return backend.saveLists(next);
             }));
           }
           langCodes.forEach(function(code) {
