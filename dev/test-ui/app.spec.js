@@ -1492,6 +1492,22 @@ test.describe('Translatable lists', () => {
     expect(keys.filter((k) => /^list\.ref_chores\.\d+$/.test(k))).toEqual([]);
     expect(keys).toContain('field.points');   // the column HEADER is still translatable
   });
+
+  // A LIST and a lookup TABLE may carry the same name -- a list outlives the catalogue that replaced
+  // it (nothing prunes one), and a filter-pinned ref value is seeded under the TABLE's own name. The
+  // enumerator used to stop at the list, so one stray value hid the whole catalogue while the picker
+  // (getListOptions, which prefers the table) went on showing it: the editor disagreed with the
+  // dropdown it fills in, and the missing keys looked like the vocabulary simply not being translatable.
+  test('a same-named list does not hide the lookup table it shares a name with', async ({ page }) => {
+    await openWithVocab(page);
+    await page.request.post('/api/saveLists', { data: { lists: { ref_chores: ['Legacy value'] } } });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => appInstance.selectTab('__languages'));
+    await expect.poll(() => page.evaluate(
+      () => appInstance.schemaTranslationKeys.filter((k) => k.startsWith('list.ref_chores.'))
+    ), { timeout: 6000 }).toEqual(['list.ref_chores.Legacy value', 'list.ref_chores.Mow the lawn', 'list.ref_chores.Wash up']);
+  });
 });
 
 test.describe('Rotation rosters from a 2-D lookup', () => {

@@ -134,6 +134,31 @@ describe('dev server — the admin API surface is gated', () => {
     assert.equal(await status('setProfileName', { email: 'member@x.com', name: 'Member' }, 'boss@x.com'), 200);
   });
 
+  // saveLists is not admin-gated -- who may write which list is the policies' question. What the route
+  // decides is whether a name ABSENT from the submitted map was retired or merely invisible to the
+  // caller, and it answers that with the predicate backend-firebase uses (`myTabs === null`). Dev
+  // merged for everyone, so a list could never be deleted here at all: the map came back with every
+  // name the store already had. That is not cosmetic -- a leftover list shows in the Lists tab as a
+  // live vocabulary, and until app-core stopped preferring it, hid a same-named lookup table's values
+  // from the Languages editor.
+  it('an unrestricted caller retires a list by omitting it; a restricted one cannot drop what they cannot see', async () => {
+    assert.equal(await status('saveLists', { lists: { keep: ['a'], retire: ['b'] } }, 'boss@x.com'), 200);
+    const before = await (await post('getLists', {}, 'boss@x.com')).json();
+    assert.deepEqual(before.retire, ['b'], 'both lists were stored');
+
+    // The admin sees every list, so their map IS the whole set: the missing name is a deletion.
+    assert.equal(await status('saveLists', { lists: { keep: ['a'] } }, 'boss@x.com'), 200);
+    const after = await (await post('getLists', {}, 'boss@x.com')).json();
+    assert.deepEqual(after.keep, ['a'], 'the surviving list is untouched');
+    assert.ok(!('retire' in after), 'the omitted list is retired, not resurrected by a merge');
+
+    // A member's map is a filtered subset of what they can see, so absence means "not mine to write".
+    // Their save must not take `keep` with it, whatever the policies decide about their own write.
+    await post('saveLists', { lists: { mine: ['x'] } }, 'member@x.com');
+    const survived = await (await post('getLists', {}, 'boss@x.com')).json();
+    assert.deepEqual(survived.keep, ['a'], "a restricted caller's save leaves the lists they omitted alone");
+  });
+
   it('an unregistered caller gets nothing from the admin surface', async () => {
     // `noUsers()` is the bootstrap grace, not "I am not in the table". Once ANY user exists, a stranger
     // is a stranger — the gate must not read an absent grant as an absent restriction.

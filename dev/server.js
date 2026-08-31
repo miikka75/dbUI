@@ -608,10 +608,18 @@ const server = http.createServer(async (req, res) => {
       }
       case 'saveLists': {
         // Which lists this caller may write is the policies' question (userWritableLists -> the _lists
-        // rules), not this file's. Merge over the existing set rather than replacing it: a non-admin's
-        // submitted map is a filtered subset of what they can see, so a plain save would drop the rest,
-        // and each individual write is then accepted or refused on its own.
-        const merged = await backend.getLists();
+        // rules), not this file's. What IS this file's is the distinction backend-firebase draws with
+        // the same predicate (`myTabs === null`): an UNRESTRICTED caller sees every list, so the map
+        // they submit is the whole set and a name missing from it was RETIRED — pruning is the only way
+        // a list is ever deleted. A restricted caller's map is a filtered subset of what they can see,
+        // so a missing name means "not mine", and merging is what stops their save dropping the rest.
+        //
+        // Dev merged for everyone, which left no way to retire a list here at all — and a leftover is
+        // not inert: it used to shadow a same-named lookup table in the Languages editor, and it still
+        // shows in the Lists tab as a live vocabulary. Every app-side caller passes the full
+        // `listsCache` (or a bundle's `lists`, a deliberate replace), so the unrestricted branch gets
+        // the whole set exactly as Firestore does.
+        const merged = getAllowedTables() === null ? {} : await backend.getLists();
         Object.keys(body.lists || {}).forEach(name => { merged[name] = body.lists[name]; });
         await backend.saveLists(merged);
         return json(res, { ok: true });
