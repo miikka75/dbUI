@@ -170,6 +170,108 @@ exists, since without that there is nothing for a scan to do. Of the two, the sh
 better first build — it needs no camera at all in its typed form, so it can ship and be used at a real
 event before any of the decoding work above is done.
 
+### Per-row goals — a target that lives in the data, not in the view
+
+`stats` measures every tile against **one goal per view**. The `perRow` branch reads `pr.goal` once and
+hands the same value to every row (`stats.js:127`), so a leaderboard can ask "how close
+is each person to 30 points" but not "how close is each *chore* to the cadence *that chore* keeps".
+
+The second question is the one a chores database actually has. Bedding once a month, bins once a week,
+windows twice a year — different targets, one view.
+
+**What already works, and is worth knowing before building anything.** A ladder goal resolves per
+*tile*, against that tile's own value, and the renderer prints the reached rung as a chip. So
+"five meals this week earns a badge" is config today, no code:
+
+```json
+"stats": { "perRow": { "label": "person", "value": "total" },
+           "goal": [ { "at": 5, "label": "text.chef_of_the_week" } ] }
+```
+
+Likewise a fixed per-chore target is expressible in `tiles` mode, one hand-written tile per chore with
+`when: { "chore": "Bedding", "done_on": { "within": "@month" } }` and `goal: 1`. It renders correctly;
+it just names every chore in the schema, so adding a row to `ref_chores` silently gains no tile. The
+gap is not the bar — it is that the target is authored in the view instead of looked up per group.
+
+**Proposed shape:**
+
+```json
+"perRow": { "label": "chore", "value": "total", "goalFrom": "target" }
+```
+
+`target` is an ordinary `computed.lookup` off a new `ref_chores.target_per_month`, the same lookup
+shape the scoreboard already uses for `points`. A **separate key**, not an overload of `goal`: `goal`
+already means number | `"max"` | ladder, and a bare column name would be indistinguishable from the
+literal `"max"`.
+
+Cost: one branch in the `perRow` loop, a `schema.schema.json` property, a `validateSchema` check, a
+test. It does not go through the view-kind seam above — no engine module, no component, no classifier.
+
+**Two things it does not fix, and one of them is the important half.**
+
+- **A group with no rows produces no tile.** `aggregateRows` builds its groups from the rows handed to
+  it, so a chore nobody has done this month is absent from the view entirely — which is precisely the
+  chore the reminder exists for. An empty bar is the whole feature; a missing bar is the bug. The fix
+  is to seed the group keys from the referenced lookup table (`chore` is a `ref` to `ref_chores`, so
+  the key set is known independently of the data) rather than from the rows. Larger than `goalFrom`,
+  and independently useful: the same hole makes any leaderboard omit everyone who scored nothing.
+- **"Days since last done" is not expressible.** `aggregate` supports `count` and `sum` only, so a
+  per-chore group can say "done twice this month" but not "last done 47 days ago". The per-row half
+  already exists as `computed.daysSince`; there is simply no `min`/`latest` aggregate to collapse it
+  per group. Adding one is small. Deciding what the bar then *means* is not — today a full bar is
+  success and overshoot recolours to `success`, whereas an overdue bar filling up is bad news, and
+  inverting that per tile is a renderer decision this entry does not make.
+
+Sequencing: `goalFrom` on its own is honest but partial — chores that get done show their own targets,
+and neglected ones stay invisible. Seeding the groups is what turns the view into a reminder. Worth
+building the two together.
+
+### Prose that names its rows — a per-row template for an embed
+
+A `markdown` view is prose **plus** grids: `{{self}}` and `{{view:x}}` render a table, a card stack or
+a `list` layout, and every one of them puts the data *under* the sentence. Nothing puts a cell *inside*
+one.
+
+The sacrament-meeting program is where that shows. The handbook's wording for presenting a member to be
+ordained is a sentence about one person — "We propose that [name] receive the Aaronic Priesthood and be
+ordained a priest" — and the bishopric schema can only approximate it: a header sentence phrased in the
+plural, the names and offices listed beneath it, a footer sentence after. It reads correctly. It is not
+what the conductor is meant to say.
+
+**Proposed shape** — a per-row template beside `markdown`, rendered once per matching row in place of
+the grid:
+
+```json
+{ "sources": ["admin_callings"],
+  "filter": { "$and": [ { "status": "accepted" }, { "calling_type": "ordination" } ] },
+  "rowMarkdown": "{{t:text.ordination_line}}",
+  "hideEmpty": true }
+```
+
+with the sentence itself living in the Languages tab (`text.ordination_line` = "We propose that
+**{{person}}** … be ordained a {{calling}}."), because a sentence with a name in the middle of it is
+per-language prose, not schema. Values interpolate through their own translations, the way a grid cell
+already resolves `list.<list>.<value>`.
+
+**The hard half is grammar, not interpolation.** A list value has one stored form and a sentence needs
+several: Finnish wants the office inflected (`pappi` → *asetetaan **papin** virkaan*), English wants the
+article to agree (*a deacon*, *an elder*). This is precisely why the current program lists the names
+under the sentence — a list needs no case. Three ways out, none free: phrase every template around
+inflection (works, constrains the wording), give inflected forms their own translation namespace
+(`list.callings.priest#gen` — a real vocabulary, and every schema pays for it), or leave it to the
+author and accept that some languages cannot use the feature. Worth deciding before building, because
+it decides whether the value is worth the branch.
+
+**Access is not free either.** A grid hides what a viewer may not see — `obscureNames` blanks a column,
+access gating drops a block. An interpolated sentence has to route every value through the same checks
+or it becomes the way to read a name the grid would have masked. The template path must reuse the cell
+renderer, not `String(row[col])`.
+
+Cost: no engine module, no classifier, no component — this is not a view kind. A rendering branch in the
+read-only data path beside the inline-`{{self}}` block, the same branch again in `print.js` (a program is
+printed more often than read on screen), a `schema.schema.json` property, a `validateSchema` check that
+every `{{col}}` names a real column, and a test. Read-only by nature: a sentence has no cells to edit.
+
 ### Calendar export (`.ics`) and subscribable feeds
 
 Two features that sound like one. They differ by roughly an order of magnitude in cost, and the
@@ -283,6 +385,10 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
 `.ics` export next — it is small, self-contained, and has no security surface. Then `timeline`, which
 closes a gap the calendar documents about itself. Then `tree` and `gallery`, both gated mainly on a
 column type.
+
+Per-row goals sits outside that line: it is the cheapest thing on this page and touches no seam, but
+it extends a shipped kind rather than adding one, so it competes for attention with nothing. Take it
+whenever a schema wants it.
 
 The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
 schema today.
