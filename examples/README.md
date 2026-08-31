@@ -33,6 +33,12 @@ offers to reinstall.
 > Reinstalling **replaces** the schema and merges the labels — a schema edit you made in the app is
 > lost. Export first. (The recorded fingerprints exist so this can become a merge rather than a
 > replace; that part is not built yet.)
+>
+> Your **lists survive**: a bundle ships its vocabularies empty, so installing one fills the lists this
+> database has not started and leaves every list that has values in it alone — including the ones the
+> bundle never mentions (`Examples.listsForInstall`). Rows, translations and doc-view bodies are
+> layered on as before. A hand-picked **Import JSON** is the other case and still replaces the whole
+> set, pruning any list the file omits: that is a restore, and it is how a list is retired.
 
 Regenerate the index after changing anything here:
 
