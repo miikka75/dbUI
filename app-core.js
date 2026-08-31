@@ -878,7 +878,14 @@ function createVueApp() {
         }
         var dc = this.dataCache || {};
         (schema.translatableLists || []).forEach(function(name) {
-          if (lists[name]) { lists[name].forEach(function(val) { keys.push('list.' + name + '.' + val); }); return; }
+          // A name can be BOTH a list and a lookup TABLE, and then both are offered -- the keys are
+          // deduped below. This used to `return` after the list, so a one-value leftover hid a
+          // hundred-row catalogue: a list survives the schema that replaced it (nothing prunes one),
+          // and a filter-pinned ref value seeds a list under the TABLE's own name, so the collision is
+          // not exotic. getListOptions resolves the same clash the other way round (a lookup table wins
+          // over a same-named list), which is how the Languages editor came to disagree with the picker
+          // it fills in: the dropdown offered the catalogue, the editor offered one stray value.
+          (lists[name] || []).forEach(function(val) { keys.push('list.' + name + '.' + val); });
           // A lookup/ref TABLE name is also accepted: expose the distinct values across its non-system columns
           // so a 2-D ref lane (its group + value dimensions) is fully translatable via the same list.<name>.<value> keys.
           if (SCHEMA[name]) {
