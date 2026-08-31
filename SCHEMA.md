@@ -366,6 +366,14 @@ A `filter` (on a view, an inline/named-view embed, or a conditional column) matc
   `notEmpty`/`empty` work on **computed** values too. Row filters and column/embed conditions share
   one matcher (`condMatches`), so **every operator above works in `filter`, `when`, and embed `when`.**
 
+**What a row `filter` can name.** Only the **stored columns of the carrier's own sources** — a view's
+`sources`, an inline embed's own `sources`, the view a `{view:...}` embed names, or the one table a
+calendar source reads. A row filter runs *before* `compute` and *before* grouping, so a **computed**
+column (which the operators above do read in a `when`) can never match in a `filter`, and
+`groupBy.filter` matches the **aggregated key row**, not a source column. A name that is not there is
+refused at load with the column and the sources it was looked for in, because at runtime it fails
+invisibly: no row matches, and the view shows an empty list that reads as "no rows yet".
+
 **Static vs Dynamic filtering:**
 | Syntax | When to use |
 |--------|-------------|
