@@ -59,7 +59,13 @@ exports.test = base.test.extend({
     child.stdout.resume();
     await use(origin);
     child.kill();
-  }, { scope: 'worker' }],
+    // The fixture needs a timeout of its OWN. A worker fixture is created inside the first test that
+    // asks for it, and without this option its setup is charged to that test's 8s budget -- so
+    // READY_TIMEOUT_MS was unreachable, and a cold start slower than eight seconds failed whichever
+    // test the worker happened to pick up first. Eight workers running initdb for a WebAssembly
+    // Postgres at the same instant is exactly when that happens, which is why it showed up as a rare
+    // failure in an arbitrary, innocent test rather than as "the server was slow to start".
+  }, { scope: 'worker', timeout: READY_TIMEOUT_MS + 5_000 }],
 
   // Overriding Playwright's own baseURL fixture is what points `page.goto('/')` and
   // `page.request.post('/api/...')` at THIS worker's server.
