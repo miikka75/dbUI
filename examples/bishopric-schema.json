@@ -1214,12 +1214,6 @@
         "calling": "second_counselor"
       },
       {
-        "id": "rc-103",
-        "position": "103",
-        "organization": "primary",
-        "calling": "third_counselor"
-      },
-      {
         "id": "rc-104",
         "position": "104",
         "organization": "primary",
@@ -1241,7 +1235,7 @@
         "id": "rc-115",
         "position": "115",
         "organization": "primary_nursery",
-        "calling": "specialist"
+        "calling": "assistant"
       },
       {
         "id": "rc-116",
@@ -1260,12 +1254,6 @@
         "position": "118",
         "organization": "relief_society",
         "calling": "second_counselor"
-      },
-      {
-        "id": "mthm3p1jhfdw1",
-        "position": "120",
-        "organization": "relief_society",
-        "calling": "third_counselor"
       },
       {
         "id": "rc-120",
@@ -1763,7 +1751,7 @@
         "id": "rc-903",
         "position": "903",
         "organization": "ward",
-        "calling": "technology_specialist"
+        "calling": "technology_assistant"
       },
       {
         "id": "rc-900",
