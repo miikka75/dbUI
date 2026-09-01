@@ -1292,112 +1292,16 @@
         "calling": "teacher"
       },
       {
-        "id": "rc-130",
-        "position": "130",
-        "organization": "young_women",
-        "calling": "representative"
-      },
-      {
-        "id": "rc-131",
-        "position": "131",
-        "organization": "young_women",
-        "calling": "specialist"
-      },
-      {
-        "id": "rc-132",
-        "position": "132",
-        "organization": "young_single_adults",
-        "calling": "president"
-      },
-      {
-        "id": "rc-133",
-        "position": "133",
-        "organization": "young_single_adults",
-        "calling": "first_counselor"
-      },
-      {
-        "id": "rc-134",
-        "position": "134",
-        "organization": "young_single_adults",
-        "calling": "second_counselor"
-      },
-      {
-        "id": "rc-135",
-        "position": "135",
-        "organization": "young_single_adults",
-        "calling": "third_counselor"
-      },
-      {
-        "id": "rc-136",
-        "position": "136",
-        "organization": "young_single_adults",
-        "calling": "secretary"
-      },
-      {
-        "id": "rc-137",
-        "position": "137",
-        "organization": "young_single_adults",
-        "calling": "teacher"
-      },
-      {
         "id": "rc-138",
         "position": "138",
         "organization": "young_single_adults",
         "calling": "representative"
       },
       {
-        "id": "rc-139",
-        "position": "139",
-        "organization": "young_single_adults",
-        "calling": "specialist"
-      },
-      {
-        "id": "rc-140",
-        "position": "140",
-        "organization": "young_single_adults_institute",
-        "calling": "president"
-      },
-      {
-        "id": "rc-141",
-        "position": "141",
-        "organization": "young_single_adults_institute",
-        "calling": "first_counselor"
-      },
-      {
-        "id": "rc-142",
-        "position": "142",
-        "organization": "young_single_adults_institute",
-        "calling": "second_counselor"
-      },
-      {
-        "id": "rc-143",
-        "position": "143",
-        "organization": "young_single_adults_institute",
-        "calling": "third_counselor"
-      },
-      {
-        "id": "rc-144",
-        "position": "144",
-        "organization": "young_single_adults_institute",
-        "calling": "secretary"
-      },
-      {
         "id": "rc-145",
         "position": "145",
         "organization": "young_single_adults_institute",
         "calling": "teacher"
-      },
-      {
-        "id": "rc-146",
-        "position": "146",
-        "organization": "young_single_adults_institute",
-        "calling": "representative"
-      },
-      {
-        "id": "rc-147",
-        "position": "147",
-        "organization": "young_single_adults_institute",
-        "calling": "specialist"
       },
       {
         "id": "rc-148",
@@ -1418,34 +1322,10 @@
         "calling": "second_counselor"
       },
       {
-        "id": "rc-151",
-        "position": "151",
-        "organization": "young_men_priests",
-        "calling": "third_counselor"
-      },
-      {
         "id": "rc-152",
         "position": "152",
         "organization": "young_men_priests",
         "calling": "secretary"
-      },
-      {
-        "id": "rc-153",
-        "position": "153",
-        "organization": "young_men_priests",
-        "calling": "teacher"
-      },
-      {
-        "id": "rc-154",
-        "position": "154",
-        "organization": "young_men_priests",
-        "calling": "representative"
-      },
-      {
-        "id": "rc-155",
-        "position": "155",
-        "organization": "young_men_priests",
-        "calling": "specialist"
       },
       {
         "id": "rc-156",
@@ -1466,34 +1346,10 @@
         "calling": "second_counselor"
       },
       {
-        "id": "rc-159",
-        "position": "159",
-        "organization": "young_men_teachers",
-        "calling": "third_counselor"
-      },
-      {
         "id": "rc-160",
         "position": "160",
         "organization": "young_men_teachers",
         "calling": "secretary"
-      },
-      {
-        "id": "rc-161",
-        "position": "161",
-        "organization": "young_men_teachers",
-        "calling": "teacher"
-      },
-      {
-        "id": "rc-162",
-        "position": "162",
-        "organization": "young_men_teachers",
-        "calling": "representative"
-      },
-      {
-        "id": "rc-163",
-        "position": "163",
-        "organization": "young_men_teachers",
-        "calling": "specialist"
       },
       {
         "id": "rc-164",
@@ -1514,40 +1370,10 @@
         "calling": "second_counselor"
       },
       {
-        "id": "rc-167",
-        "position": "167",
-        "organization": "young_men_deacons",
-        "calling": "third_counselor"
-      },
-      {
         "id": "rc-168",
         "position": "168",
         "organization": "young_men_deacons",
         "calling": "secretary"
-      },
-      {
-        "id": "rc-169",
-        "position": "169",
-        "organization": "young_men_deacons",
-        "calling": "teacher"
-      },
-      {
-        "id": "rc-170",
-        "position": "170",
-        "organization": "young_men_deacons",
-        "calling": "representative"
-      },
-      {
-        "id": "rc-171",
-        "position": "171",
-        "organization": "young_men_deacons",
-        "calling": "specialist"
-      },
-      {
-        "id": "rc-172",
-        "position": "172",
-        "organization": "single_adults",
-        "calling": "president"
       },
       {
         "id": "rc-179",
@@ -1620,54 +1446,6 @@
         "position": "196",
         "organization": "missionary_work",
         "calling": "president"
-      },
-      {
-        "id": "rc-204",
-        "position": "204",
-        "organization": "ward",
-        "calling": "president"
-      },
-      {
-        "id": "rc-205",
-        "position": "205",
-        "organization": "ward",
-        "calling": "first_counselor"
-      },
-      {
-        "id": "rc-206",
-        "position": "206",
-        "organization": "ward",
-        "calling": "second_counselor"
-      },
-      {
-        "id": "rc-207",
-        "position": "207",
-        "organization": "ward",
-        "calling": "third_counselor"
-      },
-      {
-        "id": "rc-208",
-        "position": "208",
-        "organization": "ward",
-        "calling": "secretary"
-      },
-      {
-        "id": "rc-209",
-        "position": "209",
-        "organization": "ward",
-        "calling": "teacher"
-      },
-      {
-        "id": "rc-210",
-        "position": "210",
-        "organization": "ward",
-        "calling": "representative"
-      },
-      {
-        "id": "rc-211",
-        "position": "211",
-        "organization": "ward",
-        "calling": "specialist"
       },
       {
         "id": "rc-212",
@@ -1748,16 +1526,22 @@
         "calling": "executive_secretary"
       },
       {
-        "id": "rc-903",
+        "id": "mtisz9dlqplpp",
         "position": "903",
         "organization": "ward",
-        "calling": "technology_assistant"
+        "calling": "technology_specialist"
       },
       {
         "id": "rc-900",
         "position": "904",
         "organization": "relief_society",
         "calling": "translation_coordinator"
+      },
+      {
+        "id": "rc-903",
+        "position": "905",
+        "organization": "ward",
+        "calling": "technology_assistant"
       }
     ]
   }
