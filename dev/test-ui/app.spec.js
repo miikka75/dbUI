@@ -1477,6 +1477,88 @@ test.describe('The Lookup editor loads what it edits', () => {
   });
 });
 
+test.describe('Renaming in a two-column lookup', () => {
+  // A value in a 2-D lookup is unique within its PARENT, not across the table -- "president" is a
+  // calling of many organizations. The editor treated a child edit as a rename of the value itself,
+  // which reached every other parent's rows and their shared label; and treated a parent rename as
+  // local, which reached nothing outside the lookup. Both directions are wrong, and neither is
+  // visible from the row being edited.
+  const DUTIES = {
+    defaultLanguage: 'en',
+    translatableLists: ['ref_duties'],
+    tables: {
+      ref_duties: { isLookup: true, columns: [{ name: 'org', type: 'text' }, { name: 'duty', type: 'text' }] },
+      assignments: {
+        columns: [{ name: 'who', type: 'text' },
+                  { name: 'org', type: 'select', list: 'ref_duties' },
+                  { name: 'duty', type: 'ref', table: 'ref_duties', valueCol: 'duty', filterBy: { org: 'org' } }]
+      }
+    },
+    views: [{ name: 'assign', sources: ['assignments'], mode: 'union', columns: ['who', 'org', 'duty'] }],
+    nav: { items: [{ view: 'assign' }] }
+  };
+
+  async function openDuties(page) {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DUTIES } });
+    for (const [id, org, duty] of [['d1', 'music', 'president'], ['d2', 'ward', 'president'], ['d3', 'ward', 'clerk']])
+      await page.request.post('/api/putRow', { data: { tableId: 'ref_duties', data: { id, org, duty }, tab: 'active' } });
+    for (const [id, who, org, duty] of [['a1', 'Ann', 'music', 'president'], ['a2', 'Bo', 'ward', 'president']])
+      await page.request.post('/api/putRow', { data: { tableId: 'assignments', data: { id, who, org, duty }, tab: 'active' } });
+    // The language has to EXIST, not just have strings: migrateListTranslation walks `languages`, so
+    // without this the label half of these tests would pass by doing nothing at all.
+    await page.request.post('/api/createLanguage', { data: { code: 'en', name: 'English', keys: [] } });
+    await page.request.post('/api/updateTranslations', { data: { langCode: 'en', updates: { 'list.ref_duties.president': 'President', 'list.ref_duties.ward': 'Ward' } } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    // Opening the lookup is what loads it, so the editor is reached the way a person reaches it.
+    await page.evaluate(() => appInstance.selectRefTable('ref_duties'));
+    await expect.poll(() => page.evaluate(() => appInstance.refTableData.length), { timeout: 6000 }).toBe(3);
+  }
+
+  const assignments = (page) => page.request.post('/api/getTableData', { data: { tableId: 'assignments' } })
+    .then((r) => r.json()).then((d) => Object.fromEntries((d.rows || []).map((r) => [r.id, r.org + '/' + r.duty])));
+
+  test('editing one row\'s value leaves the parents that still use it alone', async ({ page }) => {
+    await openDuties(page);
+    // Music's "president" becomes "leader". Ward's is a different row and a different calling.
+    await page.evaluate(() => {
+      const row = appInstance.dataCache.ref_duties.find((r) => r.id === 'd1');
+      appInstance.saveRefField(row, 'duty', 'leader');
+    });
+    await page.waitForTimeout(1500);
+    expect(await assignments(page)).toEqual({ a1: 'music/president', a2: 'ward/president' });   // Bo untouched
+    // ...and the label the OTHER parents still need is still theirs.
+    const en = await page.request.post('/api/getTranslations', { data: { langCode: 'en' } }).then((r) => r.json());
+    expect(en['list.ref_duties.president']).toBe('President');
+  });
+
+  test('the last row to use a value still renames it everywhere', async ({ page }) => {
+    await openDuties(page);
+    // "clerk" is ward's alone, so editing it IS a rename of the value: rows and label follow.
+    await page.evaluate(() => {
+      const row = appInstance.dataCache.ref_duties.find((r) => r.id === 'd3');
+      appInstance.saveRefField(row, 'duty', 'secretary');
+    });
+    await page.waitForTimeout(1500);
+    const en = await page.request.post('/api/getTranslations', { data: { langCode: 'en' } }).then((r) => r.json());
+    expect(en['list.ref_duties.president']).toBe('President');   // untouched by an unrelated rename
+    expect(await page.evaluate(() => appInstance.dataCache.ref_duties.find((r) => r.id === 'd3').duty)).toBe('secretary');
+  });
+
+  test('renaming the group carries the rows that name it', async ({ page }) => {
+    await openDuties(page);
+    await page.evaluate(() => appInstance.renameRefParent('ward', 'seurakunta'));
+    await page.waitForTimeout(1500);
+    const rows = await assignments(page);
+    expect(rows.a2).toBe('seurakunta/president');   // Bo's organization followed the rename
+    expect(rows.a1).toBe('music/president');        // ...and Ann's did not
+    const en = await page.request.post('/api/getTranslations', { data: { langCode: 'en' } }).then((r) => r.json());
+    expect(en['list.ref_duties.seurakunta']).toBe('Ward');   // the group's own label came along
+  });
+});
+
 test.describe('Translatable lists', () => {
   // A lookup TABLE may be named in `translatableLists`, and then its values become list.<table>.<value>
   // keys. Two things went wrong with that, both of which look like the feature working.
