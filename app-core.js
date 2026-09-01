@@ -2974,6 +2974,13 @@ function createVueApp() {
             Writes.putRow(table, row, 'active');
           }
         });
+        // The parent value is stored by every column that reads this lookup as a LIST -- a `select` whose
+        // `list:` names the table, which is how the group dimension of a 2-D lookup is referenced (the
+        // child dimension is the `ref` column beside it). Renaming the group without carrying those left
+        // every such row naming an organization the lookup no longer has: not visible here, and not
+        // visible there either until someone opens the picker and finds their value missing from it.
+        // The child branch of this editor has always propagated; this one never did.
+        self.propagateListChange(table, oldParent, newParent);
         self.migrateListTranslation(table, oldParent, newParent);   // carry the group's own label
         self.notify(self.t('msg.renamed'));
       },
@@ -3059,7 +3066,19 @@ function createVueApp() {
         var refTable = self.currentRefTable;
         // Rename side-effects (mirror list renames): carry the value across every table that refs it + its
         // translations, so an existing lookup value can be renamed without orphaning rows or its label.
-        if (oldVal && value) { self.propagateRefChange(refTable, oldVal, value); self.migrateListTranslation(refTable, oldVal, value); }
+        //
+        // ...but ONLY when this edit retires the old value from the lookup. In a two-column lookup a value
+        // is unique within its PARENT, not across the table: "president" is a calling of nine
+        // organizations, so changing the one under Music is not a rename of the value at all -- it is this
+        // row naming a different calling. Treating it as a rename rewrote every other organization's rows
+        // too (three people's callings silently changed under them) and moved `list.<table>.president` onto
+        // the new name, leaving the nine organizations that still use it with no label and a raw code on
+        // screen. Both are invisible from the row being edited, which is what made it costly.
+        //
+        // The test is the same one a flat lookup answers trivially -- there a value appears once, so an
+        // edit always retires it and this behaves exactly as it always did.
+        var retired = !(self.dataCache[refTable] || []).some(function(r) { return r.id !== item.id && r[col] === oldVal; });
+        if (oldVal && value && retired) { self.propagateRefChange(refTable, oldVal, value); self.migrateListTranslation(refTable, oldVal, value); }
         var timerKey = refTable + ':' + item.id;
         clearTimeout(self.saveTimers[timerKey]);
         self.saveTimers[timerKey] = setTimeout(function() {
