@@ -6641,12 +6641,23 @@ test.describe('lazy boot', () => {
     await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 10000 });
 
     // The landing view loads itself, so "nothing cached" is only true of tables it does not need.
+    // Its column DEPENDENCIES count as needed: a ref dropdown's lookup (tasks.city -> cities) is
+    // fetched by _ensureDeps as a second, later request than the view's own tables, so whether one has
+    // landed by the time this snapshot is taken is a matter of timing -- it passed locally and failed
+    // in CI, where the boot is slower relative to the fetch. Both outcomes are the app behaving
+    // correctly, and neither is what this test is about: the guarantee being defended is that boot did
+    // not read the SCHEMA, and a depth-1 dependency of the view you landed on is not that.
     const after = await page.evaluate(() => {
       const app = window.appInstance;
-      return { cached: Object.keys(app.dataCache), landing: app._viewTables(app.currentTable) };
+      var landing = app._viewTables(app.currentTable);
+      var deps = [];
+      landing.forEach(function(t) {
+        (window.Columns.tableDeps(window.SCHEMA, t) || []).forEach(function(d) { if (deps.indexOf(d) < 0) deps.push(d); });
+      });
+      return { cached: Object.keys(app.dataCache), landing: landing.concat(deps) };
     });
     for (const t of after.cached) {
-      expect(after.landing, 'boot cached ' + t + ', which the landing view does not need').toContain(t.replace(/__archive$/, ''));
+      expect(after.landing, 'boot cached ' + t + ', which the landing view neither reads nor depends on').toContain(t.replace(/__archive$/, ''));
     }
 
     // And a table no view has opened is genuinely absent — not merely empty, which is what a failed
