@@ -1286,12 +1286,6 @@
         "calling": "secretary"
       },
       {
-        "id": "rc-129",
-        "position": "129",
-        "organization": "young_women",
-        "calling": "teacher"
-      },
-      {
         "id": "rc-138",
         "position": "138",
         "organization": "young_single_adults",
@@ -1445,13 +1439,13 @@
         "id": "rc-196",
         "position": "196",
         "organization": "missionary_work",
-        "calling": "president"
+        "calling": "leader"
       },
       {
         "id": "rc-212",
         "position": "212",
         "organization": "music",
-        "calling": "president"
+        "calling": "leader"
       },
       {
         "id": "rc-219",
@@ -1462,50 +1456,8 @@
       {
         "id": "rc-220",
         "position": "220",
-        "organization": "family_history",
-        "calling": "president"
-      },
-      {
-        "id": "rc-221",
-        "position": "221",
-        "organization": "family_history",
-        "calling": "first_counselor"
-      },
-      {
-        "id": "rc-222",
-        "position": "222",
-        "organization": "family_history",
-        "calling": "second_counselor"
-      },
-      {
-        "id": "rc-223",
-        "position": "223",
-        "organization": "family_history",
-        "calling": "third_counselor"
-      },
-      {
-        "id": "rc-224",
-        "position": "224",
-        "organization": "family_history",
-        "calling": "secretary"
-      },
-      {
-        "id": "rc-225",
-        "position": "225",
-        "organization": "family_history",
-        "calling": "teacher"
-      },
-      {
-        "id": "rc-226",
-        "position": "226",
-        "organization": "family_history",
-        "calling": "representative"
-      },
-      {
-        "id": "rc-227",
-        "position": "227",
-        "organization": "family_history",
-        "calling": "specialist"
+        "organization": "temple_and_family_history",
+        "calling": "leader"
       },
       {
         "id": "rc-121",
@@ -1516,8 +1468,8 @@
       {
         "id": "rc-901",
         "position": "901",
-        "organization": "family_history",
-        "calling": "temple_and_family_history_consultant"
+        "organization": "temple_and_family_history",
+        "calling": "consultant"
       },
       {
         "id": "rc-902",
@@ -1530,12 +1482,6 @@
         "position": "903",
         "organization": "ward",
         "calling": "technology_specialist"
-      },
-      {
-        "id": "rc-900",
-        "position": "904",
-        "organization": "relief_society",
-        "calling": "translation_coordinator"
       },
       {
         "id": "rc-903",
