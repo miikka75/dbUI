@@ -2634,6 +2634,17 @@ function createVueApp() {
       // Translated label for a lookup value, keyed by its table's namespace (list.<table>.<value>) — the same
       // key the board/grid resolve through. The ref editor shows this for locked (filter-pinned) rows so their
       // link to `list.<table>.<value>` translations is visible, mirroring how the Lists editor labels values.
+      // Opening a lookup in the editor is what LOADS it. Boot fetches no table data, and a lookup is
+      // otherwise cached only as a side effect of some view that happens to reference it -- so the
+      // editor rendered an empty catalogue until you had visited a view using that table and come
+      // back, which reads as "this lookup has no rows" rather than as "this screen has not fetched
+      // them". Exactly the hole _ensureTranslatableLookups closes for the Languages screen, and the
+      // same answer: asking to edit a table IS the declaration that it must be there. _ensureCached is
+      // a no-op for one already loaded, so switching between lookups costs nothing after the first.
+      selectRefTable: function(rt) {
+        this.currentRefTable = rt;
+        if (rt) this._ensureCached([rt]);
+      },
       refValueLabel: function(val) { var t = this.currentRefTable; return t ? this.tOr('list.' + t + '.' + val, val) : val; },
       // A lookup opted into `translatableLists` is a translatable controlled vocabulary: its values ARE the
       // `list.<table>.<value>` translation keys, so an EXISTING value can't be renamed in the ref editor (that

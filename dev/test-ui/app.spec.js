@@ -1445,6 +1445,38 @@ test.describe('Translation keys for view columns', () => {
   });
 });
 
+test.describe('The Lookup editor loads what it edits', () => {
+  // Boot fetches no table data, and a lookup lands in the cache only as a side effect of some view
+  // referencing it -- so opening one in the Lookup editor showed an EMPTY catalogue until you had been
+  // to a view that uses it and come back. Empty is what a lookup with no rows looks like, so it reads
+  // as "nothing here", not as "not fetched yet". The fixture makes the gap deterministic: no view
+  // anywhere references `ref_things`, so nothing else can ever load it.
+  const ISOLATED = {
+    defaultLanguage: 'en',
+    tables: {
+      ref_things: { isLookup: true, columns: [{ name: 'thing', type: 'text' }] },
+      notes: { columns: [{ name: 'text', type: 'text' }] }
+    },
+    views: [{ name: 'notes_v', sources: ['notes'], mode: 'union', columns: ['text'] }],
+    nav: { items: [{ view: 'notes_v' }] }
+  };
+
+  test('opening a lookup nobody references still shows its rows', async ({ page }) => {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: ISOLATED } });
+    for (const [id, thing] of [['t1', 'Hammer'], ['t2', 'Chisel']])
+      await page.request.post('/api/putRow', { data: { tableId: 'ref_things', data: { id, thing }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+
+    await page.evaluate(() => appInstance.selectTab('__lookup'));
+    await page.locator('.v-main .v-list-item', { hasText: 'ref_things' }).first().click();
+    await expect.poll(() => page.evaluate(() => appInstance.refTableData.map((r) => r.thing).sort()),
+      { timeout: 6000 }).toEqual(['Chisel', 'Hammer']);
+  });
+});
+
 test.describe('Translatable lists', () => {
   // A lookup TABLE may be named in `translatableLists`, and then its values become list.<table>.<value>
   // keys. Two things went wrong with that, both of which look like the feature working.

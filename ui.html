@@ -568,7 +568,7 @@
           <v-list>
             <v-list-group v-for="rt in a.refTables" :key="rt" :value="rt">
               <template v-slot:activator="{ props }">
-                <v-list-item v-bind="props" :prepend-icon="'mdi-database-outline'" @click="a.currentRefTable = rt">
+                <v-list-item v-bind="props" :prepend-icon="'mdi-database-outline'" @click="a.selectRefTable(rt)">
                   <div style="display:flex;align-items:center;width:100%">
                     <span>{{ rt }}</span>
                     <v-icon v-if="a.isTranslatableList(rt)" size="x-small" style="margin-left:auto;opacity:0.45">mdi-translate</v-icon>
