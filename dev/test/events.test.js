@@ -10,7 +10,6 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const Events = require('../../events');
 const Rotation = require('../../rotation');
-const Calendar = require('../../calendar');
 
 // A ctx with the root's real answers stubbed to the identity-ish defaults. Tests override what they
 // are about. `reach` is the read gate; `strings` backs t/tOr; `display` stands in for displayValue.
@@ -21,7 +20,6 @@ function ctx(over) {
     views: o.views || {},
     dataCache: o.dataCache || {},
     today: () => o.today || '2026-03-01',
-    toDateStr: (v) => { if (!v) return ''; const s = String(v); return s.length === 10 ? s : Calendar.fmtDate(new Date(s)); },
     t: (k) => strings[k] || k,
     tOr: (k, fb) => strings[k] || fb,
     displayValue: o.displayValue || ((c, v) => (Array.isArray(v) ? v.join(', ') : String(v == null ? '' : v))),

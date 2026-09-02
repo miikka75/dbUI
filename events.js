@@ -16,7 +16,7 @@
 // way. That class of bug needs a unit tier to catch, and event building had none.
 //
 // ctx =
-//   { views, dataCache, today(), toDateStr(v), t(k), tOr(k, fallback),
+//   { views, dataCache, today(), t(k), tOr(k, fallback),
 //     displayValue(col, val, ns, viewCfg), canReachTable(tbl), hashColor(key), resolveMeTokens(filter),
 //     rotation: { rangeFor(name), anchorFor(name), rotateEveryFor(name),
 //                 mineOnlySlot(view), slotsFor(rv), slotLabel(name, slot), valueColFor(name, slot) } }
@@ -55,7 +55,7 @@
       var tag = s.label || ctx.t('tab.' + s.table);
       rows.forEach(function(r) {
         var title = (s.titleColumns || []).map(function(c) { return ctx.displayValue(c, r[c], '', calCfg); }).filter(Boolean).join(' — ');
-        var d = ctx.toDateStr(r[s.dateColumn]);
+        var d = Calendar.toDateStr(r[s.dateColumn]);
         var key = d || '__undated__';                 // an undated row is still the user's row: bucket it
         (out[key] = out[key] || []).push({            // rather than dropping it silently
           id: s.table + ':' + s.dateColumn + ':' + r.id, title: title || tag, label: tag,

@@ -1,7 +1,8 @@
 // calendar.js — Pure calendar geometry + the canonical date-string primitive. Shared by app-core.js
 // (browser) and Node unit tests, mirroring columns.js / access-features.js.
-//   Browser: <script src="/calendar.js">, then Calendar.* ; also exposes fmtDate() as a global (the app's
-//            canonical local YYYY-MM-DD formatter — schema-loader.js + app-core.js call it bare).
+//   Browser: <script src="/calendar.js">, then Calendar.* ; also exposes fmtDate() and toDateStr() as
+//            globals (the app's canonical local YYYY-MM-DD formatters — schema-loader.js + app-core.js
+//            call them bare).
 //   Node:    const Calendar = require('../calendar');
 //
 // Grid/window builders are pure functions of (anchor, weekStart, today); source resolvers are pure over
@@ -11,6 +12,15 @@
 (function(root) {
   // Canonical local YYYY-MM-DD formatter for a Date.
   function fmtDate(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+
+  // The same primitive for a STORED value: a 'YYYY-MM-DD' string passes through untouched (never
+  // round-tripped through Date, which would apply the local timezone to a date that has none), anything
+  // else is parsed and formatted, and empty stays empty.
+  // It lived in schema-loader.js, which is a browser-only fragment that exports nothing -- so the two
+  // pure modules that format dates (print.js, events.js) each had to be HANDED it through their ctx,
+  // and their tests had to stub or re-implement it. It is a pure function of fmtDate, which is here,
+  // so this is where it belongs; app-core keeps calling it bare through the global below.
+  function toDateStr(v) { if (!v) return ''; var s = String(v); if (s.length === 10) return s; return fmtDate(new Date(s)); }
 
   // 42-cell (6x7) month grid whose weeks start on `weekStart` (0=Sun..1=Mon), containing `anchor`.
   // `today` (a 'YYYY-MM-DD' string) drives the isToday flag; `anchor` defaults to it.
@@ -87,9 +97,9 @@
   function rotationSources(views, name) { var v = views[name]; return (v && v.calendar && v.calendar.rotationSources) || []; }
 
   var C = {
-    fmtDate: fmtDate, cellsMonth: cellsMonth, cellsWeek: cellsWeek, windowFor: windowFor,
+    fmtDate: fmtDate, toDateStr: toDateStr, cellsMonth: cellsMonth, cellsWeek: cellsWeek, windowFor: windowFor,
     hashColor: hashColor, paletteAt: paletteAt, sources: sources, rotationSources: rotationSources
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
-  else { root.Calendar = C; root.fmtDate = fmtDate; }
+  else { root.Calendar = C; root.fmtDate = fmtDate; root.toDateStr = toDateStr; }
 })(typeof self !== 'undefined' ? self : this);

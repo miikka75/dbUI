@@ -1464,7 +1464,6 @@ function createVueApp() {
         return {
           views: VIEWS, dataCache: this.dataCache,
           today: function() { return self._calToday(); },
-          toDateStr: toDateStr,
           t: function(k) { return self.t(k); },
           tOr: function(k, fb) { return self.tOr(k, fb); },
           displayValue: function(c, v, ns, cfg) { return self.displayValue(c, v, ns, cfg); },
@@ -5101,7 +5100,6 @@ function createVueApp() {
         return {
           t: function(k) { return self.t(k); },
           colIsDate: function(c) { return self.colIsDate(c); },
-          toDateStr: function(v) { return self.toDateStr(v); },
           displayValue: function(c, v) { return self.displayValue(c, v); },
           isColumnHidden: function(c, item) { return self.isColumnHidden(c, item); },
           colHideEmpty: function(c) { return self.colHideEmpty(c); },

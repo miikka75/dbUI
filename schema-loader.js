@@ -111,9 +111,10 @@ function withMirrors(base) {
 // mdToHtml (tiny markdown -> HTML for pages) lives in /embeds.js, exposed as a global from there.
 
 // The rotation engine (interval math + resolvers + buildRotationViewRows) lives in /rotation.js;
-// validateSchema (below) calls isValidInterval as a global from that module. fmtDate() (canonical
-// local YYYY-MM-DD formatter) is a global from calendar.js. Both load before this fragment.
-function toDateStr(v) { if (!v) return ''; var s = String(v); if (s.length === 10) return s; return fmtDate(new Date(s)); }
+// validateSchema (below) calls isValidInterval as a global from that module. fmtDate() and toDateStr()
+// (canonical local YYYY-MM-DD formatters) are globals from calendar.js — toDateStr was defined HERE
+// until the pure modules that format dates needed it and could not require this fragment. Both load
+// before this one.
 function parseTableResult(r) { if (!r) return { headers: [], rows: [] }; if (typeof r === 'string') return JSON.parse(r); return r; }
 function validateSchema() {
   var errors = [];
