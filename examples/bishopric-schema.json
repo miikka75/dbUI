@@ -810,6 +810,7 @@
         "mode": "join",
         "defaultSort": "date",
         "name": "meeting_music",
+        "printable": "view",
         "kind": "data"
       },
       {

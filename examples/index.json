@@ -20,12 +20,12 @@
       "title": "Bishopric Tool",
       "description": "A ward bishopric’s working tool — meeting programs, assignments, interviews and a members roster.",
       "icon": "./examples/bishopric-favicon.svg",
-      "revision": 23,
+      "revision": 24,
       "tables": 13,
       "views": 18,
       "schema": {
         "file": "bishopric-schema.json",
-        "hash": "05992817728b2899"
+        "hash": "363a8875be9e6cbb"
       },
       "languages": [
         {
