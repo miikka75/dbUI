@@ -2882,9 +2882,23 @@ function createVueApp() {
       cellOptions: function(col, item) {
         return this.colIsRef(col) ? this.getRefOptions(col, item) : this.getListOptions(col);
       },
+      // Options for a `ref` cell: the lookup's rows, labelled the way every other surface labels them.
+      //
+      // The label rule is listLabel's -- `list.<ns>.<value>`, falling back to the raw value -- and the
+      // namespace for a ref is its lookup TABLE, exactly as displayValue resolves it. This used to emit
+      // the raw value as the title, which made the picker the one place a translated vocabulary did not
+      // reach: in the bishopric schema `organization` (a select whose `list:` names ref_callings) came
+      // out "Primary" while `calling` (a ref into the same table, sharing the same
+      // list.ref_callings.<value> keys) came out "president" -- two dimensions of ONE catalogue,
+      // disagreeing inside one row. The cell already read "President" via displayValue, so clicking into
+      // it swapped the label for its key.
+      //
+      // Values are unaffected: `value` stays the raw key, and so do the `counts`/`seen` maps below --
+      // what a row IS is its stored value, and only the title is a display concern.
       getRefOptions: function(col, item) {
         var ref = getColumnRef(null, col);   // memoized any-table scan (see colRef); was the same loop
         if (!ref) return [];
+        var self = this, ns = ref.table;
         var rows = this.dataCache[ref.table] || [];
         if (ref.filterBy) {
           var filterBy = ref.filterBy;
@@ -2913,7 +2927,11 @@ function createVueApp() {
             var v = r[valueCol];
             if (!v || seen[v + '|' + r[parentCol]]) return;
             seen[v + '|' + r[parentCol]] = true;
-            var title = counts[v] > 1 ? v + ' (' + r[parentCol] + ')' : v;
+            // Both halves: the parent is a value of this same catalogue (ref_callings holds the
+            // organizations too), so leaving it raw would print "President (aaronic_priesthood)".
+            var title = counts[v] > 1
+              ? self.listLabel(ns, v) + ' (' + self.listLabel(ns, r[parentCol]) + ')'
+              : self.listLabel(ns, v);
             items.push({ title: title, value: v });
           });
           return items;
@@ -2922,7 +2940,7 @@ function createVueApp() {
         var opts = [];
         rows.forEach(function(r) {
           var v = r[valueCol];
-          if (v && !seen[v]) { seen[v] = true; opts.push({ title: v, value: v }); }
+          if (v && !seen[v]) { seen[v] = true; opts.push({ title: self.listLabel(ns, v), value: v }); }
         });
         return opts;
       },
@@ -4721,10 +4739,29 @@ function createVueApp() {
             }));
           }
 
+          // A filter-pinned value must exist wherever the picker reads its options from, so the import
+          // cannot leave a schema keying on a value nothing offers.
+          //
+          // For a LOOKUP TABLE that place is a ROW, never a list. lockedListValues is keyed by table
+          // name as well as list name (forEachFilterListValue pins a `ref` filter under its table), so
+          // minting a list here forged a second, three-value copy of a fifteen-row catalogue: the
+          // picker went on reading the table (getListOptions prefers it), while the Lists tab offered
+          // the phantom as a live vocabulary an admin could type into, and putListItem persisted what
+          // they typed where nothing would ever read it. _seedSchemaLists refuses the same creation for
+          // the same reason; this step had simply not been told.
+          //
+          // The rows themselves need no seeding: an import writes the lookup's rows, and isLockedRefRow
+          // then stops the ref editor renaming or deleting the pinned ones.
+          //
+          // Skipping the whole name (not just its creation) is what the seed means for a lookup, and it
+          // also makes the remaining branch honest: every non-lookup name reachable here is a column's
+          // own `list:`, which _seedSchemaLists already created at boot, so the create below now only
+          // ever covers a list this import replaced wholesale.
           chain = chain.then(step('mdi-format-list-checks', '', function() {
             var locked = self.lockedListValues;
             var needSave = false;
             for (var ln in locked) {
+              if (SCHEMA[ln] && SCHEMA[ln].isLookup) continue;
               if (!self.listsCache[ln]) { self.listsCache[ln] = []; needSave = true; }
               for (var lv in locked[ln]) {
                 if (self.listsCache[ln].indexOf(lv) < 0) { self.listsCache[ln].push(lv); needSave = true; }

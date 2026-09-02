@@ -1622,6 +1622,49 @@ test.describe('Translatable lists', () => {
       () => appInstance.schemaTranslationKeys.filter((k) => k.startsWith('list.ref_chores.'))
     ), { timeout: 6000 }).toEqual(['list.ref_chores.Legacy value', 'list.ref_chores.Mow the lawn', 'list.ref_chores.Wash up']);
   });
+
+  // ...and this is where such a list came from. An import's last step seeds every filter-pinned value
+  // into the list that offers it, so no schema can key on a value nothing offers. lockedListValues is
+  // keyed by lookup TABLE name as well (a `ref` filter pins under its table), and the step created a
+  // list for whatever key it found -- forging a catalogue's name over the two or three values some
+  // view happened to filter on. The picker read the table and never saw it; the Lists tab showed it as
+  // a live vocabulary; and it outlived every import after.
+  const PINNED = {
+    defaultLanguage: 'en',
+    tables: {
+      ref_states: { isLookup: true, columns: [{ name: 'state', type: 'text' }] },
+      task: {
+        columns: [{ name: 'state', type: 'ref', table: 'ref_states', valueCol: 'state' },
+                  { name: 'owner', type: 'select', list: 'crew' }]
+      }
+    },
+    views: [{ name: 'done', kind: 'data', sources: ['task'], mode: 'union', columns: ['state', 'owner'],
+              filter: { $and: [{ state: 'finished' }, { owner: 'ann' }] } }],
+    nav: { items: [{ view: 'done' }] }
+  };
+
+  test('a filter-pinned lookup value is seeded as a row, never as a list beside its table', async ({ page }) => {
+    test.setTimeout(30000);
+    await openWithVocab(page);
+    // `lists: {}` is a hand-picked file's replace-and-prune, so whatever exists now is cleared and the
+    // seed step is the only thing that can put a name back -- which is exactly what is under test.
+    await page.evaluate((bundle) => appInstance.applyBundle(bundle), {
+      schema: PINNED,
+      tables: { ref_states: [{ id: 's1', state: 'started' }, { id: 's2', state: 'finished' }] },
+      lists: {}
+    });
+    // Read through the API, not the page: the import reloads the tab once it finishes.
+    await expect.poll(async () => {
+      const lists = await page.request.post('/api/getLists').then((r) => r.json());
+      return Object.keys(lists).sort();
+    }, { timeout: 15000 }).toEqual(['crew']);   // the real list was seeded; the lookup's name was not
+    const lists = await page.request.post('/api/getLists').then((r) => r.json());
+    expect(lists.crew).toEqual(['ann']);        // ...and the guard stayed narrow enough to still seed it
+    // The pinned lookup value is a ROW, which is where the picker reads it from.
+    const rows = await page.request.post('/api/getTableData', { data: { tableId: 'ref_states' } })
+      .then((r) => r.json());
+    expect((rows.rows || []).map((r) => r.state).sort()).toEqual(['finished', 'started']);
+  });
 });
 
 test.describe('Rotation rosters from a 2-D lookup', () => {
@@ -5660,6 +5703,53 @@ test.describe('a `list:` may name a lookup TABLE', () => {
   // One catalogue can back both a `ref` column (which carries the row's other fields) and a plain
   // select/multiselect that only needs the name — instead of maintaining a second free-string list
   // beside it whose values nothing can score.
+
+  // A ref cell and the picker that EDITS it must read the same. They did not: displayValue resolves a
+  // ref's namespace to its lookup table and translates, while getRefOptions emitted the raw row value
+  // as its title -- so a translated vocabulary reached the grid, the board card, the lane header and
+  // the print sheet, and stopped at the one control you use to change it. Clicking a cell swapped
+  // "Davisville" for "Davis". In the bishopric schema the two halves of ONE catalogue disagreed inside
+  // a single row, because the organization dimension is reached by a `list:` (labelled via
+  // getListOptions) and the calling dimension by a `ref` (not labelled at all).
+  test('a ref picker labels its options the way the cell does, in both branches', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      // tasks.city is `ref -> cities` with filterBy { state: state }. "Davis" exists in two states, so
+      // the unfiltered branch has something to disambiguate; Fresno is left untranslated on purpose.
+      app.dataCache['cities'] = [
+        { id: 'c1', state: 'CA', city: 'Davis' },
+        { id: 'c2', state: 'CA', city: 'Napa' },
+        { id: 'c3', state: 'CA', city: 'Fresno' },
+        { id: 'c4', state: 'TX', city: 'Davis' }
+      ];
+      app.strings = Object.assign({}, app.strings, {
+        'list.cities.Davis': 'Davisville', 'list.cities.Napa': 'Napa Valley',
+        'list.cities.CA': 'California', 'list.cities.TX': 'Texas'
+      });
+      // No `state` on the row -> filterBy contributes nothing -> the disambiguating branch.
+      const wide = app.getRefOptions('city', { id: 't1' });
+      // A row that names its state -> rows are filtered -> the plain branch.
+      const narrow = app.getRefOptions('city', { id: 't1', state: 'CA' });
+      return {
+        wideTitles: wide.map((o) => o.title), wideValues: wide.map((o) => o.value),
+        narrowTitles: narrow.map((o) => o.title), narrowValues: narrow.map((o) => o.value),
+        cell: app.displayValue('city', 'Davis')
+      };
+    });
+    // Both halves of the disambiguator are values of this same catalogue, so both are labelled.
+    expect(r.wideTitles).toEqual(['Davisville (California)', 'Napa Valley', 'Fresno', 'Davisville (Texas)']);
+    expect(r.narrowTitles).toEqual(['Davisville', 'Napa Valley', 'Fresno']);
+    // An untranslated value falls back to itself, exactly as listLabel does everywhere else.
+    expect(r.narrowTitles).toContain('Fresno');
+    // Identity is untouched: what gets STORED is still the raw key, in both branches.
+    expect(r.wideValues).toEqual(['Davis', 'Napa', 'Fresno', 'Davis']);
+    expect(r.narrowValues).toEqual(['Davis', 'Napa', 'Fresno']);
+    // ...and the cell now agrees with its own editor, which is the whole point.
+    expect(r.cell).toBe('Davisville');
+    expect(r.narrowTitles[0]).toBe(r.cell);
+  });
+
   test('options come from the lookup rows, and it is not editable as a list', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {

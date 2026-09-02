@@ -2075,6 +2075,9 @@ must be edited by hand before it will render correctly. There is no migration to
 - **List values** are stored as stable keys (e.g. `"in_progress"`, not "In Progress").
 - **Display** uses translations: `list.status.in_progress` → "In Progress" (localized per active language).
 - **Locked values**: list values referenced in schema filters are auto-seeded and non-deletable.
+  A filter on a `ref` column pins under its **lookup table** instead, and there the pinned value is a
+  **row**, not a list item — nothing seeds a list beside the table (see "A `list:` may name a lookup
+  TABLE"); the ref/lookup editor locks the row.
 - **Translation keys** are auto-generated: `tab.*`, `view.*`, `field.*`, `list.*.*`,
   `nav.<group>` (group labels), and `{{t:<key>}}` tokens in markdown views — all collected
   into the Languages tab.
