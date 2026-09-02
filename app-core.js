@@ -1449,73 +1449,42 @@ function createVueApp() {
       // Visible grid window {from, toExclusive} for a calendar's anchor+mode (month/list -> month grid,
       // week -> week strip). Bounds rotation generation to what's actually on screen.
       _calWindowFor: function(anchor, mode, weekStart) { return Calendar.windowFor(anchor, mode, weekStart, this._calToday()); },
-      // Periods to generate from `fromStr` (the rotation view's OWN start) to reach `toExclusive`. We
-      // start from the rotation's own `from` — not the grid start — so the numeric slot-swap phase
-      // (floor(i/n)) matches the rotation view exactly (single source of truth); events are then
-      // clipped to the window. 0 when the window ends before the rotation begins.
-      _periodsToCover: function(fromStr, toExclusive, interval) {
-        var n = wholeIntervalsBetween(fromStr, toExclusive, interval);
-        return n < 0 ? 0 : n + 2;
+      // The event model lives in /events.js (pure over this ctx), like print.js and embeds.js before it.
+      // The root keeps the same-named thin wrapper below so components/templates/tests are unchanged;
+      // only root-state reads cross this seam.
+      //
+      // The `rotation` half is grouped rather than flattened because those seven are ONE question — how
+      // is this rotation view configured for this viewer — and the root is the only layer that can
+      // answer it: they read appConfig (per-user anchor/range/rotateEvery overrides), the signed-in
+      // identity (mineOnly), and dataCache (a rosterRef's slots are values of a lookup, not columns).
+      // The overlay asking those through anything but the matrix's own resolvers is exactly the bug
+      // that shipped untranslated chore names beside translated ones.
+      _eventsCtx: function() {
+        var self = this;
+        return {
+          views: VIEWS, dataCache: this.dataCache,
+          today: function() { return self._calToday(); },
+          t: function(k) { return self.t(k); },
+          tOr: function(k, fb) { return self.tOr(k, fb); },
+          displayValue: function(c, v, ns, cfg) { return self.displayValue(c, v, ns, cfg); },
+          canReachTable: function(tbl) { return self.canReachTable(tbl); },
+          hashColor: function(k) { return self.hashColor(k); },
+          resolveMeTokens: function(f) { return self.resolveMeTokens(f); },
+          rotation: {
+            rangeFor: function(n) { return self.rangeForView(n); },
+            anchorFor: function(n) { return self.anchorForView(n); },
+            rotateEveryFor: function(n) { return self.rotateEveryForView(n); },
+            mineOnlySlot: function(v) { return self.mineOnlySlot(v); },
+            slotsFor: function(rv) { return self.rotationSlotsFor(rv); },
+            slotLabel: function(n, slot) { return self.rotationSlotLabel(n, slot); },
+            valueColFor: function(n, slot) { return self.rotationValueColFor(n, slot); }
+          }
+        };
       },
       // Build the { 'YYYY-MM-DD': [events] } map for a calendar view. Undated rows -> '__undated__'.
       // Fail-closed per source: a table the user cannot read contributes nothing. When `window` is
       // given, rotationSources' generated duties are added (bounded to that window).
-      calEventsFor: function(name, window) {
-        var self = this, out = {};
-        // The calendar being drawn, for obscureNames. Named rather than left to default: this builder
-        // runs for an embedded calendar too, where the current screen is the page it sits on.
-        var calCfg = VIEWS[name] || null;
-        this.calSources(name).forEach(function(s) {
-          if (!s || !s.table || !s.dateColumn) return;
-          // Reachability, not a bare grant: the calendar is in this member's nav BECAUSE one of its
-          // sources is self-serviceable, so gating events on grants alone rendered it permanently empty.
-          if (!self.canReachTable(s.table)) return;
-          var rows = filterRows(self.dataCache[s.table] || [], self.resolveMeTokens(s.filter));
-          var tag = s.label || self.t('tab.' + s.table);
-          rows.forEach(function(r) {
-            var title = (s.titleColumns || []).map(function(c) { return self.displayValue(c, r[c], '', calCfg); }).filter(Boolean).join(' — ');
-            var ev = { id: s.table + ':' + s.dateColumn + ':' + r.id, title: title || tag, label: tag, color: self.hashColor(s.label || s.table), table: s.table, dateCol: s.dateColumn, row: r };
-            var d = toDateStr(r[s.dateColumn]);
-            var key = d || '__undated__';
-            (out[key] = out[key] || []).push(ev);
-          });
-        });
-        // Rotation sources -> generated read-only duty events, bounded to the visible window.
-        if (window) this.calRotationSources(name).forEach(function(rs) {
-          var v = VIEWS[rs.view]; if (!v || !v.rotation) return;
-          var rv = v.rotation, rosters = viewRosters(v);
-          if (rosters.length && !rosters.some(function(t) { return self.canReachTable(t); })) return; // per-roster access (fail-closed)
-          var range = self.rangeForView(rs.view);
-          var fromStr = (!range.from || range.from === 'today') ? self._calToday() : range.from;
-          var interval = rv.interval || 'weekly';
-          var periods = self._periodsToCover(fromStr, window.toExclusive, interval);
-          if (!periods) return;
-          var rows = buildRotationViewRows(v, self.dataCache, self._calToday(), self.anchorForView(rs.view), { from: fromStr, periods: Math.min(periods, 520) }, self.rotateEveryForView(rs.view));
-          // Honor the rotation's own mineOnly here too — an overlay that showed every slot would hand
-          // back exactly what the narrowed view withholds.
-          var mine = self.mineOnlySlot(v);
-          var slots = self.rotationSlotsFor(rv).filter(function(s) { return mine === null || String(s).toLowerCase() === mine; });
-          var tag = rs.label || self.tOr('tab.' + rs.view, rs.view);
-          // Slot -> the column whose list labels ITS cells. Both halves of an overlay event's title are
-          // shape-dependent, and both are the rotation view's own question, not the calendar's: a
-          // `rosterRef` slot is a VALUE of the lookup (so `field.<slot>` never matches) and its cells
-          // come from the roster's valueCol (so the slot name resolves no list). Asked through the same
-          // two resolvers the matrix renders with, or the same duties read differently in the two
-          // places the app shows them. Hoisted out of the row loop: it depends only on the view.
-          var slotNs = {};
-          slots.forEach(function(sl) { slotNs[sl] = self.rotationValueColFor(rs.view, sl) || ''; });
-          rows.forEach(function(r) {
-            if (r._period < window.from || r._period >= window.toExclusive) return; // clip to visible grid
-            slots.forEach(function(slot) {
-              var ppl = r[slot]; if (!(ppl && ppl.length)) return;
-              var title = self.rotationSlotLabel(rs.view, slot) + ': ' + self.displayValue(slot, ppl, slotNs[slot], v);
-              (out[r._period] = out[r._period] || []).push({ id: 'rot:' + rs.view + ':' + slot + ':' + r._period, title: title, label: tag, color: self.hashColor(rs.label || rs.view), table: null, readOnly: true, row: r });
-            });
-          });
-        });
-        Object.keys(out).forEach(function(k) { out[k].sort(function(a, b) { return (a.label + a.title).localeCompare(b.label + b.title); }); });
-        return out;
-      },
+      calEventsFor: function(name, window) { return Events.build(name, window, this._eventsCtx()); },
       isCalendarName: function(name) { return !!(VIEWS[name] && VIEWS[name].calendar); },
       isRotationName: function(name) { return !!(VIEWS[name] && VIEWS[name].rotation); },
       isPivotName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'pivot'; },
@@ -5131,7 +5100,6 @@ function createVueApp() {
         return {
           t: function(k) { return self.t(k); },
           colIsDate: function(c) { return self.colIsDate(c); },
-          toDateStr: function(v) { return self.toDateStr(v); },
           displayValue: function(c, v) { return self.displayValue(c, v); },
           isColumnHidden: function(c, item) { return self.isColumnHidden(c, item); },
           colHideEmpty: function(c) { return self.colHideEmpty(c); },

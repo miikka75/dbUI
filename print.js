@@ -4,15 +4,20 @@
 // printView / printCard) stays on the root.
 //
 // Pure over an explicit `ctx` the root builds (app-core `_printCtx()`):
-//   { t, colIsDate, toDateStr, displayValue, isColumnHidden, colHideEmpty,
+//   { t, colIsDate, displayValue, isColumnHidden, colHideEmpty,
 //     embedItems, embedWhenOk, embedRowsForItem, embedCols, embedRows, embedPartLabel }
-//   Browser: <script src="/print.js">; exposes Print.*. Node: const Print = require('../print').
+//   Browser: <script src="/print.js"> (after calendar.js); exposes Print.*.
+//   Node:    const Print = require('../print').
 (function(root) {
+  // Date formatting is NOT a ctx entry: toDateStr is a pure primitive from calendar.js, so taking it
+  // from the root would only let the printed date drift from the one on screen.
+  var Calendar = (typeof module !== 'undefined' && module.exports) ? require('./calendar') : root.Calendar;
+
   function escape(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
   // Format a print cell to match the web grid: dates (and the rotation _period) -> toDateStr,
   // list/groupBy values -> displayValue.
-  function cell(c, v, ctx) { return (c === '_period' || ctx.colIsDate(c)) ? ctx.toDateStr(v) : ctx.displayValue(c, v); }
+  function cell(c, v, ctx) { return (c === '_period' || ctx.colIsDate(c)) ? Calendar.toDateStr(v) : ctx.displayValue(c, v); }
 
   // One print <table> for cols/rows (the only table shape the print path emits). Header: field.* label
   // (the rotation _period gets its own key); cells via cell().

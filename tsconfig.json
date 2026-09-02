@@ -36,6 +36,7 @@
     "writes.js",
     "rows.js",
     "embeds.js",
+    "events.js",
     "print.js",
     "pivot.js",
     "rsvp.js",
