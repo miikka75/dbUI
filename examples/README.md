@@ -40,6 +40,27 @@ offers to reinstall.
 > layered on as before. A hand-picked **Import JSON** is the other case and still replaces the whole
 > set, pruning any list the file omits: that is a restore, and it is how a list is retired.
 
+## The id of a row a bundle ships
+
+A bundle may carry rows as well as structure — `bishopric-schema.json` ships its statuses and its
+callings catalogue, `chores-data.json` ships its chores. An import merges rows by **id**, so those ids
+are a contract with every deployment that ever installed the bundle:
+
+- **Never renumber.** Change a shipped row's id and the next reinstall does not update that row, it
+  adds a second one beside it. `dev/test/lookup-row-ids.test.js` compares against HEAD and fails the
+  build if a row that says the same thing has moved to a different id.
+- **Give a NEW row a content-derived id** — `Examples.lookupRowId('rc', [organization, calling])` →
+  `rc-primary-secretary`. The same pair then lands on the same id whoever generates the file, so two
+  independently produced catalogues merge instead of colliding, and adding a row is a pure insert.
+  Ids already shipped stay as they are: they are historical, and freezing them is the whole point.
+- **Leave gaps in `position`** (10, 20, 30). Ids stop moving but ordering does not, and a reinstall
+  writes the bundle's `position` over whatever a deployment dragged a shipped row to.
+- **A rename is an add plus an orphan.** An import can only write rows, never retire one, so changing
+  a shipped value leaves the old row behind for someone to delete. That is the safe direction — it
+  loses nothing — but it does mean a rename needs a deliberate cleanup step.
+
+Rows a deployment adds itself carry app-generated ids and are never touched by any of this.
+
 Regenerate the index after changing anything here:
 
 ```bash

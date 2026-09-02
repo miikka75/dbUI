@@ -106,6 +106,28 @@
     return out;
   }
 
+  // --- The id of a row a BUNDLE ships ------------------------------------------------------------
+  // An import merges rows by id, so a shipped row's id is its identity across every revision and every
+  // deployment that ever installed it. Numbering by position ("the 12th row is rc-112") makes that
+  // identity depend on the file, and two files that both number from rc-100 then disagree about what
+  // rc-100 IS: importing both silently overwrites wherever they collide and interleaves where they do
+  // not. That is not hypothetical -- it is how one deployment ended up with the same organization
+  // listed twice, half its catalogue in each of two vocabularies.
+  //
+  // Deriving the id from the row's own content removes the possibility: the same pair always lands on
+  // the same id whoever generated the file, so a re-import is idempotent, an added row is a pure
+  // insert, and no revision can renumber its predecessor. The cost is that a RENAME is an add plus an
+  // orphan -- an import can only write rows, never retire one -- which is a deliberate trade: the safe
+  // direction is to leave data behind, not to delete it.
+  //
+  // Rows a deployment adds itself keep their app-generated ids and are never touched by any of this.
+  function lookupRowId(prefix, values) {
+    var slug = (values || []).map(function (v) {
+      return String(v == null ? '' : v).trim().toLowerCase().replace(/[^a-z0-9_]+/g, '-').replace(/^-+|-+$/g, '');
+    }).filter(Boolean).join('-');
+    return prefix + '-' + slug;
+  }
+
   // Rows are merged by id rather than concatenated: two files may legitimately carry the same table,
   // and an import writes each row by id anyway, so a duplicate would only be written twice.
   function mergeRows(into, key, rows) {
@@ -249,7 +271,7 @@
 
   var E = {
     hash: hash, hashText: hashText, canonical: canonical,
-    asBundle: asBundle, mergeFiles: mergeFiles, listsForInstall: listsForInstall,
+    asBundle: asBundle, mergeFiles: mergeFiles, listsForInstall: listsForInstall, lookupRowId: lookupRowId,
     fingerprint: fingerprint, compare: compare, fileHashes: fileHashes
   };
   if (isNode) module.exports = E;
