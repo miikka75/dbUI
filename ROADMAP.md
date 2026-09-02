@@ -358,11 +358,17 @@ not the hard part. Three other things are:
    re-implemented server-side and kept in agreement with the rules. That is the same
    "this comparison exists in three languages" hazard already annotated around `ownerWritable`, and it
    fails silently in the dangerous direction: an over-permissive feed leaks, and nothing reports it.
-3. **The event model is not extractable yet.** `calEventsFor` lives on the Vue root, not in a pure
-   module, and reaches into `dataCache`, `canReachTable`, `resolveMeTokens`, `t()`, `displayValue`
-   and `hashColor`. A server cannot reuse it. The prerequisite is the same extraction `pivot.js` /
-   `board.js` went through — an `events.js` pure over `(views, rows, access)` — which is worth doing
-   on its own merits and would serve export, print, and the feed alike.
+3. ~~**The event model is not extractable yet.**~~ **Done** — `events.js` is a pure module over an
+   explicit ctx, the seam `print.js` and `embeds.js` already use, and the root keeps a thin
+   `calEventsFor` wrapper. Both halves of the model (a view's own `sources`, and the rotation overlay)
+   are Node-tested in `dev/test/events.test.js`, including the faf4d67 regression at unit tier: the
+   overlay and the matrix are asserted to render the same duties the same way.
+
+   Note for B specifically: being a module does not by itself make it *server*-reusable. Its ctx still
+   carries `canReachTable`, `displayValue` and the seven rotation-config resolvers, so a feed endpoint
+   has to supply server-side answers for every one of them — which is hazard 2 above restated, not
+   avoided. What the extraction actually bought B is that the boundary is now written down and typed
+   in one place instead of being implicit in a Vue method.
 
 Deployment mirrors the CSP collector exactly, and for the same reasons: a Blaze-plan Cloud Function
 behind a Hosting rewrite, a Supabase Edge Function on the free tier, or self-hosted. On Firebase's

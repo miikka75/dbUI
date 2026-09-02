@@ -416,13 +416,18 @@ describe('Permission features (primary chips + materialized closure)', () => {
 
 // Lifts a member out of app-core.js and runs it, so these assertions bind to the SHIPPED code rather
 // than a copy of it — a mirrored re-implementation is what let the `|| []` drift through last time.
-// Members sit at a fixed 6-space indent as `name: function(<args>) { ... },`.
+// Members sit at a fixed 6-space indent as `name: function(<args>) { ... },`, and the search is
+// ANCHORED to the line start — a bare substring match also hits a deeper-indented line that merely
+// mentions the name, and the root is full of those: a ctx bag hands a pure module its own
+// `canReachTable: function(tbl) { ... }` at 10 spaces, which contains the 6-space form inside it. That
+// match lands earlier in the file than the real member, so the slice runs off into unrelated code and
+// surfaces as a bare SyntaxError rather than as anything pointing here.
 function appCoreFn(name) {
   const fs = require('fs'), path = require('path');
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'app-core.js'), 'utf8');
-  const head = '      ' + name + ': function(';
+  const head = '\n      ' + name + ': function(';
   const start = src.indexOf(head);
-  assert.ok(start >= 0, 'could not find ' + name + ' in app-core.js');
+  assert.ok(start >= 0, 'could not find ' + name + ' at the root member indent in app-core.js');
   const argsEnd = src.indexOf(')', start);
   const open = src.indexOf('{', argsEnd);
   const end = src.indexOf('\n      },', start);

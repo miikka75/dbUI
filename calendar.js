@@ -5,8 +5,9 @@
 //   Node:    const Calendar = require('../calendar');
 //
 // Grid/window builders are pure functions of (anchor, weekStart, today); source resolvers are pure over
-// the VIEWS map. The event-bucketing (calEventsFor) stays on the root — it's entangled with i18n, access,
-// rotation config, and dataCache — but reads its geometry through here.
+// the VIEWS map. The event-bucketing that reads these lives in /events.js — it is entangled with i18n,
+// access, rotation config and dataCache, so it takes those through an explicit ctx rather than staying
+// on the Vue root, which is where it used to be.
 (function(root) {
   // Canonical local YYYY-MM-DD formatter for a Date.
   function fmtDate(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
