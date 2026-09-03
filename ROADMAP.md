@@ -331,56 +331,111 @@ Cost: a pure function (schema + what the database holds -> an inventory), Node-t
 deletes reuse writes that already exist. No engine module, no view kind. The same panel is the natural
 home for the example-drift notice Settings already shows.
 
-### Calendar export (`.ics`) and subscribable feeds
+### A subscribable calendar feed
 
-Two features that sound like one. They differ by roughly an order of magnitude in cost, and the
-cheap half delivers most of the value.
+The `.ics` **export** shipped (see Shipped below); this entry is what is left: a URL a calendar client
+can subscribe to, so an edit reaches a phone without anyone re-exporting.
 
-**A. Export a `.ics` file — small, no blockers.** Client-side only: serialize the events the calendar
-already computes into `VEVENT` records and hand the browser a download. No server, no endpoint, no new
-auth surface; works on every backend including a GitHub Pages deployment, where there is nothing but
-static files. The JSON export already establishes the download plumbing. Its limitation is inherent:
-it is a **snapshot**. Add an event and everyone re-exports.
+The earlier version of this entry priced the feed as the expensive half of a pair. Most of that price
+turned out to be an assumption rather than a cost, and two of its three blockers are gone. What
+remains is one decision and one small always-on component.
 
-**B. A subscribable feed (`webcal://…/feed.ics`) — the expensive half.** Generating iCalendar text is
-not the hard part. Three other things are:
+**The delivery constraint, stated first because everything follows from it.** A calendar client is not
+a browser. Google fetches your URL from *its* servers, Outlook from its own, Apple with an HTTP client
+— none has a JS engine, a DOM, or a service worker. So the response body must literally begin
+`BEGIN:VCALENDAR`. That rules out, definitively:
 
-1. **The URL *is* the credential.** Calendar clients do not perform OAuth, send headers, or hold
-   cookies — Google Calendar, Apple Calendar and Outlook fetch a plain anonymous URL. So access has to
-   be a long random per-user token in the query string, and that token is a bearer credential that
-   gets emailed around, synced to phones, and stored on Google's servers indefinitely. The app has
-   deliberately never had one of these for row data: `?mode=…&config=…` share links carry *connection
-   config*, and the reader still signs in. The only existing token-in-URL is the admin-only CSP read
-   endpoint. This needs a decision, not just code: per-user tokens, revocable, ideally scoped to one
-   calendar view.
-2. **A feed endpoint bypasses Firestore rules.** It runs with the Admin SDK, so every access rule the
-   feed relies on — `canReachTable`, `@me` resolution, owner-scoped rows, per-view filters — has to be
-   re-implemented server-side and kept in agreement with the rules. That is the same
-   "this comparison exists in three languages" hazard already annotated around `ownerWritable`, and it
-   fails silently in the dangerous direction: an over-permissive feed leaks, and nothing reports it.
-3. ~~**The event model is not extractable yet.**~~ **Done** — `events.js` is a pure module over an
-   explicit ctx, the seam `print.js` and `embeds.js` already use, and the root keeps a thin
-   `calEventsFor` wrapper. Both halves of the model (a view's own `sources`, and the rotation overlay)
-   are Node-tested in `dev/test/events.test.js`, including the faf4d67 regression at unit tier: the
-   overlay and the matrix are asserted to render the same duties the same way.
+- a static page that fetches the data and rewrites itself — the client receives the HTML source;
+- the Firestore REST API — `{"fields":{"ics":{"stringValue":"BEGIN:VCALENDAR…"}}}`;
+- the Realtime Database REST API — a *quoted* JSON string;
+- a Hosting rewrite — it can only target Cloud Functions or Cloud Run, both Blaze.
 
-   Note for B specifically: being a module does not by itself make it *server*-reusable. Its ctx still
-   carries `canReachTable`, `displayValue` and the seven rotation-config resolvers, so a feed endpoint
-   has to supply server-side answers for every one of them — which is hazard 2 above restated, not
-   avoided. What the extraction actually bought B is that the boundary is now written down and typed
-   in one place instead of being implicit in a Vue method.
+Access is not what blocks these. A single document can be made world-readable. The JSON envelope is.
 
-Deployment mirrors the CSP collector exactly, and for the same reasons: a Blaze-plan Cloud Function
-behind a Hosting rewrite, a Supabase Edge Function on the free tier, or self-hosted. On Firebase's
-free Spark plan there is no server at all, so on that deployment only the export half is possible.
+**Correction: Cloud Storage is not available on Spark.** An earlier draft of this proposal assumed a
+client could publish the file to a bucket. It cannot — Storage needs Blaze, which is exactly why the
+`asset:<id>` tier exists (`app-core.js`: "an image kept IN THE DATABASE as a data URI, for deployments
+with no blob store"). Recorded so it is not re-proposed.
 
-Expectation to set before building B: subscribed feeds are **not** live. Google Calendar refreshes
-external `.ics` subscriptions on its own schedule — typically many hours, sometimes longer — and the
-interval is not client-controllable. People who expect an edit to appear on their phone in seconds
-will be disappointed by a feed, and better served by the export.
+#### Pre-render into the database, and the server stops being dangerous
 
-Suggested split: build **A** on its own, and treat **B** as blocked on the `events.js` extraction plus
-an explicit decision about per-user feed tokens.
+The design that dissolves the old hazard is to **store the finished `.ics` as a blob, exactly the way
+an image is stored** — `_assets`-shaped, `ASSET_CAP` 900 KB against Firestore's 1 MiB document limit,
+which is roughly 4000 events.
+
+The point is not storage. It is *who renders*. The APP renders the text, with the real signed-in
+identity, the real access gating and the real translations, and writes the result. The serving layer
+then fetches one document and returns its string with `Content-Type: text/calendar` — about ten lines,
+with no knowledge of the schema, the views, or the access model.
+
+That is the whole difference. This entry used to cost a server that had to re-implement
+`canReachTable`, `@me`, owner scoping and per-view filters, and keep them in agreement with
+`firestore.rules` — the "comparison in three languages" hazard, failing silently toward leaking.
+Pre-rendering removes it rather than mitigating it: the only thing the endpoint holds is data.
+
+It also makes the update **write-triggered**, through the `writes.js` funnel — whose header already
+says it exists so exactly this kind of thing can be added in one place. No schedule, no polling,
+nothing that has to stay awake.
+
+#### What updates, what is fetched, and what is stored
+
+Three counts, routinely conflated, and only the last can grow with headcount:
+
+| | Count | Paid by |
+|---|---|---|
+| Update | **one**, regardless of subscriber count | the app, on write |
+| Fetch | one per subscriber per refresh | *their* calendar client |
+| Blob | one per distinct CONTENT — i.e. per audience tier | storage |
+
+The fetch count is identical whether everyone shares one URL or each holds their own: 200 subscribers
+means 200 fetches either way. **Per-person URLs therefore cost nothing in requests** — one extra
+document read inside a request that was happening anyway — and they buy individual revocation: someone
+leaves, delete one row, their URL dies and nobody else's does. A shared URL is all-or-nothing, and
+rotating it after a leak breaks every subscription at once.
+
+**Rendering scales with access shapes, not people.** The number of genuinely distinct calendars is the
+number of distinct grant combinations — one for a household, perhaps three for a congregation. One
+full-access client renders every tier in a single pass, because `events.js` takes `canReachTable` and
+`resolveMeTokens` as **ctx functions** rather than reading root state: narrowing them renders the
+calendar as another audience would see it, through the same predicate the app itself uses, so a
+mistake narrows too far rather than leaking. That capability was an unintended consequence of the
+extraction, and it is what makes tiering affordable.
+
+**The exception.** A view filtered on `@me`, or a rotation with `mineOnly`, differs genuinely per
+person and cannot fold into a tier. Either refuse such views as feed sources in `validateSchema` — the
+better default, since a shared file has no "me" to resolve and would otherwise pick one arbitrarily —
+or accept one blob per SUBSCRIBER, which is opt-in and far smaller than one per user.
+
+**Who regenerates matters, and this is the remaining trap.** The rendering client must be able to see
+everything the feed contains. A restricted member's write regenerating from their own `dataCache`
+would overwrite the complete calendar with a truncated one — silent loss for every subscriber, caused
+by a perfectly legitimate edit. Gate regeneration on a full-access client; a member's write then
+leaves the feed stale rather than wrong, which is the correct direction to fail.
+
+#### What is actually left
+
+1. **A decision, not code: the app's first bearer token for ROW DATA.** `?mode=…&config=…` share links
+   carry connection config and the reader still signs in; the only token-in-URL today is the
+   admin-only CSP read endpoint. A feed token is mailed around, synced to phones and stored on Google's
+   servers indefinitely, with no expiry and no second factor. Per-person tokens make it revocable and
+   attributable, which is the best available answer — but it is a real widening of the surface, and it
+   belongs to whoever owns the deployment rather than to an implementer.
+2. **One small always-on component.** Ten lines, on a free tier: a Cloudflare Worker, or a Supabase
+   Edge Function (`supabase/functions/csp-report/index.ts` is the deployment template). Because it is a
+   byte pipe it is swappable, and it is not a commitment to a second backend. Rough numbers: 200
+   subscribers polling every few hours is ~1600 requests/day against a 100k free allowance, and ~3200
+   Firestore reads against 50k.
+
+**The variant with no always-on component at all**, if that is worth more than freshness: a scheduled
+GitHub Action reads the one blob and commits it as `feed/<random>.ics`, which Pages already publishes
+on every push to `main`. Same pre-rendering, so the Action stays a byte-mover. The costs are that it is
+necessarily scheduled — a browser cannot push to the deploy — and that a shared static path gives up
+per-person revocation.
+
+**Expectation to set either way: a feed is not live.** Google refreshes external subscriptions on its
+own schedule, typically many hours, and it is not client-controllable. Write-triggered regeneration
+buys *correctness* — never stale relative to the data — not speed. Anyone wanting an edit on their
+phone within seconds is better served by the export.
 
 ### `timeline` / `gantt`
 
@@ -427,6 +482,13 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   it was proposed on: the data half already existed, so the whole feature is a renderer over the
   aggregate pipeline. `chore_points_week` became bars by gaining three lines and changing no data
   config at all, which is the adoption story the entry predicted.
+- **`.ics` export** — `ics.js` + a download button on top-level calendars. The serializer is pure over
+  the map `events.js` builds, so it exports exactly what the screen shows, rotation duties included, and
+  inherits that map's per-source access gating. It is also the half every feed design needs: a file and a
+  URL differ in how the text is delivered, not in the text. RFC 5545 supplied the reasons it is a tested
+  module rather than a template string — all-day events need a non-inclusive `DTEND`, lines fold at 75
+  OCTETS without splitting a UTF-8 sequence, and UIDs must be stable or every refresh becomes a
+  delete-and-re-add of the whole calendar on someone's phone.
 - **`rosterRef`** — a rotation's rosters from one 2-D lookup instead of a table per slot. Adding a
   family member went from five schema edits nobody could make in the app to one row in the Lookup
   editor. It was a resolver swap in `rotation.js`, as the entry predicted; the tests assert both shapes
@@ -447,9 +509,14 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
 
 ## Suggested order
 
-`.ics` export next — it is small, self-contained, and has no security surface. Then `timeline`, which
-closes a gap the calendar documents about itself. Then `tree` and `gallery`, both gated mainly on a
-column type.
+`timeline` next, which closes a gap the calendar documents about itself. Then `tree` and `gallery`,
+both gated mainly on a column type. (`.ics` export was previously first here, and has shipped.)
+
+The subscribable feed is deliberately not in that line despite being mostly designed. Everything left
+in it is a judgement rather than an implementation — whether this deployment wants a bearer token for
+row data at all, and whether a small always-on component is worth more than a scheduled static file.
+Those belong to whoever owns the deployment, so the entry waits for that answer instead of being
+ranked against features.
 
 Per-row goals sits outside that line: it is the cheapest thing on this page and touches no seam, but
 it extends a shipped kind rather than adding one, so it competes for attention with nothing. Take it
