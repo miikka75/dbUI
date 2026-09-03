@@ -1538,6 +1538,57 @@ at 30 and the badge becomes *Silver*.
   the view is broken.
 - **Embedding**: `{{view:x}}` in any document renders the tiles, like every other kind.
 
+## timeline (tenth view kind)
+
+A view with a `timeline` field renders its rows as **bars across periods** — a gantt chart. Engine:
+`timeline.js`.
+
+This is the shape a **calendar cannot hold**. A calendar places a row on one day (its `dateColumn`), so
+a row that spans days is either reduced to its start or invisible. A timeline's unit is the *span*.
+
+```json
+{ "name": "project_plan",
+  "sources": ["tasks"],
+  "timeline": {
+    "start": "starts_on",    // REQUIRED — date column the bar begins at
+    "end": "due_on",         // OPTIONAL — date column it ends at (see below)
+    "label": ["title"],      // OPTIONAL — columns forming the bar's caption
+    "from": "2026-01-01",    // OPTIONAL — window start; "today" or omitted = today
+    "periods": 12,           // OPTIONAL — how many periods the window covers (default 12)
+    "interval": "weekly"     // OPTIONAL — period size (default "weekly")
+  }
+}
+```
+
+- **`interval`** takes the same vocabulary as a rotation: `daily` · `weekly` · `monthly` · `yearly`, or
+  `"<n><d|w|m|y>"` (`"2w"`, `"3m"`). Reused deliberately, so "a week" means the same thing in both.
+- **`from` defaults to today**, not to the earliest row. A plan is read forward from now, and anchoring
+  to the data's own start means adding one old row silently rescales the whole chart.
+- **`label`** resolves through the same renderer a grid cell uses, so list values render as their labels
+  and `obscureNames` still applies. Omit it and bars are captioned with the view's own name.
+
+**A row with no `end` — or no `end` column configured at all — is a one-period bar.** A row that says
+when it starts and nothing else is a point in time; drawing it to the window edge would invent a
+duration the data does not claim. This is also what lets an ordinary single-date table render here
+without being reshaped.
+
+**Rows outside the window are dropped, not flattened to the edge.** A zero-width bar at the boundary
+reads as "this is happening now", which is the misreading a chart exists to prevent. A bar that
+*crosses* an edge is kept and clipped, and renders with a squared-off end on that side so "continues
+past here" is visible in the shape rather than only in the tooltip.
+
+An end **before** its start is bad data rather than a negative span, and collapses to a one-period bar.
+
+Read-only, like `pivot` and `stats`: a bar is a picture of a row that is edited in its own table. Rows
+come through the ordinary view pipeline, so `sources`, `filter`, computed columns and access gating all
+apply exactly as they do in a data view — a timeline is a data view with a different geometry, not a
+second way to reach rows.
+
+`validateSchema` rejects a missing `start`, a `start`/`end` naming a column that is not in `sources`,
+one that is not a **date** column, an unparseable `interval`, and a non-positive `periods`. Every one of
+those otherwise fails the same silent way — an empty chart, indistinguishable from a table nobody has
+filled in yet.
+
 ## Translatable lists (`translatableLists`)
 
 List **values** (the options behind a `select`/`multiselect` column) are translated through

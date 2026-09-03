@@ -820,7 +820,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1511,6 +1511,22 @@ function createVueApp() {
         a.download = view + '-' + from + '.ics';
         a.click();
         this.notify(this.t('msg.exported'));
+      },
+      // Build a timeline view's bars. Pure module + thin root wrapper, like pivotFor / calEventsFor.
+      // Rows come through the same embed row pipeline every other read-only kind uses, so `filter`,
+      // computed columns and access gating apply exactly as they do in a data view -- a timeline is a
+      // data view with a different geometry, not a second way to reach rows.
+      //
+      // `from` defaults to TODAY rather than to the earliest row: a plan is read forward from now, and
+      // defaulting to the data's own start means adding one old row silently rescales the whole chart.
+      timelineFor: function(name) {
+        var v = VIEWS[name]; if (!v || !v.timeline) return { periods: [], bars: [] };
+        var tl = v.timeline;
+        var from = (!tl.from || tl.from === 'today') ? this._calToday() : tl.from;
+        return Timeline.build(this.embedRows('view', name), {
+          start: tl.start, end: tl.end, from: from,
+          periods: tl.periods || 12, interval: tl.interval || 'weekly'
+        });
       },
       isCalendarName: function(name) { return !!(VIEWS[name] && VIEWS[name].calendar); },
       isRotationName: function(name) { return !!(VIEWS[name] && VIEWS[name].rotation); },
@@ -5676,7 +5692,7 @@ function createVueApp() {
   // Top-level view-kind registry: kind -> the component that renders that whole view. Every kind is
   // componentized; the top-level dispatch is a single <component :is="viewComponent"> lookup in ui.html.
   window.VIEW_KINDS = {
-    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', form: 'form-view', stats: 'stats-view', page: 'page-view', data: 'data-view',
+    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', form: 'form-view', stats: 'stats-view', timeline: 'timeline-view', page: 'page-view', data: 'data-view',
     languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view'   // system screens
   };
 
@@ -5979,6 +5995,67 @@ function createVueApp() {
       + '<td style="text-align:center;font-weight:800">{{ grid.grandTotal }}</td>'
       + '</tr></tfoot>'
       + '</template></v-table>'
+      + '</component>'
+  });
+
+  // Timeline view: rows with a start and an end, as bars across periods — the shape a calendar cannot
+  // hold, since it places a row on one day. Read-only, like pivot and stats: a bar is a picture of a
+  // row that is edited in its own table.
+  //
+  // The bar is laid out with a CSS grid column span rather than percentage widths. The period columns
+  // then decide the geometry once, so a bar cannot drift out of step with the header it is measured
+  // against — which is the failure percentage math produces at exactly the sizes nobody tests at.
+  app.component('timeline-view', {
+    props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    computed: {
+      a: function() { return appInstance; },
+      viewName: function() { return this.name || appInstance.currentTable; },
+      cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].timeline) || {}; },
+      viewCfg: function() { return VIEWS[this.viewName] || null; },   // whose obscureNames applies to the labels
+      chart: function() { return appInstance.timelineFor(this.viewName); },
+      cols: function() { return 'minmax(120px,1.4fr) repeat(' + (this.chart.periods.length || 1) + ', minmax(28px,1fr))'; }
+    },
+    methods: {
+      // The bar's caption, through displayValue so a list value renders as its label and an obscured
+      // column stays obscured — the same resolver the grid uses, never String(row[col]).
+      label: function(row) {
+        var cols = this.cfg.label || [];
+        var self = this;
+        var out = (Array.isArray(cols) ? cols : [cols]).map(function(c) {
+          return appInstance.displayValue(c, row[c], '', self.viewCfg);
+        }).filter(Boolean).join(' — ');
+        return out || appInstance.tOr('view.' + this.viewName, this.viewName);
+      },
+      periodLabel: function(d) {
+        var p = String(d).split('-');
+        return new Intl.DateTimeFormat(appInstance.calLocale(), { day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2]));
+      },
+      // A clipped bar loses its rounded end on that side, so "continues past here" is visible in the
+      // shape and not only in the tooltip.
+      barStyle: function(b) {
+        return {
+          gridColumn: (b.offset + 2) + ' / span ' + b.span,
+          background: appInstance.hashColor(this.label(b.row)),
+          borderTopLeftRadius: b.clippedStart ? '0' : '4px', borderBottomLeftRadius: b.clippedStart ? '0' : '4px',
+          borderTopRightRadius: b.clippedEnd ? '0' : '4px', borderBottomRightRadius: b.clippedEnd ? '0' : '4px'
+        };
+      },
+      barTitle: function(b) { return this.label(b.row) + ' (' + b.start + ' – ' + b.end + ')'; }
+    },
+    template: ''
+      + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="timeline-view">'
+      + '<div style="overflow-x:auto">'
+      + '<div :style="{ display:\'grid\', gridTemplateColumns: cols, alignItems:\'center\', minWidth:\'420px\', gap:\'2px 0\', padding:\'8px\' }">'
+      // Header: the row-label gutter, then one cell per period.
+      + '<div style="font-weight:600;font-size:0.8rem"></div>'
+      + '<div v-for="p in chart.periods" :key="p" style="font-size:0.7rem;opacity:0.7;text-align:center;white-space:nowrap">{{ periodLabel(p) }}</div>'
+      // One grid row per bar: the caption in the gutter, then the bar spanning its own periods.
+      + '<template v-for="(b, i) in chart.bars" :key="i">'
+      + '<div style="font-size:0.85rem;padding-right:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="barTitle(b)">{{ label(b.row) }}</div>'
+      + '<div :style="barStyle(b)" style="height:16px;grid-row:auto" :title="barTitle(b)" data-testid="timeline-bar"></div>'
+      + '</template>'
+      + '</div></div>'
+      + '<div v-if="!chart.bars.length" style="opacity:0.6;padding:12px">{{ a.t(\'timeline.empty\') }}</div>'
       + '</component>'
   });
 

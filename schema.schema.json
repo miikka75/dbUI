@@ -181,7 +181,7 @@
 
     "view": {
       "type": "object",
-      "description": "One view. Its `kind` is what the loader dispatches on; migration writes it, so a hand-authored view normally omits it and gets one at load. The property list is deliberately OPEN: each kind carries its own configuration object (rotation, calendar, pivot, rsvp, board, form, stats), and a TABLE answers to the same presentation properties a view does — `currentConfig` is `VIEWS[x] || SCHEMA[x]`, so the two occupy one object position. The properties below are the ones common to every kind; each kind's own object is documented in SCHEMA.md.",
+      "description": "One view. Its `kind` is what the loader dispatches on; migration writes it, so a hand-authored view normally omits it and gets one at load. The property list is deliberately OPEN: each kind carries its own configuration object (rotation, calendar, pivot, rsvp, board, form, stats, timeline), and a TABLE answers to the same presentation properties a view does — `currentConfig` is `VIEWS[x] || SCHEMA[x]`, so the two occupy one object position. The properties below are the ones common to every kind; each kind's own object is documented in SCHEMA.md.",
       "additionalProperties": true,
       "required": ["name"],
       "properties": {
@@ -189,7 +189,7 @@
         "views": { "type": "array", "items": { "$ref": "#/$defs/view" }, "description": "LEGACY nesting: a named nav folder holding views. Hierarchy belongs in `nav` — this shape survives only because old documents carry it, and is what `kind: \"group\"` labels." },
         "kind": {
           "type": "string",
-          "enum": ["data", "page", "rotation", "calendar", "pivot", "rsvp", "board", "form", "stats", "group"],
+          "enum": ["data", "page", "rotation", "calendar", "pivot", "rsvp", "board", "form", "stats", "timeline", "group"],
           "description": "What this entry IS — the discriminator the loader dispatches on (SchemaNormalize.viewKind). Written by migration, so a hand-authored view normally omits it and gets one at load; set it only to override. \"group\" is a nav folder carrying nested `views` and no body of its own."
         },
         "sources": { "type": "array", "items": { "type": "string" }, "description": "Table names to pull data from." },

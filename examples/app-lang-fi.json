@@ -40,6 +40,7 @@
       "btn.preview": "Esikatselu",
       "btn.reset": "Nollaa",
       "btn.export_ics": "Vie .ics",
+      "timeline.empty": "Ei mitaan naytettavaa",
       "btn.save": "Tallenna",
       "btn.search": "Hae",
       "btn.show_active": "Tulevat",

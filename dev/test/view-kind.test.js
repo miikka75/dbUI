@@ -90,7 +90,7 @@ describe('viewKind — the vocabulary is published, so it must be complete', () 
     const published = meta.$defs.view.properties.kind.enum;
     const produced = [
       { rotation: {} }, { calendar: {} }, { pivot: {} }, { rsvp: {} }, { board: {} },
-      { form: {} }, { stats: {} }, { markdown: '' }, { views: [] }, {},
+      { form: {} }, { stats: {} }, { timeline: {} }, { markdown: '' }, { views: [] }, {},
     ].map((v) => Migrations.kindOf(v));
     assert.deepEqual([...new Set(produced)].sort(), [...published].sort());
   });

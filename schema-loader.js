@@ -252,7 +252,7 @@ function validateSchema() {
   // The kinds whose rows ARE their `sources` rows passed through `filter` — loadTableData's union/join
   // branch, which data, board, form and stats all fall through to. Every other kind either generates its
   // rows (rotation) or reads through a config of its own that this `filter` is no part of.
-  var FILTERS_SOURCE_ROWS = { data: 1, board: 1, form: 1, stats: 1 };
+  var FILTERS_SOURCE_ROWS = { data: 1, board: 1, form: 1, stats: 1, timeline: 1 };
   for (var v in VIEWS) {
     var view = VIEWS[v];
     partLabelCheck('View', v, view);
@@ -443,6 +443,31 @@ function validateSchema() {
     }
     // Stats view: every mistake here renders a tile showing nothing, or a bar with no track, and the
     // view still "works" -- which is exactly the class of silent failure the rest of this function
+    // A timeline is a data view plus a render config too, so its sources and filter are already checked
+    // above; what is checked here is only the `timeline` object. Every one of these fails the way a
+    // missing column always fails in this app -- silently, as an empty chart -- because Timeline.build
+    // reads `row[start]` and gets undefined, drops the row, and has no way to tell a typo from a table
+    // where nobody has filled the dates in yet.
+    if (view.timeline) {
+      var tl = view.timeline, tlSrc = view.sources || [];
+      if (!tl.start) errors.push('timeline "' + v + '" needs `start` (the column holding each row\'s start date)');
+      ['start', 'end'].forEach(function(k) {
+        if (!tl[k]) return;
+        if (!colOfTables(tlSrc, tl[k])) {
+          errors.push('timeline "' + v + '": `' + k + '` column "' + tl[k] + '" not found in sources [' + tlSrc.join(', ') + ']');
+        } else if (!Columns.colIsDate(SCHEMA, tl[k])) {
+          // A bar is a claim about two DATES. Pointed at a text column it draws whatever Date() makes of
+          // the contents, which for most strings is nothing and for a few is a wrong year.
+          errors.push('timeline "' + v + '": `' + k + '` column "' + tl[k] + '" is not a date column');
+        }
+      });
+      if (tl.interval != null && !Rotation.isValidInterval(tl.interval)) {
+        errors.push('timeline "' + v + '": `interval` "' + tl.interval + '" is not a period size — use daily/weekly/monthly/yearly or "<n><d|w|m|y>"');
+      }
+      if (tl.periods != null && !(typeof tl.periods === 'number' && tl.periods > 0)) {
+        errors.push('timeline "' + v + '": `periods` must be a positive number');
+      }
+    }
     // exists for. A stats view is a data view plus a render config, so its sources/filter/aggregate are
     // already checked by the data-view rules above; what is checked here is only the `stats` object.
     if (view.stats) {

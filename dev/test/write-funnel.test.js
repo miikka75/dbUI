@@ -18,7 +18,7 @@ const WRITE_METHODS = ['putRow', 'deleteRow', 'moveRow'];
 // Client-side files that could plausibly write. Backend ADAPTERS are excluded on purpose: they
 // implement these methods, so `backend.putRow` inside one is the definition, not a bypass.
 const CLIENT_FILES = ['app-core.js', 'embeds.js', 'rows.js', 'rsvp.js', 'board.js', 'pivot.js',
-                      'print.js', 'calendar.js', 'rotation.js', 'events.js', 'ics.js', 'columns.js', 'live-sync.js'];
+                      'print.js', 'calendar.js', 'rotation.js', 'events.js', 'ics.js', 'timeline.js', 'columns.js', 'live-sync.js'];
 
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
