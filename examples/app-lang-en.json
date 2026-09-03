@@ -40,6 +40,7 @@
       "btn.preview": "Preview",
       "btn.reset": "Reset",
       "btn.export_ics": "Export .ics",
+      "timeline.empty": "Nothing to show",
       "btn.save": "Save",
       "btn.search": "Search",
       "btn.show_active": "Upcoming",

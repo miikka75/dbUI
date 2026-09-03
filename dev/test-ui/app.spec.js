@@ -2895,6 +2895,72 @@ test.describe('v3 @both partition toggle in an embed', () => {
   // true } }`) every row matches and the filter quietly does nothing. Neither is visible downstream:
   // the document is valid JSON and condMatches answers exactly as it would for a real column nobody
   // has filled in yet.
+  test('validateSchema names a timeline pointed at the wrong columns', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = (n) => window.validateSchema().filter((e) => e.indexOf(n) >= 0).join(' | ');
+      // Every one of these fails the same silent way: Timeline.build reads row[start], gets undefined,
+      // drops the row, and renders an empty chart that looks exactly like a table nobody has filled in.
+      window.VIEWS.tl_missing = { name: 'tl_missing', sources: ['tasks'], timeline: { end: 'date' } };
+      window.VIEWS.tl_nocol = { name: 'tl_nocol', sources: ['tasks'], timeline: { start: 'no_such_col' } };
+      window.VIEWS.tl_nodate = { name: 'tl_nodate', sources: ['tasks'], timeline: { start: 'title' } };
+      window.VIEWS.tl_interval = { name: 'tl_interval', sources: ['tasks'], timeline: { start: 'date', interval: 'fortnightly' } };
+      window.VIEWS.tl_periods = { name: 'tl_periods', sources: ['tasks'], timeline: { start: 'date', periods: 0 } };
+      // Silent: a real date column, a valid interval, no end at all (a start alone is a valid timeline).
+      window.VIEWS.tl_ok = { name: 'tl_ok', sources: ['tasks'], timeline: { start: 'date', interval: '2w', periods: 6 } };
+      return {
+        missing: errs('tl_missing'), nocol: errs('tl_nocol'), nodate: errs('tl_nodate'),
+        interval: errs('tl_interval'), periods: errs('tl_periods'), ok: errs('tl_ok')
+      };
+    });
+    expect(r.missing).toContain('needs `start`');
+    expect(r.nocol).toContain('`start` column "no_such_col" not found in sources [tasks]');
+    expect(r.nodate).toContain('is not a date column');
+    expect(r.interval).toContain('`interval` "fortnightly" is not a period size');
+    expect(r.periods).toContain('`periods` must be a positive number');
+    expect(r.ok).toBe('');
+  });
+
+  test('a timeline draws one bar per row, spanning the periods it covers', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.dataCache['tasks'] = [
+        { id: 'a', title: 'Spans two weeks', date: '2026-03-09', due: '2026-03-17' },
+        { id: 'b', title: 'One week', date: '2026-03-02', due: '2026-03-03' },
+        { id: 'c', title: 'Outside the window', date: '2027-01-01', due: '2027-02-01' },
+        { id: 'd', title: 'No start at all', date: '', due: '2026-03-10' }
+      ];
+      window.VIEWS.tl_fx = {
+        name: 'tl_fx', kind: 'timeline', sources: ['tasks'], columns: ['title', 'date', 'due'],
+        timeline: { start: 'date', end: 'due', label: ['title'], from: '2026-03-01', periods: 4, interval: 'weekly' }
+      };
+      app.selectTab('tl_fx');
+      const chart = app.timelineFor('tl_fx');
+      return {
+        kind: window.SchemaNormalize.viewKind(window.VIEWS.tl_fx),
+        component: (window.VIEW_KINDS || {})['timeline'],
+        periods: chart.periods,
+        bars: chart.bars.map((b) => ({ id: b.row.id, offset: b.offset, span: b.span }))
+      };
+    });
+    // The classifier and the registry agree, which is what makes the top-level dispatch find it.
+    expect(r.kind).toBe('timeline');
+    expect(r.component).toBe('timeline-view');
+    expect(r.periods).toEqual(['2026-03-01', '2026-03-08', '2026-03-15', '2026-03-22']);
+    // Ordered earliest-first; the far-future row and the one with no start are absent, not zero-width.
+    expect(r.bars).toEqual([
+      { id: 'b', offset: 0, span: 1 },
+      { id: 'a', offset: 1, span: 2 }
+    ]);
+
+    // And it actually renders: the card, and one bar element per bar.
+    const tl = page.locator('[data-testid="timeline-view"]');
+    await expect(tl).toBeVisible();
+    await expect(tl.locator('[data-testid="timeline-bar"]')).toHaveCount(2);
+  });
+
   test('validateSchema names a filter column that is not there', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {

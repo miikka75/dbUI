@@ -47,6 +47,7 @@
     if (v.board) return 'board';
     if (v.form) return 'form';
     if (v.stats) return 'stats';
+    if (v.timeline) return 'timeline';
     if (typeof v.markdown === 'string') return 'page';
     // A nav GROUP is a folder, not a view: nested `views` and no body of its own. Checked after
     // every body so an entry carrying both is labelled by what it RENDERS, which is the question
