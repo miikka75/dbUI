@@ -338,7 +338,8 @@ can subscribe to, so an edit reaches a phone without anyone re-exporting.
 
 The earlier version of this entry priced the feed as the expensive half of a pair. Most of that price
 turned out to be an assumption rather than a cost, and two of its three blockers are gone. What
-remains is one decision and one small always-on component.
+remains is one decision, and a choice between four ways of delivering the file — the cheapest of which
+needs no component at all.
 
 **The delivery constraint, stated first because everything follows from it.** A calendar client is not
 a browser. Google fetches your URL from *its* servers, Outlook from its own, Apple with an HTTP client
@@ -414,23 +415,82 @@ leaves the feed stale rather than wrong, which is the correct direction to fail.
 
 #### What is actually left
 
-1. **A decision, not code: the app's first bearer token for ROW DATA.** `?mode=…&config=…` share links
-   carry connection config and the reader still signs in; the only token-in-URL today is the
-   admin-only CSP read endpoint. A feed token is mailed around, synced to phones and stored on Google's
-   servers indefinitely, with no expiry and no second factor. Per-person tokens make it revocable and
-   attributable, which is the best available answer — but it is a real widening of the surface, and it
-   belongs to whoever owns the deployment rather than to an implementer.
-2. **One small always-on component.** Ten lines, on a free tier: a Cloudflare Worker, or a Supabase
-   Edge Function (`supabase/functions/csp-report/index.ts` is the deployment template). Because it is a
-   byte pipe it is swappable, and it is not a commitment to a second backend. Rough numbers: 200
-   subscribers polling every few hours is ~1600 requests/day against a 100k free allowance, and ~3200
-   Firestore reads against 50k.
+**One decision, and one choice of delivery.**
 
-**The variant with no always-on component at all**, if that is worth more than freshness: a scheduled
-GitHub Action reads the one blob and commits it as `feed/<random>.ics`, which Pages already publishes
-on every push to `main`. Same pre-rendering, so the Action stays a byte-mover. The costs are that it is
-necessarily scheduled — a browser cannot push to the deploy — and that a shared static path gives up
-per-person revocation.
+The decision is not code: this would be the app's **first bearer token for ROW DATA**. `?mode=…&config=…`
+share links carry connection config and the reader still signs in; the only token-in-URL today is the
+admin-only CSP read endpoint. A feed token is mailed around, synced to phones and stored on Google's
+servers indefinitely, with no expiry and no second factor. Per-person tokens make it revocable and
+attributable, which is the best available answer — but it is a real widening of the surface, and it
+belongs to whoever owns the deployment rather than to an implementer.
+
+#### Four ways to deliver the file
+
+All four serve the SAME pre-rendered blob, so the app-side work is identical and the choice is
+reversible. What differs is what has to exist, and whether an edit reaches subscribers without waiting.
+
+| | Update | Component you maintain | Runs on Spark | Per-person URLs |
+|---|---|---|---|---|
+| **1. Managed blob store** (Supabase Storage) | on write | none | yes | yes |
+| **2. Byte pipe** (Worker / Edge Function) | on write | one, ~10 lines | yes | yes |
+| **3. Static file** (scheduled Action → Pages) | scheduled | none (a workflow) | yes | no |
+| **4. Blaze** (Firebase Storage, or a Function) | on write | none | no | yes |
+
+**1. A managed blob store — the recommended path.** The app uploads the rendered `.ics` to a PUBLIC
+bucket and the object's own URL is the subscription. This is not a component in the sense the others
+are: it is the same managed service Firebase Storage would have been if Spark included it.
+
+*This repo already does it.* `_sbUpload` in `backend-supabase.js` uploads to a public Supabase bucket
+and returns `getPublicUrl(...)`, and `uploadFile` is already the interface the image column uses — a
+feed calls the same method with a `Blob` of `text/calendar`.
+
+- **Pro:** nothing to write, deploy, monitor or keep alive. Write-triggered through `writes.js`. Free
+  tier. The smallest total surface of the four.
+- **Con:** needs Supabase FOR STORAGE. On a Firestore deployment that is a second (free) project used
+  only as a bucket — not a data migration, and the config plumbing plus the CSP-collector precedent
+  already exist. There is no Firebase equivalent on Spark, which is the whole reason this row exists.
+- **Three real details:** `_sbUpload` writes `<email>/<ts>_<name>`, deliberately unique so one image
+  never clobbers another — a feed needs the opposite, a STABLE path with `upsert: true`, or the
+  subscription URL changes on every edit. `contentType: 'text/calendar'` must be set at upload, since
+  the stored type is what the public URL serves. And a public bucket's URL shape is predictable, so the
+  random token has to live in the FILENAME (Supabase signed URLs expire, which is wrong for a
+  subscription).
+
+**2. A byte pipe.** A Cloudflare Worker or Supabase Edge Function that reads the one blob and returns it
+with a Content-Type (`supabase/functions/csp-report/index.ts` is the deployment template).
+
+- **Pro:** works with the data wherever it already is, so no second service for storage. Ten lines,
+  swappable, not a commitment to a second backend. Rough numbers: 200 subscribers polling every few
+  hours is ~1600 requests/day against a 100k free allowance, and ~3200 Firestore reads against 50k.
+- **Con:** it is a component you own — deployed, versioned, and capable of breaking on its own. Its
+  secrets live somewhere. Strictly more to maintain than option 1 for the same result.
+
+**3. A static file, committed by a scheduled Action.** The Action reads the blob and commits
+`feed/<random>.ics`, which Pages already publishes on every push to `main`.
+
+- **Pro:** no runtime component of any kind. The delivery path is the one you already deploy.
+- **Con:** **necessarily scheduled** — a browser cannot push to the deploy, so this is the one option
+  that cannot be write-triggered. A repo-write credential must live in GitHub Secrets, every refresh is
+  a commit plus a full Pages rebuild, and a shared static path gives up per-person revocation.
+
+**4. Blaze.** Firebase Storage (option 1 without the second service) or a Cloud Function (option 2
+without the extra host). The straightforward version of all of this.
+
+- **Pro:** everything stays in one project, and the whole question disappears.
+- **Con:** billing enabled, on a deployment that is otherwise free and has been designed to stay that
+  way.
+
+#### Considered and rejected
+
+Both fail the same test — the credential ends up stronger than the thing it protects.
+
+- **Deploying from the browser via the Firebase Hosting REST API.** Technically real: create a version,
+  upload, release, with an OAuth scope an admin could grant. But a Hosting version is a WHOLE-SITE
+  snapshot, so every calendar edit becomes a full site deploy that can race with a real one.
+- **A GitHub PAT in Settings**, committing the file so Pages serves it. It works, and it stores a
+  repo-write credential in a browser in order to protect a calendar.
+
+Neither is worth revisiting unless the trade changes.
 
 **Expectation to set either way: a feed is not live.** Google refreshes external subscriptions on its
 own schedule, typically many hours, and it is not client-controllable. Write-triggered regeneration
@@ -514,9 +574,9 @@ both gated mainly on a column type. (`.ics` export was previously first here, an
 
 The subscribable feed is deliberately not in that line despite being mostly designed. Everything left
 in it is a judgement rather than an implementation — whether this deployment wants a bearer token for
-row data at all, and whether a small always-on component is worth more than a scheduled static file.
-Those belong to whoever owns the deployment, so the entry waits for that answer instead of being
-ranked against features.
+row data at all, and which of the four delivery options it prefers (the recommended one needs no
+component, at the price of using Supabase as a bucket). Those belong to whoever owns the deployment, so
+the entry waits for that answer instead of being ranked against features.
 
 Per-row goals sits outside that line: it is the cheapest thing on this page and touches no seam, but
 it extends a shipped kind rather than adding one, so it competes for attention with nothing. Take it
