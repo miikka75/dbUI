@@ -37,6 +37,7 @@
     "rows.js",
     "embeds.js",
     "events.js",
+    "ics.js",
     "print.js",
     "pivot.js",
     "rsvp.js",

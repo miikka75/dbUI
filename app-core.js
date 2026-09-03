@@ -820,7 +820,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1485,6 +1485,33 @@ function createVueApp() {
       // Fail-closed per source: a table the user cannot read contributes nothing. When `window` is
       // given, rotationSources' generated duties are added (bounded to that window).
       calEventsFor: function(name, window) { return Events.build(name, window, this._eventsCtx()); },
+      // Download a calendar view as an .ics file. Serialization is Ics.build (pure, Node-tested); this
+      // is only the window choice and the browser save, mirroring exportData's Blob/anchor dance.
+      //
+      // The window is a YEAR FROM TODAY, deliberately not the visible grid. Source rows ignore the
+      // window entirely (every loaded row is placed on its own date), but generated rotation duties are
+      // clipped to it -- so passing what is on screen would export the duties of whichever month the
+      // user happened to be looking at, and no others, with nothing to indicate that is what happened.
+      // A year is the horizon a subscription is useful over, and re-exporting is how it is extended.
+      //
+      // UIDs are qualified with the database key so two databases exported into one calendar client
+      // cannot collide; it is a stable local identifier, not an address, and nothing is sent anywhere.
+      downloadIcs: function(name) {
+        var view = name || this.currentTable;
+        var from = this._calToday();
+        var p = from.split('-');
+        var to = fmtDate(new Date(Number(p[0]) + 1, Number(p[1]) - 1, Number(p[2])));
+        var title = this.tOr('view.' + view, this.tOr('tab.' + view, view));
+        var text = Ics.build(this.calEventsFor(view, { from: from, toExclusive: to }), {
+          name: title,
+          domain: (typeof Databases !== 'undefined' && Databases.activeKey()) || 'dbui.local'
+        });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([text], { type: 'text/calendar;charset=utf-8' }));
+        a.download = view + '-' + from + '.ics';
+        a.click();
+        this.notify(this.t('msg.exported'));
+      },
       isCalendarName: function(name) { return !!(VIEWS[name] && VIEWS[name].calendar); },
       isRotationName: function(name) { return !!(VIEWS[name] && VIEWS[name].rotation); },
       isPivotName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'pivot'; },
@@ -5834,6 +5861,7 @@ function createVueApp() {
       goToday: function() { this.anchor = this.sel = appInstance._calToday(); },
       setMode: function(m) { this.mode = m; },
       addOnDay: function() { appInstance.calendarAddOnDay(this.viewName, this.sel); },
+      exportIcs: function() { appInstance.downloadIcs(this.viewName); },
       selectDay: function(d) { this.sel = d; }
     }),
     template: ''
@@ -5846,7 +5874,10 @@ function createVueApp() {
       + '<v-btn-toggle :model-value="mode" density="compact" variant="outlined" divided mandatory @update:model-value="setMode($event)">'
       + '<v-btn value="month" size="small">{{ t(\'cal.month\') }}</v-btn>'
       + '<v-btn value="week" size="small">{{ t(\'cal.week\') }}</v-btn>'
-      + '<v-btn value="list" size="small">{{ t(\'cal.list\') }}</v-btn></v-btn-toggle></div>'
+      + '<v-btn value="list" size="small">{{ t(\'cal.list\') }}</v-btn></v-btn-toggle>'
+      // Top-level only: an embedded calendar sits inside someone else's page, where a download button
+      // for just this block is noise -- the same reason the embed has no mode toggle chrome of its own.
+      + '<v-btn v-if="!embed" icon="mdi-calendar-export" size="small" variant="text" @click="exportIcs()" :title="t(\'btn.export_ics\')" data-testid="cal-export-ics"></v-btn></div>'
       + '<v-divider></v-divider>'
       + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
       + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents" :can-add="canAdd" @add="addOnDay"></cal-day-panel>'
