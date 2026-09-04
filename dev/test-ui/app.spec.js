@@ -3044,6 +3044,54 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.first).toContain('feeds/' + r.idAfterFirst + '.ics');
   });
 
+  test('a backend whose blob store is absent stops the BACKGROUND republish, not the button', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      window.VIEWS.blob_fx = { name: 'blob_fx', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+
+      // Firebase on Spark: uploadFile EXISTS (Storage initialized) but the put() fails, because Storage
+      // needs Blaze. The presence test cannot see that; only an attempt can.
+      let attempts = 0, fail = true;
+      const real = window.backend.uploadFile;
+      window.backend.uploadFile = () => { attempts++; return fail ? Promise.reject(new Error('storage/unauthorized')) : Promise.resolve('https://s/ok.ics'); };
+
+      const offeredBefore = app.canPublishFeeds();
+      await app.publishFeed('blob_fx').catch(() => {});
+      const afterOne = attempts;
+
+      // Write-triggered republishes must now stand down — otherwise every edit retries the same doomed
+      // upload and raises the same toast for ever.
+      for (let i = 0; i < 5; i++) app._onWriteRepublish('tasks');
+      await new Promise((res) => setTimeout(res, 2600));
+      const afterWrites = attempts;
+
+      // The button still tries: a person pressing it is stating intent, and the failure may have been a
+      // network blip rather than a missing bucket.
+      const offeredAfter = app.canPublishFeeds();
+      fail = false;
+      await app.publishFeed('blob_fx');
+      const afterRetry = attempts;
+
+      // A success clears the latch, so background republishing resumes.
+      const downAfterSuccess = app._blobStoreDown;
+      app._onWriteRepublish('tasks');
+      await new Promise((res) => setTimeout(res, 2600));
+      const afterResume = attempts;
+
+      window.backend.uploadFile = real;
+      return { offeredBefore, afterOne, afterWrites, offeredAfter, afterRetry, downAfterSuccess, afterResume };
+    });
+    expect(r.offeredBefore).toBe(true);
+    expect(r.afterOne).toBe(1);
+    expect(r.afterWrites).toBe(1);        // five writes, no further attempts
+    expect(r.offeredAfter).toBe(true);    // the button is not taken away
+    expect(r.afterRetry).toBe(2);         // and it retries when pressed
+    expect(r.downAfterSuccess).toBe(false);
+    expect(r.afterResume).toBe(3);        // background republishing resumed after the success
+  });
+
   test('a restricted member never republishes a feed, so a partial view cannot overwrite it', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(async () => {

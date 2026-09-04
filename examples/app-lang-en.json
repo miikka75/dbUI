@@ -48,6 +48,7 @@
       "cal.window_lang": "File language",
       "cal.lang_auto": "As the reader sees it",
       "msg.feed_failed": "Could not publish the feed",
+      "msg.no_blob_store": "No file storage on this deployment — a feed needs Firebase Storage (Blaze) or Supabase Storage",
       "timeline.empty": "Nothing to show",
       "btn.save": "Save",
       "btn.search": "Search",
