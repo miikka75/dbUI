@@ -13,6 +13,7 @@
     "test:storage-rules": "node run-with-emulators.mjs --only storage,firestore --project demo-image -- node test-emulator/storage-rules.mjs",
     "test:rules": "node run-with-emulators.mjs --only firestore --project demo-rules -- node test-emulator/firestore-rules.mjs",
     "test:cdn": "node test-cdn-fallback.mjs",
+    "csp:sync": "node sync-csp.js",
     "free-ports": "node free-emulator-ports.mjs",
     "test:all": "npm run typecheck && npm test && npm run test:emulated && npm run test:ui",
     "test:differential": "node run-with-emulators.mjs --only firestore --project demo-diff -- node test-emulator/policy-differential.mjs",
