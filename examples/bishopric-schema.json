@@ -12,6 +12,10 @@
           "icon": "mdi-information-variant-circle-outline"
         },
         {
+          "view": "meeting_calendar",
+          "icon": "mdi-calendar-month-outline"
+        },
+        {
           "icon": "mdi-progress-clock",
           "view": "meeting_program"
         },
@@ -1055,6 +1059,23 @@
         "defaultSort": "date",
         "name": "duty_interpreters",
         "kind": "data"
+      },
+      {
+        "name": "meeting_calendar",
+        "kind": "calendar",
+        "calendar": {
+          "sources": [
+            {
+              "table": "meeting_agenda",
+              "dateColumn": "date",
+              "titleColumns": [
+                "theme"
+              ]
+            }
+          ],
+          "defaultView": "month",
+          "weekStart": 0
+        }
       }
     ],
     "listSources": {
