@@ -85,12 +85,24 @@ function _noUsers() {
 
 // Upload to the public Supabase Storage bucket `uploads` under <email>/<ts>_<name>, resolving to the
 // public URL (stored in the row by the image column). Presence of this method enables the image uploader.
-function _sbUpload(file) {
+function _sbUpload(file, opts) {
   if (!_sb) return Promise.reject(new Error('Supabase not initialized'));
-  var email = _myEmail() || 'anon';
-  var safe = String((file && file.name) || 'file').replace(/[^\w.\-]+/g, '_');
-  var path = email + '/' + Date.now() + '_' + safe;
-  return _sb.storage.from(SUPABASE_BUCKET).upload(path, file, { upsert: false }).then(function(res) {
+  var o = opts || {}, path, upsert;
+  if (o.path) {
+    // A caller-chosen STABLE path, overwritten in place (upsert). An image must never collide, so it
+    // keeps the timestamped path below; a calendar feed is the opposite -- its URL is a subscription,
+    // and a new path per publish would silently strand every subscriber on the previous file.
+    path = String(o.path); upsert = true;
+  } else {
+    var email = _myEmail() || 'anon';
+    var safe = String((file && file.name) || 'file').replace(/[^\w.\-]+/g, '_');
+    path = email + '/' + Date.now() + '_' + safe; upsert = false;
+  }
+  // The stored contentType is what the PUBLIC URL serves, and a calendar client rejects anything that
+  // is not text/calendar -- so this is not cosmetic metadata, it is whether the feed works at all.
+  var up = { upsert: upsert };
+  if (o.contentType) up.contentType = o.contentType;
+  return _sb.storage.from(SUPABASE_BUCKET).upload(path, file, up).then(function(res) {
     if (res && res.error) throw res.error;
     return _sb.storage.from(SUPABASE_BUCKET).getPublicUrl(path).data.publicUrl;
   });

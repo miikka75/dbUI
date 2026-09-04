@@ -2895,6 +2895,130 @@ test.describe('v3 @both partition toggle in an embed', () => {
   // true } }`) every row matches and the filter quietly does nothing. Neither is visible downstream:
   // the document is valid JSON and condMatches answers exactly as it would for a real column nobody
   // has filled in yet.
+  test('publishing a calendar feed uploads an .ics to a stable path and keeps the URL', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;          // unrestricted -> may publish
+      app.dataCache['tasks'] = [{ id: 'a', date: '2026-07-08', title: 'Alpha' }];
+      window.VIEWS.feed_fx = {
+        name: 'feed_fx', feed: true,
+        calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] }
+      };
+      // Stand in for the blob store, recording exactly what the backend was asked for.
+      const calls = [];
+      const real = window.backend.uploadFile;
+      window.backend.uploadFile = (file, opts) => {
+        calls.push({ path: opts && opts.path, contentType: opts && opts.contentType, type: file.type });
+        return Promise.resolve('https://store.example/' + opts.path);
+      };
+      const text = await new Promise((res) => {
+        const orig = window.backend.uploadFile;
+        window.backend.uploadFile = (f, o) => { orig(f, o); f.text().then(res); return Promise.resolve('https://store.example/' + o.path); };
+        app.publishFeed('feed_fx');
+      });
+      const first = app.feedUrlFor('feed_fx');
+      const idAfterFirst = app.feedInfoFor('feed_fx').id;
+      // Publishing again must reuse the SAME id, or every existing subscription is stranded on a file
+      // that no longer updates.
+      await app.publishFeed('feed_fx');
+      window.backend.uploadFile = real;
+      return {
+        calls, text, first, idAfterFirst,
+        idAfterSecond: app.feedInfoFor('feed_fx').id,
+        secondUrl: app.feedUrlFor('feed_fx')
+      };
+    });
+
+    // It asked for a stable, unguessable path and the one Content-Type a calendar client accepts.
+    expect(r.calls[0].path).toMatch(/^feeds\/[0-9a-f]{32}\.ics$/);
+    expect(r.calls[0].contentType).toBe('text/calendar');
+    expect(r.calls[0].type).toContain('text/calendar');
+    // The bytes are a real calendar carrying the row.
+    expect(r.text.startsWith('BEGIN:VCALENDAR\r\n')).toBe(true);
+    expect(r.text).toContain('SUMMARY:Alpha');
+    // The id — and therefore the URL — survives a republish.
+    expect(r.idAfterSecond).toBe(r.idAfterFirst);
+    expect(r.secondUrl).toBe(r.first);
+    expect(r.first).toContain('feeds/' + r.idAfterFirst + '.ics');
+  });
+
+  test('a restricted member never republishes a feed, so a partial view cannot overwrite it', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      window.VIEWS.feed_gate = { name: 'feed_gate', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+      let uploads = 0;
+      const real = window.backend.uploadFile;
+      window.backend.uploadFile = () => { uploads++; return Promise.resolve('https://store.example/x'); };
+
+      // userAllowedTables is COMPUTED, so a restricted member is simulated the way the app makes one:
+      // a user list this account appears in with a table grant rather than 'all'.
+      app.usersLoaded = true;
+      app.userList = [{ key: 'm@x.com', addr: 'm@x.com', role: 'editor', tables: ['tasks'] }];
+      app.currentUserEmail = 'm@x.com';
+      const gatedCan = app.canPublishFeeds();
+      await app.publishFeed('feed_gate');
+      const afterMember = uploads;
+
+      app.userList = [];                                 // back to bootstrap/unrestricted
+      const openCan = app.canPublishFeeds();
+      window.backend.uploadFile = real;
+      return { gatedCan, openCan, afterMember };
+    });
+    expect(r.gatedCan).toBe(false);
+    expect(r.afterMember).toBe(0);       // the member's publish did nothing at all
+    expect(r.openCan).toBe(true);
+  });
+
+  test('a write to a feed source schedules exactly one republish, however many rows changed', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.userAllowedTables = null;
+      window.VIEWS.feed_deb = { name: 'feed_deb', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+      let uploads = 0;
+      const real = window.backend.uploadFile;
+      window.backend.uploadFile = () => { uploads++; return Promise.resolve('https://store.example/y'); };
+
+      // Fifty writes, as a bulk import would produce.
+      for (let i = 0; i < 50; i++) app._onWriteRepublish('tasks');
+      const during = uploads;
+      await new Promise((res) => setTimeout(res, 2600));
+      const after = uploads;
+
+      // A table no feed reads must not schedule anything.
+      app._onWriteRepublish('unrelated_table');
+      await new Promise((res) => setTimeout(res, 2600));
+      const afterUnrelated = uploads;
+      window.backend.uploadFile = real;
+      return { during, after, afterUnrelated };
+    });
+    expect(r.during).toBe(0);            // coalesced, not one upload per row
+    expect(r.after).toBe(1);
+    expect(r.afterUnrelated).toBe(1);    // an unrelated write republished nothing
+  });
+
+  test('validateSchema refuses a feed that cannot work, including the one that would leak', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = (n) => window.validateSchema().filter((e) => e.indexOf(n) >= 0).join(' | ');
+      window.VIEWS.fd_nocal = { name: 'fd_nocal', sources: ['tasks'], feed: true };
+      window.VIEWS.fd_mine = { name: 'fd_mine', feed: true, mineOnly: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+      // The leaking one: a published file has no viewer, so an @me filter renders as whoever published
+      // it and is then served to everybody. Spelled as an operator object, which a String() check misses.
+      window.VIEWS.fd_me = { name: 'fd_me', feed: true,
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: { eq: '@me' } } }] } };
+      window.VIEWS.fd_ok = { name: 'fd_ok', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+      return { nocal: errs('fd_nocal'), mine: errs('fd_mine'), me: errs('fd_me'), ok: errs('fd_ok') };
+    });
+    expect(r.nocal).toContain('is not a calendar');
+    expect(r.mine).toContain('cannot be combined with `mineOnly`');
+    expect(r.me).toContain('cannot be combined with an `@me` filter');
+    expect(r.ok).toBe('');
+  });
+
   test('validateSchema names a timeline pointed at the wrong columns', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {

@@ -468,10 +468,20 @@ backend = {
   // backends without it fall back to a paste-a-URL input.
   uploadFile: function(file, opts) {
     if (!_storage) return Promise.reject(new Error('Firebase Storage not initialized'));
-    var email = _myEmail() || 'anon';
-    var safe = String((file && file.name) || 'file').replace(/[^\w.\-]+/g, '_');
-    var path = 'uploads/' + email + '/' + Date.now() + '_' + safe;
-    return _storage.ref().child(path).put(file).then(function(snap) { return snap.ref.getDownloadURL(); });
+    var o = opts || {};
+    var path;
+    if (o.path) {
+      // A caller-chosen STABLE path, overwritten in place. An image must never collide, so it gets the
+      // timestamped path below; a calendar feed is the opposite -- its URL is a subscription, and a new
+      // path per publish would silently strand every subscriber on the previous file.
+      path = String(o.path);
+    } else {
+      var email = _myEmail() || 'anon';
+      var safe = String((file && file.name) || 'file').replace(/[^\w.\-]+/g, '_');
+      path = 'uploads/' + email + '/' + Date.now() + '_' + safe;
+    }
+    var meta = o.contentType ? { contentType: o.contentType } : undefined;
+    return _storage.ref().child(path).put(file, meta).then(function(snap) { return snap.ref.getDownloadURL(); });
   }
 };
 

@@ -1538,6 +1538,43 @@ at 30 and the badge becomes *Silver*.
   the view is broken.
 - **Embedding**: `{{view:x}}` in any document renders the tiles, like every other kind.
 
+### Publishing a calendar as a subscribable feed (`feed`)
+
+`"feed": true` on a **calendar** view publishes it as an `.ics` file at a stable URL, so a phone can
+subscribe instead of someone re-exporting. The app renders the file and uploads it through the backend
+blob store (`uploadFile`, the same seam `image` columns use); the object URL is the subscription.
+
+```json
+{ "name": "family", "feed": true,
+  "calendar": { "source": "events", "dateColumn": "on", "titleColumns": ["title"] } }
+```
+
+**The URL is a bearer credential.** Anyone holding the link reads that calendar, without signing in —
+calendar clients cannot authenticate, so this is inherent rather than a shortcut. The path carries a
+128-bit random id and the button is shown only to someone who could publish it. Treat handing out the
+link as handing out the calendar.
+
+**Only a full-access client republishes.** A restricted member regenerating from their own cache would
+overwrite the complete calendar with the subset they can see — silent loss for every subscriber, caused
+by a legitimate edit. Their write leaves the feed stale instead, which is the safe direction.
+
+**Republished on write**, coalesced: fifty rows in a bulk import produce one upload, not fifty. The
+tables that trigger it are the calendar's sources *and* the rosters behind any rotation overlay — a duty
+roster lives in a lookup table the calendar never names, and editing it changes what the feed says.
+
+**A feed cannot use `mineOnly` or an `@me` filter**, and `validateSchema` refuses both. A published
+file has no viewer to resolve "me" against, so it would be rendered as whoever pressed publish and then
+served to everyone — the failure here that leaks rather than merely disappoints.
+
+**Subscriptions are not live.** Calendar clients refresh external `.ics` on their own schedule, often
+many hours, and it is not controllable from here. Publishing on write buys *correctness* — the file
+never disagrees with the database — not speed. For an immediate copy, use the calendar's download
+button.
+
+Requires a backend with a blob store. Firebase Storage needs the Blaze plan; Supabase Storage is on the
+free tier. Without one the publish button does not appear. See ROADMAP, "A subscribable calendar feed",
+for the delivery options and their trade-offs.
+
 ## timeline (tenth view kind)
 
 A view with a `timeline` field renders its rows as **bars across periods** — a gantt chart. Engine:

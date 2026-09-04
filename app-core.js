@@ -298,6 +298,9 @@ function createVueApp() {
       _inflight: {},
       _liveSubs: {},
       _liveState: null,
+      // Feed republish coalescing: names invalidated since the last flush, and the pending timer.
+      _feedDirty: {},
+      _feedTimer: null,
       _liveRebuildTimer: null,
       pendingDelete: null,
       pendingDeleteTimer: null,
@@ -820,7 +823,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1527,6 +1530,71 @@ function createVueApp() {
           start: tl.start, end: tl.end, from: from,
           periods: tl.periods || 12, interval: tl.interval || 'weekly'
         });
+      },
+      // --- Calendar feeds: a published .ics at a stable URL --------------------------------------
+      // A calendar with `feed: true` is rendered to iCalendar and uploaded to the backend's blob store
+      // (`uploadFile`, the same seam image columns use). The object's public URL is the subscription.
+      //
+      // The whole design rests on the app doing the RENDERING: the text is produced here, under a real
+      // signed-in identity with real access gating and real translations, so whatever serves the file
+      // needs to know nothing about the schema. See ROADMAP, "A subscribable calendar feed".
+      //
+      // Only a FULL-ACCESS client republishes. A restricted member regenerating from their own
+      // dataCache would overwrite the complete calendar with the subset they can see -- silent loss for
+      // every subscriber, caused by a perfectly legitimate edit. Their write leaves the feed stale
+      // instead, which is the correct direction to fail.
+      canPublishFeeds: function() {
+        return !this.userAllowedTables && !!(typeof backend !== 'undefined' && backend && backend.uploadFile);
+      },
+      feedInfoFor: function(name) { return ((this.appConfig && this.appConfig.feeds) || {})[name] || null; },
+      feedUrlFor: function(name) { var f = this.feedInfoFor(name); return (f && f.url) || ''; },
+
+      // Render + upload one feed. The id is minted once and kept in the folder config, because the PATH
+      // is what makes the URL stable -- mint a new one per publish and every existing subscription is
+      // silently pointed at a file that no longer updates.
+      publishFeed: function(name) {
+        var self = this;
+        if (!Feeds.isFeed(VIEWS[name])) return Promise.resolve(null);
+        if (!this.canPublishFeeds()) return Promise.resolve(null);
+        var info = this.feedInfoFor(name) || {};
+        var id = info.id || Feeds.newId();
+        // A year from today, for the same reason the download uses one: source rows ignore the window,
+        // but generated rotation duties are clipped to it.
+        var from = this._calToday(), p = from.split('-');
+        var to = fmtDate(new Date(Number(p[0]) + 1, Number(p[1]) - 1, Number(p[2])));
+        var title = this.tOr('view.' + name, this.tOr('tab.' + name, name));
+        var text = Ics.build(this.calEventsFor(name, { from: from, toExclusive: to }), {
+          name: title,
+          domain: (typeof Databases !== 'undefined' && Databases.activeKey()) || 'dbui.local'
+        });
+        var blob = new Blob([text], { type: 'text/calendar;charset=utf-8' });
+        return Promise.resolve(backend.uploadFile(blob, { path: Feeds.pathFor(id), contentType: 'text/calendar' }))
+          .then(function(url) {
+            var cfg = Object.assign({}, self.appConfig || {});
+            cfg.feeds = Object.assign({}, cfg.feeds || {});
+            cfg.feeds[name] = { id: id, url: url, at: new Date().toISOString() };
+            self._saveFolderConfig(cfg, null);
+            return url;
+          })
+          .catch(function(e) { self.notify(self.t('msg.feed_failed')); throw e; });
+      },
+
+      // Republish whatever a write invalidated, coalesced. A bulk import writes hundreds of rows and
+      // every one of them would otherwise be a full render plus an upload; one publish after the writes
+      // stop says the same thing for a fraction of the cost. The delay is short enough that a single
+      // edit still lands in seconds -- which does not mean subscribers see it then, since calendar
+      // clients refresh on their own multi-hour schedule.
+      _onWriteRepublish: function(tableId) {
+        var self = this;
+        if (!this.canPublishFeeds()) return;
+        Feeds.forTable(VIEWS, tableId).forEach(function(n) { self._feedDirty[n] = 1; });
+        if (!Object.keys(this._feedDirty).length) return;
+        clearTimeout(this._feedTimer);
+        this._feedTimer = setTimeout(function() {
+          var names = Object.keys(self._feedDirty);
+          self._feedDirty = {};
+          names.forEach(function(n) { self.publishFeed(n).catch(function() {}); });
+        }, 2000);
       },
       isCalendarName: function(name) { return !!(VIEWS[name] && VIEWS[name].calendar); },
       isRotationName: function(name) { return !!(VIEWS[name] && VIEWS[name].rotation); },
@@ -5276,6 +5344,10 @@ function createVueApp() {
     mounted: function() {
       var self = this;
       window.addEventListener('resize', function() { self.mobile = window.innerWidth < 768; self.windowWidth = window.innerWidth; });
+      // Republish calendar feeds when their data changes. Registered on the write funnel, which is the
+      // one place that knows a row was written — and the reason writes.js exists rather than twenty-six
+      // call sites. Guarded inside _onWriteRepublish, so a restricted member's write costs nothing.
+      if (typeof Writes !== 'undefined' && Writes.onWrite) Writes.onWrite(function(t) { self._onWriteRepublish(t); });
       // Remote changes that arrived while a cell had focus are held (see _liveHeld); leaving the cell is
       // one of the two moments that can end. Deferred a tick because focusout fires BEFORE focus lands on
       // the next element — checking activeElement synchronously would see the outgoing cell (or <body>)
@@ -5869,6 +5941,8 @@ function createVueApp() {
       listDays: function() { var ev = this.events; return Object.keys(ev).filter(function(k) { return k !== '__undated__'; }).sort().map(function(k) { var p = k.split('-'); return { date: k, label: new Intl.DateTimeFormat(appInstance.calLocale(), { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: ev[k] }; }); },
       undated: function() { return this.events['__undated__'] || []; },
       canAdd: function() { return appInstance.canCalendarAdd(this.viewName); },
+      canPublish: function() { return Feeds.isFeed(window.VIEWS[this.viewName]) && appInstance.canPublishFeeds(); },
+      feedUrl: function() { return appInstance.feedUrlFor(this.viewName); },
       body: function() { return window.viewPartFor('calendar', this.displayMode) || 'cal-agenda'; }
     },
     methods: Object.assign({}, ROOT_PROXY, {
@@ -5878,6 +5952,13 @@ function createVueApp() {
       setMode: function(m) { this.mode = m; },
       addOnDay: function() { appInstance.calendarAddOnDay(this.viewName, this.sel); },
       exportIcs: function() { appInstance.downloadIcs(this.viewName); },
+      publish: function() { appInstance.publishFeed(this.viewName); },
+      copyFeed: function() {
+        var a = appInstance, u = this.feedUrl;
+        Promise.resolve(navigator.clipboard && navigator.clipboard.writeText(u))
+          .then(function() { a.notify(a.t('msg.copied')); })
+          .catch(function() { a.notify(a.t('msg.save_failed')); });
+      },
       selectDay: function(d) { this.sel = d; }
     }),
     template: ''
@@ -5893,7 +5974,14 @@ function createVueApp() {
       + '<v-btn value="list" size="small">{{ t(\'cal.list\') }}</v-btn></v-btn-toggle>'
       // Top-level only: an embedded calendar sits inside someone else's page, where a download button
       // for just this block is noise -- the same reason the embed has no mode toggle chrome of its own.
-      + '<v-btn v-if="!embed" icon="mdi-calendar-export" size="small" variant="text" @click="exportIcs()" :title="t(\'btn.export_ics\')" data-testid="cal-export-ics"></v-btn></div>'
+      + '<v-btn v-if="!embed" icon="mdi-calendar-export" size="small" variant="text" @click="exportIcs()" :title="t(\'btn.export_ics\')" data-testid="cal-export-ics"></v-btn>'
+      // The subscription. Offered only to someone who could publish it, because the URL is a bearer
+      // credential -- anyone holding the link reads this calendar -- so it is not put in front of people
+      // who have no reason to be handing it out.
+      + '<v-btn v-if="!embed && canPublish" :icon="feedUrl ? \'mdi-rss\' : \'mdi-rss-off\'" size="small" variant="text" @click="publish()" :title="t(\'btn.publish_feed\')" data-testid="cal-publish-feed"></v-btn></div>'
+      + '<div v-if="!embed && canPublish && feedUrl" class="px-2 pb-2 d-flex align-center" style="gap:8px" data-testid="cal-feed-url">'
+      + '<v-text-field :model-value="feedUrl" readonly density="compact" variant="outlined" hide-details :label="t(\'cal.feed_url\')" style="font-size:0.8rem"></v-text-field>'
+      + '<v-btn size="small" variant="text" @click="copyFeed()">{{ t(\'btn.copy\') }}</v-btn></div>'
       + '<v-divider></v-divider>'
       + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
       + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents" :can-add="canAdd" @add="addOnDay"></cal-day-panel>'

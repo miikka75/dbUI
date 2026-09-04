@@ -38,6 +38,7 @@
     "embeds.js",
     "events.js",
     "ics.js",
+    "feeds.js",
     "timeline.js",
     "print.js",
     "pivot.js",

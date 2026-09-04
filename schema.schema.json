@@ -205,6 +205,7 @@
         "layout": { "type": "string", "enum": ["table", "card", "list"], "description": "`list` is a READING layout: values render read-only, so a row added there has no editor. Use table/card for anything people actually enter data into." },
         "collapsed": { "type": "boolean", "description": "Cards start collapsed (accordion)." },
         "defaultSort": { "type": "string", "description": "Default sort column." },
+        "feed": { "type": "boolean", "description": "Publish this calendar as a subscribable .ics at a stable URL (calendar views only). The app renders the file and uploads it through the backend blob store; the object URL is the subscription and is a BEARER credential — anyone holding it reads the calendar. Republished when a source table changes, by a full-access client only." },
         "hideEmpty": { "type": "boolean", "description": "Hide empty columns. Table layout drops a column empty across ALL rows; card/board layouts drop it per row." },
         "icon": { "type": "string", "description": "MDI icon for the sidebar." },
         "printable": {

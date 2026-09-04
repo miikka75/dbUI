@@ -443,6 +443,28 @@ function validateSchema() {
     }
     // Stats view: every mistake here renders a tile showing nothing, or a bar with no track, and the
     // view still "works" -- which is exactly the class of silent failure the rest of this function
+    // `feed` publishes a view's .ics at a world-readable URL. Two ways to declare one that cannot work,
+    // both of which otherwise fail as a button that quietly does nothing:
+    //   - on a view that is not a calendar. Feeds.isFeed answers false, so nothing publishes and there
+    //     is no error anywhere to say why.
+    //   - alongside `mineOnly`, or a filter naming `@me`. A published file has no viewer to resolve
+    //     "me" against, so it would be rendered against whoever happened to press publish and then
+    //     served to everybody — the one failure here that leaks rather than merely disappoints.
+    if (view.feed) {
+      if (!view.calendar) errors.push('view "' + v + '": `feed` publishes a calendar as .ics, and this view is not a calendar');
+      if (view.mineOnly) errors.push('view "' + v + '": `feed` cannot be combined with `mineOnly` — a published file has no viewer to resolve "me" against');
+      // The condition may be a bare value or an operator object ({ eq: "@me" }), so this looks at the
+      // whole serialized condition rather than at String(cond) -- which for an object is
+      // "[object Object]" and would miss every non-bare spelling.
+      var meInFilter = false;
+      var scanMe = function(f) {
+        forEachCondCol(f, function(col, cond) { if (JSON.stringify(cond === undefined ? null : cond).indexOf('@me') >= 0) meInFilter = true; });
+      };
+      scanMe(view.filter);
+      // A calendar carries a filter PER SOURCE as well as on the view.
+      Calendar.sources(VIEWS, v).forEach(function(s) { scanMe(s && s.filter); });
+      if (meInFilter) errors.push('view "' + v + '": `feed` cannot be combined with an `@me` filter — a published file is served to everyone, so it would carry whoever published it');
+    }
     // A timeline is a data view plus a render config too, so its sources and filter are already checked
     // above; what is checked here is only the `timeline` object. Every one of these fails the way a
     // missing column always fails in this app -- silently, as an empty chart -- because Timeline.build
