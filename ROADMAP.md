@@ -403,10 +403,74 @@ calendar as another audience would see it, through the same predicate the app it
 mistake narrows too far rather than leaking. That capability was an unintended consequence of the
 extraction, and it is what makes tiering affordable.
 
-**The exception.** A view filtered on `@me`, or a rotation with `mineOnly`, differs genuinely per
-person and cannot fold into a tier. Either refuse such views as feed sources in `validateSchema` — the
-better default, since a shared file has no "me" to resolve and would otherwise pick one arbitrarily —
-or accept one blob per SUBSCRIBER, which is opt-in and far smaller than one per user.
+**The exception, and what it would take.** A view filtered on `@me`, or a rotation with `mineOnly`,
+differs genuinely per person and cannot fold into a tier. `validateSchema` refuses such views as feed
+sources today — the right default, since a published file has no "me" to resolve and would otherwise
+carry whoever pressed publish and serve it to everyone. That is the one failure in this feature that
+LEAKS rather than disappoints, so the refusal stays until something replaces it deliberately.
+
+Lifting it means one blob per SUBSCRIBER rather than per tier. The shipped `my_calendar` in the
+bishopric example is the shape that wants it: three sources, each filtered `responsible: "@me"`, so one
+view is a different calendar for every member of a bishopric.
+
+#### Per-person feeds — the plan
+
+**Rendering is already possible, and that is the surprising part.** `events.js` takes `canReachTable`
+and `resolveMeTokens` as ctx FUNCTIONS rather than reading root state, so a full-access client can
+render "the calendar as this other person sees it" by substituting both — through the same predicates
+the app itself uses, so a mistake narrows rather than leaks. No new rendering path is needed. What is
+missing is everything around it.
+
+1. **Who to render for.** A feed needs a subscriber list, and it must be opt-in: rendering one blob per
+   USER would publish a file for people who never asked and never look. The natural shape is a
+   self-service table with an `owner` column — the primitive that already backs RSVP — so subscribing is
+   a row the person creates for themselves and unsubscribing is deleting it. That also makes the count
+   honest: N is subscribers, not headcount.
+2. **Resolving another person's `@me`.** `meValueForList` reads `myListValues`, which is the SIGNED-IN
+   user's link. Rendering for someone else needs the same lookup for an arbitrary account, from
+   `listAvatars` / the `_list_users` sidecar. Per-person is where a wrong answer means one person's
+   calendar handed to another, so this wants its own tests, and the sentinel matters: an identity that
+   cannot be resolved must yield the no-match token and an EMPTY calendar, never an unfiltered one.
+3. **Access, not just filtering.** `@me` is display-only — the app's own note on `mineOnly` says so:
+   "the roster rows are still fetched … Real secrecy is a per-roster-table grant". On screen that is
+   fine, because the viewer could read those rows anyway. In a FEED it is not: the file is rendered by a
+   full-access client and served to one subscriber, so `@me` becomes the only thing standing between
+   them and everyone else's rows. A per-person feed therefore has to be checked as an ACCESS boundary,
+   which the filter was never built to be. This is the real work, and the reason this is not a small
+   change.
+4. **N blobs, one write.** Republishing stays a single pass — the loop is inside one operation — but it
+   costs N renders and N uploads per debounce window. Fine for a household or a bishopric; a
+   congregation-sized subscriber list wants a cap and a way to see how many are being written.
+5. **Tokens.** Per-person URLs are what make revocation possible, and they are the decision this whole
+   entry already waits on.
+
+Not scheduled. Steps 1, 2 and 4 are ordinary work; step 3 is a security boundary being asked to hold
+weight it was not designed for, and it should be entered deliberately or not at all.
+
+#### Decoupling a feed from a calendar VIEW
+
+Asked because the bishopric example had no calendar and therefore no way to publish anything, which
+made the requirement look like an obstacle. It is not, and the cheap answer is better than the change.
+
+**Cost if built: small — perhaps half a day.** `Feeds.isFeed` tests `v.calendar && v.feed`, and
+`events.js` reads sources through `Calendar.sources`, which already expands the single-source
+`{source, dateColumn, titleColumns}` sugar. A `feed` on a DATA view would need the same three facts
+under some other key, `Feeds.tablesOf` taught to read it, and validation for it.
+
+**Why it is the wrong shape anyway.** A calendar view IS the declaration "these rows are dated events,
+this column is the date, these are the title". A data view does not say that, so decoupling means
+inventing a second vocabulary for the same fact — two places to look, two to keep in step, and the
+question "what does this feed contain" answered differently depending on which one an author used.
+
+**And the problem it would solve is not real.** A calendar view is a few lines of config, `nav` and
+`views` are independent (the bishopric schema defines eighteen views and navigates to thirteen), and
+because republishing is write-triggered a feed's first publish happens on the first write to a source
+table — nobody has to press anything. A calendar view that exists only to be published is therefore
+already possible, costs almost nothing, and keeps one vocabulary.
+
+Declined for now on that basis rather than on cost. Worth revisiting only if something OTHER than a
+calendar ever needs publishing, at which point the question is not "decouple the feed" but "what is the
+second thing, and does it share a shape with the first".
 
 **Who regenerates matters, and this is the remaining trap.** The rendering client must be able to see
 everything the feed contains. A restricted member's write regenerating from their own `dataCache`
