@@ -20,7 +20,8 @@
 //     wildcarded for the same reason the Google origins are: one URL connects the app to ANY project.
 //     wss: covers realtime if it is ever switched on. The SDK itself loads from jsdelivr, already in
 //     script-src. Without these the Supabase backend fails the moment the header stops being
-//     Report-Only — silently, since a blocked fetch looks like an empty database.
+//     Report-Only — silently, since a blocked fetch looks like an empty database. A SELF-HOSTED
+//     Supabase is on a domain no wildcard here can guess — see CONNECT_HOSTS below.
 (function(root) {
   var isNode = (typeof module !== 'undefined' && module.exports);
 
@@ -41,9 +42,20 @@
   // report-to can be added later via a Reporting-Endpoints header if wanted.
   var REPORT_URI = '/csp-report';
 
+  // Extra origins the app is allowed to TALK to, on top of the hosted backends wildcarded in
+  // connect-src below. Empty by default: a hosted Firebase or Supabase project is already covered.
+  // A SELF-HOSTED Supabase (see "Self-hosted (Docker)" in SUPABASE.md) is on a domain only its owner
+  // knows, so it is named HERE — the one place the policy is written — and both deliveries follow it:
+  // dev/server.js builds its enforcing header from this builder, and `npm run csp:sync` in dev/
+  // rewrites firebase.json's static copy from it. Name BOTH schemes when realtime is on: https:// for
+  // the PostgREST/GoTrue calls, wss:// for the websocket.
+  //   var CONNECT_HOSTS = ['https://db.example.org', 'wss://db.example.org'];
+  var CONNECT_HOSTS = [];
+
   // opts.scriptHashes: array from inlineScriptHashes; opts.meta: true strips header-only directives
   // (frame-ancestors, report-uri) for a <meta http-equiv> delivery (e.g. GitHub Pages);
-  // opts.reportUri: append a report-uri directive (pass REPORT_URI for the production header).
+  // opts.reportUri: append a report-uri directive (pass REPORT_URI for the production header);
+  // opts.connect: override CONNECT_HOSTS (the drift test uses it; deployments edit the array).
   function buildPolicy(opts) {
     opts = opts || {};
     var d = [
@@ -62,7 +74,8 @@
       // module fetches its own pglite.wasm / pglite.data by URL relative to itself, and those fetches
       // are connect-src, not script-src — so without this the fallback loads and then dies fetching its
       // engine. It grants nothing script-src did not already: the app can execute jsdelivr code today.
-      "connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",   // blob: -> fetch of the runtime (Blob-URL) manifest
+      ["connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*"]   // blob: -> fetch of the runtime (Blob-URL) manifest
+        .concat(opts.connect || CONNECT_HOSTS).join(' '),
       "frame-src https://*.firebaseapp.com https://accounts.google.com",
       "manifest-src 'self' blob:",   // the runtime PWA manifest is a Blob URL
       "worker-src 'self'",

@@ -39,6 +39,16 @@ describe('Content-Security-Policy', () => {
     for (const h of hashes) assert.ok(builtPolicy().includes(h), 'policy includes ' + h);
   });
 
+  it('extra connect origins (a self-hosted backend) reach connect-src and no other directive', () => {
+    const hosts = ['https://db.example.org', 'wss://db.example.org'];
+    const p = builtPolicy({ connect: hosts });
+    const connect = p.split(';').find(d => d.trim().startsWith('connect-src '));
+    for (const h of hosts) {
+      assert.ok(connect.includes(h), 'connect-src carries ' + h);
+      assert.equal(p.split(h).length - 1, 1, h + ' appears in exactly one directive');
+    }
+  });
+
   it('the meta variant drops header-only directives', () => {
     const meta = builtPolicy({ meta: true });
     assert.ok(!meta.includes('frame-ancestors'), 'frame-ancestors is invalid in a <meta> delivery');

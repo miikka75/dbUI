@@ -13,6 +13,7 @@ per-row Row-Level-Security (RLS) policy.
 | `supabase-schema.sql` | Postgres `kv` table + RLS mirroring `firestore.rules`. Run once in Supabase. |
 | `.github/workflows/deploy-pages.yml` | Deploy the static site to GitHub Pages on push to `main`. |
 | `dev/test/storage-supabase.test.js` | Unit test for the storage adapter (in-memory fake client). |
+| `dev/sync-csp.js` | `npm run csp:sync` — regenerates firebase.json's CSP header from `csp.js`. Needed after naming a self-hosted origin in `CONNECT_HOSTS`. |
 
 Wiring is applied to `index.html` (mode branch, shared-link support, SDK + adapter `loadScript`),
 `ui.html` (setup button + step), `app-core.js` (`saveSupabaseConfig`, `shareLink`, setup fields), and the
@@ -48,6 +49,69 @@ global `window.supabase`), exactly like the Firebase compat SDK — no ES module
 First sign-in, while no members exist, acts as **admin** (bootstrap). Import a schema
 (Settings → Import from JSON), then add yourself under **Settings → User Access**. From then on only
 registered users have access.
+
+## Self-hosted (Docker)
+
+Everything above assumes supabase.com. The stack is open source, so the same project can run on a
+machine you own — usually to escape the free tier's inactivity pause, at the price of owning Postgres
+backups yourself. **`supabase-schema.sql` does not change**: its policies reach identity only through
+`auth.jwt() ->> 'email'`, which a self-hosted GoTrue populates identically.
+
+```bash
+git clone --depth 1 https://github.com/supabase/supabase
+cp -r supabase/docker my-supabase && cd my-supabase
+cp .env.example .env
+```
+
+1. **Replace every secret in `.env`** — `POSTGRES_PASSWORD`, `JWT_SECRET` (40+ chars),
+   `SECRET_KEY_BASE`, `VAULT_ENC_KEY`, `DASHBOARD_USERNAME` / `DASHBOARD_PASSWORD`,
+   `POOLER_TENANT_ID`. Then generate `ANON_KEY` and `SERVICE_ROLE_KEY`: those are JWTs **signed with
+   your `JWT_SECRET`**, not random strings (Supabase's self-hosting docs carry the generator). The
+   example values are published on GitHub, so leaving any of them is the same as running with no auth.
+2. **URLs**: point `SITE_URL`, `API_EXTERNAL_URL` and `SUPABASE_PUBLIC_URL` at your domain, and add the
+   app's own origin (the GitHub Pages URL) to `ADDITIONAL_REDIRECT_URLS`.
+3. **Google sign-in** has no provider UI here — it is env on the `auth` service:
+   `GOTRUE_EXTERNAL_GOOGLE_ENABLED=true`, `..._CLIENT_ID`, `..._SECRET`, and
+   `..._REDIRECT_URI=https://db.example.org/auth/v1/callback`. Register that redirect URI with Google
+   in place of the `<ref>.supabase.co` one in **Supabase project setup** step 2.
+4. **Terminate TLS in front of Kong** (the whole stack enters on `:8000`) with Caddy or Traefik. Not
+   optional: Google OAuth and the browser's realtime `wss://` both require https.
+5. `docker compose pull && docker compose up -d`, then run all of `supabase-schema.sql` through
+   Studio's SQL editor or `psql`.
+6. In the app's setup screen: **Project URL** is your domain, and the key is the `ANON_KEY` you
+   generated — the legacy `eyJ…` shape, which is still accepted (**Supabase project setup** step 5).
+
+Budget ~4 GB of RAM for the stock stack (see *Trimming* below for how to fit it in less). A small VPS
+or an always-free ARM instance handles it; a laptop or Pi behind a tunnel that provides the hostname
+and certificate works too, and covers step 4 at the same time.
+
+### The one edit this app needs
+
+`csp.js` wildcards `*.supabase.co` in `connect-src`, which your domain is not. Name it in
+`CONNECT_HOSTS` — **both** schemes, https for the PostgREST/GoTrue calls and wss for realtime — then
+regenerate the static copy that Firebase Hosting serves:
+
+```js
+var CONNECT_HOSTS = ['https://db.example.org', 'wss://db.example.org'];
+```
+
+```bash
+cd dev && npm run csp:sync    # rewrites firebase.json's header; test/csp.test.js guards the drift
+```
+
+Skipping this costs nothing while the header is Report-Only, and then breaks the app the moment it is
+enforced — as an **empty database** with no visible error, because a blocked fetch looks exactly like
+one. Nothing else changes: `databases.js` already keys a host that is not `<ref>.supabase.co` by its
+whole hostname, so two self-hosted databases cannot collide into one installed app.
+
+### Trimming the stack
+
+This app talks to **Postgres, PostgREST and GoTrue**, plus Realtime and Storage. `studio`, `analytics`
+(the usual reason `docker compose up` fails), `vector`, `imgproxy`, `supavisor` and `meta` are all
+droppable, which fits the stack under 2 GB. One caveat if you drop Realtime or Storage: both are
+*optional* per BACKEND_API.md, but `backend-supabase.js` passes `subscribeTable` and `uploadFile` to
+`createKvBackend` unconditionally, so their absence surfaces as runtime errors rather than as the
+documented degradation to manual refresh and paste-a-URL.
 
 ## GitHub Pages
 
