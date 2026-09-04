@@ -1538,37 +1538,55 @@ at 30 and the badge becomes *Silver*.
   the view is broken.
 - **Embedding**: `{{view:x}}` in any document renders the tiles, like every other kind.
 
-### How far a calendar's `.ics` reaches (`calendar.window`)
+### What a calendar's `.ics` contains (`calendar.ics`)
 
-Both the download button and a published feed cover the same range: `back` before today, `forward`
-after, in the same period vocabulary a rotation uses (`daily`/`weekly`/`monthly`/`yearly`, or
-`"<n><d|w|m|y>"`).
+Both the download button and a published feed generate the same file, from one setting: how far `back`
+and `forward` it reaches, and which `lang` it is written in.
 
 ```json
 { "calendar": { "source": "events", "dateColumn": "on",
-                "window": { "back": "3m", "forward": "1y" } } }
+                "ics": { "back": "3m", "forward": "1y", "lang": "fi" } } }
 ```
 
-Defaults are `back: "3m"`, `forward: "1y"`. Everyone with view access can change it from the calendar
-toolbar (it stores per view in the folder config, like a rotation's range); only an admin writes it
-through to the database. The resolved dates are shown beside the fields, so the effect of `3m` is
-visible without exporting to find out.
+`back` / `forward` take the period vocabulary a rotation uses (`daily`/`weekly`/`monthly`/`yearly`, or
+`"<n><d|w|m|y>"`). Defaults are `3m` and `1y`. Everyone with view access can change all three from the
+calendar toolbar — it stores per view in the folder config, like a rotation's range — and only an admin
+writes it through. The resolved dates are shown beside the fields, so the effect of `3m` is visible
+without exporting to find out.
 
-**Why `back` is not zero, and why this matters more to a feed than to a download.** A downloaded file
-is *merged* into someone's calendar, so its window only decides how much they get. A subscription is a
-*mirror* — the client replaces the calendar with whatever the file says — so anything outside the window
+**These are properties of the FILE, not of the viewer**, which is exactly why they are settings at all.
+A published file has nobody to ask, so every per-viewer answer has to be pinned or it comes from
+whoever happened to generate it.
+
+**Language.** Everything a calendar shows is translated — event titles through the list vocabulary,
+source labels through `tab.<table>`, the calendar's own name through `view.<name>`, rotation duty titles
+through `list.<table>.<value>`. An unset `lang` resolves differently for the two paths, and each is
+right for its own reason:
+
+- a **download** falls back to the reader's session language, because someone is pressing a button
+  while looking at a screen and the file should match the screen;
+- a **feed** falls back to the deployment's default language. A feed has no viewer and republishes
+  automatically on write, so inheriting the session would mean every subscriber's calendar silently
+  changes language depending on who edited a row last.
+
+Setting `lang` explicitly pins both. `validateSchema` rejects a `lang` this database does not declare —
+it would otherwise render every key as its raw key — but stays silent when no languages are declared,
+since there is then nothing to check against.
+
+**Why `back` is not zero, and why the range matters more to a feed.** A downloaded file is *merged*
+into someone's calendar, so its window only decides how much they get. A subscription is a *mirror* —
+the client replaces the calendar with whatever the file says — so anything outside the window
 **disappears** from the subscriber's view. With `back` at zero, a subscribed calendar would lose its
 history a day at a time, silently, as events fall out of the window.
 
-Two related things a file cannot do, worth knowing before choosing between the download and a feed:
+Two things a file cannot do, worth knowing before choosing between a download and a feed:
 
 | | Existing events | Events you deleted |
 |---|---|---|
 | Re-importing a download | updated in place (UIDs are stable) | **stay forever** — import merges, it never deletes |
 | A subscribed feed | updated | **removed** — the client mirrors the file |
 
-That is the functional argument for a feed over repeated downloads. It is also why the window is a
-setting rather than a constant: on a feed it decides how much history a subscriber keeps.
+That is the functional argument for a feed over repeated downloads.
 
 ### Publishing a calendar as a subscribable feed (`feed`)
 
