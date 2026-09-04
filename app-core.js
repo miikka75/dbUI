@@ -298,6 +298,9 @@ function createVueApp() {
       _inflight: {},
       _liveSubs: {},
       _liveState: null,
+      // Feed republish coalescing: names invalidated since the last flush, and the pending timer.
+      _feedDirty: {},
+      _feedTimer: null,
       _liveRebuildTimer: null,
       pendingDelete: null,
       pendingDeleteTimer: null,
@@ -820,7 +823,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1497,20 +1500,18 @@ function createVueApp() {
       // UIDs are qualified with the database key so two databases exported into one calendar client
       // cannot collide; it is a stable local identifier, not an address, and nothing is sent anywhere.
       downloadIcs: function(name) {
+        var self = this;
         var view = name || this.currentTable;
-        var from = this._calToday();
-        var p = from.split('-');
-        var to = fmtDate(new Date(Number(p[0]) + 1, Number(p[1]) - 1, Number(p[2])));
-        var title = this.tOr('view.' + view, this.tOr('tab.' + view, view));
-        var text = Ics.build(this.calEventsFor(view, { from: from, toExclusive: to }), {
-          name: title,
-          domain: (typeof Databases !== 'undefined' && Databases.activeKey()) || 'dbui.local'
+        var win = this.calendarCoverFor(view);
+        // fallbackToSession: an unpinned download matches the screen the person is looking at.
+        return this._icsStringsFor(this.calendarIcsFor(view).lang, true).then(function(strings) {
+          var text = self._renderIcs(view, win, strings);
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(new Blob([text], { type: 'text/calendar;charset=utf-8' }));
+          a.download = view + '-' + self._calToday() + '.ics';
+          a.click();
+          self.notify(self.t('msg.exported'));
         });
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(new Blob([text], { type: 'text/calendar;charset=utf-8' }));
-        a.download = view + '-' + from + '.ics';
-        a.click();
-        this.notify(this.t('msg.exported'));
       },
       // Build a timeline view's bars. Pure module + thin root wrapper, like pivotFor / calEventsFor.
       // Rows come through the same embed row pipeline every other read-only kind uses, so `filter`,
@@ -1527,6 +1528,149 @@ function createVueApp() {
           start: tl.start, end: tl.end, from: from,
           periods: tl.periods || 12, interval: tl.interval || 'weekly'
         });
+      },
+      // --- Calendar feeds: a published .ics at a stable URL --------------------------------------
+      // A calendar with `feed: true` is rendered to iCalendar and uploaded to the backend's blob store
+      // (`uploadFile`, the same seam image columns use). The object's public URL is the subscription.
+      //
+      // The whole design rests on the app doing the RENDERING: the text is produced here, under a real
+      // signed-in identity with real access gating and real translations, so whatever serves the file
+      // needs to know nothing about the schema. See ROADMAP, "A subscribable calendar feed".
+      //
+      // Only a FULL-ACCESS client republishes. A restricted member regenerating from their own
+      // dataCache would overwrite the complete calendar with the subset they can see -- silent loss for
+      // every subscriber, caused by a perfectly legitimate edit. Their write leaves the feed stale
+      // instead, which is the correct direction to fail.
+      canPublishFeeds: function() {
+        return !this.userAllowedTables && !!(typeof backend !== 'undefined' && backend && backend.uploadFile);
+      },
+      // What a calendar's .ics contains: how far `back` and `forward` it reaches, and which `lang` it is
+      // written in. Two layers, like rangeForView: the schema declares a default (`calendar.ics`), the
+      // folder config overrides it per view, everyone with view access may change it and only an admin
+      // writes it through.
+      //
+      // ONE setting for both the download and the feed, because it is one question -- what does the
+      // generated file contain -- and answering it twice is how the two would come to disagree.
+      //
+      // Grouped rather than scattered because all three are the same kind of thing: a property of the
+      // FILE, not of the viewer. That is exactly what makes them settings at all -- a published file has
+      // no viewer to ask, so every per-viewer answer has to be pinned or it comes from whoever happened
+      // to generate it.
+      calendarIcsFor: function(name) {
+        var schema = ((VIEWS[name] || {}).calendar || {}).ics || {};
+        var over = ((this.appConfig && this.appConfig.icsSettings) || {})[name] || {};
+        var pick = function(k, dflt) { return over[k] !== undefined ? over[k] : (schema[k] !== undefined ? schema[k] : dflt); };
+        return { back: pick('back', '3m'), forward: pick('forward', '1y'), lang: pick('lang', '') };
+      },
+      // Back-compat alias for the range half, which the toolbar reads.
+      calendarWindowFor: function(name) { var c = this.calendarIcsFor(name); return { back: c.back, forward: c.forward }; },
+
+      // The strings to render an .ics with, resolving `lang` the way switchLanguage does: the default
+      // language as a base, the chosen one merged over it. Resolves to null when the CURRENT session
+      // strings are already right, so the common case costs no round-trip.
+      //
+      // The two paths want different things from an unset `lang`, and each is right for its own reason:
+      //   - a DOWNLOAD is someone pressing a button while looking at a screen, so the file should match
+      //     the screen -> their session language.
+      //   - a FEED has no viewer and many subscribers, and republishes automatically on write. Inheriting
+      //     the session would mean the subscribers' calendar silently changes language depending on who
+      //     edited a row last -> the deployment's default language, which is deterministic.
+      _icsStringsFor: function(code, fallbackToSession) {
+        var self = this, def = this.defaultLanguage;
+        var want = code || (fallbackToSession ? this.currentLang : def);
+        if (!want || want === this.currentLang) return Promise.resolve(null);   // session strings already
+        return Promise.resolve(backend.getTranslations(def)).then(function(base) {
+          if (want === def) return base || {};
+          return Promise.resolve(backend.getTranslations(want)).then(function(t) {
+            return Object.assign({}, base || {}, t || {});
+          });
+        }).catch(function() { return null; });   // a missing pack renders in the session language rather than failing
+      },
+      // Render one .ics. When `strings` is given the root's translation map is swapped for the duration
+      // -- SYNCHRONOUSLY, so Vue's render queue never observes the intermediate value and no component
+      // flickers into another language. Everything translated in a calendar (list values, tab labels,
+      // view names, rotation slot labels) resolves through this.strings via t/tOr, so this one swap
+      // covers all of it without threading a strings map through displayValue's twenty-one call sites.
+      _renderIcs: function(name, win, strings) {
+        var saved = this.strings;
+        if (strings) this.strings = strings;
+        try {
+          var title = this.tOr('view.' + name, this.tOr('tab.' + name, name));
+          return Ics.build(this.calEventsFor(name, win), {
+            name: title,
+            domain: (typeof Databases !== 'undefined' && Databases.activeKey()) || 'dbui.local'
+          });
+        } finally {
+          if (strings) this.strings = saved;
+        }
+      },
+      // The resolved {from, toExclusive} both the download and the publish path pass to calEventsFor.
+      calendarCoverFor: function(name) {
+        var w = this.calendarWindowFor(name);
+        return Events.coverWindow(this._calToday(), w.back, w.forward);
+      },
+      // Mirrors saveRotationRange: an empty value clears the override and falls back to the schema.
+      saveCalendarWindow: function(viewName, patch) {
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.icsSettings = Object.assign({}, cfg.icsSettings || {});
+        var cur = Object.assign({}, cfg.icsSettings[viewName] || {});
+        Object.keys(patch).forEach(function(k) {
+          var val = patch[k];
+          if (val === '' || val === null || val === undefined) delete cur[k];
+          else cur[k] = val;
+        });
+        if (Object.keys(cur).length) cfg.icsSettings[viewName] = cur; else delete cfg.icsSettings[viewName];
+        cfg.mode = this.mode;
+        this._saveFolderConfig(cfg, viewName);
+      },
+      feedInfoFor: function(name) { return ((this.appConfig && this.appConfig.feeds) || {})[name] || null; },
+      feedUrlFor: function(name) { var f = this.feedInfoFor(name); return (f && f.url) || ''; },
+
+      // Render + upload one feed. The id is minted once and kept in the folder config, because the PATH
+      // is what makes the URL stable -- mint a new one per publish and every existing subscription is
+      // silently pointed at a file that no longer updates.
+      publishFeed: function(name) {
+        var self = this;
+        if (!Feeds.isFeed(VIEWS[name])) return Promise.resolve(null);
+        if (!this.canPublishFeeds()) return Promise.resolve(null);
+        var info = this.feedInfoFor(name) || {};
+        var id = info.id || Feeds.newId();
+        // The view's own window, the same one the download uses. It matters more here: a subscription
+        // REPLACES, so an event outside this range vanishes from every subscriber's calendar.
+        var win = this.calendarCoverFor(name);
+        // NOT fallbackToSession. A feed republishes automatically on write, so inheriting the session
+        // would mean subscribers' calendars silently change language depending on who edited a row last.
+        return this._icsStringsFor(this.calendarIcsFor(name).lang, false).then(function(strings) {
+          var text = self._renderIcs(name, win, strings);
+          var blob = new Blob([text], { type: 'text/calendar;charset=utf-8' });
+          return backend.uploadFile(blob, { path: Feeds.pathFor(id), contentType: 'text/calendar' });
+        })
+          .then(function(url) {
+            var cfg = Object.assign({}, self.appConfig || {});
+            cfg.feeds = Object.assign({}, cfg.feeds || {});
+            cfg.feeds[name] = { id: id, url: url, at: new Date().toISOString() };
+            self._saveFolderConfig(cfg, null);
+            return url;
+          })
+          .catch(function(e) { self.notify(self.t('msg.feed_failed')); throw e; });
+      },
+
+      // Republish whatever a write invalidated, coalesced. A bulk import writes hundreds of rows and
+      // every one of them would otherwise be a full render plus an upload; one publish after the writes
+      // stop says the same thing for a fraction of the cost. The delay is short enough that a single
+      // edit still lands in seconds -- which does not mean subscribers see it then, since calendar
+      // clients refresh on their own multi-hour schedule.
+      _onWriteRepublish: function(tableId) {
+        var self = this;
+        if (!this.canPublishFeeds()) return;
+        Feeds.forTable(VIEWS, tableId).forEach(function(n) { self._feedDirty[n] = 1; });
+        if (!Object.keys(this._feedDirty).length) return;
+        clearTimeout(this._feedTimer);
+        this._feedTimer = setTimeout(function() {
+          var names = Object.keys(self._feedDirty);
+          self._feedDirty = {};
+          names.forEach(function(n) { self.publishFeed(n).catch(function() {}); });
+        }, 2000);
       },
       isCalendarName: function(name) { return !!(VIEWS[name] && VIEWS[name].calendar); },
       isRotationName: function(name) { return !!(VIEWS[name] && VIEWS[name].rotation); },
@@ -5276,6 +5420,10 @@ function createVueApp() {
     mounted: function() {
       var self = this;
       window.addEventListener('resize', function() { self.mobile = window.innerWidth < 768; self.windowWidth = window.innerWidth; });
+      // Republish calendar feeds when their data changes. Registered on the write funnel, which is the
+      // one place that knows a row was written — and the reason writes.js exists rather than twenty-six
+      // call sites. Guarded inside _onWriteRepublish, so a restricted member's write costs nothing.
+      if (typeof Writes !== 'undefined' && Writes.onWrite) Writes.onWrite(function(t) { self._onWriteRepublish(t); });
       // Remote changes that arrived while a cell had focus are held (see _liveHeld); leaving the cell is
       // one of the two moments that can end. Deferred a tick because focusout fires BEFORE focus lands on
       // the next element — checking activeElement synchronously would see the outgoing cell (or <body>)
@@ -5869,6 +6017,18 @@ function createVueApp() {
       listDays: function() { var ev = this.events; return Object.keys(ev).filter(function(k) { return k !== '__undated__'; }).sort().map(function(k) { var p = k.split('-'); return { date: k, label: new Intl.DateTimeFormat(appInstance.calLocale(), { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: ev[k] }; }); },
       undated: function() { return this.events['__undated__'] || []; },
       canAdd: function() { return appInstance.canCalendarAdd(this.viewName); },
+      canPublish: function() { return Feeds.isFeed(window.VIEWS[this.viewName]) && appInstance.canPublishFeeds(); },
+      feedUrl: function() { return appInstance.feedUrlFor(this.viewName); },
+      a: function() { return appInstance; },
+      win: function() { return appInstance.calendarIcsFor(this.viewName); },
+      // Blank first: the default is not a language but a RULE ("whichever the reader is using", and for
+      // a feed the deployment default), so it is named rather than left as an empty row.
+      langItems: function() {
+        return [{ title: appInstance.t('cal.lang_auto'), value: '' }].concat(
+          (appInstance.languages || []).map(function(l) { return { title: l.name || l.code, value: l.code }; }));
+      },
+      // The resolved dates, so the effect of '3m' is visible without exporting to find out.
+      coverLabel: function() { var c = appInstance.calendarCoverFor(this.viewName); return c.from + ' – ' + c.toExclusive; },
       body: function() { return window.viewPartFor('calendar', this.displayMode) || 'cal-agenda'; }
     },
     methods: Object.assign({}, ROOT_PROXY, {
@@ -5878,6 +6038,14 @@ function createVueApp() {
       setMode: function(m) { this.mode = m; },
       addOnDay: function() { appInstance.calendarAddOnDay(this.viewName, this.sel); },
       exportIcs: function() { appInstance.downloadIcs(this.viewName); },
+      publish: function() { appInstance.publishFeed(this.viewName); },
+      setWindow: function(patch) { appInstance.saveCalendarWindow(this.viewName, patch); },
+      copyFeed: function() {
+        var a = appInstance, u = this.feedUrl;
+        Promise.resolve(navigator.clipboard && navigator.clipboard.writeText(u))
+          .then(function() { a.notify(a.t('msg.copied')); })
+          .catch(function() { a.notify(a.t('msg.save_failed')); });
+      },
       selectDay: function(d) { this.sel = d; }
     }),
     template: ''
@@ -5893,7 +6061,26 @@ function createVueApp() {
       + '<v-btn value="list" size="small">{{ t(\'cal.list\') }}</v-btn></v-btn-toggle>'
       // Top-level only: an embedded calendar sits inside someone else's page, where a download button
       // for just this block is noise -- the same reason the embed has no mode toggle chrome of its own.
-      + '<v-btn v-if="!embed" icon="mdi-calendar-export" size="small" variant="text" @click="exportIcs()" :title="t(\'btn.export_ics\')" data-testid="cal-export-ics"></v-btn></div>'
+      + '<v-btn v-if="!embed" icon="mdi-calendar-export" size="small" variant="text" @click="exportIcs()" :title="t(\'btn.export_ics\')" data-testid="cal-export-ics"></v-btn>'
+      // The subscription. Offered only to someone who could publish it, because the URL is a bearer
+      // credential -- anyone holding the link reads this calendar -- so it is not put in front of people
+      // who have no reason to be handing it out.
+      + '<v-btn v-if="!embed && canPublish" :icon="feedUrl ? \'mdi-rss\' : \'mdi-rss-off\'" size="small" variant="text" @click="publish()" :title="t(\'btn.publish_feed\')" data-testid="cal-publish-feed"></v-btn></div>'
+      // Export/publish range, on top-level calendars only. Mirrors the rotation toolbar: everyone with
+      // view access may change it, only an admin writes it through. Sits beside the buttons it governs
+      // so "how far does this file reach" is answered where the file is produced, rather than in a
+      // settings screen away from it.
+      + '<div v-if="!embed" class="px-2 pb-2 d-flex align-center flex-wrap" style="gap:8px" data-testid="cal-window">'
+      + '<v-text-field :model-value="win.back" name="cal-window-back" :label="t(\'cal.window_back\')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ back: $event })" data-testid="cal-window-back"></v-text-field>'
+      + '<v-text-field :model-value="win.forward" name="cal-window-forward" :label="t(\'cal.window_forward\')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ forward: $event })" data-testid="cal-window-forward"></v-text-field>'
+      // Language of the generated file. Blank means "as I see it" for a download and the deployment
+      // default for a feed — the label says which, because the two differ for a reason the reader
+      // cannot guess (a feed has no viewer to inherit from).
+      + '<v-select :model-value="win.lang" :items="langItems" item-title="title" item-value="value" name="cal-window-lang" :label="t(\'cal.window_lang\')" density="compact" variant="outlined" hide-details style="max-width:170px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ lang: $event })" data-testid="cal-window-lang"></v-select>'
+      + '<span style="font-size:0.75rem;opacity:0.6">{{ coverLabel }}</span></div>'
+      + '<div v-if="!embed && canPublish && feedUrl" class="px-2 pb-2 d-flex align-center" style="gap:8px" data-testid="cal-feed-url">'
+      + '<v-text-field :model-value="feedUrl" readonly density="compact" variant="outlined" hide-details :label="t(\'cal.feed_url\')" style="font-size:0.8rem"></v-text-field>'
+      + '<v-btn size="small" variant="text" @click="copyFeed()">{{ t(\'btn.copy\') }}</v-btn></div>'
       + '<v-divider></v-divider>'
       + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
       + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents" :can-add="canAdd" @add="addOnDay"></cal-day-panel>'

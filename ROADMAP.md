@@ -338,8 +338,9 @@ can subscribe to, so an edit reaches a phone without anyone re-exporting.
 
 The earlier version of this entry priced the feed as the expensive half of a pair. Most of that price
 turned out to be an assumption rather than a cost, and two of its three blockers are gone. What
-remains is one decision, and a choice between four ways of delivering the file — the cheapest of which
-needs no component at all.
+remains is one decision, and a choice between four ways of delivering the file. On a Supabase
+deployment the cheapest needs no component at all; on Firebase it does, for a reason that is about
+IDENTITY rather than storage — see option 1.
 
 **The delivery constraint, stated first because everything follows from it.** A calendar client is not
 a browser. Google fetches your URL from *its* servers, Outlook from its own, Apple with an HTTP client
@@ -431,30 +432,52 @@ reversible. What differs is what has to exist, and whether an edit reaches subsc
 
 | | Update | Component you maintain | Runs on Spark | Per-person URLs |
 |---|---|---|---|---|
-| **1. Managed blob store** (Supabase Storage) | on write | none | yes | yes |
+| **1. Managed blob store** (Supabase Storage) | on write | none on Supabase; see identity note on Firebase | yes | yes |
 | **2. Byte pipe** (Worker / Edge Function) | on write | one, ~10 lines | yes | yes |
 | **3. Static file** (scheduled Action → Pages) | scheduled | none (a workflow) | yes | no |
 | **4. Blaze** (Firebase Storage, or a Function) | on write | none | no | yes |
 
-**1. A managed blob store — the recommended path.** The app uploads the rendered `.ics` to a PUBLIC
-bucket and the object's own URL is the subscription. This is not a component in the sense the others
-are: it is the same managed service Firebase Storage would have been if Spark included it.
+**1. A managed blob store — recommended, but read the identity note below before assuming it is free.**
+The app uploads the rendered `.ics` to a PUBLIC bucket and the object's own URL is the subscription.
+This is not a component in the sense the others are: it is the same managed service Firebase Storage
+would have been if Spark included it.
 
-*This repo already does it.* `_sbUpload` in `backend-supabase.js` uploads to a public Supabase bucket
-and returns `getPublicUrl(...)`, and `uploadFile` is already the interface the image column uses — a
-feed calls the same method with a `Blob` of `text/calendar`.
+*This repo already does it, on Supabase.* `_sbUpload` in `backend-supabase.js` uploads to a public
+bucket and returns `getPublicUrl(...)`, and `uploadFile` is the interface the image column already
+uses — a feed calls the same method with a `Blob` of `text/calendar`.
 
-- **Pro:** nothing to write, deploy, monitor or keep alive. Write-triggered through `writes.js`. Free
-  tier. The smallest total surface of the four.
-- **Con:** needs Supabase FOR STORAGE. On a Firestore deployment that is a second (free) project used
-  only as a bucket — not a data migration, and the config plumbing plus the CSP-collector precedent
-  already exist. There is no Firebase equivalent on Spark, which is the whole reason this row exists.
-- **Three real details:** `_sbUpload` writes `<email>/<ts>_<name>`, deliberately unique so one image
-  never clobbers another — a feed needs the opposite, a STABLE path with `upsert: true`, or the
-  subscription URL changes on every edit. `contentType: 'text/calendar'` must be set at upload, since
-  the stored type is what the public URL serves. And a public bucket's URL shape is predictable, so the
-  random token has to live in the FILENAME (Supabase signed URLs expire, which is wrong for a
-  subscription).
+- **Pro:** on a SUPABASE deployment, nothing to write, deploy, monitor or keep alive. Write-triggered
+  through `writes.js`. Free tier. The smallest total surface of the four.
+- **Con on Supabase:** none worth the name — the signed-in user is already a Supabase user, so an RLS
+  policy on `storage.objects` is the whole access story.
+- **Con on FIREBASE — the part an earlier draft of this entry glossed over.** "A second free project
+  used only as a bucket" is true of the *data*, and misleading about *identity*. The user is
+  authenticated with Firebase; Supabase has never heard of them. Storage writes are gated by RLS, and
+  the anon key is PUBLIC by design (it ships in client code), so "allow anon insert" means
+  world-writable — anyone could exhaust the quota or overwrite the feed. Three ways out, none free:
+  sign admins into Supabase with the same Google account and gate writes on an allowlist table
+  (`auth.jwt()->>'email' in (select …)`) — no server, but a second identity provider and a second
+  sign-in; or a Supabase Edge Function that verifies the Firebase ID token and uploads with the service
+  role — proper, but a component on the WRITE side; or Blaze, and use Firebase Storage.
+- **What that means for the comparison.** On Firebase, option 1's "no component to maintain" advantage
+  largely evaporates: you end up with a second identity provider or a function either way. If a
+  Supabase project is being stood up regardless, ONE read-side byte pipe (option 2) reading the blob
+  out of Firestore may be simpler than a function plus a second storage service. The gap between rows
+  1 and 2 is real on Supabase and nearly nil on Firebase.
+- **The mechanical half is genuinely easy**, and worth separating from the identity half so it is not
+  re-investigated: no CSP change (`connect-src` already allows `https://*.supabase.co`, for the Supabase
+  backend), and no SDK (the Storage REST API is
+  `POST {url}/storage/v1/object/{bucket}/{path}` with `x-upsert: true`, public reads at
+  `/object/public/…`), so a `fetch`-based uploader is about thirty lines and does not drag
+  `backend-supabase.js` onto a Firebase deployment. `uploadFile` is already the seam; what is missing is
+  a storage config INDEPENDENT of the data backend, since `Databases.config(mode)` is keyed by the
+  active backend's mode.
+- **Three details that each fail silently:** `_sbUpload` writes `<email>/<ts>_<name>`, deliberately
+  unique so one image never clobbers another — a feed needs the opposite, a STABLE path with
+  `upsert: true`, or the subscription URL changes on every edit. `contentType: 'text/calendar'` must be
+  set at upload, since the stored type is what the public URL serves. And a public bucket's URL shape is
+  predictable, so the random token has to live in the FILENAME (Supabase signed URLs expire, which is
+  wrong for a subscription).
 
 **2. A byte pipe.** A Cloudflare Worker or Supabase Edge Function that reads the one blob and returns it
 with a Content-Type (`supabase/functions/csp-report/index.ts` is the deployment template).
@@ -574,9 +597,10 @@ both gated mainly on a column type. (`.ics` export was previously first here, an
 
 The subscribable feed is deliberately not in that line despite being mostly designed. Everything left
 in it is a judgement rather than an implementation — whether this deployment wants a bearer token for
-row data at all, and which of the four delivery options it prefers (the recommended one needs no
-component, at the price of using Supabase as a bucket). Those belong to whoever owns the deployment, so
-the entry waits for that answer instead of being ranked against features.
+row data at all, and which of the four delivery options it prefers — a choice whose answer differs by
+backend, since the cheapest option is free on Supabase and costs either a second identity provider or a
+function on Firebase. Those belong to whoever owns the deployment, so the entry waits for that answer
+instead of being ranked against features.
 
 Per-row goals sits outside that line: it is the cheapest thing on this page and touches no seam, but
 it extends a shipped kind rather than adding one, so it competes for attention with nothing. Take it

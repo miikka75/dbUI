@@ -2895,6 +2895,231 @@ test.describe('v3 @both partition toggle in an embed', () => {
   // true } }`) every row matches and the filter quietly does nothing. Neither is visible downstream:
   // the document is valid JSON and condMatches answers exactly as it would for a real column nobody
   // has filled in yet.
+  test('the .ics is written in the language the setting names, not the one the session uses', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.dataCache['tasks'] = [{ id: 'a', date: app._calToday(), title: 'Alpha' }];
+      window.VIEWS.lang_fx = { name: 'lang_fx', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+
+      // Two packs: the calendar's own name differs between them, so the rendered file says which was used.
+      const packs = { en: { 'view.lang_fx': 'Chores' }, xx: { 'view.lang_fx': 'Askareet' } };
+      const realGet = window.backend.getTranslations;
+      window.backend.getTranslations = (c) => Promise.resolve(packs[c] || {});
+      app.languages = [{ code: 'en', name: 'English' }, { code: 'xx', name: 'Test' }];
+      app.defaultLanguage = 'en';
+      app.currentLang = 'xx';
+      app.strings = packs.xx;                       // the SESSION is in xx
+
+      const sessionStrings = JSON.stringify(app.strings);
+      const captured = [];
+      const realUp = window.backend.uploadFile;
+      window.backend.uploadFile = (f, o) => f.text().then((t) => { captured.push(t); return 'https://s/' + o.path; });
+
+      // 1. Unpinned FEED -> the deployment default (en), NOT the xx session it was published from.
+      await app.publishFeed('lang_fx');
+      // 2. Pinned to xx -> xx, from any session.
+      app.saveCalendarWindow('lang_fx', { lang: 'xx' });
+      await app.publishFeed('lang_fx');
+
+      window.backend.uploadFile = realUp; window.backend.getTranslations = realGet;
+      return {
+        unpinned: captured[0], pinned: captured[1],
+        stringsRestored: JSON.stringify(app.strings) === sessionStrings
+      };
+    });
+    expect(r.unpinned).toContain('X-WR-CALNAME:Chores');       // default language, deterministic
+    expect(r.unpinned).not.toContain('Askareet');
+    expect(r.pinned).toContain('X-WR-CALNAME:Askareet');       // the pinned language
+    // The swap must not leak: the session's own strings are exactly as they were.
+    expect(r.stringsRestored).toBe(true);
+  });
+
+  test('the export/publish range is one setting, editable, and used by both paths', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.dataCache['tasks'] = [{ id: 'a', date: app._calToday(), title: 'Today' }];
+      window.VIEWS.win_fx = { name: 'win_fx', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+
+      const dflt = app.calendarIcsFor('win_fx');               // no schema, no override
+      app.saveCalendarWindow('win_fx', { back: '1m', forward: '2m' });
+      const saved = app.calendarIcsFor('win_fx');
+      const cover = app.calendarCoverFor('win_fx');
+
+      // The PUBLISH path must read the same window, not a second copy of the question.
+      let asked = null;
+      const real = window.backend.uploadFile;
+      const realEvents = app.calEventsFor;
+      app.calEventsFor = function(n, w) { asked = w; return realEvents.call(app, n, w); };
+      window.backend.uploadFile = (f, o) => Promise.resolve('https://store.example/' + o.path);
+      await app.publishFeed('win_fx');
+      app.calEventsFor = realEvents; window.backend.uploadFile = real;
+
+      // Clearing a field falls back to the default rather than storing an empty string.
+      app.saveCalendarWindow('win_fx', { back: '' });
+      const cleared = app.calendarIcsFor('win_fx');
+      return { dflt, saved, cover, asked, cleared };
+    });
+    // A non-zero default `back`: a subscription REPLACES, so a zero-history window would drop the
+    // subscriber's past a day at a time.
+    expect(r.dflt).toEqual({ back: '3m', forward: '1y', lang: '' });
+    expect(r.saved).toEqual({ back: '1m', forward: '2m', lang: '' });
+    expect(r.cover.from < r.cover.toExclusive).toBe(true);
+    expect(r.asked).toEqual(r.cover);              // publish used the resolved window
+    expect(r.cleared.back).toBe('3m');             // cleared -> back to the default
+    expect(r.cleared.forward).toBe('2m');          // the other field untouched
+
+    // And it is reachable in the UI, next to the buttons it governs.
+    await page.evaluate(() => window.appInstance.selectTab('cal_fx'));
+    const cal = page.locator('[data-testid="cal-view"]');
+    await expect(cal.locator('[data-testid="cal-window-back"]')).toBeVisible();
+    await expect(cal.locator('[data-testid="cal-window-forward"]')).toBeVisible();
+  });
+
+  test('validateSchema names a calendar window that is not a period', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = (n) => window.validateSchema().filter((e) => e.indexOf(n) >= 0).join(' | ');
+      window.VIEWS.w_bad = { name: 'w_bad', calendar: { source: 'tasks', dateColumn: 'date', ics: { back: 'a while', forward: '1y' } } };
+      // The lang check is only made when the database DECLARES languages — with none, there is nothing
+      // to check against and silence is the honest answer.
+      window.appInstance.languages = [{ code: 'en', name: 'English' }];
+      window.VIEWS.w_lang = { name: 'w_lang', calendar: { source: 'tasks', dateColumn: 'date', ics: { lang: 'kl' } } };
+      window.VIEWS.w_ok = { name: 'w_ok', calendar: { source: 'tasks', dateColumn: 'date', ics: { back: '6m', forward: '2y' } } };
+      return { bad: errs('w_bad'), lang: errs('w_lang'), ok: errs('w_ok') };
+    });
+    expect(r.bad).toContain('`ics.back` "a while" is not a period');
+    expect(r.lang).toContain('`ics.lang` "kl" is not a language this database declares');
+    expect(r.ok).toBe('');
+  });
+
+  test('publishing a calendar feed uploads an .ics to a stable path and keeps the URL', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;          // unrestricted -> may publish
+      app.dataCache['tasks'] = [{ id: 'a', date: '2026-07-08', title: 'Alpha' }];
+      window.VIEWS.feed_fx = {
+        name: 'feed_fx', feed: true,
+        calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] }
+      };
+      // Stand in for the blob store, recording exactly what the backend was asked for.
+      const calls = [];
+      const real = window.backend.uploadFile;
+      window.backend.uploadFile = (file, opts) => {
+        calls.push({ path: opts && opts.path, contentType: opts && opts.contentType, type: file.type });
+        return Promise.resolve('https://store.example/' + opts.path);
+      };
+      const text = await new Promise((res) => {
+        const orig = window.backend.uploadFile;
+        window.backend.uploadFile = (f, o) => { orig(f, o); f.text().then(res); return Promise.resolve('https://store.example/' + o.path); };
+        app.publishFeed('feed_fx');
+      });
+      const first = app.feedUrlFor('feed_fx');
+      const idAfterFirst = app.feedInfoFor('feed_fx').id;
+      // Publishing again must reuse the SAME id, or every existing subscription is stranded on a file
+      // that no longer updates.
+      await app.publishFeed('feed_fx');
+      window.backend.uploadFile = real;
+      return {
+        calls, text, first, idAfterFirst,
+        idAfterSecond: app.feedInfoFor('feed_fx').id,
+        secondUrl: app.feedUrlFor('feed_fx')
+      };
+    });
+
+    // It asked for a stable, unguessable path and the one Content-Type a calendar client accepts.
+    expect(r.calls[0].path).toMatch(/^feeds\/[0-9a-f]{32}\.ics$/);
+    expect(r.calls[0].contentType).toBe('text/calendar');
+    expect(r.calls[0].type).toContain('text/calendar');
+    // The bytes are a real calendar carrying the row.
+    expect(r.text.startsWith('BEGIN:VCALENDAR\r\n')).toBe(true);
+    expect(r.text).toContain('SUMMARY:Alpha');
+    // The id — and therefore the URL — survives a republish.
+    expect(r.idAfterSecond).toBe(r.idAfterFirst);
+    expect(r.secondUrl).toBe(r.first);
+    expect(r.first).toContain('feeds/' + r.idAfterFirst + '.ics');
+  });
+
+  test('a restricted member never republishes a feed, so a partial view cannot overwrite it', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      window.VIEWS.feed_gate = { name: 'feed_gate', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+      let uploads = 0;
+      const real = window.backend.uploadFile;
+      window.backend.uploadFile = () => { uploads++; return Promise.resolve('https://store.example/x'); };
+
+      // userAllowedTables is COMPUTED, so a restricted member is simulated the way the app makes one:
+      // a user list this account appears in with a table grant rather than 'all'.
+      app.usersLoaded = true;
+      app.userList = [{ key: 'm@x.com', addr: 'm@x.com', role: 'editor', tables: ['tasks'] }];
+      app.currentUserEmail = 'm@x.com';
+      const gatedCan = app.canPublishFeeds();
+      await app.publishFeed('feed_gate');
+      const afterMember = uploads;
+
+      app.userList = [];                                 // back to bootstrap/unrestricted
+      const openCan = app.canPublishFeeds();
+      window.backend.uploadFile = real;
+      return { gatedCan, openCan, afterMember };
+    });
+    expect(r.gatedCan).toBe(false);
+    expect(r.afterMember).toBe(0);       // the member's publish did nothing at all
+    expect(r.openCan).toBe(true);
+  });
+
+  test('a write to a feed source schedules exactly one republish, however many rows changed', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.userAllowedTables = null;
+      window.VIEWS.feed_deb = { name: 'feed_deb', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+      let uploads = 0;
+      const real = window.backend.uploadFile;
+      window.backend.uploadFile = () => { uploads++; return Promise.resolve('https://store.example/y'); };
+
+      // Fifty writes, as a bulk import would produce.
+      for (let i = 0; i < 50; i++) app._onWriteRepublish('tasks');
+      const during = uploads;
+      await new Promise((res) => setTimeout(res, 2600));
+      const after = uploads;
+
+      // A table no feed reads must not schedule anything.
+      app._onWriteRepublish('unrelated_table');
+      await new Promise((res) => setTimeout(res, 2600));
+      const afterUnrelated = uploads;
+      window.backend.uploadFile = real;
+      return { during, after, afterUnrelated };
+    });
+    expect(r.during).toBe(0);            // coalesced, not one upload per row
+    expect(r.after).toBe(1);
+    expect(r.afterUnrelated).toBe(1);    // an unrelated write republished nothing
+  });
+
+  test('validateSchema refuses a feed that cannot work, including the one that would leak', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = (n) => window.validateSchema().filter((e) => e.indexOf(n) >= 0).join(' | ');
+      window.VIEWS.fd_nocal = { name: 'fd_nocal', sources: ['tasks'], feed: true };
+      window.VIEWS.fd_mine = { name: 'fd_mine', feed: true, mineOnly: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+      // The leaking one: a published file has no viewer, so an @me filter renders as whoever published
+      // it and is then served to everybody. Spelled as an operator object, which a String() check misses.
+      window.VIEWS.fd_me = { name: 'fd_me', feed: true,
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: { eq: '@me' } } }] } };
+      window.VIEWS.fd_ok = { name: 'fd_ok', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+      return { nocal: errs('fd_nocal'), mine: errs('fd_mine'), me: errs('fd_me'), ok: errs('fd_ok') };
+    });
+    expect(r.nocal).toContain('is not a calendar');
+    expect(r.mine).toContain('cannot be combined with `mineOnly`');
+    expect(r.me).toContain('cannot be combined with an `@me` filter');
+    expect(r.ok).toBe('');
+  });
+
   test('validateSchema names a timeline pointed at the wrong columns', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {

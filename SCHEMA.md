@@ -1538,6 +1538,93 @@ at 30 and the badge becomes *Silver*.
   the view is broken.
 - **Embedding**: `{{view:x}}` in any document renders the tiles, like every other kind.
 
+### What a calendar's `.ics` contains (`calendar.ics`)
+
+Both the download button and a published feed generate the same file, from one setting: how far `back`
+and `forward` it reaches, and which `lang` it is written in.
+
+```json
+{ "calendar": { "source": "events", "dateColumn": "on",
+                "ics": { "back": "3m", "forward": "1y", "lang": "fi" } } }
+```
+
+`back` / `forward` take the period vocabulary a rotation uses (`daily`/`weekly`/`monthly`/`yearly`, or
+`"<n><d|w|m|y>"`). Defaults are `3m` and `1y`. Everyone with view access can change all three from the
+calendar toolbar — it stores per view in the folder config, like a rotation's range — and only an admin
+writes it through. The resolved dates are shown beside the fields, so the effect of `3m` is visible
+without exporting to find out.
+
+**These are properties of the FILE, not of the viewer**, which is exactly why they are settings at all.
+A published file has nobody to ask, so every per-viewer answer has to be pinned or it comes from
+whoever happened to generate it.
+
+**Language.** Everything a calendar shows is translated — event titles through the list vocabulary,
+source labels through `tab.<table>`, the calendar's own name through `view.<name>`, rotation duty titles
+through `list.<table>.<value>`. An unset `lang` resolves differently for the two paths, and each is
+right for its own reason:
+
+- a **download** falls back to the reader's session language, because someone is pressing a button
+  while looking at a screen and the file should match the screen;
+- a **feed** falls back to the deployment's default language. A feed has no viewer and republishes
+  automatically on write, so inheriting the session would mean every subscriber's calendar silently
+  changes language depending on who edited a row last.
+
+Setting `lang` explicitly pins both. `validateSchema` rejects a `lang` this database does not declare —
+it would otherwise render every key as its raw key — but stays silent when no languages are declared,
+since there is then nothing to check against.
+
+**Why `back` is not zero, and why the range matters more to a feed.** A downloaded file is *merged*
+into someone's calendar, so its window only decides how much they get. A subscription is a *mirror* —
+the client replaces the calendar with whatever the file says — so anything outside the window
+**disappears** from the subscriber's view. With `back` at zero, a subscribed calendar would lose its
+history a day at a time, silently, as events fall out of the window.
+
+Two things a file cannot do, worth knowing before choosing between a download and a feed:
+
+| | Existing events | Events you deleted |
+|---|---|---|
+| Re-importing a download | updated in place (UIDs are stable) | **stay forever** — import merges, it never deletes |
+| A subscribed feed | updated | **removed** — the client mirrors the file |
+
+That is the functional argument for a feed over repeated downloads.
+
+### Publishing a calendar as a subscribable feed (`feed`)
+
+`"feed": true` on a **calendar** view publishes it as an `.ics` file at a stable URL, so a phone can
+subscribe instead of someone re-exporting. The app renders the file and uploads it through the backend
+blob store (`uploadFile`, the same seam `image` columns use); the object URL is the subscription.
+
+```json
+{ "name": "family", "feed": true,
+  "calendar": { "source": "events", "dateColumn": "on", "titleColumns": ["title"] } }
+```
+
+**The URL is a bearer credential.** Anyone holding the link reads that calendar, without signing in —
+calendar clients cannot authenticate, so this is inherent rather than a shortcut. The path carries a
+128-bit random id and the button is shown only to someone who could publish it. Treat handing out the
+link as handing out the calendar.
+
+**Only a full-access client republishes.** A restricted member regenerating from their own cache would
+overwrite the complete calendar with the subset they can see — silent loss for every subscriber, caused
+by a legitimate edit. Their write leaves the feed stale instead, which is the safe direction.
+
+**Republished on write**, coalesced: fifty rows in a bulk import produce one upload, not fifty. The
+tables that trigger it are the calendar's sources *and* the rosters behind any rotation overlay — a duty
+roster lives in a lookup table the calendar never names, and editing it changes what the feed says.
+
+**A feed cannot use `mineOnly` or an `@me` filter**, and `validateSchema` refuses both. A published
+file has no viewer to resolve "me" against, so it would be rendered as whoever pressed publish and then
+served to everyone — the failure here that leaks rather than merely disappoints.
+
+**Subscriptions are not live.** Calendar clients refresh external `.ics` on their own schedule, often
+many hours, and it is not controllable from here. Publishing on write buys *correctness* — the file
+never disagrees with the database — not speed. For an immediate copy, use the calendar's download
+button.
+
+Requires a backend with a blob store. Firebase Storage needs the Blaze plan; Supabase Storage is on the
+free tier. Without one the publish button does not appear. See ROADMAP, "A subscribable calendar feed",
+for the delivery options and their trade-offs.
+
 ## timeline (tenth view kind)
 
 A view with a `timeline` field renders its rows as **bars across periods** — a gantt chart. Engine:

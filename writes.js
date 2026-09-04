@@ -38,20 +38,42 @@
     catch (e) { return Promise.reject(e); }
   }
 
+  // Observers, notified with the table id AFTER a write resolves. This is the first thing to use the
+  // chokepoint the file was built for: calendar feeds republish on write, and there is exactly one
+  // place that knows a write happened.
+  //
+  // Two deliberate properties. Notification is POST-SUCCESS -- a rejected write changes nothing, so
+  // republishing on one would push a file that disagrees with the database. And an observer that throws
+  // is swallowed: a feed that cannot be regenerated must not turn a saved row into a failed one, since
+  // the row is the thing the user actually asked for.
+  var observers = [];
+  function notify(tableId) {
+    observers.forEach(function (fn) { try { fn(tableId); } catch (e) {} });
+  }
+  function after(tableId, p) {
+    return p.then(function (r) { notify(tableId); return r; });
+  }
+
   var Writes = {
+    // Register an observer. Returns an unsubscribe, so a test can leave no trace.
+    onWrite: function (fn) {
+      observers.push(fn);
+      return function () { var i = observers.indexOf(fn); if (i >= 0) observers.splice(i, 1); };
+    },
+
     // Upsert a row. `part` is the partition ('active' by default), as in the backend contract.
     putRow: function (tableId, row, part) {
-      return run(function (b) { return b.putRow(tableId, row, part); });
+      return after(tableId, run(function (b) { return b.putRow(tableId, row, part); }));
     },
 
     deleteRow: function (tableId, id, part) {
-      return run(function (b) { return b.deleteRow(tableId, id, part); });
+      return after(tableId, run(function (b) { return b.deleteRow(tableId, id, part); }));
     },
 
     // Not atomic on any backend — the contract says so, and moving that guarantee here would be
     // pretending. It funnels through for the same reason the others do.
     moveRow: function (tableId, row, fromPart, toPart) {
-      return run(function (b) { return b.moveRow(tableId, row, fromPart, toPart); });
+      return after(tableId, run(function (b) { return b.moveRow(tableId, row, fromPart, toPart); }));
     }
   };
 
