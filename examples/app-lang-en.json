@@ -39,6 +39,7 @@
       "btn.more": "More",
       "btn.preview": "Preview",
       "btn.reset": "Reset",
+      "btn.export_ics": "Export .ics",
       "btn.save": "Save",
       "btn.search": "Search",
       "btn.show_active": "Upcoming",

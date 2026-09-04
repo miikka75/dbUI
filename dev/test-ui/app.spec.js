@@ -3747,6 +3747,40 @@ test.describe('calendar view', () => {
     await expect(cal).toContainText('cal.no_events');             // the panel followed the click to an empty day
   });
 
+  test('the calendar exports an .ics the browser is handed as a download', async ({ page }) => {
+    await ensureAppReady(page);
+    // The button is the only part not covered by dev/test/ics.test.js, so this asserts the WIRING: a
+    // real download, named after the view, whose bytes parse as the calendar the screen is showing.
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      app.dataCache['tasks'] = [
+        { id: 'a', date: '2026-07-08', title: 'Alpha' },
+        { id: 'b', date: '', title: 'NoDate' }
+      ];
+      app.userList = []; app.usersLoaded = true;
+      app.selectTab('cal_fx');
+    });
+    const cal = page.locator('[data-testid="cal-view"]');
+    await expect(cal).toBeVisible();
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      cal.locator('[data-testid="cal-export-ics"]').click()
+    ]);
+    expect(download.suggestedFilename()).toMatch(/^cal_fx-\d{4}-\d{2}-\d{2}\.ics$/);
+
+    const fs = require('fs');
+    const text = fs.readFileSync(await download.path(), 'utf8');
+    expect(text.startsWith('BEGIN:VCALENDAR\r\n')).toBe(true);
+    expect(text).toContain('END:VCALENDAR');
+    expect(text).toContain('SUMMARY:Alpha');
+    expect(text).toContain('DTSTART;VALUE=DATE:20260708');
+    expect(text).not.toContain('NoDate');           // undated rows are not expressible as events
+    // Balanced events, and no bare LF anywhere — the two ways a client rejects a file outright.
+    expect((text.match(/BEGIN:VEVENT/g) || []).length).toBe((text.match(/END:VEVENT/g) || []).length);
+    expect(/[^\r]\n/.test(text)).toBe(false);
+  });
+
   test('calEventsFor buckets rows by date (+ undated), month cells + counts + selected day', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
