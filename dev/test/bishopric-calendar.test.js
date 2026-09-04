@@ -109,3 +109,52 @@ describe('bishopric example — what the calendar deliberately leaves out', () =
     });
   });
 });
+
+describe('bishopric example — my_calendar narrows to the viewer', () => {
+  const MY = 'my_calendar';
+  const rows = {
+    meeting_agenda: [
+      { id: 'm1', date: '2026-03-01', theme: 'Faith', responsible: 'bishop' },
+      { id: 'm2', date: '2026-03-08', theme: 'Service', responsible: 'counselor1' }
+    ],
+    admin_interviews: [
+      { id: 'i1', meeting: '2026-03-03', person: 'Ann', topic: 'Temple', responsible: 'bishop' },
+      { id: 'i2', meeting: '2026-03-04', person: 'Bob', topic: 'Calling', responsible: 'counselor2' }
+    ],
+    admin_reminders: [
+      { id: 'r1', date: '2026-03-05', item: 'Order flowers', person: 'Cal', responsible: 'counselor1' }
+    ]
+  };
+  // The app resolves `@me` per column through that column's list; here it stands in for one viewer.
+  const asPerson = (who) => Object.assign({}, ctx, {
+    dataCache: rows,
+    resolveMeTokens: (f) => JSON.parse(JSON.stringify(f == null ? null : f).split('"@me"').join(JSON.stringify(who)))
+  });
+
+  it('every source filters on `responsible`, so nothing unfiltered leaks in', () => {
+    const srcs = VIEWS[MY].calendar.sources;
+    assert.ok(srcs.length >= 3);
+    srcs.forEach((s) => assert.deepEqual(s.filter, { responsible: '@me' }));
+  });
+
+  it('two people open the same view and see different calendars', () => {
+    const bishop = Events.build(MY, WIN, asPerson('bishop'));
+    const c1 = Events.build(MY, WIN, asPerson('counselor1'));
+    const titles = (ev) => Object.keys(ev).sort().flatMap((d) => ev[d].map((e) => e.title));
+    assert.deepEqual(titles(bishop).sort(), ['Ann — Temple', 'Faith']);
+    assert.deepEqual(titles(c1).sort(), ['Order flowers — Cal', 'Service']);
+  });
+
+  it('an unresolvable identity matches nothing rather than everything', () => {
+    // The failure direction that matters: a viewer the link cannot resolve must see an empty calendar,
+    // never the whole bishopric's.
+    const ghost = Events.build(MY, WIN, asPerson('\u0000__no_me__'));
+    assert.deepEqual(Object.keys(ghost), []);
+  });
+
+  it('cannot be published, and is not', () => {
+    // validateSchema refuses `feed` beside an `@me` filter: a published file has no viewer, so it would
+    // carry whoever pressed publish and then be served to everyone.
+    assert.equal(Feeds.isFeed(VIEWS[MY]), false);
+  });
+});
