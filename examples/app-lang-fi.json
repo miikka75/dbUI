@@ -48,6 +48,7 @@
       "cal.window_lang": "Tiedoston kieli",
       "cal.lang_auto": "Lukijan mukaan",
       "msg.feed_failed": "Syotteen julkaisu epaonnistui",
+      "msg.no_blob_store": "Talla asennuksella ei ole tiedostovarastoa — syote vaatii Firebase Storagen (Blaze) tai Supabase Storagen",
       "timeline.empty": "Ei mitaan naytettavaa",
       "btn.save": "Tallenna",
       "btn.search": "Hae",

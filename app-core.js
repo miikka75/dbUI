@@ -301,6 +301,9 @@ function createVueApp() {
       // Feed republish coalescing: names invalidated since the last flush, and the pending timer.
       _feedDirty: {},
       _feedTimer: null,
+      // Set when an upload has actually failed, which is the only way to learn that this deployment has
+      // no usable blob store — see publishFeed. Session-scoped on purpose: a reload re-tries.
+      _blobStoreDown: false,
       _liveRebuildTimer: null,
       pendingDelete: null,
       pendingDeleteTimer: null,
@@ -823,7 +826,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1650,9 +1653,25 @@ function createVueApp() {
             cfg.feeds = Object.assign({}, cfg.feeds || {});
             cfg.feeds[name] = { id: id, url: url, at: new Date().toISOString() };
             self._saveFolderConfig(cfg, null);
+            self._blobStoreDown = false;      // it worked, so the background path may resume
             return url;
           })
-          .catch(function(e) { self.notify(self.t('msg.feed_failed')); throw e; });
+          .catch(function(e) {
+            // The presence of `uploadFile` is a CAPABILITY test, not an availability one:
+            // backend-firebase exposes it whenever Storage initialized, and on a Spark project the
+            // put() then fails at runtime because Storage needs Blaze (the same trap annotated on
+            // uploadImage). An image column survives that by falling back to the `asset:` tier; a feed
+            // CANNOT, because an asset is a database row and a subscription needs an HTTP URL.
+            //
+            // So the failure is remembered, and only the BACKGROUND path honours it. Republishing is
+            // write-triggered, so without this every edit on such a deployment would retry the same
+            // doomed upload and raise the same toast, for ever. A person pressing the button is stating
+            // intent and always gets an attempt -- which is also how the flag clears, since a failure
+            // here can equally be a network blip.
+            self._blobStoreDown = true;
+            self.notify(self.t('msg.no_blob_store'));
+            throw e;
+          });
       },
 
       // Republish whatever a write invalidated, coalesced. A bulk import writes hundreds of rows and
@@ -1662,7 +1681,7 @@ function createVueApp() {
       // clients refresh on their own multi-hour schedule.
       _onWriteRepublish: function(tableId) {
         var self = this;
-        if (!this.canPublishFeeds()) return;
+        if (!this.canPublishFeeds() || this._blobStoreDown) return;
         Feeds.forTable(VIEWS, tableId).forEach(function(n) { self._feedDirty[n] = 1; });
         if (!Object.keys(this._feedDirty).length) return;
         clearTimeout(this._feedTimer);
