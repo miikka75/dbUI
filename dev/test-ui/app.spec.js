@@ -2895,6 +2895,47 @@ test.describe('v3 @both partition toggle in an embed', () => {
   // true } }`) every row matches and the filter quietly does nothing. Neither is visible downstream:
   // the document is valid JSON and condMatches answers exactly as it would for a real column nobody
   // has filled in yet.
+  test('the .ics is written in the language the setting names, not the one the session uses', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.dataCache['tasks'] = [{ id: 'a', date: app._calToday(), title: 'Alpha' }];
+      window.VIEWS.lang_fx = { name: 'lang_fx', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+
+      // Two packs: the calendar's own name differs between them, so the rendered file says which was used.
+      const packs = { en: { 'view.lang_fx': 'Chores' }, xx: { 'view.lang_fx': 'Askareet' } };
+      const realGet = window.backend.getTranslations;
+      window.backend.getTranslations = (c) => Promise.resolve(packs[c] || {});
+      app.languages = [{ code: 'en', name: 'English' }, { code: 'xx', name: 'Test' }];
+      app.defaultLanguage = 'en';
+      app.currentLang = 'xx';
+      app.strings = packs.xx;                       // the SESSION is in xx
+
+      const sessionStrings = JSON.stringify(app.strings);
+      const captured = [];
+      const realUp = window.backend.uploadFile;
+      window.backend.uploadFile = (f, o) => f.text().then((t) => { captured.push(t); return 'https://s/' + o.path; });
+
+      // 1. Unpinned FEED -> the deployment default (en), NOT the xx session it was published from.
+      await app.publishFeed('lang_fx');
+      // 2. Pinned to xx -> xx, from any session.
+      app.saveCalendarWindow('lang_fx', { lang: 'xx' });
+      await app.publishFeed('lang_fx');
+
+      window.backend.uploadFile = realUp; window.backend.getTranslations = realGet;
+      return {
+        unpinned: captured[0], pinned: captured[1],
+        stringsRestored: JSON.stringify(app.strings) === sessionStrings
+      };
+    });
+    expect(r.unpinned).toContain('X-WR-CALNAME:Chores');       // default language, deterministic
+    expect(r.unpinned).not.toContain('Askareet');
+    expect(r.pinned).toContain('X-WR-CALNAME:Askareet');       // the pinned language
+    // The swap must not leak: the session's own strings are exactly as they were.
+    expect(r.stringsRestored).toBe(true);
+  });
+
   test('the export/publish range is one setting, editable, and used by both paths', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(async () => {
@@ -2903,9 +2944,9 @@ test.describe('v3 @both partition toggle in an embed', () => {
       app.dataCache['tasks'] = [{ id: 'a', date: app._calToday(), title: 'Today' }];
       window.VIEWS.win_fx = { name: 'win_fx', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
 
-      const dflt = app.calendarWindowFor('win_fx');            // no schema, no override
+      const dflt = app.calendarIcsFor('win_fx');               // no schema, no override
       app.saveCalendarWindow('win_fx', { back: '1m', forward: '2m' });
-      const saved = app.calendarWindowFor('win_fx');
+      const saved = app.calendarIcsFor('win_fx');
       const cover = app.calendarCoverFor('win_fx');
 
       // The PUBLISH path must read the same window, not a second copy of the question.
@@ -2919,13 +2960,13 @@ test.describe('v3 @both partition toggle in an embed', () => {
 
       // Clearing a field falls back to the default rather than storing an empty string.
       app.saveCalendarWindow('win_fx', { back: '' });
-      const cleared = app.calendarWindowFor('win_fx');
+      const cleared = app.calendarIcsFor('win_fx');
       return { dflt, saved, cover, asked, cleared };
     });
     // A non-zero default `back`: a subscription REPLACES, so a zero-history window would drop the
     // subscriber's past a day at a time.
-    expect(r.dflt).toEqual({ back: '3m', forward: '1y' });
-    expect(r.saved).toEqual({ back: '1m', forward: '2m' });
+    expect(r.dflt).toEqual({ back: '3m', forward: '1y', lang: '' });
+    expect(r.saved).toEqual({ back: '1m', forward: '2m', lang: '' });
     expect(r.cover.from < r.cover.toExclusive).toBe(true);
     expect(r.asked).toEqual(r.cover);              // publish used the resolved window
     expect(r.cleared.back).toBe('3m');             // cleared -> back to the default
@@ -2942,11 +2983,16 @@ test.describe('v3 @both partition toggle in an embed', () => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {
       const errs = (n) => window.validateSchema().filter((e) => e.indexOf(n) >= 0).join(' | ');
-      window.VIEWS.w_bad = { name: 'w_bad', calendar: { source: 'tasks', dateColumn: 'date', window: { back: 'a while', forward: '1y' } } };
-      window.VIEWS.w_ok = { name: 'w_ok', calendar: { source: 'tasks', dateColumn: 'date', window: { back: '6m', forward: '2y' } } };
-      return { bad: errs('w_bad'), ok: errs('w_ok') };
+      window.VIEWS.w_bad = { name: 'w_bad', calendar: { source: 'tasks', dateColumn: 'date', ics: { back: 'a while', forward: '1y' } } };
+      // The lang check is only made when the database DECLARES languages — with none, there is nothing
+      // to check against and silence is the honest answer.
+      window.appInstance.languages = [{ code: 'en', name: 'English' }];
+      window.VIEWS.w_lang = { name: 'w_lang', calendar: { source: 'tasks', dateColumn: 'date', ics: { lang: 'kl' } } };
+      window.VIEWS.w_ok = { name: 'w_ok', calendar: { source: 'tasks', dateColumn: 'date', ics: { back: '6m', forward: '2y' } } };
+      return { bad: errs('w_bad'), lang: errs('w_lang'), ok: errs('w_ok') };
     });
-    expect(r.bad).toContain('`window.back` "a while" is not a period');
+    expect(r.bad).toContain('`ics.back` "a while" is not a period');
+    expect(r.lang).toContain('`ics.lang` "kl" is not a language this database declares');
     expect(r.ok).toBe('');
   });
 

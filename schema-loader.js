@@ -443,16 +443,24 @@ function validateSchema() {
     }
     // Stats view: every mistake here renders a tile showing nothing, or a bar with no track, and the
     // view still "works" -- which is exactly the class of silent failure the rest of this function
-    // `calendar.window` bounds what the .ics covers. A bad spec here is invisible: coverWindow falls
-    // back to a default and the file silently covers a range nobody asked for.
-    if (view.calendar && view.calendar.window) {
+    // `calendar.ics` decides what the generated file contains. Every mistake here is invisible at
+    // runtime: a bad period falls back to a default and the file silently covers a range nobody asked
+    // for, and a `lang` naming no declared language renders every key as its raw key.
+    if (view.calendar && view.calendar.ics) {
+      var icsCfg = view.calendar.ics;
       ['back', 'forward'].forEach(function(k) {
-        var val = view.calendar.window[k];
+        var val = icsCfg[k];
         if (val === undefined || val === '' || val === null) return;
         if (!Rotation.isValidInterval(val)) {
-          errors.push('calendar "' + v + '": `window.' + k + '` "' + val + '" is not a period — use daily/weekly/monthly/yearly or "<n><d|w|m|y>"');
+          errors.push('calendar "' + v + '": `ics.' + k + '` "' + val + '" is not a period — use daily/weekly/monthly/yearly or "<n><d|w|m|y>"');
         }
       });
+      if (icsCfg.lang) {
+        var declared = (window.appInstance && window.appInstance.languages) || [];
+        if (declared.length && !declared.some(function(l) { return l.code === icsCfg.lang; })) {
+          errors.push('calendar "' + v + '": `ics.lang` "' + icsCfg.lang + '" is not a language this database declares');
+        }
+      }
     }
     // `feed` publishes a view's .ics at a world-readable URL. Two ways to declare one that cannot work,
     // both of which otherwise fail as a button that quietly does nothing:

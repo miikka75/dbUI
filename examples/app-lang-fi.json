@@ -45,6 +45,8 @@
       "cal.feed_url": "Tilaus-URL",
       "cal.window_back": "Menneisyys",
       "cal.window_forward": "Tulevaisuus",
+      "cal.window_lang": "Tiedoston kieli",
+      "cal.lang_auto": "Lukijan mukaan",
       "msg.feed_failed": "Syotteen julkaisu epaonnistui",
       "timeline.empty": "Ei mitaan naytettavaa",
       "btn.save": "Tallenna",

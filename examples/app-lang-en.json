@@ -45,6 +45,8 @@
       "cal.feed_url": "Subscription URL",
       "cal.window_back": "History",
       "cal.window_forward": "Ahead",
+      "cal.window_lang": "File language",
+      "cal.lang_auto": "As the reader sees it",
       "msg.feed_failed": "Could not publish the feed",
       "timeline.empty": "Nothing to show",
       "btn.save": "Save",
