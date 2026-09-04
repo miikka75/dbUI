@@ -1538,6 +1538,38 @@ at 30 and the badge becomes *Silver*.
   the view is broken.
 - **Embedding**: `{{view:x}}` in any document renders the tiles, like every other kind.
 
+### How far a calendar's `.ics` reaches (`calendar.window`)
+
+Both the download button and a published feed cover the same range: `back` before today, `forward`
+after, in the same period vocabulary a rotation uses (`daily`/`weekly`/`monthly`/`yearly`, or
+`"<n><d|w|m|y>"`).
+
+```json
+{ "calendar": { "source": "events", "dateColumn": "on",
+                "window": { "back": "3m", "forward": "1y" } } }
+```
+
+Defaults are `back: "3m"`, `forward: "1y"`. Everyone with view access can change it from the calendar
+toolbar (it stores per view in the folder config, like a rotation's range); only an admin writes it
+through to the database. The resolved dates are shown beside the fields, so the effect of `3m` is
+visible without exporting to find out.
+
+**Why `back` is not zero, and why this matters more to a feed than to a download.** A downloaded file
+is *merged* into someone's calendar, so its window only decides how much they get. A subscription is a
+*mirror* — the client replaces the calendar with whatever the file says — so anything outside the window
+**disappears** from the subscriber's view. With `back` at zero, a subscribed calendar would lose its
+history a day at a time, silently, as events fall out of the window.
+
+Two related things a file cannot do, worth knowing before choosing between the download and a feed:
+
+| | Existing events | Events you deleted |
+|---|---|---|
+| Re-importing a download | updated in place (UIDs are stable) | **stay forever** — import merges, it never deletes |
+| A subscribed feed | updated | **removed** — the client mirrors the file |
+
+That is the functional argument for a feed over repeated downloads. It is also why the window is a
+setting rather than a constant: on a feed it decides how much history a subscriber keeps.
+
 ### Publishing a calendar as a subscribable feed (`feed`)
 
 `"feed": true` on a **calendar** view publishes it as an `.ics` file at a stable URL, so a phone can

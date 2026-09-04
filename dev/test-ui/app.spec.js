@@ -2895,6 +2895,61 @@ test.describe('v3 @both partition toggle in an embed', () => {
   // true } }`) every row matches and the filter quietly does nothing. Neither is visible downstream:
   // the document is valid JSON and condMatches answers exactly as it would for a real column nobody
   // has filled in yet.
+  test('the export/publish range is one setting, editable, and used by both paths', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.dataCache['tasks'] = [{ id: 'a', date: app._calToday(), title: 'Today' }];
+      window.VIEWS.win_fx = { name: 'win_fx', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+
+      const dflt = app.calendarWindowFor('win_fx');            // no schema, no override
+      app.saveCalendarWindow('win_fx', { back: '1m', forward: '2m' });
+      const saved = app.calendarWindowFor('win_fx');
+      const cover = app.calendarCoverFor('win_fx');
+
+      // The PUBLISH path must read the same window, not a second copy of the question.
+      let asked = null;
+      const real = window.backend.uploadFile;
+      const realEvents = app.calEventsFor;
+      app.calEventsFor = function(n, w) { asked = w; return realEvents.call(app, n, w); };
+      window.backend.uploadFile = (f, o) => Promise.resolve('https://store.example/' + o.path);
+      await app.publishFeed('win_fx');
+      app.calEventsFor = realEvents; window.backend.uploadFile = real;
+
+      // Clearing a field falls back to the default rather than storing an empty string.
+      app.saveCalendarWindow('win_fx', { back: '' });
+      const cleared = app.calendarWindowFor('win_fx');
+      return { dflt, saved, cover, asked, cleared };
+    });
+    // A non-zero default `back`: a subscription REPLACES, so a zero-history window would drop the
+    // subscriber's past a day at a time.
+    expect(r.dflt).toEqual({ back: '3m', forward: '1y' });
+    expect(r.saved).toEqual({ back: '1m', forward: '2m' });
+    expect(r.cover.from < r.cover.toExclusive).toBe(true);
+    expect(r.asked).toEqual(r.cover);              // publish used the resolved window
+    expect(r.cleared.back).toBe('3m');             // cleared -> back to the default
+    expect(r.cleared.forward).toBe('2m');          // the other field untouched
+
+    // And it is reachable in the UI, next to the buttons it governs.
+    await page.evaluate(() => window.appInstance.selectTab('cal_fx'));
+    const cal = page.locator('[data-testid="cal-view"]');
+    await expect(cal.locator('[data-testid="cal-window-back"]')).toBeVisible();
+    await expect(cal.locator('[data-testid="cal-window-forward"]')).toBeVisible();
+  });
+
+  test('validateSchema names a calendar window that is not a period', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = (n) => window.validateSchema().filter((e) => e.indexOf(n) >= 0).join(' | ');
+      window.VIEWS.w_bad = { name: 'w_bad', calendar: { source: 'tasks', dateColumn: 'date', window: { back: 'a while', forward: '1y' } } };
+      window.VIEWS.w_ok = { name: 'w_ok', calendar: { source: 'tasks', dateColumn: 'date', window: { back: '6m', forward: '2y' } } };
+      return { bad: errs('w_bad'), ok: errs('w_ok') };
+    });
+    expect(r.bad).toContain('`window.back` "a while" is not a period');
+    expect(r.ok).toBe('');
+  });
+
   test('publishing a calendar feed uploads an .ics to a stable path and keeps the URL', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(async () => {

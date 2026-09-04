@@ -443,6 +443,17 @@ function validateSchema() {
     }
     // Stats view: every mistake here renders a tile showing nothing, or a bar with no track, and the
     // view still "works" -- which is exactly the class of silent failure the rest of this function
+    // `calendar.window` bounds what the .ics covers. A bad spec here is invisible: coverWindow falls
+    // back to a default and the file silently covers a range nobody asked for.
+    if (view.calendar && view.calendar.window) {
+      ['back', 'forward'].forEach(function(k) {
+        var val = view.calendar.window[k];
+        if (val === undefined || val === '' || val === null) return;
+        if (!Rotation.isValidInterval(val)) {
+          errors.push('calendar "' + v + '": `window.' + k + '` "' + val + '" is not a period — use daily/weekly/monthly/yearly or "<n><d|w|m|y>"');
+        }
+      });
+    }
     // `feed` publishes a view's .ics at a world-readable URL. Two ways to declare one that cannot work,
     // both of which otherwise fail as a button that quietly does nothing:
     //   - on a view that is not a calendar. Feeds.isFeed answers false, so nothing publishes and there

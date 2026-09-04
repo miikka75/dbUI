@@ -43,6 +43,8 @@
       "btn.publish_feed": "Publish feed",
       "btn.copy": "Copy",
       "cal.feed_url": "Subscription URL",
+      "cal.window_back": "History",
+      "cal.window_forward": "Ahead",
       "msg.feed_failed": "Could not publish the feed",
       "timeline.empty": "Nothing to show",
       "btn.save": "Save",

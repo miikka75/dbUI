@@ -823,7 +823,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1501,17 +1501,15 @@ function createVueApp() {
       // cannot collide; it is a stable local identifier, not an address, and nothing is sent anywhere.
       downloadIcs: function(name) {
         var view = name || this.currentTable;
-        var from = this._calToday();
-        var p = from.split('-');
-        var to = fmtDate(new Date(Number(p[0]) + 1, Number(p[1]) - 1, Number(p[2])));
+        var win = this.calendarCoverFor(view);
         var title = this.tOr('view.' + view, this.tOr('tab.' + view, view));
-        var text = Ics.build(this.calEventsFor(view, { from: from, toExclusive: to }), {
+        var text = Ics.build(this.calEventsFor(view, win), {
           name: title,
           domain: (typeof Databases !== 'undefined' && Databases.activeKey()) || 'dbui.local'
         });
         var a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([text], { type: 'text/calendar;charset=utf-8' }));
-        a.download = view + '-' + from + '.ics';
+        a.download = view + '-' + this._calToday() + '.ics';
         a.click();
         this.notify(this.t('msg.exported'));
       },
@@ -1546,6 +1544,42 @@ function createVueApp() {
       canPublishFeeds: function() {
         return !this.userAllowedTables && !!(typeof backend !== 'undefined' && backend && backend.uploadFile);
       },
+      // How much of a calendar its .ics covers: `back` before today, `forward` after. Two layers, like
+      // rangeForView: the schema declares a default (`calendar.window`), the folder config overrides it
+      // per view, and everyone with view access may change it while only an admin writes it through.
+      //
+      // ONE setting for both the download and the feed, because it is one question -- what range does
+      // this calendar cover -- and answering it twice is how the two would come to disagree. It matters
+      // more to the feed: a download is merged into someone's calendar, but a SUBSCRIPTION is a mirror,
+      // so anything outside the window disappears from the subscriber's view. That is why `back`
+      // defaults above zero; at zero a subscribed calendar loses its history a day at a time.
+      calendarWindowFor: function(name) {
+        var schema = ((VIEWS[name] || {}).calendar || {}).window || {};
+        var over = ((this.appConfig && this.appConfig.calendarWindows) || {})[name] || {};
+        return {
+          back: over.back !== undefined ? over.back : (schema.back !== undefined ? schema.back : '3m'),
+          forward: over.forward !== undefined ? over.forward : (schema.forward !== undefined ? schema.forward : '1y')
+        };
+      },
+      // The resolved {from, toExclusive} both the download and the publish path pass to calEventsFor.
+      calendarCoverFor: function(name) {
+        var w = this.calendarWindowFor(name);
+        return Events.coverWindow(this._calToday(), w.back, w.forward);
+      },
+      // Mirrors saveRotationRange: an empty value clears the override and falls back to the schema.
+      saveCalendarWindow: function(viewName, patch) {
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.calendarWindows = Object.assign({}, cfg.calendarWindows || {});
+        var cur = Object.assign({}, cfg.calendarWindows[viewName] || {});
+        Object.keys(patch).forEach(function(k) {
+          var val = patch[k];
+          if (val === '' || val === null || val === undefined) delete cur[k];
+          else cur[k] = val;
+        });
+        if (Object.keys(cur).length) cfg.calendarWindows[viewName] = cur; else delete cfg.calendarWindows[viewName];
+        cfg.mode = this.mode;
+        this._saveFolderConfig(cfg, viewName);
+      },
       feedInfoFor: function(name) { return ((this.appConfig && this.appConfig.feeds) || {})[name] || null; },
       feedUrlFor: function(name) { var f = this.feedInfoFor(name); return (f && f.url) || ''; },
 
@@ -1558,12 +1592,11 @@ function createVueApp() {
         if (!this.canPublishFeeds()) return Promise.resolve(null);
         var info = this.feedInfoFor(name) || {};
         var id = info.id || Feeds.newId();
-        // A year from today, for the same reason the download uses one: source rows ignore the window,
-        // but generated rotation duties are clipped to it.
-        var from = this._calToday(), p = from.split('-');
-        var to = fmtDate(new Date(Number(p[0]) + 1, Number(p[1]) - 1, Number(p[2])));
+        // The view's own window, the same one the download uses. It matters more here: a subscription
+        // REPLACES, so an event outside this range vanishes from every subscriber's calendar.
+        var win = this.calendarCoverFor(name);
         var title = this.tOr('view.' + name, this.tOr('tab.' + name, name));
-        var text = Ics.build(this.calEventsFor(name, { from: from, toExclusive: to }), {
+        var text = Ics.build(this.calEventsFor(name, win), {
           name: title,
           domain: (typeof Databases !== 'undefined' && Databases.activeKey()) || 'dbui.local'
         });
@@ -5943,6 +5976,10 @@ function createVueApp() {
       canAdd: function() { return appInstance.canCalendarAdd(this.viewName); },
       canPublish: function() { return Feeds.isFeed(window.VIEWS[this.viewName]) && appInstance.canPublishFeeds(); },
       feedUrl: function() { return appInstance.feedUrlFor(this.viewName); },
+      a: function() { return appInstance; },
+      win: function() { return appInstance.calendarWindowFor(this.viewName); },
+      // The resolved dates, so the effect of '3m' is visible without exporting to find out.
+      coverLabel: function() { var c = appInstance.calendarCoverFor(this.viewName); return c.from + ' – ' + c.toExclusive; },
       body: function() { return window.viewPartFor('calendar', this.displayMode) || 'cal-agenda'; }
     },
     methods: Object.assign({}, ROOT_PROXY, {
@@ -5953,6 +5990,7 @@ function createVueApp() {
       addOnDay: function() { appInstance.calendarAddOnDay(this.viewName, this.sel); },
       exportIcs: function() { appInstance.downloadIcs(this.viewName); },
       publish: function() { appInstance.publishFeed(this.viewName); },
+      setWindow: function(patch) { appInstance.saveCalendarWindow(this.viewName, patch); },
       copyFeed: function() {
         var a = appInstance, u = this.feedUrl;
         Promise.resolve(navigator.clipboard && navigator.clipboard.writeText(u))
@@ -5979,6 +6017,14 @@ function createVueApp() {
       // credential -- anyone holding the link reads this calendar -- so it is not put in front of people
       // who have no reason to be handing it out.
       + '<v-btn v-if="!embed && canPublish" :icon="feedUrl ? \'mdi-rss\' : \'mdi-rss-off\'" size="small" variant="text" @click="publish()" :title="t(\'btn.publish_feed\')" data-testid="cal-publish-feed"></v-btn></div>'
+      // Export/publish range, on top-level calendars only. Mirrors the rotation toolbar: everyone with
+      // view access may change it, only an admin writes it through. Sits beside the buttons it governs
+      // so "how far does this file reach" is answered where the file is produced, rather than in a
+      // settings screen away from it.
+      + '<div v-if="!embed" class="px-2 pb-2 d-flex align-center flex-wrap" style="gap:8px" data-testid="cal-window">'
+      + '<v-text-field :model-value="win.back" name="cal-window-back" :label="t(\'cal.window_back\')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ back: $event })" data-testid="cal-window-back"></v-text-field>'
+      + '<v-text-field :model-value="win.forward" name="cal-window-forward" :label="t(\'cal.window_forward\')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ forward: $event })" data-testid="cal-window-forward"></v-text-field>'
+      + '<span style="font-size:0.75rem;opacity:0.6">{{ coverLabel }}</span></div>'
       + '<div v-if="!embed && canPublish && feedUrl" class="px-2 pb-2 d-flex align-center" style="gap:8px" data-testid="cal-feed-url">'
       + '<v-text-field :model-value="feedUrl" readonly density="compact" variant="outlined" hide-details :label="t(\'cal.feed_url\')" style="font-size:0.8rem"></v-text-field>'
       + '<v-btn size="small" variant="text" @click="copyFeed()">{{ t(\'btn.copy\') }}</v-btn></div>'

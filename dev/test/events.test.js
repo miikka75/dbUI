@@ -199,3 +199,38 @@ describe('events.js — periodsToCover', () => {
     assert.equal(Events.periodsToCover('2026-03-01', '2026-03-29', 'weekly'), 6);   // 4 whole weeks + 2
   });
 });
+
+describe('events.js — coverWindow (what a published or exported file covers)', () => {
+  it('reaches back and forward from today, in the interval vocabulary', () => {
+    assert.deepEqual(Events.coverWindow('2026-09-04', '3m', '1y'),
+      { from: '2026-06-04', toExclusive: '2027-09-04' });
+    assert.deepEqual(Events.coverWindow('2026-09-04', '2w', '4w'),
+      { from: '2026-08-21', toExclusive: '2026-10-02' });
+  });
+
+  it('no `back` starts at today — a snapshot with no history', () => {
+    assert.equal(Events.coverWindow('2026-09-04', '', '1y').from, '2026-09-04');
+    assert.equal(Events.coverWindow('2026-09-04', null, '1y').from, '2026-09-04');
+  });
+
+  it('defaults forward to a year when none is given', () => {
+    assert.equal(Events.coverWindow('2026-09-04', '', '').toExclusive, '2027-09-04');
+  });
+
+  it('refuses to invert: a window ending before it starts yields NO events, silently', () => {
+    // The failure this prevents is an empty calendar with nothing anywhere saying why.
+    const w = Events.coverWindow('2026-09-04', '', '0d');
+    assert.ok(w.toExclusive > w.from, 'the window is never empty or backwards');
+  });
+
+  it('the window it returns is the shape build() takes, and bounds the overlay', () => {
+    const w = Events.coverWindow('2026-03-01', '', '4w');
+    const ev = Events.build('cal', w, ctx({
+      views: { cal: { calendar: { sources: [], rotationSources: [{ view: 'duties' }] } },
+               duties: { rotation: { rosterRef: 'r', rosterBy: 'k', valueCol: 'p', interval: 'weekly', anchorDate: '2026-03-01' } } },
+      dataCache: { r: [{ id: '1', k: 'a', p: 'Ann', position: 1 }] }
+    }));
+    Object.keys(ev).forEach((d) => assert.ok(d >= w.from && d < w.toExclusive, d + ' is inside the window'));
+    assert.ok(Object.keys(ev).length > 0);
+  });
+});

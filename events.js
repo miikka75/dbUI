@@ -107,6 +107,23 @@
     });
   }
 
+  // How much of a calendar a PUBLISHED or EXPORTED file covers: `back` before today, `forward` after,
+  // both in rotation.js's interval vocabulary ('3m', '1y', 'weekly'). Returns the {from, toExclusive}
+  // shape build() already takes, so the same window bounds the rotation overlay it always did.
+  //
+  // Why this is a setting and not a constant. A DOWNLOAD is a snapshot merged into someone's calendar,
+  // so its window only decides how much they get. A SUBSCRIPTION is a mirror -- the client replaces the
+  // calendar with whatever the file says -- so anything outside the window DISAPPEARS from the
+  // subscriber's view. With `back` at zero that means a subscribed calendar silently loses its history,
+  // a day at a time, which is why the default reaches backwards.
+  function coverWindow(todayStr, back, forward) {
+    var from = back ? Rotation.addIntervals(todayStr, -1, back) : todayStr;
+    var to = Rotation.addIntervals(todayStr, 1, forward || '1y');
+    // A window that ends before it starts yields no events at all, silently. Refuse to invert.
+    if (to <= from) to = Rotation.addIntervals(from, 1, '1d');
+    return { from: from, toExclusive: to };
+  }
+
   // The { 'YYYY-MM-DD': [events] } map for a calendar view. Undated rows -> '__undated__'.
   // `win` ({from, toExclusive}) is what bounds rotation generation; without it the overlay is skipped
   // entirely, since generating unbounded periods is what the window exists to prevent.
@@ -121,7 +138,7 @@
     return out;
   }
 
-  var M = { build: build, periodsToCover: periodsToCover };
+  var M = { build: build, periodsToCover: periodsToCover, coverWindow: coverWindow };
   if (isNode) module.exports = M;
   else root.Events = M;
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));
