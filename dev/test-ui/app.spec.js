@@ -3068,14 +3068,16 @@ test.describe('v3 @both partition toggle in an embed', () => {
       // show the empty file and say nothing about what regenerate had published there.
       const oldBody = wrote[oldPath], newBody = wrote[newPath];
       await app.unpublishFeed('regen_fx');
-      const listedAfterStop = app.publishedFeeds.map((x) => x.name);
+      // Still LISTED after stopping -- it is a calendar, and the list is calendars-as-files -- but no
+      // longer published, so it offers a download and nothing to revoke.
+      const afterStop = app.calendarFiles.find((x) => x.name === 'regen_fx');
       window.backend.uploadFile = real;
       return {
         differentId: first.id !== second.id,
         differentUrl: first.url !== second.url,
         oldBody: oldBody, newBody: newBody,
         stoppedBody: wrote[newPath],       // the same path, re-read AFTER the stop
-        listedAfterStop
+        stillListed: !!afterStop, stillPublished: !!(afterStop && afterStop.published)
       };
     });
     expect(r.differentId).toBe(true);
@@ -3089,7 +3091,8 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.newBody).toContain('SUMMARY:Alpha');
     // Stopping blanks the live address too, and drops it from the list.
     expect(r.stoppedBody).not.toContain('BEGIN:VEVENT');
-    expect(r.listedAfterStop).not.toContain('regen_fx');
+    expect(r.stillListed).toBe(true);
+    expect(r.stillPublished).toBe(false);
   });
 
   test('Settings lists published feeds, including one that has stopped republishing', async ({ page }) => {
@@ -3107,12 +3110,38 @@ test.describe('v3 @both partition toggle in an embed', () => {
       // The trap this list exists to show: `feed` switched off stops REPUBLISHING while the last file
       // stays world-readable at an address already in people's calendar apps.
       delete window.VIEWS.list_off.feed;
-      const rows = app.publishedFeeds.map((f) => ({ name: f.name, live: f.live, hasUrl: !!f.url }));
+      // A calendar in NO nav entry at all, never published: the case the list exists for, since it is
+      // reachable from nowhere else in the app.
+      window.VIEWS.list_hidden = { name: 'list_hidden', calendar: { source: 'tasks', dateColumn: 'date' } };
+      const rows = app.calendarFiles.map((f) => ({ name: f.name, live: f.live, published: f.published }));
+      const inNav = app.sidebarTabs.filter((t) => t.id).map((t) => t.id);
       window.backend.uploadFile = real;
-      return rows;
+      return { rows, hiddenInNav: inNav.includes('list_hidden') };
     });
-    expect(r.find((x) => x.name === 'list_live')).toMatchObject({ live: true, hasUrl: true });
-    expect(r.find((x) => x.name === 'list_off')).toMatchObject({ live: false, hasUrl: true });
+    expect(r.rows.find((x) => x.name === 'list_live')).toMatchObject({ live: true, published: true });
+    expect(r.rows.find((x) => x.name === 'list_off')).toMatchObject({ live: false, published: true });
+    // Listed as a downloadable file even though nothing publishes it and no nav entry reaches it.
+    expect(r.rows.find((x) => x.name === 'list_hidden')).toMatchObject({ published: false });
+    expect(r.hiddenInNav).toBe(false);
+  });
+
+  test('an invisible calendar can be downloaded from Settings', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.dataCache['tasks'] = [{ id: 'a', date: app._calToday(), title: 'Alpha' }];
+      // Defined in VIEWS, absent from nav — unreachable except here.
+      window.VIEWS.hidden_cal = { name: 'hidden_cal', calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] } };
+      app.selectTab('__settings');
+    });
+    const btn = page.locator('[data-testid="feed-download-hidden_cal"]');
+    await expect(btn).toBeVisible();
+    const [download] = await Promise.all([page.waitForEvent('download'), btn.click()]);
+    expect(download.suggestedFilename()).toMatch(/^hidden_cal-\d{4}-\d{2}-\d{2}\.ics$/);
+    const text = require('fs').readFileSync(await download.path(), 'utf8');
+    expect(text).toContain('BEGIN:VCALENDAR');
+    expect(text).toContain('SUMMARY:Alpha');
   });
 
   test('a backend whose blob store is absent stops the BACKGROUND republish, not the button', async ({ page }) => {
@@ -3705,7 +3734,13 @@ test.describe('access control: user matching + fail-closed', () => {
       return backend_users.getMyProfile();
     }, pic);
     expect(saved.picture).toBe(pic);
-    // the settings avatar shows the uploaded image
+    // the settings avatar shows the uploaded image.
+    // Scrolled into view first: Vuetify's v-img defers loading until the element intersects the
+    // viewport, so an avatar below the fold renders its wrapper and never an <img>. This assertion used
+    // to pass only because the profile happened to sit high enough on the Settings screen -- an
+    // invisible dependency on how much content is above it, which any new panel would break.
+    const avatar = page.locator('.v-main .v-avatar').first();
+    await avatar.scrollIntoViewIfNeeded();
     await expect(page.locator('.v-main .v-avatar img').first()).toHaveAttribute('src', pic);
     // remove clears it everywhere
     const cleared = await page.evaluate(async () => {
