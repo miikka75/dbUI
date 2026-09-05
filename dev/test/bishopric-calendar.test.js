@@ -1,15 +1,18 @@
-// bishopric-calendar.test.js — the shipped bishopric calendar, driven through the real export path.
+// bishopric-calendar.test.js — the bishopric example ships NO calendar view, and does not need one.
 //
-// The other tests over the shipped examples check their SHAPE: that they parse, that they are written
-// in the current schema version, that their vocabulary is closed. None of them asks whether a view
-// actually produces anything, so a calendar could name a column that had been renamed out from under it
-// and every one of them would still pass while the screen rendered empty.
+// It used to ship two. They were removed once a calendar could be defined in the database instead: a
+// calendar is a saved question over tables that already exist, so putting one in the schema document
+// makes the example carry a decision that belongs to whoever installs it.
 //
-// This drives the real file through the real modules — SchemaNormalize -> Events.build -> Ics.build —
-// so the shipped config is checked against the code that consumes it.
+// What has to stay true is that removing them cost nothing, so this checks both halves:
 //
-// It also pins the two things about this particular calendar that are decisions rather than details:
-// which sources it draws from, and that it is NOT published.
+//   1. the schema really is minimal — no calendar view, nothing in the nav pointing at one;
+//   2. its dated tables are still EXPORTABLE, by building a calendar the way Settings does and driving
+//      it through the real modules (SchemaNormalize -> Events.build -> Ics.build).
+//
+// (2) is the half worth having. "No calendar in the schema" stays true by accident; "you can still get
+// an .ics out of this data" is the property actually being relied on, and it breaks silently — a
+// renamed column leaves the runtime path valid and permanently empty.
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -22,139 +25,79 @@ const Feeds = require('../../feeds');
 const doc = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'examples', 'bishopric-schema.json'), 'utf8'));
 const schema = doc.schema;
 const VIEWS = SchemaNormalize.flattenViews(schema.views);
-const CAL = 'meeting_calendar';
 
-// Two Sundays, as the shipped agenda table holds them.
-const dataCache = {
-  meeting_agenda: [
-    { id: 'm1', date: '2026-03-01', theme: 'Faith', presiding: 'bishop' },
-    { id: 'm2', date: '2026-03-08', theme: 'Service', presiding: 'counselor1' }
-  ]
-};
-const ctx = {
-  views: VIEWS, dataCache,
-  today: () => '2026-03-01',
-  t: (k) => k, tOr: (k, fb) => fb,
-  displayValue: (c, v) => (Array.isArray(v) ? v.join(', ') : String(v == null ? '' : v)),
-  canReachTable: () => true, hashColor: () => '#000', resolveMeTokens: (f) => f,
-  rotation: {
-    rangeFor: () => ({}), anchorFor: () => null, rotateEveryFor: () => undefined,
-    mineOnlySlot: () => null, slotsFor: () => [], slotLabel: (n, s) => s, valueColFor: () => ''
-  }
-};
-const WIN = { from: '2026-02-01', toExclusive: '2026-04-01' };
+const colsOf = (t) => (schema.tables[t].columns || []).reduce((m, c) => (m[c.name] = c, m), {});
+const dateColsOf = (t) => (schema.tables[t].columns || []).filter((c) => c.type === 'date').map((c) => c.name);
 
-describe('bishopric example — the calendar is wired to columns that exist', () => {
-  it('is a calendar view, in the nav', () => {
-    assert.equal(SchemaNormalize.viewKind(VIEWS[CAL]), 'calendar');
+describe('bishopric example — ships no calendar, and no feed', () => {
+  it('declares no calendar view', () => {
+    const cals = Object.keys(VIEWS).filter((n) => VIEWS[n].calendar);
+    assert.deepEqual(cals, [], 'a calendar in the schema is a decision the installer should make');
+  });
+
+  it('and nothing in the nav points at one', () => {
     const inNav = [];
     (function walk(items) { (items || []).forEach((i) => { if (i.view) inNav.push(i.view); walk(i.items); }); })(schema.nav.items);
-    assert.ok(inNav.includes(CAL), 'reachable from the sidebar');
+    assert.deepEqual(inNav.filter((n) => !VIEWS[n]), [], 'every nav entry names a view that exists');
+    assert.deepEqual(inNav.filter((n) => VIEWS[n] && VIEWS[n].calendar), []);
   });
 
-  it('every source names a real table, a real DATE column and real title columns', () => {
-    // The failure this catches: a renamed column leaves the calendar valid JSON and permanently empty.
-    const cols = (t) => (schema.tables[t].columns || []).reduce((m, c) => (m[c.name] = c, m), {});
-    VIEWS[CAL].calendar.sources.forEach((s) => {
-      assert.ok(schema.tables[s.table], s.table + ' exists');
-      const cs = cols(s.table);
-      assert.ok(cs[s.dateColumn], s.table + '.' + s.dateColumn + ' exists');
-      assert.equal(cs[s.dateColumn].type, 'date', s.table + '.' + s.dateColumn + ' is a date');
-      (s.titleColumns || []).forEach((c) => assert.ok(cs[c], s.table + '.' + c + ' exists'));
-    });
-  });
-
-  it('produces events, and serializes to a calendar a client would accept', () => {
-    const ev = Events.build(CAL, WIN, ctx);
-    assert.deepEqual(Object.keys(ev).sort(), ['2026-03-01', '2026-03-08']);
-    assert.equal(ev['2026-03-01'][0].title, 'Faith');
-
-    const doc = Ics.build(ev, { name: 'Bishopric', domain: 'test', dtstamp: '20260301T000000Z' });
-    assert.ok(doc.startsWith('BEGIN:VCALENDAR\r\n'));
-    assert.equal((doc.match(/BEGIN:VEVENT/g) || []).length, 2);
-    assert.ok(doc.includes('SUMMARY:Faith'));
-    assert.ok(doc.includes('DTSTART;VALUE=DATE:20260301'));
-  });
-});
-
-describe('bishopric example — what the calendar deliberately leaves out', () => {
-  it('draws ONLY from meeting_agenda', () => {
-    assert.deepEqual(VIEWS[CAL].calendar.sources.map((s) => s.table), ['meeting_agenda']);
-  });
-
-  it('carries nothing confidential, because a feed would serve it to anyone with the URL', () => {
-    // These tables are dated and would each look reasonable on a calendar. They are excluded on
-    // purpose: interviews name a person and a topic, reminders name who owes what, and the duty
-    // rotations carry obscureNames precisely because their names are not for everyone. This example is
-    // one switch away from being published, and that switch must not be the moment anyone finds out.
-    const tables = VIEWS[CAL].calendar.sources.map((s) => s.table);
-    ['admin_interviews', 'admin_reminders', 'admin_callings', 'duty_usher_dates', 'duty_interpreters']
-      .forEach((t) => assert.ok(!tables.includes(t), t + ' is not a calendar source'));
-  });
-
-  it('is NOT published — installing an example must not mint a world-readable URL', () => {
-    // Turning it on is one field in the schema editor. Doing it FOR someone, on install, is a privacy
-    // decision that is not the example's to make.
-    assert.equal(Feeds.isFeed(VIEWS[CAL]), false);
+  it('publishes nothing — no shipped example mints a world-readable URL on install', () => {
     assert.deepEqual(Feeds.names(VIEWS), []);
-  });
-
-  it('no OTHER shipped view is published either', () => {
     ['chores', 'demo'].forEach((name) => {
       const f = path.join(__dirname, '..', '..', 'examples', name + '-schema.json');
       if (!fs.existsSync(f)) return;
       const d = JSON.parse(fs.readFileSync(f, 'utf8'));
-      const v = SchemaNormalize.flattenViews((d.schema || d).views);
-      assert.deepEqual(Feeds.names(v), [], name + ' ships no feed');
+      assert.deepEqual(Feeds.names(SchemaNormalize.flattenViews((d.schema || d).views)), [], name);
     });
   });
 });
 
-describe('bishopric example — my_calendar narrows to the viewer', () => {
-  const MY = 'my_calendar';
-  const rows = {
-    meeting_agenda: [
-      { id: 'm1', date: '2026-03-01', theme: 'Faith', responsible: 'bishop' },
-      { id: 'm2', date: '2026-03-08', theme: 'Service', responsible: 'counselor1' }
-    ],
-    admin_interviews: [
-      { id: 'i1', meeting: '2026-03-03', person: 'Ann', topic: 'Temple', responsible: 'bishop' },
-      { id: 'i2', meeting: '2026-03-04', person: 'Bob', topic: 'Calling', responsible: 'counselor2' }
-    ],
-    admin_reminders: [
-      { id: 'r1', date: '2026-03-05', item: 'Order flowers', person: 'Cal', responsible: 'counselor1' }
-    ]
-  };
-  // The app resolves `@me` per column through that column's list; here it stands in for one viewer.
-  const asPerson = (who) => Object.assign({}, ctx, {
-    dataCache: rows,
-    resolveMeTokens: (f) => JSON.parse(JSON.stringify(f == null ? null : f).split('"@me"').join(JSON.stringify(who)))
+describe('bishopric example — its dated tables are still exportable at runtime', () => {
+  // The tables someone would actually put on a calendar, and the date column each one means. Named
+  // rather than derived: admin_interviews has TWO date columns (`meeting` and `expires`) and only one
+  // of them is when the thing happens — which is the whole reason a calendar has to be declared
+  // somewhere rather than inferred from a table.
+  const CANDIDATES = [
+    ['meeting_agenda', 'date', ['theme']],
+    ['duty_usher_dates', 'date', []],
+    ['admin_interviews', 'meeting', ['person', 'topic']],
+    ['admin_reminders', 'date', ['item']]
+  ];
+
+  it('every table Settings would offer still has the columns a calendar needs', () => {
+    CANDIDATES.forEach(function(entry) {
+      var table = entry[0], dateCol = entry[1], titles = entry[2];
+      assert.ok(schema.tables[table], table + ' exists');
+      const cs = colsOf(table);
+      assert.ok(cs[dateCol], table + '.' + dateCol + ' exists');
+      assert.equal(cs[dateCol].type, 'date', table + '.' + dateCol + ' is a date column');
+      assert.ok(dateColsOf(table).includes(dateCol));
+      titles.forEach((c) => assert.ok(cs[c], table + '.' + c + ' exists'));
+    });
   });
 
-  it('every source filters on `responsible`, so nothing unfiltered leaks in', () => {
-    const srcs = VIEWS[MY].calendar.sources;
-    assert.ok(srcs.length >= 3);
-    srcs.forEach((s) => assert.deepEqual(s.filter, { responsible: '@me' }));
-  });
+  it('a calendar built the way Settings builds one produces an .ics from this schema', () => {
+    // Exactly the shape saveUserCalendar stores and _applyUserCalendars merges into VIEWS.
+    const runtime = Object.assign({}, VIEWS, {
+      ushers: { name: 'ushers', kind: 'calendar', userDefined: true,
+                calendar: { sources: [{ table: 'duty_usher_dates', dateColumn: 'date', titleColumns: [] }] } }
+    });
+    const dataCache = { duty_usher_dates: [{ id: 'u1', date: '2026-09-13' }, { id: 'u2', date: '2026-09-20' }] };
+    const ctx = {
+      views: runtime, dataCache, today: () => '2026-09-06',
+      t: (k) => k, tOr: (k, fb) => fb,
+      displayValue: (c, v) => String(v == null ? '' : v),
+      canReachTable: () => true, hashColor: () => '#000', resolveMeTokens: (f) => f,
+      rotation: { rangeFor: () => ({}), anchorFor: () => null, rotateEveryFor: () => undefined,
+                  mineOnlySlot: () => null, slotsFor: () => [], slotLabel: (n, s) => s, valueColFor: () => '' }
+    };
+    const ev = Events.build('ushers', { from: '2026-06-06', toExclusive: '2027-09-06' }, ctx);
+    assert.deepEqual(Object.keys(ev).sort(), ['2026-09-13', '2026-09-20']);
 
-  it('two people open the same view and see different calendars', () => {
-    const bishop = Events.build(MY, WIN, asPerson('bishop'));
-    const c1 = Events.build(MY, WIN, asPerson('counselor1'));
-    const titles = (ev) => Object.keys(ev).sort().flatMap((d) => ev[d].map((e) => e.title));
-    assert.deepEqual(titles(bishop).sort(), ['Ann — Temple', 'Faith']);
-    assert.deepEqual(titles(c1).sort(), ['Order flowers — Cal', 'Service']);
-  });
-
-  it('an unresolvable identity matches nothing rather than everything', () => {
-    // The failure direction that matters: a viewer the link cannot resolve must see an empty calendar,
-    // never the whole bishopric's.
-    const ghost = Events.build(MY, WIN, asPerson('\u0000__no_me__'));
-    assert.deepEqual(Object.keys(ghost), []);
-  });
-
-  it('cannot be published, and is not', () => {
-    // validateSchema refuses `feed` beside an `@me` filter: a published file has no viewer, so it would
-    // carry whoever pressed publish and then be served to everyone.
-    assert.equal(Feeds.isFeed(VIEWS[MY]), false);
+    const out = Ics.build(ev, { name: 'Ushers', domain: 'test', dtstamp: '20260906T000000Z' });
+    assert.ok(out.startsWith('BEGIN:VCALENDAR\r\n'));
+    assert.equal((out.match(/BEGIN:VEVENT/g) || []).length, 2);
+    assert.ok(out.includes('DTSTART;VALUE=DATE:20260913'));
   });
 });
