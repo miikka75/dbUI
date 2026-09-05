@@ -1530,6 +1530,34 @@ function createVueApp() {
       // Fail-closed per source: a table the user cannot read contributes nothing. When `window` is
       // given, rotationSources' generated duties are added (bounded to that window).
       calEventsFor: function(name, window) { return Events.build(name, window, this._eventsCtx()); },
+      // The rows a calendar reads, present before anything renders a FILE from them.
+      //
+      // Boot fetches no table data and a view loads its own tables when it opens, so for the first
+      // seconds after opening a calendar `dataCache` is empty. A screen copes with that -- it re-renders
+      // as each table lands. An export does not: it reads the cache once and writes whatever was there,
+      // which for a calendar opened a moment ago is an EMPTY CALENDAR, saved with no error and no clue.
+      //
+      // Awaits the fetches _ensureCached starts, then waits briefly for anything a LIVE SUBSCRIPTION is
+      // delivering instead (Firestore's first snapshot carries the rows, so no fetch is started for it
+      // and there is no promise to await). Bounded, because a table nobody can read never arrives and an
+      // export that hangs is worse than one that is honestly short.
+      _awaitViewData: function(name) {
+        var self = this, tables = Feeds.tablesOf(VIEWS, name);
+        var missing = function() {
+          return tables.filter(function(t) { return self.canReachTable(t) && !self.dataCache[t]; });
+        };
+        return Promise.resolve(this._ensureCached(tables, null, this._viewNeedsArchive(name))).then(function() {
+          if (!missing().length) return null;
+          return new Promise(function(resolve) {
+            var waited = 0;
+            var tick = function() {
+              if (!missing().length || waited >= 3000) return resolve(null);
+              waited += 100; setTimeout(tick, 100);
+            };
+            setTimeout(tick, 100);
+          });
+        });
+      },
       // Download a calendar view as an .ics file. Serialization is Ics.build (pure, Node-tested); this
       // is only the window choice and the browser save, mirroring exportData's Blob/anchor dance.
       //
@@ -1546,7 +1574,9 @@ function createVueApp() {
         var view = name || this.currentTable;
         var win = this.calendarCoverFor(view);
         // fallbackToSession: an unpinned download matches the screen the person is looking at.
-        return this._icsStringsFor(this.calendarIcsFor(view).lang, true).then(function(strings) {
+        return this._awaitViewData(view).then(function() {
+          return self._icsStringsFor(self.calendarIcsFor(view).lang, true);
+        }).then(function(strings) {
           var text = self._renderIcs(view, win, strings);
           var a = document.createElement('a');
           a.href = URL.createObjectURL(new Blob([text], { type: 'text/calendar;charset=utf-8' }));
@@ -1734,7 +1764,9 @@ function createVueApp() {
         var win = this.calendarCoverFor(name);
         // NOT fallbackToSession. A feed republishes automatically on write, so inheriting the session
         // would mean subscribers' calendars silently change language depending on who edited a row last.
-        return this._icsStringsFor(this.calendarIcsFor(name).lang, false).then(function(strings) {
+        return this._awaitViewData(name).then(function() {
+          return self._icsStringsFor(self.calendarIcsFor(name).lang, false);
+        }).then(function(strings) {
           var text = self._renderIcs(name, win, strings);
           var blob = new Blob([text], { type: 'text/calendar;charset=utf-8' });
           return backend.uploadFile(blob, { path: Feeds.pathFor(id), contentType: 'text/calendar' });
@@ -2191,8 +2223,13 @@ function createVueApp() {
         return p;
       },
 
+      // Returns a promise for the loads it STARTED, so a caller that has to read the rows (rather than
+      // just render them when they arrive) can wait. Navigation ignores it and is unchanged: a view
+      // re-renders reactively as each table lands. An EXPORT cannot -- it reads dataCache once and
+      // writes a file, so without waiting it happily produces an empty calendar.
       _ensureCached: function(tables, onLoad, wantArchive) {
         var self = this;
+        var started = [];
         // Whatever this view needs cached is also what it needs kept LIVE. Watching here (rather than
         // per branch of loadTableData) means every derived kind — calendar, rotation, pivot, rsvp,
         // union/join — subscribes through the same list it already preloads, and cannot drift from it.
@@ -2205,23 +2242,24 @@ function createVueApp() {
           // responses table loads for a no-grant member instead of silently staying empty.
           if (!tbl || !self.canReachTable(tbl)) return;
           if (!self.dataCache[tbl] && !self._liveLoads(tbl)) {
-            self._fetchTable(tbl, 'active', tbl).then(function() {
+            started.push(self._fetchTable(tbl, 'active', tbl).then(function() {
               // A table can only be swept once it is HERE. _autoArchive walks whatever is cached and a
               // repeat run finds nothing left to move, so this is what keeps the sweep working when boot
               // no longer loads everything -- otherwise rows in a table nobody had opened would simply
               // never age out, silently.
               self._autoArchive();
               if (onLoad) onLoad(tbl);
-            });
+            }));
           }
           // The ARCHIVE partition, only when the caller says something will read it, and still behind
           // `preload_archive` -- a user who turned that off asked not to load archives, and the
           // documented consequence (a history view comes up short) is unchanged.
           if (wantArchive && self.settings.preload_archive && SCHEMA[tbl] && SCHEMA[tbl].archivable && !self.dataCache[aKey(tbl)]) {
-            self._fetchTable(tbl, 'archive', aKey(tbl)).then(function() { if (onLoad) onLoad(tbl); });
+            started.push(self._fetchTable(tbl, 'archive', aKey(tbl)).then(function() { if (onLoad) onLoad(tbl); }));
           }
         });
-        self._ensureDeps(tables, onLoad);
+        started.push(self._ensureDeps(tables, onLoad));
+        return Promise.all(started);
       },
 
       // The tables a view's COLUMNS resolve out of, as opposed to the tables its rows come from: a ref
@@ -2240,16 +2278,17 @@ function createVueApp() {
       //     closure of the schema on the first view load, which is the cost this is meant to avoid.
       _ensureDeps: function(tables, onLoad) {
         var self = this;
-        if (typeof Columns === 'undefined' || !Columns.tableDeps) return;
-        var seen = {};
+        if (typeof Columns === 'undefined' || !Columns.tableDeps) return Promise.resolve();
+        var started = [], seen = {};
         (tables || []).forEach(function(tbl) {
           if (!tbl) return;
           Columns.tableDeps(SCHEMA, tbl).forEach(function(dep) {
             if (seen[dep] || self.dataCache[dep] || !self.canReachTable(dep)) return;
             seen[dep] = 1;
-            self._fetchTable(dep, 'active', dep).then(function() { if (onLoad) onLoad(dep); });
+            started.push(self._fetchTable(dep, 'active', dep).then(function() { if (onLoad) onLoad(dep); }));
           });
         });
+        return Promise.all(started);
       },
 
       // --- Live sync ------------------------------------------------------------------------------
@@ -2401,13 +2440,9 @@ function createVueApp() {
           // Calendar view: load each distinct source table (deduped); the grid/panel read from
           // dataCache via calEventsFor. No stored calendar rows — pure presentation of source rows.
           if (view.calendar) {
-            var calTables = [];
-            self.calSources(self.currentTable).forEach(function(s) { if (s && s.table && calTables.indexOf(s.table) < 0) calTables.push(s.table); });
-            // Also preload each rotationSource's rosters so generated duty events can resolve.
-            self.calRotationSources(self.currentTable).forEach(function(rs) {
-              rotationTables(VIEWS[rs.view]).forEach(function(tbl) { if (calTables.indexOf(tbl) < 0) calTables.push(tbl); });
-            });
-            self._ensureCached(calTables, null, self._viewNeedsArchive(self.currentTable));
+            // One answer to "what does this calendar read", shared with the export path — see
+            // Feeds.tablesOf. Built inline here until the two disagreed.
+            self._ensureCached(Feeds.tablesOf(VIEWS, self.currentTable), null, self._viewNeedsArchive(self.currentTable));
             return;
           }
           // rotationView (third view kind): generate rows from range; no sources to read.

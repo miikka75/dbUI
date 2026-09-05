@@ -4192,6 +4192,29 @@ test.describe('calendar view', () => {
     await expect(cal).toContainText('cal.no_events');             // the panel followed the click to an empty day
   });
 
+  test('exporting a calendar the moment it opens waits for its rows, instead of writing an empty file', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      window.VIEWS.race_cal = { name: 'race_cal', calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] } };
+      // The row goes to the BACKEND, then the local cache is dropped. That is the state a calendar is
+      // in for the first moments after someone clicks it: rows exist, dataCache does not, because boot
+      // fetches no table data and a view loads its own tables when it opens.
+      await window.Writes.putRow('tasks', { id: 'race_row', date: app._calToday(), title: 'RaceRow' }, 'active');
+      delete app.dataCache['tasks'];
+    });
+    // Open and export in the SAME tick. Before this waited, the file was written from an empty cache:
+    // a valid calendar with no events, saved with no error and nothing to suggest anything was wrong.
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.evaluate(() => { window.appInstance.selectTab('race_cal'); return window.appInstance.downloadIcs('race_cal'); })
+    ]);
+    const text = require('fs').readFileSync(await download.path(), 'utf8');
+    expect(text).toContain('BEGIN:VCALENDAR');
+    expect(text).toContain('SUMMARY:RaceRow');
+  });
+
   test('the calendar exports an .ics the browser is handed as a download', async ({ page }) => {
     await ensureAppReady(page);
     // The button is the only part not covered by dev/test/ics.test.js, so this asserts the WIRING: a

@@ -58,8 +58,20 @@ describe('feeds.js — what a feed depends on', () => {
     assert.deepEqual(Feeds.tablesOf(v, 'broken'), []);
   });
 
-  it('a non-feed view depends on nothing, so its writes republish nothing', () => {
-    assert.deepEqual(Feeds.tablesOf(VIEWS, 'private_cal'), []);
+  it('answers for ANY calendar, published or not — three callers share this one question', () => {
+    // What to preload when the view opens, what to wait for before writing a file from it, and what
+    // invalidates a published feed. Gating this on `feed` is what let the export path wait on a helper
+    // that returned nothing for a calendar, and write an empty file.
+    assert.deepEqual(Feeds.tablesOf(VIEWS, 'private_cal'), ['secrets']);
+  });
+
+  it('but an unpublished calendar still republishes nothing', () => {
+    // The gate belongs on forTable, which is about FEEDS, not on the table list.
+    assert.deepEqual(Feeds.forTable(VIEWS, 'secrets'), []);
+  });
+
+  it('a view that is not a calendar at all reads no calendar tables', () => {
+    assert.deepEqual(Feeds.tablesOf(VIEWS, 'notcal'), []);
   });
 });
 
