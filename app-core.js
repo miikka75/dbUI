@@ -298,9 +298,21 @@ function createVueApp() {
       _inflight: {},
       _liveSubs: {},
       _liveState: null,
+      // The calendar being edited in Settings. A DRAFT, not the stored definition: a half-built calendar
+      // (a table picked, its date column not yet) is exactly what the validator rejects, and writing
+      // each keystroke through would either spam the config or force the validator to tolerate the
+      // invalid states it exists to catch.
+      calDraft: null,
+      calDraftId: '',
+      // Names VIEWS currently holds from folder-config calendar definitions, so a deleted one can be
+      // removed rather than lingering until reload.
+      _userCalNames: [],
       // Feed republish coalescing: names invalidated since the last flush, and the pending timer.
       _feedDirty: {},
       _feedTimer: null,
+      // Set when an upload has actually failed, which is the only way to learn that this deployment has
+      // no usable blob store — see publishFeed. Session-scoped on purpose: a reload re-tries.
+      _blobStoreDown: false,
       _liveRebuildTimer: null,
       pendingDelete: null,
       pendingDeleteTimer: null,
@@ -331,34 +343,7 @@ function createVueApp() {
       allGroupIds: function() { return this.sidebarTabs.filter(function(t) { return t.children; }).map(function(t) { return t.id; }); },
       sidebarTabs: function() {
         var self = this;
-        var allowedTables = self.userAllowedTables;
-        function canAccess(id) {
-          if (!allowedTables) return true;
-          if (VIEWS[id]) {
-            var v = VIEWS[id];
-            // Restricted doc-view: a markdown page with `access:[tables]` is hidden unless the user is
-            // granted one of them (the firestore _pages rule enforces the matching read server-side).
-            if (typeof v.markdown === 'string' && !self.canAccessPage(v)) return false;
-            // A source is reachable if granted OR self-serviceable (owner-column table): a member sees a
-            // self-service table/view in nav without a table grant, scoped to their own rows by the rules.
-            if (!(v.sources || []).every(function(s) { return self.canReachTable(s); })) return false;
-            // A sourceless view (rotation/calendar/pivot/rsvp) is unlocked by ANY of the tables it reads
-            // — one you lack simply renders blank (per-roster access, e.g. team_b coordinator sees
-            // team_a empty). Those inputs are declared per-kind (rosters, calendar.sources,
-            // pivot.source, rsvp.events/responses), not in `sources`, so ask viewImplicitTables for the
-            // whole set: consulting rosters alone let a calendar or a pivot through to a user with no
-            // grant on anything it reads, handing them a tab that could only ever render empty.
-            // Self-service counts, exactly as it does for a declared source above — it is what keeps a
-            // grantless member's own calendar (where `addTo` lets them log a row) in their nav.
-            if (!(v.sources && v.sources.length)) {
-              var inputs = viewImplicitTables(v);
-              if (inputs.length) return inputs.some(function(t) { return self.canReachTable(t); });
-            }
-            return true;
-          }
-          if (SCHEMA[id]) return self.canReachTable(id);
-          return true;
-        }
+        var canAccess = function(id) { return self.canAccessNavId(id); };
         var navCfg = self.navConfig;
         var navItems = (navCfg && Array.isArray(navCfg.items)) ? navCfg.items : [];
         return buildNavTabs(navItems, self.t.bind(self), canAccess, { isAdmin: self.isAdmin, hasLookup: self.refTables.length || Object.keys(self.visibleLists).length });
@@ -530,6 +515,51 @@ function createVueApp() {
       sortedUserList: function() {
         return this.userList.slice().sort(function(a, b) {
           return (a.key || '').toLowerCase().localeCompare((b.key || '').toLowerCase());
+        });
+      },
+      userCalendars: function() {
+        var defs = (this.appConfig && this.appConfig.calendars) || {};
+        return Object.keys(defs).map(function(id) {
+          return Object.assign({ id: id }, defs[id]);
+        }).sort(function(a, b) { return String(a.title || a.id).localeCompare(String(b.title || b.id)); });
+      },
+      calendarSourceTables: function() {
+        var self = this;
+        return Object.keys(SCHEMA).filter(function(t) {
+          return self.canReachTable(t) && self.dateColumnsOf(t).length;
+        }).sort();
+      },
+      // Every calendar this database has, as a FILE — what Settings offers to download and manage.
+      //
+      // The union of two sets, and the second is the one that matters:
+      //   - calendars the viewer may reach. Listed whether or not they are in the nav, because a
+      //     publish-only calendar need not be in the nav at all and would otherwise be reachable
+      //     nowhere. Access is `canAccessNavId`, the same question the sidebar asks, so the two cannot
+      //     come to disagree about what someone may see.
+      //   - anything the folder config says has been PUBLISHED, even when its view is gone or its
+      //     `feed` switch is off. Those files are still being served at a URL already in people's
+      //     calendar apps, so dropping them from the one screen that lists what is out there would hide
+      //     exactly the case someone needs to find.
+      calendarFiles: function() {
+        var self = this;
+        var feeds = (this.appConfig && this.appConfig.feeds) || {};
+        var names = Object.keys(VIEWS).filter(function(n) {
+          return self.isCalendarName(n) && self.canAccessNavId(n);
+        });
+        Object.keys(feeds).forEach(function(n) { if (names.indexOf(n) < 0) names.push(n); });
+        return names.sort().map(function(n) {
+          var f = feeds[n] || {};
+          return {
+            name: n,
+            title: self.tOr('view.' + n, self.tOr('tab.' + n, n)),
+            url: f.url || '',
+            at: f.at || '',
+            // Declared a feed AND still a calendar. False on a published file whose view was removed or
+            // switched off — it no longer updates, and the row says so rather than looking healthy.
+            live: Feeds.isFeed(VIEWS[n]),
+            // A calendar that exists but has never been published: downloadable, nothing to revoke.
+            published: !!f.url
+          };
         });
       },
       // Tables I may SEE (grant mode 'r' or 'rw'). This is the visibility set every nav/load/list gate
@@ -823,7 +853,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_open', 'settings.cal_delete', 'settings.cal_custom', 'settings.cal_custom_note', 'msg.name_taken', 'btn.cancel', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1052,6 +1082,39 @@ function createVueApp() {
     },
 
     methods: {
+      // "May this user reach this nav id?" -- the one question the sidebar asks of every entry, and now
+      // also what the Settings calendar list asks before offering a calendar as a file. It lived inside
+      // sidebarTabs, which was fine while the sidebar was its only caller; a second copy is how the menu
+      // and the export list would come to disagree about what someone may see.
+      canAccessNavId: function(id) {
+        var self = this;
+        var allowedTables = this.userAllowedTables;   // null = unrestricted
+        if (!allowedTables) return true;
+        if (VIEWS[id]) {
+          var v = VIEWS[id];
+          // Restricted doc-view: a markdown page with `access:[tables]` is hidden unless the user is
+          // granted one of them (the firestore _pages rule enforces the matching read server-side).
+          if (typeof v.markdown === 'string' && !self.canAccessPage(v)) return false;
+          // A source is reachable if granted OR self-serviceable (owner-column table): a member sees a
+          // self-service table/view in nav without a table grant, scoped to their own rows by the rules.
+          if (!(v.sources || []).every(function(s) { return self.canReachTable(s); })) return false;
+          // A sourceless view (rotation/calendar/pivot/rsvp) is unlocked by ANY of the tables it reads
+          // — one you lack simply renders blank (per-roster access, e.g. team_b coordinator sees
+          // team_a empty). Those inputs are declared per-kind (rosters, calendar.sources,
+          // pivot.source, rsvp.events/responses), not in `sources`, so ask viewImplicitTables for the
+          // whole set: consulting rosters alone let a calendar or a pivot through to a user with no
+          // grant on anything it reads, handing them a tab that could only ever render empty.
+          // Self-service counts, exactly as it does for a declared source above — it is what keeps a
+          // grantless member's own calendar (where `addTo` lets them log a row) in their nav.
+          if (!(v.sources && v.sources.length)) {
+            var inputs = viewImplicitTables(v);
+            if (inputs.length) return inputs.some(function(t) { return self.canReachTable(t); });
+          }
+          return true;
+        }
+        if (SCHEMA[id]) return self.canReachTable(id);
+        return true;
+      },
       t: function(key) { return this.strings[key] || key; },
       // Only for keys whose fallback is the DATA the key labels — a column/view/list value, which reads
       // far better raw ("chore_name") than as a key ("field.chore_name"). Static UI prose must use t(),
@@ -1197,6 +1260,7 @@ function createVueApp() {
           if (!backend.getFolderConfig) return;
           return Promise.resolve(backend.getFolderConfig()).then(function(cfg) {
             self.appConfig = cfg || {};
+            self._applyUserCalendars();
           }).catch(function() {});
         });
 
@@ -1488,6 +1552,143 @@ function createVueApp() {
       // Fail-closed per source: a table the user cannot read contributes nothing. When `window` is
       // given, rotationSources' generated duties are added (bounded to that window).
       calEventsFor: function(name, window) { return Events.build(name, window, this._eventsCtx()); },
+      // --- Calendars defined in the DATABASE ----------------------------------------------------
+      // A calendar is a saved question over tables that already exist, so it does not have to be part of
+      // the schema document. These live in the FOLDER CONFIG -- which already holds per-view runtime
+      // settings (a rotation's anchor, a calendar's window, a feed's URL), is already admin-only to
+      // write, and is already exported and imported.
+      //
+      // Not a `_calendars` system store, deliberately: firestore.rules denies the whole underscore
+      // namespace as a fail-safe, so a new one needs its own block there, the mirror in the Supabase
+      // RLS, and the dev server -- three layers of access rules to hold one list of view definitions
+      // that nothing enforces access on anyway. Rendering is gated per SOURCE at read time, not by who
+      // wrote the definition.
+      //
+      // Merged into VIEWS as ordinary calendar views, so everything downstream is inherited untouched:
+      // rendering, the .ics download, the window and language settings, {{view:x}} embeds, and the
+      // Settings list. `_userCalNames` is what was merged last time, so a deleted one is removed rather
+      // than lingering until reload.
+      _applyUserCalendars: function() {
+        var defs = (this.appConfig && this.appConfig.calendars) || {};
+        (this._userCalNames || []).forEach(function(n) { if (VIEWS[n]) delete VIEWS[n]; });
+        var added = [];
+        Object.keys(defs).forEach(function(id) {
+          var d = defs[id];
+          if (!d || !Array.isArray(d.sources) || !d.sources.length) return;
+          // A schema view of the same name WINS. The schema is the more deliberate statement, and
+          // silently shadowing one from a config row is how a calendar would start disagreeing with the
+          // file it appears to come from.
+          if (VIEWS[id] && added.indexOf(id) < 0) return;
+          VIEWS[id] = {
+            name: id, kind: 'calendar', userDefined: true,
+            calendar: { sources: d.sources, defaultView: d.defaultView || 'month' },
+            obscureNames: d.obscureNames || undefined,
+            ics: undefined
+          };
+          added.push(id);
+        });
+        this._userCalNames = added;
+        return added;
+      },
+      // Every calendar an admin has defined here, for the Settings editor. Ordered by title so the list
+      // does not reshuffle when one is renamed.
+      newUserCalendar: function() {
+        this.calDraftId = '';
+        this.calDraft = { title: '', sources: [{ table: '', dateColumn: '', titleColumns: [] }] };
+      },
+      editUserCalendar: function(c) {
+        this.calDraftId = c.id;
+        this.calDraft = JSON.parse(JSON.stringify({ title: c.title || '', sources: c.sources || [] }));
+      },
+      addCalDraftSource: function() { this.calDraft.sources.push({ table: '', dateColumn: '', titleColumns: [] }); },
+      removeCalDraftSource: function(i) { this.calDraft.sources.splice(i, 1); },
+      // Changing the table invalidates the columns picked under it -- they belong to the old one.
+      calDraftTableChanged: function(src) { src.dateColumn = ''; src.titleColumns = []; },
+      saveCalDraft: function() {
+        var self = this;
+        // The id is derived from the name ONCE, on create, and then never moves: it is what VIEWS is
+        // keyed on and what the folder config stores, so renaming to a new id would orphan the old
+        // definition and any per-view settings hanging off it.
+        var id = this.calDraftId || ('cal_' + String(this.calDraft.title || 'calendar').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')).slice(0, 40);
+        if (!this.calDraftId && VIEWS[id]) { this.notify(this.t('msg.name_taken')); return; }
+        return this.saveUserCalendar(id, JSON.parse(JSON.stringify(this.calDraft))).then(function(errs) {
+          if (!errs.length) { self.calDraft = null; self.calDraftId = ''; }
+        });
+      },
+      cancelCalDraft: function() { this.calDraft = null; this.calDraftId = ''; },
+      openUserCalendar: function(id) { this.selectTab(id); },
+      // Tables this user could put on a calendar: ones they can reach that declare a date column.
+      // Save one definition. Validated here rather than only in the form, because the folder config is
+      // also reachable by IMPORT -- and every one of these mistakes fails the same silent way, as a
+      // calendar that renders and exports nothing at all.
+      saveUserCalendar: function(id, def) {
+        var errs = this.userCalendarErrors(def);
+        if (errs.length) { this.notify(errs[0]); return Promise.resolve(errs); }
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.calendars = Object.assign({}, cfg.calendars || {});
+        cfg.calendars[id] = def;
+        cfg.mode = this.mode;
+        this._saveFolderConfig(cfg, null);
+        this._applyUserCalendars();
+        return Promise.resolve([]);
+      },
+      deleteUserCalendar: function(id) {
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.calendars = Object.assign({}, cfg.calendars || {});
+        delete cfg.calendars[id];
+        cfg.mode = this.mode;
+        this._saveFolderConfig(cfg, null);
+        this._applyUserCalendars();
+        if (this.currentTable === id) this._autoSelectTab();
+      },
+      // The same checks validateSchema makes of a schema calendar. Each of these otherwise produces a
+      // calendar that is valid, renders, and is permanently empty -- indistinguishable from a table
+      // nobody has filled in yet.
+      userCalendarErrors: function(def) {
+        var self = this, errs = [];
+        if (!def || !Array.isArray(def.sources) || !def.sources.length) { errs.push(this.t('cal.err_no_source')); return errs; }
+        def.sources.forEach(function(s) {
+          if (!s || !s.table || !SCHEMA[s.table]) { errs.push(self.t('cal.err_table')); return; }
+          var cols = (SCHEMA[s.table] && SCHEMA[s.table].columns) || {};
+          if (!s.dateColumn || !cols[s.dateColumn]) { errs.push(self.t('cal.err_date_col')); return; }
+          if (!Columns.colIsDate(SCHEMA, s.dateColumn)) errs.push(self.t('cal.err_not_date'));
+          (s.titleColumns || []).forEach(function(c) { if (!cols[c]) errs.push(self.t('cal.err_title_col')); });
+        });
+        return errs;
+      },
+      // Date columns of a table, for the editor's pickers.
+      columnsOf: function(table) { return table && SCHEMA[table] ? getColumns(table) : []; },
+      dateColumnsOf: function(table) {
+        return getColumns(table).filter(function(c) { return Columns.colIsDate(SCHEMA, c); });
+      },
+      // The rows a calendar reads, present before anything renders a FILE from them.
+      //
+      // Boot fetches no table data and a view loads its own tables when it opens, so for the first
+      // seconds after opening a calendar `dataCache` is empty. A screen copes with that -- it re-renders
+      // as each table lands. An export does not: it reads the cache once and writes whatever was there,
+      // which for a calendar opened a moment ago is an EMPTY CALENDAR, saved with no error and no clue.
+      //
+      // Awaits the fetches _ensureCached starts, then waits briefly for anything a LIVE SUBSCRIPTION is
+      // delivering instead (Firestore's first snapshot carries the rows, so no fetch is started for it
+      // and there is no promise to await). Bounded, because a table nobody can read never arrives and an
+      // export that hangs is worse than one that is honestly short.
+      _awaitViewData: function(name) {
+        var self = this, tables = Feeds.tablesOf(VIEWS, name);
+        var missing = function() {
+          return tables.filter(function(t) { return self.canReachTable(t) && !self.dataCache[t]; });
+        };
+        return Promise.resolve(this._ensureCached(tables, null, this._viewNeedsArchive(name))).then(function() {
+          if (!missing().length) return null;
+          return new Promise(function(resolve) {
+            var waited = 0;
+            var tick = function() {
+              if (!missing().length || waited >= 3000) return resolve(null);
+              waited += 100; setTimeout(tick, 100);
+            };
+            setTimeout(tick, 100);
+          });
+        });
+      },
       // Download a calendar view as an .ics file. Serialization is Ics.build (pure, Node-tested); this
       // is only the window choice and the browser save, mirroring exportData's Blob/anchor dance.
       //
@@ -1504,7 +1705,9 @@ function createVueApp() {
         var view = name || this.currentTable;
         var win = this.calendarCoverFor(view);
         // fallbackToSession: an unpinned download matches the screen the person is looking at.
-        return this._icsStringsFor(this.calendarIcsFor(view).lang, true).then(function(strings) {
+        return this._awaitViewData(view).then(function() {
+          return self._icsStringsFor(self.calendarIcsFor(view).lang, true);
+        }).then(function(strings) {
           var text = self._renderIcs(view, win, strings);
           var a = document.createElement('a');
           a.href = URL.createObjectURL(new Blob([text], { type: 'text/calendar;charset=utf-8' }));
@@ -1623,7 +1826,59 @@ function createVueApp() {
         cfg.mode = this.mode;
         this._saveFolderConfig(cfg, viewName);
       },
+      // One clipboard helper: the calendar toolbar and the Settings feed list both copy a URL, and a
+      // second copy of the try/catch is how the two would come to report success differently.
+      copyText: function(text) {
+        var self = this;
+        return Promise.resolve(navigator.clipboard && navigator.clipboard.writeText(text))
+          .then(function() { self.notify(self.t('msg.copied')); })
+          .catch(function() { self.notify(self.t('msg.save_failed')); });
+      },
       feedInfoFor: function(name) { return ((this.appConfig && this.appConfig.feeds) || {})[name] || null; },
+      // Blank the file at an id's path: a VALID but empty calendar, uploaded over the old object.
+      //
+      // This is what revocation means here, and it is deliberately not a delete. There is no delete in
+      // the backend contract, and adding one would not be better: a 404 leaves clients retrying a dead
+      // address, while an empty VCALENDAR is a clean "there is nothing here" that every client
+      // understands. What matters either way is that the old URL stops SERVING DATA -- minting a new id
+      // and walking away would leave the leaked link showing the last snapshot for ever, which is the
+      // opposite of revoking it.
+      _blankFeedAt: function(id) {
+        if (!id || !backend.uploadFile) return Promise.resolve(null);
+        var text = Ics.build({}, { name: this.t('settings.feed_revoked'), domain: (typeof Databases !== 'undefined' && Databases.activeKey()) || 'dbui.local' });
+        var blob = new Blob([text], { type: 'text/calendar;charset=utf-8' });
+        return Promise.resolve(backend.uploadFile(blob, { path: Feeds.pathFor(id), contentType: 'text/calendar' }))
+          .catch(function() { return null; });   // best effort: the caller must still move on to a new id
+      },
+
+      // Retire the current URL and publish at a fresh one. Every existing subscriber breaks, which IS
+      // the feature -- it is how a link that got out is taken back.
+      regenerateFeed: function(name) {
+        var self = this, info = this.feedInfoFor(name);
+        if (!this.canPublishFeeds()) return Promise.resolve(null);
+        return this._blankFeedAt(info && info.id).then(function() {
+          var cfg = Object.assign({}, self.appConfig || {});
+          cfg.feeds = Object.assign({}, cfg.feeds || {});
+          delete cfg.feeds[name];               // drop the id so publishFeed mints a new one
+          self._saveFolderConfig(cfg, null);
+          return self.publishFeed(name);
+        });
+      },
+
+      // Stop publishing entirely: blank the file, then forget it. Without this, turning `feed` off in
+      // the schema stops REPUBLISHING while leaving the last file world-readable at a URL that is
+      // already in people's calendar apps -- a trap, and the reason this sits beside regenerate rather
+      // than waiting for someone to ask for it.
+      unpublishFeed: function(name) {
+        var self = this, info = this.feedInfoFor(name);
+        return this._blankFeedAt(info && info.id).then(function() {
+          var cfg = Object.assign({}, self.appConfig || {});
+          cfg.feeds = Object.assign({}, cfg.feeds || {});
+          delete cfg.feeds[name];
+          self._saveFolderConfig(cfg, null);
+          self.notify(self.t('settings.feed_unpublished'));
+        });
+      },
       feedUrlFor: function(name) { var f = this.feedInfoFor(name); return (f && f.url) || ''; },
 
       // Render + upload one feed. The id is minted once and kept in the folder config, because the PATH
@@ -1640,7 +1895,9 @@ function createVueApp() {
         var win = this.calendarCoverFor(name);
         // NOT fallbackToSession. A feed republishes automatically on write, so inheriting the session
         // would mean subscribers' calendars silently change language depending on who edited a row last.
-        return this._icsStringsFor(this.calendarIcsFor(name).lang, false).then(function(strings) {
+        return this._awaitViewData(name).then(function() {
+          return self._icsStringsFor(self.calendarIcsFor(name).lang, false);
+        }).then(function(strings) {
           var text = self._renderIcs(name, win, strings);
           var blob = new Blob([text], { type: 'text/calendar;charset=utf-8' });
           return backend.uploadFile(blob, { path: Feeds.pathFor(id), contentType: 'text/calendar' });
@@ -1650,9 +1907,25 @@ function createVueApp() {
             cfg.feeds = Object.assign({}, cfg.feeds || {});
             cfg.feeds[name] = { id: id, url: url, at: new Date().toISOString() };
             self._saveFolderConfig(cfg, null);
+            self._blobStoreDown = false;      // it worked, so the background path may resume
             return url;
           })
-          .catch(function(e) { self.notify(self.t('msg.feed_failed')); throw e; });
+          .catch(function(e) {
+            // The presence of `uploadFile` is a CAPABILITY test, not an availability one:
+            // backend-firebase exposes it whenever Storage initialized, and on a Spark project the
+            // put() then fails at runtime because Storage needs Blaze (the same trap annotated on
+            // uploadImage). An image column survives that by falling back to the `asset:` tier; a feed
+            // CANNOT, because an asset is a database row and a subscription needs an HTTP URL.
+            //
+            // So the failure is remembered, and only the BACKGROUND path honours it. Republishing is
+            // write-triggered, so without this every edit on such a deployment would retry the same
+            // doomed upload and raise the same toast, for ever. A person pressing the button is stating
+            // intent and always gets an attempt -- which is also how the flag clears, since a failure
+            // here can equally be a network blip.
+            self._blobStoreDown = true;
+            self.notify(self.t('msg.no_blob_store'));
+            throw e;
+          });
       },
 
       // Republish whatever a write invalidated, coalesced. A bulk import writes hundreds of rows and
@@ -1662,7 +1935,7 @@ function createVueApp() {
       // clients refresh on their own multi-hour schedule.
       _onWriteRepublish: function(tableId) {
         var self = this;
-        if (!this.canPublishFeeds()) return;
+        if (!this.canPublishFeeds() || this._blobStoreDown) return;
         Feeds.forTable(VIEWS, tableId).forEach(function(n) { self._feedDirty[n] = 1; });
         if (!Object.keys(this._feedDirty).length) return;
         clearTimeout(this._feedTimer);
@@ -2081,8 +2354,13 @@ function createVueApp() {
         return p;
       },
 
+      // Returns a promise for the loads it STARTED, so a caller that has to read the rows (rather than
+      // just render them when they arrive) can wait. Navigation ignores it and is unchanged: a view
+      // re-renders reactively as each table lands. An EXPORT cannot -- it reads dataCache once and
+      // writes a file, so without waiting it happily produces an empty calendar.
       _ensureCached: function(tables, onLoad, wantArchive) {
         var self = this;
+        var started = [];
         // Whatever this view needs cached is also what it needs kept LIVE. Watching here (rather than
         // per branch of loadTableData) means every derived kind — calendar, rotation, pivot, rsvp,
         // union/join — subscribes through the same list it already preloads, and cannot drift from it.
@@ -2095,23 +2373,24 @@ function createVueApp() {
           // responses table loads for a no-grant member instead of silently staying empty.
           if (!tbl || !self.canReachTable(tbl)) return;
           if (!self.dataCache[tbl] && !self._liveLoads(tbl)) {
-            self._fetchTable(tbl, 'active', tbl).then(function() {
+            started.push(self._fetchTable(tbl, 'active', tbl).then(function() {
               // A table can only be swept once it is HERE. _autoArchive walks whatever is cached and a
               // repeat run finds nothing left to move, so this is what keeps the sweep working when boot
               // no longer loads everything -- otherwise rows in a table nobody had opened would simply
               // never age out, silently.
               self._autoArchive();
               if (onLoad) onLoad(tbl);
-            });
+            }));
           }
           // The ARCHIVE partition, only when the caller says something will read it, and still behind
           // `preload_archive` -- a user who turned that off asked not to load archives, and the
           // documented consequence (a history view comes up short) is unchanged.
           if (wantArchive && self.settings.preload_archive && SCHEMA[tbl] && SCHEMA[tbl].archivable && !self.dataCache[aKey(tbl)]) {
-            self._fetchTable(tbl, 'archive', aKey(tbl)).then(function() { if (onLoad) onLoad(tbl); });
+            started.push(self._fetchTable(tbl, 'archive', aKey(tbl)).then(function() { if (onLoad) onLoad(tbl); }));
           }
         });
-        self._ensureDeps(tables, onLoad);
+        started.push(self._ensureDeps(tables, onLoad));
+        return Promise.all(started);
       },
 
       // The tables a view's COLUMNS resolve out of, as opposed to the tables its rows come from: a ref
@@ -2130,16 +2409,17 @@ function createVueApp() {
       //     closure of the schema on the first view load, which is the cost this is meant to avoid.
       _ensureDeps: function(tables, onLoad) {
         var self = this;
-        if (typeof Columns === 'undefined' || !Columns.tableDeps) return;
-        var seen = {};
+        if (typeof Columns === 'undefined' || !Columns.tableDeps) return Promise.resolve();
+        var started = [], seen = {};
         (tables || []).forEach(function(tbl) {
           if (!tbl) return;
           Columns.tableDeps(SCHEMA, tbl).forEach(function(dep) {
             if (seen[dep] || self.dataCache[dep] || !self.canReachTable(dep)) return;
             seen[dep] = 1;
-            self._fetchTable(dep, 'active', dep).then(function() { if (onLoad) onLoad(dep); });
+            started.push(self._fetchTable(dep, 'active', dep).then(function() { if (onLoad) onLoad(dep); }));
           });
         });
+        return Promise.all(started);
       },
 
       // --- Live sync ------------------------------------------------------------------------------
@@ -2291,13 +2571,9 @@ function createVueApp() {
           // Calendar view: load each distinct source table (deduped); the grid/panel read from
           // dataCache via calEventsFor. No stored calendar rows — pure presentation of source rows.
           if (view.calendar) {
-            var calTables = [];
-            self.calSources(self.currentTable).forEach(function(s) { if (s && s.table && calTables.indexOf(s.table) < 0) calTables.push(s.table); });
-            // Also preload each rotationSource's rosters so generated duty events can resolve.
-            self.calRotationSources(self.currentTable).forEach(function(rs) {
-              rotationTables(VIEWS[rs.view]).forEach(function(tbl) { if (calTables.indexOf(tbl) < 0) calTables.push(tbl); });
-            });
-            self._ensureCached(calTables, null, self._viewNeedsArchive(self.currentTable));
+            // One answer to "what does this calendar read", shared with the export path — see
+            // Feeds.tablesOf. Built inline here until the two disagreed.
+            self._ensureCached(Feeds.tablesOf(VIEWS, self.currentTable), null, self._viewNeedsArchive(self.currentTable));
             return;
           }
           // rotationView (third view kind): generate rows from range; no sources to read.
@@ -3561,6 +3837,7 @@ function createVueApp() {
       _saveFolderConfig: function(cfg, viewName) {
         var self = this;
         this.appConfig = cfg;                       // local override for everyone with view access
+        this._applyUserCalendars();
         if (this.isAdmin && backend.setFolderConfig) {
           Promise.resolve(backend.setFolderConfig(cfg))
             .catch(function() { self.notify(self.t('msg.save_failed')); });
@@ -6040,12 +6317,7 @@ function createVueApp() {
       exportIcs: function() { appInstance.downloadIcs(this.viewName); },
       publish: function() { appInstance.publishFeed(this.viewName); },
       setWindow: function(patch) { appInstance.saveCalendarWindow(this.viewName, patch); },
-      copyFeed: function() {
-        var a = appInstance, u = this.feedUrl;
-        Promise.resolve(navigator.clipboard && navigator.clipboard.writeText(u))
-          .then(function() { a.notify(a.t('msg.copied')); })
-          .catch(function() { a.notify(a.t('msg.save_failed')); });
-      },
+      copyFeed: function() { appInstance.copyText(this.feedUrl); },
       selectDay: function(d) { this.sel = d; }
     }),
     template: ''

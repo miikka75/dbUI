@@ -3044,6 +3044,154 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.first).toContain('feeds/' + r.idAfterFirst + '.ics');
   });
 
+  test('regenerating a feed EMPTIES the old address, not just abandons it', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.dataCache['tasks'] = [{ id: 'a', date: app._calToday(), title: 'Alpha' }];
+      window.VIEWS.regen_fx = { name: 'regen_fx', feed: true, calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] } };
+
+      // Record what lands at each path, so the OLD one can be inspected after the swap.
+      const wrote = {};
+      const real = window.backend.uploadFile;
+      window.backend.uploadFile = (f, o) => f.text().then((t) => { wrote[o.path] = t; return 'https://store.example/' + o.path; });
+
+      await app.publishFeed('regen_fx');
+      const first = app.feedInfoFor('regen_fx');
+      await app.regenerateFeed('regen_fx');
+      const second = app.feedInfoFor('regen_fx');
+
+      const oldPath = 'feeds/' + first.id + '.ics';
+      const newPath = 'feeds/' + second.id + '.ics';
+      // Snapshot BEFORE unpublishing: stopping blanks the CURRENT path, so reading it afterwards would
+      // show the empty file and say nothing about what regenerate had published there.
+      const oldBody = wrote[oldPath], newBody = wrote[newPath];
+      await app.unpublishFeed('regen_fx');
+      // Still LISTED after stopping -- it is a calendar, and the list is calendars-as-files -- but no
+      // longer published, so it offers a download and nothing to revoke.
+      const afterStop = app.calendarFiles.find((x) => x.name === 'regen_fx');
+      window.backend.uploadFile = real;
+      return {
+        differentId: first.id !== second.id,
+        differentUrl: first.url !== second.url,
+        oldBody: oldBody, newBody: newBody,
+        stoppedBody: wrote[newPath],       // the same path, re-read AFTER the stop
+        stillListed: !!afterStop, stillPublished: !!(afterStop && afterStop.published)
+      };
+    });
+    expect(r.differentId).toBe(true);
+    expect(r.differentUrl).toBe(true);
+    // The point: the retired address serves a VALID but EMPTY calendar. Minting a new id and walking
+    // away would leave the leaked link showing the last snapshot for ever.
+    expect(r.oldBody).toContain('BEGIN:VCALENDAR');
+    expect(r.oldBody).not.toContain('SUMMARY:Alpha');
+    expect(r.oldBody).not.toContain('BEGIN:VEVENT');
+    // The new address carries the real calendar.
+    expect(r.newBody).toContain('SUMMARY:Alpha');
+    // Stopping blanks the live address too, and drops it from the list.
+    expect(r.stoppedBody).not.toContain('BEGIN:VEVENT');
+    expect(r.stillListed).toBe(true);
+    expect(r.stillPublished).toBe(false);
+  });
+
+  test('Settings lists published feeds, including one that has stopped republishing', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      const real = window.backend.uploadFile;
+      window.backend.uploadFile = (f, o) => Promise.resolve('https://store.example/' + o.path);
+
+      window.VIEWS.list_live = { name: 'list_live', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+      window.VIEWS.list_off = { name: 'list_off', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+      await app.publishFeed('list_live');
+      await app.publishFeed('list_off');
+      // The trap this list exists to show: `feed` switched off stops REPUBLISHING while the last file
+      // stays world-readable at an address already in people's calendar apps.
+      delete window.VIEWS.list_off.feed;
+      // A calendar in NO nav entry at all, never published: the case the list exists for, since it is
+      // reachable from nowhere else in the app.
+      window.VIEWS.list_hidden = { name: 'list_hidden', calendar: { source: 'tasks', dateColumn: 'date' } };
+      const rows = app.calendarFiles.map((f) => ({ name: f.name, live: f.live, published: f.published }));
+      const inNav = app.sidebarTabs.filter((t) => t.id).map((t) => t.id);
+      window.backend.uploadFile = real;
+      return { rows, hiddenInNav: inNav.includes('list_hidden') };
+    });
+    expect(r.rows.find((x) => x.name === 'list_live')).toMatchObject({ live: true, published: true });
+    expect(r.rows.find((x) => x.name === 'list_off')).toMatchObject({ live: false, published: true });
+    // Listed as a downloadable file even though nothing publishes it and no nav entry reaches it.
+    expect(r.rows.find((x) => x.name === 'list_hidden')).toMatchObject({ published: false });
+    expect(r.hiddenInNav).toBe(false);
+  });
+
+  test('an invisible calendar can be downloaded from Settings', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.dataCache['tasks'] = [{ id: 'a', date: app._calToday(), title: 'Alpha' }];
+      // Defined in VIEWS, absent from nav — unreachable except here.
+      window.VIEWS.hidden_cal = { name: 'hidden_cal', calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] } };
+      app.selectTab('__settings');
+    });
+    const btn = page.locator('[data-testid="feed-download-hidden_cal"]');
+    await expect(btn).toBeVisible();
+    const [download] = await Promise.all([page.waitForEvent('download'), btn.click()]);
+    expect(download.suggestedFilename()).toMatch(/^hidden_cal-\d{4}-\d{2}-\d{2}\.ics$/);
+    const text = require('fs').readFileSync(await download.path(), 'utf8');
+    expect(text).toContain('BEGIN:VCALENDAR');
+    expect(text).toContain('SUMMARY:Alpha');
+  });
+
+  test('a backend whose blob store is absent stops the BACKGROUND republish, not the button', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      window.VIEWS.blob_fx = { name: 'blob_fx', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
+
+      // Firebase on Spark: uploadFile EXISTS (Storage initialized) but the put() fails, because Storage
+      // needs Blaze. The presence test cannot see that; only an attempt can.
+      let attempts = 0, fail = true;
+      const real = window.backend.uploadFile;
+      window.backend.uploadFile = () => { attempts++; return fail ? Promise.reject(new Error('storage/unauthorized')) : Promise.resolve('https://s/ok.ics'); };
+
+      const offeredBefore = app.canPublishFeeds();
+      await app.publishFeed('blob_fx').catch(() => {});
+      const afterOne = attempts;
+
+      // Write-triggered republishes must now stand down — otherwise every edit retries the same doomed
+      // upload and raises the same toast for ever.
+      for (let i = 0; i < 5; i++) app._onWriteRepublish('tasks');
+      await new Promise((res) => setTimeout(res, 2600));
+      const afterWrites = attempts;
+
+      // The button still tries: a person pressing it is stating intent, and the failure may have been a
+      // network blip rather than a missing bucket.
+      const offeredAfter = app.canPublishFeeds();
+      fail = false;
+      await app.publishFeed('blob_fx');
+      const afterRetry = attempts;
+
+      // A success clears the latch, so background republishing resumes.
+      const downAfterSuccess = app._blobStoreDown;
+      app._onWriteRepublish('tasks');
+      await new Promise((res) => setTimeout(res, 2600));
+      const afterResume = attempts;
+
+      window.backend.uploadFile = real;
+      return { offeredBefore, afterOne, afterWrites, offeredAfter, afterRetry, downAfterSuccess, afterResume };
+    });
+    expect(r.offeredBefore).toBe(true);
+    expect(r.afterOne).toBe(1);
+    expect(r.afterWrites).toBe(1);        // five writes, no further attempts
+    expect(r.offeredAfter).toBe(true);    // the button is not taken away
+    expect(r.afterRetry).toBe(2);         // and it retries when pressed
+    expect(r.downAfterSuccess).toBe(false);
+    expect(r.afterResume).toBe(3);        // background republishing resumed after the success
+  });
+
   test('a restricted member never republishes a feed, so a partial view cannot overwrite it', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(async () => {
@@ -3586,7 +3734,13 @@ test.describe('access control: user matching + fail-closed', () => {
       return backend_users.getMyProfile();
     }, pic);
     expect(saved.picture).toBe(pic);
-    // the settings avatar shows the uploaded image
+    // the settings avatar shows the uploaded image.
+    // Scrolled into view first: Vuetify's v-img defers loading until the element intersects the
+    // viewport, so an avatar below the fold renders its wrapper and never an <img>. This assertion used
+    // to pass only because the profile happened to sit high enough on the Settings screen -- an
+    // invisible dependency on how much content is above it, which any new panel would break.
+    const avatar = page.locator('.v-main .v-avatar').first();
+    await avatar.scrollIntoViewIfNeeded();
     await expect(page.locator('.v-main .v-avatar img').first()).toHaveAttribute('src', pic);
     // remove clears it everywhere
     const cleared = await page.evaluate(async () => {
@@ -4036,6 +4190,136 @@ test.describe('calendar view', () => {
     const emptyDay = anchor.endsWith('-09') ? `${y}-${m}-10` : `${y}-${m}-09`;
     await cal.locator(`[data-testid="cal-cell-${emptyDay}"]`).click();
     await expect(cal).toContainText('cal.no_events');             // the panel followed the click to an empty day
+  });
+
+  test('exporting a calendar the moment it opens waits for its rows, instead of writing an empty file', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      window.VIEWS.race_cal = { name: 'race_cal', calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] } };
+      // The row goes to the BACKEND, then the local cache is dropped. That is the state a calendar is
+      // in for the first moments after someone clicks it: rows exist, dataCache does not, because boot
+      // fetches no table data and a view loads its own tables when it opens.
+      await window.Writes.putRow('tasks', { id: 'race_row', date: app._calToday(), title: 'RaceRow' }, 'active');
+      delete app.dataCache['tasks'];
+    });
+    // Open and export in the SAME tick. Before this waited, the file was written from an empty cache:
+    // a valid calendar with no events, saved with no error and nothing to suggest anything was wrong.
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.evaluate(() => { window.appInstance.selectTab('race_cal'); return window.appInstance.downloadIcs('race_cal'); })
+    ]);
+    const text = require('fs').readFileSync(await download.path(), 'utf8');
+    expect(text).toContain('BEGIN:VCALENDAR');
+    expect(text).toContain('SUMMARY:RaceRow');
+  });
+
+  test('an exported calendar obscures names the view obscures, even for an admin', async ({ page }) => {
+    await ensureAppReady(page);
+    // The privacy question a FEED raises: the file is rendered by a full-access client and then served
+    // to anyone holding its URL, so if obscuring were a viewer privilege the publisher would bake real
+    // names into a world-readable document. shouldObscure takes no viewer at all — it reads the VIEW's
+    // config — which is what makes publishing an obscured calendar safe. Nothing pinned that.
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;                  // admin: the most privileged viewer
+      app.dataCache['tasks'] = [{ id: 'o1', date: app._calToday(), title: 'Ann Example Smith' }];
+      window.VIEWS.obs_plain = { name: 'obs_plain',
+        calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] } };
+      window.VIEWS.obs_hidden = { name: 'obs_hidden', obscureNames: ['title'],
+        calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] } };
+      const titles = (v) => Object.values(app.calEventsFor(v, app.calendarCoverFor(v))).flat().map((e) => e.title);
+      return { isAdmin: app.isAdmin, plain: titles('obs_plain'), hidden: titles('obs_hidden') };
+    });
+    expect(r.isAdmin).toBe(true);
+    expect(r.plain).toEqual(['Ann Example Smith']);
+    expect(r.hidden).toEqual(['Ann E. S.']);
+
+    // And it survives serialization — the file carries the obscured form, not the stored one.
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.evaluate(() => window.appInstance.downloadIcs('obs_hidden'))
+    ]);
+    const text = require('fs').readFileSync(await download.path(), 'utf8');
+    expect(text).toContain('SUMMARY:Ann E. S.');
+    expect(text).not.toContain('Example Smith');
+  });
+
+  test('an admin can build a calendar in the app, and it behaves like any other', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      await window.Writes.putRow('tasks', { id: 'uc_row', date: app._calToday(), title: 'BuiltHere' }, 'active');
+
+      // The pickers only offer what can actually carry a calendar: reachable tables with a date column.
+      const tables = app.calendarSourceTables;
+      const dateCols = app.dateColumnsOf('tasks');
+
+      const errs = await app.saveUserCalendar('cal_built', {
+        title: 'Built here', sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'] }]
+      });
+
+      return {
+        offersTasks: tables.includes('tasks'), dateCols, errs,
+        // Merged into VIEWS as an ordinary calendar, which is what makes everything downstream work.
+        kind: window.SchemaNormalize.viewKind(window.VIEWS.cal_built),
+        listed: app.userCalendars.map((c) => c.id),
+        // And it appears in the calendars-as-files list without any nav entry existing.
+        asFile: app.calendarFiles.map((f) => f.name).includes('cal_built'),
+        inNav: app.sidebarTabs.filter((t) => t.id).map((t) => t.id).includes('cal_built')
+      };
+    });
+    expect(r.offersTasks).toBe(true);
+    expect(r.dateCols).toContain('date');
+    expect(r.errs).toEqual([]);
+    expect(r.kind).toBe('calendar');
+    expect(r.listed).toContain('cal_built');
+    expect(r.asFile).toBe(true);
+    expect(r.inNav).toBe(false);
+
+    // It renders, and exports, exactly like a schema-defined one.
+    await page.evaluate(() => window.appInstance.selectTab('cal_built'));
+    await expect(page.locator('[data-testid="cal-view"]')).toBeVisible();
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.evaluate(() => window.appInstance.downloadIcs('cal_built'))
+    ]);
+    const text = require('fs').readFileSync(await download.path(), 'utf8');
+    expect(text).toContain('SUMMARY:BuiltHere');
+
+    // Deleting it removes the view too, rather than leaving a name that renders nothing.
+    const gone = await page.evaluate(() => {
+      window.appInstance.deleteUserCalendar('cal_built');
+      return { inViews: !!window.VIEWS.cal_built, listed: window.appInstance.userCalendars.map((c) => c.id) };
+    });
+    expect(gone.inViews).toBe(false);
+    expect(gone.listed).not.toContain('cal_built');
+  });
+
+  test('a calendar built in the app is refused when it would render nothing', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      const t = async (def) => (await app.saveUserCalendar('cal_bad', def)).length > 0;
+      return {
+        noSource: await t({ title: 'x', sources: [] }),
+        badTable: await t({ title: 'x', sources: [{ table: 'nope', dateColumn: 'date' }] }),
+        noDateCol: await t({ title: 'x', sources: [{ table: 'tasks', dateColumn: '' }] }),
+        notADate: await t({ title: 'x', sources: [{ table: 'tasks', dateColumn: 'title' }] }),
+        badTitleCol: await t({ title: 'x', sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['nope'] }] }),
+        ok: await t({ title: 'x', sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'] }] })
+      };
+    });
+    // Each of these otherwise produces a calendar that is valid, renders, and is permanently empty.
+    expect(r.noSource).toBe(true);
+    expect(r.badTable).toBe(true);
+    expect(r.noDateCol).toBe(true);
+    expect(r.notADate).toBe(true);
+    expect(r.badTitleCol).toBe(true);
+    expect(r.ok).toBe(false);
   });
 
   test('the calendar exports an .ics the browser is handed as a download', async ({ page }) => {

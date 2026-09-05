@@ -676,6 +676,70 @@
               <v-btn size="small" variant="outlined" class="mt-2" prepend-icon="mdi-download"
                      data-testid="example-update-apply" @click="a.reinstallExample()">{{ a.t('settings.examples_reinstall') }}</v-btn>
             </v-alert>
+            <!-- Calendars an admin builds here rather than in the schema document. Stored in the folder
+                 config beside the other per-view settings, merged into VIEWS at load. Creating one
+                 reveals nothing: every source is gated by canReachTable when the events are built, so a
+                 calendar cannot show anyone rows they could not already open. -->
+            <v-divider class="my-4"></v-divider>
+            <p class="text-subtitle-2 mb-1">{{ a.t('settings.cal_custom') }}</p>
+            <p style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.cal_custom_note') }}</p>
+            <div v-for="c in a.userCalendars" :key="c.id" class="d-flex align-center flex-wrap mb-2" style="gap:8px" data-testid="user-cal">
+              <strong style="font-size:0.9rem">{{ c.title || c.id }}</strong>
+              <span style="font-size:0.75rem;opacity:0.6">{{ (c.sources || []).map(s => s.table).join(', ') }}</span>
+              <v-btn size="small" variant="text" :data-testid="'user-cal-open-' + c.id" @click="a.openUserCalendar(c.id)">{{ a.t('settings.cal_open') }}</v-btn>
+              <v-btn size="small" variant="text" :data-testid="'user-cal-edit-' + c.id" @click="a.editUserCalendar(c)">{{ a.t('btn.edit') }}</v-btn>
+              <v-btn size="small" variant="text" color="error" :data-testid="'user-cal-del-' + c.id" @click="a.deleteUserCalendar(c.id)">{{ a.t('settings.cal_delete') }}</v-btn>
+            </div>
+            <v-btn v-if="!a.calDraft" size="small" variant="outlined" prepend-icon="mdi-calendar-plus"
+                   data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('settings.cal_new') }}</v-btn>
+            <v-card v-if="a.calDraft" variant="tonal" class="pa-3 mt-2" data-testid="user-cal-form">
+              <v-text-field v-model="a.calDraft.title" :label="a.t('settings.cal_title')" density="compact" variant="outlined" hide-details class="mb-3" data-testid="user-cal-title"></v-text-field>
+              <div v-for="(src, i) in a.calDraft.sources" :key="i" class="d-flex align-center flex-wrap mb-2" style="gap:8px">
+                <v-select v-model="src.table" :items="a.calendarSourceTables" :label="a.t('settings.cal_table')" density="compact" variant="outlined" hide-details style="max-width:190px"
+                          @update:model-value="a.calDraftTableChanged(src)" :data-testid="'user-cal-table-' + i"></v-select>
+                <v-select v-model="src.dateColumn" :items="a.dateColumnsOf(src.table)" :label="a.t('settings.cal_date_col')" density="compact" variant="outlined" hide-details style="max-width:190px"
+                          :data-testid="'user-cal-datecol-' + i"></v-select>
+                <v-select v-model="src.titleColumns" :items="src.table ? a.columnsOf(src.table) : []" multiple chips :label="a.t('settings.cal_title_cols')" density="compact" variant="outlined" hide-details style="min-width:220px"
+                          :data-testid="'user-cal-titlecols-' + i"></v-select>
+                <v-btn v-if="a.calDraft.sources.length > 1" icon="mdi-close" size="x-small" variant="text" @click="a.removeCalDraftSource(i)"></v-btn>
+              </div>
+              <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="a.addCalDraftSource()">{{ a.t('settings.cal_add_source') }}</v-btn>
+              <div class="mt-2 d-flex" style="gap:8px">
+                <v-btn size="small" color="primary" data-testid="user-cal-save" @click="a.saveCalDraft()">{{ a.t('btn.save') }}</v-btn>
+                <v-btn size="small" variant="text" @click="a.cancelCalDraft()">{{ a.t('btn.cancel') }}</v-btn>
+              </div>
+            </v-card>
+            <!-- Calendars, as files. Here rather than only on each calendar's toolbar because a
+                 publish-only calendar need not be in the nav at all, so its download and its URL would
+                 otherwise be reachable from nowhere. Also the only screen that answers "what is this
+                 deployment serving to anyone with a link?" -- which is why a published file whose view
+                 was removed or switched off still appears, flagged, instead of quietly dropping out. -->
+            <template v-if="a.calendarFiles.length">
+              <v-divider class="my-4"></v-divider>
+              <p class="text-subtitle-2 mb-1">{{ a.t('settings.feeds') }}</p>
+              <p style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.feeds_note') }}</p>
+              <div v-for="f in a.calendarFiles" :key="f.name" class="mb-3" data-testid="settings-feed">
+                <div class="d-flex align-center flex-wrap" style="gap:8px">
+                  <strong style="font-size:0.9rem">{{ f.title }}</strong>
+                  <v-chip v-if="f.published && !f.live" size="x-small" color="warning" variant="tonal"
+                          data-testid="feed-stale">{{ a.t('settings.feed_not_republishing') }}</v-chip>
+                  <v-btn size="small" variant="text" prepend-icon="mdi-calendar-export"
+                         :data-testid="'feed-download-' + f.name"
+                         @click="a.downloadIcs(f.name)">{{ a.t('btn.export_ics') }}</v-btn>
+                </div>
+                <div v-if="f.published" class="d-flex align-center flex-wrap mt-1" style="gap:8px">
+                  <v-text-field :model-value="f.url" readonly density="compact" variant="outlined"
+                                hide-details style="font-size:0.78rem;min-width:260px" :data-testid="'feed-url-' + f.name"></v-text-field>
+                  <v-btn size="small" variant="text" @click="a.copyText(f.url)">{{ a.t('btn.copy') }}</v-btn>
+                  <v-btn size="small" variant="text" color="warning" :disabled="!a.canPublishFeeds"
+                         :data-testid="'feed-regen-' + f.name"
+                         @click="a.regenerateFeed(f.name)">{{ a.t('settings.feed_regenerate') }}</v-btn>
+                  <v-btn size="small" variant="text" color="error"
+                         :data-testid="'feed-stop-' + f.name"
+                         @click="a.unpublishFeed(f.name)">{{ a.t('settings.feed_unpublish') }}</v-btn>
+                </div>
+              </div>
+            </template>
             <!-- Browser-local Postgres only. Deliberately next to Export, because the honest answer to
                  "can I lose this?" is a backup, and the second-best answer is the persistence request
                  below. Literal English rather than t() keys, matching the other backend-specific copy
