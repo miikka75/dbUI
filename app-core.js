@@ -334,34 +334,7 @@ function createVueApp() {
       allGroupIds: function() { return this.sidebarTabs.filter(function(t) { return t.children; }).map(function(t) { return t.id; }); },
       sidebarTabs: function() {
         var self = this;
-        var allowedTables = self.userAllowedTables;
-        function canAccess(id) {
-          if (!allowedTables) return true;
-          if (VIEWS[id]) {
-            var v = VIEWS[id];
-            // Restricted doc-view: a markdown page with `access:[tables]` is hidden unless the user is
-            // granted one of them (the firestore _pages rule enforces the matching read server-side).
-            if (typeof v.markdown === 'string' && !self.canAccessPage(v)) return false;
-            // A source is reachable if granted OR self-serviceable (owner-column table): a member sees a
-            // self-service table/view in nav without a table grant, scoped to their own rows by the rules.
-            if (!(v.sources || []).every(function(s) { return self.canReachTable(s); })) return false;
-            // A sourceless view (rotation/calendar/pivot/rsvp) is unlocked by ANY of the tables it reads
-            // — one you lack simply renders blank (per-roster access, e.g. team_b coordinator sees
-            // team_a empty). Those inputs are declared per-kind (rosters, calendar.sources,
-            // pivot.source, rsvp.events/responses), not in `sources`, so ask viewImplicitTables for the
-            // whole set: consulting rosters alone let a calendar or a pivot through to a user with no
-            // grant on anything it reads, handing them a tab that could only ever render empty.
-            // Self-service counts, exactly as it does for a declared source above — it is what keeps a
-            // grantless member's own calendar (where `addTo` lets them log a row) in their nav.
-            if (!(v.sources && v.sources.length)) {
-              var inputs = viewImplicitTables(v);
-              if (inputs.length) return inputs.some(function(t) { return self.canReachTable(t); });
-            }
-            return true;
-          }
-          if (SCHEMA[id]) return self.canReachTable(id);
-          return true;
-        }
+        var canAccess = function(id) { return self.canAccessNavId(id); };
         var navCfg = self.navConfig;
         var navItems = (navCfg && Array.isArray(navCfg.items)) ? navCfg.items : [];
         return buildNavTabs(navItems, self.t.bind(self), canAccess, { isAdmin: self.isAdmin, hasLookup: self.refTables.length || Object.keys(self.visibleLists).length });
@@ -535,26 +508,39 @@ function createVueApp() {
           return (a.key || '').toLowerCase().localeCompare((b.key || '').toLowerCase());
         });
       },
-      // Every feed this database has published, for the Settings list. Read from the FOLDER CONFIG, not
-      // from VIEWS: a calendar can be published and then hidden (or its `feed` switch turned off), and
-      // the file at that URL goes on being world-readable either way. The list has to show what is
-      // actually out there, which is a different question from what the schema currently declares.
-      publishedFeeds: function() {
-        var feeds = (this.appConfig && this.appConfig.feeds) || {};
+      // Every calendar this database has, as a FILE — what Settings offers to download and manage.
+      //
+      // The union of two sets, and the second is the one that matters:
+      //   - calendars the viewer may reach. Listed whether or not they are in the nav, because a
+      //     publish-only calendar need not be in the nav at all and would otherwise be reachable
+      //     nowhere. Access is `canAccessNavId`, the same question the sidebar asks, so the two cannot
+      //     come to disagree about what someone may see.
+      //   - anything the folder config says has been PUBLISHED, even when its view is gone or its
+      //     `feed` switch is off. Those files are still being served at a URL already in people's
+      //     calendar apps, so dropping them from the one screen that lists what is out there would hide
+      //     exactly the case someone needs to find.
+      calendarFiles: function() {
         var self = this;
-        return Object.keys(feeds).sort().map(function(n) {
+        var feeds = (this.appConfig && this.appConfig.feeds) || {};
+        var names = Object.keys(VIEWS).filter(function(n) {
+          return self.isCalendarName(n) && self.canAccessNavId(n);
+        });
+        Object.keys(feeds).forEach(function(n) { if (names.indexOf(n) < 0) names.push(n); });
+        return names.sort().map(function(n) {
+          var f = feeds[n] || {};
           return {
             name: n,
             title: self.tOr('view.' + n, self.tOr('tab.' + n, n)),
-            url: feeds[n].url || '',
-            at: feeds[n].at || '',
-            // A feed whose view is gone or whose `feed` switch was turned off no longer republishes,
-            // but its last file is still being served. Saying so is the point of showing it here.
-            live: Feeds.isFeed(VIEWS[n])
+            url: f.url || '',
+            at: f.at || '',
+            // Declared a feed AND still a calendar. False on a published file whose view was removed or
+            // switched off — it no longer updates, and the row says so rather than looking healthy.
+            live: Feeds.isFeed(VIEWS[n]),
+            // A calendar that exists but has never been published: downloadable, nothing to revoke.
+            published: !!f.url
           };
         });
       },
-
       // Tables I may SEE (grant mode 'r' or 'rw'). This is the visibility set every nav/load/list gate
       // uses; the write gates use userWritableTables below. null = unrestricted, [] = none.
       userAllowedTables: function() {
@@ -1075,6 +1061,39 @@ function createVueApp() {
     },
 
     methods: {
+      // "May this user reach this nav id?" -- the one question the sidebar asks of every entry, and now
+      // also what the Settings calendar list asks before offering a calendar as a file. It lived inside
+      // sidebarTabs, which was fine while the sidebar was its only caller; a second copy is how the menu
+      // and the export list would come to disagree about what someone may see.
+      canAccessNavId: function(id) {
+        var self = this;
+        var allowedTables = this.userAllowedTables;   // null = unrestricted
+        if (!allowedTables) return true;
+        if (VIEWS[id]) {
+          var v = VIEWS[id];
+          // Restricted doc-view: a markdown page with `access:[tables]` is hidden unless the user is
+          // granted one of them (the firestore _pages rule enforces the matching read server-side).
+          if (typeof v.markdown === 'string' && !self.canAccessPage(v)) return false;
+          // A source is reachable if granted OR self-serviceable (owner-column table): a member sees a
+          // self-service table/view in nav without a table grant, scoped to their own rows by the rules.
+          if (!(v.sources || []).every(function(s) { return self.canReachTable(s); })) return false;
+          // A sourceless view (rotation/calendar/pivot/rsvp) is unlocked by ANY of the tables it reads
+          // — one you lack simply renders blank (per-roster access, e.g. team_b coordinator sees
+          // team_a empty). Those inputs are declared per-kind (rosters, calendar.sources,
+          // pivot.source, rsvp.events/responses), not in `sources`, so ask viewImplicitTables for the
+          // whole set: consulting rosters alone let a calendar or a pivot through to a user with no
+          // grant on anything it reads, handing them a tab that could only ever render empty.
+          // Self-service counts, exactly as it does for a declared source above — it is what keeps a
+          // grantless member's own calendar (where `addTo` lets them log a row) in their nav.
+          if (!(v.sources && v.sources.length)) {
+            var inputs = viewImplicitTables(v);
+            if (inputs.length) return inputs.some(function(t) { return self.canReachTable(t); });
+          }
+          return true;
+        }
+        if (SCHEMA[id]) return self.canReachTable(id);
+        return true;
+      },
       t: function(key) { return this.strings[key] || key; },
       // Only for keys whose fallback is the DATA the key labels — a column/view/list value, which reads
       // far better raw ("chore_name") than as a key ("field.chore_name"). Static UI prose must use t(),
