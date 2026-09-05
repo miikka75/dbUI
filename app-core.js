@@ -298,6 +298,15 @@ function createVueApp() {
       _inflight: {},
       _liveSubs: {},
       _liveState: null,
+      // The calendar being edited in Settings. A DRAFT, not the stored definition: a half-built calendar
+      // (a table picked, its date column not yet) is exactly what the validator rejects, and writing
+      // each keystroke through would either spam the config or force the validator to tolerate the
+      // invalid states it exists to catch.
+      calDraft: null,
+      calDraftId: '',
+      // Names VIEWS currently holds from folder-config calendar definitions, so a deleted one can be
+      // removed rather than lingering until reload.
+      _userCalNames: [],
       // Feed republish coalescing: names invalidated since the last flush, and the pending timer.
       _feedDirty: {},
       _feedTimer: null,
@@ -507,6 +516,18 @@ function createVueApp() {
         return this.userList.slice().sort(function(a, b) {
           return (a.key || '').toLowerCase().localeCompare((b.key || '').toLowerCase());
         });
+      },
+      userCalendars: function() {
+        var defs = (this.appConfig && this.appConfig.calendars) || {};
+        return Object.keys(defs).map(function(id) {
+          return Object.assign({ id: id }, defs[id]);
+        }).sort(function(a, b) { return String(a.title || a.id).localeCompare(String(b.title || b.id)); });
+      },
+      calendarSourceTables: function() {
+        var self = this;
+        return Object.keys(SCHEMA).filter(function(t) {
+          return self.canReachTable(t) && self.dateColumnsOf(t).length;
+        }).sort();
       },
       // Every calendar this database has, as a FILE — what Settings offers to download and manage.
       //
@@ -832,7 +853,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_open', 'settings.cal_delete', 'settings.cal_custom', 'settings.cal_custom_note', 'msg.name_taken', 'btn.cancel', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1239,6 +1260,7 @@ function createVueApp() {
           if (!backend.getFolderConfig) return;
           return Promise.resolve(backend.getFolderConfig()).then(function(cfg) {
             self.appConfig = cfg || {};
+            self._applyUserCalendars();
           }).catch(function() {});
         });
 
@@ -1530,6 +1552,115 @@ function createVueApp() {
       // Fail-closed per source: a table the user cannot read contributes nothing. When `window` is
       // given, rotationSources' generated duties are added (bounded to that window).
       calEventsFor: function(name, window) { return Events.build(name, window, this._eventsCtx()); },
+      // --- Calendars defined in the DATABASE ----------------------------------------------------
+      // A calendar is a saved question over tables that already exist, so it does not have to be part of
+      // the schema document. These live in the FOLDER CONFIG -- which already holds per-view runtime
+      // settings (a rotation's anchor, a calendar's window, a feed's URL), is already admin-only to
+      // write, and is already exported and imported.
+      //
+      // Not a `_calendars` system store, deliberately: firestore.rules denies the whole underscore
+      // namespace as a fail-safe, so a new one needs its own block there, the mirror in the Supabase
+      // RLS, and the dev server -- three layers of access rules to hold one list of view definitions
+      // that nothing enforces access on anyway. Rendering is gated per SOURCE at read time, not by who
+      // wrote the definition.
+      //
+      // Merged into VIEWS as ordinary calendar views, so everything downstream is inherited untouched:
+      // rendering, the .ics download, the window and language settings, {{view:x}} embeds, and the
+      // Settings list. `_userCalNames` is what was merged last time, so a deleted one is removed rather
+      // than lingering until reload.
+      _applyUserCalendars: function() {
+        var defs = (this.appConfig && this.appConfig.calendars) || {};
+        (this._userCalNames || []).forEach(function(n) { if (VIEWS[n]) delete VIEWS[n]; });
+        var added = [];
+        Object.keys(defs).forEach(function(id) {
+          var d = defs[id];
+          if (!d || !Array.isArray(d.sources) || !d.sources.length) return;
+          // A schema view of the same name WINS. The schema is the more deliberate statement, and
+          // silently shadowing one from a config row is how a calendar would start disagreeing with the
+          // file it appears to come from.
+          if (VIEWS[id] && added.indexOf(id) < 0) return;
+          VIEWS[id] = {
+            name: id, kind: 'calendar', userDefined: true,
+            calendar: { sources: d.sources, defaultView: d.defaultView || 'month' },
+            obscureNames: d.obscureNames || undefined,
+            ics: undefined
+          };
+          added.push(id);
+        });
+        this._userCalNames = added;
+        return added;
+      },
+      // Every calendar an admin has defined here, for the Settings editor. Ordered by title so the list
+      // does not reshuffle when one is renamed.
+      newUserCalendar: function() {
+        this.calDraftId = '';
+        this.calDraft = { title: '', sources: [{ table: '', dateColumn: '', titleColumns: [] }] };
+      },
+      editUserCalendar: function(c) {
+        this.calDraftId = c.id;
+        this.calDraft = JSON.parse(JSON.stringify({ title: c.title || '', sources: c.sources || [] }));
+      },
+      addCalDraftSource: function() { this.calDraft.sources.push({ table: '', dateColumn: '', titleColumns: [] }); },
+      removeCalDraftSource: function(i) { this.calDraft.sources.splice(i, 1); },
+      // Changing the table invalidates the columns picked under it -- they belong to the old one.
+      calDraftTableChanged: function(src) { src.dateColumn = ''; src.titleColumns = []; },
+      saveCalDraft: function() {
+        var self = this;
+        // The id is derived from the name ONCE, on create, and then never moves: it is what VIEWS is
+        // keyed on and what the folder config stores, so renaming to a new id would orphan the old
+        // definition and any per-view settings hanging off it.
+        var id = this.calDraftId || ('cal_' + String(this.calDraft.title || 'calendar').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')).slice(0, 40);
+        if (!this.calDraftId && VIEWS[id]) { this.notify(this.t('msg.name_taken')); return; }
+        return this.saveUserCalendar(id, JSON.parse(JSON.stringify(this.calDraft))).then(function(errs) {
+          if (!errs.length) { self.calDraft = null; self.calDraftId = ''; }
+        });
+      },
+      cancelCalDraft: function() { this.calDraft = null; this.calDraftId = ''; },
+      openUserCalendar: function(id) { this.selectTab(id); },
+      // Tables this user could put on a calendar: ones they can reach that declare a date column.
+      // Save one definition. Validated here rather than only in the form, because the folder config is
+      // also reachable by IMPORT -- and every one of these mistakes fails the same silent way, as a
+      // calendar that renders and exports nothing at all.
+      saveUserCalendar: function(id, def) {
+        var errs = this.userCalendarErrors(def);
+        if (errs.length) { this.notify(errs[0]); return Promise.resolve(errs); }
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.calendars = Object.assign({}, cfg.calendars || {});
+        cfg.calendars[id] = def;
+        cfg.mode = this.mode;
+        this._saveFolderConfig(cfg, null);
+        this._applyUserCalendars();
+        return Promise.resolve([]);
+      },
+      deleteUserCalendar: function(id) {
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.calendars = Object.assign({}, cfg.calendars || {});
+        delete cfg.calendars[id];
+        cfg.mode = this.mode;
+        this._saveFolderConfig(cfg, null);
+        this._applyUserCalendars();
+        if (this.currentTable === id) this._autoSelectTab();
+      },
+      // The same checks validateSchema makes of a schema calendar. Each of these otherwise produces a
+      // calendar that is valid, renders, and is permanently empty -- indistinguishable from a table
+      // nobody has filled in yet.
+      userCalendarErrors: function(def) {
+        var self = this, errs = [];
+        if (!def || !Array.isArray(def.sources) || !def.sources.length) { errs.push(this.t('cal.err_no_source')); return errs; }
+        def.sources.forEach(function(s) {
+          if (!s || !s.table || !SCHEMA[s.table]) { errs.push(self.t('cal.err_table')); return; }
+          var cols = (SCHEMA[s.table] && SCHEMA[s.table].columns) || {};
+          if (!s.dateColumn || !cols[s.dateColumn]) { errs.push(self.t('cal.err_date_col')); return; }
+          if (!Columns.colIsDate(SCHEMA, s.dateColumn)) errs.push(self.t('cal.err_not_date'));
+          (s.titleColumns || []).forEach(function(c) { if (!cols[c]) errs.push(self.t('cal.err_title_col')); });
+        });
+        return errs;
+      },
+      // Date columns of a table, for the editor's pickers.
+      columnsOf: function(table) { return table && SCHEMA[table] ? getColumns(table) : []; },
+      dateColumnsOf: function(table) {
+        return getColumns(table).filter(function(c) { return Columns.colIsDate(SCHEMA, c); });
+      },
       // The rows a calendar reads, present before anything renders a FILE from them.
       //
       // Boot fetches no table data and a view loads its own tables when it opens, so for the first
@@ -3706,6 +3837,7 @@ function createVueApp() {
       _saveFolderConfig: function(cfg, viewName) {
         var self = this;
         this.appConfig = cfg;                       // local override for everyone with view access
+        this._applyUserCalendars();
         if (this.isAdmin && backend.setFolderConfig) {
           Promise.resolve(backend.setFolderConfig(cfg))
             .catch(function() { self.notify(self.t('msg.save_failed')); });

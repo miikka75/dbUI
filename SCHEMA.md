@@ -1538,6 +1538,42 @@ at 30 and the badge becomes *Silver*.
   the view is broken.
 - **Embedding**: `{{view:x}}` in any document renders the tiles, like every other kind.
 
+### Calendars built in the app, not the schema
+
+A calendar can also be created at runtime from **Settings → Your own calendars**: name it, pick a
+table, its date column, and the columns that form each event's title. Repeat per table for a calendar
+that draws from several.
+
+They are stored in the **folder config**, beside the other per-view runtime settings (a rotation's
+anchor, a calendar's `ics` window, a feed's URL) — not in the schema document, and not in a system
+store of their own. Both alternatives cost more than they buy: a schema editor is explicitly not the
+design, and a new underscore-prefixed store would need its own block in `firestore.rules`, the mirror
+in the Supabase RLS, and the dev server, to guard a list of view definitions that nothing enforces
+access on anyway.
+
+They merge into `VIEWS` at load as ordinary calendar views, so everything downstream is inherited
+unchanged: rendering, the `.ics` download, the window and language settings, `{{view:x}}` embeds, and
+the Settings calendar list — which enumerates views rather than the nav, so one appears there with a
+download button **without any nav entry existing**. Putting one in the sidebar is still a schema
+concern (`nav.items`).
+
+**Creating one reveals nothing.** Every source is gated by `canReachTable` when the events are built,
+so a calendar cannot show anyone rows they could not already open — the same fail-closed rule that lets
+a shared calendar sit in a restricted member's nav. That is what makes this safe to offer at runtime.
+
+**A schema view of the same name wins.** The schema is the more deliberate statement, and silently
+shadowing one from a config row is how a calendar starts disagreeing with the file it appears to come
+from.
+
+The same checks `validateSchema` makes of a schema calendar are made on save — a real table, a real
+**date** column, real title columns — because each of them otherwise produces a calendar that is valid,
+renders, and is permanently empty. The folder config is also reachable by import, so the check lives on
+the save path rather than only in the form.
+
+Not offered on these yet: publishing. A feed is world-readable to anyone holding its URL, and turning
+that from a schema commit into a button is a decision about who may publish rather than a missing
+feature — see ROADMAP.
+
 ### What a calendar's `.ics` contains (`calendar.ics`)
 
 Both the download button and a published feed generate the same file, from one setting: how far `back`

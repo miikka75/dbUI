@@ -4246,6 +4246,82 @@ test.describe('calendar view', () => {
     expect(text).not.toContain('Example Smith');
   });
 
+  test('an admin can build a calendar in the app, and it behaves like any other', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      await window.Writes.putRow('tasks', { id: 'uc_row', date: app._calToday(), title: 'BuiltHere' }, 'active');
+
+      // The pickers only offer what can actually carry a calendar: reachable tables with a date column.
+      const tables = app.calendarSourceTables;
+      const dateCols = app.dateColumnsOf('tasks');
+
+      const errs = await app.saveUserCalendar('cal_built', {
+        title: 'Built here', sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'] }]
+      });
+
+      return {
+        offersTasks: tables.includes('tasks'), dateCols, errs,
+        // Merged into VIEWS as an ordinary calendar, which is what makes everything downstream work.
+        kind: window.SchemaNormalize.viewKind(window.VIEWS.cal_built),
+        listed: app.userCalendars.map((c) => c.id),
+        // And it appears in the calendars-as-files list without any nav entry existing.
+        asFile: app.calendarFiles.map((f) => f.name).includes('cal_built'),
+        inNav: app.sidebarTabs.filter((t) => t.id).map((t) => t.id).includes('cal_built')
+      };
+    });
+    expect(r.offersTasks).toBe(true);
+    expect(r.dateCols).toContain('date');
+    expect(r.errs).toEqual([]);
+    expect(r.kind).toBe('calendar');
+    expect(r.listed).toContain('cal_built');
+    expect(r.asFile).toBe(true);
+    expect(r.inNav).toBe(false);
+
+    // It renders, and exports, exactly like a schema-defined one.
+    await page.evaluate(() => window.appInstance.selectTab('cal_built'));
+    await expect(page.locator('[data-testid="cal-view"]')).toBeVisible();
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.evaluate(() => window.appInstance.downloadIcs('cal_built'))
+    ]);
+    const text = require('fs').readFileSync(await download.path(), 'utf8');
+    expect(text).toContain('SUMMARY:BuiltHere');
+
+    // Deleting it removes the view too, rather than leaving a name that renders nothing.
+    const gone = await page.evaluate(() => {
+      window.appInstance.deleteUserCalendar('cal_built');
+      return { inViews: !!window.VIEWS.cal_built, listed: window.appInstance.userCalendars.map((c) => c.id) };
+    });
+    expect(gone.inViews).toBe(false);
+    expect(gone.listed).not.toContain('cal_built');
+  });
+
+  test('a calendar built in the app is refused when it would render nothing', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      const t = async (def) => (await app.saveUserCalendar('cal_bad', def)).length > 0;
+      return {
+        noSource: await t({ title: 'x', sources: [] }),
+        badTable: await t({ title: 'x', sources: [{ table: 'nope', dateColumn: 'date' }] }),
+        noDateCol: await t({ title: 'x', sources: [{ table: 'tasks', dateColumn: '' }] }),
+        notADate: await t({ title: 'x', sources: [{ table: 'tasks', dateColumn: 'title' }] }),
+        badTitleCol: await t({ title: 'x', sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['nope'] }] }),
+        ok: await t({ title: 'x', sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'] }] })
+      };
+    });
+    // Each of these otherwise produces a calendar that is valid, renders, and is permanently empty.
+    expect(r.noSource).toBe(true);
+    expect(r.badTable).toBe(true);
+    expect(r.noDateCol).toBe(true);
+    expect(r.notADate).toBe(true);
+    expect(r.badTitleCol).toBe(true);
+    expect(r.ok).toBe(false);
+  });
+
   test('the calendar exports an .ics the browser is handed as a download', async ({ page }) => {
     await ensureAppReady(page);
     // The button is the only part not covered by dev/test/ics.test.js, so this asserts the WIRING: a
