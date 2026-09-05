@@ -584,10 +584,67 @@ own schedule, typically many hours, and it is not client-controllable. Write-tri
 buys *correctness* — never stale relative to the data — not speed. Anyone wanting an edit on their
 phone within seconds is better served by the export.
 
-### `timeline` / `gantt`
+### Calendars defined in the DATABASE, not the schema
 
-Rows with a start *and* end date, drawn as bars across periods. This fills the calendar's documented
-gap — it places single-day events only, so anything spanning days has nowhere to go today.
+"Can a new calendar — ushers, cleaning, whatever someone thinks of next — be made without editing the
+schema document?" Today: no. `calendar.sources` is schema, and the app has no schema editor by design
+(SCHEMA.md: *hand-editing this document is the design*), so the routes are Settings → Import or editing
+the file and reinstalling.
+
+The proposal is not a schema editor. It is to let a calendar be a ROW.
+
+**Why this fits rather than fights the architecture.** The split already exists and this lands on the
+side that is already database-backed:
+
+- `_pages` holds doc-view BODIES in the database, not in the schema;
+- folder config holds per-view runtime settings — a rotation's anchor and range, a calendar's `ics`
+  window and language, a feed's URL;
+- lists and lookup tables hold vocabulary.
+
+Schema is structure; the database holds content and per-deployment configuration. A calendar is a
+saved question over tables that already exist — closer to a lookup table than to a column definition.
+
+**Shape.** A `_calendars` system store, one row per calendar:
+
+```json
+{ "id": "ushers", "title": "Ushers",
+  "sources": [ { "table": "duty_usher_dates", "dateColumn": "date", "titleColumns": ["…"] } ],
+  "obscureNames": ["…"], "ics": { "back": "3m", "forward": "1y" } }
+```
+
+Read at boot and merged into `VIEWS` as ordinary calendar views. From there everything downstream is
+inherited and needs no changes at all: rendering, the `.ics` download, publishing, the window and
+language settings, `embed-view` for `{{view:x}}`, and the Settings list, which already enumerates
+`Object.keys(VIEWS)` rather than the nav — so a database-defined calendar appears there with a download
+button without a nav entry existing.
+
+**Two constraints that shape it, both already written into the code.**
+
+1. **A schema change forces a reload.** `columns.js` memoizes schema-static scans in a WeakMap keyed on
+   the schema object, "safe because SCHEMA is built once at load and every runtime schema change forces
+   a full page reload". Adding a CALENDAR does not touch `SCHEMA` (tables), so those caches stay valid —
+   but the honest design is still create-then-reload, matching how installing an example behaves. Not a
+   live-editing feature.
+2. **Rendering is already fail-closed per source.** `events.js` drops any source whose table the viewer
+   cannot reach, so a calendar created by one person cannot show another person rows they could not
+   already open. This is what makes the feature safe to expose at runtime at all, and it is existing
+   behaviour rather than something to add.
+
+**The decision this needs, and it is not the code.** Creating a calendar is harmless — it reveals
+nothing new. PUBLISHING one is not: a feed is world-readable to anyone holding its URL. Today that is a
+schema commit, which is reviewed and deliberate; as a runtime action it becomes a button. So the two
+want different permissions — create for any admin, publish gated more tightly, or not offered on
+database-defined calendars at first. Worth deciding before building, not after.
+
+**Cost.** The engine half is small, because everything downstream already exists: a system store, a
+boot merge, and the save-time validation `validateSchema` already performs for `calendar` (a real table,
+a real DATE column, real title columns — each of which otherwise fails as a permanently empty
+calendar). The bulk is the UI nobody has built yet: pick a table, pick its date column, pick title
+columns, repeat per source. That is a small form, but it is the first place the app asks someone to
+choose a column by name, so it wants the same care the Lookup editor got.
+
+Sequencing: worth doing after the feed's token decision, since "who may publish" is the same question
+in a different hat, and answering it once covers both.
 
 ### `tree`
 
@@ -625,6 +682,13 @@ stops working offline. Everything above it stays inside the app boundary.
 
 Recorded so the roadmap shows what graduated rather than silently shrinking.
 
+- **`timeline`** (#173) — rows with a start *and* end date as bars across periods, closing the gap the
+  calendar documents about itself: a calendar places a row on ONE day, so anything spanning days had
+  nowhere to go. `timeline.js` reuses `rotation.js`'s interval arithmetic rather than growing a second
+  definition of "a week". The decisions that mattered were all about not lying with a picture — a row
+  with no end is one period rather than open-ended, a row outside the window is dropped rather than
+  flattened to a zero-width bar that reads as "happening now", and a crossing bar is clipped and
+  squared-off so "continues past here" is in the shape.
 - **`stats`** (KPI tiles / progress bars) — `stats.js` + the `stats` view kind. Confirmed the premise
   it was proposed on: the data half already existed, so the whole feature is a renderer over the
   aggregate pipeline. `chore_points_week` became bars by gaining three lines and changing no data
@@ -656,8 +720,11 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
 
 ## Suggested order
 
-`timeline` next, which closes a gap the calendar documents about itself. Then `tree` and `gallery`,
-both gated mainly on a column type. (`.ics` export was previously first here, and has shipped.)
+`tree` and `gallery` next, both gated mainly on a column type. (`.ics` export and `timeline` were each
+first here in turn, and have shipped.)
+
+Database-defined calendars sit outside that line for the same reason the feed does: what it needs
+decided is who may PUBLISH one, which is the feed's open question wearing a different hat.
 
 The subscribable feed is deliberately not in that line despite being mostly designed. Everything left
 in it is a judgement rather than an implementation — whether this deployment wants a bearer token for
