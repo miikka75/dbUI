@@ -1604,6 +1604,13 @@ calendar clients cannot authenticate, so this is inherent rather than a shortcut
 128-bit random id and the button is shown only to someone who could publish it. Treat handing out the
 link as handing out the calendar.
 
+**`obscureNames` is respected, including in a published file.** `shouldObscure` takes no viewer — it
+reads the view's own config — so a calendar that masks names masks them for everyone, an admin
+included, and the same masked form is what reaches the `.ics`. That is what makes publishing an
+obscured roster safe: the file cannot carry more than the view shows, even though a full-access client
+is what renders it. Note it is the ROTATION view's `obscureNames` that governs an overlaid duty, not
+the calendar's, because the overlay renders through the matrix's own resolvers.
+
 **Only a full-access client republishes.** A restricted member regenerating from their own cache would
 overwrite the complete calendar with the subset they can see — silent loss for every subscriber, caused
 by a legitimate edit. Their write leaves the feed stale instead, which is the safe direction.

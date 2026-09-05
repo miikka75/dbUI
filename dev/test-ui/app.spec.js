@@ -4215,6 +4215,37 @@ test.describe('calendar view', () => {
     expect(text).toContain('SUMMARY:RaceRow');
   });
 
+  test('an exported calendar obscures names the view obscures, even for an admin', async ({ page }) => {
+    await ensureAppReady(page);
+    // The privacy question a FEED raises: the file is rendered by a full-access client and then served
+    // to anyone holding its URL, so if obscuring were a viewer privilege the publisher would bake real
+    // names into a world-readable document. shouldObscure takes no viewer at all — it reads the VIEW's
+    // config — which is what makes publishing an obscured calendar safe. Nothing pinned that.
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;                  // admin: the most privileged viewer
+      app.dataCache['tasks'] = [{ id: 'o1', date: app._calToday(), title: 'Ann Example Smith' }];
+      window.VIEWS.obs_plain = { name: 'obs_plain',
+        calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] } };
+      window.VIEWS.obs_hidden = { name: 'obs_hidden', obscureNames: ['title'],
+        calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] } };
+      const titles = (v) => Object.values(app.calEventsFor(v, app.calendarCoverFor(v))).flat().map((e) => e.title);
+      return { isAdmin: app.isAdmin, plain: titles('obs_plain'), hidden: titles('obs_hidden') };
+    });
+    expect(r.isAdmin).toBe(true);
+    expect(r.plain).toEqual(['Ann Example Smith']);
+    expect(r.hidden).toEqual(['Ann E. S.']);
+
+    // And it survives serialization — the file carries the obscured form, not the stored one.
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.evaluate(() => window.appInstance.downloadIcs('obs_hidden'))
+    ]);
+    const text = require('fs').readFileSync(await download.path(), 'utf8');
+    expect(text).toContain('SUMMARY:Ann E. S.');
+    expect(text).not.toContain('Example Smith');
+  });
+
   test('the calendar exports an .ics the browser is handed as a download', async ({ page }) => {
     await ensureAppReady(page);
     // The button is the only part not covered by dev/test/ics.test.js, so this asserts the WIRING: a
