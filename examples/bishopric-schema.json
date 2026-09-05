@@ -12,14 +12,6 @@
           "icon": "mdi-information-variant-circle-outline"
         },
         {
-          "view": "meeting_calendar",
-          "icon": "mdi-calendar-month-outline"
-        },
-        {
-          "view": "my_calendar",
-          "icon": "mdi-calendar-account-outline"
-        },
-        {
           "icon": "mdi-progress-clock",
           "view": "meeting_program"
         },
@@ -1063,64 +1055,6 @@
         "defaultSort": "date",
         "name": "duty_interpreters",
         "kind": "data"
-      },
-      {
-        "name": "meeting_calendar",
-        "kind": "calendar",
-        "calendar": {
-          "sources": [
-            {
-              "table": "meeting_agenda",
-              "dateColumn": "date",
-              "titleColumns": [
-                "theme"
-              ]
-            }
-          ],
-          "defaultView": "month",
-          "weekStart": 0
-        }
-      },
-      {
-        "name": "my_calendar",
-        "kind": "calendar",
-        "calendar": {
-          "sources": [
-            {
-              "table": "meeting_agenda",
-              "dateColumn": "date",
-              "titleColumns": [
-                "theme"
-              ],
-              "filter": {
-                "responsible": "@me"
-              }
-            },
-            {
-              "table": "admin_interviews",
-              "dateColumn": "meeting",
-              "titleColumns": [
-                "person",
-                "topic"
-              ],
-              "filter": {
-                "responsible": "@me"
-              }
-            },
-            {
-              "table": "admin_reminders",
-              "dateColumn": "date",
-              "titleColumns": [
-                "item",
-                "person"
-              ],
-              "filter": {
-                "responsible": "@me"
-              }
-            }
-          ],
-          "defaultView": "list"
-        }
       }
     ],
     "listSources": {

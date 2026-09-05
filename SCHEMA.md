@@ -1570,6 +1570,11 @@ The same checks `validateSchema` makes of a schema calendar are made on save —
 renders, and is permanently empty. The folder config is also reachable by import, so the check lives on
 the save path rather than only in the form.
 
+The shipped bishopric example deliberately declares NO calendar, for this reason: a calendar is a
+saved question over tables that already exist, so shipping one makes the example carry a decision that
+belongs to whoever installs it. Its dated tables are exportable the moment someone builds a calendar
+here.
+
 Not offered on these yet: publishing. A feed is world-readable to anyone holding its URL, and turning
 that from a schema commit into a button is a decision about who may publish rather than a missing
 feature — see ROADMAP.
