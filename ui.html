@@ -676,6 +676,34 @@
               <v-btn size="small" variant="outlined" class="mt-2" prepend-icon="mdi-download"
                      data-testid="example-update-apply" @click="a.reinstallExample()">{{ a.t('settings.examples_reinstall') }}</v-btn>
             </v-alert>
+            <!-- Published calendars. Here rather than only on each calendar's toolbar because a
+                 publish-only calendar need not be in the nav at all, and because "what am I currently
+                 serving to anyone with a link?" is a question about the DEPLOYMENT, not about one view.
+                 Read from the folder config, so a feed whose view was hidden or switched off still
+                 appears -- its file is still out there. -->
+            <template v-if="a.publishedFeeds.length">
+              <v-divider class="my-4"></v-divider>
+              <p class="text-subtitle-2 mb-1">{{ a.t('settings.feeds') }}</p>
+              <p style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.feeds_note') }}</p>
+              <div v-for="f in a.publishedFeeds" :key="f.name" class="mb-3" data-testid="settings-feed">
+                <div class="d-flex align-center flex-wrap" style="gap:8px">
+                  <strong style="font-size:0.9rem">{{ f.title }}</strong>
+                  <v-chip v-if="!f.live" size="x-small" color="warning" variant="tonal"
+                          data-testid="feed-stale">{{ a.t('settings.feed_not_republishing') }}</v-chip>
+                </div>
+                <div class="d-flex align-center flex-wrap mt-1" style="gap:8px">
+                  <v-text-field :model-value="f.url" readonly density="compact" variant="outlined"
+                                hide-details style="font-size:0.78rem;min-width:260px" :data-testid="'feed-url-' + f.name"></v-text-field>
+                  <v-btn size="small" variant="text" @click="a.copyText(f.url)">{{ a.t('btn.copy') }}</v-btn>
+                  <v-btn size="small" variant="text" color="warning" :disabled="!a.canPublishFeeds"
+                         :data-testid="'feed-regen-' + f.name"
+                         @click="a.regenerateFeed(f.name)">{{ a.t('settings.feed_regenerate') }}</v-btn>
+                  <v-btn size="small" variant="text" color="error"
+                         :data-testid="'feed-stop-' + f.name"
+                         @click="a.unpublishFeed(f.name)">{{ a.t('settings.feed_unpublish') }}</v-btn>
+                </div>
+              </div>
+            </template>
             <!-- Browser-local Postgres only. Deliberately next to Export, because the honest answer to
                  "can I lose this?" is a backup, and the second-best answer is the persistence request
                  below. Literal English rather than t() keys, matching the other backend-specific copy

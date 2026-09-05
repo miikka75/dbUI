@@ -535,6 +535,26 @@ function createVueApp() {
           return (a.key || '').toLowerCase().localeCompare((b.key || '').toLowerCase());
         });
       },
+      // Every feed this database has published, for the Settings list. Read from the FOLDER CONFIG, not
+      // from VIEWS: a calendar can be published and then hidden (or its `feed` switch turned off), and
+      // the file at that URL goes on being world-readable either way. The list has to show what is
+      // actually out there, which is a different question from what the schema currently declares.
+      publishedFeeds: function() {
+        var feeds = (this.appConfig && this.appConfig.feeds) || {};
+        var self = this;
+        return Object.keys(feeds).sort().map(function(n) {
+          return {
+            name: n,
+            title: self.tOr('view.' + n, self.tOr('tab.' + n, n)),
+            url: feeds[n].url || '',
+            at: feeds[n].at || '',
+            // A feed whose view is gone or whose `feed` switch was turned off no longer republishes,
+            // but its last file is still being served. Saying so is the point of showing it here.
+            live: Feeds.isFeed(VIEWS[n])
+          };
+        });
+      },
+
       // Tables I may SEE (grant mode 'r' or 'rw'). This is the visibility set every nav/load/list gate
       // uses; the write gates use userWritableTables below. null = unrestricted, [] = none.
       userAllowedTables: function() {
@@ -826,7 +846,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1626,7 +1646,59 @@ function createVueApp() {
         cfg.mode = this.mode;
         this._saveFolderConfig(cfg, viewName);
       },
+      // One clipboard helper: the calendar toolbar and the Settings feed list both copy a URL, and a
+      // second copy of the try/catch is how the two would come to report success differently.
+      copyText: function(text) {
+        var self = this;
+        return Promise.resolve(navigator.clipboard && navigator.clipboard.writeText(text))
+          .then(function() { self.notify(self.t('msg.copied')); })
+          .catch(function() { self.notify(self.t('msg.save_failed')); });
+      },
       feedInfoFor: function(name) { return ((this.appConfig && this.appConfig.feeds) || {})[name] || null; },
+      // Blank the file at an id's path: a VALID but empty calendar, uploaded over the old object.
+      //
+      // This is what revocation means here, and it is deliberately not a delete. There is no delete in
+      // the backend contract, and adding one would not be better: a 404 leaves clients retrying a dead
+      // address, while an empty VCALENDAR is a clean "there is nothing here" that every client
+      // understands. What matters either way is that the old URL stops SERVING DATA -- minting a new id
+      // and walking away would leave the leaked link showing the last snapshot for ever, which is the
+      // opposite of revoking it.
+      _blankFeedAt: function(id) {
+        if (!id || !backend.uploadFile) return Promise.resolve(null);
+        var text = Ics.build({}, { name: this.t('settings.feed_revoked'), domain: (typeof Databases !== 'undefined' && Databases.activeKey()) || 'dbui.local' });
+        var blob = new Blob([text], { type: 'text/calendar;charset=utf-8' });
+        return Promise.resolve(backend.uploadFile(blob, { path: Feeds.pathFor(id), contentType: 'text/calendar' }))
+          .catch(function() { return null; });   // best effort: the caller must still move on to a new id
+      },
+
+      // Retire the current URL and publish at a fresh one. Every existing subscriber breaks, which IS
+      // the feature -- it is how a link that got out is taken back.
+      regenerateFeed: function(name) {
+        var self = this, info = this.feedInfoFor(name);
+        if (!this.canPublishFeeds()) return Promise.resolve(null);
+        return this._blankFeedAt(info && info.id).then(function() {
+          var cfg = Object.assign({}, self.appConfig || {});
+          cfg.feeds = Object.assign({}, cfg.feeds || {});
+          delete cfg.feeds[name];               // drop the id so publishFeed mints a new one
+          self._saveFolderConfig(cfg, null);
+          return self.publishFeed(name);
+        });
+      },
+
+      // Stop publishing entirely: blank the file, then forget it. Without this, turning `feed` off in
+      // the schema stops REPUBLISHING while leaving the last file world-readable at a URL that is
+      // already in people's calendar apps -- a trap, and the reason this sits beside regenerate rather
+      // than waiting for someone to ask for it.
+      unpublishFeed: function(name) {
+        var self = this, info = this.feedInfoFor(name);
+        return this._blankFeedAt(info && info.id).then(function() {
+          var cfg = Object.assign({}, self.appConfig || {});
+          cfg.feeds = Object.assign({}, cfg.feeds || {});
+          delete cfg.feeds[name];
+          self._saveFolderConfig(cfg, null);
+          self.notify(self.t('settings.feed_unpublished'));
+        });
+      },
       feedUrlFor: function(name) { var f = this.feedInfoFor(name); return (f && f.url) || ''; },
 
       // Render + upload one feed. The id is minted once and kept in the folder config, because the PATH
@@ -6059,12 +6131,7 @@ function createVueApp() {
       exportIcs: function() { appInstance.downloadIcs(this.viewName); },
       publish: function() { appInstance.publishFeed(this.viewName); },
       setWindow: function(patch) { appInstance.saveCalendarWindow(this.viewName, patch); },
-      copyFeed: function() {
-        var a = appInstance, u = this.feedUrl;
-        Promise.resolve(navigator.clipboard && navigator.clipboard.writeText(u))
-          .then(function() { a.notify(a.t('msg.copied')); })
-          .catch(function() { a.notify(a.t('msg.save_failed')); });
-      },
+      copyFeed: function() { appInstance.copyText(this.feedUrl); },
       selectDay: function(d) { this.sel = d; }
     }),
     template: ''
