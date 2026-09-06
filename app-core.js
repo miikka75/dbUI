@@ -1640,6 +1640,11 @@ function createVueApp() {
       editUserCalendar: function(c) {
         this.calDraftId = c.id;
         this.calDraft = JSON.parse(JSON.stringify({ title: c.title || '', feed: !!c.feed, rotationViews: c.rotationViews || [], sources: c.sources || [] }));
+        // One blank row minimum, the same rule newUserCalendar and removeCalDraftSource follow. The
+        // form renders a row PER SOURCE and puts the calendar-level fields (name, rotations, publish)
+        // in the first one -- so an overlay-only calendar, whose stored `sources` is empty, opened a
+        // table with no rows at all and looked like a blank new-calendar form.
+        if (!this.calDraft.sources.length) this.calDraft.sources.push({ table: '', dateColumn: '', titleColumns: [] });
       },
       addCalDraftSource: function() { this.calDraft.sources.push({ table: '', dateColumn: '', titleColumns: [] }); },
       // Always leaves one row. The calendar-level fields (name, rotations, publish) live in the first

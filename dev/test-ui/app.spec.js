@@ -4426,6 +4426,42 @@ test.describe('calendar view', () => {
     expect(r.badErrs).toBe(true);
   });
 
+  test('editing an overlay-only calendar shows its values, not an empty new-calendar form', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.dataCache['roster_e'] = [{ id: 'p1', people: ['Ann'], position: 1 }];
+      window.VIEWS.rot_e = { name: 'rot_e', kind: 'rotation',
+        rotation: { slots: ['a'], rosters: ['roster_e'], advanceBy: 'calendar', interval: 'weekly',
+                    anchorDate: app._calToday(), range: { from: 'today', periods: 4 } } };
+      // Overlay-only: its stored `sources` is empty, which is a legitimate calendar.
+      await app.saveUserCalendar('cal_edit', { title: 'Cleaning', rotationViews: ['rot_e'], sources: [] });
+      app.selectTab('__settings');
+    });
+    await page.locator('[data-testid="user-cal-edit-cal_edit"]').click();
+
+    // The form renders a row PER SOURCE and puts name/rotations/publish in the FIRST one. With no
+    // sources there were no rows, so the whole editor rendered blank and read as "add new".
+    await expect(page.locator('[data-testid="user-cal-title"] input')).toHaveValue('Cleaning');
+    const loaded = await page.evaluate(() => ({ id: window.appInstance.calDraftId,
+                                                rots: window.appInstance.calDraft.rotationViews }));
+    expect(loaded.id).toBe('cal_edit');
+    expect(loaded.rots).toEqual(['rot_e']);
+
+    // Saving keeps the same id and does not resurrect the blank row it was opened with.
+    await page.evaluate(() => { window.appInstance.calDraft.title = 'Cleaning rota'; });
+    await page.locator('[data-testid="user-cal-save"]').click();
+    const after = await page.evaluate(() => {
+      const d = (window.appInstance.appConfig.calendars || {})['cal_edit'];
+      return { ids: Object.keys(window.appInstance.appConfig.calendars || {}), title: d && d.title, sources: d && d.sources };
+    });
+    expect(after.ids).toContain('cal_edit');
+    expect(after.title).toBe('Cleaning rota');
+    expect(after.sources).toEqual([]);
+    await page.evaluate(() => window.appInstance.deleteUserCalendar('cal_edit'));
+  });
+
   test('a calendar built in the app survives a reload, and is listed by its own name', async ({ page }) => {
     await ensureAppReady(page);
     await page.evaluate(async () => {
