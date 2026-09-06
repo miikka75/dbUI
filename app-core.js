@@ -573,7 +573,11 @@ function createVueApp() {
             // switched off — it no longer updates, and the row says so rather than looking healthy.
             live: Feeds.isFeed(VIEWS[n]),
             // A calendar that exists but has never been published: downloadable, nothing to revoke.
-            published: !!f.url
+            published: !!f.url,
+            // Defined in the folder config rather than the schema, so it can be edited and deleted from
+            // here. A schema calendar is shown too -- it is still a file you can download -- but the app
+            // is not where it is changed.
+            userDefined: !!(VIEWS[n] && VIEWS[n].userDefined)
           };
         });
       },
@@ -1618,6 +1622,10 @@ function createVueApp() {
       newUserCalendar: function() {
         this.calDraftId = '';
         this.calDraft = { title: '', feed: false, rotationViews: [], sources: [{ table: '', dateColumn: '', titleColumns: [] }] };
+      },
+      editCalendarById: function(id) {
+        var c = this.userCalendars.filter(function(x) { return x.id === id; })[0];
+        if (c) this.editUserCalendar(c);
       },
       editUserCalendar: function(c) {
         this.calDraftId = c.id;

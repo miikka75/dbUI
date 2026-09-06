@@ -683,16 +683,6 @@
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-1">{{ a.t('settings.cal_custom') }}</p>
             <p style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.cal_custom_note') }}</p>
-            <div v-for="c in a.userCalendars" :key="c.id" class="d-flex align-center flex-wrap mb-2" style="gap:8px" data-testid="user-cal">
-              <strong style="font-size:0.9rem">{{ c.title || c.id }}</strong>
-              <span style="font-size:0.75rem;opacity:0.6">{{ a.calSourceLabels(c) }}</span>
-              <v-btn size="small" variant="text" :data-testid="'user-cal-open-' + c.id" @click="a.openUserCalendar(c.id)">{{ a.t('settings.cal_open') }}</v-btn>
-              <v-btn size="small" variant="text" :data-testid="'user-cal-edit-' + c.id" @click="a.editUserCalendar(c)">{{ a.t('btn.edit') }}</v-btn>
-              <v-btn size="small" variant="text" :color="a.isArmed('ucal:' + c.id) ? 'error' : 'warning'"
-                     :prepend-icon="a.isArmed('ucal:' + c.id) ? 'mdi-check-circle' : 'mdi-delete-outline'"
-                     :data-testid="'user-cal-del-' + c.id"
-                     @click="a.isArmed('ucal:' + c.id) ? a.deleteUserCalendar(c.id) : a.armDelete('ucal:' + c.id)">{{ a.isArmed('ucal:' + c.id) ? a.t('settings.confirm_delete') : a.t('settings.cal_delete') }}</v-btn>
-            </div>
             <v-btn v-if="!a.calDraft" size="small" variant="outlined" prepend-icon="mdi-calendar-plus"
                    data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('settings.cal_new') }}</v-btn>
             <v-card v-if="a.calDraft" variant="tonal" class="pa-3 mt-2" data-testid="user-cal-form">
@@ -704,29 +694,29 @@
               <v-table density="compact">
                 <template v-slot:default>
                 <thead><tr>
+                  <th v-if="a.rotationViewItems.length">{{ a.t('settings.cal_rotations') }}</th>
                   <th>{{ a.t('settings.cal_title') }}</th>
                   <th>{{ a.t('settings.cal_table') }}</th>
                   <th>{{ a.t('settings.cal_date_col') }}</th>
                   <th>{{ a.t('settings.cal_title_cols') }}</th>
-                  <th v-if="a.rotationViewItems.length">{{ a.t('settings.cal_rotations') }}</th>
                   <th v-if="a.canPublishFeeds">{{ a.t('settings.cal_publish') }}</th>
                   <th></th>
                 </tr></thead>
                 <tbody>
                   <tr v-for="(src, i) in a.calDraft.sources" :key="i">
-                    <td><v-text-field v-if="i === 0" v-model="a.calDraft.title" density="compact" variant="plain" hide-details style="min-width:120px" data-testid="user-cal-title"></v-text-field></td>
-                    <td><v-select v-model="src.table" :items="a.calendarTableItems" density="compact" variant="plain" hide-details style="min-width:130px"
-                                  @update:model-value="a.calDraftTableChanged(src)" :data-testid="'user-cal-table-' + i"></v-select></td>
-                    <td><v-select v-model="src.dateColumn" :items="a.dateColumnItems(src.table)" density="compact" variant="plain" hide-details style="min-width:120px"
-                                  :data-testid="'user-cal-datecol-' + i"></v-select></td>
-                    <td><v-select v-model="src.titleColumns" :items="a.columnItems(src.table)" multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:150px"
-                                  :data-testid="'user-cal-titlecols-' + i"></v-select></td>
                     <!-- Duty rotations drawn on the same grid. Their duties are GENERATED, not stored,
                          so they are overlays rather than sources -- and they render through the
                          rotation's own resolvers, which carries its obscureNames across. -->
                     <td v-if="a.rotationViewItems.length"><v-select v-if="i === 0" v-model="a.calDraft.rotationViews" :items="a.rotationViewItems"
                                   multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:150px"
                                   data-testid="user-cal-rotations"></v-select></td>
+                    <td><v-text-field v-if="i === 0" v-model="a.calDraft.title" density="compact" variant="outlined" hide-details style="min-width:120px" data-testid="user-cal-title"></v-text-field></td>
+                    <td><v-select v-model="src.table" :items="a.calendarTableItems" density="compact" variant="plain" hide-details style="min-width:130px"
+                                  @update:model-value="a.calDraftTableChanged(src)" :data-testid="'user-cal-table-' + i"></v-select></td>
+                    <td><v-select v-model="src.dateColumn" :items="a.dateColumnItems(src.table)" density="compact" variant="plain" hide-details style="min-width:120px"
+                                  :data-testid="'user-cal-datecol-' + i"></v-select></td>
+                    <td><v-select v-model="src.titleColumns" :items="a.columnItems(src.table)" multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:150px"
+                                  :data-testid="'user-cal-titlecols-' + i"></v-select></td>
                     <!-- Publishing, offered only where it can actually happen: a blob store is a
                          CAPABILITY the app learns by trying, so this mirrors the export button rather
                          than promising a switch that would fail on save. -->
@@ -758,9 +748,18 @@
                   <strong style="font-size:0.9rem">{{ f.title }}</strong>
                   <v-chip v-if="f.published && !f.live" size="x-small" color="warning" variant="tonal"
                           data-testid="feed-stale">{{ a.t('settings.feed_not_republishing') }}</v-chip>
+                  <v-spacer></v-spacer>
+                  <v-btn size="small" variant="text" :data-testid="'user-cal-open-' + f.name" @click="a.openUserCalendar(f.name)">{{ a.t('settings.cal_open') }}</v-btn>
                   <v-btn size="small" variant="text" prepend-icon="mdi-calendar-export"
                          :data-testid="'feed-download-' + f.name"
                          @click="a.downloadIcs(f.name)">{{ a.t('btn.export_ics') }}</v-btn>
+                  <!-- Only a calendar defined HERE can be changed here. A schema one is still listed --
+                       it is a file you can download -- but the app is not where it is edited. -->
+                  <v-btn v-if="f.userDefined" size="small" variant="text" :data-testid="'user-cal-edit-' + f.name" @click="a.editCalendarById(f.name)">{{ a.t('btn.edit') }}</v-btn>
+                  <v-btn v-if="f.userDefined" size="small" variant="text" :color="a.isArmed('ucal:' + f.name) ? 'error' : 'warning'"
+                         :prepend-icon="a.isArmed('ucal:' + f.name) ? 'mdi-check-circle' : 'mdi-delete-outline'"
+                         :data-testid="'user-cal-del-' + f.name"
+                         @click="a.isArmed('ucal:' + f.name) ? a.deleteUserCalendar(f.name) : a.armDelete('ucal:' + f.name)">{{ a.isArmed('ucal:' + f.name) ? a.t('settings.confirm_delete') : a.t('settings.cal_delete') }}</v-btn>
                 </div>
                 <div v-if="f.published" class="d-flex align-center flex-wrap mt-1" style="gap:8px">
                   <v-text-field :model-value="f.url" readonly density="compact" variant="outlined"
