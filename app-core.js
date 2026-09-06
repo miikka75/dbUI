@@ -1624,7 +1624,13 @@ function createVueApp() {
         this.calDraft = JSON.parse(JSON.stringify({ title: c.title || '', feed: !!c.feed, rotationViews: c.rotationViews || [], sources: c.sources || [] }));
       },
       addCalDraftSource: function() { this.calDraft.sources.push({ table: '', dateColumn: '', titleColumns: [] }); },
-      removeCalDraftSource: function(i) { this.calDraft.sources.splice(i, 1); },
+      // Always leaves one row. The calendar-level fields (name, rotations, publish) live in the first
+      // row, so emptying the list would take them off screen with it -- and a blank row costs nothing,
+      // since blanks are dropped on save. That is also what keeps an overlay-only calendar reachable.
+      removeCalDraftSource: function(i) {
+        this.calDraft.sources.splice(i, 1);
+        if (!this.calDraft.sources.length) this.calDraft.sources.push({ table: '', dateColumn: '', titleColumns: [] });
+      },
       // Changing the table invalidates the columns picked under it -- they belong to the old one.
       calDraftTableChanged: function(src) { src.dateColumn = ''; src.titleColumns = []; },
       saveCalDraft: function() {

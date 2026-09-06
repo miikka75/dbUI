@@ -696,37 +696,47 @@
             <v-btn v-if="!a.calDraft" size="small" variant="outlined" prepend-icon="mdi-calendar-plus"
                    data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('settings.cal_new') }}</v-btn>
             <v-card v-if="a.calDraft" variant="tonal" class="pa-3 mt-2" data-testid="user-cal-form">
-              <!-- Laid out like the Users table: `plain` selects on one line, the destructive control
-                   last. flex-wrap rather than a real <v-table> because a calendar has a VARIABLE number
-                   of sources, so there is no fixed column count to give a table -- and min/max widths
-                   rather than fixed ones because these labels come from the language pack, where a width
-                   that fits "Date column" does not fit its Finnish label. -->
-              <div class="d-flex align-center flex-wrap mb-2" style="gap:8px">
-                <v-text-field v-model="a.calDraft.title" :label="a.t('settings.cal_title')" density="compact" variant="plain" hide-details style="min-width:130px;max-width:180px" data-testid="user-cal-title"></v-text-field>
-                <!-- Duty rotations drawn on the same grid. Their duties are GENERATED, not stored, so
-                     they are overlays rather than sources -- and they render through the rotation's own
-                     resolvers, which is what carries its obscureNames across without repeating it. -->
-                <v-select v-if="a.rotationViewItems.length" v-model="a.calDraft.rotationViews" :items="a.rotationViewItems"
-                          multiple chips closable-chips :label="a.t('settings.cal_rotations')" density="compact" variant="plain" hide-details
-                          style="min-width:170px;max-width:280px" data-testid="user-cal-rotations"></v-select>
-                <v-spacer></v-spacer>
-                <!-- Publishing, offered only where it can actually happen. Presence of a blob store is a
-                     CAPABILITY the app only learns by trying, so this mirrors the export button rather
-                     than promising a switch that would fail on save. Last on the line, like the Users
-                     table's own trailing control. -->
-                <v-switch v-if="a.canPublishFeeds" v-model="a.calDraft.feed" color="primary" density="compact" hide-details
-                          :label="a.t('settings.cal_publish')" data-testid="user-cal-feed"></v-switch>
-              </div>
-              <div v-for="(src, i) in a.calDraft.sources" :key="i" class="d-flex align-center flex-wrap mb-1" style="gap:8px">
-                <v-select v-model="src.table" :items="a.calendarTableItems" :label="a.t('settings.cal_table')" density="compact" variant="plain" hide-details style="min-width:140px;max-width:190px"
-                          @update:model-value="a.calDraftTableChanged(src)" :data-testid="'user-cal-table-' + i"></v-select>
-                <v-select v-model="src.dateColumn" :items="a.dateColumnItems(src.table)" :label="a.t('settings.cal_date_col')" density="compact" variant="plain" hide-details style="min-width:130px;max-width:180px"
-                          :data-testid="'user-cal-datecol-' + i"></v-select>
-                <v-select v-model="src.titleColumns" :items="a.columnItems(src.table)" multiple chips closable-chips :label="a.t('settings.cal_title_cols')" density="compact" variant="plain" hide-details style="min-width:170px;max-width:260px"
-                          :data-testid="'user-cal-titlecols-' + i"></v-select>
-                <v-spacer></v-spacer>
-                <v-btn icon="mdi-close" size="x-small" variant="text" :data-testid="'user-cal-rmsrc-' + i" @click="a.removeCalDraftSource(i)"></v-btn>
-              </div>
+              <!-- A real table, like Users: headers, `plain` controls, one row, destructive control
+                   last. A calendar has a VARIABLE number of sources, which a table handles the way a
+                   table does -- one row per source, with the calendar-level fields (name, rotations,
+                   publish) filled in on the first row only, so continuation rows read as belonging to
+                   it rather than repeating it. -->
+              <v-table density="compact">
+                <template v-slot:default>
+                <thead><tr>
+                  <th>{{ a.t('settings.cal_title') }}</th>
+                  <th>{{ a.t('settings.cal_table') }}</th>
+                  <th>{{ a.t('settings.cal_date_col') }}</th>
+                  <th>{{ a.t('settings.cal_title_cols') }}</th>
+                  <th v-if="a.rotationViewItems.length">{{ a.t('settings.cal_rotations') }}</th>
+                  <th v-if="a.canPublishFeeds">{{ a.t('settings.cal_publish') }}</th>
+                  <th></th>
+                </tr></thead>
+                <tbody>
+                  <tr v-for="(src, i) in a.calDraft.sources" :key="i">
+                    <td><v-text-field v-if="i === 0" v-model="a.calDraft.title" density="compact" variant="plain" hide-details style="min-width:120px" data-testid="user-cal-title"></v-text-field></td>
+                    <td><v-select v-model="src.table" :items="a.calendarTableItems" density="compact" variant="plain" hide-details style="min-width:130px"
+                                  @update:model-value="a.calDraftTableChanged(src)" :data-testid="'user-cal-table-' + i"></v-select></td>
+                    <td><v-select v-model="src.dateColumn" :items="a.dateColumnItems(src.table)" density="compact" variant="plain" hide-details style="min-width:120px"
+                                  :data-testid="'user-cal-datecol-' + i"></v-select></td>
+                    <td><v-select v-model="src.titleColumns" :items="a.columnItems(src.table)" multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:150px"
+                                  :data-testid="'user-cal-titlecols-' + i"></v-select></td>
+                    <!-- Duty rotations drawn on the same grid. Their duties are GENERATED, not stored,
+                         so they are overlays rather than sources -- and they render through the
+                         rotation's own resolvers, which carries its obscureNames across. -->
+                    <td v-if="a.rotationViewItems.length"><v-select v-if="i === 0" v-model="a.calDraft.rotationViews" :items="a.rotationViewItems"
+                                  multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:150px"
+                                  data-testid="user-cal-rotations"></v-select></td>
+                    <!-- Publishing, offered only where it can actually happen: a blob store is a
+                         CAPABILITY the app learns by trying, so this mirrors the export button rather
+                         than promising a switch that would fail on save. -->
+                    <td v-if="a.canPublishFeeds"><v-switch v-if="i === 0" v-model="a.calDraft.feed" color="primary" density="compact" hide-details
+                                  data-testid="user-cal-feed"></v-switch></td>
+                    <td><v-btn icon="mdi-close" size="x-small" variant="text" :data-testid="'user-cal-rmsrc-' + i" @click="a.removeCalDraftSource(i)"></v-btn></td>
+                  </tr>
+                </tbody>
+                </template>
+              </v-table>
               <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="a.addCalDraftSource()">{{ a.t('settings.cal_add_source') }}</v-btn>
               <p v-if="a.calDraft.feed" style="font-size:0.75rem;opacity:0.75" class="mt-1">{{ a.t('settings.cal_publish_warn') }}</p>
               <div class="mt-2 d-flex" style="gap:8px">

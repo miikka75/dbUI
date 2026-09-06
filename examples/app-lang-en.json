@@ -76,7 +76,7 @@
       "settings.confirm_delete": "Confirm delete",
       "cal.err_not_rotation": "That is not a rotation view",
       "settings.cal_rotations": "Duty rotations",
-      "settings.cal_publish": "Publish as a subscribable link",
+      "settings.cal_publish": "Publish",
       "settings.cal_publish_warn": "Anyone with the link can read this calendar, without signing in. The link appears under Calendars once it is saved.",
       "timeline.empty": "Nothing to show",
       "btn.save": "Save",
