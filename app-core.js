@@ -2647,6 +2647,13 @@ function createVueApp() {
               Writes.putRow(source, { id: item.id, _status: 'active', updated_at: stamp }, 'active');
               return;
             }
+            // A live row that is already ACTIVE has nothing to restore, and must not fall through to the
+            // move below. A deployment mid-migration can hold the same id in BOTH stores, and the archive
+            // copy is the stale one -- partitionRows says so, letting the active store win a duplicate.
+            // Moving it would overwrite the live row with the copy the app has been ignoring, which is a
+            // silent data loss reachable by clicking Restore twice: the first click frees the stale copy
+            // to show in the archive tab, where it looks like another row to restore.
+            if (live) return;
             // A row archived under the STORE model is still sitting in the archive collection, and every
             // deployment has some. Those still move -- writing `_status: 'active'` onto a row in the
             // archive store would be honoured by partitionRows, but only for a session that had loaded

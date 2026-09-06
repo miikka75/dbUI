@@ -119,3 +119,62 @@ describe('app-core _deleteFromSources — delete means gone from the table', () 
     assert.equal(app.dataCache.meetings__archive, undefined);
   });
 });
+
+describe('app-core restoreRow — a stale archive-store copy never overwrites the live row', () => {
+  // Reachable by clicking Restore TWICE on a row that exists in both stores, which is exactly what the
+  // repair for the bug above invites: the first Restore makes the live row active, which frees the
+  // stale archive-store copy to show in the archive tab — where it looks like another row to restore.
+  // The second click used to moveRow that copy over the live one, losing whatever had been edited since.
+  const writes = [];
+  const restoreRow = appCoreFn('restoreRow', {
+    VIEWS: {},
+    SCHEMA: { meetings: { archivable: true } },
+    aKey: (t) => t + '__archive',
+    withMirrors: (base) => base,
+    Rows: Rows,
+    Writes: {
+      putRow: (t, r, tab) => writes.push(['put', t, r, tab]),
+      moveRow: (t, r, from, to) => writes.push(['move', t, r.id, from, to])
+    }
+  });
+  const app = (live) => ({
+    dataCache: { meetings: [live], meetings__archive: [{ id: 'm1', title: 'stale' }] },
+    currentData: [], currentTable: 'meetings',
+    getSource: () => 'meetings',
+    _ensureCached: () => Promise.resolve(),
+    notify: () => {}, t: (k) => k
+  });
+
+  it('restores an archived row by field, leaving the stale copy where it is', async () => {
+    writes.length = 0;
+    const ctx = app({ id: 'm1', _status: 'archive', title: 'live' });
+    await restoreRow.call(ctx, { id: 'm1' });
+    assert.deepEqual(writes, [['put', 'meetings', { id: 'm1', _status: 'active', updated_at: writes[0][2].updated_at }, 'active']]);
+    assert.equal(ctx.dataCache.meetings[0].title, 'live');
+  });
+
+  it('does NOTHING for a row that is already active, rather than moving the stale copy over it', async () => {
+    // REGRESSION: this used to fall through to moveRow and replace the live row wholesale.
+    writes.length = 0;
+    const ctx = app({ id: 'm1', _status: 'active', title: 'live' });
+    await restoreRow.call(ctx, { id: 'm1' });
+    assert.deepEqual(writes, []);
+    assert.equal(ctx.dataCache.meetings[0].title, 'live');
+    assert.equal(ctx.dataCache.meetings__archive.length, 1, 'the stale copy is left alone, not consumed');
+  });
+
+  it('still MOVES a genuine legacy row, which exists only in the archive store', async () => {
+    writes.length = 0;
+    const ctx = {
+      dataCache: { meetings: [], meetings__archive: [{ id: 'old', title: 'legacy' }] },
+      currentData: [], currentTable: 'meetings',
+      getSource: () => 'meetings',
+      _ensureCached: () => Promise.resolve(),
+      notify: () => {}, t: (k) => k
+    };
+    await restoreRow.call(ctx, { id: 'old' });
+    assert.deepEqual(writes, [['move', 'meetings', 'old', 'archive', 'active']]);
+    assert.equal(ctx.dataCache.meetings.length, 1);
+    assert.equal(ctx.dataCache.meetings__archive.length, 0);
+  });
+});
