@@ -704,7 +704,7 @@
                           :data-testid="'user-cal-datecol-' + i"></v-select>
                 <v-select v-model="src.titleColumns" :items="a.columnItems(src.table)" multiple chips :label="a.t('settings.cal_title_cols')" density="compact" variant="outlined" hide-details style="min-width:220px"
                           :data-testid="'user-cal-titlecols-' + i"></v-select>
-                <v-btn v-if="a.calDraft.sources.length > 1" icon="mdi-close" size="x-small" variant="text" @click="a.removeCalDraftSource(i)"></v-btn>
+                <v-btn icon="mdi-close" size="x-small" variant="text" :data-testid="'user-cal-rmsrc-' + i" @click="a.removeCalDraftSource(i)"></v-btn>
               </div>
               <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="a.addCalDraftSource()">{{ a.t('settings.cal_add_source') }}</v-btn>
               <!-- Duty rotations drawn on the same grid. Their duties are GENERATED, not stored, so they

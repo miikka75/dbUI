@@ -1657,6 +1657,10 @@ function createVueApp() {
         return this._storeUserCalendar(id, def);
       },
       _storeUserCalendar: function(id, def) {
+        def = Object.assign({}, def, {
+          sources: (def.sources || []).filter(function(s) { return s && s.table; }),
+          rotationViews: (def.rotationViews || []).slice()
+        });
         var cfg = Object.assign({}, this.appConfig || {});
         cfg.calendars = Object.assign({}, cfg.calendars || {});
         cfg.calendars[id] = def;
@@ -1688,7 +1692,7 @@ function createVueApp() {
       userCalendarErrors: function(def) {
         var self = this, errs = [];
         var rots = (def && def.rotationViews) || [];
-        var srcs = (def && def.sources) || [];
+        var srcs = ((def && def.sources) || []).filter(function(s) { return s && s.table; });
         if (!srcs.length && !rots.length) { errs.push(this.t('cal.err_no_source')); return errs; }
         var self0 = this;
         rots.forEach(function(n) {

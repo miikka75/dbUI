@@ -4359,6 +4359,39 @@ test.describe('calendar view', () => {
     expect(r.listed).toBe(false);
   });
 
+  test('a calendar of ONLY a duty rotation saves from the form as it opens', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.dataCache['roster_y'] = [{ id: 'p1', people: ['Ann Smith'], position: 1 }];
+      window.VIEWS.rot_only = { name: 'rot_only', kind: 'rotation',
+        rotation: { slots: ['a'], rosters: ['roster_y'], advanceBy: 'calendar', interval: 'weekly',
+                    anchorDate: app._calToday(), range: { from: 'today', periods: 4 } } };
+
+      // Exactly what the form hands you: one BLANK source row, which it offers no way to avoid.
+      app.newUserCalendar();
+      const blankRow = JSON.parse(JSON.stringify(app.calDraft.sources));
+      app.calDraft.title = 'Cleaning only';
+      app.calDraft.rotationViews = ['rot_only'];
+      const errs = app.userCalendarErrors(app.calDraft);
+      await app.saveUserCalendar('cal_only', JSON.parse(JSON.stringify(app.calDraft)));
+
+      const stored = (app.appConfig.calendars || {})['cal_only'];
+      const ev = app.calEventsFor('cal_only', app.calendarCoverFor('cal_only'));
+      app.deleteUserCalendar('cal_only');
+      return { blankRow, errs, storedSources: stored && stored.sources,
+               storedRots: stored && stored.rotationViews, events: Object.values(ev).flat().length };
+    });
+    expect(r.blankRow).toEqual([{ table: '', dateColumn: '', titleColumns: [] }]);
+    // An unfilled row is not a mistake — it is the form's starting state.
+    expect(r.errs).toEqual([]);
+    // And it is not stored, so the saved definition is exactly what was meant.
+    expect(r.storedSources).toEqual([]);
+    expect(r.storedRots).toEqual(['rot_only']);
+    expect(r.events).toBeGreaterThan(0);
+  });
+
   test('a calendar built in the app can overlay a duty rotation, masking names as the rotation does', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(async () => {
