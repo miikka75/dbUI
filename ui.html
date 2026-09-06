@@ -653,7 +653,7 @@
             <template v-if="a.isAdmin">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.import_export') }}</p>
-            <v-btn variant="outlined" prepend-icon="mdi-download" @click="a.exportData" class="mr-2 mb-2">{{ a.t('settings.export') }}</v-btn>
+            <v-btn variant="outlined" prepend-icon="mdi-download" data-testid="settings-export-json" @click="a.exportData" class="mr-2 mb-2">{{ a.t('settings.export') }}</v-btn>
             <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()" class="mr-2 mb-2">{{ a.t('settings.import') }}</v-btn>
             <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
             <v-btn variant="outlined" prepend-icon="mdi-shape-outline" class="mb-2"
@@ -696,16 +696,17 @@
                   <v-chip v-if="f.published && !f.live" size="x-small" color="warning" variant="tonal"
                           data-testid="feed-stale">{{ a.t('settings.feed_not_republishing') }}</v-chip>
                   <v-spacer></v-spacer>
-                  <v-btn size="small" variant="text" prepend-icon="mdi-calendar-export"
+                  <v-btn size="small" variant="text" prepend-icon="mdi-download"
                          :data-testid="'feed-download-' + f.name"
                          @click="a.downloadIcs(f.name)">{{ a.t('btn.export_ics') }}</v-btn>
                   <!-- Only a calendar defined HERE can be changed here. A schema one is still listed --
                        it is a file you can download -- but the app is not where it is edited. -->
-                  <v-btn v-if="f.userDefined" size="small" variant="text" :data-testid="'user-cal-edit-' + f.name" @click="a.editCalendarById(f.name)">{{ a.t('btn.edit') }}</v-btn>
-                  <v-btn v-if="f.userDefined" size="small" variant="text" :color="a.isArmed('ucal:' + f.name) ? 'error' : 'warning'"
-                         :prepend-icon="a.isArmed('ucal:' + f.name) ? 'mdi-check-circle' : 'mdi-delete-outline'"
+                  <v-btn v-if="f.userDefined" icon="mdi-pencil" size="x-small" variant="text" :title="a.t('btn.edit')" :data-testid="'user-cal-edit-' + f.name" @click="a.editCalendarById(f.name)"></v-btn>
+                  <v-btn v-if="f.userDefined" :icon="a.isArmed('ucal:' + f.name) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text"
+                         :color="a.isArmed('ucal:' + f.name) ? 'error' : ''"
+                         :title="a.isArmed('ucal:' + f.name) ? a.t('settings.confirm_delete') : a.t('settings.cal_delete')"
                          :data-testid="'user-cal-del-' + f.name"
-                         @click="a.isArmed('ucal:' + f.name) ? a.deleteUserCalendar(f.name) : a.armDelete('ucal:' + f.name)">{{ a.isArmed('ucal:' + f.name) ? a.t('settings.confirm_delete') : a.t('settings.cal_delete') }}</v-btn>
+                         @click="a.isArmed('ucal:' + f.name) ? a.deleteUserCalendar(f.name) : a.armDelete('ucal:' + f.name)"></v-btn>
                 </div>
                 <div v-if="f.published" class="d-flex align-center flex-wrap mt-1" style="gap:8px">
                   <v-text-field :model-value="f.url" readonly density="compact" variant="outlined"
@@ -720,8 +721,8 @@
                 </div>
               </div>
             </template>
-            <v-btn v-if="!a.calDraft" size="small" variant="outlined" prepend-icon="mdi-calendar-plus"
-                   data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('settings.cal_new') }}</v-btn>
+            <v-btn v-if="!a.calDraft" variant="text" prepend-icon="mdi-plus"
+                   data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('btn.add') }} {{ a.t('settings.cal_new') }}</v-btn>
             <v-card v-if="a.calDraft" variant="tonal" class="pa-3 mt-2" data-testid="user-cal-form">
               <!-- A real table, like Users: headers, `plain` controls, one row, destructive control
                    last. A calendar has a VARIABLE number of sources, which a table handles the way a

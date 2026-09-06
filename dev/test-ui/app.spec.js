@@ -780,7 +780,9 @@ test.describe('Import/Export', () => {
     await page.waitForTimeout(200);
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has(.mdi-download)').click()
+      // By testid, not by icon: "the only button with a download icon" was true by accident, and
+      // stopped being true once calendar rows used the same icon for the same meaning.
+      page.locator('[data-testid="settings-export-json"]').click()
     ]);
     expect(download.suggestedFilename()).toMatch(/\.json$/);
     // Columns must export as the documented array-of-objects form (with name, no implicit id)
@@ -877,7 +879,7 @@ test.describe('Setup UI', () => {
     await page.waitForTimeout(200);
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has(.mdi-download)').click()
+      page.locator('[data-testid="settings-export-json"]').click()
     ]);
     expect(download.suggestedFilename()).toMatch(/\.json$/);
   });
@@ -5962,7 +5964,7 @@ test.describe('Filter array-IN -> $or on export', () => {
     await page.waitForTimeout(200);
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has(.mdi-download)').click()
+      page.locator('[data-testid="settings-export-json"]').click()
     ]);
     const fs = require('fs');
     const body = JSON.parse(fs.readFileSync(await download.path(), 'utf8'));

@@ -65,7 +65,7 @@
       "cal.err_title_col": "A title column does not exist",
       "settings.cal_custom": "Your own calendars",
       "settings.cal_custom_note": "Built here rather than in the schema. Each one shows only rows you could already open.",
-      "settings.cal_new": "New calendar",
+      "settings.cal_new": "calendar",
       "settings.cal_title": "Name",
       "settings.cal_table": "Table",
       "settings.cal_date_col": "Date column",
