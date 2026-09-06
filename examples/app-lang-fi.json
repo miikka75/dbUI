@@ -71,7 +71,6 @@
       "settings.cal_date_col": "Paivamaarasarake",
       "settings.cal_title_cols": "Sisältö",
       "settings.cal_add_source": "Lisaa taulu",
-      "settings.cal_open": "Avaa",
       "settings.cal_delete": "Poista",
       "settings.confirm_delete": "Vahvista poisto",
       "cal.err_not_rotation": "Kyseessa ei ole kiertoluettelo",

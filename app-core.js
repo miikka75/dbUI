@@ -872,7 +872,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_open', 'settings.cal_delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'settings.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'settings.cal_custom', 'settings.cal_custom_note', 'msg.name_taken', 'btn.cancel', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'settings.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'settings.cal_custom', 'settings.cal_custom_note', 'msg.name_taken', 'btn.cancel', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1653,7 +1653,6 @@ function createVueApp() {
         });
       },
       cancelCalDraft: function() { this.calDraft = null; this.calDraftId = ''; },
-      openUserCalendar: function(id) { this.selectTab(id); },
       // Tables this user could put on a calendar: ones they can reach that declare a date column.
       // Save one definition. Validated here rather than only in the form, because the folder config is
       // also reachable by IMPORT -- and every one of these mistakes fails the same silent way, as a

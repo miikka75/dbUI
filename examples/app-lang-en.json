@@ -71,7 +71,6 @@
       "settings.cal_date_col": "Date column",
       "settings.cal_title_cols": "Contents",
       "settings.cal_add_source": "Add table",
-      "settings.cal_open": "Open",
       "settings.cal_delete": "Delete",
       "settings.confirm_delete": "Confirm delete",
       "cal.err_not_rotation": "That is not a rotation view",

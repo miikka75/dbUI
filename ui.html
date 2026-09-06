@@ -694,8 +694,8 @@
               <v-table density="compact">
                 <template v-slot:default>
                 <thead><tr>
-                  <th v-if="a.rotationViewItems.length">{{ a.t('settings.cal_rotations') }}</th>
                   <th>{{ a.t('settings.cal_title') }}</th>
+                  <th v-if="a.rotationViewItems.length">{{ a.t('settings.cal_rotations') }}</th>
                   <th>{{ a.t('settings.cal_table') }}</th>
                   <th>{{ a.t('settings.cal_date_col') }}</th>
                   <th>{{ a.t('settings.cal_title_cols') }}</th>
@@ -704,13 +704,13 @@
                 </tr></thead>
                 <tbody>
                   <tr v-for="(src, i) in a.calDraft.sources" :key="i">
+                    <td><v-text-field v-if="i === 0" v-model="a.calDraft.title" density="compact" variant="outlined" hide-details style="min-width:120px" data-testid="user-cal-title"></v-text-field></td>
                     <!-- Duty rotations drawn on the same grid. Their duties are GENERATED, not stored,
                          so they are overlays rather than sources -- and they render through the
                          rotation's own resolvers, which carries its obscureNames across. -->
                     <td v-if="a.rotationViewItems.length"><v-select v-if="i === 0" v-model="a.calDraft.rotationViews" :items="a.rotationViewItems"
                                   multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:150px"
                                   data-testid="user-cal-rotations"></v-select></td>
-                    <td><v-text-field v-if="i === 0" v-model="a.calDraft.title" density="compact" variant="outlined" hide-details style="min-width:120px" data-testid="user-cal-title"></v-text-field></td>
                     <td><v-select v-model="src.table" :items="a.calendarTableItems" density="compact" variant="plain" hide-details style="min-width:130px"
                                   @update:model-value="a.calDraftTableChanged(src)" :data-testid="'user-cal-table-' + i"></v-select></td>
                     <td><v-select v-model="src.dateColumn" :items="a.dateColumnItems(src.table)" density="compact" variant="plain" hide-details style="min-width:120px"
@@ -749,7 +749,6 @@
                   <v-chip v-if="f.published && !f.live" size="x-small" color="warning" variant="tonal"
                           data-testid="feed-stale">{{ a.t('settings.feed_not_republishing') }}</v-chip>
                   <v-spacer></v-spacer>
-                  <v-btn size="small" variant="text" :data-testid="'user-cal-open-' + f.name" @click="a.openUserCalendar(f.name)">{{ a.t('settings.cal_open') }}</v-btn>
                   <v-btn size="small" variant="text" prepend-icon="mdi-calendar-export"
                          :data-testid="'feed-download-' + f.name"
                          @click="a.downloadIcs(f.name)">{{ a.t('btn.export_ics') }}</v-btn>
