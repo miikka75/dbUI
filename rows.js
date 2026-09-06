@@ -311,6 +311,26 @@
     return out;
   }
 
+  // Which STORE holds a row: 'active' (`<table>`) or 'archive' (`<table>__archive`).
+  //
+  // A write has to answer this, and it is NOT the tab on screen. The partition is a field now, so an
+  // archived row normally stays in the ACTIVE store carrying `_status`, and the archive store holds
+  // only what was filed away under the old model. A write that picked its store from "am I looking at
+  // the archive tab" therefore put a SECOND copy of the row in the other collection -- which
+  // partitionRows then ignores, because the active store wins a duplicate id. The edit looked saved,
+  // reverted on the next render, and left a ghost document behind.
+  //
+  // Unknown answers 'active': that is where every row written under the field model lives, and where a
+  // row is unless the archive store is loaded and says otherwise.
+  function storeOf(dataCache, src, id) {
+    var cache = dataCache || {};
+    function has(key) {
+      return (cache[key] || []).some(function (r) { return r && r.id === id; });
+    }
+    if (id == null || has(src)) return 'active';
+    return has(src + '__archive') ? 'archive' : 'active';
+  }
+
   // Merge a view's source tables into one row list (union tags _source; join merges by id), then filter.
   // `part` is the partition to read, 'active' by default. It is a PARAMETER rather than something the
   // caller pre-projects into the cache, because projecting archived rows onto the plain source key and
@@ -454,8 +474,11 @@
         // (earlier dates), so an active row keeps its index as earlier rows move to the archive
         // (+1 archived, -1 active cancel). Without this, archiving one meeting slides the whole
         // roster by a slot. Falls back to the view rows when no explicit occurrenceSource.
+        // Through partitionRows for BOTH partitions rather than concatenating the two stores raw: the
+        // same id can sit in both mid-migration, and a duplicate here shifts the occurrence rank of
+        // every later row by one -- silently reassigning the whole roster from that date on.
         var occSrc = comp.occurrenceSource
-          ? (cache[comp.occurrenceSource] || []).concat(cache[comp.occurrenceSource + '__archive'] || [])
+          ? partitionRows(cache, comp.occurrenceSource, 'active').concat(partitionRows(cache, comp.occurrenceSource, 'archive'))
           : rows;
         r[d.name] = Rot.resolveByOccurrence(rot, occSrc, r, comp.occurrenceSort, comp.valueCol);
       } else if (comp.advanceBy === 'calendar') {
@@ -515,7 +538,7 @@
     convertViewFilters: convertViewFilters, sortByCol: sortByCol, buildRows: buildRows,
     aggregateRows: aggregateRows, resolveComputed: resolveComputed, isFilterToken: isFilterToken,
     compareValues: compareValues, listOrderFor: listOrderFor,
-    partitionOf: partitionOf, partitionRows: partitionRows,
+    partitionOf: partitionOf, partitionRows: partitionRows, storeOf: storeOf,
     searchRows: searchRows, searchColumns: searchColumns, fold: fold
   };
   if (isNode) module.exports = M;

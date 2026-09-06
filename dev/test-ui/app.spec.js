@@ -1074,6 +1074,42 @@ test.describe('Archive from a view whose source has a mirror table not in source
     expect((await get(page, 'music', 'archive')).rows.some(r => r.id === id)).toBe(true);
   });
 
+  test('archiving in a FRESH session still reaches a mirror table nothing has opened', async ({ page }) => {
+    // REGRESSION, and the case the test above cannot reach: there, the add created the music mirror
+    // row in the same session, so it was already in the cache when archive fanned out over it.
+    //
+    // Boot preloads nothing now — a view loads its own tables when it opens — so in a session that did
+    // not create the row, 'music' is simply absent from the cache. The fan-out looked the row up there,
+    // found nothing and skipped it in SILENCE: the meeting was archived and its music row stayed live,
+    // and the same id then showed in both tabs at once. Reload is what makes the caches cold.
+    test.setTimeout(20000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.goto('/');
+    await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'mtg' }).first().click();
+    await page.waitForSelector('button:has(.mdi-plus)', { timeout: 6000 });
+    await page.locator('button:has(.mdi-plus)').click();
+    await expect.poll(async () => (await get(page, 'music', 'active')).rows.length).toBe(1);
+    const id = (await get(page, 'meetings', 'active')).rows[0].id;
+
+    // New session: open ONLY the meeting view, so nothing has ever read 'music'.
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'mtg' }).first().click();
+    await page.waitForSelector('button:has(.mdi-archive-outline)', { timeout: 6000 });
+    expect(await page.evaluate(() => appInstance.dataCache.music)).toBeUndefined();
+
+    await page.locator('button:has(.mdi-archive-outline)').first().click();
+    await expect.poll(async () => (await get(page, 'meetings', 'archive')).rows.some(r => r.id === id)).toBe(true);
+    // The half that used to be left behind.
+    await expect.poll(async () => (await get(page, 'music', 'archive')).rows.some(r => r.id === id)).toBe(true);
+    expect((await get(page, 'music', 'active')).rows.length).toBe(0);
+  });
+
   test('a DETAIL view hides its own add/archive; archiving via the master rides to the mirror', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
