@@ -1575,6 +1575,11 @@ saved question over tables that already exist, so shipping one makes the example
 belongs to whoever installs it. Its dated tables are exportable the moment someone builds a calendar
 here.
 
+Duty **rotations** can be overlaid on one too, picked from the same form. Their duties are generated
+rather than stored, so they are overlays rather than sources — and they render through the rotation's
+own resolvers, which is what carries its `obscureNames` across without the calendar repeating it. A
+calendar made only of overlays is valid.
+
 **Publishing is offered here too**, as a switch on the form — so a subscription no longer needs a
 schema edit. It sets the same `feed` flag a schema calendar carries, so `Feeds.isFeed`, the
 write-triggered republish and the Settings feed controls treat the two identically. The switch appears

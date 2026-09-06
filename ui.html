@@ -685,25 +685,34 @@
             <p style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.cal_custom_note') }}</p>
             <div v-for="c in a.userCalendars" :key="c.id" class="d-flex align-center flex-wrap mb-2" style="gap:8px" data-testid="user-cal">
               <strong style="font-size:0.9rem">{{ c.title || c.id }}</strong>
-              <span style="font-size:0.75rem;opacity:0.6">{{ (c.sources || []).map(s => s.table).join(', ') }}</span>
+              <span style="font-size:0.75rem;opacity:0.6">{{ a.calSourceLabels(c) }}</span>
               <v-btn size="small" variant="text" :data-testid="'user-cal-open-' + c.id" @click="a.openUserCalendar(c.id)">{{ a.t('settings.cal_open') }}</v-btn>
               <v-btn size="small" variant="text" :data-testid="'user-cal-edit-' + c.id" @click="a.editUserCalendar(c)">{{ a.t('btn.edit') }}</v-btn>
-              <v-btn size="small" variant="text" color="error" :data-testid="'user-cal-del-' + c.id" @click="a.deleteUserCalendar(c.id)">{{ a.t('settings.cal_delete') }}</v-btn>
+              <v-btn size="small" variant="text" :color="a.isArmed('ucal:' + c.id) ? 'error' : 'warning'"
+                     :prepend-icon="a.isArmed('ucal:' + c.id) ? 'mdi-check-circle' : 'mdi-delete-outline'"
+                     :data-testid="'user-cal-del-' + c.id"
+                     @click="a.isArmed('ucal:' + c.id) ? a.deleteUserCalendar(c.id) : a.armDelete('ucal:' + c.id)">{{ a.isArmed('ucal:' + c.id) ? a.t('settings.confirm_delete') : a.t('settings.cal_delete') }}</v-btn>
             </div>
             <v-btn v-if="!a.calDraft" size="small" variant="outlined" prepend-icon="mdi-calendar-plus"
                    data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('settings.cal_new') }}</v-btn>
             <v-card v-if="a.calDraft" variant="tonal" class="pa-3 mt-2" data-testid="user-cal-form">
               <v-text-field v-model="a.calDraft.title" :label="a.t('settings.cal_title')" density="compact" variant="outlined" hide-details class="mb-3" data-testid="user-cal-title"></v-text-field>
               <div v-for="(src, i) in a.calDraft.sources" :key="i" class="d-flex align-center flex-wrap mb-2" style="gap:8px">
-                <v-select v-model="src.table" :items="a.calendarSourceTables" :label="a.t('settings.cal_table')" density="compact" variant="outlined" hide-details style="max-width:190px"
+                <v-select v-model="src.table" :items="a.calendarTableItems" :label="a.t('settings.cal_table')" density="compact" variant="outlined" hide-details style="max-width:190px"
                           @update:model-value="a.calDraftTableChanged(src)" :data-testid="'user-cal-table-' + i"></v-select>
-                <v-select v-model="src.dateColumn" :items="a.dateColumnsOf(src.table)" :label="a.t('settings.cal_date_col')" density="compact" variant="outlined" hide-details style="max-width:190px"
+                <v-select v-model="src.dateColumn" :items="a.dateColumnItems(src.table)" :label="a.t('settings.cal_date_col')" density="compact" variant="outlined" hide-details style="max-width:190px"
                           :data-testid="'user-cal-datecol-' + i"></v-select>
-                <v-select v-model="src.titleColumns" :items="src.table ? a.columnsOf(src.table) : []" multiple chips :label="a.t('settings.cal_title_cols')" density="compact" variant="outlined" hide-details style="min-width:220px"
+                <v-select v-model="src.titleColumns" :items="a.columnItems(src.table)" multiple chips :label="a.t('settings.cal_title_cols')" density="compact" variant="outlined" hide-details style="min-width:220px"
                           :data-testid="'user-cal-titlecols-' + i"></v-select>
                 <v-btn v-if="a.calDraft.sources.length > 1" icon="mdi-close" size="x-small" variant="text" @click="a.removeCalDraftSource(i)"></v-btn>
               </div>
               <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="a.addCalDraftSource()">{{ a.t('settings.cal_add_source') }}</v-btn>
+              <!-- Duty rotations drawn on the same grid. Their duties are GENERATED, not stored, so they
+                   are overlays rather than sources -- and they render through the rotation's own
+                   resolvers, which is what carries its obscureNames across without repeating it here. -->
+              <v-select v-if="a.rotationViewItems.length" v-model="a.calDraft.rotationViews" :items="a.rotationViewItems"
+                        multiple chips :label="a.t('settings.cal_rotations')" density="compact" variant="outlined" hide-details
+                        class="mt-2" data-testid="user-cal-rotations"></v-select>
               <!-- Publishing, offered only where it can actually happen. Presence of a blob store is a
                    CAPABILITY the app only learns by trying, so this mirrors the export button rather
                    than promising a switch that would fail on save. -->

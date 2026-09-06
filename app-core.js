@@ -523,6 +523,21 @@ function createVueApp() {
           return Object.assign({ id: id }, defs[id]);
         }).sort(function(a, b) { return String(a.title || a.id).localeCompare(String(b.title || b.id)); });
       },
+      // The same keys every other screen labels these with: `tab.<table>` for a table, `field.<col>` for
+      // a column, both falling back to the raw name. A picker showing raw keys asks someone to choose
+      // between identifiers they have never seen -- the schema's vocabulary, not the app's.
+      calendarTableItems: function() {
+        var self = this;
+        return this.calendarSourceTables.map(function(t) { return { title: self.tOr('tab.' + t, t), value: t }; });
+      },
+      // Rotation views whose duties could be overlaid. Reachability asked the same way the sidebar asks
+      // it, so the picker cannot offer a roster the person could not open.
+      rotationViewItems: function() {
+        var self = this;
+        return Object.keys(VIEWS).filter(function(n) {
+          return VIEWS[n].rotation && self.canAccessNavId(n);
+        }).sort().map(function(n) { return { title: self.tOr('view.' + n, self.tOr('tab.' + n, n)), value: n }; });
+      },
       calendarSourceTables: function() {
         var self = this;
         return Object.keys(SCHEMA).filter(function(t) {
@@ -853,7 +868,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_open', 'settings.cal_delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'settings.cal_custom', 'settings.cal_custom_note', 'msg.name_taken', 'btn.cancel', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_open', 'settings.cal_delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'settings.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'settings.cal_custom', 'settings.cal_custom_note', 'msg.name_taken', 'btn.cancel', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1574,14 +1589,20 @@ function createVueApp() {
         var added = [];
         Object.keys(defs).forEach(function(id) {
           var d = defs[id];
-          if (!d || !Array.isArray(d.sources) || !d.sources.length) return;
+          if (!d || (!(d.sources || []).length && !(d.rotationViews || []).length)) return;
           // A schema view of the same name WINS. The schema is the more deliberate statement, and
           // silently shadowing one from a config row is how a calendar would start disagreeing with the
           // file it appears to come from.
           if (VIEWS[id] && added.indexOf(id) < 0) return;
           VIEWS[id] = {
             name: id, kind: 'calendar', userDefined: true,
-            calendar: { sources: d.sources, defaultView: d.defaultView || 'month' },
+            calendar: {
+              sources: d.sources || [], defaultView: d.defaultView || 'month',
+              // Generated duties from a rotation view, drawn on the same grid. events.js renders these
+              // through the MATRIX's own resolvers, so a rotation's obscureNames masks its names here
+              // without the calendar repeating it.
+              rotationSources: (d.rotationViews || []).map(function(v) { return { view: v }; })
+            },
             obscureNames: d.obscureNames || undefined,
             // Same flag a schema calendar carries, so Feeds.isFeed, the republish trigger and the
             // Settings feed controls all treat this exactly as they treat one written in the file.
@@ -1596,11 +1617,11 @@ function createVueApp() {
       // does not reshuffle when one is renamed.
       newUserCalendar: function() {
         this.calDraftId = '';
-        this.calDraft = { title: '', feed: false, sources: [{ table: '', dateColumn: '', titleColumns: [] }] };
+        this.calDraft = { title: '', feed: false, rotationViews: [], sources: [{ table: '', dateColumn: '', titleColumns: [] }] };
       },
       editUserCalendar: function(c) {
         this.calDraftId = c.id;
-        this.calDraft = JSON.parse(JSON.stringify({ title: c.title || '', feed: !!c.feed, sources: c.sources || [] }));
+        this.calDraft = JSON.parse(JSON.stringify({ title: c.title || '', feed: !!c.feed, rotationViews: c.rotationViews || [], sources: c.sources || [] }));
       },
       addCalDraftSource: function() { this.calDraft.sources.push({ table: '', dateColumn: '', titleColumns: [] }); },
       removeCalDraftSource: function(i) { this.calDraft.sources.splice(i, 1); },
@@ -1666,8 +1687,14 @@ function createVueApp() {
       // nobody has filled in yet.
       userCalendarErrors: function(def) {
         var self = this, errs = [];
-        if (!def || !Array.isArray(def.sources) || !def.sources.length) { errs.push(this.t('cal.err_no_source')); return errs; }
-        def.sources.forEach(function(s) {
+        var rots = (def && def.rotationViews) || [];
+        var srcs = (def && def.sources) || [];
+        if (!srcs.length && !rots.length) { errs.push(this.t('cal.err_no_source')); return errs; }
+        var self0 = this;
+        rots.forEach(function(n) {
+          if (!VIEWS[n] || !VIEWS[n].rotation) errs.push(self0.t('cal.err_not_rotation'));
+        });
+        srcs.forEach(function(s) {
           if (!s || !s.table || !SCHEMA[s.table]) { errs.push(self.t('cal.err_table')); return; }
           var cols = (SCHEMA[s.table] && SCHEMA[s.table].columns) || {};
           if (!s.dateColumn || !cols[s.dateColumn]) { errs.push(self.t('cal.err_date_col')); return; }
@@ -1678,6 +1705,19 @@ function createVueApp() {
       },
       // Date columns of a table, for the editor's pickers.
       columnsOf: function(table) { return table && SCHEMA[table] ? getColumns(table) : []; },
+      columnItems: function(table) {
+        var self = this;
+        return this.columnsOf(table).map(function(c) { return { title: self.tOr('field.' + c, c), value: c }; });
+      },
+      dateColumnItems: function(table) {
+        var self = this;
+        return this.dateColumnsOf(table).map(function(c) { return { title: self.tOr('field.' + c, c), value: c }; });
+      },
+      // The saved definition's table names, for the list row, as labels.
+      calSourceLabels: function(c) {
+        var self = this;
+        return (c.sources || []).map(function(s) { return self.tOr('tab.' + s.table, s.table); }).join(', ');
+      },
       dateColumnsOf: function(table) {
         return getColumns(table).filter(function(c) { return Columns.colIsDate(SCHEMA, c); });
       },

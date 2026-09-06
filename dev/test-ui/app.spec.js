@@ -4359,6 +4359,38 @@ test.describe('calendar view', () => {
     expect(r.listed).toBe(false);
   });
 
+  test('a calendar built in the app can overlay a duty rotation, masking names as the rotation does', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      // A rotation whose names are obscured, exactly as the shipped cleaning roster is.
+      app.dataCache['roster_x'] = [{ id: 'p1', people: ['Ann Example Smith'], position: 1 }];
+      window.VIEWS.rot_duty = { name: 'rot_duty', kind: 'rotation', obscureNames: true,
+        rotation: { slots: ['area_a'], rosters: ['roster_x'], advanceBy: 'calendar', interval: 'weekly',
+                    anchorDate: app._calToday(), range: { from: 'today', periods: 4 } } };
+
+      const offered = app.rotationViewItems.map((i) => i.value);
+      // Overlay only — no plain source at all, which must still be a valid calendar.
+      const errs = await app.saveUserCalendar('cal_overlay', { title: 'Duties', sources: [], rotationViews: ['rot_duty'] });
+      const merged = window.VIEWS.cal_overlay.calendar.rotationSources;
+      const ev = app.calEventsFor('cal_overlay', app.calendarCoverFor('cal_overlay'));
+      const titles = Object.values(ev).flat().map((e) => e.title);
+      const bad = await app.saveUserCalendar('cal_badrot', { title: 'x', sources: [], rotationViews: ['not_a_rotation'] });
+      app.deleteUserCalendar('cal_overlay');
+      return { offered, errs, merged, titles, badErrs: bad.length > 0 };
+    });
+    expect(r.offered).toContain('rot_duty');
+    expect(r.errs).toEqual([]);
+    expect(r.merged).toEqual([{ view: 'rot_duty' }]);
+    expect(r.titles.length).toBeGreaterThan(0);
+    // The rotation's obscureNames governs the overlay, so the full name never reaches the calendar.
+    expect(r.titles.join(' ')).toContain('Ann E. S.');
+    expect(r.titles.join(' ')).not.toContain('Example Smith');
+    // A view that is not a rotation is refused rather than silently drawing nothing.
+    expect(r.badErrs).toBe(true);
+  });
+
   test('an admin can build a calendar in the app, and it behaves like any other', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(async () => {
