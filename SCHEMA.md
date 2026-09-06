@@ -1575,9 +1575,16 @@ saved question over tables that already exist, so shipping one makes the example
 belongs to whoever installs it. Its dated tables are exportable the moment someone builds a calendar
 here.
 
-Not offered on these yet: publishing. A feed is world-readable to anyone holding its URL, and turning
-that from a schema commit into a button is a decision about who may publish rather than a missing
-feature — see ROADMAP.
+**Publishing is offered here too**, as a switch on the form — so a subscription no longer needs a
+schema edit. It sets the same `feed` flag a schema calendar carries, so `Feeds.isFeed`, the
+write-triggered republish and the Settings feed controls treat the two identically. The switch appears
+only where a blob store exists, mirroring the export button rather than promising something that would
+fail on save.
+
+Turning it OFF, or deleting the calendar, **retires the address**: the file is overwritten with an
+empty calendar first. Stopping at "no longer refreshed" would leave a URL already sitting in people's
+calendar apps serving the last snapshot for ever — and deleting the definition is the worse half of the
+two, since nothing in the app would then list the URL that is still live.
 
 ### What a calendar's `.ics` contains (`calendar.ics`)
 

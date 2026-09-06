@@ -853,7 +853,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_open', 'settings.cal_delete', 'settings.cal_custom', 'settings.cal_custom_note', 'msg.name_taken', 'btn.cancel', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_open', 'settings.cal_delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'settings.cal_custom', 'settings.cal_custom_note', 'msg.name_taken', 'btn.cancel', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1583,7 +1583,9 @@ function createVueApp() {
             name: id, kind: 'calendar', userDefined: true,
             calendar: { sources: d.sources, defaultView: d.defaultView || 'month' },
             obscureNames: d.obscureNames || undefined,
-            ics: undefined
+            // Same flag a schema calendar carries, so Feeds.isFeed, the republish trigger and the
+            // Settings feed controls all treat this exactly as they treat one written in the file.
+            feed: !!d.feed
           };
           added.push(id);
         });
@@ -1594,11 +1596,11 @@ function createVueApp() {
       // does not reshuffle when one is renamed.
       newUserCalendar: function() {
         this.calDraftId = '';
-        this.calDraft = { title: '', sources: [{ table: '', dateColumn: '', titleColumns: [] }] };
+        this.calDraft = { title: '', feed: false, sources: [{ table: '', dateColumn: '', titleColumns: [] }] };
       },
       editUserCalendar: function(c) {
         this.calDraftId = c.id;
-        this.calDraft = JSON.parse(JSON.stringify({ title: c.title || '', sources: c.sources || [] }));
+        this.calDraft = JSON.parse(JSON.stringify({ title: c.title || '', feed: !!c.feed, sources: c.sources || [] }));
       },
       addCalDraftSource: function() { this.calDraft.sources.push({ table: '', dateColumn: '', titleColumns: [] }); },
       removeCalDraftSource: function(i) { this.calDraft.sources.splice(i, 1); },
@@ -1624,6 +1626,16 @@ function createVueApp() {
       saveUserCalendar: function(id, def) {
         var errs = this.userCalendarErrors(def);
         if (errs.length) { this.notify(errs[0]); return Promise.resolve(errs); }
+        // Switching publishing OFF has to retire the address, not just stop refreshing it: the file is
+        // already in people's calendar apps, and a URL that keeps serving the last snapshot is exactly
+        // what "stop publishing" must not leave behind.
+        var was = this.feedInfoFor(id);
+        if (was && was.url && !def.feed) return this.unpublishFeed(id).then(function() {
+          return this._storeUserCalendar(id, def);
+        }.bind(this));
+        return this._storeUserCalendar(id, def);
+      },
+      _storeUserCalendar: function(id, def) {
         var cfg = Object.assign({}, this.appConfig || {});
         cfg.calendars = Object.assign({}, cfg.calendars || {});
         cfg.calendars[id] = def;
@@ -1633,6 +1645,14 @@ function createVueApp() {
         return Promise.resolve([]);
       },
       deleteUserCalendar: function(id) {
+        // Same reason: deleting the definition while its file goes on being served is the worse half of
+        // the two, since nothing in the app would then list the URL that is still live.
+        var was = this.feedInfoFor(id);
+        if (was && was.url) { var self = this; return this.unpublishFeed(id).then(function() { self._forgetUserCalendar(id); }); }
+        this._forgetUserCalendar(id);
+        return Promise.resolve();
+      },
+      _forgetUserCalendar: function(id) {
         var cfg = Object.assign({}, this.appConfig || {});
         cfg.calendars = Object.assign({}, cfg.calendars || {});
         delete cfg.calendars[id];

@@ -704,6 +704,12 @@
                 <v-btn v-if="a.calDraft.sources.length > 1" icon="mdi-close" size="x-small" variant="text" @click="a.removeCalDraftSource(i)"></v-btn>
               </div>
               <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="a.addCalDraftSource()">{{ a.t('settings.cal_add_source') }}</v-btn>
+              <!-- Publishing, offered only where it can actually happen. Presence of a blob store is a
+                   CAPABILITY the app only learns by trying, so this mirrors the export button rather
+                   than promising a switch that would fail on save. -->
+              <v-switch v-if="a.canPublishFeeds" v-model="a.calDraft.feed" color="primary" density="compact" hide-details class="mt-2"
+                        :label="a.t('settings.cal_publish')" data-testid="user-cal-feed"></v-switch>
+              <p v-if="a.calDraft.feed" style="font-size:0.75rem;opacity:0.75" class="mt-1">{{ a.t('settings.cal_publish_warn') }}</p>
               <div class="mt-2 d-flex" style="gap:8px">
                 <v-btn size="small" color="primary" data-testid="user-cal-save" @click="a.saveCalDraft()">{{ a.t('btn.save') }}</v-btn>
                 <v-btn size="small" variant="text" @click="a.cancelCalDraft()">{{ a.t('btn.cancel') }}</v-btn>

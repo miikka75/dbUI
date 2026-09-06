@@ -4282,6 +4282,83 @@ test.describe('calendar view', () => {
     expect(text).not.toContain('Example Smith');
   });
 
+  test('a calendar built in the app can be published, and switching it off RETIRES the address', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      await window.Writes.putRow('tasks', { id: 'pub_row', date: app._calToday(), title: 'PubRow' }, 'active');
+
+      const wrote = {};
+      const real = window.backend.uploadFile;
+      window.backend.uploadFile = (f, o) => f.text().then((t) => { wrote[o.path] = t; return 'https://store.example/' + o.path; });
+
+      // Built with publishing ON — the flag rides on the definition, exactly as `feed: true` does in a
+      // schema file, so Feeds.isFeed and the republish trigger see no difference.
+      await app.saveUserCalendar('cal_pub', {
+        title: 'Published', feed: true,
+        sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'] }]
+      });
+      const isFeed = window.Feeds.isFeed(window.VIEWS.cal_pub);
+      await app.publishFeed('cal_pub');
+      const info = app.feedInfoFor('cal_pub');
+      const listed = app.calendarFiles.find((f) => f.name === 'cal_pub');
+      const publishedBody = wrote['feeds/' + (info && info.id) + '.ics'];
+
+      // Switching it off must not merely stop refreshing: the file is already in people's calendar
+      // apps, so the address has to stop serving data.
+      await app.saveUserCalendar('cal_pub', {
+        title: 'Published', feed: false,
+        sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'] }]
+      });
+      const afterOff = {
+        body: wrote['feeds/' + (info && info.id) + '.ics'],
+        stillFeed: window.Feeds.isFeed(window.VIEWS.cal_pub),
+        stillPublished: !!(app.feedInfoFor('cal_pub') || {}).url,
+        stillListed: !!app.calendarFiles.find((f) => f.name === 'cal_pub')
+      };
+      window.backend.uploadFile = real;
+      await app.deleteUserCalendar('cal_pub');
+      return { isFeed, hasUrl: !!(info && info.url), listedPublished: !!(listed && listed.published), publishedBody, afterOff };
+    });
+    expect(r.isFeed).toBe(true);
+    expect(r.hasUrl).toBe(true);
+    expect(r.listedPublished).toBe(true);
+    expect(r.publishedBody).toContain('SUMMARY:PubRow');
+    // Retired: the same path now serves a valid but EMPTY calendar, and nothing claims it is live.
+    expect(r.afterOff.body).toContain('BEGIN:VCALENDAR');
+    expect(r.afterOff.body).not.toContain('SUMMARY:PubRow');
+    expect(r.afterOff.stillFeed).toBe(false);
+    expect(r.afterOff.stillPublished).toBe(false);
+    // Still a calendar, still downloadable — only the publishing stopped.
+    expect(r.afterOff.stillListed).toBe(true);
+  });
+
+  test('deleting a published app-built calendar retires its address too', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      const wrote = {};
+      const real = window.backend.uploadFile;
+      window.backend.uploadFile = (f, o) => f.text().then((t) => { wrote[o.path] = t; return 'https://store.example/' + o.path; });
+      await app.saveUserCalendar('cal_del', { title: 'Gone', feed: true,
+        sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'] }] });
+      await app.publishFeed('cal_del');
+      const id = (app.feedInfoFor('cal_del') || {}).id;
+      // Deleting the definition while its file goes on being served is the worse half of the two:
+      // nothing in the app would then list the URL that is still live.
+      await app.deleteUserCalendar('cal_del');
+      window.backend.uploadFile = real;
+      return { body: wrote['feeds/' + id + '.ics'], inViews: !!window.VIEWS.cal_del,
+               listed: app.calendarFiles.map((f) => f.name).includes('cal_del') };
+    });
+    expect(r.body).toContain('BEGIN:VCALENDAR');
+    expect(r.body).not.toContain('BEGIN:VEVENT');
+    expect(r.inViews).toBe(false);
+    expect(r.listed).toBe(false);
+  });
+
   test('an admin can build a calendar in the app, and it behaves like any other', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(async () => {

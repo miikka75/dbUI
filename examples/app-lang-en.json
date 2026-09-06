@@ -73,6 +73,8 @@
       "settings.cal_add_source": "Add table",
       "settings.cal_open": "Open",
       "settings.cal_delete": "Delete",
+      "settings.cal_publish": "Publish as a subscribable link",
+      "settings.cal_publish_warn": "Anyone with the link can read this calendar, without signing in. The link appears under Calendars once it is saved.",
       "timeline.empty": "Nothing to show",
       "btn.save": "Save",
       "btn.search": "Search",
