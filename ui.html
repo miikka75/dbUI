@@ -681,8 +681,45 @@
                  reveals nothing: every source is gated by canReachTable when the events are built, so a
                  calendar cannot show anyone rows they could not already open. -->
             <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-1">{{ a.t('settings.cal_custom') }}</p>
-            <p style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.cal_custom_note') }}</p>
+            <!-- Calendars, as files. Here rather than only on each calendar's toolbar because a
+                 publish-only calendar need not be in the nav at all, so its download and its URL would
+                 otherwise be reachable from nowhere. Also the only screen that answers "what is this
+                 deployment serving to anyone with a link?" -- which is why a published file whose view
+                 was removed or switched off still appears, flagged, instead of quietly dropping out. -->
+            <v-divider class="my-4"></v-divider>
+            <p class="text-subtitle-2 mb-1">{{ a.t('settings.feeds') }}</p>
+            <p style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.feeds_note') }}</p>
+            <template v-if="a.calendarFiles.length">
+              <div v-for="f in a.calendarFiles" :key="f.name" class="mb-3" data-testid="settings-feed">
+                <div class="d-flex align-center flex-wrap" style="gap:8px">
+                  <strong style="font-size:0.9rem">{{ f.title }}</strong>
+                  <v-chip v-if="f.published && !f.live" size="x-small" color="warning" variant="tonal"
+                          data-testid="feed-stale">{{ a.t('settings.feed_not_republishing') }}</v-chip>
+                  <v-spacer></v-spacer>
+                  <v-btn size="small" variant="text" prepend-icon="mdi-calendar-export"
+                         :data-testid="'feed-download-' + f.name"
+                         @click="a.downloadIcs(f.name)">{{ a.t('btn.export_ics') }}</v-btn>
+                  <!-- Only a calendar defined HERE can be changed here. A schema one is still listed --
+                       it is a file you can download -- but the app is not where it is edited. -->
+                  <v-btn v-if="f.userDefined" size="small" variant="text" :data-testid="'user-cal-edit-' + f.name" @click="a.editCalendarById(f.name)">{{ a.t('btn.edit') }}</v-btn>
+                  <v-btn v-if="f.userDefined" size="small" variant="text" :color="a.isArmed('ucal:' + f.name) ? 'error' : 'warning'"
+                         :prepend-icon="a.isArmed('ucal:' + f.name) ? 'mdi-check-circle' : 'mdi-delete-outline'"
+                         :data-testid="'user-cal-del-' + f.name"
+                         @click="a.isArmed('ucal:' + f.name) ? a.deleteUserCalendar(f.name) : a.armDelete('ucal:' + f.name)">{{ a.isArmed('ucal:' + f.name) ? a.t('settings.confirm_delete') : a.t('settings.cal_delete') }}</v-btn>
+                </div>
+                <div v-if="f.published" class="d-flex align-center flex-wrap mt-1" style="gap:8px">
+                  <v-text-field :model-value="f.url" readonly density="compact" variant="outlined"
+                                hide-details style="font-size:0.78rem;min-width:260px" :data-testid="'feed-url-' + f.name"></v-text-field>
+                  <v-btn size="small" variant="text" @click="a.copyText(f.url)">{{ a.t('btn.copy') }}</v-btn>
+                  <v-btn size="small" variant="text" color="warning" :disabled="!a.canPublishFeeds"
+                         :data-testid="'feed-regen-' + f.name"
+                         @click="a.regenerateFeed(f.name)">{{ a.t('settings.feed_regenerate') }}</v-btn>
+                  <v-btn size="small" variant="text" color="error"
+                         :data-testid="'feed-stop-' + f.name"
+                         @click="a.unpublishFeed(f.name)">{{ a.t('settings.feed_unpublish') }}</v-btn>
+                </div>
+              </div>
+            </template>
             <v-btn v-if="!a.calDraft" size="small" variant="outlined" prepend-icon="mdi-calendar-plus"
                    data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('settings.cal_new') }}</v-btn>
             <v-card v-if="a.calDraft" variant="tonal" class="pa-3 mt-2" data-testid="user-cal-form">
@@ -734,45 +771,6 @@
                 <v-btn size="small" variant="text" @click="a.cancelCalDraft()">{{ a.t('btn.cancel') }}</v-btn>
               </div>
             </v-card>
-            <!-- Calendars, as files. Here rather than only on each calendar's toolbar because a
-                 publish-only calendar need not be in the nav at all, so its download and its URL would
-                 otherwise be reachable from nowhere. Also the only screen that answers "what is this
-                 deployment serving to anyone with a link?" -- which is why a published file whose view
-                 was removed or switched off still appears, flagged, instead of quietly dropping out. -->
-            <template v-if="a.calendarFiles.length">
-              <v-divider class="my-4"></v-divider>
-              <p class="text-subtitle-2 mb-1">{{ a.t('settings.feeds') }}</p>
-              <p style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.feeds_note') }}</p>
-              <div v-for="f in a.calendarFiles" :key="f.name" class="mb-3" data-testid="settings-feed">
-                <div class="d-flex align-center flex-wrap" style="gap:8px">
-                  <strong style="font-size:0.9rem">{{ f.title }}</strong>
-                  <v-chip v-if="f.published && !f.live" size="x-small" color="warning" variant="tonal"
-                          data-testid="feed-stale">{{ a.t('settings.feed_not_republishing') }}</v-chip>
-                  <v-spacer></v-spacer>
-                  <v-btn size="small" variant="text" prepend-icon="mdi-calendar-export"
-                         :data-testid="'feed-download-' + f.name"
-                         @click="a.downloadIcs(f.name)">{{ a.t('btn.export_ics') }}</v-btn>
-                  <!-- Only a calendar defined HERE can be changed here. A schema one is still listed --
-                       it is a file you can download -- but the app is not where it is edited. -->
-                  <v-btn v-if="f.userDefined" size="small" variant="text" :data-testid="'user-cal-edit-' + f.name" @click="a.editCalendarById(f.name)">{{ a.t('btn.edit') }}</v-btn>
-                  <v-btn v-if="f.userDefined" size="small" variant="text" :color="a.isArmed('ucal:' + f.name) ? 'error' : 'warning'"
-                         :prepend-icon="a.isArmed('ucal:' + f.name) ? 'mdi-check-circle' : 'mdi-delete-outline'"
-                         :data-testid="'user-cal-del-' + f.name"
-                         @click="a.isArmed('ucal:' + f.name) ? a.deleteUserCalendar(f.name) : a.armDelete('ucal:' + f.name)">{{ a.isArmed('ucal:' + f.name) ? a.t('settings.confirm_delete') : a.t('settings.cal_delete') }}</v-btn>
-                </div>
-                <div v-if="f.published" class="d-flex align-center flex-wrap mt-1" style="gap:8px">
-                  <v-text-field :model-value="f.url" readonly density="compact" variant="outlined"
-                                hide-details style="font-size:0.78rem;min-width:260px" :data-testid="'feed-url-' + f.name"></v-text-field>
-                  <v-btn size="small" variant="text" @click="a.copyText(f.url)">{{ a.t('btn.copy') }}</v-btn>
-                  <v-btn size="small" variant="text" color="warning" :disabled="!a.canPublishFeeds"
-                         :data-testid="'feed-regen-' + f.name"
-                         @click="a.regenerateFeed(f.name)">{{ a.t('settings.feed_regenerate') }}</v-btn>
-                  <v-btn size="small" variant="text" color="error"
-                         :data-testid="'feed-stop-' + f.name"
-                         @click="a.unpublishFeed(f.name)">{{ a.t('settings.feed_unpublish') }}</v-btn>
-                </div>
-              </div>
-            </template>
             <!-- Browser-local Postgres only. Deliberately next to Export, because the honest answer to
                  "can I lose this?" is a backup, and the second-best answer is the persistence request
                  below. Literal English rather than t() keys, matching the other backend-specific copy

@@ -564,9 +564,12 @@ function createVueApp() {
         Object.keys(feeds).forEach(function(n) { if (names.indexOf(n) < 0) names.push(n); });
         return names.sort().map(function(n) {
           var f = feeds[n] || {};
+          var def = ((self.appConfig && self.appConfig.calendars) || {})[n];
           return {
             name: n,
-            title: self.tOr('view.' + n, self.tOr('tab.' + n, n)),
+            // A calendar built here carries its own title and has no `view.<id>` translation, so asking
+            // for one only ever fell back to the id. A schema calendar is the other way round.
+            title: (def && def.title) || self.tOr('view.' + n, self.tOr('tab.' + n, n)),
             url: f.url || '',
             at: f.at || '',
             // Declared a feed AND still a calendar. False on a published file whose view was removed or
@@ -1351,6 +1354,12 @@ function createVueApp() {
               }
             });
           }).then(function() {
+          // Re-applied at the END of boot, not only when the folder config lands. The config arrives
+          // before the schema is finished loading, and normalizing a schema REPLACES the VIEWS map --
+          // so calendars merged in earlier were silently dropped, leaving `_userCalNames` claiming
+          // views that no longer existed. Idempotent, so running it twice costs a rebuild of a handful
+          // of entries.
+          self._applyUserCalendars();
             self._autoArchive();
             self.loadUsers();
           }).catch(function(err) {
@@ -1426,6 +1435,7 @@ function createVueApp() {
           //
           // The archive partitions this used to pull under `preload_archive` moved with them:
           // _ensureCached honours that same setting for each table it loads.
+          self._applyUserCalendars();   // see the note on the other boot path
           self.loading = false;
           self._autoArchive();
           self._autoSelectTab();

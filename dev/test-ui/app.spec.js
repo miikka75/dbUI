@@ -4424,6 +4424,38 @@ test.describe('calendar view', () => {
     expect(r.badErrs).toBe(true);
   });
 
+  test('a calendar built in the app survives a reload, and is listed by its own name', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      await app.saveUserCalendar('cal_persist', {
+        title: 'My ward', sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'] }]
+      });
+    });
+    // RELOAD. The folder config arrives before the schema finishes loading, and normalizing a schema
+    // REPLACES the VIEWS map — so calendars merged in on config load were dropped, leaving the app
+    // claiming views that no longer existed and Settings listing nothing.
+    await page.reload();
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 15000 });
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      return {
+        inViews: !!(window.VIEWS.cal_persist && window.VIEWS.cal_persist.userDefined),
+        kind: window.SchemaNormalize.viewKind(window.VIEWS.cal_persist),
+        // Listed by the title that was TYPED, not by the id: a calendar built here has no
+        // `view.<id>` translation, so asking for one only ever fell back to the id.
+        listed: (app.calendarFiles.find((f) => f.name === 'cal_persist') || {}).title,
+        editable: (app.calendarFiles.find((f) => f.name === 'cal_persist') || {}).userDefined
+      };
+    });
+    expect(r.inViews).toBe(true);
+    expect(r.kind).toBe('calendar');
+    expect(r.listed).toBe('My ward');
+    expect(r.editable).toBe(true);
+    await page.evaluate(() => window.appInstance.deleteUserCalendar('cal_persist'));
+  });
+
   test('an admin can build a calendar in the app, and it behaves like any other', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(async () => {
