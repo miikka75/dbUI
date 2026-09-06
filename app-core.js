@@ -1442,7 +1442,7 @@ function createVueApp() {
       boardAddInLane: function(name, laneKey) {
         var v = VIEWS[name]; if (!v || !v.board || !this.canMutateRows) return;
         var primary = v.sources[0], prefill = {}; prefill[v.board.lane] = laneKey;
-        var primaryRow = this._createBlankRow(primary, { tab: this.viewingArchive ? 'archive' : 'active', prefill: prefill });
+        var primaryRow = this._createBlankRow(primary, { part: this.viewingArchive ? 'archive' : 'active', prefill: prefill });
         var viewRow = Object.assign({}, primaryRow);
         if (v.mode === 'union') viewRow._source = primary;
         this.currentData.push(viewRow);
@@ -1681,9 +1681,12 @@ function createVueApp() {
       pivotFor: function(name) {
         var v = VIEWS[name]; if (!v || !v.pivot) return { columns: [], rows: [] };
         var p = v.pivot, src = p.source;
-        var rows = VIEWS[src] ? this.embedRows('view', src) : (this.dataCache[src] || []);
+        // Through partitionRows, not the raw store: dataCache[src] now holds filed-away rows too, so
+        // indexing it directly cross-tabbed the archive into every pivot that never asked for it — and
+        // concatenating the archive STORE on top double-counted any id still present in both.
+        var rows = VIEWS[src] ? this.embedRows('view', src) : Rows.partitionRows(this.dataCache, src, 'active');
         // Same reasoning as buildRows: a cross-tab counting history must see the archived rows too.
-        if (v.includeArchive && !VIEWS[src]) rows = rows.concat(this.dataCache[src + '__archive'] || []);
+        if (v.includeArchive && !VIEWS[src]) rows = rows.concat(Rows.partitionRows(this.dataCache, src, 'archive'));
         return Pivot.build(rows, p);
       },
       isRsvpName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'rsvp'; },
@@ -1763,7 +1766,7 @@ function createVueApp() {
         if (built.record) return built.record;
         // _createBlankRow stamps the owner column and any `default`/`defaultFrom`, and pushes the row
         // into the cache -- the same path the grid's Add uses, so a form record is an ordinary row.
-        return this._createBlankRow(v.form.table, { tab: 'active' });
+        return this._createBlankRow(v.form.table);
       },
 
       // Upsert the current user's response for one event: update my existing owned row, else create one
@@ -2020,7 +2023,7 @@ function createVueApp() {
       embedDeleteRow: function(type, name, item) {
         var key = 'erow:' + item.id;
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
-        this._deleteFromSources(withMirrors(this.embedSources(type, name)), item.id, false);
+        this._deleteFromSources(withMirrors(this.embedSources(type, name)), item.id);
       },
       embedArchiveRow: function(type, name, item) {
         this._archiveInSources(withMirrors(this.embedSources(type, name)), item.id);
@@ -2081,8 +2084,14 @@ function createVueApp() {
         return p;
       },
 
+      // Returns a promise for the loads it STARTED, so a caller that has to read the rows (rather than
+      // just render them when they arrive) can wait. Navigation ignores it and is unchanged: a view
+      // re-renders reactively as each table lands. The archive fan-out cannot -- it looks each row up
+      // in the cache, and a mirror that has not landed yet is indistinguishable from one that has no
+      // row at all.
       _ensureCached: function(tables, onLoad, wantArchive) {
         var self = this;
+        var started = [];
         // Whatever this view needs cached is also what it needs kept LIVE. Watching here (rather than
         // per branch of loadTableData) means every derived kind — calendar, rotation, pivot, rsvp,
         // union/join — subscribes through the same list it already preloads, and cannot drift from it.
@@ -2095,23 +2104,24 @@ function createVueApp() {
           // responses table loads for a no-grant member instead of silently staying empty.
           if (!tbl || !self.canReachTable(tbl)) return;
           if (!self.dataCache[tbl] && !self._liveLoads(tbl)) {
-            self._fetchTable(tbl, 'active', tbl).then(function() {
+            started.push(self._fetchTable(tbl, 'active', tbl).then(function() {
               // A table can only be swept once it is HERE. _autoArchive walks whatever is cached and a
               // repeat run finds nothing left to move, so this is what keeps the sweep working when boot
               // no longer loads everything -- otherwise rows in a table nobody had opened would simply
               // never age out, silently.
               self._autoArchive();
               if (onLoad) onLoad(tbl);
-            });
+            }));
           }
           // The ARCHIVE partition, only when the caller says something will read it, and still behind
           // `preload_archive` -- a user who turned that off asked not to load archives, and the
           // documented consequence (a history view comes up short) is unchanged.
           if (wantArchive && self.settings.preload_archive && SCHEMA[tbl] && SCHEMA[tbl].archivable && !self.dataCache[aKey(tbl)]) {
-            self._fetchTable(tbl, 'archive', aKey(tbl)).then(function() { if (onLoad) onLoad(tbl); });
+            started.push(self._fetchTable(tbl, 'archive', aKey(tbl)).then(function() { if (onLoad) onLoad(tbl); }));
           }
         });
-        self._ensureDeps(tables, onLoad);
+        started.push(self._ensureDeps(tables, onLoad));
+        return Promise.all(started);
       },
 
       // The tables a view's COLUMNS resolve out of, as opposed to the tables its rows come from: a ref
@@ -2130,16 +2140,17 @@ function createVueApp() {
       //     closure of the schema on the first view load, which is the cost this is meant to avoid.
       _ensureDeps: function(tables, onLoad) {
         var self = this;
-        if (typeof Columns === 'undefined' || !Columns.tableDeps) return;
-        var seen = {};
+        if (typeof Columns === 'undefined' || !Columns.tableDeps) return Promise.resolve();
+        var started = [], seen = {};
         (tables || []).forEach(function(tbl) {
           if (!tbl) return;
           Columns.tableDeps(SCHEMA, tbl).forEach(function(dep) {
             if (seen[dep] || self.dataCache[dep] || !self.canReachTable(dep)) return;
             seen[dep] = 1;
-            self._fetchTable(dep, 'active', dep).then(function() { if (onLoad) onLoad(dep); });
+            started.push(self._fetchTable(dep, 'active', dep).then(function() { if (onLoad) onLoad(dep); }));
           });
         });
+        return Promise.all(started);
       },
 
       // --- Live sync ------------------------------------------------------------------------------
@@ -2466,9 +2477,9 @@ function createVueApp() {
             if (SCHEMA[s] && SCHEMA[s].columns && SCHEMA[s].columns[col]) { source = s; break; }
           }
         }
-        var tab = this.getTab(source);
-        // Update cache
-        var cacheKey = this.viewingArchive ? aKey(source) : source;
+        var tab = this.getTab(source, item.id);
+        // Update cache — keyed off the store the write is going to, so the two cannot disagree.
+        var cacheKey = tab === 'archive' ? aKey(source) : source;
         var cached = this.dataCache[cacheKey];
         // Does this table already hold the row? Unknown (table not cached) counts as yes — the user is
         // editing it, so it exists somewhere. This decides partial-vs-whole below.
@@ -2528,9 +2539,13 @@ function createVueApp() {
       // writes through to the backend, and returns the PRIMARY row.
       // Previously each caller hand-rolled this, and they drifted: only addRow seeded `position`, so a
       // row added to a reorderable table from an embed or the calendar sorted after every placed row.
-      // opts: { tab: 'active'|'archive' (default active), prefill: { col: value } }
+      // opts: { part: 'active'|'archive' (default active), prefill: { col: value } }
+      // `part` is the PARTITION the row is created in, not a store: adding a row while the archive tab
+      // is open stamps `_status` and still writes to the active store, because that is where a row
+      // lives under the field model. Creating it in the archive store instead made it invisible to
+      // every session that had not loaded that store (boot does not, unless preload_archive is on).
       _createBlankRow: function(primary, opts) {
-        var self = this, o = opts || {}, tab = o.tab || 'active', prefill = o.prefill || {};
+        var self = this, o = opts || {}, part = o.part || 'active', prefill = o.prefill || {};
         var id = this.generateId(), primaryRow = null;
         withMirrors([primary]).forEach(function(src) {
           var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
@@ -2554,17 +2569,17 @@ function createVueApp() {
             row[dc.name] = dc.from ? self.defaultFromValue(dc.from, dc.name) : dc.value;
           });
           for (var pc in prefill) { if (cols.indexOf(pc) >= 0) row[pc] = prefill[pc]; }  // only columns the mirror actually has
-          var cacheKey = tab === 'archive' ? aKey(src) : src;
-          if (!self.dataCache[cacheKey]) self.dataCache[cacheKey] = [];
+          if (part !== 'active') row._status = part;
+          if (!self.dataCache[src]) self.dataCache[src] = [];
           // Reorderable tables order by `position`; seed the next number so new rows append in order
           // (otherwise they get an empty position and the hardened sort floats them after positioned rows).
           if (SCHEMA[src] && SCHEMA[src].reorderable) {
             var mp = 0;
-            self.dataCache[cacheKey].forEach(function(r) { var n = Number(r.position); if (!isNaN(n) && n > mp) mp = n; });
+            self.dataCache[src].forEach(function(r) { var n = Number(r.position); if (!isNaN(n) && n > mp) mp = n; });
             row.position = String(mp + 1);
           }
-          self.dataCache[cacheKey].push(row);
-          Writes.putRow(src, row, tab);
+          self.dataCache[src].push(row);
+          Writes.putRow(src, row, 'active');
           if (src === primary) primaryRow = row;
         });
         return primaryRow;
@@ -2575,7 +2590,7 @@ function createVueApp() {
         var self = this;
         var view = VIEWS[this.currentTable];
         var primary = view ? view.sources[0] : this.currentTable;
-        var primaryRow = this._createBlankRow(primary, { tab: this.viewingArchive ? 'archive' : 'active' });
+        var primaryRow = this._createBlankRow(primary, { part: this.viewingArchive ? 'archive' : 'active' });
         if (view) {
           var viewRow = Object.assign({}, primaryRow);
           if (view.mode === 'union') viewRow._source = primary;
@@ -2597,7 +2612,7 @@ function createVueApp() {
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
         var view = VIEWS[this.currentTable];
         var sources = withMirrors(view ? view.sources : [this.getSource(item)]);
-        this._deleteFromSources(sources, item.id, this.viewingArchive);
+        this._deleteFromSources(sources, item.id);
       },
 
       // Archive / Restore
@@ -2612,36 +2627,42 @@ function createVueApp() {
         var self = this;
         var view = VIEWS[this.currentTable];
         var sources = withMirrors(view ? view.sources : [this.getSource(item)]);
-        sources.forEach(function(source) {
-          var schema = SCHEMA[source];
-          if (!schema) return;
-          var stamp = new Date().toISOString();
-          // A row archived under the FIELD model never left the active store, so restoring it is the
-          // same field write in reverse.
-          var live = (self.dataCache[source] || []).find(function(r) { return r.id === item.id; });
-          if (live && Rows.partitionOf(live, 'active') === 'archive') {
-            live._status = 'active';
-            live.updated_at = stamp;
-            Writes.putRow(source, { id: item.id, _status: 'active', updated_at: stamp }, 'active');
-            return;
-          }
-          // A row archived under the STORE model is still sitting in the archive collection, and every
-          // deployment has some. Those still move -- writing `_status: 'active'` onto a row in the
-          // archive store would be honoured by partitionRows, but only for a session that had loaded
-          // that store, and boot does not load it unless `preload_archive` is on. The row would appear
-          // to vanish from both tabs. Moving it is what keeps it visible; the stamp makes it
-          // unambiguous once it lands.
-          var cached = self.dataCache[aKey(source)] || [];
-          var srcRow = cached.find(function(r) { return r.id === item.id; });
-          if (!srcRow) return;
-          srcRow._status = 'active';
-          self.dataCache[aKey(source)] = cached.filter(function(r) { return r.id !== item.id; });
-          if (!self.dataCache[source]) self.dataCache[source] = [];
-          self.dataCache[source].push(srcRow);
-          Writes.moveRow(source, srcRow, 'archive', 'active');
-        });
         self.currentData = self.currentData.filter(function(r) { return r.id !== item.id; });
         self.notify(self.t('msg.restored'));
+        // Both stores, for the same reason archiving needs the active one: a mirror that is not cached
+        // cannot be restored, and skipping it silently is what splits a row across the two tabs. The
+        // legacy branch below reads the archive store, so that partition is asked for too (still behind
+        // preload_archive — a user who turned it off has already accepted a short history).
+        return self._ensureCached(sources, null, true).then(function() {
+          sources.forEach(function(source) {
+            var schema = SCHEMA[source];
+            if (!schema) return;
+            var stamp = new Date().toISOString();
+            // A row archived under the FIELD model never left the active store, so restoring it is the
+            // same field write in reverse.
+            var live = (self.dataCache[source] || []).find(function(r) { return r.id === item.id; });
+            if (live && Rows.partitionOf(live, 'active') === 'archive') {
+              live._status = 'active';
+              live.updated_at = stamp;
+              Writes.putRow(source, { id: item.id, _status: 'active', updated_at: stamp }, 'active');
+              return;
+            }
+            // A row archived under the STORE model is still sitting in the archive collection, and every
+            // deployment has some. Those still move -- writing `_status: 'active'` onto a row in the
+            // archive store would be honoured by partitionRows, but only for a session that had loaded
+            // that store, and boot does not load it unless `preload_archive` is on. The row would appear
+            // to vanish from both tabs. Moving it is what keeps it visible; the stamp makes it
+            // unambiguous once it lands.
+            var cached = self.dataCache[aKey(source)] || [];
+            var srcRow = cached.find(function(r) { return r.id === item.id; });
+            if (!srcRow) return;
+            srcRow._status = 'active';
+            self.dataCache[aKey(source)] = cached.filter(function(r) { return r.id !== item.id; });
+            if (!self.dataCache[source]) self.dataCache[source] = [];
+            self.dataCache[source].push(srcRow);
+            Writes.moveRow(source, srcRow, 'archive', 'active');
+          });
+        });
       },
 
       // Column helpers
@@ -3825,8 +3846,8 @@ function createVueApp() {
           var synced = [];
           for (var mc in SCHEMA[mt].columns) { var md = SCHEMA[mt].columns[mc]; if (md && typeof md === 'object' && md.syncFrom === sourceTable) synced.push(mc); }
           if (!synced.length) continue;
-          var mKey = self.viewingArchive ? aKey(mt) : mt;
-          var mTab = self.viewingArchive ? 'archive' : 'active';
+          var mTab = Rows.storeOf(self.dataCache, mt, id);   // per mirror: same reasoning as getTab
+          var mKey = mTab === 'archive' ? aKey(mt) : mt;
           var mr = (self.dataCache[mKey] || []).find(function(r) { return r.id === id; });
           if (mr) {
             // Write only the mirrored columns, not the whole mirror row — a mirror carries columns of
@@ -3845,8 +3866,8 @@ function createVueApp() {
         var upTargets = {};
         for (var rc in (srcCols || {})) { var rdef = srcCols[rc]; if (rdef && typeof rdef === 'object' && rdef.syncFrom) { (upTargets[rdef.syncFrom] = upTargets[rdef.syncFrom] || []).push(rc); } }
         Object.keys(upTargets).forEach(function(st) {
-          var stKey = self.viewingArchive ? aKey(st) : st;
-          var stTab = self.viewingArchive ? 'archive' : 'active';
+          var stTab = Rows.storeOf(self.dataCache, st, id);
+          var stKey = stTab === 'archive' ? aKey(st) : st;
           var stRow = (self.dataCache[stKey] || []).find(function(r) { return r.id === id; });
           if (stRow) {
             var upPatch = { id: id };   // mirrored columns only — same reasoning as the downstream branch
@@ -5052,17 +5073,31 @@ function createVueApp() {
         return ownerId;
       },
 
-      getTab: function(source) {
-        return this.viewingArchive ? 'archive' : 'active';
+      // Which STORE a write about this row must target. NOT the tab on screen: `viewingArchive` names
+      // a PARTITION, and an archived row normally sits in the ACTIVE store carrying `_status`. Reading
+      // the store off the tab wrote a second copy of the row into `<table>__archive`, where
+      // partitionRows ignores it (the active store wins a duplicate id) -- so the edit silently did
+      // nothing and the row now existed twice. Rows.storeOf answers from the caches instead.
+      getTab: function(source, id) {
+        return Rows.storeOf(this.dataCache, source, id);
       },
 
-      _deleteFromSources: function(sources, itemId, fromArchive) {
+      // Delete means GONE from the table, so it clears both stores rather than whichever one the tab on
+      // screen implies. A row's store is a property of the row now (Rows.storeOf), and a deployment
+      // mid-migration can hold the same id in both -- deleting only the visible copy left the other to
+      // resurface in the archive tab. Deleting a row that isn't there is a no-op on every backend.
+      _deleteFromSources: function(sources, itemId) {
         var self = this;
         sources.forEach(function(src) {
-          var tab = fromArchive ? 'archive' : 'active';
-          var key = fromArchive ? aKey(src) : src;
-          self.dataCache[key] = (self.dataCache[key] || []).filter(function(r) { return r.id !== itemId; });
-          Writes.deleteRow(src, itemId, tab);
+          var stores = [['active', src]];
+          if (SCHEMA[src] && SCHEMA[src].archivable) stores.push(['archive', aKey(src)]);
+          stores.forEach(function(store) {
+            var key = store[1];
+            // Only rewrite a cache that EXISTS: seeding [] here would tell partitionRows the archive
+            // store is loaded and empty, hiding every legacy archived row until the next reload.
+            if (self.dataCache[key]) self.dataCache[key] = self.dataCache[key].filter(function(r) { return r.id !== itemId; });
+            Writes.deleteRow(src, itemId, store[0]);
+          });
         });
         this.currentData = this.currentData.filter(function(r) { return r.id !== itemId; });
         this.notify(this.t('msg.deleted'));
@@ -5104,18 +5139,27 @@ function createVueApp() {
       // A PARTIAL patch, not the whole row: the contract pins that an omitted column keeps its stored
       // value on every backend, and sending our cached copy of the rest is the cross-client clobber
       // saveField already avoids.
+      // The fan-out covers the whole mirror cluster, and it needs each table's rows CACHED to work: the
+      // row has to be found before it can be stamped, because a blind `_status` write would CREATE a
+      // row in a mirror that legitimately never had one (an old meeting with no usher-shift row).
+      // Boot stopped preloading tables, so a cluster member whose view the user never opened is simply
+      // absent -- and this used to skip it in silence, leaving one half of a meeting archived and the
+      // other half live. That row then showed in BOTH tabs at once: the archived half in the archive
+      // tab, the still-active mirrors joining into the same id in the active one.
       _archiveInSources: function(sources, itemId, quiet) {
         var self = this;
-        sources.forEach(function(source) {
-          var schema = SCHEMA[source];
-          if (!schema || !schema.archivable) return;
-          var srcRow = (self.dataCache[source] || []).find(function(r) { return r.id === itemId; });
-          if (!srcRow || Rows.partitionOf(srcRow, 'active') === 'archive') return;
-          srcRow._status = 'archive';
-          srcRow.updated_at = new Date().toISOString();
-          Writes.putRow(source, { id: itemId, _status: 'archive', updated_at: srcRow.updated_at }, 'active');
+        return self._ensureCached(sources).then(function() {
+          sources.forEach(function(source) {
+            var schema = SCHEMA[source];
+            if (!schema || !schema.archivable) return;
+            var srcRow = (self.dataCache[source] || []).find(function(r) { return r.id === itemId; });
+            if (!srcRow || Rows.partitionOf(srcRow, 'active') === 'archive') return;
+            srcRow._status = 'archive';
+            srcRow.updated_at = new Date().toISOString();
+            Writes.putRow(source, { id: itemId, _status: 'archive', updated_at: srcRow.updated_at }, 'active');
+          });
+          if (!quiet) self.notify(self.t('msg.archived'));   // the auto sweep files rows silently
         });
-        if (!quiet) this.notify(this.t('msg.archived'));   // the auto sweep files rows silently
       },
       armDelete: function(key) {
         var self = this;
