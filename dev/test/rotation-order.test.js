@@ -49,3 +49,34 @@ describe('sortRosterRows (position ordering, robust to partial data)', () => {
     assert.equal(input[0].id, 'b'); // original order untouched
   });
 });
+
+describe('roster order — one sort, not four', () => {
+  // `sortRosterRows` was hardened once: a missing or empty `position` must sort LAST, keeping insertion
+  // order, because `(Number(position) || 0)` reads it as 0 and floats those rows ahead of every
+  // positioned one. Three other callers kept inlining the old coercion — rosterGroups, the Lookup
+  // editor, and the ref-hierarchy builder — so the same roster could come out in a different order
+  // depending on which screen was asking, which is precisely what rosterGroups' own comment warns of.
+  const rows = [
+    { id: 'c', position: '2', people: ['Cal'] },
+    { id: 'new', people: ['Newcomer'] },          // added, never reordered: no position at all
+    { id: 'a', position: '1', people: ['Ann'] },
+    { id: 'blank', position: '', people: ['Blank'] }
+  ];
+
+  it('unpositioned rows sort AFTER positioned ones, in insertion order', () => {
+    assert.deepEqual(sortRosterRows(rows).map((r) => r.id), ['a', 'c', 'new', 'blank']);
+  });
+
+  it('and rosterGroups agrees, rather than floating them to the front', () => {
+    const rv = { rosterRef: 'roster', rosterBy: 'grp', valueCol: 'people' };
+    const withGroup = rows.map((r) => Object.assign({ grp: 'g' }, r));
+    const g = require('../../rotation').rosterGroups(rv, { roster: withGroup });
+    assert.deepEqual(g.groups[0].map((r) => r.id), ['a', 'c', 'new', 'blank']);
+  });
+
+  it('does not mutate its input, since dataCache arrays are shared', () => {
+    const before = rows.map((r) => r.id);
+    sortRosterRows(rows);
+    assert.deepEqual(rows.map((r) => r.id), before);
+  });
+});

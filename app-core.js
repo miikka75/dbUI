@@ -1068,7 +1068,11 @@ function createVueApp() {
       refTableData: function() {
         if (!this.currentRefTable) return [];
         var rows = this.dataCache[this.currentRefTable] || [];
-        if (this.refReorderable) rows = rows.slice().sort(function(a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0); });
+        // The same sort the rotation reads these rows through -- a lookup table's order is one question,
+        // and the editor disagreeing with the matrix about it is what `rosterGroups` already warns of.
+        // The inline `(Number(position) || 0)` this replaces put UNPOSITIONED rows first, ahead of every
+        // positioned one, which is the opposite of where they belong.
+        if (this.refReorderable) rows = Rotation.sortRosterRows(rows);
         return rows;
       },
       isHierarchicalRef: function() {
@@ -7071,7 +7075,9 @@ function createVueApp() {
         var childCol = rf.valueCol || cols[cols.length - 1];
         var parentCol = cols[0] === childCol ? cols[1] : cols[0];
         var rows = appInstance.dataCache[rf.table] || [];
-        if (SCHEMA[rf.table] && SCHEMA[rf.table].reorderable) rows = rows.slice().sort(function(a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0); });  // stable, reorderable order
+        // Same one sort again -- this is the fourth place that asked, and the third that answered it
+        // differently by inlining the coercion sortRosterRows exists to avoid.
+        if (SCHEMA[rf.table] && SCHEMA[rf.table].reorderable) rows = Rotation.sortRosterRows(rows);  // stable, reorderable order
         return { table: rf.table, parentCol: parentCol, childCol: childCol, rows: rows };
       },
       // Lane keys in intended order: a ref lane -> the lookup's child values in row order; else explicit

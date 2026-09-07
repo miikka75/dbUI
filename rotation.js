@@ -149,7 +149,11 @@
       // Sorted here rather than trusted: dataCache holds whatever order the backend returned, while the
       // Lookup editor renders `position` order. Without this the groups could come out in a different
       // order than the screen the admin edits them on.
-      rows.sort(function(a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0); });
+      //
+      // THE shared sort, not a second copy of it. This used to inline `(Number(position) || 0)`, which
+      // is exactly what sortRosterRows was hardened away from: it reads a missing or empty position as
+      // 0 and floats those rows to the FRONT, ahead of every positioned one.
+      rows = sortRosterRows(rows);
       var slots = [], groups = [], index = {};
       rows.forEach(function(r) {
         var k = r[by];
