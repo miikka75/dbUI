@@ -24,7 +24,7 @@ function makeFakeSb() {
   return {
     _rows: rows,
     from() {
-      const st = { op: 'select', filters: {}, payload: null };
+      const st = { op: 'select', filters: {}, payload: null, order: null };
       const exec = () => {
         if (st.op === 'upsert') {
           const { store, key, value } = st.payload;
@@ -36,11 +36,17 @@ function makeFakeSb() {
           for (let i = rows.length - 1; i >= 0; i--) if (matches(rows[i], st.filters)) rows.splice(i, 1);
           return Promise.resolve({ data: null, error: null });
         }
-        return Promise.resolve({ data: rows.filter(r => matches(r, st.filters)).map(r => ({ key: r.key, value: r.value })), error: null });
+        let out = rows.filter(r => matches(r, st.filters));
+        // Modelled, not ignored: without ORDER BY Postgres returns heap order, and an UPDATE moves a row
+        // within it. A fake that always returned insertion order would make the adapter look stable in
+        // tests while a real deployment reshuffled after every edit -- which is what happened.
+        if (st.order) out = out.slice().sort((a, b) => String(a[st.order]).localeCompare(String(b[st.order])));
+        return Promise.resolve({ data: out.map(r => ({ key: r.key, value: r.value })), error: null });
       };
       const builder = {
         select() { st.op = 'select'; return builder; },
         eq(c, v) { st.filters[c] = v; return builder; },
+        order(col) { st.order = col; return builder; },
         upsert(obj) { st.op = 'upsert'; st.payload = obj; return builder; },
         delete() { st.op = 'delete'; return builder; },
         maybeSingle() { const r = find(st.filters); return Promise.resolve({ data: r ? { value: r.value } : null, error: null }); },
@@ -157,5 +163,28 @@ describe('storage-supabase — pushing a filter into the query', () => {
     const S = await seeded();
     const { constraints } = Query.compile({ status: 'open' });
     assert.ok(!(await S.getAll('tasks__active', constraints)).some((r) => r.id === 'p4'));
+  });
+});
+
+describe('storage-supabase adapter — rows come back in a defined order', () => {
+  // storage-pglite reads with `order by key`; this adapter did not order at all. The adapters are meant
+  // to be interchangeable, and this was the one place they disagreed about something a SCREEN can see:
+  // a list the app does not sort itself rendered stably on the dev server and jumped around on Supabase,
+  // because an UPDATE rewrites a row elsewhere in the heap and an unordered SELECT follows the heap.
+  it('getAll is ordered by key regardless of insertion order', async () => {
+    const sb = makeFakeSb();
+    const S = createSupabaseStorage(sb);
+    await S.put('tasks__active', 'c', { id: 'c', n: 3 });
+    await S.put('tasks__active', 'a', { id: 'a', n: 1 });
+    await S.put('tasks__active', 'b', { id: 'b', n: 2 });
+    assert.deepEqual((await S.getAll('tasks__active')).map((r) => r.id), ['a', 'b', 'c']);
+  });
+
+  it('and stays ordered after a row is updated, which is what moved it in Postgres', async () => {
+    const sb = makeFakeSb();
+    const S = createSupabaseStorage(sb);
+    for (const id of ['a', 'b', 'c']) await S.put('tasks__active', id, { id: id, n: 0 });
+    await S.put('tasks__active', 'a', { id: 'a', n: 99 });     // the edit that reshuffled the real thing
+    assert.deepEqual((await S.getAll('tasks__active')).map((r) => r.id), ['a', 'b', 'c']);
   });
 });

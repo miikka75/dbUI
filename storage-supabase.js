@@ -76,7 +76,13 @@ function createSupabaseStorage(sb) {
     // equality is ever passed: the compiler refuses anything whose meaning differs between the matcher
     // and a query, so this is a jsonb text comparison and nothing cleverer.
     getAll: function(store, constraints) {
-      var qb = sb.from(TABLE).select('value').eq('store', store);
+      // ORDERED BY KEY, like storage-pglite's `order by key`. A SELECT with no ORDER BY returns rows in
+      // whatever order Postgres finds them, and an UPDATE rewrites a row elsewhere in the heap -- so
+      // editing one row could reshuffle the whole list, differently each time. The adapters are meant to
+      // be interchangeable, and this was the one place they disagreed about something a screen can see:
+      // any list the app does not sort itself (a reorderable lookup whose rows carry no `position`, for
+      // one) rendered in a stable order locally and jumped around on Supabase.
+      var qb = sb.from(TABLE).select('value').eq('store', store).order('key');
       (constraints || []).forEach(function(c) {
         if (!c || c.op !== '==') return;                  // unknown op: the caller's residual handles it
         qb = qb.eq('value->>' + c.field, c.value === null ? null : String(c.value));
@@ -99,7 +105,7 @@ function createSupabaseStorage(sb) {
     // --- Supabase-only helpers for the collection-style queries backend-supabase.js needs
     // (Firestore exposes _db.collection(...).where(...); these are the kv-table equivalents). ---
     _all: function(store) {
-      return sb.from(TABLE).select('key,value').eq('store', store).then(_unwrap).then(function(r) { return r || []; });
+      return sb.from(TABLE).select('key,value').eq('store', store).order('key').then(_unwrap).then(function(r) { return r || []; });
     },
     _replace: _replace,
     _merge: _merge
