@@ -1673,16 +1673,25 @@ function createVueApp() {
       // also reachable by IMPORT -- and every one of these mistakes fails the same silent way, as a
       // calendar that renders and exports nothing at all.
       saveUserCalendar: function(id, def) {
+        var self = this;
         var errs = this.userCalendarErrors(def);
         if (errs.length) { this.notify(errs[0]); return Promise.resolve(errs); }
+        var was = this.feedInfoFor(id);
+        var store = function() {
+          return Promise.resolve(self._storeUserCalendar(id, def)).then(function(r) {
+            // Turning publishing ON publishes NOW. Every other trigger is out of reach for a calendar
+            // built here: republishing waits for a WRITE to a source table, and the only button is on
+            // the calendar view's own toolbar, which has no nav entry to open. So ticking Publish and
+            // saving did nothing visible -- no URL, no error -- until somebody happened to edit a row.
+            if (!def.feed || (self.feedInfoFor(id) || {}).url) return r;
+            return self.publishFeed(id).then(function() { return r; }, function() { return r; });
+          });
+        };
         // Switching publishing OFF has to retire the address, not just stop refreshing it: the file is
         // already in people's calendar apps, and a URL that keeps serving the last snapshot is exactly
         // what "stop publishing" must not leave behind.
-        var was = this.feedInfoFor(id);
-        if (was && was.url && !def.feed) return this.unpublishFeed(id).then(function() {
-          return this._storeUserCalendar(id, def);
-        }.bind(this));
-        return this._storeUserCalendar(id, def);
+        if (was && was.url && !def.feed) return this.unpublishFeed(id).then(store);
+        return store();
       },
       _storeUserCalendar: function(id, def) {
         def = Object.assign({}, def, {
