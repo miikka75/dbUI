@@ -207,7 +207,13 @@
       "tab.lists": "Lists",
       "tab.lookup": "Lists",
       "tab.ref_data": "Databases",
-      "tab.settings": "Settings"
+      "tab.settings": "Settings",
+      "btn.undo": "Undo",
+      "btn.redo": "Redo",
+      "msg.undone": "Undone",
+      "msg.redone": "Redone",
+      "settings.data": "Data",
+      "settings.refresh": "Refresh data"
     }
   }
 }

@@ -267,7 +267,11 @@
       <v-spacer v-else></v-spacer>
       <v-select v-if="languages.length > 1" v-model="currentLang" name="current-lang" :items="langItems" density="compact" variant="plain" hide-details style="max-width:120px" class="mr-2" @update:model-value="switchLanguage"></v-select>
       <user-avatar v-if="usersLoaded && !isUnregisteredUser" :email="currentUserEmail" :name="myProfile.name" :size="32" :title="myProfile.name || currentUserEmail" class="mr-2"></user-avatar>
-      <v-btn icon="mdi-refresh" @click="refreshData" :loading="syncing"></v-btn>
+      <!-- Undo/redo hold the slot refresh used to. Refresh moved to Settings: every backend subscribes
+           to its tables, so it is the escape hatch for a dropped subscription rather than a daily
+           action, and a browser reload already refetches strictly more than it does. -->
+      <v-btn icon="mdi-undo" :disabled="!undoDepth" :title="t('btn.undo')" :aria-label="t('btn.undo')" data-testid="undo" @click="undoLast"></v-btn>
+      <v-btn icon="mdi-redo" :disabled="!redoDepth" :title="t('btn.redo')" :aria-label="t('btn.redo')" data-testid="redo" @click="redoLast"></v-btn>
       <v-btn :icon="theme === 'dark' ? 'mdi-weather-sunny' : 'mdi-weather-night'" @click="toggleTheme"></v-btn>
     </v-app-bar>
 
@@ -653,6 +657,9 @@
           <v-card-text>
             <div class="mb-4">
             <v-switch :model-value="a.navLayout === 'tabs'" @update:model-value="v => a.setNavLayout(v ? 'tabs' : 'drawer')" color="primary" density="compact" hide-details :label="a.t('settings.tabs_nav')" data-testid="nav-layout-toggle"></v-switch>
+            <v-divider class="my-4"></v-divider>
+            <p class="text-subtitle-2 mb-2">{{ a.t('settings.data') }}</p>
+            <v-btn variant="outlined" prepend-icon="mdi-refresh" :loading="a.syncing" data-testid="settings-refresh" @click="a.refreshData" class="mr-2 mb-2">{{ a.t('settings.refresh') }}</v-btn>
             <template v-if="a.isAdmin">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.import_export') }}</p>

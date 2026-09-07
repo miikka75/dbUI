@@ -207,7 +207,13 @@
       "tab.lists": "Listat",
       "tab.lookup": "Listat",
       "tab.ref_data": "Tietokannat",
-      "tab.settings": "Asetukset"
+      "tab.settings": "Asetukset",
+      "btn.undo": "Kumoa",
+      "btn.redo": "Tee uudelleen",
+      "msg.undone": "Kumottu",
+      "msg.redone": "Tehty uudelleen",
+      "settings.data": "Tiedot",
+      "settings.refresh": "Päivitä tiedot"
     }
   }
 }
