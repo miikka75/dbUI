@@ -1051,15 +1051,12 @@ function createVueApp() {
       // grant is for — see it, don't change it — so the editor follows the same viewReadonly gate the
       // data grid does (config `readonly`, viewer role, or no rw grant on the table).
       canEditCurrentRef: function() { return !!this.currentRefTable && !this.viewReadonly(this.currentRefTable); },
+      // The author-facing columns (no id, no timestamps, no `hidden` position) -- the editor's cells,
+      // and what the hierarchy below is read from. Columns.lookupCols owns that filter; the board's ref
+      // lane used to keep a second copy of it.
       refTableCols: function() {
         if (!this.currentRefTable) return [];
-        var cols = (SCHEMA[this.currentRefTable] && SCHEMA[this.currentRefTable].columns) || {};
-        // Exclude hidden columns (e.g. a reorderable table's `position`) so they don't show as editable cells
-        // OR count toward isHierarchicalRef's 2-column test.
-        return getColumns(this.currentRefTable).filter(function(c) {
-          if (c === 'id' || c === 'created_at' || c === 'updated_at') return false;
-          var d = cols[c]; return !(d && typeof d === 'object' && d.hidden);
-        });
+        return Columns.lookupCols(SCHEMA[this.currentRefTable], getColumns(this.currentRefTable));
       },
       // A ref/lookup table opted into `reorderable` orders its rows by a `position` column — the same
       // convention as a reorderable data table — so the lookup editor's arrows and the board's ref-lane order
@@ -1075,11 +1072,19 @@ function createVueApp() {
         if (this.refReorderable) rows = Rotation.sortRosterRows(rows);
         return rows;
       },
-      isHierarchicalRef: function() {
-        return this.refTableCols.length === 2;
+      // WHICH column is the group and which the value -- the lookup's own answer (Columns
+      // .lookupHierarchy), declared by the table or inferred from two author-facing columns for a
+      // schema written before the declaration existed. The board's ref lane asks the same function, so
+      // the two screens can no longer disagree about it: this one used to require EXACTLY two columns
+      // while the board accepted any number, and a lookup that grew a third column kept its lanes and
+      // silently lost its hierarchy here.
+      refHierarchy: function() {
+        if (!this.currentRefTable) return null;
+        return Columns.lookupHierarchy(SCHEMA[this.currentRefTable], getColumns(this.currentRefTable));
       },
-      refParentCol: function() { return this.refTableCols[0]; },
-      refChildCol: function() { return this.refTableCols[1]; },
+      isHierarchicalRef: function() { return !!this.refHierarchy; },
+      refParentCol: function() { return this.refHierarchy ? this.refHierarchy.parent : null; },
+      refChildCol: function() { return this.refHierarchy ? this.refHierarchy.value : null; },
       // Values a schema filter/conditional depends on — locked (can't be deleted/renamed) in the Lookup
       // editor. A CACHED computed (was a method): isLockedValue is called ~3x per list item, and this
       // rebuild is O(views x columns x tables) — recomputing it per call made the Lookup view crawl on
@@ -1093,17 +1098,11 @@ function createVueApp() {
         forEachFilterListValue(function(ln, val) { (locked[ln] || (locked[ln] = {}))[val] = true; });
         return locked;
       },
-      refGroupedData: function() {
-        if (!this.isHierarchicalRef) return {};
-        var parentCol = this.refParentCol;
-        var data = this.refTableData;
-        var groups = {};
-        data.forEach(function(row) {
-          var key = row[parentCol] || '';
-          if (!groups[key]) groups[key] = [];
-          groups[key].push(row);
-        });
-        return groups;
+      // The groups, in row order, as nodes -- an ARRAY, not the value->rows map this replaces, because
+      // an object orders numeric-looking keys ("2024", "2025") ahead of everything else and ascending,
+      // whatever `position` said. See Columns.buildHierarchy.
+      refTree: function() {
+        return Columns.buildHierarchy(this.refTableData, this.refHierarchy);
       }
     },
 
@@ -3070,16 +3069,16 @@ function createVueApp() {
       // One catalogue can then back both a `ref` column (which carries the row's other fields — a chore's
       // points) and a plain select/multiselect that only needs the name, instead of maintaining a second
       // free-string list beside it that nothing can score. `translatableLists` already accepts a lookup
-      // table name for the same reason. The option VALUE is the lookup's first visible column (its name
-      // column, the same one `ref.valueCol` defaults to); the rest of the row is reference data.
+      // table name for the same reason. The option VALUE is the lookup's GROUP dimension (see below);
+      // the rest of the row is reference data.
       lookupListValues: function(name) {
         if (!name || !SCHEMA[name] || !SCHEMA[name].isLookup) return null;
-        var scols = SCHEMA[name].columns || {};
-        var valueCol = getColumns(name).filter(function(c) {
-          if (c === 'id' || c === 'created_at' || c === 'updated_at') return false;
-          var d = scols[c];
-          return !(d && typeof d === 'object' && d.hidden);
-        })[0];
+        // A `list:` names the lookup's GROUP dimension -- the parent of a hierarchy, the name column of
+        // a flat catalogue -- while a `ref` column names the value under it. Both come from the one
+        // declaration, so a lookup that states a parent which is not simply its first column is picked
+        // from correctly here too, instead of by a third copy of the visible-column filter.
+        var order = getColumns(name), h = Columns.lookupHierarchy(SCHEMA[name], order);
+        var valueCol = h ? h.parent : Columns.lookupCols(SCHEMA[name], order)[0];
         if (!valueCol) return [];
         var seen = {}, out = [];
         (this.dataCache[name] || []).forEach(function(r) {
@@ -3195,8 +3194,8 @@ function createVueApp() {
         return this.refTableCols.some(function(c) { return !!lv[item[c]]; });
       },
       refParentLocked: function(parent) {
-        var self = this;
-        return (this.refGroupedData[parent] || []).some(function(it) { return self.isLockedRefRow(it); });
+        var self = this, node = this.refTree.find(function(n) { return n.value === parent; });
+        return !!node && node.children.some(function(c) { return self.isLockedRefRow(c.row); });
       },
       // Translated label for a lookup value, keyed by its table's namespace (list.<table>.<value>) — the same
       // key the board/grid resolve through. The ref editor shows this for locked (filter-pinned) rows so their
@@ -3605,7 +3604,17 @@ function createVueApp() {
       },
       // --- Reorder a reorderable lookup (arrows in the ref editor). Mirrors moveListItem/moveRowPosition:
       // renumber the affected rows' `position` so the lookup editor AND the board's ref-lane order follow it.
-      _refGroupRows: function(parentVal) { var pc = this.refParentCol; return this.refTableData.filter(function(r) { return r[pc] === parentVal; }); },
+      // The rows under one group, read off the tree rather than re-grouped. Filtering refTableData again
+      // was a second answer to the question refTree had already answered — and not quite the same one:
+      // the tree keys a group by String(parent) while the filter compared raw values, so a lookup
+      // grouped by a numeric column matched here only when the caller happened to hold the same type.
+      // The two callers do not: refChildAtEdge passes a raw cell value, the template passes a node's
+      // (string) value.
+      _refGroupRows: function(parentVal) {
+        var key = parentVal == null ? '' : String(parentVal);
+        var node = this.refTree.find(function(n) { return n.value === key; });
+        return node ? node.children.map(function(c) { return c.row; }) : [];
+      },
       // Move a child value up/down WITHIN its group (swap position with the adjacent same-group sibling).
       moveRefChild: function(item, dir) {
         if (!this.refReorderable || !this.canEditCurrentRef) return;
@@ -3629,6 +3638,7 @@ function createVueApp() {
           var row = inGroup[r.id] ? reordered[gi++] : r;
           var np = String(k + 1);
           if (String(row.position) === np) return;        // already right: no write, no churn
+          var was = row.position;
           row.position = np; row.updated_at = now;
           // position-only write: reordering says nothing about the row's other columns, so it must not
           // carry (and overwrite with) our copy of them.
@@ -3638,10 +3648,10 @@ function createVueApp() {
       // Move a whole group up/down (swap it with the adjacent group), then renumber every row sequentially.
       moveRefGroup: function(parentVal, dir) {
         if (!this.refReorderable || !this.canEditCurrentRef) return;
-        var self = this, table = this.currentRefTable, grouped = this.refGroupedData;
-        var order = Object.keys(grouped), i = order.indexOf(parentVal), j = i + dir;
-        if (i < 0 || j < 0 || j >= order.length) return;
-        var t = order[i]; order[i] = order[j]; order[j] = t;
+        var self = this, table = this.currentRefTable, nodes = this.refTree.slice();
+        var i = nodes.findIndex(function(n) { return n.value === parentVal; }), j = i + dir;
+        if (i < 0 || j < 0 || j >= nodes.length) return;
+        var t = nodes[i]; nodes[i] = nodes[j]; nodes[j] = t;
         var pos = 1, now = new Date().toISOString();
         order.forEach(function(g) { (grouped[g] || []).forEach(function(r) {
           if (Number(r.position) !== pos) { r.position = String(pos); r.updated_at = now; Writes.putRow(table, { id: r.id, position: r.position, updated_at: now }, 'active'); }
@@ -3649,7 +3659,7 @@ function createVueApp() {
         }); });
       },
       refChildAtEdge: function(item, dir) { var g = this._refGroupRows(item[this.refParentCol]), i = g.findIndex(function(r) { return r.id === item.id; }); return dir < 0 ? i <= 0 : i >= g.length - 1; },
-      refGroupAtEdge: function(parentVal, dir) { var o = Object.keys(this.refGroupedData), i = o.indexOf(parentVal); return dir < 0 ? i <= 0 : i >= o.length - 1; },
+      refGroupAtEdge: function(parentVal, dir) { var n = this.refTree, i = n.findIndex(function(g) { return g.value === parentVal; }); return dir < 0 ? i <= 0 : i >= n.length - 1; },
       saveRefField: function(item, col, value) {
         if (!this.canEditCurrentRef) return;   // 'r' grant: the cell renders read-only, this guards the path
         if (item[col] === value) return;
@@ -3701,6 +3711,7 @@ function createVueApp() {
         var key = 'ref:' + item.id;
         if (this.pendingDelete !== key) { this.armDelete(key); return; }
         var table = this.currentRefTable;
+        var gone = (this.dataCache[table] || []).find(function(r) { return r.id === item.id; });
         this.dataCache[table] = (this.dataCache[table] || []).filter(function(r) { return r.id !== item.id; });
         Writes.deleteRow(table, item.id, 'active');
         this.notify(this.t('msg.deleted'));
@@ -4231,6 +4242,7 @@ function createVueApp() {
         ordered.forEach(function(r, k) {
           var np = k + 1;
           if (Number(r.position) !== np) {
+            var was = r.position;
             r.position = String(np); // keep as string — sortedData sorts via localeCompare (number would throw)
             r.updated_at = new Date().toISOString();
             // position-only write: reordering says nothing about the row's other columns, so it must not
@@ -5495,6 +5507,11 @@ function createVueApp() {
           if (SCHEMA[src] && SCHEMA[src].archivable) stores.push(['archive', aKey(src)]);
           stores.forEach(function(store) {
             var key = store[1];
+            // The row itself is the before-image, and this is the last moment it exists anywhere: read
+            // it out before the filter below drops it. A row that was not in this store records nothing
+            // — the delete there is a no-op on every backend, and inventing an inverse for it would
+            // resurrect a row into a partition it never occupied.
+            var gone = self.dataCache[key] && self.dataCache[key].find(function(r) { return r.id === itemId; });
             // Only rewrite a cache that EXISTS: seeding [] here would tell partitionRows the archive
             // store is loaded and empty, hiding every legacy archived row until the next reload.
             if (self.dataCache[key]) self.dataCache[key] = self.dataCache[key].filter(function(r) { return r.id !== itemId; });
@@ -7087,11 +7104,13 @@ function createVueApp() {
         if (!appInstance.colIsRef(this.laneCol)) return null;
         var rf = appInstance.colRef(this.laneCol);
         if (!rf || !rf.table) return null;
-        var scols = (SCHEMA[rf.table] && SCHEMA[rf.table].columns) || {};
-        var cols = getColumns(rf.table).filter(function(c) { if (c === 'id' || c === 'created_at' || c === 'updated_at') return false; var d = scols[c]; return !(d && typeof d === 'object' && d.hidden); });
-        if (cols.length < 2) return null;                       // 1-col ref -> no group dimension; treat as flat
-        var childCol = rf.valueCol || cols[cols.length - 1];
-        var parentCol = cols[0] === childCol ? cols[1] : cols[0];
+        // The lookup's own hierarchy, the same one the Lookup editor renders (Columns.lookupHierarchy).
+        // `valueCol` names the child from this side, so it is passed as the hint; null for a ref that
+        // does not name one, which keeps taking the last column. A flat lookup (declared, or a single
+        // author-facing column) has no group dimension -> null, and the list/laneGroups paths run.
+        var h = Columns.lookupHierarchy(SCHEMA[rf.table], getColumns(rf.table), rf.valueCol || null);
+        if (!h) return null;
+        var parentCol = h.parent, childCol = h.value;
         var rows = appInstance.dataCache[rf.table] || [];
         // Same one sort again -- this is the fourth place that asked, and the third that answered it
         // differently by inlining the coercion sortRosterRows exists to avoid.

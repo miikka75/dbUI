@@ -162,6 +162,21 @@
           }
         },
         "isLookup": { "type": "boolean", "description": "Marks a reference/lookup table — managed in the Lookup tab, not the sidebar." },
+        "hierarchy": {
+          "description": "Which column of this lookup is the GROUP and which holds the value under it. Declaring it is what lets a lookup carry a third column (a code, a note) and stay a hierarchy: without it the shape is inferred from there being exactly two author-facing columns, so a third one silently flattens the Lookup editor. `false` says the table is flat — two columns that are a value and an attribute (chore + points), not a group and its members.",
+          "oneOf": [
+            { "type": "boolean", "enum": [false] },
+            {
+              "type": "object",
+              "required": ["parent", "value"],
+              "additionalProperties": false,
+              "properties": {
+                "parent": { "type": "string", "description": "The grouping column — the Lookup editor's parent rows, a board ref lane's phase, a rosterRef rotation's slots." },
+                "value": { "type": "string", "description": "The column holding the value under the group — what a `ref` column stores." }
+              }
+            }
+          ]
+        },
         "reorderable": { "type": "boolean", "description": "Rows may be dragged into a new order, stored in a `number` position column." },
         "ownerWritable": {
           "type": "array",

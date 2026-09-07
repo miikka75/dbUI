@@ -192,6 +192,104 @@ describe('columns.js — the two column shapes', () => {
 // A source guard, like rules-parity's: re-implementing the branch would not fail any behavioural test.
 // It would just quietly become a twelfth answer to the same question, which is how the shapes drifted
 // apart the first time.
+// A lookup's parent/child shape. Three places used to answer this question independently and two of
+// them disagreed: the Lookup editor required EXACTLY two author-facing columns, the board's ref lane
+// accepted any number. A lookup that grew a third column therefore kept its board lanes and silently
+// lost its hierarchy in the editor -- a flat grid, no error, and nothing in the schema to point at,
+// because no schema could SAY the table was hierarchical.
+describe('columns.js — a lookup declares its hierarchy, and one function answers it', () => {
+  // The shipped shape: two author-facing columns, `position` and the timestamps hidden.
+  const callings = { isLookup: true, reorderable: true, columns: [
+    { name: 'organization', type: 'text' }, { name: 'calling', type: 'text' },
+    { name: 'position', type: 'number', hidden: true },
+    { name: 'created_at', type: 'text', hidden: true }, { name: 'updated_at', type: 'text', hidden: true }
+  ] };
+
+  it('infers the historical shape, so a schema written before the declaration is unchanged', () => {
+    assert.deepEqual(Columns.lookupCols(callings), ['organization', 'calling']);
+    assert.deepEqual(Columns.lookupHierarchy(callings), { parent: 'organization', value: 'calling' });
+  });
+
+  it('a third column flattens an UNDECLARED lookup -- the behaviour preserved, not the bug kept', () => {
+    // Left inferring, this is what the editor has always done. The declaration below is the way out;
+    // changing the inference instead would re-render every deployed lookup on somebody else's guess.
+    const withNote = { isLookup: true, columns: callings.columns.concat([{ name: 'note', type: 'text' }]) };
+    assert.equal(Columns.lookupHierarchy(withNote), null);
+  });
+
+  it('the declaration survives the third column, and both screens read the same one', () => {
+    const declared = { isLookup: true, hierarchy: { parent: 'organization', value: 'calling' },
+                       columns: callings.columns.concat([{ name: 'note', type: 'text' }]) };
+    // The editor asks with no hint; a board ref lane asks with its `valueCol`. Same answer, which is
+    // the whole invariant: the matrix, the lanes and the editor cannot disagree about the group.
+    assert.deepEqual(Columns.lookupHierarchy(declared), { parent: 'organization', value: 'calling' });
+    assert.deepEqual(Columns.lookupHierarchy(declared, null, 'calling'), { parent: 'organization', value: 'calling' });
+  });
+
+  it('`hierarchy: false` says flat -- a value and its attribute, not a group and its members', () => {
+    // ref_chores is `chore` + `points`. Two columns, so the inference calls it a hierarchy and the
+    // editor renders every chore as a GROUP whose one child is a number. Only the table can say
+    // otherwise: nothing about the shape distinguishes it from organization + calling.
+    const chores = { isLookup: true, hierarchy: false,
+                     columns: [{ name: 'chore', type: 'text' }, { name: 'points', type: 'number' }] };
+    assert.equal(Columns.lookupHierarchy(chores), null);
+    assert.equal(Columns.lookupHierarchy(chores, null, 'points'), null);   // a ref lane honours it too
+  });
+
+  it('a ref lane hint names the child; a ref with no valueCol still takes the last column', () => {
+    const three = { isLookup: true, columns: [
+      { name: 'phase', type: 'text' }, { name: 'code', type: 'text' }, { name: 'status', type: 'text' } ] };
+    assert.deepEqual(Columns.lookupHierarchy(three, null, 'status'), { parent: 'phase', value: 'status' });
+    assert.deepEqual(Columns.lookupHierarchy(three, null, null), { parent: 'phase', value: 'status' });
+    assert.equal(Columns.lookupHierarchy(three), null);                    // no hint, three columns -> flat
+  });
+
+  it('a one-column lookup has no group dimension', () => {
+    assert.equal(Columns.lookupHierarchy({ isLookup: true, columns: [{ name: 'thing', type: 'text' }] }, null, null), null);
+  });
+
+  it('authored column ORDER decides the parent, not the map key order', () => {
+    const map = { isLookup: true, columns: { calling: { type: 'text' }, organization: { type: 'text' } } };
+    assert.deepEqual(Columns.lookupHierarchy(map), { parent: 'calling', value: 'organization' });
+    // ...and an explicit order (the browser's _columnOrders) wins over both.
+    assert.deepEqual(Columns.lookupHierarchy(map, ['organization', 'calling']), { parent: 'organization', value: 'calling' });
+  });
+
+  describe('buildHierarchy', () => {
+    const h = { parent: 'organization', value: 'calling' };
+    const rows = [{ id: 'a', organization: 'ward', calling: 'clerk' },
+                  { id: 'b', organization: 'music', calling: 'chorister' },
+                  { id: 'c', organization: 'ward', calling: 'secretary' }];
+
+    it('groups rows in row order, with the row on the child and never on the group', () => {
+      const t = Columns.buildHierarchy(rows, h);
+      assert.deepEqual(t.map((n) => n.value), ['ward', 'music']);
+      assert.equal(t[0].row, null);                                  // a group is a value rows carry
+      assert.deepEqual(t[0].children.map((c) => c.row.id), ['a', 'c']);
+      assert.deepEqual(t[0].children.map((c) => c.value), ['clerk', 'secretary']);
+      assert.deepEqual(t[0].children[0].children, []);               // depth 2 today: children are leaves
+    });
+
+    it('keeps `position` order even when the group values look like numbers', () => {
+      // The map this replaces could not: an object iterates integer-like keys first and ascending, so
+      // a lookup grouped by year came back 2024, 2025 however the arrows had been used.
+      const years = [{ id: 'y1', organization: '2025', calling: 'a' }, { id: 'y2', organization: '2024', calling: 'b' }];
+      assert.deepEqual(Columns.buildHierarchy(years, h).map((n) => n.value), ['2025', '2024']);
+      assert.deepEqual(Object.keys({ 2025: 1, 2024: 1 }), ['2024', '2025']);   // what the old shape did
+    });
+
+    it('a missing group value is its own group, not a dropped row', () => {
+      const t = Columns.buildHierarchy([{ id: 'x', calling: 'parked' }], h);
+      assert.deepEqual(t.map((n) => n.value), ['']);
+      assert.equal(t[0].children[0].row.id, 'x');
+    });
+
+    it('a flat lookup builds no tree at all', () => {
+      assert.deepEqual(Columns.buildHierarchy(rows, null), []);
+    });
+  });
+});
+
 describe('columns.js — nothing re-implements the shape branch', () => {
   const fs = require('node:fs');
   const path = require('node:path');
@@ -206,6 +304,16 @@ describe('columns.js — nothing re-implements the shape branch', () => {
       const src = fs.readFileSync(path.join(ROOT, ...rel.split('/')), 'utf8');
       assert.doesNotMatch(src, /Array\.isArray\(cols\)\s*\?\s*cols\s*:\s*Object\.keys\(cols\)/,
         rel + ': use Columns.columnDefs / Columns.columnDefList');
+    }
+  });
+
+  it('nobody re-derives which lookup column is the parent', () => {
+    // The exact line that used to live in app-core's board ref lane, beside the editor's own
+    // incompatible answer. Ask Columns.lookupHierarchy -- that disagreement is the bug it exists for.
+    for (const rel of FILES) {
+      const src = fs.readFileSync(path.join(ROOT, ...rel.split('/')), 'utf8');
+      assert.doesNotMatch(src, /cols\[0\] === childCol \? cols\[1\] : cols\[0\]/,
+        rel + ': use Columns.lookupHierarchy');
     }
   });
 

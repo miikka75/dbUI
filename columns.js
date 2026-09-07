@@ -154,6 +154,76 @@
     return null;
   }
 
+  // --- A lookup's hierarchy --------------------------------------------------------------------
+  // The AUTHOR-FACING columns of a lookup: the cells the Lookup editor shows, and what the shape below
+  // is read from. `id` and the timestamps are plumbing, and a `hidden` column (a reorderable table's
+  // `position`) is not the author's either. Two call sites hand-rolled exactly this filter.
+  function lookupCols(tableDef, order) {
+    var defs = columnDefs(tableDef);
+    var names = (order && order.length) ? order : Object.keys(defs);
+    return names.filter(function(c) {
+      if (c === 'id' || c === 'created_at' || c === 'updated_at') return false;
+      var d = defs[c];
+      return !(d && typeof d === 'object' && d.hidden);
+    });
+  }
+
+  // WHICH column groups a lookup, and which one holds the value under it -> { parent, value }, or null
+  // for a flat table. THE answer: the Lookup editor, the board's 2-D ref lane and validateSchema all
+  // read this one, because three re-derivations of the same question disagreed. The editor required
+  // EXACTLY two author-facing columns and the board accepted any number, so a lookup that grew a third
+  // column (a note, a code, an abbreviation) kept its board lanes and silently lost its hierarchy in
+  // the editor -- a flat grid where parents and children had been, with nothing wrong in the schema and
+  // nothing to warn about, because no schema ever SAID the table was hierarchical.
+  //
+  // Now one may. Resolution order:
+  //   1. `hierarchy: { parent, value }` on the table -- says it, so extra columns cost nothing.
+  //      `hierarchy: false` says the table is FLAT, for the two-column lookup that is a value plus an
+  //      attribute (chore + points) rather than a group and its members.
+  //   2. `valueHint` -- a caller holding a `ref` column knows the child from its `valueCol`; the parent
+  //      is then the first other author-facing column. Pass null to say "a value column exists, I do
+  //      not know its name" (a ref with no `valueCol`), which takes the last column. This is what a
+  //      board lane has always done, kept so a ref lane behaves as before.
+  //   3. Exactly two author-facing columns -- the historical inference, kept so every schema written
+  //      before the declaration keeps its hierarchy with no edit and no migration.
+  //
+  // Pure over the SHAPE: no row data is consulted, so a hierarchy cannot appear and disappear as rows
+  // come and go.
+  function lookupHierarchy(tableDef, order, valueHint) {
+    if (!tableDef) return null;
+    var h = tableDef.hierarchy;
+    if (h === false) return null;
+    if (h && h.parent && h.value) return { parent: h.parent, value: h.value };
+    var cols = lookupCols(tableDef, order);
+    if (arguments.length >= 3 && cols.length >= 2) {
+      var value = (valueHint && cols.indexOf(valueHint) >= 0) ? valueHint : cols[cols.length - 1];
+      for (var i = 0; i < cols.length; i++) if (cols[i] !== value) return { parent: cols[i], value: value };
+      return null;
+    }
+    if (cols.length === 2) return { parent: cols[0], value: cols[1] };
+    return null;
+  }
+
+  // The rows of a hierarchical lookup as a TREE: group nodes, each holding its rows as leaf nodes.
+  //   [{ value, row, children: [{ value, row, children: [] }] }]
+  // An ordered ARRAY, not the value -> rows map this replaces, for two reasons. A map preserves
+  // insertion order only for non-numeric keys, so a lookup grouped by year ("2024", "2025") came back
+  // in ascending NUMERIC order whatever `position` said. And a node whose children are NODES is the
+  // shape a deeper hierarchy needs, so depth would be a change here rather than at every caller.
+  // `row` is null on a group node: a group is a value that rows CARRY, not a row of its own.
+  function buildHierarchy(rows, h) {
+    var out = [], index = {};
+    if (!h) return out;
+    (rows || []).forEach(function(r) {
+      if (!r) return;
+      var key = r[h.parent] == null ? '' : String(r[h.parent]);
+      var node = index[key];
+      if (!node) { node = index[key] = { value: key, row: null, children: [] }; out.push(node); }
+      node.children.push({ value: r[h.value] == null ? '' : String(r[h.value]), row: r, children: [] });
+    });
+    return out;
+  }
+
   // Any-table scanners: a column name is typed the same wherever it appears (mirror clusters share
   // names), so "does column `col` have property X in ANY table?" is schema-static. These were O(tables)
   // per call and are hit per-cell per-render (data-cell) — so aggregate every column's attributes into
@@ -304,6 +374,7 @@
     columnType: columnType, columnList: columnList, columnRef: columnRef,
     isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol,
     tableDefaultCols: tableDefaultCols, tableRefCol: tableRefCol,
+    lookupCols: lookupCols, lookupHierarchy: lookupHierarchy, buildHierarchy: buildHierarchy,
     colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate, colIsNumber: colIsNumber,
     colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted,
     colIsImage: colIsImage, colIsUrl: colIsUrl, colPicker: colPicker,

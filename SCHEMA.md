@@ -131,6 +131,40 @@ read together, so nothing has to be migrated. To move over, **export and re-impo
 import folds a `__archive` key into `_status` and clears the old collection.
 `isLookup: true` marks a reference/lookup table (managed in the Lookup tab, not the sidebar).
 
+### `hierarchy` — which column of a lookup is the group
+
+A lookup is often two dimensions: an organization and its callings, a phase and its statuses, a person
+and their tasks. Four things read that shape — the Lookup editor (parents with children), a board's
+**2-D ref lane** (group and lane), a `list:` pointing at the table (the group values), and a
+`rosterRef` rotation (the slots) — and `hierarchy` is where the table says it once:
+
+```json
+"ref_callings": {
+  "isLookup": true,
+  "hierarchy": { "parent": "organization", "value": "calling" },
+  "columns": [ … ]
+}
+```
+
+**Declaring it is what lets a lookup carry a third column.** Left undeclared, the shape is inferred
+from the table having exactly two author-facing columns (everything but `id`, the timestamps and any
+`hidden` column). That inference is kept, so every schema written before this existed keeps its
+hierarchy with no edit — but add one more visible column to such a table, a code or a note, and the
+Lookup editor silently falls back to a flat grid while a board lane goes on grouping. Nothing is
+invalid and nothing is reported: the count was never something anyone declared.
+
+**`"hierarchy": false` says the table is flat.** Two columns are not always a group and its members —
+`ref_chores` is a chore and its `points`, `ref_rewards` a reward and its `cost`. Nothing in the shape
+distinguishes those from an organization and its callings, so the editor rendered every chore as a
+group whose single child was a number. Only the table can settle it.
+
+- `parent` and `value` must both be author-facing columns of that table and must differ —
+  `validateSchema` says so at load, because a parent column that is not there groups nothing and
+  renders as one empty group.
+- A `rosterRef` rotation's `rosterBy`/`valueCol` must agree with a declared `hierarchy` (also checked at
+  load). The rotation matrix and the Lookup editor read the same rows; grouping them differently is the
+  drift the declaration exists to end, and each screen looks correct on its own.
+
 ### `archiveAfter` — file finished rows away on their own
 ```json
 "chore_log": {
@@ -940,7 +974,8 @@ a nav item and its translations — five edits, none of which can be made from i
 ```
 
 Two visible columns make it a **hierarchical ref**, which the Lookup editor already renders as parents
-with children and reorders within a group. So **adding a person is a row**, typed in the app — no table,
+with children and reorders within a group (a roster that grows a third column should say so with
+`hierarchy` — see above — and `rosterBy` must then name the same parent). So **adding a person is a row**, typed in the app — no table,
 no schema edit, no deploy, no untranslated key. Removing one is deleting their rows.
 
 - **Slot order is `position` order**, first appearance wins. It has to be stable and data-driven,
@@ -1785,8 +1820,9 @@ Use it when a catalogue already exists and a second column only needs the *name*
 example the rotation rosters read `ref_chores`, so every rostered task is a chore the scoreboard can
 price — before, a parallel free-string list held task names that nothing could score.
 
-- **The option value is the lookup's first visible column** (its name column — the same one a `ref`
-  column's `valueCol` defaults to). The rest of the row stays reference data: `ref_chores.points` is
+- **The option value is the lookup's group dimension** — `hierarchy.parent` where the table declares
+  one, else its first author-facing column (its name column, the same one a `ref` column's `valueCol`
+  defaults to). The rest of the row stays reference data: `ref_chores.points` is
   what the scoreboard's `lookup` computed column reads.
 - **Values are deduped** across rows and translate through `list.<table>.<value>`, the same keys
   `translatableLists` exposes when it names a lookup table.
