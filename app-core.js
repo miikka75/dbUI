@@ -3612,10 +3612,28 @@ function createVueApp() {
         var self = this, table = this.currentRefTable, group = this._refGroupRows(item[this.refParentCol]);
         var i = group.findIndex(function(r) { return r.id === item.id; }), j = i + dir;
         if (i < 0 || j < 0 || j >= group.length) return;
-        var b = group[j], pa = item.position, pb = b.position, now = new Date().toISOString();
-        item.position = pb; b.position = pa; item.updated_at = b.updated_at = now;
-        Writes.putRow(table, { id: item.id, position: item.position, updated_at: now }, 'active');
-        Writes.putRow(table, { id: b.id, position: b.position, updated_at: now }, 'active');
+        // Move within the ARRAY, then renumber, the way moveRowPosition and moveRefGroup already do.
+        // This used to SWAP the two rows' `position` values, which moves nothing when neither has one:
+        // on a roster whose rows arrived by import or seeding rather than through these very buttons,
+        // every position is empty, the swap wrote undefined over undefined, and the arrows did nothing.
+        //
+        // Renumbered across the WHOLE table, not 1..n within the group: moveRefGroup numbers globally,
+        // so per-group numbering would give every group its own 1..n and collide them.
+        var reordered = group.slice();
+        reordered.splice(j, 0, reordered.splice(i, 1)[0]);
+        var inGroup = {}; group.forEach(function(r) { inGroup[r.id] = 1; });
+        var gi = 0, now = new Date().toISOString();
+        // Walk the table in DISPLAY order, substituting the group's rows in their new order — which
+        // keeps this group occupying exactly the slots it already held.
+        this.refTableData.forEach(function(r, k) {
+          var row = inGroup[r.id] ? reordered[gi++] : r;
+          var np = String(k + 1);
+          if (String(row.position) === np) return;        // already right: no write, no churn
+          row.position = np; row.updated_at = now;
+          // position-only write: reordering says nothing about the row's other columns, so it must not
+          // carry (and overwrite with) our copy of them.
+          Writes.putRow(table, { id: row.id, position: np, updated_at: now }, 'active');
+        });
       },
       // Move a whole group up/down (swap it with the adjacent group), then renumber every row sequentially.
       moveRefGroup: function(parentVal, dir) {

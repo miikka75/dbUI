@@ -4492,6 +4492,37 @@ test.describe('calendar view', () => {
     await page.evaluate(() => window.appInstance.deleteUserCalendar('cal_edit'));
   });
 
+  test('the lookup reorder arrows work on rows that have no position yet', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      const T = 'ref_reorder_fx';
+      window.SCHEMA[T] = { reorderable: true, columns: { id: { type: 'text' }, grp: { type: 'text' }, person: { type: 'text' } } };
+      // NO positions — a roster whose rows arrived by import or seeding rather than through these
+      // buttons. The old swap-two-values move wrote undefined over undefined and did nothing.
+      app.dataCache[T] = [
+        { id: 'r1', grp: 'a', person: 'Ann' },
+        { id: 'r2', grp: 'a', person: 'Bob' },
+        { id: 'r3', grp: 'b', person: 'Cal' }
+      ];
+      app.currentRefTable = T;
+      const before = app.refTableData.map((x) => x.id);
+      app.moveRefChild(app.dataCache[T].find((x) => x.id === 'r1'), 1);   // Ann down
+      return {
+        before,
+        after: app.refTableData.map((x) => x.id),
+        positions: app.dataCache[T].map((x) => [x.id, x.position])
+      };
+    });
+    expect(r.before).toEqual(['r1', 'r2', 'r3']);
+    // It actually moved, and every row came away with a real position.
+    expect(r.after).toEqual(['r2', 'r1', 'r3']);
+    // Numbered across the WHOLE table, not 1..n per group — moveRefGroup numbers globally, so
+    // per-group numbering would give each group its own 1..n and collide them.
+    expect(r.positions.sort()).toEqual([['r1', '2'], ['r2', '1'], ['r3', '3']]);
+  });
+
   test('a calendar built in the app survives a reload, and is listed by its own name', async ({ page }) => {
     await ensureAppReady(page);
     await page.evaluate(async () => {
