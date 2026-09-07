@@ -648,8 +648,37 @@ in a different hat, and answering it once covers both.
 
 ### `tree`
 
-Hierarchies via a self-referencing parent column. Would generalize the ref-hierarchy the Lookup screen
-already renders. Needs the `parent` column type below.
+Hierarchies of arbitrary depth. Would generalize the ref-hierarchy the Lookup screen already renders.
+The prerequisite half — one declared answer to "which column is the parent", returned as nodes with
+children — shipped (see Shipped), so this is no longer a fifth place guessing at it.
+
+**Not a `parent` COLUMN TYPE, which is how this entry used to propose it.** Building the declaration
+settled the shape: `hierarchy` already names columns, so the second model is a mode of the same key
+rather than a second way to say the same thing.
+
+```json
+"hierarchy": { "parent": "parent_id", "value": "name", "by": "id" }
+```
+
+`by: "value"` (the default, and every lookup that exists) means the parent column holds the group's
+VALUE; `by: "id"` means it holds another row's id. `lookupHierarchy` returns the mode, `buildHierarchy`
+branches on it once, and every caller goes on reading nodes with children without learning which model
+it is looking at. One declaration, one resolver, two edge kinds.
+
+**Where it belongs is a DATA table, not a lookup, and that is a boundary rather than a preference.** In
+this app a lookup value *is* its identity, in four places at once: `list.<table>.<value>` translation
+keys (`migrateListTranslation` re-keys them on rename), schema filters that pin values by hand — which
+`lockedListValues` then refuses to let anyone rename — `select list: <lookup>` columns storing the
+value, and the exports and rules mirrors comparing those same strings. An id-keyed lookup has to
+choose: keep storing values, and the ids buy depth but not the single-row rename that made them
+attractive; store ids, and a hand-written schema filter has to name `o1` instead of
+`aaronic_priesthood`, in a document whose whole premise is that hand-editing it is the design.
+
+So the value model stays for lookups, `by: "id"` serves the tables that actually want depth — a task
+with subtasks, an agenda item with sub-items — and the two coexist behind one resolver. Which is also
+the reason this is not urgent: every hierarchy in every shipped schema is two levels and value-keyed,
+so `by: "id"` would be a second model with no user, and the write paths do NOT unify (rename
+propagation exists *because* parents are values, and is simply dead under ids).
 
 ### `gallery`
 
@@ -668,7 +697,6 @@ Master-detail two-pane layout — a list on the left, the selected record on the
 
 Several proposed views are really "a layout plus a column type":
 
-- **`parent`** — self-referencing, required by `tree`.
 - **`geo`** — lat/lng, required by `map`.
 - **`richtext`** — speculative; the markdown renderer seam in `embeds.js` may cover it more cheaply.
 
@@ -689,6 +717,17 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   with no end is one period rather than open-ended, a row outside the window is dropped rather than
   flattened to a zero-width bar that reads as "happening now", and a crossing bar is clipped and
   squared-off so "continues past here" is in the shape.
+- **One declaration for a lookup's hierarchy** — `hierarchy: { "parent": …, "value": … }` on a lookup
+  table (or `false` for a flat catalogue), and `Columns.lookupHierarchy` as the ONE answer the Lookup
+  editor, a board's 2-D ref lane, a `list:` naming a lookup, and `validateSchema` all read. Proposed as
+  the prerequisite for `tree`; landed as a bug fix. Three of those four re-derived "which column is the
+  parent" independently and two disagreed — the editor required EXACTLY two author-facing columns, the
+  board accepted any number — so a lookup that grew a third column kept its lanes and silently lost its
+  parents and children in the editor, with nothing invalid to point at. The grouped rows became an
+  ordered array of nodes rather than a value→rows map, which is what keeps depth open for `tree` and
+  which incidentally fixed a lookup grouped by year ignoring `position` (an object iterates
+  integer-like keys first and ascending). `hierarchy: false` settled two shipped catalogues the
+  inference had been rendering as groups of numbers: `ref_chores` (chore + points) and `ref_rewards`.
 - **`stats`** (KPI tiles / progress bars) — `stats.js` + the `stats` view kind. Confirmed the premise
   it was proposed on: the data half already existed, so the whole feature is a renderer over the
   aggregate pipeline. `chore_points_week` became bars by gaining three lines and changing no data

@@ -132,7 +132,8 @@
           "hidden": true
         }
       ],
-      "isLookup": true
+      "isLookup": true,
+      "hierarchy": { "parent": "state", "value": "city" }
     },
     "crew_rotation": {
       "columns": [
@@ -265,6 +266,7 @@
     },
     "ticket_stages": {
       "isLookup": true,
+      "hierarchy": { "parent": "phase", "value": "stage" },
       "columns": [
         {
           "name": "phase",

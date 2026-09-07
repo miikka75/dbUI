@@ -35,6 +35,7 @@
   "tables": {
     "ref_chores": {
       "isLookup": true,
+      "hierarchy": false,
       "columns": [
         {
           "name": "chore",
@@ -48,6 +49,7 @@
     },
     "ref_rewards": {
       "isLookup": true,
+      "hierarchy": false,
       "columns": [
         {
           "name": "reward",
@@ -61,6 +63,7 @@
     },
     "ref_duties": {
       "isLookup": true,
+      "hierarchy": { "parent": "person", "value": "tasks" },
       "reorderable": true,
       "defaultSort": "position",
       "columns": [

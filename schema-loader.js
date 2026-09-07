@@ -174,6 +174,27 @@ function validateSchema() {
     });
     if (!Array.isArray(SCHEMA[ot].ownerWritable)) errors.push('table "' + ot + '": `ownerWritableWhile` has no effect without `ownerWritable` (nothing bounds an owner-scoped write to begin with)');
   }
+  // `hierarchy` is a lookup's own statement of which column groups it and which holds the value under
+  // that group. Three readers ask Columns.lookupHierarchy for it -- the Lookup editor, a board's 2-D ref
+  // lane, and this file's `rosterRef` check -- and a wrong one fails the same silent way in all three:
+  // a column that is not there groups nothing, so the screen renders a single empty group and the author
+  // sees a lookup that "lost its values". Naming a HIDDEN column is the same outcome by another route --
+  // the editor never renders it, so the group is unreachable and cannot be typed into.
+  for (var ht in SCHEMA) {
+    var hd = SCHEMA[ht], hy = hd && hd.hierarchy;
+    if (hy === undefined) continue;
+    if (!hd.isLookup) { errors.push('table "' + ht + '": `hierarchy` has no effect on a table that is not `isLookup: true` — only the Lookup editor, a ref lane and `rosterRef` read it'); continue; }
+    if (hy === false) continue;                                  // an explicit "this table is flat"
+    if (!hy || typeof hy !== 'object' || Array.isArray(hy) || !hy.parent || !hy.value) {
+      errors.push('table "' + ht + '": `hierarchy` must be `false` or an object like { "parent": "organization", "value": "calling" }');
+      continue;
+    }
+    var hcols = Columns.lookupCols(hd, getColumns(ht));
+    ['parent', 'value'].forEach(function(k) {
+      if (hcols.indexOf(hy[k]) < 0) errors.push('table "' + ht + '": `hierarchy.' + k + '` "' + hy[k] + '" is not an author-facing column of this lookup [' + hcols.join(', ') + ']');
+    });
+    if (hy.parent === hy.value) errors.push('table "' + ht + '": `hierarchy.parent` and `hierarchy.value` must be two DIFFERENT columns');
+  }
   // `stamped` marks a column the app fills in and nobody rewrites -- it binds a grant-holder, not just
   // an owner. It only works on a `defaultFrom: "@me"` column backed by a list: that is what fills it in
   // and what the write layers verify the value against. Silently ignoring a malformed one would leave a
@@ -348,6 +369,16 @@ function validateSchema() {
           if (!rvv.valueCol) errors.push('rotationView "' + v + '": `rosterRef` needs `valueCol` (the column holding the duty)');
           else if (badValueCol(rvv.rosterRef, rvv.valueCol)) errors.push('rotationView "' + v + '": valueCol "' + rvv.valueCol + '" is not a column of "' + rvv.rosterRef + '"');
           if (rvv.rosterBy && rvv.valueCol && rvv.rosterBy === rvv.valueCol) errors.push('rotationView "' + v + '": `rosterBy` and `valueCol` must be different columns');
+          // The lookup may state its own shape. Two screens read this same table -- the rotation matrix
+          // and the Lookup editor -- and disagreeing about which column is the group is precisely the
+          // drift `hierarchy` exists to end: the slots would be one dimension, the editor's parents the
+          // other, and both would look right on their own screen.
+          var rrh = SCHEMA[rvv.rosterRef].hierarchy;
+          if (rrh === false) errors.push('rotationView "' + v + '": "' + rvv.rosterRef + '" declares itself flat (`hierarchy: false`), so it has no slot dimension to rotate over');
+          else if (rrh && rrh.parent) {
+            if (rvv.rosterBy && rvv.rosterBy !== rrh.parent) errors.push('rotationView "' + v + '": rosterBy "' + rvv.rosterBy + '" contradicts "' + rvv.rosterRef + '".hierarchy.parent "' + rrh.parent + '" — the rotation and the Lookup editor would group the same lookup differently');
+            if (rvv.valueCol && rrh.value && rvv.valueCol !== rrh.value) errors.push('rotationView "' + v + '": valueCol "' + rvv.valueCol + '" contradicts "' + rvv.rosterRef + '".hierarchy.value "' + rrh.value + '"');
+          }
         }
         if (!isValidInterval(rvv.interval)) errors.push('rotationView "' + v + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
       }

@@ -475,6 +475,7 @@
       },
       "ref_statuses": {
         "isLookup": true,
+        "hierarchy": { "parent": "phase", "value": "status" },
         "columns": [
           {
             "name": "phase",
@@ -505,6 +506,7 @@
       },
       "ref_callings": {
         "isLookup": true,
+        "hierarchy": { "parent": "organization", "value": "calling" },
         "columns": [
           {
             "name": "organization",

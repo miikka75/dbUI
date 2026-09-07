@@ -20,12 +20,12 @@
       "title": "Bishopric Tool",
       "description": "A ward bishopric’s working tool — meeting programs, assignments, interviews and a members roster.",
       "icon": "./examples/bishopric-favicon.svg",
-      "revision": 27,
+      "revision": 28,
       "tables": 13,
       "views": 18,
       "schema": {
         "file": "bishopric-schema.json",
-        "hash": "363a8875be9e6cbb"
+        "hash": "b3aa65cfcf86d109"
       },
       "languages": [
         {
@@ -47,12 +47,12 @@
       "title": "Our Home",
       "description": "A household chore tracker — points, approvals, rewards, a weekly rota and a shopping list.",
       "icon": "./examples/chores-favicon.svg",
-      "revision": 6,
+      "revision": 8,
       "tables": 6,
       "views": 17,
       "schema": {
         "file": "chores-schema.json",
-        "hash": "b8e7f0c4464cbece"
+        "hash": "81405925601e5d97"
       },
       "languages": [
         {
@@ -78,12 +78,12 @@
       "title": "Team Demo",
       "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
       "icon": null,
-      "revision": 3,
+      "revision": 4,
       "tables": 10,
       "views": 26,
       "schema": {
         "file": "demo-schema.json",
-        "hash": "14f7222e2d668e88"
+        "hash": "9c3e32a9d7456ae3"
       },
       "languages": [
         {

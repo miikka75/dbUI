@@ -1515,6 +1515,113 @@ test.describe('The Lookup editor loads what it edits', () => {
   });
 });
 
+test.describe('A lookup that declares its hierarchy', () => {
+  // The Lookup editor asked "does this table have exactly two author-facing columns?" and the board's
+  // ref lane asked "which column is the valueCol, and what is the other one?" -- so a lookup with a
+  // third column kept its lanes and lost its parents-and-children, with nothing invalid to point at.
+  // `hierarchy` is the table saying it, and both screens now read that one answer.
+  const DECLARED = {
+    defaultLanguage: 'en',
+    tables: {
+      ref_stages: {
+        isLookup: true,
+        hierarchy: { parent: 'phase', value: 'stage' },
+        columns: [{ name: 'phase', type: 'text' }, { name: 'stage', type: 'text' },
+                  { name: 'code', type: 'text' }]        // the third column that used to flatten it
+      },
+      tickets: {
+        columns: [{ name: 'title', type: 'text' },
+                  { name: 'stage', type: 'ref', table: 'ref_stages', valueCol: 'stage' }]
+      }
+    },
+    views: [{ name: 'tickets_b', sources: ['tickets'], mode: 'union', columns: ['title', 'stage'],
+              board: { lane: 'stage', title: 'title' } }],
+    nav: { items: [{ view: 'tickets_b' }] }
+  };
+
+  test('keeps its parents and children in the editor, and its groups on the board', async ({ page }) => {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DECLARED } });
+    for (const [id, phase, stage, code] of [['s1', 'open', 'triage', 'T'], ['s2', 'open', 'ready', 'R'], ['s3', 'done', 'shipped', 'S']])
+      await page.request.post('/api/putRow', { data: { tableId: 'ref_stages', data: { id, phase, stage, code }, tab: 'active' } });
+    await page.request.post('/api/putRow', { data: { tableId: 'tickets', data: { id: 't1', title: 'A', stage: 'triage' }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+
+    // The editor: three columns, and still a hierarchy -- grouped by the declared parent, in row order.
+    // Reached the way a person reaches it, since the markup renders only on the open Lookup tab.
+    await page.evaluate(() => appInstance.selectTab('__lookup'));
+    await page.locator('.v-main .v-list-item', { hasText: 'ref_stages' }).first().click();
+    await expect.poll(() => page.evaluate(() => appInstance.refTableData.length), { timeout: 6000 }).toBe(3);
+    const shape = await page.evaluate(() => ({
+      hierarchical: appInstance.isHierarchicalRef,
+      parent: appInstance.refParentCol,
+      child: appInstance.refChildCol,
+      groups: appInstance.refTree.map((n) => [n.value, n.children.map((c) => c.value)])
+    }));
+    expect(shape).toEqual({ hierarchical: true, parent: 'phase', child: 'stage',
+                            groups: [['open', ['triage', 'ready']], ['done', ['shipped']]] });
+    // ...and it is on screen, not just in the computed.
+    await expect(page.locator('.ref-hierarchy .v-list-group')).toHaveCount(2);
+
+    // The board reads the SAME declaration for its lane grouping -- the agreement is the point. Its
+    // group headers are the parent dimension and its lanes the value one, straight from the lookup.
+    await page.evaluate(() => appInstance.selectTab('tickets_b'));
+    await page.waitForSelector('[data-testid="board-view"]', { timeout: 6000 });
+    await expect.poll(() => page.evaluate(() =>
+      [...document.querySelectorAll('[data-testid^="board-group-"] span')].map((e) => e.textContent.trim()).filter((t) => /[a-z]/.test(t))
+    ), { timeout: 6000 }).toEqual(['open', 'done']);
+    for (const lane of ['triage', 'ready', 'shipped'])
+      await expect(page.locator('[data-testid="board-lane-' + lane + '"]')).toBeVisible();
+  });
+
+  test('validateSchema names a hierarchy that groups by a column that is not there', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = (n) => window.validateSchema().filter((e) => e.indexOf(n) >= 0).join(' | ');
+      window.SCHEMA.ref_bad = { isLookup: true, hierarchy: { parent: 'organisation', value: 'calling' },
+                                columns: { organization: { type: 'text' }, calling: { type: 'text' } } };
+      window.SCHEMA.ref_same = { isLookup: true, hierarchy: { parent: 'a', value: 'a' },
+                                 columns: { a: { type: 'text' }, b: { type: 'text' } } };
+      window.SCHEMA.ref_shape = { isLookup: true, hierarchy: { parent: 'a' }, columns: { a: { type: 'text' }, b: { type: 'text' } } };
+      window.SCHEMA.plain_tbl = { hierarchy: { parent: 'a', value: 'b' }, columns: { a: { type: 'text' }, b: { type: 'text' } } };
+      const bad = { typo: errs('ref_bad'), same: errs('ref_same'), shape: errs('ref_shape'), inert: errs('plain_tbl') };
+      // control: the correct spelling, and an explicit flat table, raise nothing
+      window.SCHEMA.ref_bad.hierarchy = { parent: 'organization', value: 'calling' };
+      window.SCHEMA.ref_same.hierarchy = false;
+      window.SCHEMA.ref_shape.hierarchy = { parent: 'a', value: 'b' };
+      delete window.SCHEMA.plain_tbl.hierarchy;
+      const good = errs('ref_bad') + errs('ref_same') + errs('ref_shape') + errs('plain_tbl');
+      ['ref_bad', 'ref_same', 'ref_shape', 'plain_tbl'].forEach((t) => { delete window.SCHEMA[t]; });
+      return { bad, good };
+    });
+    expect(r.bad.typo).toContain('is not an author-facing column');
+    expect(r.bad.same).toContain('must be two DIFFERENT columns');
+    expect(r.bad.shape).toContain('must be `false` or an object');
+    expect(r.bad.inert).toContain('has no effect on a table that is not `isLookup: true`');
+    expect(r.good).toBe('');
+  });
+
+  test('validateSchema refuses a rotation that groups a lookup differently than the lookup does', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = () => window.validateSchema().filter((e) => e.indexOf('rot_x') >= 0).join(' | ');
+      window.SCHEMA.ref_roster = { isLookup: true, hierarchy: { parent: 'person', value: 'tasks' },
+                                   columns: { person: { type: 'text' }, tasks: { type: 'text' } } };
+      window.VIEWS.rot_x = { name: 'rot_x', rotation: { rosterRef: 'ref_roster', rosterBy: 'tasks', valueCol: 'person', interval: 'weekly' } };
+      const bad = errs();
+      window.VIEWS.rot_x.rotation = { rosterRef: 'ref_roster', rosterBy: 'person', valueCol: 'tasks', interval: 'weekly' };
+      const good = errs();
+      delete window.SCHEMA.ref_roster; delete window.VIEWS.rot_x;
+      return { bad, good };
+    });
+    expect(r.bad).toContain('contradicts');
+    expect(r.bad).toContain('would group the same lookup differently');
+    expect(r.good).toBe('');
+  });
+});
+
 test.describe('Renaming in a two-column lookup', () => {
   // A value in a 2-D lookup is unique within its PARENT, not across the table -- "president" is a
   // calling of many organizations. The editor treated a child edit as a rename of the value itself,
