@@ -23,19 +23,26 @@
     return Object.keys(views || {}).filter(function(n) { return isFeed(views[n]); });
   }
 
-  // The tables whose rows can change what a feed contains: its calendar sources, plus the ROSTERS behind
-  // any rotation overlaid on it. The rosters are the ones easy to forget -- a duty overlay's content
-  // lives in a lookup table the calendar never names directly, so editing the roster changes the feed
-  // while the calendar's own `sources` are untouched.
+  // The tables whose rows a CALENDAR reads: its sources, plus the rosters behind any rotation overlaid
+  // on it. The rosters are the ones easy to forget -- a duty overlay's content lives in a lookup table
+  // the calendar never names directly, so editing the roster changes what the calendar says while its
+  // own `sources` are untouched.
+  //
+  // Not gated on `feed`. It answers a question three callers have -- what to preload when the view
+  // opens, what to wait for before writing a FILE from it, and what invalidates a published feed -- and
+  // those were three separate answers until they disagreed: the export waited on a helper that returns
+  // nothing for a calendar, so it waited for nothing and wrote an empty file.
   function tablesOf(views, name) {
     var v = (views || {})[name];
-    if (!isFeed(v)) return [];
+    if (!v || !v.calendar) return [];
     var out = [], seen = {};
     var add = function(t) { if (t && !seen[t]) { seen[t] = 1; out.push(t); } };
     Calendar.sources(views, name).forEach(function(s) { add(s && s.table); });
     Calendar.rotationSources(views, name).forEach(function(rs) {
       var rv = views[rs.view];
-      if (rv) AccessFeatures.viewRosters(rv).forEach(add);
+      // rotationTables, not viewRosters: the wider set, matching what a calendar preloads. viewRosters
+      // is the GRANTABLE subset, which is a different question.
+      if (rv) AccessFeatures.rotationTables(rv).forEach(add);
     });
     return out;
   }

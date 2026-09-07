@@ -403,10 +403,74 @@ calendar as another audience would see it, through the same predicate the app it
 mistake narrows too far rather than leaking. That capability was an unintended consequence of the
 extraction, and it is what makes tiering affordable.
 
-**The exception.** A view filtered on `@me`, or a rotation with `mineOnly`, differs genuinely per
-person and cannot fold into a tier. Either refuse such views as feed sources in `validateSchema` — the
-better default, since a shared file has no "me" to resolve and would otherwise pick one arbitrarily —
-or accept one blob per SUBSCRIBER, which is opt-in and far smaller than one per user.
+**The exception, and what it would take.** A view filtered on `@me`, or a rotation with `mineOnly`,
+differs genuinely per person and cannot fold into a tier. `validateSchema` refuses such views as feed
+sources today — the right default, since a published file has no "me" to resolve and would otherwise
+carry whoever pressed publish and serve it to everyone. That is the one failure in this feature that
+LEAKS rather than disappoints, so the refusal stays until something replaces it deliberately.
+
+Lifting it means one blob per SUBSCRIBER rather than per tier. The shipped `my_calendar` in the
+bishopric example is the shape that wants it: three sources, each filtered `responsible: "@me"`, so one
+view is a different calendar for every member of a bishopric.
+
+#### Per-person feeds — the plan
+
+**Rendering is already possible, and that is the surprising part.** `events.js` takes `canReachTable`
+and `resolveMeTokens` as ctx FUNCTIONS rather than reading root state, so a full-access client can
+render "the calendar as this other person sees it" by substituting both — through the same predicates
+the app itself uses, so a mistake narrows rather than leaks. No new rendering path is needed. What is
+missing is everything around it.
+
+1. **Who to render for.** A feed needs a subscriber list, and it must be opt-in: rendering one blob per
+   USER would publish a file for people who never asked and never look. The natural shape is a
+   self-service table with an `owner` column — the primitive that already backs RSVP — so subscribing is
+   a row the person creates for themselves and unsubscribing is deleting it. That also makes the count
+   honest: N is subscribers, not headcount.
+2. **Resolving another person's `@me`.** `meValueForList` reads `myListValues`, which is the SIGNED-IN
+   user's link. Rendering for someone else needs the same lookup for an arbitrary account, from
+   `listAvatars` / the `_list_users` sidecar. Per-person is where a wrong answer means one person's
+   calendar handed to another, so this wants its own tests, and the sentinel matters: an identity that
+   cannot be resolved must yield the no-match token and an EMPTY calendar, never an unfiltered one.
+3. **Access, not just filtering.** `@me` is display-only — the app's own note on `mineOnly` says so:
+   "the roster rows are still fetched … Real secrecy is a per-roster-table grant". On screen that is
+   fine, because the viewer could read those rows anyway. In a FEED it is not: the file is rendered by a
+   full-access client and served to one subscriber, so `@me` becomes the only thing standing between
+   them and everyone else's rows. A per-person feed therefore has to be checked as an ACCESS boundary,
+   which the filter was never built to be. This is the real work, and the reason this is not a small
+   change.
+4. **N blobs, one write.** Republishing stays a single pass — the loop is inside one operation — but it
+   costs N renders and N uploads per debounce window. Fine for a household or a bishopric; a
+   congregation-sized subscriber list wants a cap and a way to see how many are being written.
+5. **Tokens.** Per-person URLs are what make revocation possible, and they are the decision this whole
+   entry already waits on.
+
+Not scheduled. Steps 1, 2 and 4 are ordinary work; step 3 is a security boundary being asked to hold
+weight it was not designed for, and it should be entered deliberately or not at all.
+
+#### Decoupling a feed from a calendar VIEW
+
+Asked because the bishopric example had no calendar and therefore no way to publish anything, which
+made the requirement look like an obstacle. It is not, and the cheap answer is better than the change.
+
+**Cost if built: small — perhaps half a day.** `Feeds.isFeed` tests `v.calendar && v.feed`, and
+`events.js` reads sources through `Calendar.sources`, which already expands the single-source
+`{source, dateColumn, titleColumns}` sugar. A `feed` on a DATA view would need the same three facts
+under some other key, `Feeds.tablesOf` taught to read it, and validation for it.
+
+**Why it is the wrong shape anyway.** A calendar view IS the declaration "these rows are dated events,
+this column is the date, these are the title". A data view does not say that, so decoupling means
+inventing a second vocabulary for the same fact — two places to look, two to keep in step, and the
+question "what does this feed contain" answered differently depending on which one an author used.
+
+**And the problem it would solve is not real.** A calendar view is a few lines of config, `nav` and
+`views` are independent (the bishopric schema defines eighteen views and navigates to thirteen), and
+because republishing is write-triggered a feed's first publish happens on the first write to a source
+table — nobody has to press anything. A calendar view that exists only to be published is therefore
+already possible, costs almost nothing, and keeps one vocabulary.
+
+Declined for now on that basis rather than on cost. Worth revisiting only if something OTHER than a
+calendar ever needs publishing, at which point the question is not "decouple the feed" but "what is the
+second thing, and does it share a shape with the first".
 
 **Who regenerates matters, and this is the remaining trap.** The rendering client must be able to see
 everything the feed contains. A restricted member's write regenerating from their own `dataCache`
@@ -520,10 +584,67 @@ own schedule, typically many hours, and it is not client-controllable. Write-tri
 buys *correctness* — never stale relative to the data — not speed. Anyone wanting an edit on their
 phone within seconds is better served by the export.
 
-### `timeline` / `gantt`
+### Calendars defined in the DATABASE, not the schema
 
-Rows with a start *and* end date, drawn as bars across periods. This fills the calendar's documented
-gap — it places single-day events only, so anything spanning days has nowhere to go today.
+"Can a new calendar — ushers, cleaning, whatever someone thinks of next — be made without editing the
+schema document?" Today: no. `calendar.sources` is schema, and the app has no schema editor by design
+(SCHEMA.md: *hand-editing this document is the design*), so the routes are Settings → Import or editing
+the file and reinstalling.
+
+The proposal is not a schema editor. It is to let a calendar be a ROW.
+
+**Why this fits rather than fights the architecture.** The split already exists and this lands on the
+side that is already database-backed:
+
+- `_pages` holds doc-view BODIES in the database, not in the schema;
+- folder config holds per-view runtime settings — a rotation's anchor and range, a calendar's `ics`
+  window and language, a feed's URL;
+- lists and lookup tables hold vocabulary.
+
+Schema is structure; the database holds content and per-deployment configuration. A calendar is a
+saved question over tables that already exist — closer to a lookup table than to a column definition.
+
+**Shape.** A `_calendars` system store, one row per calendar:
+
+```json
+{ "id": "ushers", "title": "Ushers",
+  "sources": [ { "table": "duty_usher_dates", "dateColumn": "date", "titleColumns": ["…"] } ],
+  "obscureNames": ["…"], "ics": { "back": "3m", "forward": "1y" } }
+```
+
+Read at boot and merged into `VIEWS` as ordinary calendar views. From there everything downstream is
+inherited and needs no changes at all: rendering, the `.ics` download, publishing, the window and
+language settings, `embed-view` for `{{view:x}}`, and the Settings list, which already enumerates
+`Object.keys(VIEWS)` rather than the nav — so a database-defined calendar appears there with a download
+button without a nav entry existing.
+
+**Two constraints that shape it, both already written into the code.**
+
+1. **A schema change forces a reload.** `columns.js` memoizes schema-static scans in a WeakMap keyed on
+   the schema object, "safe because SCHEMA is built once at load and every runtime schema change forces
+   a full page reload". Adding a CALENDAR does not touch `SCHEMA` (tables), so those caches stay valid —
+   but the honest design is still create-then-reload, matching how installing an example behaves. Not a
+   live-editing feature.
+2. **Rendering is already fail-closed per source.** `events.js` drops any source whose table the viewer
+   cannot reach, so a calendar created by one person cannot show another person rows they could not
+   already open. This is what makes the feature safe to expose at runtime at all, and it is existing
+   behaviour rather than something to add.
+
+**The decision this needs, and it is not the code.** Creating a calendar is harmless — it reveals
+nothing new. PUBLISHING one is not: a feed is world-readable to anyone holding its URL. Today that is a
+schema commit, which is reviewed and deliberate; as a runtime action it becomes a button. So the two
+want different permissions — create for any admin, publish gated more tightly, or not offered on
+database-defined calendars at first. Worth deciding before building, not after.
+
+**Cost.** The engine half is small, because everything downstream already exists: a system store, a
+boot merge, and the save-time validation `validateSchema` already performs for `calendar` (a real table,
+a real DATE column, real title columns — each of which otherwise fails as a permanently empty
+calendar). The bulk is the UI nobody has built yet: pick a table, pick its date column, pick title
+columns, repeat per source. That is a small form, but it is the first place the app asks someone to
+choose a column by name, so it wants the same care the Lookup editor got.
+
+Sequencing: worth doing after the feed's token decision, since "who may publish" is the same question
+in a different hat, and answering it once covers both.
 
 ### `tree`
 
@@ -561,6 +682,13 @@ stops working offline. Everything above it stays inside the app boundary.
 
 Recorded so the roadmap shows what graduated rather than silently shrinking.
 
+- **`timeline`** (#173) — rows with a start *and* end date as bars across periods, closing the gap the
+  calendar documents about itself: a calendar places a row on ONE day, so anything spanning days had
+  nowhere to go. `timeline.js` reuses `rotation.js`'s interval arithmetic rather than growing a second
+  definition of "a week". The decisions that mattered were all about not lying with a picture — a row
+  with no end is one period rather than open-ended, a row outside the window is dropped rather than
+  flattened to a zero-width bar that reads as "happening now", and a crossing bar is clipped and
+  squared-off so "continues past here" is in the shape.
 - **`stats`** (KPI tiles / progress bars) — `stats.js` + the `stats` view kind. Confirmed the premise
   it was proposed on: the data half already existed, so the whole feature is a renderer over the
   aggregate pipeline. `chore_points_week` became bars by gaining three lines and changing no data
@@ -592,8 +720,11 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
 
 ## Suggested order
 
-`timeline` next, which closes a gap the calendar documents about itself. Then `tree` and `gallery`,
-both gated mainly on a column type. (`.ics` export was previously first here, and has shipped.)
+`tree` and `gallery` next, both gated mainly on a column type. (`.ics` export and `timeline` were each
+first here in turn, and have shipped.)
+
+Database-defined calendars sit outside that line for the same reason the feed does: what it needs
+decided is who may PUBLISH one, which is the feed's open question wearing a different hat.
 
 The subscribable feed is deliberately not in that line despite being mostly designed. Everything left
 in it is a judgement rather than an implementation — whether this deployment wants a bearer token for
