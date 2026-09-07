@@ -646,6 +646,123 @@ choose a column by name, so it wants the same care the Lookup editor got.
 Sequencing: worth doing after the feed's token decision, since "who may publish" is the same question
 in a different hat, and answering it once covers both.
 
+### Undo/redo — take the last thing back
+
+Every write in this app is final the moment it happens. A cell edit saves 300ms after the last
+keystroke, a row delete removes a row, a group rename rewrites forty rows across two tables, and the
+only way back from any of them is to remember what it used to say and type it in again. On a database
+whose rows are the only copy, that is the sharpest edge left in the grid.
+
+**The seam exists and is already enforced.** `writes.js` was built for this and says so in its header:
+`putRow`/`deleteRow`/`moveRow` were called from twenty-six places, and there was no one place to stand
+if you wanted to change what a write *does*. There are twenty-seven call sites today, all in
+`app-core.js`, and `dev/test/write-funnel.test.js` asserts that no direct `backend.putRow` survives
+outside the funnel. Undo is the second thing to use the chokepoint, after the calendar-feed observer.
+
+So the stack is not the difficulty. Three other things are.
+
+**1. The before-image.** To invert a write you need the row as it was, and the funnel does not have it.
+Several call sites mutate the cached row *before* they call `Writes` — `r.position = String(pos)` then
+`putRow`, `row.updated_at = …` then `putRow` — so by the time the funnel sees the payload, `dataCache`
+already agrees with it and there is nothing to diff against. The before-image has to be captured at the
+call site and handed in.
+
+The case that matters most is already holding it. `saveField` is the single entry point for every cell
+edit, and its first two statements are:
+
+```js
+if (item[col] === value) return;   // item[col] is still the OLD value here
+item[col] = value;
+```
+
+One function, old value in hand, covering the grid, the form view, and every inline editor that routes
+through it. Row create (inverse: delete), row delete (inverse: put the row back — the object is in hand
+at delete time) and archive/unarchive (inverse: the reverse `moveRow`) are the same shape and nearly as
+cheap. That set is most of what anyone means by undo.
+
+**2. One user action is not one write, and this is where the day actually goes.** A cell edit fans out
+through `propagateMirror`. A group rename writes every matching row and then `propagateListChange`
+across every column whose `list:` names the table. A reorder writes each row whose position shifted.
+Without a grouping concept, the first Ctrl+Z of a forty-row rename puts one row back and leaves
+thirty-nine — which is worse than having no undo, because it looks like it worked. So the funnel needs a
+transaction wrapper, and the ten-odd multi-write call sites need auditing into it. The wrapper is small;
+the audit is the work, and it is the part that cannot be hurried.
+
+**3. Undo is a WRITE, not a restore.** Every backend subscribes to its tables, so an undo that reaches
+into `dataCache` and puts the old values back would leave this client disagreeing with every other one.
+It has to replay an inverse write through the same funnel, which also gets the observers, the feed
+republish and the failure handling for free. This lands well: a cell write is already a partial patch,
+and every backend merges partials (pinned by the "putRow merge semantics" suite in
+`backend-conformance.test.js`), so undoing one column does not clobber a colleague's edit to a different
+column of the same row. If they edited *the same* cell, the undo wins — that is the honest behaviour of
+an inverse-op log against live data, and it is worth accepting rather than solving. Nothing here should
+attempt a shared or collaborative undo.
+
+The stack is **in-memory, per-session and local**. Not persisted, not shared, cleared on reload. Redo is
+then close to free, because the forward patch is the payload the funnel already received.
+
+**What stays out of it.** Schema import, `_pages` bodies and `_assets` writes are not logged. Undoing
+"import a schema" is not an undo, it is a migration, and the import path already deletes-then-writes per
+row for change detection — pretending that inverts cleanly would be the kind of guarantee this codebase
+does not make elsewhere (`moveRow`'s comment about atomicity is the precedent: it does not claim what it
+cannot do).
+
+**The button.** The proposal is to give undo/redo the toolbar slot the refresh button holds. Refresh is
+not dead — all four backends implement `subscribeTable`, so it is redundant only while a subscription is
+alive, and it remains the one escape hatch when a socket drops silently — but it is the fallback, not
+the daily action, and it belongs in an overflow menu or Settings. Undo and redo want to sit together, so
+the slot becomes a pair. Ctrl+Z / Ctrl+Shift+Z alongside, and a disabled state that says the stack is
+empty rather than doing nothing when clicked.
+
+**Cost.** A pure `undo.js` (the stack, the transaction collapse, the replay) that is Node-testable with
+no DOM; the call-site audit; the toolbar pair and the keybindings. No view kind, no schema change, no
+backend contract change — notably no `getRow`, which a read-before-write design would have needed on
+four backends and which would have put a Firestore read on every write. The audit rather than the volume
+is what decides whether this is any good.
+
+**Built so far — the mechanism and the cell-edit path.** `undo.js`, the grouping, the replay, the
+keybindings and the toolbar pair; `saveField` and `propagateMirror` record into one action, so a cell
+and every mirror it feeds come back in one press. Three findings worth keeping:
+
+- `writes.js` is UNCHANGED, and that turned out to be right. The funnel knows a write happened, which is
+  the wrong moment: `saveField` debounces 300ms, and typing `a` -> `b` -> `c` inside that window cancels
+  two timers and writes once. Recording at edit time would have left two entries for writes that never
+  happened. Recording happens where the write is actually issued, and the before-image is held per timer
+  key so a debounce reset keeps the FIRST one — the undo restores `a`, not the `b` nothing ever stored.
+- The clock is stamped at replay time rather than carried in the op. An undo is a write happening now,
+  and `updated_at` is what `archiveAfter` measures age by; replaying a stored timestamp would leave a
+  row the user just touched claiming it had sat still, and eventually file it away for it.
+- The local half of a replay is `LiveSync.applyChange`, not a second merge implementation — but
+  deliberately NOT `_liveApply`, which queues behind `_liveHeld`. That gate is right for a remote change
+  arriving mid-edit and wrong for the user's own undo, which would otherwise sit invisible until they
+  clicked away.
+
+Refresh moved to Settings, as proposed. It is not gone: every backend subscribes, so it is the escape
+hatch for a dropped subscription rather than a daily action, and a browser reload already refetches
+strictly more than it does.
+
+**Also built — the row lifecycle.** Add (`_createBlankRow`, one action across the whole mirror cluster),
+delete (all three paths: `_deleteFromSources`, `deleteRefRow`, `deleteRefParent`), archive and restore,
+and all three reorders (`moveRowPosition`, `moveRefChild`, `moveRefGroup`). Three more findings:
+
+- The automatic `archiveAfter` sweep is excluded. It runs on boot and is nobody's action; an entry for
+  it would sit at the bottom of the stack, and on a database with a short window it would be the FIRST
+  thing Ctrl+Z reached — un-filing rows the user never filed.
+- A delete records nothing for a partition the row was not in. The write there is a no-op on every
+  backend, and inventing an inverse for it would resurrect the row into a partition it never occupied.
+- `undo.js` grew one method, `abandon()`, for the branch that genuinely cannot be inverted: restoring a
+  row archived under the old STORE model moves it between two collections, and that inverse is only
+  correct while both are cached — which is exactly what the branch exists because boot does not
+  guarantee. It poisons the whole action rather than skipping the one op, because an entry that puts
+  back three mirrors of four is not an undo and looks like one.
+
+**What remains.** The value cascades, which are a different question from the row ones: the group rename
+(`renameRefParent`) and the lookup cell edit (`saveRefField`) both fan out through
+`propagateListChange` / `propagateRefChange` into `_rewriteValueInColumns`, and onwards into list
+vocabularies and translations. Undoing a row is local; undoing a rename means deciding what happens to
+the list value and the translation key it carried, and `saveLists` prunes — the same asymmetry the
+Leftovers entry above warns about. Worth designing before building.
+
 ### `tree`
 
 Hierarchies of arbitrary depth. Would generalize the ref-hierarchy the Lookup screen already renders.
@@ -759,8 +876,15 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
 
 ## Suggested order
 
-`tree` and `gallery` next, both gated mainly on a column type. (`.ics` export and `timeline` were each
-first here in turn, and have shipped.)
+`gallery` next, then `tree`. `gallery` is gated on nothing since `image`/`url` shipped; `tree` is gated
+on wanting it — its prerequisite landed, and what remains is a second hierarchy model that no shipped
+schema has asked for. (`.ics` export and `timeline` were each first here in turn, and have shipped.)
+
+Undo/redo sits ahead of both, and is the one entry on this page that would be first on merit rather
+than on cheapness: it is gated on nothing, it needs no schema change and no backend change, and it is
+the only proposal here that removes an existing sharp edge instead of adding a surface. What holds it
+back is that its cost is an audit of the multi-write call sites rather than an implementation, so it
+wants an uninterrupted sitting rather than a spare afternoon.
 
 Database-defined calendars sit outside that line for the same reason the feed does: what it needs
 decided is who may PUBLISH one, which is the feed's open question wearing a different hat.

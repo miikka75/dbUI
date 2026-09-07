@@ -280,6 +280,10 @@ function createVueApp() {
       windowWidth: window.innerWidth,
       theme: localStorage.getItem('app_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
       syncing: false,
+      // Mirrors of undo.js's stack depths, kept current by the onChange it is configured with in
+      // mounted(). A plain module is not reactive, so the buttons cannot read Undo.canUndo() directly.
+      undoDepth: 0,
+      redoDepth: 0,
       snackbar: false,
       snackText: '',
       // _collapseBackgrounds starts COLLAPSED (unlike the others): the section is one row per navigable
@@ -880,6 +884,7 @@ function createVueApp() {
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
          'bg.fit', 'bg.fit_cover', 'bg.fit_contain', 'bg.fit_tile', 'bg.fit_width',
+         'btn.undo', 'btn.redo', 'msg.undone', 'msg.redone', 'settings.data', 'settings.refresh',
          'msg.saved', 'msg.save_failed', 'msg.upload_failed', 'msg.choose_image', 'msg.image_too_large', 'msg.image_read_failed', 'msg.image_invalid', 'msg.image_process_failed',
          'msg.row_added', 'msg.no_identity', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.export_incomplete', 'msg.form_submitted', 'msg.form_incomplete', 'msg.form_required', 'msg.synced', 'msg.sync_failed',
          'msg.load_failed', 'msg.request_failed', 'msg.approve_failed', 'msg.import_complete',
@@ -2839,6 +2844,7 @@ function createVueApp() {
         if (typeof value === "object" && value !== null && !Array.isArray(value)) value = value.value || value.title || String(value);
         if (Array.isArray(value)) value = value.map(function(x) { return (x && typeof x === 'object') ? (x.value || x.title || String(x)) : x; });
         if (item[col] === value) return; // reference compare; arrays always differ -> always saved (intended)
+        var undoBefore = item[col];      // the before-image, taken while it is still here (see below)
         item[col] = value;
         item.updated_at = new Date().toISOString();
         var self = this;
@@ -2882,10 +2888,21 @@ function createVueApp() {
         var timerKey = source + ':' + item.id + ':' + col;
         clearTimeout((self.saveTimers || {})[timerKey]);
         if (!self.saveTimers) self.saveTimers = {};
+        // UNDO's before-image, held per timer key until the write it belongs to actually goes out.
+        //
+        // It has to survive a debounce reset, and only the FIRST one may be kept. Typing "a" -> "b" ->
+        // "c" inside 300ms cancels the first two timers and writes once, so there is one write and there
+        // must be one undo entry — and it has to restore "a", the value the cell held before the person
+        // started, not "b", which no write ever stored. Recording at edit time instead would leave two
+        // entries for writes that never happened.
+        if (!self.undoBefore) self.undoBefore = {};
+        if (!(timerKey in self.undoBefore)) self.undoBefore[timerKey] = isNewRow ? null : undoBefore;
         self.saveTimers[timerKey] = setTimeout(function() {
           // Drop the key before anything else: _liveHeld treats a lingering timer entry as "an edit is
           // still in flight" and would hold remote changes back forever.
           delete self.saveTimers[timerKey];
+          var undoWas = self.undoBefore[timerKey];
+          delete self.undoBefore[timerKey];
           var row;
           if (isNewRow) {
             row = {};
@@ -2898,11 +2915,27 @@ function createVueApp() {
             row[col] = value;
           }
           row.updated_at = new Date().toISOString();
-          Writes.putRow(source, row, tab);
-          // Propagate to mirror tables if this column is mirrored. This takes the LIVE row, not the
-          // payload: `row` is now a partial, and propagateMirror reads every synced column off it —
-          // given the partial it would blank each one it couldn't find.
-          self.propagateMirror(item.id, source, item);
+          // One action, so one press takes back the cell AND the mirror rows it cascaded into. The
+          // group has to be opened HERE rather than at edit time: propagateMirror runs inside this
+          // callback, and an action is a synchronous scope.
+          Undo.action('edit', function() {
+            Undo.record({
+              table: source, part: tab,
+              forward: { type: 'put', id: item.id, row: row },
+              // A create inverts to a delete: blanking the column would leave behind a row that only
+              // exists because of the edit being taken back. Otherwise the inverse names ONLY the
+              // edited column, which is what keeps an undo from reverting someone else's edit to a
+              // different column of the same row.
+              inverse: undoWas === null
+                ? { type: 'delete', id: item.id, row: null }
+                : { type: 'put', id: item.id, row: (function() { var r = { id: item.id }; r[col] = undoWas; return r; })() }
+            });
+            Writes.putRow(source, row, tab);
+            // Propagate to mirror tables if this column is mirrored. This takes the LIVE row, not the
+            // payload: `row` is now a partial, and propagateMirror reads every synced column off it —
+            // given the partial it would blank each one it couldn't find.
+            self.propagateMirror(item.id, source, item);
+          });
           self.notify(self.t('msg.saved'));
           self._liveFlush();      // the write is out; let anything held during the edit land
         }, 300);
@@ -2922,6 +2955,10 @@ function createVueApp() {
       _createBlankRow: function(primary, opts) {
         var self = this, o = opts || {}, part = o.part || 'active', prefill = o.prefill || {};
         var id = this.generateId(), primaryRow = null;
+        // One action for the whole cluster: an add creates a row in every mirror under one id, so
+        // taking it back has to remove all of them. Every caller is a single add gesture (the grid's
+        // button, the board's lane, the calendar's day, the lookup editor), so one action per call.
+        Undo.action('add', function() {
         withMirrors([primary]).forEach(function(src) {
           var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           var cols = getColumns(src);
@@ -2954,8 +2991,13 @@ function createVueApp() {
             row.position = String(mp + 1);
           }
           self.dataCache[src].push(row);
+          // The row did not exist, so the inverse is a delete rather than a patch of old values.
+          Undo.record({ table: src, part: 'active',
+            forward: { type: 'put', id: id, row: row },
+            inverse: { type: 'delete', id: id, row: null } });
           Writes.putRow(src, row, 'active');
           if (src === primary) primaryRow = row;
+        });
         });
         return primaryRow;
       },
@@ -3009,6 +3051,7 @@ function createVueApp() {
         // legacy branch below reads the archive store, so that partition is asked for too (still behind
         // preload_archive — a user who turned it off has already accepted a short history).
         return self._ensureCached(sources, null, true).then(function() {
+          Undo.action('restore', function() {
           sources.forEach(function(source) {
             var schema = SCHEMA[source];
             if (!schema) return;
@@ -3019,6 +3062,9 @@ function createVueApp() {
             if (live && Rows.partitionOf(live, 'active') === 'archive') {
               live._status = 'active';
               live.updated_at = stamp;
+              Undo.record({ table: source, part: 'active',
+                forward: { type: 'put', id: item.id, row: { id: item.id, _status: 'active' } },
+                inverse: { type: 'put', id: item.id, row: { id: item.id, _status: 'archive' } } });
               Writes.putRow(source, { id: item.id, _status: 'active', updated_at: stamp }, 'active');
               return;
             }
@@ -3042,7 +3088,14 @@ function createVueApp() {
             self.dataCache[aKey(source)] = cached.filter(function(r) { return r.id !== item.id; });
             if (!self.dataCache[source]) self.dataCache[source] = [];
             self.dataCache[source].push(srcRow);
+            // NOT UNDOABLE, and the whole action goes with it. This branch moves a row between two
+            // collections, and its inverse would only be correct while both are cached — which is the
+            // very thing the branch exists because boot does not guarantee. Recording the other sources
+            // and skipping this one would offer an undo that restores three mirrors of four; abandoning
+            // says plainly that this restore cannot be taken back, which is the safe direction.
+            Undo.abandon();
             Writes.moveRow(source, srcRow, 'archive', 'active');
+          });
           });
         });
       },
@@ -3571,7 +3624,15 @@ function createVueApp() {
         var parentCol = self.refParentCol;
         var toDelete = (self.dataCache[table] || []).filter(function(r) { return r[parentCol] === parent; });
         self.dataCache[table] = (self.dataCache[table] || []).filter(function(r) { return r[parentCol] !== parent; });
-        toDelete.forEach(function(row) { Writes.deleteRow(table, row.id, 'active'); });
+        // One action: deleting a group is one gesture, however many children it took with it.
+        Undo.action('delete group', function() {
+          toDelete.forEach(function(row) {
+            Undo.record({ table: table, part: 'active',
+              forward: { type: 'delete', id: row.id, row: null },
+              inverse: { type: 'put', id: row.id, row: Object.assign({}, row) } });
+            Writes.deleteRow(table, row.id, 'active');
+          });
+        });
         self.pendingDelete = null;
         self.notify(self.t('msg.deleted'));
       },
@@ -3634,15 +3695,20 @@ function createVueApp() {
         var gi = 0, now = new Date().toISOString();
         // Walk the table in DISPLAY order, substituting the group's rows in their new order — which
         // keeps this group occupying exactly the slots it already held.
-        this.refTableData.forEach(function(r, k) {
+        Undo.action('reorder', function() {
+        self.refTableData.forEach(function(r, k) {
           var row = inGroup[r.id] ? reordered[gi++] : r;
           var np = String(k + 1);
           if (String(row.position) === np) return;        // already right: no write, no churn
           var was = row.position;
           row.position = np; row.updated_at = now;
+          Undo.record({ table: table, part: 'active',
+            forward: { type: 'put', id: row.id, row: { id: row.id, position: np } },
+            inverse: { type: 'put', id: row.id, row: { id: row.id, position: was } } });
           // position-only write: reordering says nothing about the row's other columns, so it must not
           // carry (and overwrite with) our copy of them.
           Writes.putRow(table, { id: row.id, position: np, updated_at: now }, 'active');
+        });
         });
       },
       // Move a whole group up/down (swap it with the adjacent group), then renumber every row sequentially.
@@ -3653,10 +3719,19 @@ function createVueApp() {
         if (i < 0 || j < 0 || j >= nodes.length) return;
         var t = nodes[i]; nodes[i] = nodes[j]; nodes[j] = t;
         var pos = 1, now = new Date().toISOString();
-        order.forEach(function(g) { (grouped[g] || []).forEach(function(r) {
-          if (Number(r.position) !== pos) { r.position = String(pos); r.updated_at = now; Writes.putRow(table, { id: r.id, position: r.position, updated_at: now }, 'active'); }
+        Undo.action('reorder', function() {
+        nodes.forEach(function(n) { n.children.forEach(function(c) { var r = c.row;
+          if (Number(r.position) !== pos) {
+            var was = r.position;
+            r.position = String(pos); r.updated_at = now;
+            Undo.record({ table: table, part: 'active',
+              forward: { type: 'put', id: r.id, row: { id: r.id, position: r.position } },
+              inverse: { type: 'put', id: r.id, row: { id: r.id, position: was } } });
+            Writes.putRow(table, { id: r.id, position: r.position, updated_at: now }, 'active');
+          }
           pos++;
         }); });
+        });
       },
       refChildAtEdge: function(item, dir) { var g = this._refGroupRows(item[this.refParentCol]), i = g.findIndex(function(r) { return r.id === item.id; }); return dir < 0 ? i <= 0 : i >= g.length - 1; },
       refGroupAtEdge: function(parentVal, dir) { var n = this.refTree, i = n.findIndex(function(g) { return g.value === parentVal; }); return dir < 0 ? i <= 0 : i >= n.length - 1; },
@@ -3713,6 +3788,9 @@ function createVueApp() {
         var table = this.currentRefTable;
         var gone = (this.dataCache[table] || []).find(function(r) { return r.id === item.id; });
         this.dataCache[table] = (this.dataCache[table] || []).filter(function(r) { return r.id !== item.id; });
+        if (gone) Undo.record({ table: table, part: 'active', label: 'delete',
+          forward: { type: 'delete', id: item.id, row: null },
+          inverse: { type: 'put', id: item.id, row: Object.assign({}, gone) } });
         Writes.deleteRow(table, item.id, 'active');
         this.notify(this.t('msg.deleted'));
       },
@@ -4239,16 +4317,23 @@ function createVueApp() {
         var j = i + dir;
         if (i < 0 || j < 0 || j >= ordered.length) return;
         ordered.splice(j, 0, ordered.splice(i, 1)[0]); // move item to its new slot
+        // One action: a single arrow press renumbers every row between the old slot and the new one,
+        // and putting one of them back is not a reorder.
+        Undo.action('reorder', function() {
         ordered.forEach(function(r, k) {
           var np = k + 1;
           if (Number(r.position) !== np) {
             var was = r.position;
             r.position = String(np); // keep as string — sortedData sorts via localeCompare (number would throw)
             r.updated_at = new Date().toISOString();
+            Undo.record({ table: table, part: 'active',
+              forward: { type: 'put', id: r.id, row: { id: r.id, position: r.position } },
+              inverse: { type: 'put', id: r.id, row: { id: r.id, position: was } } });
             // position-only write: reordering says nothing about the row's other columns, so it must not
             // carry (and overwrite with) our copy of them.
             Writes.putRow(table, { id: r.id, position: r.position, updated_at: r.updated_at }, 'active');
           }
+        });
         });
       },
 
@@ -4267,10 +4352,16 @@ function createVueApp() {
             // Write only the mirrored columns, not the whole mirror row — a mirror carries columns of
             // its own that this edit has nothing to say about, and shipping our cached copy of them is
             // exactly the cross-client clobber saveField now avoids.
-            var patch = { id: id };
-            synced.forEach(function(c) { if (mr[c] !== rowData[c]) { mr[c] = rowData[c] || ''; patch[c] = mr[c]; } });
+            var patch = { id: id }, undoPatch = { id: id };
+            synced.forEach(function(c) { if (mr[c] !== rowData[c]) { undoPatch[c] = mr[c]; mr[c] = rowData[c] || ''; patch[c] = mr[c]; } });
             if (Object.keys(patch).length > 1) {
               mr.updated_at = patch.updated_at = new Date().toISOString();
+              // Joins the action the caller opened, so the cell and every mirror it fed come back
+              // together. Recorded before the write for the same reason the before-image is read
+              // before the assignment above: afterwards there is nothing left to read.
+              Undo.record({ table: mt, part: mTab,
+                forward: { type: 'put', id: id, row: patch },
+                inverse: { type: 'put', id: id, row: undoPatch } });
               Writes.putRow(mt, patch, mTab);
             }
           }
@@ -4284,10 +4375,13 @@ function createVueApp() {
           var stKey = stTab === 'archive' ? aKey(st) : st;
           var stRow = (self.dataCache[stKey] || []).find(function(r) { return r.id === id; });
           if (stRow) {
-            var upPatch = { id: id };   // mirrored columns only — same reasoning as the downstream branch
-            upTargets[st].forEach(function(c) { if (stRow[c] !== rowData[c]) { stRow[c] = rowData[c] || ''; upPatch[c] = stRow[c]; } });
+            var upPatch = { id: id }, upUndo = { id: id };   // mirrored columns only — same reasoning as the downstream branch
+            upTargets[st].forEach(function(c) { if (stRow[c] !== rowData[c]) { upUndo[c] = stRow[c]; stRow[c] = rowData[c] || ''; upPatch[c] = stRow[c]; } });
             if (Object.keys(upPatch).length > 1) {
               stRow.updated_at = upPatch.updated_at = new Date().toISOString();
+              Undo.record({ table: st, part: stTab,
+                forward: { type: 'put', id: id, row: upPatch },
+                inverse: { type: 'put', id: id, row: upUndo } });
               Writes.putRow(st, upPatch, stTab);
             }
           }
@@ -5440,6 +5534,33 @@ function createVueApp() {
         }
       },
 
+      // Undo/redo. The stack lives in undo.js; these three are the Vue side of it — the cache patch it
+      // cannot do for itself, and the two depths, because a plain module is not reactive.
+      //
+      // The patch deliberately does NOT go through _liveApply: that path queues behind _liveHeld, which
+      // is right for a remote change arriving mid-edit and wrong for the user's own undo, which would
+      // then sit invisible until they clicked away.
+      _undoApply: function(table, part, change) {
+        var key = part === 'archive' ? aKey(table) : table;
+        var rows = this.dataCache[key];
+        if (!rows) return;                      // table not cached: it will be fetched current when opened
+        if (LiveSync.applyChange(rows, change)) this._liveRebuild();
+      },
+
+      undoLast: function() {
+        var self = this;
+        return Undo.undo().then(function(label) {
+          if (label !== null) self.notify(self.t('msg.undone'));
+        }).catch(function(err) { self.notify(err && err.message ? err.message : self.t('msg.save_failed')); });
+      },
+
+      redoLast: function() {
+        var self = this;
+        return Undo.redo().then(function(label) {
+          if (label !== null) self.notify(self.t('msg.redone'));
+        }).catch(function(err) { self.notify(err && err.message ? err.message : self.t('msg.save_failed')); });
+      },
+
       // Sync
       refreshData: function() {
         var self = this;
@@ -5458,7 +5579,9 @@ function createVueApp() {
             });
           });
         });
-        chain.then(function() { self.loadTableData(); self.syncing = false; self.notify(self.t('msg.synced')); }).catch(function(err) {
+        // The stack's inverses were derived against rows this is about to replace wholesale, so they
+        // are no longer inverses of anything.
+        chain.then(function() { Undo.clear(); self.loadTableData(); self.syncing = false; self.notify(self.t('msg.synced')); }).catch(function(err) {
           self.syncing = false;
           self.notify(err && err.message ? err.message : self.t('msg.sync_failed'));
         });
@@ -5502,6 +5625,7 @@ function createVueApp() {
       // resurface in the archive tab. Deleting a row that isn't there is a no-op on every backend.
       _deleteFromSources: function(sources, itemId) {
         var self = this;
+        Undo.action('delete', function() {
         sources.forEach(function(src) {
           var stores = [['active', src]];
           if (SCHEMA[src] && SCHEMA[src].archivable) stores.push(['archive', aKey(src)]);
@@ -5515,8 +5639,17 @@ function createVueApp() {
             // Only rewrite a cache that EXISTS: seeding [] here would tell partitionRows the archive
             // store is loaded and empty, hiding every legacy archived row until the next reload.
             if (self.dataCache[key]) self.dataCache[key] = self.dataCache[key].filter(function(r) { return r.id !== itemId; });
+            if (gone) {
+              Undo.record({ table: src, part: store[0],
+                forward: { type: 'delete', id: itemId, row: null },
+                // A deleted row has nothing left to merge a partial onto, so the inverse carries every
+                // column. Copied, because the live object is about to be dropped from the cache and
+                // anything still holding it may keep mutating it.
+                inverse: { type: 'put', id: itemId, row: Object.assign({}, gone) } });
+            }
             Writes.deleteRow(src, itemId, store[0]);
           });
+        });
         });
         this.currentData = this.currentData.filter(function(r) { return r.id !== itemId; });
         this.notify(this.t('msg.deleted'));
@@ -5568,6 +5701,10 @@ function createVueApp() {
       _archiveInSources: function(sources, itemId, quiet) {
         var self = this;
         return self._ensureCached(sources).then(function() {
+          // `quiet` is the automatic archiveAfter sweep, which runs on boot and is nobody's action. An
+          // entry for it would sit at the bottom of the stack waiting to un-file rows the user never
+          // filed, and on a database with a short window it would be the FIRST thing Ctrl+Z reached.
+          Undo.action('archive', function() {
           sources.forEach(function(source) {
             var schema = SCHEMA[source];
             if (!schema || !schema.archivable) return;
@@ -5575,7 +5712,13 @@ function createVueApp() {
             if (!srcRow || Rows.partitionOf(srcRow, 'active') === 'archive') return;
             srcRow._status = 'archive';
             srcRow.updated_at = new Date().toISOString();
+            // The row was active (the guard above says so), so restoring it is the same field write in
+            // reverse — the exact patch _restoreFromSources issues when someone clicks Restore.
+            if (!quiet) Undo.record({ table: source, part: 'active',
+              forward: { type: 'put', id: itemId, row: { id: itemId, _status: 'archive' } },
+              inverse: { type: 'put', id: itemId, row: { id: itemId, _status: 'active' } } });
             Writes.putRow(source, { id: itemId, _status: 'archive', updated_at: srcRow.updated_at }, 'active');
+          });
           });
           if (!quiet) self.notify(self.t('msg.archived'));   // the auto sweep files rows silently
         });
@@ -5887,12 +6030,26 @@ function createVueApp() {
       // one place that knows a row was written — and the reason writes.js exists rather than twenty-six
       // call sites. Guarded inside _onWriteRepublish, so a restricted member's write costs nothing.
       if (typeof Writes !== 'undefined' && Writes.onWrite) Writes.onWrite(function(t) { self._onWriteRepublish(t); });
+      Undo.configure({
+        apply: function(table, part, change) { self._undoApply(table, part, change); },
+        onChange: function(u, r) { self.undoDepth = u; self.redoDepth = r; }
+      });
       // Remote changes that arrived while a cell had focus are held (see _liveHeld); leaving the cell is
       // one of the two moments that can end. Deferred a tick because focusout fires BEFORE focus lands on
       // the next element — checking activeElement synchronously would see the outgoing cell (or <body>)
       // and flush straight into the cell the user just tabbed into.
       document.addEventListener('focusout', function() { setTimeout(function() { self._liveFlush(); }, 0); });
       document.addEventListener('keydown', function(e) {
+        // Undo/redo. Deliberately NOT taken while a text field has focus: inside a cell the browser's
+        // own undo is the one the user means (it takes back a character), and stealing Ctrl+Z there
+        // would take back the whole edit instead. Leaving the cell hands the shortcut over.
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'z' || e.key === 'Z' || e.key === 'y')) {
+          var ae = document.activeElement;
+          if (ae && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName || ''))) return;
+          e.preventDefault();
+          if (e.key === 'y' || e.shiftKey) self.redoLast(); else self.undoLast();
+          return;
+        }
         if (e.key === 'Enter' && !e.shiftKey) {
           var el = e.target;
           if (el.hasAttribute('contenteditable') || el.tagName === 'SELECT' || el.tagName === 'INPUT') {

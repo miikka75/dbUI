@@ -6,7 +6,9 @@
 //
 // `deps` are the free bindings the lifted body needs. app-core members read file-scope globals
 // (SCHEMA, aKey, Writes, VIEWS, ...) that do not exist in a test, so pass whatever the member you are
-// lifting actually touches; AccessFeatures and Rows are supplied by default because most do.
+// lifting actually touches; AccessFeatures, Rows and Undo are supplied by default because most do.
+// Undo is the real module rather than a stub: it is pure, and a lift that RECORDS an op should be
+// recording through the same code the app does. Nothing here replays, so no write funnel is needed.
 const assert = require('node:assert');
 
 // Lifts a member out of app-core.js and runs it, so these assertions bind to the SHIPPED code rather
@@ -18,7 +20,7 @@ const assert = require('node:assert');
 // match lands earlier in the file than the real member, so the slice runs off into unrelated code and
 // surfaces as a bare SyntaxError rather than as anything pointing here.
 function appCoreFn(name, deps) {
-  deps = Object.assign({ AccessFeatures: require('../../access-features'), Rows: require('../../rows') }, deps || {});
+  deps = Object.assign({ AccessFeatures: require('../../access-features'), Rows: require('../../rows'), Undo: require('../../undo') }, deps || {});
   const fs = require('fs'), path = require('path');
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'app-core.js'), 'utf8');
   const head = '\n      ' + name + ': function(';
