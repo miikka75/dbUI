@@ -4284,6 +4284,36 @@ test.describe('calendar view', () => {
     expect(text).not.toContain('Example Smith');
   });
 
+  test('ticking Publish and saving produces a URL immediately', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      await window.Writes.putRow('tasks', { id: 'pub_now', date: app._calToday(), title: 'PubNow' }, 'active');
+      const real = window.backend.uploadFile;
+      window.backend.uploadFile = (f, o) => Promise.resolve('https://store.example/' + o.path);
+
+      // Saved with publishing ON. Every other trigger is unreachable for a calendar built here: the
+      // republish waits for a WRITE, and the only button is on a view toolbar with no nav entry.
+      await app.saveUserCalendar('cal_now', { title: 'Now', feed: true,
+        sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'] }] });
+      const afterSave = app.calendarFiles.find((f) => f.name === 'cal_now');
+
+      // Saving again must not mint a second address — the URL is a subscription.
+      const firstUrl = afterSave && afterSave.url;
+      await app.saveUserCalendar('cal_now', { title: 'Now renamed', feed: true,
+        sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'] }] });
+      const stable = (app.calendarFiles.find((f) => f.name === 'cal_now') || {}).url === firstUrl;
+
+      window.backend.uploadFile = real;
+      await app.deleteUserCalendar('cal_now');
+      return { url: firstUrl, published: !!(afterSave && afterSave.published), stable };
+    });
+    expect(r.published).toBe(true);
+    expect(r.url).toMatch(/^https:\/\/store\.example\/feeds\/[0-9a-f]{32}\.ics$/);
+    expect(r.stable).toBe(true);
+  });
+
   test('a calendar built in the app can be published, and switching it off RETIRES the address', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(async () => {
