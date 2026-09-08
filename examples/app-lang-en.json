@@ -29,6 +29,7 @@
       "bg.width": "Width",
       "board.add_in_lane": "Add here",
       "board.archive": "Archive",
+      "board.confirm_archive": "Click again to archive",
       "board.confirm_delete": "Click again to delete",
       "board.delete": "Delete",
       "board.edit": "Edit",

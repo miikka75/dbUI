@@ -181,7 +181,9 @@ test.describe('Undo / redo', () => {
     await expect(rows).toHaveCount(1);
     await typeInFirstCell(page, 'Filed');
 
+    // Archive arms first (same confirm as delete): click the icon, then the tick it turns into.
     await page.locator('button:has(.mdi-archive-outline)').first().click();
+    await page.locator('button:has(.mdi-check-circle)').first().click();
     await expect(rows).toHaveCount(0);
 
     await undoBtn(page).click();
