@@ -3010,13 +3010,13 @@ test.describe('v3 @both partition toggle in an embed', () => {
         { label: 'How many', agg: 'count' },                   // count reads no column: nothing to check
         { label: 'Latest', agg: 'latest', column: 'title' }    // a real column: silent
       ] } };
-      window.VIEWS.st_prow = { name: 'st_prow', sources: ['tasks'], stats: { perRow: { label: 'alsoMissing', value: 'title' } } };
+      window.VIEWS.st_prow = { name: 'st_prow', sources: ['tasks'], stats: { rowTiles: { label: 'alsoMissing', value: 'title' } } };
       const bad = errs().filter((e) => e.indexOf('st_tiles') >= 0 || e.indexOf('st_prow') >= 0).join(' | ');
 
       // An AGGREGATE stats view is exempt, for the same reason the data-view column check above skips
       // one: its rows carry the group key and the aggregate outputs, which no table declares.
       window.VIEWS.st_agg = { name: 'st_agg', sources: ['tasks'], groupBy: { column: 'status' },
-        stats: { perRow: { label: 'status', value: 'howMany' } } };
+        stats: { rowTiles: { label: 'status', value: 'howMany' } } };
       // ...and a column the VIEW declares itself (a computed) is a real column of its rows.
       window.VIEWS.st_comp = { name: 'st_comp', sources: ['tasks'],
         columns: [{ name: 'derived', computed: { fromColumns: ['title'] } }],
@@ -3029,10 +3029,40 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.bad).toContain('noSuchCol');
     expect(r.bad).toContain('tile 0');
     expect(r.bad).toContain('alsoMissing');
-    expect(r.bad).toContain('perRow.label');
+    expect(r.bad).toContain('rowTiles.label');
     expect(r.bad).not.toContain('tile 1');    // count needs no column
     expect(r.bad).not.toContain('tile 2');    // `title` is a real one
     expect(r.quiet).toBe('');
+  });
+
+  // `goal: { column }` reads a target off the ROW, which is the whole of per-row goals -- one view
+  // holding "bedding once a month" beside "wash up daily". It therefore means nothing on an explicit
+  // tile, which aggregates many rows and has none to read: the engine would resolve it to null and
+  // draw no bar, silently, on a view that otherwise looks configured. Load time is where that is said.
+  test('validateSchema accepts a per-row goal column, and rejects it where there is no row', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = () => window.validateSchema();
+      // Aggregate views, so the column check is exempt exactly as it is for `label`/`value` above.
+      const agg = { sources: ['tasks'], groupBy: { column: 'status' } };
+      window.VIEWS.g_ok = Object.assign({ name: 'g_ok' }, agg, {
+        stats: { rowTiles: { label: 'status', value: 'howMany', goal: { column: 'target' } } } });
+      window.VIEWS.g_view = Object.assign({ name: 'g_view' }, agg, {
+        stats: { goal: { column: 'target' }, rowTiles: { label: 'status', value: 'howMany' } } });
+      const quiet = errs().filter((e) => e.indexOf('g_ok') >= 0 || e.indexOf('g_view') >= 0).join(' | ');
+
+      window.VIEWS.g_tile = { name: 'g_tile', sources: ['tasks'],
+        stats: { tiles: [{ label: 'T', agg: 'count', goal: { column: 'target' } }] } };
+      window.VIEWS.g_empty = Object.assign({ name: 'g_empty' }, agg, {
+        stats: { rowTiles: { label: 'status', value: 'howMany', goal: {} } } });
+      const bad = errs().filter((e) => e.indexOf('g_tile') >= 0 || e.indexOf('g_empty') >= 0).join(' | ');
+
+      ['g_ok', 'g_view', 'g_tile', 'g_empty'].forEach((n) => delete window.VIEWS[n]);
+      return { quiet, bad };
+    });
+    expect(r.quiet).toBe('');
+    expect(r.bad).toContain('needs `rowTiles`');       // an explicit tile has no row to read
+    expect(r.bad).toContain('{ "column": "<column name>" }');   // an object that names nothing
   });
 
   // A `filter` naming a column that is not there matches NO row -- the view renders an empty list,

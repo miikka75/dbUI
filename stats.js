@@ -18,9 +18,11 @@
 //             `when` narrows the rows for that tile only (the shared condition language), which is how
 //             "signed in today" and "signed in this week" become two tiles over one view.
 //
-//   perRow  — ONE TILE PER ROW, for a view that has already aggregated. { label: <col>, value: <col> }
+//   rowTiles  — ONE TILE PER ROW, for a view that has already aggregated. { label: <col>, value: <col> }
 //             names which column is the caption and which the number, so an existing leaderboard
 //             (person -> total) renders as a column of bars with no new data plumbing at all.
+//             `goal: { column: <col> }` reads the target off the ROW too, which is what lets one view
+//             hold targets that differ per row (bedding monthly, bins weekly).
 //
 // `goal` sets the bar's 100% mark. A number is an absolute target ("120 sign-ins"). The string "max"
 // means "the largest value among these tiles", which is what a leaderboard wants — the leader's bar is
@@ -94,6 +96,20 @@
     return out.sort(function(a, b) { return a.at - b.at; });
   }
 
+  // A goal of `{ column: <col> }` is a target the ROW carries: each chore measured against the cadence
+  // that chore keeps, rather than every tile against one number. It is resolved HERE, while the source
+  // row is still in hand, because the pass that turns rawGoal into a bar runs over the built tiles and
+  // no longer has one. Resolving it to a plain number also means everything downstream — "max", the
+  // ladder, the pct/over arithmetic — keeps working unchanged and unaware.
+  //
+  // A row whose target column is blank or non-numeric resolves to null, which is the same "no goal"
+  // every other unusable goal produces: the tile shows its number with no bar. That is the honest
+  // reading — a chore nobody has set a cadence for has no bar to be short of.
+  function rowGoal(g, row) {
+    if (!g || typeof g !== 'object' || Array.isArray(g) || !g.column) return g;
+    return num(row[g.column]);
+  }
+
   // -> { goal, tier } : the rung being worked toward, and the highest rung actually reached (or null).
   // Past the top rung the goal STAYS there, so the bar reads full and `over` carries the overshoot —
   // the same contract a plain numeric goal has.
@@ -113,16 +129,16 @@
     var defDisplay = opts.display || 'bar';
     var out = [];
 
-    if (opts.perRow) {
-      var pr = opts.perRow;
+    if (opts.rowTiles) {
+      var rt = opts.rowTiles;
       var list = opts.limit ? rows.slice(0, opts.limit) : rows;
       list.forEach(function(r) {
         out.push({
-          label: r[pr.label] == null ? '' : r[pr.label],
-          labelCol: pr.label,                      // so the renderer can run it through displayValue
-          value: num(r[pr.value]),
-          rawGoal: (pr.goal !== undefined ? pr.goal : opts.goal),
-          display: pr.display || defDisplay
+          label: r[rt.label] == null ? '' : r[rt.label],
+          labelCol: rt.label,                      // so the renderer can run it through displayValue
+          value: num(r[rt.value]),
+          rawGoal: rowGoal(rt.goal !== undefined ? rt.goal : opts.goal, r),
+          display: rt.display || defDisplay
         });
       });
     } else {
@@ -153,7 +169,7 @@
       t.tier = null;
       var g;
       if (Array.isArray(raw)) {
-        // A ladder is per-TILE by nature: on a perRow leaderboard each person is measured against the
+        // A ladder is per-TILE by nature: on a rowTiles leaderboard each person is measured against the
         // rung they are personally working toward, so the bars answer "how close am I to the next
         // level" rather than "how do I compare". `goal: "max"` is the one that answers the other.
         var r = resolveTiers(typeof t.value === 'number' ? t.value : -Infinity, normTiers(raw));
