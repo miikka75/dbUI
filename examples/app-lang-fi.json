@@ -29,6 +29,7 @@
       "bg.width": "Leveys",
       "board.add_in_lane": "Lisää",
       "board.archive": "Arkistoi",
+      "board.confirm_archive": "Vahvista arkistointi",
       "board.confirm_delete": "Vahvista poisto",
       "board.delete": "Poista",
       "board.edit": "Muokkaa",
