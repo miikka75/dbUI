@@ -170,61 +170,33 @@ exists, since without that there is nothing for a scan to do. Of the two, the sh
 better first build — it needs no camera at all in its typed form, so it can ship and be used at a real
 event before any of the decoding work above is done.
 
-### Per-row goals — a target that lives in the data, not in the view
+### Empty groups — the bar that is missing is the one that matters
 
-`stats` measures every tile against **one goal per view**. The `perRow` branch reads `pr.goal` once and
-hands the same value to every row (`stats.js:127`), so a leaderboard can ask "how close
-is each person to 30 points" but not "how close is each *chore* to the cadence *that chore* keeps".
+Half of *per-row goals* (below, in Shipped). That half made each tile carry its own target; this one
+is about the tiles that never appear.
 
-The second question is the one a chores database actually has. Bedding once a month, bins once a week,
-windows twice a year — different targets, one view.
+`aggregateRows` builds its groups from the rows it is handed, so a chore nobody has done this month
+has no group and no tile — and that is precisely the chore a reminder exists for. `chore_cadence`
+demonstrates it today: twelve chores in `ref_chores`, nine tiles, and the three missing ones are the
+neglected ones. **An empty bar is the whole feature; a missing bar is the bug.**
 
-**What already works, and is worth knowing before building anything.** A ladder goal resolves per
-*tile*, against that tile's own value, and the renderer prints the reached rung as a chip. So
-"five meals this week earns a badge" is config today, no code:
+The fix is to seed the group keys from the referenced lookup table rather than from the rows — `chore`
+is a `ref` to `ref_chores`, so the key set is known independently of the data. Independently useful:
+the same hole makes any leaderboard omit everyone who scored nothing, which is the person most worth
+seeing on a scoreboard.
 
-```json
-"stats": { "perRow": { "label": "person", "value": "total" },
-           "goal": [ { "at": 5, "label": "text.chef_of_the_week" } ] }
-```
+The cost is a decision, not lines. `aggregateRows` is used by every aggregate view, so seeding cannot
+be unconditional — a leaderboard over a 400-row lookup would grow 400 tiles. It needs a key on the
+view (`groupBy: { seedFrom: "ref_chores" }`, or a bare `seed: true` reading the `ref` the column
+already declares), which is the part to settle before writing anything.
 
-Likewise a fixed per-chore target is expressible in `tiles` mode, one hand-written tile per chore with
-`when: { "chore": "Bedding", "done_on": { "within": "@month" } }` and `goal: 1`. It renders correctly;
-it just names every chore in the schema, so adding a row to `ref_chores` silently gains no tile. The
-gap is not the bar — it is that the target is authored in the view instead of looked up per group.
-
-**Proposed shape:**
-
-```json
-"perRow": { "label": "chore", "value": "total", "goalFrom": "target" }
-```
-
-`target` is an ordinary `computed.lookup` off a new `ref_chores.target_per_month`, the same lookup
-shape the scoreboard already uses for `points`. A **separate key**, not an overload of `goal`: `goal`
-already means number | `"max"` | ladder, and a bare column name would be indistinguishable from the
-literal `"max"`.
-
-Cost: one branch in the `perRow` loop, a `schema.schema.json` property, a `validateSchema` check, a
-test. It does not go through the view-kind seam above — no engine module, no component, no classifier.
-
-**Two things it does not fix, and one of them is the important half.**
-
-- **A group with no rows produces no tile.** `aggregateRows` builds its groups from the rows handed to
-  it, so a chore nobody has done this month is absent from the view entirely — which is precisely the
-  chore the reminder exists for. An empty bar is the whole feature; a missing bar is the bug. The fix
-  is to seed the group keys from the referenced lookup table (`chore` is a `ref` to `ref_chores`, so
-  the key set is known independently of the data) rather than from the rows. Larger than `goalFrom`,
-  and independently useful: the same hole makes any leaderboard omit everyone who scored nothing.
-- **"Days since last done" is not expressible.** `aggregate` supports `count` and `sum` only, so a
-  per-chore group can say "done twice this month" but not "last done 47 days ago". The per-row half
-  already exists as `computed.daysSince`; there is simply no `min`/`latest` aggregate to collapse it
-  per group. Adding one is small. Deciding what the bar then *means* is not — today a full bar is
-  success and overshoot recolours to `success`, whereas an overdue bar filling up is bad news, and
-  inverting that per tile is a renderer decision this entry does not make.
-
-Sequencing: `goalFrom` on its own is honest but partial — chores that get done show their own targets,
-and neglected ones stay invisible. Seeding the groups is what turns the view into a reminder. Worth
-building the two together.
+**"Days since last done" is the other thing this view cannot say.** `aggregateRows` supports `count`
+and `sum` only, so a per-chore group can report "done twice this month" but not "last done 47 days
+ago". The per-row half already exists as `computed.daysSince`, and `stats.js`'s own `reduce` already
+has `min`/`max`/`latest` — the gap is only that the aggregate pipeline has neither. Adding one is
+small. Deciding what the bar then *means* is not: today a full bar is success and overshoot recolours
+to `success`, whereas an overdue bar filling up is bad news, and inverting that per tile is a renderer
+decision this entry does not make.
 
 ### Prose that names its rows — a per-row template for an embed
 
@@ -827,6 +799,15 @@ stops working offline. Everything above it stays inside the app boundary.
 
 Recorded so the roadmap shows what graduated rather than silently shrinking.
 
+- **A goal each row carries** — `goal: { "column": "<col>" }` on `rowTiles`, plus the shipped
+  `chore_cadence` view reading `ref_chores.target_per_month`. One view now holds "bedding once a
+  month" beside "wash up daily", which no single `goal` could express. The proposal argued for a
+  separate `goalFrom` key on the grounds that a bare column name is indistinguishable from the literal
+  `"max"` — true of a *string*, and the reason it shipped as an OBJECT instead: `stGoalOk` already
+  dispatches on type, so a fourth shape cost one branch and spent no new key, and no precedence rule
+  had to be invented for a view that set both. It resolves where the row is still in hand and becomes
+  a plain number, so `"max"`, the ladder and the pct/over arithmetic never learned about it. Shipped
+  knowingly partial: a chore with no rows still produces no tile (see *Empty groups*, above).
 - **`timeline`** (#173) — rows with a start *and* end date as bars across periods, closing the gap the
   calendar documents about itself: a calendar places a row on ONE day, so anything spanning days had
   nowhere to go. `timeline.js` reuses `rotation.js`'s interval arithmetic rather than growing a second
@@ -896,9 +877,10 @@ backend, since the cheapest option is free on Supabase and costs either a second
 function on Firebase. Those belong to whoever owns the deployment, so the entry waits for that answer
 instead of being ranked against features.
 
-Per-row goals sits outside that line: it is the cheapest thing on this page and touches no seam, but
-it extends a shipped kind rather than adding one, so it competes for attention with nothing. Take it
-whenever a schema wants it.
+Empty groups sits outside that line: it extends a shipped kind rather than adding one, so it competes
+for attention with nothing. It is also the half of per-row goals that was left behind — the shipped
+half is honest but partial, and this is what turns a scoreboard into a reminder. Take it whenever a
+schema wants it, and settle the seeding key first.
 
 The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
 schema today.

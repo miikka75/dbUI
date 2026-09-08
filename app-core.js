@@ -976,20 +976,20 @@ function createVueApp() {
                 // resolved with tOr -- so a key works and prose works. Collect it either way: an author
                 // who wrote prose still sees it offered in the Languages editor (which is how they
                 // discover it can be translated at all), and one who wrote a key must see it or the key
-                // renders raw with nothing on screen saying where to fix it. A perRow tile's caption
+                // renders raw with nothing on screen saying where to fix it. A `rowTiles` caption
                 // comes from a COLUMN, so it is already covered by field.<col> below.
                 // A goal LADDER names its levels ("Bronze"/"Silver"/"Gold"), and those render on the
                 // tile as a badge -- so they are user-visible text and belong here too. A ladder can be
-                // set view-wide, per tile, or on perRow, so all three are swept.
+                // set view-wide, per tile, or on rowTiles, so all three are swept.
                 var stTier = function(goal) {
                   if (Array.isArray(goal)) goal.forEach(function(e) { if (e && typeof e === 'object' && e.label) keys.push(e.label); });
                 };
                 stTier(v.stats.goal);
                 (v.stats.tiles || []).forEach(function(t) { if (t && t.label) keys.push(t.label); if (t) stTier(t.goal); });
-                if (v.stats.perRow) {
-                  if (v.stats.perRow.label) keys.push('field.' + v.stats.perRow.label);
-                  if (v.stats.perRow.value) keys.push('field.' + v.stats.perRow.value);
-                  stTier(v.stats.perRow.goal);
+                if (v.stats.rowTiles) {
+                  if (v.stats.rowTiles.label) keys.push('field.' + v.stats.rowTiles.label);
+                  if (v.stats.rowTiles.value) keys.push('field.' + v.stats.rowTiles.value);
+                  stTier(v.stats.rowTiles.goal);
                 }
               }
               (v.columns || []).forEach(function(c) {
@@ -6870,14 +6870,15 @@ function createVueApp() {
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
-      viewCfg: function() { return VIEWS[this.viewName] || null; },   // whose obscureNames applies to perRow captions
+      viewCfg: function() { return VIEWS[this.viewName] || null; },   // whose obscureNames applies to rowTiles captions
       tiles: function() { return appInstance.statsFor(this.viewName).tiles || []; },
-      // perRow tiles are a leaderboard: one per row, so they stack full-width and stay readable at any
+      // `rowTiles` are a leaderboard: one per row, so they stack full-width and stay readable at any
       // count. Explicit `tiles` are a scorecard: a handful of them, side by side. Same component, and
-      // the difference is a single grid-template rather than two templates to keep in step.
-      perRow: function() { return !!((VIEWS[this.viewName] || {}).stats || {}).perRow; },
+      // the difference is a single grid-template rather than two templates to keep in step. Named for
+      // the layout rather than the key, so it does not read as a second list beside the `tiles` array.
+      stacked: function() { return !!((VIEWS[this.viewName] || {}).stats || {}).rowTiles; },
       gridStyle: function() {
-        return this.perRow
+        return this.stacked
           ? 'display:grid;grid-template-columns:1fr;gap:10px'
           : 'display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px';
       }
@@ -6885,7 +6886,7 @@ function createVueApp() {
     methods: Object.assign({}, ROOT_PROXY, {
       // A tile's number, formatted the way the same value would render in a cell: a `latest` tile over a
       // date column should read like that date, not like an ISO string, and a list-backed column should
-      // show its label. Numbers with no column behind them (count, or a perRow total) pass through.
+      // show its label. Numbers with no column behind them (count, or a rowTiles total) pass through.
       fmt: function(t) {
         if (t.value == null) return '—';
         if (t.column && typeof t.value !== 'number') return appInstance.displayValue(t.column, t.value, '', this.viewCfg);
@@ -6899,7 +6900,7 @@ function createVueApp() {
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'pa-4\'" data-testid="stats-view">'
       + '<div :style="gridStyle">'
       + '<div v-for="(t, i) in tiles" :key="i" data-testid="stat-tile" style="padding:10px 12px;border:1px solid rgb(var(--v-theme-outline),0.25);border-radius:8px">'
-      // perRow labels come from a COLUMN, so they route through list-value for the same display text
+      // rowTiles labels come from a COLUMN, so they route through list-value for the same display text
       // (and linked-user avatar) the pivot axes and the grid cells give that column. An explicit tile's
       // label is authored prose and is printed as written.
       +   '<div style="font-size:0.72rem;opacity:0.7;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px">'

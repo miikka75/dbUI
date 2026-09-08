@@ -1481,13 +1481,13 @@ leaderboard becomes bars by **adding three lines to it**, not by writing a secon
   "includeArchive": true,
 
   "kind": "stats",
-  "stats": { "perRow": { "label": "person", "value": "total" }, "goal": "max" }
+  "stats": { "rowTiles": { "label": "person", "value": "total" }, "goal": "max" }
 }
 ```
 
 ### Two modes
 
-**`perRow`** — one tile per row, for a view that has already aggregated. `label` and `value` name the
+**`rowTiles`** — one tile per row, for a view that has already aggregated. `label` and `value` name the
 columns holding the caption and the number, so a `person -> total` leaderboard renders as a column of
 labelled bars. `label` is run through the same display path a cell uses, so list values, translations
 and linked-user avatars all appear.
@@ -1507,13 +1507,44 @@ The two are mutually exclusive; declaring both is a load-time error.
 | Key | Meaning |
 |-----|---------|
 | `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals }` |
-| `perRow` | `{ label, value, goal? }` — one tile per row instead |
-| `goal` | Default bar target for every tile: a positive number, `"max"` (scale to the largest tile), or a **ladder** of levels (below). No goal = no bar, just a number |
+| `rowTiles` | `{ label, value, goal? }` — one tile per row instead |
+| `goal` | Default bar target for every tile: a positive number, `"max"` (scale to the largest tile), a **ladder** of levels (below), or `{ "column": "<col>" }` to read the target off each row (`rowTiles` only). No goal = no bar, just a number |
 | `display` | `"bar"` (default) or `"number"`. Per-tile, or view-wide as a default |
-| `limit` | `perRow` only: cap the tile count (a top-N board) |
+| `limit` | `rowTiles` only: cap the tile count (a top-N board) |
 
 **Aggregates**: `count` (needs no `column`), `sum`, `avg`, `min`, `max`, `latest`. Everything but
 `count` requires a `column`, and says so at load rather than showing an em dash forever.
+
+### A goal each row carries
+
+Every shape above measures each tile against the same target. `{ "column": "<col>" }` reads it off the
+row instead, so one view can hold targets that differ per row — bedding once a month, bins once a week:
+
+```json
+"stats": { "rowTiles": { "label": "chore", "value": "done", "goal": { "column": "target" } } }
+```
+
+`target` is an ordinary column of the view's rows. On an aggregate view that means a `computed.lookup`
+declared in `columns`, which resolves AFTER grouping — so it is one lookup per group, not per source
+row. The shipped `chore_cadence` view is exactly this, reading `ref_chores.target_per_month`:
+
+```json
+"groupBy": { "column": "chore" },
+"aggregate": { "count": true, "into": "done" },
+"columns": ["chore", "done",
+  { "name": "target", "computed": { "lookup":
+      { "table": "ref_chores", "match": "chore", "on": "chore", "field": "target_per_month", "default": 0 } } }]
+```
+
+- **It is an object, not a bare column name.** `goal: "target"` could not be told apart from a
+  misspelling of the literal `"max"`, so the column form says which it is.
+- **`rowTiles` only.** An explicit tile is an aggregate over many rows and has no row to read, so a
+  `{ column }` goal there is a load-time error rather than a tile that silently draws no bar.
+- **A row whose target is blank or non-numeric gets no bar**, and shows its number alone — the same
+  thing every other unusable goal does. A chore with no cadence set has no bar to be short of.
+- **A group with no rows produces no tile at all.** `aggregateRows` builds its groups from the rows it
+  is given, so a chore nobody logged is absent rather than an empty bar — which is the one it would be
+  most useful to see. Tracked in ROADMAP.md.
 
 ### Tiered goals (bronze / silver / gold)
 
@@ -1522,7 +1553,7 @@ level instead:
 
 ```json
 "stats": {
-  "perRow": { "label": "person", "value": "total" },
+  "rowTiles": { "label": "person", "value": "total" },
   "goal": [
     { "at": 10, "label": "text.tier_bronze" },
     { "at": 20, "label": "text.tier_silver" },
@@ -1544,7 +1575,7 @@ at 30 and the badge becomes *Silver*.
   defensible reading and is deliberately not what this does.
 - **Past the top level the goal stays there**, so the bar reads full and `over` carries the overshoot —
   the same contract a plain numeric goal has.
-- **On `perRow`, each row is measured against the level IT is working toward.** That makes the bars
+- **On `rowTiles`, each row is measured against the level IT is working toward.** That makes the bars
   answer *"how close am I to the next level"*, and it means two rows can have different scales — Ann at
   19/20 beside Cara at 6/10. `goal: "max"` is the one that answers *"how do I compare"* by putting
   everyone on one scale. Pick per view according to which question the page is asking; the shipped

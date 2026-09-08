@@ -94,7 +94,7 @@ describe('stats.js — goals and bars', () => {
   });
 
   it('goal "max" over an all-zero set draws no bars rather than dividing by zero', () => {
-    const s = Stats.build([{ n: 0 }, { n: 0 }], { perRow: { label: 'n', value: 'n' }, goal: 'max' });
+    const s = Stats.build([{ n: 0 }, { n: 0 }], { rowTiles: { label: 'n', value: 'n' }, goal: 'max' });
     assert.deepEqual(s.tiles.map(t => t.pct), [null, null]);
     assert.deepEqual(s.tiles.map(t => t.goal), [null, null]);
   });
@@ -106,12 +106,12 @@ describe('stats.js — goals and bars', () => {
   });
 });
 
-describe('stats.js — perRow (an existing leaderboard as bars)', () => {
+describe('stats.js — rowTiles (an existing leaderboard as bars)', () => {
   // Exactly the shape chore_points_week already produces: one row per person, with a summed total.
   const leaderboard = [{ person: 'Ann', total: 12 }, { person: 'Bob', total: 8 }, { person: 'Cara', total: 3 }];
 
   it('one tile per row, labelled from a column', () => {
-    const s = Stats.build(leaderboard, { perRow: { label: 'person', value: 'total' }, goal: 'max' });
+    const s = Stats.build(leaderboard, { rowTiles: { label: 'person', value: 'total' }, goal: 'max' });
     assert.equal(s.tiles.length, 3);
     assert.deepEqual(s.tiles.map(t => t.label), ['Ann', 'Bob', 'Cara']);
     assert.deepEqual(s.tiles.map(t => t.value), [12, 8, 3]);
@@ -120,22 +120,66 @@ describe('stats.js — perRow (an existing leaderboard as bars)', () => {
   });
 
   it('labelCol is carried through so the renderer can format the label like a cell', () => {
-    const s = Stats.build(leaderboard, { perRow: { label: 'person', value: 'total' } });
+    const s = Stats.build(leaderboard, { rowTiles: { label: 'person', value: 'total' } });
     assert.equal(s.tiles[0].labelCol, 'person');
   });
 
   it('an absolute goal applies to every row', () => {
-    const s = Stats.build(leaderboard, { perRow: { label: 'person', value: 'total' }, goal: 24 });
+    const s = Stats.build(leaderboard, { rowTiles: { label: 'person', value: 'total' }, goal: 24 });
     assert.deepEqual(s.tiles.map(t => t.pct), [50, 33, 13]);
   });
 
   it('limit caps the tile count (a top-N board)', () => {
-    const s = Stats.build(leaderboard, { perRow: { label: 'person', value: 'total' }, limit: 2 });
+    const s = Stats.build(leaderboard, { rowTiles: { label: 'person', value: 'total' }, limit: 2 });
     assert.deepEqual(s.tiles.map(t => t.label), ['Ann', 'Bob']);
   });
 
   it('no rows means no tiles, not a crash', () => {
-    assert.deepEqual(Stats.build([], { perRow: { label: 'person', value: 'total' } }).tiles, []);
+    assert.deepEqual(Stats.build([], { rowTiles: { label: 'person', value: 'total' } }).tiles, []);
+  });
+});
+
+describe('stats.js — a goal each row carries', () => {
+  // Exactly the shape chore_cadence produces: one row per chore, the count done, and that chore's own
+  // monthly target resolved as a computed lookup off ref_chores.
+  const cadence = [
+    { chore: 'Take out bins', done: 3, target: 4 },
+    { chore: 'Change bedding', done: 1, target: 1 },
+    { chore: 'Hoover', done: 6, target: 4 }
+  ];
+  const opts = { rowTiles: { label: 'chore', value: 'done', goal: { column: 'target' } } };
+
+  it('measures each row against its OWN target, not one number for the view', () => {
+    const s = Stats.build(cadence, opts);
+    assert.deepEqual(s.tiles.map(t => t.goal), [4, 1, 4]);
+    assert.deepEqual(s.tiles.map(t => t.pct), [75, 100, 100]);
+  });
+
+  it('overshoot still clamps the bar and reports itself, as a fixed goal does', () => {
+    // Hoovered six times against a target of four: the bar cannot exceed its track, and `over` is what
+    // lets the renderer say "6 / 4" rather than pretend the target was met exactly.
+    const t = Stats.build(cadence, opts).tiles[2];
+    assert.equal(t.over, true);
+    assert.equal(t.pct, 100);
+  });
+
+  it('a row with no target gets no bar rather than a wrong one', () => {
+    // The honest reading: a chore nobody has set a cadence for has no bar to be short of. Blank and
+    // non-numeric both land here, which is what every other unusable goal already does.
+    const s = Stats.build([{ chore: 'Odd job', done: 2 }, { chore: 'Junk', done: 1, target: '' }], opts);
+    assert.deepEqual(s.tiles.map(t => t.goal), [null, null]);
+    assert.deepEqual(s.tiles.map(t => t.pct), [null, null]);
+    assert.deepEqual(s.tiles.map(t => t.value), [2, 1]);   // the number still shows
+  });
+
+  it('works as a view-level goal too, so one key covers every row', () => {
+    const s = Stats.build(cadence, { rowTiles: { label: 'chore', value: 'done' }, goal: { column: 'target' } });
+    assert.deepEqual(s.tiles.map(t => t.goal), [4, 1, 4]);
+  });
+
+  it('rowTiles.goal still wins over a view-level goal', () => {
+    const s = Stats.build(cadence, { rowTiles: { label: 'chore', value: 'done', goal: { column: 'target' } }, goal: 100 });
+    assert.deepEqual(s.tiles.map(t => t.goal), [4, 1, 4]);
   });
 });
 
@@ -205,7 +249,7 @@ describe('stats.js — tiered goals (bronze / silver / gold)', () => {
     // The difference from goal:"max" -- these bars answer "how close am I to the next level", not
     // "how do I compare to the leader", so two rows can have different scales.
     const s = Stats.build([{ who: 'Ann', total: 250 }, { who: 'Bob', total: 40 }],
-      { perRow: { label: 'who', value: 'total' }, goal: TIERS });
+      { rowTiles: { label: 'who', value: 'total' }, goal: TIERS });
     assert.deepEqual(s.tiles.map(t => t.goal), [300, 100]);
     assert.deepEqual(s.tiles.map(t => t.tier && t.tier.label), ['Silver', null]);
   });

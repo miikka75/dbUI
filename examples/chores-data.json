@@ -39,62 +39,74 @@
       {
         "id": "chore-dishes",
         "chore": "Wash up",
-        "points": 2
+        "points": 2,
+        "target_per_month": 30
       },
       {
         "id": "chore-dishwash",
         "chore": "Empty dishwasher",
-        "points": 1
+        "points": 1,
+        "target_per_month": 30
       },
       {
         "id": "chore-bins",
         "chore": "Take out bins",
-        "points": 1
+        "points": 1,
+        "target_per_month": 4
       },
       {
         "id": "chore-cook",
         "chore": "Cook dinner",
-        "points": 4
+        "points": 4,
+        "target_per_month": 20
       },
       {
         "id": "chore-bathroom",
         "chore": "Clean bathroom",
-        "points": 4
+        "points": 4,
+        "target_per_month": 4
       },
       {
         "id": "chore-hoover",
         "chore": "Hoover",
-        "points": 3
+        "points": 3,
+        "target_per_month": 4
       },
       {
         "id": "chore-dust",
         "chore": "Dust + tidy",
-        "points": 2
+        "points": 2,
+        "target_per_month": 4
       },
       {
         "id": "chore-beds",
         "chore": "Change bedding",
-        "points": 3
+        "points": 3,
+        "target_per_month": 1
       },
       {
         "id": "chore-laundry",
         "chore": "Laundry load",
-        "points": 2
+        "points": 2,
+        "target_per_month": 12
       },
       {
         "id": "chore-lawn",
         "chore": "Mow the lawn",
-        "points": 5
+        "points": 5,
+        "target_per_month": 2
       },
       {
         "id": "chore-plants",
         "chore": "Water plants",
-        "points": 1
+        "points": 1,
+        "target_per_month": 8
       },
       {
         "id": "chore-shopping",
         "chore": "Go shopping",
-        "points": 3
+        "points": 3,
+        "target_per_month": 4
       }
     ],
     "ref_duties": [

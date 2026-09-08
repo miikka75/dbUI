@@ -545,8 +545,8 @@ function validateSchema() {
     if (view.stats) {
       var st = view.stats;
       var stAggs = ['count', 'sum', 'avg', 'min', 'max', 'latest'];
-      if (st.perRow && st.tiles) errors.push('stats "' + v + '": use `perRow` OR `tiles`, not both');
-      else if (!st.perRow && !Array.isArray(st.tiles)) errors.push('stats "' + v + '" needs `tiles` (an array) or `perRow`');
+      if (st.rowTiles && st.tiles) errors.push('stats "' + v + '": use `rowTiles` OR `tiles`, not both');
+      else if (!st.rowTiles && !Array.isArray(st.tiles)) errors.push('stats "' + v + '" needs `tiles` (an array) or `rowTiles`');
       // A goal is either a number to measure against or the string "max" (scale to the largest tile).
       // Any other string is silently treated as "no goal" by the engine, so the bar the author asked
       // for simply never appears.
@@ -563,11 +563,21 @@ function validateSchema() {
           prev = at;
         });
       };
-      var stGoalOk = function(g, where) {
+      // `rowGoal` accepts a fourth shape, `{ column: <col> }` — a target read off the row, so one view
+      // can hold targets that differ per row. It is an OBJECT rather than a bare column name because a
+      // bare string is already spoken for: "max" is a literal, so `goal: "target"` could not be told
+      // apart from a misspelling of it. `hasRow` says whether a row exists to read: an explicit tile is
+      // an aggregate over many rows and has none, so the same object there would silently draw no bar.
+      var stGoalOk = function(g, where, hasRow) {
         if (g === undefined || g === null) return;
         if (g === 'max') return;
         if (Array.isArray(g)) { stTiersOk(g, where); return; }
-        if (typeof g !== 'number' || !(g > 0)) errors.push('stats "' + v + '" ' + where + ': `goal` must be a positive number, an ascending list of levels, or "max"');
+        if (typeof g === 'object') {
+          if (!hasRow) errors.push('stats "' + v + '" ' + where + ': `goal: { column }` reads a target off a row, so it needs `rowTiles` — an explicit tile aggregates many rows and has none');
+          else if (typeof g.column !== 'string' || !g.column) errors.push('stats "' + v + '" ' + where + ': `goal` object must be { "column": "<column name>" }');
+          return;
+        }
+        if (typeof g !== 'number' || !(g > 0)) errors.push('stats "' + v + '" ' + where + ': `goal` must be a positive number, an ascending list of levels, "max", or { "column": "<col>" }');
       };
       // A column name that resolves to nothing fails the same silent way a missing one does: the tile
       // reads every row's `undefined` and shows an em dash forever, which looks like "no data yet".
@@ -576,7 +586,7 @@ function validateSchema() {
       //
       // Skipped on an aggregate view, for exactly the reason the data-view column check above skips
       // one: its rows carry synthetic columns -- the group key, the aggregate outputs -- that no table
-      // declares, so there is nothing here to check them against. That is also the case perRow exists
+      // declares, so there is nothing here to check them against. That is also the case rowTiles exists
       // for, so in practice this catches the explicit-tiles mistakes and stays quiet on leaderboards.
       var stCol = function(col, where) {
         if (!col || view.groupBy) return;
@@ -584,12 +594,13 @@ function validateSchema() {
           errors.push('stats "' + v + '" ' + where + ': column "' + col + '" not found in sources [' + (view.sources || []).join(', ') + ']');
         }
       };
-      stGoalOk(st.goal, 'view');
-      if (st.perRow) {
-        if (!st.perRow.label || !st.perRow.value) errors.push('stats "' + v + '": `perRow` needs both `label` and `value` column names');
-        stCol(st.perRow.label, 'perRow.label');
-        stCol(st.perRow.value, 'perRow.value');
-        stGoalOk(st.perRow.goal, 'perRow');
+      stGoalOk(st.goal, 'view', !!st.rowTiles);
+      if (st.rowTiles) {
+        if (!st.rowTiles.label || !st.rowTiles.value) errors.push('stats "' + v + '": `rowTiles` needs both `label` and `value` column names');
+        stCol(st.rowTiles.label, 'rowTiles.label');
+        stCol(st.rowTiles.value, 'rowTiles.value');
+        stGoalOk(st.rowTiles.goal, 'rowTiles', true);
+        stCol(st.rowTiles.goal && st.rowTiles.goal.column, 'rowTiles.goal.column');
       }
       (st.tiles || []).forEach(function(t, ti) {
         var at = 'tile ' + ti;
@@ -600,7 +611,7 @@ function validateSchema() {
         // an em dash forever, which looks like "no data yet" rather than like a schema mistake.
         else if (ag !== 'count' && !t.column) errors.push('stats "' + v + '" ' + at + ': `' + ag + '` needs a `column`');
         stCol(t.column, at);
-        stGoalOk(t.goal, at);
+        stGoalOk(t.goal, at, false);
       });
     }
   }
