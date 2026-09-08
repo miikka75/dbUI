@@ -318,8 +318,8 @@ function createVueApp() {
       // no usable blob store — see publishFeed. Session-scoped on purpose: a reload re-tries.
       _blobStoreDown: false,
       _liveRebuildTimer: null,
-      pendingDelete: null,
-      pendingDeleteTimer: null,
+      pendingConfirm: null,
+      pendingConfirmTimer: null,
       currentRefTable: null,
       themeEdit: {},   // admin palette editor: pending {mode: {token: hex}} overrides (applied live, saved to schema.theme)
       schemaData: null,
@@ -893,7 +893,7 @@ function createVueApp() {
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
          'pivot.total', 'pivot.empty',
          'stats.empty',
-         'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.edit', 'board.archive', 'board.delete', 'board.confirm_delete',
+         'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.edit', 'board.archive', 'board.confirm_archive', 'board.delete', 'board.confirm_delete',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
@@ -2404,10 +2404,12 @@ function createVueApp() {
       },
       embedDeleteRow: function(type, name, item) {
         var key = 'erow:' + item.id;
-        if (this.pendingDelete !== key) { this.armDelete(key); return; }
+        if (this.pendingConfirm !== key) { this.armConfirm(key); return; }
         this._deleteFromSources(withMirrors(this.embedSources(type, name)), item.id);
       },
       embedArchiveRow: function(type, name, item) {
+        var key = 'earch:' + item.id;
+        if (this.pendingConfirm !== key) { this.armConfirm(key); return; }
         this._archiveInSources(withMirrors(this.embedSources(type, name)), item.id);
       },
       togglePageEdit: function() { this.pageEditing = !this.pageEditing; if (this.pageEditing) this.pageEditText = (this.currentPage && this.currentPage.markdown) || ''; },
@@ -3026,14 +3028,19 @@ function createVueApp() {
 
       deleteRow: function(item) {
         var key = 'row:' + item.id;
-        if (this.pendingDelete !== key) { this.armDelete(key); return; }
+        if (this.pendingConfirm !== key) { this.armConfirm(key); return; }
         var view = VIEWS[this.currentTable];
         var sources = withMirrors(view ? view.sources : [this.getSource(item)]);
         this._deleteFromSources(sources, item.id);
       },
 
-      // Archive / Restore
+      // Archive / Restore. Archive arms first, exactly as delete does — same single-slot pendingConfirm,
+      // keyed 'arch:<id>' so arming one disarms the other. The archive button sits next to delete in a
+      // dense row-action strip and its click makes the row vanish from the list; undoing a mis-click
+      // means finding the row again in the archived tab, which is more than a stray click should cost.
       archiveRow: function(item) {
+        var key = 'arch:' + item.id;
+        if (this.pendingConfirm !== key) { this.armConfirm(key); return; }
         var view = VIEWS[this.currentTable];
         var sources = withMirrors(view ? view.sources : [this.getSource(item)]);
         this._archiveInSources(sources, item.id);
@@ -3618,7 +3625,7 @@ function createVueApp() {
         if (!this.canEditCurrentRef) return;
         if (this.refParentLocked(parent)) { this.notify(this.t('msg.locked')); return; }
         var key = 'refp:' + parent;
-        if (this.pendingDelete !== key) { this.armDelete(key); return; }
+        if (this.pendingConfirm !== key) { this.armConfirm(key); return; }
         var self = this;
         var table = self.currentRefTable;
         var parentCol = self.refParentCol;
@@ -3633,7 +3640,7 @@ function createVueApp() {
             Writes.deleteRow(table, row.id, 'active');
           });
         });
-        self.pendingDelete = null;
+        self.pendingConfirm = null;
         self.notify(self.t('msg.deleted'));
       },
       addRefParent: function() {
@@ -3784,7 +3791,7 @@ function createVueApp() {
         if (!this.canEditCurrentRef) return;
         if (this.isLockedRefRow(item)) { this.notify(this.t('msg.locked')); return; }
         var key = 'ref:' + item.id;
-        if (this.pendingDelete !== key) { this.armDelete(key); return; }
+        if (this.pendingConfirm !== key) { this.armConfirm(key); return; }
         var table = this.currentRefTable;
         var gone = (this.dataCache[table] || []).find(function(r) { return r.id === item.id; });
         this.dataCache[table] = (this.dataCache[table] || []).filter(function(r) { return r.id !== item.id; });
@@ -3863,7 +3870,7 @@ function createVueApp() {
       },
       deleteLang: function(lang) {
         var key = 'lang:' + lang.code;
-        if (this.pendingDelete !== key) { this.armDelete(key); return; }  // arm-then-confirm (double click)
+        if (this.pendingConfirm !== key) { this.armConfirm(key); return; }  // arm-then-confirm (double click)
         var self = this;
         backend.deleteLanguage(lang.code).then(function() {
           self.languages = self.languages.filter(function(l) { return l.code !== lang.code; });
@@ -3948,8 +3955,8 @@ function createVueApp() {
       removeListItem2: function(name, i) {
         if (!this.canEditList(name)) return;
         var key = 'list_' + name + '_' + i;
-        if (this.pendingDelete !== key) { this.armDelete(key); return; }
-        this.pendingDelete = null;
+        if (this.pendingConfirm !== key) { this.armConfirm(key); return; }
+        this.pendingConfirm = null;
         var oldVal = this.listsCache[name][i];
         this.listsCache[name].splice(i, 1);
         this.saveLists();
@@ -5723,14 +5730,14 @@ function createVueApp() {
           if (!quiet) self.notify(self.t('msg.archived'));   // the auto sweep files rows silently
         });
       },
-      armDelete: function(key) {
+      armConfirm: function(key) {
         var self = this;
-        self.pendingDelete = key;
-        clearTimeout(self.pendingDeleteTimer);
-        self.pendingDeleteTimer = setTimeout(function() { self.pendingDelete = null; }, 3000);
+        self.pendingConfirm = key;
+        clearTimeout(self.pendingConfirmTimer);
+        self.pendingConfirmTimer = setTimeout(function() { self.pendingConfirm = null; }, 3000);
       },
 
-      isArmed: function(key) { return this.pendingDelete === key; },
+      isArmed: function(key) { return this.pendingConfirm === key; },
 
       // Per-database favicon + apple-touch-icon from schema.icons (absolute URLs, may be cross-origin).
       // Missing fields keep the bundled static defaults declared in index.html, so switching databases
@@ -6233,7 +6240,8 @@ function createVueApp() {
       // is the same split the primary grid makes.
       colHidden: function(col, item) { return !!appInstance && appInstance.isColumnHidden(col, item, this.colCfg); },
       colsFor: function(item) { var self = this; return this.cols.filter(function(c) { return !self.colHidden(c, item); }); },
-      isArmed: function(item) { return appInstance.isArmed('erow:' + item.id); },
+      isDelArmed: function(item) { return appInstance.isArmed('erow:' + item.id); },
+      isArchArmed: function(item) { return appInstance.isArmed('earch:' + item.id); },
       partLabel: function(archive) { return appInstance.embedPartLabel(this.type, this.name, archive ? 'archive' : 'active'); },
       // Per-row control gate. On a self-service embed `canMutate` only means "the Add button is open";
       // whether THIS row may be archived/deleted is ownership + state, exactly as in the primary grid.
@@ -6300,20 +6308,20 @@ function createVueApp() {
       + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
       + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
       + '<template v-slot:default><span v-for="(col, i) in colsFor(item)" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]" :view-cfg="obscureCfg"></list-value><span v-if="i < colsFor(item).length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
-      + '<template v-slot:append><template v-if="canMutateRow(item)"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></template></template>'
+      + '<template v-slot:append><template v-if="canMutateRow(item)"><v-btn v-if="hasArchive" :icon="isArchArmed(item) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" :color="isArchArmed(item) ? \'warning\' : \'\'" @click="archRow(item)"></v-btn><v-btn :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isDelArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></template></template>'
       + '</v-list-item></v-list>'
       + '<div v-else-if="layout===\'card\'" class="my-2">'
       + '<v-card v-for="(item, ri) in rows" :key="item.id || ri" variant="flat" class="ma-2 pa-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">'
       + '<div v-for="col in colsFor(item)" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8"><list-value :col="col" :value="item[col]" :view-cfg="obscureCfg"></list-value></span></div>'
-      + '<div v-if="canMutateRow(item)" style="text-align:right"><v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn><v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></div>'
+      + '<div v-if="canMutateRow(item)" style="text-align:right"><v-btn v-if="hasArchive" :icon="isArchArmed(item) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" :color="isArchArmed(item) ? \'warning\' : \'\'" @click="archRow(item)"></v-btn><v-btn :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isDelArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></div>'
       + '</v-card></div>'
       + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
       + '<thead><tr><th v-for="c in cols" :key="c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
       + '<tbody><tr v-for="(item, ri) in rows" :key="item.id || ri"><td v-for="col in cols" :key="col">'
       + '<data-cell v-if="!colHidden(col, item)" :item="item" :col="col" :owner="name" :readonly="!!effPart" :embed="true"></data-cell>'
       + '</td><td v-if="canMutate" style="white-space:nowrap"><template v-if="canMutateRow(item)">'
-      + '<v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archRow(item)"></v-btn>'
-      + '<v-btn :icon="isArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn>'
+      + '<v-btn v-if="hasArchive" :icon="isArchArmed(item) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" :color="isArchArmed(item) ? \'warning\' : \'\'" @click="archRow(item)"></v-btn>'
+      + '<v-btn :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isDelArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn>'
       + '</template></td></tr></tbody>'
       + '</template></v-table>'
       + '<v-btn v-if="canMutate" variant="text" size="small" prepend-icon="mdi-plus" @click="addRow">{{ t(\'btn.add\') || \'Add\' }}</v-btn>'
@@ -6604,7 +6612,7 @@ function createVueApp() {
       + '<template v-slot:append>'
       + '<v-btn v-if="canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>'
       + '<template v-if="canMutateRows">'
-      + '<v-btn v-if="hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" @click="archiveRow(item)"></v-btn>'
+      + '<v-btn v-if="hasArchive" :icon="isArmed(\'arch:\'+item.id) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" :color="isArmed(\'arch:\'+item.id) ? \'warning\' : \'\'" @click="archiveRow(item)"></v-btn>'
       + '<v-btn :icon="isArmed(\'row:\'+item.id) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(\'row:\'+item.id) ? \'error\' : \'\'" @click="deleteRow(item)"></v-btn>'
       + '</template>'
       + '</template>'
@@ -7389,9 +7397,10 @@ function createVueApp() {
       laneMenuItems: function() { var self = this; return this.laneOrder.map(function(k) { return { value: k, title: self.laneLabel(k) }; }); },
       addInLane: function(laneKey) { appInstance.boardAddInLane(this.viewName, laneKey); },
       // Per-card row controls (mirror the grid's row-append buttons): archive files the card to the archive
-      // partition (reversible via restore); delete uses the app's armed-confirm (keyed row:<id>) — first click
-      // arms for 3s and swaps the icon, the second removes the row.
+      // partition (reversible via restore), delete removes it. Both go through the app's armed-confirm
+      // (keyed arch:<id> / row:<id>) — first click arms for 3s and swaps the icon, the second acts.
       archItem: function(item) { if (this.canEditCard(item)) appInstance.archiveRow(item); },
+      isArchArmed: function(item) { return appInstance.isArmed('arch:' + item.id); },
       isDelArmed: function(item) { return appInstance.isArmed('row:' + item.id); },
       delItem: function(item) { if (this.canEditCard(item)) appInstance.deleteRow(item); },
       // Inline card editing: a pencil flips one card into edit mode, where every field except the lane
@@ -7438,7 +7447,7 @@ function createVueApp() {
       + '        <div style="display:flex;align-items:flex-start;gap:4px">'
       + '          <div style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
       + '          <v-btn v-if="canEditCard(item)" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="t(\'board.edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
-      + '          <v-btn v-if="canEditCard(item) && hasArchive" icon="mdi-archive-outline" size="x-small" variant="text" density="comfortable" :title="t(\'board.archive\')" @click="archItem(item)" :data-testid="\'board-arch-\'+item.id"></v-btn>'
+      + '          <v-btn v-if="canEditCard(item) && hasArchive" :icon="isArchArmed(item) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" density="comfortable" :color="isArchArmed(item) ? \'warning\' : undefined" :title="isArchArmed(item) ? t(\'board.confirm_archive\') : t(\'board.archive\')" @click="archItem(item)" :data-testid="\'board-arch-\'+item.id"></v-btn>'
       + '          <v-btn v-if="canEditCard(item)" :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" density="comfortable" :color="isDelArmed(item) ? \'error\' : undefined" :title="isDelArmed(item) ? t(\'board.confirm_delete\') : t(\'board.delete\')" @click="delItem(item)" :data-testid="\'board-del-\'+item.id"></v-btn>'
       + '          <v-menu v-if="canEditCard(item) && canMoveCards" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
       + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :title="t(\'board.move_to\')" :data-testid="\'board-move-\'+item.id"></v-btn></template>'

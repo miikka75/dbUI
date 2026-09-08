@@ -26,6 +26,14 @@ async function viewReady(page, name) {
   }, name || null, { timeout: 8000 });
 }
 
+// Archiving a row arms first, exactly as deleting one does: the first click swaps the icon to a
+// confirm tick, the second files the row. `scope` prefixes the locator where a page shows more than
+// one row-action strip.
+async function archiveFirstRow(page, scope = '') {
+  await page.locator(scope + 'button:has(.mdi-archive-outline)').first().click();
+  await page.locator(scope + 'button:has(.mdi-check-circle)').first().click();
+}
+
 // Reset DB, seed the schema (server no longer auto-loads schema.json), and wait for the app.
 // Opens the 'notes' table tab by default — it's the addable master table (first sidebar
 // tab is a read-only join view; 'tasks' is a detail synced from 'notes' so has no add button).
@@ -125,7 +133,7 @@ test.describe('Archive / Restore', () => {
     const rowsBefore = await rows(page).count();
     await page.locator('button:has(.mdi-plus)').click();
     await expect(rows(page)).toHaveCount(rowsBefore + 1);
-    await page.locator('button:has(.mdi-archive-outline)').first().click();
+    await archiveFirstRow(page);
     await expect(rows(page)).toHaveCount(rowsBefore);
     // Switch to archived view
     await page.locator('.v-tab:nth-child(2)').click();
@@ -140,7 +148,7 @@ test.describe('Archive / Restore', () => {
     await page.locator('button:has(.mdi-plus)').click();
     await expect(rows(page)).toHaveCount(before + 1);
     const activeBefore = before + 1;
-    await page.locator('button:has(.mdi-archive-outline)').first().click();
+    await archiveFirstRow(page);
     await expect(rows(page)).toHaveCount(activeBefore - 1);
     // Go to archived, restore
     await page.locator('.v-tab:nth-child(2)').click();
@@ -941,7 +949,7 @@ test.describe('Multi-table lifecycle (join view UI)', () => {
     expect(notes.rows[0].id).toBe(id);
 
     // ARCHIVE -> both sources move to archive
-    await page.locator('button:has(.mdi-archive-outline)').first().click();
+    await archiveFirstRow(page);
     await expect.poll(() => has(page, 'tasks', 'archive', id)).toBe(true);
     expect(await has(page, 'notes', 'archive', id)).toBe(true);
     expect(await has(page, 'tasks', 'active', id)).toBe(false);
@@ -1005,7 +1013,7 @@ test.describe('Archivable flag', () => {
     // ADD + ARCHIVE
     await page.locator('button:has(.mdi-plus)').click();
     await expect(page.locator('.v-table tbody tr')).toHaveCount(1);
-    await page.locator('button:has(.mdi-archive-outline)').first().click();
+    await archiveFirstRow(page);
 
     // Stored under the fixed 'archive' partition. Polled rather than slept for: the click is a write
     // that has to reach the server before this read can see it, and how long that takes is not 600ms,
@@ -1069,7 +1077,7 @@ test.describe('Archive from a view whose source has a mirror table not in source
     const id = (await get(page, 'meetings', 'active')).rows[0].id;
 
     // ARCHIVE from the view -> BOTH meetings AND the mirror 'music' move to archive
-    await page.locator('button:has(.mdi-archive-outline)').first().click();
+    await archiveFirstRow(page);
     await expect.poll(async () => (await get(page, 'meetings', 'active')).rows.length).toBe(0);
     expect((await get(page, 'music', 'active')).rows.length).toBe(0);
     expect((await get(page, 'meetings', 'archive')).rows.some(r => r.id === id)).toBe(true);
@@ -1105,7 +1113,7 @@ test.describe('Archive from a view whose source has a mirror table not in source
     await page.waitForSelector('button:has(.mdi-archive-outline)', { timeout: 6000 });
     expect(await page.evaluate(() => appInstance.dataCache.music)).toBeUndefined();
 
-    await page.locator('button:has(.mdi-archive-outline)').first().click();
+    await archiveFirstRow(page);
     await expect.poll(async () => (await get(page, 'meetings', 'archive')).rows.some(r => r.id === id)).toBe(true);
     // The half that used to be left behind.
     await expect.poll(async () => (await get(page, 'music', 'archive')).rows.some(r => r.id === id)).toBe(true);
@@ -1139,7 +1147,7 @@ test.describe('Archive from a view whose source has a mirror table not in source
     const id = (await get(page, 'meetings', 'active')).rows[0].id;
 
     // ARCHIVE from the master view -> the mirror 'music' detail row rides along to archive
-    await page.locator('button:has(.mdi-archive-outline)').first().click();
+    await archiveFirstRow(page);
     await expect.poll(async () => (await get(page, 'music', 'active')).rows.length).toBe(0);
     expect((await get(page, 'meetings', 'active')).rows.length).toBe(0);
     expect((await get(page, 'meetings', 'archive')).rows.some(r => r.id === id)).toBe(true);
@@ -1999,7 +2007,7 @@ test.describe('v3 embed row controls', () => {
     await page.locator('.v-main button:has(.mdi-plus)').first().click();
     await expect.poll(() => count(page, 'active')).toBe(1);
     // ARCHIVE via embed
-    await page.locator('.v-main button:has(.mdi-archive-outline)').first().click();
+    await archiveFirstRow(page, '.v-main ');
     await expect.poll(() => count(page, 'active')).toBe(0);
     expect(await count(page, 'archive')).toBe(1);
   });
