@@ -216,11 +216,27 @@ today: `filter` runs on source rows, `groupBy.filter` tests a synthetic row buil
 predicate over the aggregated row — SQL's `HAVING`, as `groupBy.having` — is a genuine gap and worth
 recording as its own, but it is a different feature and must not be built as this one's excuse.
 
-**Still open: where the zeros sort.** `aggregateRows` ranks highest-total first, so every seeded zero
-lands at the bottom — right for a leaderboard, exactly backwards for a reminder, where the chore at
-0/1 is the one the page was opened for. Complicated slightly by the two paths already differing: a
-top-level stats view renders `currentData` unsorted, while the embedded one goes through `sortByCol`.
-This is the one part still to settle, and it is a sort, not an architecture.
+**Where the zeros sort: `stats.js`, over `pct` — NOT `defaultSort`.** `aggregateRows` ranks
+highest-total first, so every seeded zero lands at the bottom: right for a leaderboard, exactly
+backwards for a reminder, where the chore at 0/1 is the one the page was opened for.
+
+The schema's existing sort vocabulary cannot express the fix, and it is worth writing down why, because
+`defaultSort: "done"` looks like it would. It sorts ascending on one named column, which puts the zeros
+first and then gets the rest wrong: raw count is a poor proxy for *behind*. Cook dinner at 1/20 is 5%
+and would sort AHEAD of Hoover at 2/4, on nothing but 1 < 2. The order a reminder wants is by
+completion ratio, and no column holds one — `pct` is computed inside `stats.js` after the goal
+resolves, and `computed` has no arithmetic to manufacture it (the kinds are `lookup`, `fromColumns`,
+`daysSince`, `occurrenceSource`).
+
+So this belongs to the renderer, as a key on `rowTiles` (`order: "behind"` or similar), sorting the
+built tiles. That placement has the property worth having: `defaultSort` cannot reach `pct` by
+construction, so the two orderings cannot disagree about the same view — which is the failure mode
+`sortRosterRows` was consolidated to end (#180, four inline copies of one order).
+
+One inconsistency to fix or to know about first: a top-level stats view renders `currentData` straight
+out of `aggregateRows`, while the embedded one goes through `sortByCol` (`embeds.js`). Today that is
+invisible, since `sortByCol` returns rows untouched when no column is named — but any view that sets
+`defaultSort` orders differently depending on where it is rendered.
 
 A seeded row is `{ id: key, <keyCol>: key, <into>: 0 }`. Zero is honest for `count` and `sum`, where
 "nothing" genuinely is zero; it would be a lie for the `avg`/`min` below, which is a reason to land
