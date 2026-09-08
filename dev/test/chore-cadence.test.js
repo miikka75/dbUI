@@ -68,6 +68,17 @@ describe('chore_cadence — the shipped per-row goal', () => {
     assert.equal(byChore['Wash up'].pct, 7);            // twice out of thirty: barely started
   });
 
+  it('reads worst-first, which is what makes it a reminder rather than a scoreboard', () => {
+    // The view declares order: "behind". Without it the tiles arrive ranked by raw count, where the
+    // chore done twice leads the chore done once -- true, and useless, when the two are on different
+    // cadences. Asserted as a monotonic ratio rather than a fixed list of chores so that editing the
+    // seed data does not falsely fail this.
+    const ratios = tiles.filter((t) => t.goal !== null).map((t) => t.value / t.goal);
+    assert.deepEqual(ratios, ratios.slice().sort((a, b) => a - b), tiles.map((t) => t.label).join(' < '));
+    assert.ok(byChore['Empty dishwasher'].pct < byChore['Change bedding'].pct);
+    assert.equal(tiles[0].label, 'Empty dishwasher');   // 1 of 30: the least kept-up chore on the page
+  });
+
   it('a chore nobody logged is absent, not a zero bar', () => {
     // Documented in ROADMAP.md as the half this feature does NOT fix: `aggregateRows` builds its groups
     // from the rows it is handed, so a chore with no approved log rows has no group and no tile — and

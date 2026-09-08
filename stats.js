@@ -22,7 +22,9 @@
 //             names which column is the caption and which the number, so an existing leaderboard
 //             (person -> total) renders as a column of bars with no new data plumbing at all.
 //             `goal: { column: <col> }` reads the target off the ROW too, which is what lets one view
-//             hold targets that differ per row (bedding monthly, bins weekly).
+//             hold targets that differ per row (bedding monthly, bins weekly), and
+//             `order: "behind"` ranks by how much of its own goal each row has reached rather than by
+//             raw value -- "what is neglected" instead of "who is winning".
 //
 // `goal` sets the bar's 100% mark. A number is an absolute target ("120 sign-ins"). The string "max"
 // means "the largest value among these tiles", which is what a leaderboard wants — the leader's bar is
@@ -110,6 +112,19 @@
     return num(row[g.column]);
   }
 
+  // How much of its OWN goal a tile has reached, as a fraction. The sort key for `order: "behind"`,
+  // and null for a tile there is no answer for -- no goal, or a value that is not a number.
+  //
+  // The RATIO, not the shortfall (`goal - value`). Shortfall is dominated by whichever row has the
+  // biggest goal -- wash-up 28 short outranks bedding 1 short every time, however complete the
+  // bedding is -- which puts every row back on one scale, the exact thing a per-row goal exists to
+  // escape. It is also computed from value/goal rather than read off `pct`, which is rounded for
+  // display: 1/20 and 1/19 are both "5%" on screen and must not become a tie in the order.
+  function reached(t) {
+    if (t.goal === null || typeof t.value !== 'number') return null;
+    return t.value / t.goal;
+  }
+
   // -> { goal, tier } : the rung being worked toward, and the highest rung actually reached (or null).
   // Past the top rung the goal STAYS there, so the bar reads full and `over` carries the overshoot —
   // the same contract a plain numeric goal has.
@@ -131,8 +146,7 @@
 
     if (opts.rowTiles) {
       var rt = opts.rowTiles;
-      var list = opts.limit ? rows.slice(0, opts.limit) : rows;
-      list.forEach(function(r) {
+      rows.forEach(function(r) {
         out.push({
           label: r[rt.label] == null ? '' : r[rt.label],
           labelCol: rt.label,                      // so the renderer can run it through displayValue
@@ -188,6 +202,25 @@
       t.over = pct > 100;
       t.pct = Math.max(0, Math.min(100, Math.round(pct)));
     });
+
+    // `behind` answers "what is neglected", against the default's "who is winning". A tile with no
+    // goal has no answer and sorts LAST rather than first, which is the rule sortRosterRows settled
+    // for a missing `position` -- absent means no opinion, not zero. Array.sort is stable, so tiles
+    // that tie (0/1 and 0/30 are both nothing done) keep the ranking they arrived in, and there is no
+    // second-order rule to invent.
+    if (opts.rowTiles && opts.rowTiles.order === 'behind') {
+      out.sort(function(a, b) {
+        var x = reached(a), y = reached(b);
+        if (x === null) return y === null ? 0 : 1;
+        if (y === null) return -1;
+        return x - y;
+      });
+    }
+    // Applied LAST, so `limit` means "the first N in the order asked for" rather than "the first N
+    // aggregateRows happened to hand over". Nothing changes for the default order -- the rows arrive
+    // ranked, so ordering them by rank is a no-op and the top-ranked tile is the `max` peak either
+    // way -- but "the five most neglected" is inexpressible if the slice happens first.
+    if (opts.rowTiles && opts.limit) out = out.slice(0, opts.limit);
 
     return { tiles: out };
   }

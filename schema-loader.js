@@ -600,6 +600,17 @@ function validateSchema() {
         stCol(st.rowTiles.label, 'rowTiles.label');
         stCol(st.rowTiles.value, 'rowTiles.value');
         stGoalOk(st.rowTiles.goal, 'rowTiles', true);
+        // An unknown `order` is silently the default, so a typo leaves a board that looks configured
+        // and reads in the wrong order -- and the two orders answer different questions, so nobody
+        // checks a bar chart against the one they did not ask for.
+        if (st.rowTiles.order != null && ['rank', 'behind'].indexOf(st.rowTiles.order) < 0) {
+          errors.push('stats "' + v + '": `rowTiles.order` is "' + st.rowTiles.order + '" — use "rank" (highest first, the default) or "behind" (least of its own goal first)');
+        }
+        // `behind` measures each tile against its goal, so without one every tile is unanswerable and
+        // the order it asks for cannot exist. Silent otherwise: the goal may be a view-level default.
+        if (st.rowTiles.order === 'behind' && st.rowTiles.goal === undefined && st.goal === undefined) {
+          errors.push('stats "' + v + '": `rowTiles.order: "behind"` needs a `goal` to be behind — every tile would be unmeasured and the order would be the one it arrived in');
+        }
         stCol(st.rowTiles.goal && st.rowTiles.goal.column, 'rowTiles.goal.column');
       }
       (st.tiles || []).forEach(function(t, ti) {

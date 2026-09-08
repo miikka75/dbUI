@@ -216,27 +216,11 @@ today: `filter` runs on source rows, `groupBy.filter` tests a synthetic row buil
 predicate over the aggregated row — SQL's `HAVING`, as `groupBy.having` — is a genuine gap and worth
 recording as its own, but it is a different feature and must not be built as this one's excuse.
 
-**Where the zeros sort: `stats.js`, over `pct` — NOT `defaultSort`.** `aggregateRows` ranks
-highest-total first, so every seeded zero lands at the bottom: right for a leaderboard, exactly
-backwards for a reminder, where the chore at 0/1 is the one the page was opened for.
-
-The schema's existing sort vocabulary cannot express the fix, and it is worth writing down why, because
-`defaultSort: "done"` looks like it would. It sorts ascending on one named column, which puts the zeros
-first and then gets the rest wrong: raw count is a poor proxy for *behind*. Cook dinner at 1/20 is 5%
-and would sort AHEAD of Hoover at 2/4, on nothing but 1 < 2. The order a reminder wants is by
-completion ratio, and no column holds one — `pct` is computed inside `stats.js` after the goal
-resolves, and `computed` has no arithmetic to manufacture it (the kinds are `lookup`, `fromColumns`,
-`daysSince`, `occurrenceSource`).
-
-So this belongs to the renderer, as a key on `rowTiles` (`order: "behind"` or similar), sorting the
-built tiles. That placement has the property worth having: `defaultSort` cannot reach `pct` by
-construction, so the two orderings cannot disagree about the same view — which is the failure mode
-`sortRosterRows` was consolidated to end (#180, four inline copies of one order).
-
-One inconsistency to fix or to know about first: a top-level stats view renders `currentData` straight
-out of `aggregateRows`, while the embedded one goes through `sortByCol` (`embeds.js`). Today that is
-invisible, since `sortByCol` returns rows untouched when no column is named — but any view that sets
-`defaultSort` orders differently depending on where it is rendered.
+**Where the zeros sort is settled and shipped** — `rowTiles: { order: "behind" }`, below. It landed
+BEFORE seeding on purpose: it needed no empty groups to be useful (`chore_cadence` had nine real
+tiles and the wrong order), so it could be proven against data that already existed rather than
+arriving as the second unproven behaviour in one change. The zeros now have an order waiting for them:
+nothing done is a ratio of 0 and sorts first, which is the whole point of seeding them.
 
 A seeded row is `{ id: key, <keyCol>: key, <into>: 0 }`. Zero is honest for `count` and `sum`, where
 "nothing" genuinely is zero; it would be a lie for the `avg`/`min` below, which is a reason to land
@@ -851,6 +835,17 @@ stops working offline. Everything above it stays inside the app boundary.
 
 Recorded so the roadmap shows what graduated rather than silently shrinking.
 
+- **`order: "behind"`** — a `rowTiles` board sorted by how much of its OWN goal each tile reached,
+  against the default ranking's "who is winning". The reason it is a `stats` key and not a
+  `defaultSort` is that the number it sorts on does not exist as a column: `pct` is computed after the
+  goal resolves, and `computed` has no arithmetic to build one. That turned out to be the feature
+  rather than the obstacle — `defaultSort` cannot reach it, so the two orderings cannot disagree about
+  one view, which is what #180 spent four inline copies of a roster order learning. Two decisions
+  worth keeping: it sorts on the RATIO, since a shortfall (`goal - value`) is dominated by whichever
+  row carries the biggest goal and puts every row back on one scale; and a tile with no goal sorts
+  LAST, because absent means unmeasured rather than zero — the same rule a missing `position` follows.
+  `limit` moved to the end of the pipeline so it means "the first N of the order asked for", which
+  changed nothing for the default order and made "the five most neglected" expressible at all.
 - **A goal each row carries** — `goal: { "column": "<col>" }` on `rowTiles`, plus the shipped
   `chore_cadence` view reading `ref_chores.target_per_month`. One view now holds "bedding once a
   month" beside "wash up daily", which no single `goal` could express. The proposal argued for a
@@ -930,9 +925,9 @@ function on Firebase. Those belong to whoever owns the deployment, so the entry 
 instead of being ranked against features.
 
 Empty groups sits outside that line: it extends a shipped kind rather than adding one, so it competes
-for attention with nothing. It is also the half of per-row goals that was left behind — the shipped
-half is honest but partial, and this is what turns a scoreboard into a reminder. Take it whenever a
-schema wants it, and settle the seeding key first.
+for attention with nothing. It is also the last half of per-row goals — the targets ship, the order
+ships, and what is still missing is the rows that were never there to sort. Its decisions are made and
+written down; what remains is the writing.
 
 The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
 schema today.

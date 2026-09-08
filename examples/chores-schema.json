@@ -486,7 +486,8 @@
           "value": "done",
           "goal": {
             "column": "target"
-          }
+          },
+          "order": "behind"
         }
       }
     },
