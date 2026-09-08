@@ -1507,10 +1507,10 @@ The two are mutually exclusive; declaring both is a load-time error.
 | Key | Meaning |
 |-----|---------|
 | `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals }` |
-| `rowTiles` | `{ label, value, goal? }` — one tile per row instead |
+| `rowTiles` | `{ label, value, goal?, order? }` — one tile per row instead |
 | `goal` | Default bar target for every tile: a positive number, `"max"` (scale to the largest tile), a **ladder** of levels (below), or `{ "column": "<col>" }` to read the target off each row (`rowTiles` only). No goal = no bar, just a number |
 | `display` | `"bar"` (default) or `"number"`. Per-tile, or view-wide as a default |
-| `limit` | `rowTiles` only: cap the tile count (a top-N board) |
+| `limit` | `rowTiles` only: cap the tile count. Applied after `order`, so it is the first N of the order asked for |
 
 **Aggregates**: `count` (needs no `column`), `sum`, `avg`, `min`, `max`, `latest`. Everything but
 `count` requires a `column`, and says so at load rather than showing an em dash forever.
@@ -1545,6 +1545,31 @@ row. The shipped `chore_cadence` view is exactly this, reading `ref_chores.targe
 - **A group with no rows produces no tile at all.** `aggregateRows` builds its groups from the rows it
   is given, so a chore nobody logged is absent rather than an empty bar — which is the one it would be
   most useful to see. Tracked in ROADMAP.md.
+
+### Which end of the board is the point (`order`)
+
+`rowTiles` arrives ranked highest-first, because an aggregate view returns a ranking. That answers
+*who is winning*. `order: "behind"` answers the other question — *what is neglected* — by sorting on
+how much of its **own** goal each tile reached:
+
+```json
+"rowTiles": { "label": "chore", "value": "done", "goal": { "column": "target" }, "order": "behind" }
+```
+
+| Value | Order |
+|-------|-------|
+| `"rank"` | Highest value first (the default; what an aggregate view already produces) |
+| `"behind"` | Least of its own goal first. Needs a `goal`, and says so at load |
+
+- **It is the ratio, not the shortfall.** `goal - value` is dominated by whichever row has the biggest
+  goal — wash-up 28 short beats bedding 1 short however complete the bedding is — which puts every row
+  back on one scale, the thing a per-row goal exists to escape.
+- **A tile with no goal sorts last.** Absent means unmeasured, not zero; floating it to the top would
+  read as the most neglected thing on the page. Same rule a missing `position` follows in a roster.
+- **Ties keep the order they arrived in**, so the incoming ranking breaks them and there is no second
+  rule to disagree with.
+- It sorts the built tiles, so it applies identically top-level and embedded — unlike `defaultSort`,
+  which the top-level stats path does not consult.
 
 ### Tiered goals (bronze / silver / gold)
 

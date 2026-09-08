@@ -177,6 +177,55 @@ describe('stats.js — a goal each row carries', () => {
     assert.deepEqual(s.tiles.map(t => t.goal), [4, 1, 4]);
   });
 
+  it('order: "behind" ranks by how much of its OWN goal each row reached', () => {
+    // The contrast with the default: by raw value Hoover (6) leads and Change bedding (1) trails, but
+    // bedding has met its month and Hoover has not been asked for six. Only the ratio can say that.
+    const s = Stats.build(cadence.concat([{ chore: 'Wash up', done: 2, target: 30 }]),
+      { rowTiles: { label: 'chore', value: 'done', goal: { column: 'target' }, order: 'behind' } });
+    assert.deepEqual(s.tiles.map((t) => t.label), ['Wash up', 'Take out bins', 'Change bedding', 'Hoover']);
+  });
+
+  it('the shortfall reading is NOT what it does', () => {
+    // goal - value would put "60 short of 100" ahead of "1 short of 1", however complete the second
+    // is. That is every row back on one scale, which is what a per-row goal exists to escape.
+    const s = Stats.build([{ n: 'big', v: 40, g: 100 }, { n: 'small', v: 0, g: 1 }],
+      { rowTiles: { label: 'n', value: 'v', goal: { column: 'g' }, order: 'behind' } });
+    assert.deepEqual(s.tiles.map((t) => t.label), ['small', 'big']);
+  });
+
+  it('a tile with no goal sorts last, not first', () => {
+    // sortRosterRows' rule: absent means no opinion, not zero. A goal-less tile floated to the top
+    // would read as the most neglected thing on the page while being the one nobody measured.
+    const s = Stats.build([{ n: 'unmeasured', v: 0 }, { n: 'behind', v: 1, g: 10 }],
+      { rowTiles: { label: 'n', value: 'v', goal: { column: 'g' }, order: 'behind' } });
+    assert.deepEqual(s.tiles.map((t) => t.label), ['behind', 'unmeasured']);
+  });
+
+  it('ties keep the ranking they arrived in', () => {
+    // 0/1 and 0/30 are both nothing done. A stable sort means the incoming rank breaks it, so there
+    // is no second rule to write down or to disagree with later.
+    const s = Stats.build([{ n: 'first', v: 0, g: 1 }, { n: 'second', v: 0, g: 30 }],
+      { rowTiles: { label: 'n', value: 'v', goal: { column: 'g' }, order: 'behind' } });
+    assert.deepEqual(s.tiles.map((t) => t.label), ['first', 'second']);
+  });
+
+  it('display rounding does not create ties the order has to break', () => {
+    // Both render "5%". Sorting on the rounded pct would call them equal; the ratio does not.
+    const s = Stats.build([{ n: 'a', v: 1, g: 19 }, { n: 'b', v: 1, g: 20 }],
+      { rowTiles: { label: 'n', value: 'v', goal: { column: 'g' }, order: 'behind' } });
+    assert.deepEqual(s.tiles.map((t) => t.pct), [5, 5]);
+    assert.deepEqual(s.tiles.map((t) => t.label), ['b', 'a']);
+  });
+
+  it('limit takes the first N of the order asked for, not of the order handed over', () => {
+    const rows = [{ n: 'lead', v: 9, g: 10 }, { n: 'mid', v: 5, g: 10 }, { n: 'worst', v: 1, g: 10 }];
+    assert.deepEqual(Stats.build(rows, { limit: 2, rowTiles: { label: 'n', value: 'v', goal: { column: 'g' }, order: 'behind' } })
+      .tiles.map((t) => t.label), ['worst', 'mid']);
+    // ...and the default order still means what it always did: the top N as they arrived.
+    assert.deepEqual(Stats.build(rows, { limit: 2, rowTiles: { label: 'n', value: 'v', goal: { column: 'g' } } })
+      .tiles.map((t) => t.label), ['lead', 'mid']);
+  });
+
   it('rowTiles.goal still wins over a view-level goal', () => {
     const s = Stats.build(cadence, { rowTiles: { label: 'chore', value: 'done', goal: { column: 'target' } }, goal: 100 });
     assert.deepEqual(s.tiles.map(t => t.goal), [4, 1, 4]);

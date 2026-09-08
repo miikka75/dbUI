@@ -3065,12 +3065,27 @@ test.describe('v3 @both partition toggle in an embed', () => {
         stats: { rowTiles: { label: 'status', value: 'howMany', goal: {} } } });
       const bad = errs().filter((e) => e.indexOf('g_tile') >= 0 || e.indexOf('g_empty') >= 0).join(' | ');
 
-      ['g_ok', 'g_view', 'g_tile', 'g_empty'].forEach((n) => delete window.VIEWS[n]);
-      return { quiet, bad };
+      // `order` is the same class of silent mistake: an unknown value falls back to the default, so a
+      // typo leaves a board reading in the order nobody asked for, and `behind` without a goal has
+      // nothing to be behind -- it would quietly keep the ranking it arrived in.
+      window.VIEWS.g_order = Object.assign({ name: 'g_order' }, agg, {
+        stats: { rowTiles: { label: 'status', value: 'howMany', goal: 5, order: 'lowest' } } });
+      window.VIEWS.g_nogoal = Object.assign({ name: 'g_nogoal' }, agg, {
+        stats: { rowTiles: { label: 'status', value: 'howMany', order: 'behind' } } });
+      window.VIEWS.g_inherit = Object.assign({ name: 'g_inherit' }, agg, {
+        stats: { goal: 5, rowTiles: { label: 'status', value: 'howMany', order: 'behind' } } });
+      const ord = errs().filter((e) => e.indexOf('g_order') >= 0 || e.indexOf('g_nogoal') >= 0).join(' | ');
+      const inherited = errs().filter((e) => e.indexOf('g_inherit') >= 0).join(' | ');
+
+      ['g_ok', 'g_view', 'g_tile', 'g_empty', 'g_order', 'g_nogoal', 'g_inherit'].forEach((n) => delete window.VIEWS[n]);
+      return { quiet, bad, ord, inherited };
     });
     expect(r.quiet).toBe('');
     expect(r.bad).toContain('needs `rowTiles`');       // an explicit tile has no row to read
     expect(r.bad).toContain('{ "column": "<column name>" }');   // an object that names nothing
+    expect(r.ord).toContain('"lowest"');               // an unknown order names itself
+    expect(r.ord).toContain('needs a `goal` to be behind');
+    expect(r.inherited).toBe('');                      // a view-level goal is a goal
   });
 
   // A `filter` naming a column that is not there matches NO row -- the view renders an empty list,
