@@ -185,10 +185,46 @@ is a `ref` to `ref_chores`, so the key set is known independently of the data. I
 the same hole makes any leaderboard omit everyone who scored nothing, which is the person most worth
 seeing on a scoreboard.
 
-The cost is a decision, not lines. `aggregateRows` is used by every aggregate view, so seeding cannot
-be unconditional — a leaderboard over a 400-row lookup would grow 400 tiles. It needs a key on the
-view (`groupBy: { seedFrom: "ref_chores" }`, or a bare `seed: true` reading the `ref` the column
-already declares), which is the part to settle before writing anything.
+The cost was a decision rather than lines, and the decisions are now made. They are recorded here
+because each one was argued down from a plausible alternative, and an entry that shows only the answer
+gets the alternative re-proposed.
+
+**`seed: true`, not `seedFrom: "ref_chores"`.** `aggregateRows` serves every aggregate view, so seeding
+cannot be unconditional — a leaderboard over a 400-row lookup would grow 400 tiles — which means a key
+on the view either way. It reads the column's own declaration rather than restating it: `chore` is
+already `{ type: "ref", table: "ref_chores", valueCol: "chore" }`, so naming the table again on the
+view creates a second place to be wrong and the two can disagree. That is the failure the `hierarchy:`
+fix was written to end (see Shipped), and it is not worth re-introducing one entry later.
+
+Scoped to `ref` columns first, and say so. "The key set" has more than one origin — `person` is
+`{ type: "select", list: "members" }`, whose keys are a `listSources: users` roster, not a table's rows
+— so covering both means type dispatch. A `seed: true` that quietly does nothing on a `select` is worse
+than one that reports it at load.
+
+**Gate on the target, not on the count.** A key with no `target_per_month` is not on a cadence and gets
+no tile. This is what makes the seeded set self-maintaining: retiring a chore means clearing its
+target, in the Lookup tab, with no schema edit — so "which rows of the lookup count" is answered by
+data that already exists rather than by a new flag. The drop belongs in `stats.js`, which holds the row
+and the resolved goal together; `rows.js` must not learn what a goal is. Wanted under its own name
+(`skipUntargeted` or similar) rather than as a silent rule, because a tile with a value and no goal is
+legitimate elsewhere — a `display: "number"` scorecard is exactly that.
+
+**Hiding zero tiles is NOT the answer, though it looks like one.** For this view the zeros are the
+output; a view that hides them did not need seeding in the first place. It is also not expressible
+today: `filter` runs on source rows, `groupBy.filter` tests a synthetic row built from the key alone
+(`rows.js`) and so never sees a total, and `limit` is a top-N slice rather than a predicate. A real
+predicate over the aggregated row — SQL's `HAVING`, as `groupBy.having` — is a genuine gap and worth
+recording as its own, but it is a different feature and must not be built as this one's excuse.
+
+**Still open: where the zeros sort.** `aggregateRows` ranks highest-total first, so every seeded zero
+lands at the bottom — right for a leaderboard, exactly backwards for a reminder, where the chore at
+0/1 is the one the page was opened for. Complicated slightly by the two paths already differing: a
+top-level stats view renders `currentData` unsorted, while the embedded one goes through `sortByCol`.
+This is the one part still to settle, and it is a sort, not an architecture.
+
+A seeded row is `{ id: key, <keyCol>: key, <into>: 0 }`. Zero is honest for `count` and `sum`, where
+"nothing" genuinely is zero; it would be a lie for the `avg`/`min` below, which is a reason to land
+those two in the other order or to seed `null` when they arrive.
 
 **"Days since last done" is the other thing this view cannot say.** `aggregateRows` supports `count`
 and `sum` only, so a per-chore group can report "done twice this month" but not "last done 47 days
