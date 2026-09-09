@@ -901,7 +901,7 @@ function createVueApp() {
          'pivot.total', 'pivot.empty',
          'stats.empty',
          'scan.code', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
-         'scan.print_codes', 'scan.no_barcode',
+         'scan.print_codes', 'scan.print_code', 'scan.no_barcode',
          'scan.camera', 'scan.no_code_found', 'scan.several_codes', 'scan.camera_failed',
          'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.edit', 'board.archive', 'board.confirm_archive', 'board.delete', 'board.confirm_delete',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
@@ -6129,7 +6129,10 @@ function createVueApp() {
       // A sheet of scannable labels for a scan view's catalogue -- one per row, printed and stuck on
       // the doors. This is what makes the scan view deployable: without codes on paper there is
       // nothing to scan, and the typed fallback is printed under each barcode for a scuffed label.
-      printScanLabels: function(name) {
+      // `rowId` narrows the sheet to ONE catalogue row -- a chore whose label was lost, a control
+      // added after the round was printed. One code path rather than a second builder: reprinting one
+      // label and printing the whole catalogue differ in which rows go in, and in nothing else.
+      printScanLabels: function(name, rowId) {
         var v = VIEWS[name], cfg = v && v.scan;
         if (!cfg) return;
         var self = this, ref = getColumnRef((v.sources || [])[0], cfg.column) || {};
@@ -6141,7 +6144,9 @@ function createVueApp() {
         // and the ENCODER (fetched on first use). Building from rows that are still on their way prints
         // an empty page, which is the same mistake the auto-submitting link made with its tables.
         Promise.all([this._ensureCached([ref.table]), this._ensureQrEncoder()]).then(function() {
-          var items = (self.dataCache[ref.table] || []).map(function(r) {
+          var rows = self.dataCache[ref.table] || [];
+          if (rowId) rows = rows.filter(function(r) { return r.id === rowId; });
+          var items = rows.map(function(r) {
             // The LABEL goes through displayValue, so a translated catalogue prints the words people
             // read on screen; the CODE is the stored text, because that is what a scan matches against.
             // `code` is what a 1D label and the typed box use; `link` is what a QR carries, so that the
@@ -6149,7 +6154,11 @@ function createVueApp() {
             return { code: r[codeCol], label: self.displayValue(cfg.column, r[valueCol]),
                      link: self.scanDeepLink(name, r[codeCol]) };
           }).filter(function(it) { return String(it.code || '').trim(); });
-          self._printOpen(title, '<h2>' + Print.escape(title) + '</h2>' + Print.labels(items, self._printCtx()));
+          // A single label prints under the name of the thing it labels, and without a heading -- a
+          // <h2> repeating the one word already on the label is noise on a sticker.
+          var one = rowId && items.length === 1;
+          var head = one ? '' : '<h2>' + Print.escape(title) + '</h2>';
+          self._printOpen(one ? items[0].label : title, head + Print.labels(items, self._printCtx()));
         });
       },
       printCard: function(item) {

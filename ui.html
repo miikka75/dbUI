@@ -622,6 +622,7 @@
                         <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="a.refChildAtEdge(c.row,-1)" @click="a.moveRefChild(c.row,-1)"></v-btn>
                         <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="a.refChildAtEdge(c.row,1)" @click="a.moveRefChild(c.row,1)"></v-btn>
                       </template>
+                      <v-btn v-if="a.scanViewForCatalog(rt)" icon="mdi-printer" size="x-small" variant="text" :title="a.t('scan.print_code')" :data-testid="'ref-print-row-' + c.row.id" @click="a.printScanLabels(a.scanViewForCatalog(rt), c.row.id)"></v-btn>
                       <v-btn v-if="a.canEditCurrentRef && !a.isLockedRefRow(c.row)" :icon="a.isArmed('ref:'+c.row.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+c.row.id) ? 'error' : ''" @click="a.deleteRefRow(c.row)"></v-btn>
                     </template>
                   </v-list-item>
@@ -648,7 +649,9 @@
                       <span v-if="a.isReadonlyRefCell(item, col)" class="editable-cell" style="opacity:0.7">{{ a.refValueLabel(item[col]) }}</span>
                       <span v-else class="editable-cell" contenteditable @keydown.home.stop @keydown.end.stop @blur="a.saveRefField(item, col, $event.target.textContent)">{{ item[col] || '' }}</span>
                     </td>
-                    <td><v-icon v-if="a.isTranslatableRefTable()" size="x-small" style="opacity:0.35">mdi-translate</v-icon><v-icon v-if="a.isLockedRefRow(item)" size="x-small" style="opacity:0.4" :title="a.t('list.locked_value')">mdi-lock-outline</v-icon><v-btn v-else-if="a.canEditCurrentRef" :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn></td>
+                    <td><v-icon v-if="a.isTranslatableRefTable()" size="x-small" style="opacity:0.35">mdi-translate</v-icon><!--
+                      --><v-btn v-if="a.scanViewForCatalog(rt)" icon="mdi-printer" size="x-small" variant="text" :title="a.t('scan.print_code')" :data-testid="'ref-print-row-' + item.id" @click="a.printScanLabels(a.scanViewForCatalog(rt), item.id)"></v-btn><!--
+                      --><v-icon v-if="a.isLockedRefRow(item)" size="x-small" style="opacity:0.4" :title="a.t('list.locked_value')">mdi-lock-outline</v-icon><v-btn v-else-if="a.canEditCurrentRef" :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn></td>
                   </tr>
                 </tbody>
                 </template>

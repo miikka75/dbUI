@@ -1941,7 +1941,9 @@ some scan view resolves codes against it, and its tooltip names that view, becau
 link and a link needs a destination. (Two scan views over one catalogue is legitimate — the same route
 logged two ways — and the first is taken, visibly rather than silently.)
 
-It emits one label per catalogue row: the name people read, a **QR**, and the code in text underneath. The QR carries the `?view=…&scan=…` deep link, which is what makes the sheet
+It emits one label per catalogue row: the name people read, a **QR**, and the code in text underneath.
+**Each row also carries its own printer**, for the one label that got scuffed or the control added after
+the round was printed — a single label prints under the name of the thing it labels, with no heading. The QR carries the `?view=…&scan=…` deep link, which is what makes the sheet
 useful to a phone — any camera app opens the link, and the app comes up on the right view with the code
 already resolved.
 
