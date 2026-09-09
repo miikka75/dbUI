@@ -142,7 +142,9 @@ being free — which for a household, a congregation or a club is the whole requ
 
 Decomposition follows the usual seam: a pure `checkin.js` over
 `(scanned payload, rows, config) -> which row to update and to what`, Node-tested, with the camera as
-the impure shell around it. Config names the target rather than hardcoding it, e.g.
+the impure shell around it. **See *Scan to log an action*, below** — that entry argues
+the module should be `scan.js` and cover appending a row too, since the two cases differ only in
+whether the target row exists yet. Config names the target rather than hardcoding it, e.g.
 `{ "source": "rsvps", "match": "owner", "set": { "attendance": "attended" } }`.
 
 Costs, in order of how much they will actually hurt:
@@ -169,6 +171,282 @@ Sequencing: either arrangement is only worth building after the attendance colum
 exists, since without that there is nothing for a scan to do. Of the two, the shared-code one is the
 better first build — it needs no camera at all in its typed form, so it can ship and be used at a real
 event before any of the decoding work above is done.
+
+### Scan to log an action — the same camera, a row appended
+
+QR check-in, above, writes an *answer* onto a row that already exists: someone signed up, and the scan
+records that they turned up. This entry asks whether the same scan can create the record instead — a
+code on the dishwasher that logs a chore done, a code at each door on a security round that logs the
+place visited, a control at an orienteering checkpoint. **Yes, and it is the cheaper half of the two.**
+
+**The code names a thing, not a person.** That is the whole inversion. In check-in the payload
+identifies the attendee and the row is found by owner; here the payload identifies a *lookup row* — a
+chore, a checkpoint — and the owner comes from being signed in. Which half is configured swaps; nothing
+underneath changes.
+
+**The target table already exists.** `chore_log` in the chores example is this feature's destination as
+it stands today: `owner` (auto-stamped), `person` (`defaultFrom: "@me"`), `chore` (a `ref` into
+`ref_chores`), `done_on`, `status` defaulting to `logged`, and `ownerWritable`/`ownerWritableWhile`
+bounding what the member may write and until when. A scan sets `chore` and `done_on`; every other
+column is filled by machinery that shipped long ago. A guard's route is the *same table* with a
+`ref_checkpoints` lookup in place of `ref_chores` — not one line of code different, which is the sign
+this is one feature and not three.
+
+**No new access primitive, and — unlike check-in — not even a verifier.** Check-in leans on an editor
+standing at the door; this leans on nothing but `owner`. Appending a row you own is exactly what `rsvp`
+and `form` already do, gated by the same two rule layers. The write is the one `setRsvp` performs
+today: upsert the row keyed by (a value, me), create it if it is not there. So the honest description
+of the write half is *`setRsvp` with the key taken from config instead of from an event*.
+
+**Which means `checkin.js` should be `scan.js`.** Not a generalization invented in advance — two
+concrete cases are on the table, and they differ only in whether the row already exists. The pure
+module maps a payload to a write *plan*:
+
+    (payload, rows, config, { me, today }) -> { table, match, set } | { error }
+
+with the component performing the write and the camera as the impure shell, the same division every
+kind here uses. Config names the target rather than hardcoding it, exactly as the check-in entry
+proposed:
+
+```json
+{ "scan": { "table": "chore_log", "column": "chore", "from": "ref_chores",
+            "set": { "done_on": "@today" }, "once": "day" } }
+```
+
+`@today` is resolved by the scan shell, which knows the date. It is deliberately **not** a new
+`defaultFrom` token — `defaultFromValue` resolves `@me` and stamps `''` for everything else, and giving
+it a second token would put a clock in the column layer to save one line here.
+
+**The payload is the stored value, so there is no code format to invent.** A `ref` cell already holds
+the lookup's `valueCol` text, so a barcode carrying `CP-07` resolves by equality against
+`ref_checkpoints`. No id space, no registry, no mapping table. Two things follow for free: a payload
+matching no lookup row is *rejected* rather than written as free text (the ref column's own validity is
+the check), and a code that will not scan can be **typed** — the same fallback that lets the
+shared-code arrangement above ship before any decoder exists.
+
+`once` is the double-scan question, and it is the reason the plan carries a `match` at all. A guard who
+scans a door twice visited it once; someone who washes up twice did it twice. `once: "day"` makes the
+plan an upsert keyed by (column, owner, date); omitting it appends. That is a config choice per view,
+not a policy the module can guess.
+
+**Issuing the codes is a print job, and encoding is the cheap direction.** Decoding is the expensive
+half — the iOS `BarcodeDetector` gap and the vendoring ceremony documented above, all of it shared with
+check-in and none of it duplicated. Encoding is not in that class: Code 39 is bars from a 44-entry
+pattern table, tens of lines of inline SVG, no vendored library, and every phone camera reads it. QR
+needs a real encoder and therefore the full `vendor/versions` + SRI + drift-guard ritual. So the first
+build is a **printable sheet of labels over a lookup table**, one code per row, through `print.js`.
+
+**What a printed code proves, stated plainly.** It proves the scanner had the code — not that they were
+there. The check-in entry's argument for why its QR may carry nothing secret (a verifier is standing in
+front of the person) does not survive this inversion: here nobody is watching, and a code photographed
+once walks the route from a sofa forever. Rotation cannot rescue it either, because the code is glued
+to a wall. This is not a corner being cut — commercial guard-tour systems are static NFC buttons on
+walls and have exactly this property — but it has to be decided up front that **a scan is a convenient
+truthful record, not evidence.**
+
+What makes it credible is the trail rather than the token. Every row carries who, what and when — as
+long as the *when* is a time and not merely a date, which is requirement 2 below and the reason it is
+in the first build. Then a round logged in forty seconds, or logged at 03:00 from one spot, is visible
+in the report — which is a
+`pivot` (checkpoint × person) or a `timeline` over data the scan already writes. A `geo` column (see
+*New column types*) would raise the cost of faking it from zero to something; it would not close it,
+and it is not a prerequisite.
+
+**Offline works, but only for a page that is already open.** Basements, car parks and forests have no
+signal, which is where this feature is used, so the distinction matters. `backend-firebase.js` enables
+Firestore persistence, so a scan performed in a loaded tab queues locally and flushes on reconnect with
+no code of ours involved. What does NOT work is a cold start: `sw.js` is a pass-through stub that
+caches nothing, so a scan that arrives as a fresh navigation needs the network to load the app at all.
+That is not a limitation of this feature — the app has never started offline — but it decides which
+form of scanning survives a basement, and the build order below is arranged around it. Worth writing
+down for a second reason: it makes the Supabase assessment's "no offline cache" line a real regression
+rather than a footnote, since on that backend even the open tab needs a connection at the door.
+
+**It makes *Empty groups* load-bearing rather than nice.** The checkpoint nobody visited is the entire
+point of a patrol report, and it is the same hole `chore_cadence` has today — a group is built from the
+rows that exist, so the missing one is invisible. This feature does not need it in order to work, but a
+report that silently omits the skipped door is worse than no report.
+
+#### What each use case needs
+
+The cases below were collected by asking what else a "scan a thing, record that it happened" gesture is
+good for. Most add nothing — which is the argument that this is one feature. The four that do add
+something are small, and two of them are needed by the cases already documented above.
+
+| Use case | The write | What it adds |
+|---|---|---|
+| Chore logged — a code on the dishwasher | Append to `chore_log` | Nothing. This is the baseline |
+| Guard round · orienteering control | Append per checkpoint | **A time, not a date** (2). `once` per round. *Empty groups* for the door nobody opened |
+| Attendance check-in *(the entry above)* | Update the row that exists | `match: "owner"` — the other branch of the same plan |
+| Equipment out and back — tools, AV kit, boats | Append a movement | Nothing. "Who has it now" is a `latest` tile over the log, which `stats` already computes |
+| Training log, reading log, recycling drop-off | Append | Nothing |
+| Shop shelf — scan the product's own barcode | Append to `home_shopping` | **`codeCol`** (1): an EAN is not a value anyone typed into a list |
+| Member card, staff badge, pre-printed label | Either branch | `codeCol` again — an opaque id, not a name |
+| Single-use ticket or meal voucher | Append once, ever | `once: "ever"`, and a **refusal the scanner can see** (3) |
+| Vehicle check, incident report — scan, then fill in | Start a record | `then: "edit"` — hand the new row to `form`. Deferred |
+| Stock count — fifty items in a minute | Append many | A batch session with a correctable list. Deferred |
+| Kiosk: scan the person's badge *and* the place | — | **Declined**, see below |
+
+**The kiosk case is declined, and it is worth writing down why**, because it is the one that will be
+asked for. On a shared device with nobody signed in, the identity would have to come from a scanned
+badge — which makes the code a credential, exactly the model the check-in entry above rejects on the
+grounds that this app has real identities and does not need to invent one. `owner` is stamped from
+auth; a device signed in as one account writing rows attributed to whoever waved a card at it is
+authentication by possession of a photocopiable token, and it would be the first place here where a
+row's owner is not the person who wrote it. The supported answer is that each person signs in on their
+own phone, which is also how the round gets its honest timestamps.
+
+#### Requirements that follow
+
+1. **`codeCol`** — the scanned payload matches a *named column* of the lookup, defaulting to its
+   `valueCol`. An EAN, a badge number or a stamped checkpoint id is not the display text. This is one
+   parameter in the resolver, and check-in needs it too, so it is in the first build rather than after.
+2. **A time, not a date.** `@today` is enough for a chore and useless for a round: the whole credibility
+   argument above is that *when* each control was logged is visible, and a `date` column cannot show
+   that four controls were logged in the same minute. So `set` also resolves **`@now`** into a declared
+   timestamp column. `created_at` is not the answer — it is hidden, its meaning is "when the row was
+   written" rather than "when the thing happened", and it is not a column a `timeline` or `pivot` may
+   read.
+3. **Outcomes, not exceptions.** The plan reports `created` · `updated` · `already` · `unknown`, and
+   the view shows which. A ticket scanned twice must *refuse loudly with the first time on the screen*;
+   a door scanned twice should say "already, at 02:14" rather than silently doing nothing, which is
+   indistinguishable from a scan that did not register. This is the difference between a tool someone
+   trusts at 3am and one they stop using.
+4. **The table must be able to accept the write, and `validateSchema` must say so.** A `scan` view over
+   a table with no `owner` column, or whose scanned column is missing from `ownerWritable`, is a view
+   that renders fine and fails at the rules layer with nothing to point at. That check belongs beside
+   the other config checks, not in a bug report.
+
+#### Build order
+
+Each phase is shippable and useful on its own, and the expensive half is last on purpose.
+
+**Phase 1 — the engine and a box you type into. LANDED.** No camera, no printing, no new dependency.
+`scan.js` — `plan(code, rows, lookupRows, cfg, { me, now }) -> { outcome, table, row | patch, existing }`
+— plus the standard five: `kindOf` (`migrations.js`), `VIEW_KINDS` + `isScanView` (`app-core.js`), the
+`kind` enum and the `scan` object in `schema.schema.json`, the `validateSchema` branch including
+requirement 4, and `dev/test/scan.test.js`. The write is `_createBlankRow(table, prefill)`, which
+already stamps the owner, resolves `defaultFrom`, writes every mirror under one id, records an undo
+entry and honours `rosterPublic` — so the root's share of this is roughly fifteen lines. The view body
+is a code box, the outcome line, and my last few rows. Embedding is free, per the seam at the top of
+this file.
+
+*Usable the day it lands*: by typing, and — worth noting because it is nearly free — with a **handheld
+barcode scanner, which is a keyboard**. A twenty-euro USB or Bluetooth wedge scanner types the code
+into the box and presses Enter. A library desk, a stock room or a check-in table is fully served by
+phase 1 with no camera code in existence.
+
+*Acceptance*: a typed code appends the row with owner, person, chore and timestamp set; an unknown code
+refuses and writes nothing; under `once: "day"` the second scan reports the first one's time. All three
+are asserted end to end in `dev/test-ui/scan.spec.js`, over a patrol route rather than the chores
+bundle, since that is the arrangement `once` exists for.
+
+Two things the build taught that the plan had not settled. **`ambiguous` is a fifth outcome**, not a
+detail of `unknown`: two catalogue rows carrying one code is a label reprinted onto the wrong post, and
+resolving it by taking the first would log the wrong door and leave a report that looks perfectly fine
+afterwards. And **the config check belongs to `scan.js`, not to `validateSchema`** — `Columns.vocabularyErrors`
+is the precedent, and it is what makes requirement 4 (a view that renders but cannot write) a tested
+property rather than an error string nobody executes.
+
+**Phase 1.5 — check-in, as config.** `match: "owner"` plus `codeCol` turns the same module into the
+entry above, still with no camera. It is listed as a half-phase because it is a resolver branch and a
+test, not a feature.
+
+**Phase 2 — codes on paper. LANDED.** A printable label sheet over the scan view's catalogue, one code
+per row, through `print.js`. Code 39 is a 44-entry pattern table rendered as inline SVG — no vendored
+library, no CSP change — and every handheld and phone decoder reads it. This is the phase that makes a
+real route deployable: print, stick on the doors, scan with the wedge or type.
+
+*Acceptance*: printing yields one scannable label per row, and what is on the paper resolves the row it
+names. Both asserted in `dev/test-ui/scan.spec.js`.
+
+The symbology turned out to settle a question the entry had not asked. **Code 39 has no lowercase**, so
+a label prints uppercase — which is free only because matching lowercases both sides, and that decision
+was already made in phase 1 for a different reason (a wedge scanner's stray carriage return). Had codes
+been matched exactly, this phase would have needed either a second symbology or a rule about how
+catalogues may be spelled. The table itself is transcribed rather than derived, so it is guarded by the
+symbology's own laws — nine elements, exactly three wide, a 2-bars-1-space split except for the four
+punctuation codes, and no two characters sharing a pattern. That catches a transcription slip; it does
+not substitute for holding a scanner in front of a printed sheet, which is still worth doing once.
+
+**Phase 3 — the phone's own camera, without writing a decoder.** Encode the label as a QR carrying a
+URL into the app — `?scan=<code>&view=<name>` — and the platform's own camera decodes it. iOS Camera
+and Control Center, Android's camera, and every third-party scanner already do this; the app's share is
+one boot parameter resolved after sign-in, beside the `?db=` and `?user=` params already handled. **No
+`BarcodeDetector`, no vendored decoder, no camera lifecycle, and it works on the platform the decoding
+problem was about.** Its cost is a QR *encoder* for the print sheet, which does need the
+`vendor/versions` + SRI + drift-guard ceremony — encoding is the cheap direction, but QR is not Code 39.
+
+Two things to state plainly: an installed iOS PWA and Safari have **separate storage**, so a scanned
+link opening in Safari will ask for sign-in once; and every scan is a page navigation, which is what
+the offline note below is about.
+
+*Acceptance*: scanning a printed QR with the phone's stock camera app opens the view with the code in
+the box, and one press records it.
+
+**LANDED, in two separable halves.** The boot parameter carries the architecture and needed no
+dependency at all; the encoder is the convenience of the app drawing its own codes, and it went in
+second, once printing sheets, "any camera app" and a door display had each arrived at the same missing
+piece.
+
+`qrcode-generator` is vendored the way every other dist here is — pinned in `vendor/versions`, fetched
+by all three materialisation paths (`update-vendor.sh`, the Pages workflow, the session-start hook),
+with an SRI-pinned CDN fallback and drift guards in `deploy-config.test.js` for each. One thing it does
+NOT do is load at boot: 56 KB of third party for an action most sessions never take is paid for on
+first use instead, which means a schema with no scan view never pays for it at all. That is the only
+place this repo's vendoring pattern was extended rather than copied, and it is why the fallback URL and
+its hash live in `app-core.js` rather than `index.html`.
+
+The sheet now prints QR, with Code 39 as the fallback when the encoder cannot be fetched — which also
+retired the "this code cannot be printed" note for anything but that fallback, since a QR carries a URL
+and has none of Code 39's 43-character limit.
+
+The acceptance criterion above also changed while building it, and the reason is worth keeping. **The
+link arms the box by default rather than writing the row**, and `link: "submit"` opts out per view. A link is something anyone can send you, and a GET that logs
+a visit as you is a row somebody else caused — which for a patrol round is exactly the property the log
+exists to have. One deliberate press costs nothing next to pointing a camera, and it removes a
+drive-by write entirely. This is also an argument for phase 4 that was not recorded before: zero-tap is
+safe in an in-app scanner, because there the person pointing the camera *is* the intent. For a URL it
+is a deployment's call, not the app's: a wrong chore costs nothing and gets approved by somebody
+anyway, while a falsified patrol round is the one thing that log exists to prevent.
+
+Auto-submit also turned out to need something arming does not: **it must wait for the view's tables**.
+Writing into the gap before they land is not merely a race on the catalogue (a good code reported as
+`unknown`) — the log arriving afterwards REPLACES dataCache, so the created row disappears from the
+screen while still reaching the backend, and `once` cannot see an earlier scan it should have refused.
+Found by the test, not by reading the code.
+
+**Phase 4 — the in-app scanner. LANDED, and it cost far less than this entry budgeted for.** The plan
+allowed for a vendored decoder, `getUserMedia` and teardown discipline. What shipped is
+`BarcodeDetector` plus `<input type="file" accept="image/*" capture="environment">` — one frame from the
+OS camera, decoded in the page. **No vendored decoder, no `getUserMedia`, no permission of the app's
+own, no decode loop, and no stream to forget to stop**, which was the failure this entry actually warned
+about. It reads both symbologies the app produces: the sheet's Code 39, and a QR carrying the `?scan=`
+link, which is unwrapped to its code rather than navigated to.
+
+The decoder gap is answered by **not answering it**. `BarcodeDetector` is absent on iOS Safari, Firefox
+and desktop Chrome for Windows; there, no button appears, rather than a button that fails. The camera is
+an enhancement, and the typed box — with a wedge scanner or fingers — was always the path that works
+everywhere. Vendoring a decoder to close that gap would buy an enhancement, not a capability, which is
+the trade the QR encoder decision already declined.
+
+*Acceptance*: a photographed label writes its row without the page being left, which is the structural
+reason this form works offline — asserted in `dev/test-ui/scan.spec.js` with a sentinel a navigation
+would wipe. The queue-and-flush half is Firestore's offline cache and is not exercised by the local dev
+server, so it is claimed on the backend's behaviour rather than on a test here.
+
+What is genuinely untestable in this repo is **the decode itself**: `BarcodeDetector` does not exist in
+the browser the suite runs in. The tests stub exactly that one call and exercise everything around it —
+whether the button appears at all, what a photograph does to the row, and what each refusal says. Worth
+holding a phone in front of a printed sheet once before trusting it in a basement.
+
+**Phase 5 — deferred, and only on demand.** `then: "edit"` (hand the new row to a `form`), a batch
+session with a correctable list, and a `geo` stamp. None is needed by any case above; each is a small
+addition to a shape that already exists, which is the reason for not building them now.
+
+Phases 2 and 3 can swap. Phase 4 depends on nothing and could be built at any point — it is last
+because it is the only expensive one and, until the offline case is actually in front of someone,
+phase 3 does the same job for free.
 
 ### Empty groups — the bar that is missing is the one that matters
 
@@ -931,3 +1209,7 @@ written down; what remains is the writing.
 
 The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
 schema today.
+
+Of the scan family, *Scan to log an action* is the entry to build first and the only one worth
+ranking: it needs nothing else to land first, its typed form needs no camera, and building it in
+the other order means writing `scan.js` twice.

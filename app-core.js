@@ -80,6 +80,9 @@ function ownerBoundsFor(table) {
 // this is consulted for every caller, not just the self-service branch: a table grant does not lift a
 // stamped column, which is the whole reason the key exists.
 var _stampedKey = null, _stampedAll = null;
+// The in-flight (or settled) load of the vendored QR encoder. Module-level: there is one document,
+// one <script> and one global, so a second caller must await the first load rather than start another.
+var _qrLoad = null;
 function stampedBoundsFor(table) {
   if (_stampedKey !== SCHEMA) { _stampedKey = SCHEMA; _stampedAll = BackendHelpers.stampedOf({ tables: SCHEMA }); }
   return _stampedAll[table] || null;
@@ -174,7 +177,7 @@ function obscureName(s) {
   return parts[0] + ' ' + parts.slice(1).map(function(p) { return p.charAt(0).toUpperCase() + '.'; }).join(' ');
 }
 
-var PRINT_CSS = 'body{font-family:system-ui;margin:20px;font-size:13px}.card{border:1px solid #ddd;padding:12px;margin-bottom:12px;border-radius:6px;page-break-inside:avoid}dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0}dt{font-weight:bold;font-size:13px;opacity:0.7}dd{margin:0;font-size:13px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:4px 8px;text-align:left;font-size:13px}th{background:#f5f5f5}.embed{margin:8px 0;padding:8px;background:#f9f9f9;border-radius:4px}.embed h4{margin:0 0 4px;font-size:13px;opacity:0.7}h1,h2,h3,h4,h5,h6{font-size:13px;margin:6px 0}@media print{button{display:none}}';
+var PRINT_CSS = 'body{font-family:system-ui;margin:20px;font-size:13px}.card{border:1px solid #ddd;padding:12px;margin-bottom:12px;border-radius:6px;page-break-inside:avoid}dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0}dt{font-weight:bold;font-size:13px;opacity:0.7}dd{margin:0;font-size:13px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:4px 8px;text-align:left;font-size:13px}th{background:#f5f5f5}.embed{margin:8px 0;padding:8px;background:#f9f9f9;border-radius:4px}.embed h4{margin:0 0 4px;font-size:13px;opacity:0.7}h1,h2,h3,h4,h5,h6{font-size:13px;margin:6px 0}.labels{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.label{border:1px solid #ddd;border-radius:6px;padding:10px 8px;text-align:center;page-break-inside:avoid}.label b{display:block;font-size:14px;margin-bottom:6px}.label code{display:block;margin-top:4px;font-family:monospace;font-size:11px;letter-spacing:1px}.label .nocode{font-size:11px;color:#a00;padding:14px 0}@media print{button{display:none}}';
 // Click-to-sort header behaviour, shared by every surface that sorts: the root (the data grid, via
 // its own sortCol/sortAsc) and the components that keep their own sort state because they render
 // their own lists rather than currentData (rsvp, pivot). Mix into `methods` with Object.assign, like
@@ -257,6 +260,9 @@ function createVueApp() {
       mode: '',
       currentTable: '',
       currentData: [],
+      // A code a `?scan=` deep link handed over, and the scan view it belongs to. Held here rather
+      // than in the component because it arrives before that component exists.
+      pendingScan: null,
       dataCache: {},
       sortCol: null,
       sortAsc: true,
@@ -384,6 +390,7 @@ function createVueApp() {
       isBoardView: function() { return this.currentKind === 'board'; },
       isFormView: function() { return this.currentKind === 'form'; },
       isStatsView: function() { return this.currentKind === 'stats'; },
+      isScanView: function() { return this.currentKind === 'scan'; },
       // Curated palette tokens exposed in the admin theme editor (Vuetify color names + friendly labels).
       themeTokens: function() {
         return [
@@ -893,6 +900,9 @@ function createVueApp() {
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
          'pivot.total', 'pivot.empty',
          'stats.empty',
+         'scan.code', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
+         'scan.print_codes', 'scan.no_barcode',
+         'scan.camera', 'scan.no_code_found', 'scan.several_codes', 'scan.camera_failed',
          'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.edit', 'board.archive', 'board.confirm_archive', 'board.delete', 'board.confirm_delete',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
@@ -1471,7 +1481,7 @@ function createVueApp() {
         this.sortCol = cfg.defaultSort || null;
         this.sortAsc = true;
         if (this.isCalendarView || this.isPivotView || this.isRsvpView || this.isFormView) { this.loadTableData(); }
-        else if (this.isDataView || this.isRotationView || this.isBoardView || this.isStatsView) { this.periodOffset = 0; this.loadTableData(); }
+        else if (this.isDataView || this.isRotationView || this.isBoardView || this.isStatsView || this.isScanView) { this.periodOffset = 0; this.loadTableData(); }
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
       },
       // --- Calendar helpers (used by the calendar view + calendar embeds) ---
@@ -2073,6 +2083,50 @@ function createVueApp() {
       },
       isRsvpName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'rsvp'; },
       isStatsName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'stats'; },
+      isScanName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'scan'; },
+      // Resolve one scanned or typed code and, when it resolves to a row, write it. Returns the outcome
+      // for the view to SHOW -- see scan.js: silence is the one answer a scanner must never get.
+      //
+      // Two readings of "the rows", and they are deliberately different. `once` is checked against
+      // dataCache, the STORED table: a view filtered to this week must still refuse a code logged last
+      // week, or the filter would quietly become a way to log twice. What the view lists back is the
+      // view's own rows, which is the filtered, sorted thing the author asked for.
+      //
+      // The write itself is _createBlankRow -- the same factory the grid's Add, the board's lane and the
+      // calendar's add-on-day use -- so a scanned row is an ordinary row: owner stamped, roster policy
+      // applied, every mirror written under one id, and one undo entry to take it back.
+      submitScan: function(name, code) {
+        var v = VIEWS[name], cfg = v && v.scan;
+        if (!cfg) return null;
+        var table = (v.sources || [])[0];
+        var ref = getColumnRef(table, cfg.column) || {};
+        var me = this.currentUserEmail || '';
+        // Self-service writes are owner-stamped, so there is nothing to stamp when signed out. Same
+        // guard, same message, as setRsvp and formRecord.
+        if (!me) { this.notify(this.t('msg.sign_in_respond')); return null; }
+        var now = new Date();
+        var res = Scan.plan(code, {
+          catalog: this.dataCache[ref.table] || [],
+          rows: this.dataCache[table] || [],
+          column: cfg.column, codeCol: cfg.codeCol, valueCol: ref.valueCol,
+          set: cfg.set, once: cfg.once || '',
+          me: me, ownerCol: getOwnerCol(table) || 'owner',
+          today: fmtDate(now), now: now.toISOString()
+        });
+        if (res.outcome === 'created') {
+          var row = this._createBlankRow(table, { prefill: res.prefill });
+          // currentData is DERIVED, not aliased to dataCache, so a pushed row does not appear by
+          // itself -- the same reason addRow pushes explicitly. Only when this view is the one on
+          // screen: an embedded scan writes its own table and reads back through embedRows, which is
+          // derived from dataCache and updates on its own.
+          if (row && name === this.currentTable && !this.viewingArchive) {
+            var shown = Object.assign({}, row);
+            if (v.mode === 'union') shown._source = table;
+            this.currentData.push(shown);
+          }
+        }
+        return res;
+      },
       // KPI tiles for a stats view. Unlike pivot/rsvp there is no separate source config to resolve: a
       // stats view IS a data view -- same sources/filter/groupBy/aggregate/compute -- with a different
       // renderer, so the rows come from the pipeline that already ran.
@@ -2238,6 +2292,13 @@ function createVueApp() {
         // A form writes ONE table, named per-kind rather than in `sources` -- so nothing else
         // derives it, and without this the view would load nothing and show an empty record.
         if (v.form && v.form.table) push(v.form.table);
+        // A scan resolves its code against the LOOKUP its target column references. That table is read,
+        // never written, so it is not in `sources` -- and without it the view would load the log it
+        // writes and nothing to check a code against, reporting every scan as an unknown code.
+        if (v.scan && v.scan.column) {
+          var sref = getColumnRef((v.sources || [])[0], v.scan.column);
+          if (sref && sref.table) push(sref.table);
+        }
         AccessFeatures.viewTables(v).forEach(expand);
         viewImplicitTables(v).forEach(expand);
 
@@ -4417,14 +4478,43 @@ function createVueApp() {
         else { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); }
         this.notify(this.t('msg.copied'));
       },
+      // A deep link: `?view=<scan view>&scan=<code>`. A QR carrying that URL is decoded by the
+      // PHONE'S OWN camera -- iOS Camera, Control Center and Android's camera all offer to open a
+      // link they find in a QR -- so this path needs no BarcodeDetector, no vendored decoder and no
+      // camera lifecycle, on any platform. The app's whole share of it is this function.
+      //
+      // It ARMS the box; it does not write. A link is something anyone can send you, and a GET that
+      // logs a visit as you is a row somebody else caused -- which for a patrol round is precisely
+      // the property the log exists to have. So the code arrives resolved and focused, and one
+      // deliberate press records it. Zero-tap is safe in an in-app scanner, where the person
+      // pointing the camera IS the intent; it is not safe for a URL.
+      //
+      // `view` is honoured only alongside `scan`, and only when it names a scan view: this is a scan
+      // contract, not a general view-routing parameter that something else may later want.
+      _pendingScanFromUrl: function() {
+        var p = new URLSearchParams(location.search);
+        var code = p.get('scan'), view = p.get('view');
+        if (!code || !view || SchemaNormalize.viewKind(VIEWS[view]) !== 'scan') return null;
+        // Consume it from the address bar: a reload must not re-arm, and the link should not stay in
+        // history with a code in it.
+        try {
+          p['delete']('scan'); p['delete']('view');
+          var q = p.toString();
+          history.replaceState(null, '', location.pathname + (q ? '?' + q : '') + location.hash);
+        } catch (e) {}
+        return { view: view, code: code };
+      },
       _autoSelectTab: function() {
+        // A deep-linked code names the view it belongs to, so it decides which tab opens.
+        var pend = this._pendingScanFromUrl();
+        if (pend) { this.pendingScan = pend; this.selectTab(pend.view); return; }
         if (!this.currentTable) { var ft = this.sidebarTabs.find(function(t) { return !t.divider; }); if (ft) this.selectTab(ft.id); }
       },
       loadUsers: function() {
         var self = this;
         if (typeof backend_users === 'undefined') {
           self.usersLoaded = true; self.loading = false;
-          if (!self.currentTable) { var ft0 = self.sidebarTabs.find(function(t) { return !t.divider; }); if (ft0) self.selectTab(ft0.id); }
+          self._autoSelectTab();   // was a hand-rolled copy of its body, which no deep link reached
           return;
         }
         if (!self.currentUserEmail) {
@@ -5945,7 +6035,22 @@ function createVueApp() {
           embedRowsForItem: function(ei, item) { return self.embedRowsForItem(ei, item); },
           embedCols: function(t, n) { return self.embedCols(t, n); },
           embedRows: function(t, n, p) { return self.embedRows(t, n, p); },
-          embedPartLabel: function(t, n, p) { return self.embedPartLabel(t, n, p); }
+          embedPartLabel: function(t, n, p) { return self.embedPartLabel(t, n, p); },
+          // A QR matrix for `text`, or null when the encoder is not loaded -- which is what makes the
+          // label sheet fall back to Code 39 rather than print a name with no code under it. Passed in
+          // rather than read as a global inside print.js, so the print builders stay pure over ctx and
+          // their Node tests need no 56 KB stub.
+          qr: function(text) {
+            if (typeof qrcode === 'undefined' || !text) return null;
+            try {
+              // Type 0 = "the smallest version that fits"; M is the middle error correction, which is
+              // what survives a scuffed label without inflating the module count.
+              var q = qrcode(0, 'M');
+              q.addData(String(text));
+              q.make();
+              return { size: q.getModuleCount(), isDark: function(r, c) { return q.isDark(r, c); } };
+            } catch (e) { return null; }        // too much data for any version -> Code 39 instead
+          }
         };
       },
       printView: function() {
@@ -5971,6 +6076,81 @@ function createVueApp() {
           this.embedItems.forEach(function(ei) { if (!ei.config.afterColumn && Print.printable(ei, undefined, ctx)) body += Print.embed(ei, undefined, ctx); });
         }
         this._printOpen(title, body);
+      },
+      // The QR encoder, fetched the FIRST TIME something needs to draw one and never before. It is 56 KB
+      // of vendored third party taken verbatim from npm, and the only things that reach for it are the
+      // label sheet and (later) a door display -- so a deployment whose schema has no scan view never
+      // pays for it at all, and one that has never printed a sheet does not either. That is why it is
+      // absent from index.html's boot list, where every other vendored dist lives.
+      //
+      // Verbatim, not minified, on purpose: the CI copy comes from `npm pack`, so a re-minified byte
+      // stream would not match the SRI hash pinned on the CDN fallback below.
+      _ensureQrEncoder: function() {
+        if (typeof qrcode !== 'undefined') return Promise.resolve(true);
+        if (_qrLoad) return _qrLoad;
+        var load = function(src, integrity) {
+          return new Promise(function(resolve, reject) {
+            var el = document.createElement('script');
+            el.src = src;
+            if (integrity) { el.integrity = integrity; el.crossOrigin = 'anonymous'; }
+            el.onload = function() { resolve(true); };
+            el.onerror = function() { reject(new Error(src)); };
+            document.head.appendChild(el);
+          });
+        };
+        // Same two-step every vendored dist takes in index.html: our own copy first, the CDN only when
+        // /vendor is missing, and then pinned by hash so the fallback cannot serve different bytes.
+        _qrLoad = load('/vendor/qrcode.js')
+          .catch(function() { return load('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js', 'sha384-8FWZA6BGMXhsfO+BLtrJK0We6gg5o1JyO8xQm6peWDEUs17ACA5ziE/NIAkl9z2k'); })
+          .catch(function() { return false; });     // no encoder -> the sheet falls back to Code 39
+        return _qrLoad;
+      },
+      // The URL a QR on a label carries: this deployment, this view, this code. `db` rides along because
+      // an installed app says which database it is that way (databases.js manifestIdentity), and two
+      // databases installed from one origin share a scope -- so without it the wrong one may answer.
+      scanDeepLink: function(view, code) {
+        var base = location.origin + location.pathname;
+        var q = [];
+        var dbKey = (typeof Databases !== 'undefined' && Databases.activeKey) ? Databases.activeKey() : '';
+        if (dbKey) q.push('db=' + encodeURIComponent(dbKey));
+        q.push('view=' + encodeURIComponent(view));
+        q.push('scan=' + encodeURIComponent(code));
+        return base + '?' + q.join('&');
+      },
+      // The scan view whose codes these catalogue rows carry, or '' when nothing scans them. This is
+      // what puts `Print codes` in the LOOKUP editor: a label belongs to the catalogue row it names,
+      // so it is printed where those rows are kept rather than from the view that happens to read
+      // them. Several scan views over one catalogue is legitimate -- the same route logged two ways --
+      // and the first is taken, with the button naming which, so the choice is visible rather than
+      // silent. The labels differ only in the `view=` their link carries.
+      scanViewForCatalog: function(table) {
+        return (Scan.viewsForCatalog(SCHEMA, VIEWS, table) || [])[0] || '';
+      },
+      // A sheet of scannable labels for a scan view's catalogue -- one per row, printed and stuck on
+      // the doors. This is what makes the scan view deployable: without codes on paper there is
+      // nothing to scan, and the typed fallback is printed under each barcode for a scuffed label.
+      printScanLabels: function(name) {
+        var v = VIEWS[name], cfg = v && v.scan;
+        if (!cfg) return;
+        var self = this, ref = getColumnRef((v.sources || [])[0], cfg.column) || {};
+        if (!ref.table) return;
+        var valueCol = ref.valueCol || 'id', codeCol = cfg.codeCol || valueCol;
+        var title = this.t('view.' + name) || name;   // raw -- _printOpen escapes
+        // Two things have to be here before a sheet can be drawn, and neither is guaranteed: the
+        // CATALOGUE (printing is offered from the Lookup editor, which is not the view that loads it)
+        // and the ENCODER (fetched on first use). Building from rows that are still on their way prints
+        // an empty page, which is the same mistake the auto-submitting link made with its tables.
+        Promise.all([this._ensureCached([ref.table]), this._ensureQrEncoder()]).then(function() {
+          var items = (self.dataCache[ref.table] || []).map(function(r) {
+            // The LABEL goes through displayValue, so a translated catalogue prints the words people
+            // read on screen; the CODE is the stored text, because that is what a scan matches against.
+            // `code` is what a 1D label and the typed box use; `link` is what a QR carries, so that the
+            // phone's own camera can open it. Both name the same row.
+            return { code: r[codeCol], label: self.displayValue(cfg.column, r[valueCol]),
+                     link: self.scanDeepLink(name, r[codeCol]) };
+          }).filter(function(it) { return String(it.code || '').trim(); });
+          self._printOpen(title, '<h2>' + Print.escape(title) + '</h2>' + Print.labels(items, self._printCtx()));
+        });
       },
       printCard: function(item) {
         var cols = this.visibleCols;
@@ -6177,9 +6357,10 @@ function createVueApp() {
       isPiv: function() { return this.type === 'view' && !!(appInstance && appInstance.isPivotName(this.name)); },
       isRsvp: function() { return this.type === 'view' && !!(appInstance && appInstance.isRsvpName(this.name)); },
       isStats: function() { return this.type === 'view' && !!(appInstance && appInstance.isStatsName(this.name)); },
+      isScan: function() { return this.type === 'view' && !!(appInstance && appInstance.isScanName(this.name)); },
       // A doc-view embedded inside another page (only via the no-spec page path; the spec path pre-tags kind='doc').
       isDoc: function() { return !this.spec && this.type === 'view' && !!(appInstance && appInstance.isDocViewName(this.name)); },
-      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : this.isRsvp ? 'rsvp' : this.isStats ? 'stats' : this.isDoc ? 'doc' : 'data'); },
+      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : this.isRsvp ? 'rsvp' : this.isStats ? 'stats' : this.isScan ? 'scan' : this.isDoc ? 'doc' : 'data'); },
       // Render blocks for a doc embed. Spec path carries its own blocks (built from the schema seed by
       // resolveEmbed); the page path builds them here from the ACCESS-GATED body: hidden entirely unless
       // canAccessPage passes, then the server-filtered pageCache body (seed only as a pre-load fallback).
@@ -6272,6 +6453,7 @@ function createVueApp() {
       + '<pivot-view v-else-if="kind===\'pivot\'" :name="calName" :embed="true"></pivot-view>'
       + '<rsvp-view v-else-if="kind===\'rsvp\'" :name="calName" :embed="true"></rsvp-view>'
       + '<stats-view v-else-if="kind===\'stats\'" :name="calName" :embed="true"></stats-view>'
+      + '<scan-view v-else-if="kind===\'scan\'" :name="calName" :embed="true"></scan-view>'
       + '<template v-else-if="kind===\'doc\'">'
       + '<div v-if="canEditDoc" class="d-flex align-center"><v-spacer></v-spacer>'
       + '<v-btn size="x-small" variant="text" density="comfortable" :icon="editing ? \'mdi-eye\' : \'mdi-pencil\'" :title="editing ? t(\'btn.preview\') : t(\'btn.edit\')" @click="toggleDocEdit()" data-testid="doc-edit"></v-btn>'
@@ -6468,7 +6650,7 @@ function createVueApp() {
   // Top-level view-kind registry: kind -> the component that renders that whole view. Every kind is
   // componentized; the top-level dispatch is a single <component :is="viewComponent"> lookup in ui.html.
   window.VIEW_KINDS = {
-    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', form: 'form-view', stats: 'stats-view', timeline: 'timeline-view', page: 'page-view', data: 'data-view',
+    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', form: 'form-view', stats: 'stats-view', timeline: 'timeline-view', scan: 'scan-view', page: 'page-view', data: 'data-view',
     languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view'   // system screens
   };
 
@@ -6926,6 +7108,172 @@ function createVueApp() {
       +   '<v-progress-linear v-if="t.display === \'bar\' && t.pct !== null" :model-value="t.pct" :color="t.over ? \'success\' : \'primary\'" height="6" rounded class="mt-2" data-testid="stat-bar"></v-progress-linear>'
       + '</div>'
       + '<div v-if="!tiles.length" style="opacity:0.6;font-size:0.85rem;padding:8px">{{ a.t(\'stats.empty\') }}</div>'
+      + '</div>'
+      + '</component>'
+  });
+
+  // Scan view: a code goes in, a row comes out. The box IS the interface, and that is what makes this
+  // usable before any camera code exists -- a handheld wedge scanner is a keyboard, so it types the code
+  // and presses Enter, and anyone without one types the same code by hand.
+  //
+  // Every outcome is shown, none is swallowed. A scan that quietly does nothing looks exactly like a
+  // scan that never registered, and that is how somebody standing at a door at 3am stops trusting it.
+  app.component('scan-view', {
+    props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    data: function() { return { code: '', last: null, armed: false, reading: false, autoSubmit: false }; },
+    // A `?scan=` deep link hands its code to the view it names. Taken once -- after that the box is
+    // the person's, and `armed` is what makes "something is waiting for you to press" visible.
+    //
+    // `link: "submit"` logs it with no press at all. The view's tables may still be in flight (selectTab
+    // started the fetches a tick ago), so the write waits for `viewLoaded` rather than racing them --
+    // the watcher below is what fires when they land, and runPending is a no-op if they already had.
+    mounted: function() {
+      var p = appInstance.pendingScan;
+      if (!p || p.view !== this.viewName) return;
+      appInstance.pendingScan = null;
+      this.code = p.code;
+      this.armed = true;
+      if (this.cfg.link === 'submit') { this.autoSubmit = true; this.runPending(); }
+    },
+    watch: { viewLoaded: function(ready) { if (ready) this.runPending(); } },
+    computed: {
+      a: function() { return appInstance; },
+      viewName: function() { return this.name || appInstance.currentTable; },
+      cfg: function() { return (VIEWS[this.viewName] || {}).scan || {}; },
+      // The browser's own barcode decoder, or nothing. `BarcodeDetector` is native where it exists and
+      // absent on iOS Safari, Firefox and desktop Chrome on Windows -- so the camera is an ENHANCEMENT
+      // and the typed box stays the interface everywhere. No button appears rather than a button that
+      // fails, and a wedge scanner and a person's fingers were always the paths that work everywhere.
+      cameraOk: function() { return typeof BarcodeDetector !== 'undefined'; },
+      catalogRef: function() { return getColumnRef(((VIEWS[this.viewName] || {}).sources || [])[0], this.cfg.column); },
+      // Has everything this view reads ARRIVED -- which is not the same question as whether any of it
+      // has rows. A genuinely empty catalogue is loaded, and `unknown` is then the honest answer.
+      //
+      // EVERY table, not just the catalogue, and both of the others matter. `once` is checked against
+      // the LOG, so submitting before that lands would let a duplicate through; and the in-flight
+      // fetch replaces dataCache on arrival, so a row created into the gap disappears from the screen
+      // (it reaches the backend, which is worse: the two then disagree). Unreachable tables are
+      // excluded for the same reason _ensureCached skips them -- they never arrive, and waiting for
+      // one would wait forever.
+      //
+      // Only an automatic submit has to ask: a person pressing the button has already waited.
+      viewLoaded: function() {
+        var a = appInstance;
+        return (a._viewTables(this.viewName) || [])
+          .filter(function(t) { return a.canReachTable(t); })
+          .every(function(t) { return Array.isArray(a.dataCache[t]); });
+      },
+      // What each outcome looks like. `created` is the only one that wrote anything; the other three
+      // refused, and the difference between them is the whole diagnosis -- a code nobody printed, a code
+      // printed twice, or a code already logged.
+      tone: function() {
+        var o = this.last && this.last.outcome;
+        return o === 'created' ? 'success' : o === 'already' ? 'warning' : 'error';
+      },
+      // Same split as statsFor, and for the same reason: top-level renders the rows loadTableData just
+      // built (which carry the period offset), an embed renders its own rows, because currentData
+      // belongs to whatever page is hosting it.
+      recent: function() {
+        var rows = (this.viewName === appInstance.currentTable && !appInstance.viewingArchive)
+          ? (appInstance.currentData || []) : appInstance.embedRows('view', this.viewName);
+        return (rows || []).slice(-5).reverse();
+      },
+      // The rows listed back under the box, so a scan is visibly recorded rather than only claimed.
+      // Top-level only: EMBEDDED, the box is a widget on a page that composes the rest around it --
+      // doc_mine puts the whole log directly under it -- and the outcome alert already says the scan
+      // registered. Same reason the print action is top-level only.
+      // The view's own columns when it declares them; otherwise exactly what the scan writes, which is
+      // always something worth reading back.
+      cols: function() {
+        var v = VIEWS[this.viewName] || {};
+        var declared = (v.columns || []).filter(function(c) { return typeof c === 'string'; });
+        return declared.length ? declared : [this.cfg.column].concat(Object.keys(this.cfg.set || {}));
+      }
+    },
+    methods: Object.assign({}, ROOT_PROXY, {
+      // The deep-linked code, submitted once the catalogue it resolves against is here. Called from
+      // mounted and from the watcher, and disarms itself, so whichever happens first wins and the
+      // other does nothing.
+      runPending: function() {
+        if (!this.autoSubmit || !this.viewLoaded) return;
+        this.autoSubmit = false;
+        this.submit();
+      },
+      // Decode a photograph of a label and log it. A still photo rather than a live video stream, and
+      // the difference is the whole cost of this phase: `<input capture>` hands back one frame from
+      // the OS camera, so there is no `getUserMedia`, no permission of ours to hold, no rAF loop and
+      // -- the failure the roadmap actually warned about -- no stream to forget to stop, which is how
+      // a camera light stays on after somebody navigates away.
+      //
+      // The page is never left, so this is the form that works with no network: the app is already
+      // loaded, the decode is local, and the write queues in the backend's offline cache. That is the
+      // basement and the forest, which is the whole reason this exists beside the `?scan=` link.
+      //
+      // Submitting straight away is safe HERE, unlike a deep link: somebody pointing a camera at a
+      // label is the intent, where a URL is only ever something that arrived.
+      onPhoto: function(ev) {
+        var self = this, file = ev.target.files && ev.target.files[0];
+        ev.target.value = '';                 // reset, so re-picking the same photo fires change again
+        if (!file) return;
+        this.reading = true;
+        var fail = function(outcome) { self.reading = false; self.last = { outcome: outcome, code: '' }; };
+        // Both symbologies the app itself produces: the printed sheet's Code 39, and a QR carrying the
+        // `?scan=` deep link, which `Scan.codeFrom` unwraps rather than navigating to.
+        Promise.resolve()
+          .then(function() { return createImageBitmap(file); })
+          .then(function(bmp) { return new BarcodeDetector({ formats: ['code_39', 'qr_code'] }).detect(bmp); })
+          .then(function(found) {
+            if (!found || !found.length) return fail('no_code_found');
+            // Several codes in one picture is a framing problem, and choosing one of them would log a
+            // door nobody aimed at -- the same reason a duplicated catalogue code refuses.
+            if (found.length > 1) return fail('several_codes');
+            self.reading = false;
+            self.code = Scan.codeFrom(found[0].rawValue);
+            self.submit();
+          })
+          .catch(function() { fail('camera_failed'); });
+      },
+      submit: function() {
+        var self = this;
+        if (!String(this.code).trim()) return;
+        var res = appInstance.submitScan(this.viewName, this.code);
+        this.armed = false;
+        if (!res) return;                 // signed out: the root has already said so
+        // The time the code was FIRST logged is the only thing that makes an `already` actionable --
+        // "you did this at 02:14" is a different message from "that did not work".
+        if (res.outcome === 'already' && res.existing && res.existing.created_at) {
+          res.at = new Date(res.existing.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+        this.last = res;
+        this.code = '';
+        // Straight back to the box: a round is twenty codes in a row, and reaching for the field between
+        // each one is the difference between a tool and a chore.
+        this.$nextTick(function() { try { self.$refs.box.focus(); } catch (e) {} });
+      }
+    }),
+    template: ''
+      + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'pa-4\'" data-testid="scan-view">'
+      + '<template v-if="cameraOk">'
+      +   '<input type="file" accept="image/*" capture="environment" ref="photo" style="display:none" data-testid="scan-photo" @change="onPhoto($event)">'
+      +   '<v-btn block variant="tonal" color="primary" prepend-icon="mdi-camera" class="mb-3" :loading="reading" data-testid="scan-camera" @click="$refs.photo.click()">{{ a.t(\'scan.camera\') }}</v-btn>'
+      + '</template>'
+      + '<v-text-field ref="box" v-model="code" :label="a.t(\'scan.code\')" density="compact" variant="outlined" hide-details autofocus autocomplete="off" data-testid="scan-code" @keydown.enter="submit()">'
+      +   '<template v-slot:append-inner>'
+      +     '<v-btn size="small" icon="mdi-barcode-scan" :disabled="!code.trim()" :color="armed ? \'primary\' : undefined" :variant="armed ? \'tonal\' : \'text\'" :title="a.t(\'scan.code\')" @click="submit()" data-testid="scan-submit"></v-btn>'
+      +   '</template>'
+      + '</v-text-field>'
+      + '<v-alert v-if="last" :type="tone" density="compact" variant="tonal" class="mt-3" data-testid="scan-outcome" :data-outcome="last.outcome">'
+      +   '<span>{{ a.t(\'scan.\' + last.outcome) }}</span>&nbsp;'
+      // A resolved scan names the CATALOGUE ROW it hit, through the same renderer the grid uses for that
+      // column -- so a translated vocabulary reads the same here as everywhere else. A refused one can
+      // only echo what was typed, since it resolved to nothing.
+      +   '<b v-if="last.value"><list-value :col="cfg.column" :value="last.value"></list-value></b>'
+      +   '<b v-else>{{ last.code }}</b>'
+      +   '<span v-if="last.at" style="opacity:0.75">&nbsp;· {{ last.at }}</span>'
+      + '</v-alert>'
+      + '<div v-if="!embed && recent.length" class="mt-4">'
+      +   '<div style="font-size:0.72rem;opacity:0.7;text-transform:uppercase;letter-spacing:0.03em">{{ a.t(\'scan.recent\') }}</div>'
+      +   '<data-list :rows="recent" :cols="cols"></data-list>'
       + '</div>'
       + '</component>'
   });

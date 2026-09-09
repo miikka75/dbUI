@@ -136,3 +136,77 @@ describe('print.js — cardHtml', () => {
     assert.equal(/<dl><\/dl>/.test(html), false);               // no empty dl pairs remain
   });
 });
+
+describe('print.js — a sheet of scannable labels', () => {
+  const ctx = { t: (k) => k };
+
+  it('one label per row: the name, a barcode, and the code in text', () => {
+    const html = Print.labels([{ code: 'CP-01', label: 'Back door' }], ctx);
+    assert.equal((html.match(/class="label"/g) || []).length, 1);
+    assert.match(html, /<b>Back door<\/b>/);
+    assert.match(html, /<svg viewBox="0 0 111 46"/);
+    // The text under the barcode is the fallback for a scuffed label, and typing it is what the scan
+    // view shipped on — so it must be the code, not the name.
+    assert.match(html, /<code>CP-01<\/code>/);
+  });
+
+  it('a code that cannot be printed says so instead of coming out blank', () => {
+    const html = Print.labels([{ code: 'Wash-up #2', label: 'Wash up' }], ctx);
+    assert.equal(/<svg/.test(html), false);
+    assert.match(html, /scan\.no_barcode/);
+    assert.match(html, /<code>Wash-up #2<\/code>/);   // still printed, so it can at least be typed
+  });
+
+  it('labels and codes are escaped — a catalogue is editor-writable and this is written into a document', () => {
+    const html = Print.labels([{ code: 'A', label: '<img src=x onerror=alert(1)>' }], ctx);
+    assert.equal(/<img/.test(html), false);
+    assert.match(html, /&lt;img/);
+  });
+
+  it('bars scale together, so stretching the sheet does not change what a decoder measures', () => {
+    const e = require('../../scan').code39('AB');
+    const widths = new Set(e.bars.map((b) => b.w));
+    assert.deepEqual([...widths].sort(), [1, 3]);     // exactly two module widths, 3:1
+  });
+});
+
+describe('print.js — QR labels', () => {
+  // The encoder is vendored and loaded on demand, so print.js never sees it: ctx hands over a module
+  // matrix and nothing else. A fake one here is therefore the REAL contract, not a stand-in.
+  const matrix = (size) => ({ size, isDark: (r, c) => (r + c) % 2 === 0 });
+  const ctx = (qr) => ({ t: (k) => k, qr });
+
+  it('a label with a link and an encoder carries a QR', () => {
+    const html = Print.labels([{ code: 'CP-01', label: 'Back door', link: 'https://a.b/?view=w&scan=CP-01' }],
+                              ctx(() => matrix(21)));
+    assert.match(html, /<svg viewBox="0 0 29 29"/);      // 21 modules + a 4-module quiet zone each side
+    assert.match(html, /<code>CP-01<\/code>/);           // the typed fallback stays under it
+  });
+
+  it('the quiet zone is drawn, because without it a decoder cannot find the symbol', () => {
+    const html = Print.labels([{ code: 'X', label: 'X', link: 'u' }], ctx(() => matrix(21)));
+    // Every module rect sits inside the border, never at 0.
+    for (const m of html.matchAll(/<rect x="(\d+)" y="(\d+)"/g)) {
+      assert.ok(Number(m[1]) >= 4 && Number(m[2]) >= 4, 'a module was drawn into the quiet zone');
+    }
+  });
+
+  it('dark modules are run-length merged along each row, not one rect per module', () => {
+    // A solid row of 21 must be ONE rect, or a sheet of thirty labels is tens of thousands of nodes.
+    const solid = { size: 3, isDark: (r) => r === 0 };
+    const html = Print.labels([{ code: 'X', label: 'X', link: 'u' }], ctx(() => solid));
+    assert.match(html, /<rect x="4" y="4" width="3" height="1"\/>/);
+    assert.equal((html.match(/<rect x=/g) || []).length, 1);
+  });
+
+  it('no encoder falls back to Code 39, which needs none', () => {
+    const html = Print.labels([{ code: 'CP-01', label: 'Back door', link: 'https://a.b/?scan=CP-01' }], ctx(null));
+    assert.match(html, /<svg viewBox="0 0 111 46"/);
+    assert.equal(/viewBox="0 0 29 29"/.test(html), false);
+  });
+
+  it('an encoder that refuses the payload also falls back rather than printing nothing', () => {
+    const html = Print.labels([{ code: 'CP-01', label: 'Back door', link: 'x' }], ctx(() => null));
+    assert.match(html, /<svg viewBox="0 0 111 46"/);
+  });
+});

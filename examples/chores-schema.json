@@ -67,7 +67,10 @@
     },
     "ref_duties": {
       "isLookup": true,
-      "hierarchy": { "parent": "person", "value": "tasks" },
+      "hierarchy": {
+        "parent": "person",
+        "value": "tasks"
+      },
       "reorderable": true,
       "defaultSort": "position",
       "columns": [
@@ -261,7 +264,7 @@
     {
       "name": "doc_mine",
       "icon": "mdi-account-check",
-      "markdown": "## {{t:text.mine_tasks}}\n\n{{view:duty_matrix}}\n\n## {{t:text.mine_log}}\n\n{{view:chore_mine@both}}\n",
+      "markdown": "## {{t:text.mine_scan}}\n\n{{view:chore_scan}}\n\n## {{t:text.mine_tasks}}\n\n{{view:duty_matrix}}\n\n## {{t:text.mine_log}}\n\n{{view:chore_mine@both}}\n",
       "kind": "page"
     },
     {
@@ -283,6 +286,31 @@
       },
       "icon": "mdi-clipboard-text-clock",
       "kind": "data"
+    },
+    {
+      "name": "chore_scan",
+      "sources": [
+        "chore_log"
+      ],
+      "mode": "union",
+      "kind": "scan",
+      "icon": "mdi-barcode-scan",
+      "defaultSort": "done_on",
+      "filter": {
+        "person": "@me"
+      },
+      "columns": [
+        "done_on",
+        "chore",
+        "status"
+      ],
+      "scan": {
+        "column": "chore",
+        "set": {
+          "done_on": "@today"
+        },
+        "link": "submit"
+      }
     },
     {
       "name": "chore_board",

@@ -1827,6 +1827,210 @@ one that is not a **date** column, an unparseable `interval`, and a non-positive
 those otherwise fails the same silent way — an empty chart, indistinguishable from a table nobody has
 filled in yet.
 
+## scan (eleventh view kind)
+
+A view with a `scan` field turns **a code somebody scans or types into a row**. Engine: `scan.js`.
+
+The gesture is "this happened, here, now": a code on the dishwasher that logs a chore done, a code at
+each door on a security round, a control at an orienteering checkpoint, a code on a piece of kit that
+logs it going out. The code names the *thing*; the person comes from being signed in.
+
+```json
+{ "name": "chore_scan",
+  "sources": ["chore_log"],          // REQUIRED — the ONE table the scan appends to
+  "kind": "scan",
+  "filter": { "person": "@me" },     // the view lists rows back, like any data view
+  "columns": ["done_on", "chore", "status"],
+  "scan": {
+    "column": "chore",               // REQUIRED — a `ref` column; its lookup is the catalogue
+    "codeCol": "code",               // OPTIONAL — the lookup column the code matches (default: its valueCol)
+    "set": { "done_on": "@today" },  // OPTIONAL — the rest of the row
+    "once": "day"                    // OPTIONAL — "day" | "ever"; omitted, every scan appends
+  }
+}
+```
+
+A scan view **is a data view** over the log it writes — same `sources`, `filter`, `columns`,
+`defaultSort`, access gating — plus a box to type a code into. It lists the last few rows back so a scan
+is visibly recorded.
+
+**It usually wants no tab of its own.** Embedded through `{{view:x}}`, the box sits on the page it
+writes into — which is what the chores bundle does, putting it at the top of *My chores*, above the log
+it appends to:
+
+```
+## {{t:text.mine_scan}}
+
+{{view:chore_scan}}
+
+## {{t:text.mine_log}}
+
+{{view:chore_mine@both}}
+```
+
+Embedded, it renders **only the box**: the page composes what goes around it, and the outcome line
+already says the scan registered. The print action is top-level only for the same reason. A view kept
+out of `nav` is still a view — `{{view:…}}` and the `?scan=` deep link both name the VIEW, not a tab —
+so removing its tab costs nothing.
+
+### The code names a catalogue row
+
+`column` must be a **`ref`**, because the lookup it points at is what a code is checked against. A code
+matching no row is refused rather than written, which is the whole difference between a log worth
+reading and free text. Matching ignores case and surrounding whitespace — a wedge scanner appends Enter
+and sometimes a stray carriage return, and someone typing `cp-07` means the label that reads `CP-07`.
+
+`codeCol` exists for when the label is not the value the row stores: an EAN on a product, a badge
+number, a stamped control id. Two catalogue rows carrying the same code are **refused as ambiguous** —
+guessing writes the wrong door, and the report looks perfectly fine afterwards.
+
+### `set` — the rest of the row
+
+Values are literals, except two tokens resolved at scan time:
+
+| Token | Writes |
+|---|---|
+| `@today` | the local date, `YYYY-MM-DD` |
+| `@now` | an ISO timestamp |
+
+`@now` is what makes a round legible: four controls sharing a *date* says nothing, four controls sharing
+a *minute* says everything. Any other `@word` is rejected at load rather than written through as text.
+Columns with a `default` or `defaultFrom` (`status`, `person`) are filled by the ordinary create path and
+do not belong in `set`.
+
+### `once` — one scan per code
+
+`"day"` refuses a second scan of the same code on the same day and reports **when the first one was**;
+`"ever"` refuses it whenever it was logged. Omitted, every scan appends — washing up twice is two
+chores, and only a route or a checklist wants the other behaviour.
+
+Scoped to the **owner**: two guards walking one route each record their own visit. The day comes from
+`created_at` (in local time, so a 03:00 round does not split at UTC midnight) rather than from the date
+column the scan stamps — that column is what the row *means* and can be back-dated, while `created_at`
+is when the scan happened, which is what `once` is asking about.
+
+### Every outcome is shown
+
+| Outcome | What happened |
+|---|---|
+| `created` | the row was written |
+| `already` | `once` refused it, and the first time is on screen |
+| `unknown` | the code names no catalogue row — nothing written |
+| `ambiguous` | it names several — nothing written |
+
+Silence is the one answer a scanner must never get: a scan that quietly does nothing is
+indistinguishable from one that never registered.
+
+### What it needs to be able to write
+
+The row is written through the **self-service path** — owner-stamped, gated by `ownerWritable` in both
+rules layers — so the target table needs an `owner` column, and `ownerWritable` (when the table declares
+one) must name `scan.column` and every key of `set`. A column left out is *locked* to its declared
+default, so the create is refused whole rather than trimmed.
+
+`validateSchema` reports both, along with a `column` that is not a ref, a `codeCol` that is not a column
+of the lookup, a `set` naming a column that does not exist or naming the scanned column itself, an
+unknown `@token`, and an `once` that is neither `"day"` nor `"ever"`. Each otherwise fails the same
+silent way: a view that renders perfectly and refuses at the write layer with nothing to point at.
+
+### Printing the codes
+
+**Print codes lives in the Lookup editor**, beside the catalogue whose rows it labels — a label belongs
+to the row it names, not to the view that happens to read it. The button appears on a lookup only when
+some scan view resolves codes against it, and its tooltip names that view, because the QR carries a deep
+link and a link needs a destination. (Two scan views over one catalogue is legitimate — the same route
+logged two ways — and the first is taken, visibly rather than silently.)
+
+It emits one label per catalogue row: the name people read, a **QR**, and the code in text underneath. The QR carries the `?view=…&scan=…` deep link, which is what makes the sheet
+useful to a phone — any camera app opens the link, and the app comes up on the right view with the code
+already resolved.
+
+The encoder is vendored (`qrcode-generator`) and **fetched the first time something draws a code, never
+at boot** — so a schema with no scan view never pays for it, and one that has never printed a sheet does
+not either. If it cannot be fetched (no `/vendor`, no network), the sheet falls back to **Code 39**,
+which needs no library at all: 44 characters of nine elements, three of them wide, drawn as SVG rects.
+That is the code a handheld wedge scanner reads.
+
+Code 39 has no lowercase, so its labels print **uppercase**. That costs nothing, because matching
+lowercases both sides: a label reading `DISHES` resolves the catalogue value `Dishes`. Its 43 characters
+are `0-9 A-Z` and `- . space $ / + %`; a code outside them cannot be encoded, and the sheet says so on
+that label rather than printing a name with no code under it. A QR has no such limit — it carries a URL.
+
+The text under each code is not decoration: it is what someone types when a label is scuffed, and it is
+the same path the box takes.
+
+**No camera is involved anywhere in this.** A handheld barcode scanner is a keyboard — it types the code
+and presses Enter — and anyone without one types the code by hand.
+
+### The phone's own camera: `?view=…&scan=…`
+
+A URL of the form
+
+```
+https://<app>/?view=<scan view>&scan=<code>
+```
+
+opens that scan view with the code already in the box. Put that URL in a **QR** on the door and the
+phone's own camera decodes it — iOS Camera, Control Center and Android's camera all offer to open a link
+they find in a QR — so this needs **no `BarcodeDetector`, no decoder, and no camera lifecycle**, on any
+platform. The app's whole share of it is one boot parameter.
+
+**By default it arms the box; it does not write.** A link is something anyone can send you, and a GET
+that logs a visit as you is a row somebody else caused — which for a patrol round is exactly the
+property the log exists to have. So the code arrives resolved and focused, and one deliberate press
+records it.
+
+`"link": "submit"` logs it with no press at all:
+
+```json
+"scan": { "column": "chore", "set": { "done_on": "@today" }, "link": "submit" }
+```
+
+That is the right trade where a wrong row costs nothing and gets reviewed anyway — a household chore
+log, where `status` starts at `logged` and somebody approves it — and the wrong one where the log's
+whole purpose is to say a person was somewhere. It is per view rather than one answer baked in, because
+those are both real deployments. The shipped `chore_scan` sets it; the default stays `"arm"`.
+
+An auto-submitting link **waits for the view's tables before writing**, which arming never has to do:
+the catalogue missing would report a good code as `unknown`, and the log missing would both blind
+`once` to an earlier scan and let the still-running fetch overwrite the new row in the cache — leaving
+the screen and the backend disagreeing.
+
+`view` is honoured only alongside `scan`, and only when it names a scan view: this is a scan contract,
+not a general view-routing parameter. Both are consumed from the address bar once read, so a reload does
+not re-arm and the link does not sit in history carrying a code.
+
+Two things to know before relying on it. An installed **iOS PWA and Safari have separate storage**, so a
+scanned link opening in Safari asks for sign-in once. And every scan is a **page navigation**, so this
+path needs the network — `sw.js` caches nothing, and the app has never started offline. A round in a
+basement wants a scanner that stays on one page.
+
+### Reading a label with the phone's camera
+
+Where the browser has a **`BarcodeDetector`**, the view offers a camera button: photograph a label and
+the code is decoded in the page and logged. It reads both symbologies the app itself produces — the
+sheet's Code 39, and a QR carrying the `?scan=` deep link, which is unwrapped to its code rather than
+navigated to, so photographing your own QR *inside* the app does the write here instead of opening a
+second copy of the app to do the same one.
+
+`BarcodeDetector` is absent on iOS Safari, on Firefox, and on desktop Chrome for Windows. **No button
+appears there, rather than a button that fails** — the camera is an enhancement, and the typed box (with
+a handheld wedge scanner, or fingers) is the path that works everywhere.
+
+It is a **still photograph**, not a video stream: `<input capture>` hands back one frame from the OS
+camera, so there is no `getUserMedia`, no permission of the app's own to hold, no decode loop, and no
+stream to forget to stop — which is how a camera light ends up staying on after somebody navigates away.
+
+**This is the form that works with no network.** The page is never left: the app is already loaded, the
+decode is local, and the write goes into the backend's offline cache. The `?scan=` link cannot do that —
+each scan is a fresh navigation, and `sw.js` caches nothing.
+
+A photograph with **no code** in it, or with **more than one**, is refused and says which. Choosing one
+of several would log a door nobody aimed at, for the same reason a duplicated catalogue code refuses.
+
+Photographing submits immediately, where a deep link only arms the box. Somebody pointing a camera at a
+label *is* the intent; a URL is only ever something that arrived.
+
 ## Translatable lists (`translatableLists`)
 
 List **values** (the options behind a `select`/`multiselect` column) are translated through

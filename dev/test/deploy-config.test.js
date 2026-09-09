@@ -6,6 +6,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
+const crypto = require('node:crypto');
 const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
@@ -204,6 +205,40 @@ describe('deploy config — the browser-local Postgres backend', () => {
     const wf = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'deploy-pages.yml'), 'utf8');
     assert.match(wf, /npm pack .*vue@/, 'deploy-pages.yml no longer materialises vendor/vue.js');
     assert.match(wf, /scripts\/vendor-pglite\.sh/, 'deploy-pages.yml no longer materialises vendor/pglite');
+    assert.match(wf, /qrcode-generator@/, 'deploy-pages.yml no longer materialises vendor/qrcode.js');
+  });
+
+  // Three places materialise vendor/ and they must agree, or the QR encoder is present in one
+  // environment and absent in another -- where the label sheet silently prints Code 39 instead, which
+  // looks like a design choice rather than a missing file.
+  it('every path that materialises vendor/ knows about the QR encoder', () => {
+    for (const f of [['update-vendor.sh'], ['.claude', 'hooks', 'session-start.sh'],
+                     ['.github', 'workflows', 'deploy-pages.yml']]) {
+      const src = fs.readFileSync(path.join(ROOT, ...f), 'utf8');
+      assert.match(src, /qrcode/, f.join('/') + ' does not materialise vendor/qrcode.js');
+    }
+  });
+
+  // Same trap the PGlite pin has: bump vendor/versions by hand and the CDN fallback keeps naming the
+  // old version, which is invisible until the day /vendor is missing -- and then the fallback serves a
+  // DIFFERENT encoder than the SRI hash beside it was taken from, so it is blocked and no QR appears.
+  it('the QR CDN fallback pins the version in vendor/versions', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'app-core.js'), 'utf8');
+    const m = /cdn\.jsdelivr\.net\/npm\/qrcode-generator@([0-9.]+)\//.exec(src);
+    assert.ok(m, 'app-core.js has no jsdelivr fallback URL for the QR encoder');
+    assert.equal(m[1], versions.QRCODE, 'the CDN fallback and vendor/versions name different qrcode-generator versions');
+  });
+
+  // The fallback is only as good as its hash: an unpinned CDN script is a third party that can change
+  // what it serves, which is the one thing loading from /vendor first exists to avoid.
+  it('the QR CDN fallback is pinned by SRI, and the hash is the vendored file', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'app-core.js'), 'utf8');
+    const m = /qrcode-generator@[0-9.]+\/qrcode\.js', '(sha384-[A-Za-z0-9+/=]+)'/.exec(src);
+    assert.ok(m, 'the QR CDN fallback carries no SRI hash');
+    const file = path.join(ROOT, 'vendor', 'qrcode.js');
+    if (!fs.existsSync(file)) return;      // vendor/ is generated; nothing to compare against here
+    const want = 'sha384-' + crypto.createHash('sha384').update(fs.readFileSync(file)).digest('base64');
+    assert.equal(m[1], want, 'the SRI hash does not match vendor/qrcode.js — run ./update-vendor.sh');
   });
 
   // The fallback pins a version in backend-local-pglite.js, and a half-done bump (vendor/versions moved,
