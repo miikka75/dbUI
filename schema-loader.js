@@ -273,7 +273,7 @@ function validateSchema() {
   // The kinds whose rows ARE their `sources` rows passed through `filter` — loadTableData's union/join
   // branch, which data, board, form and stats all fall through to. Every other kind either generates its
   // rows (rotation) or reads through a config of its own that this `filter` is no part of.
-  var FILTERS_SOURCE_ROWS = { data: 1, board: 1, form: 1, stats: 1, timeline: 1 };
+  var FILTERS_SOURCE_ROWS = { data: 1, board: 1, form: 1, stats: 1, timeline: 1, scan: 1 };
   for (var v in VIEWS) {
     var view = VIEWS[v];
     partLabelCheck('View', v, view);
@@ -625,6 +625,11 @@ function validateSchema() {
         stGoalOk(t.goal, at, false);
       });
     }
+    // A scan view IS a data view over the log it writes — sources, filter and columns are checked by the
+    // rules above — plus a resolver config, whose shape (and whose write-layer prerequisites) scan.js
+    // owns. Same division as Columns.vocabularyErrors: the module that reads a config reports what is
+    // wrong with it.
+    errors = errors.concat(Scan.configErrors(SCHEMA, v, view));
   }
   // Check list references
   for (var t2 in SCHEMA) { for (var c2 in SCHEMA[t2].columns) {

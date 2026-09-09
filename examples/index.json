@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "cc04016045f5ed3a"
+      "hash": "9227b20c1fcfee52"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "a177105de7bef843"
+      "hash": "a0b76d87e9904b2d"
     }
   ],
   "bundles": [
@@ -47,25 +47,25 @@
       "title": "Our Home",
       "description": "A household chore tracker — points, approvals, rewards, a weekly rota and a shopping list.",
       "icon": "./examples/chores-favicon.svg",
-      "revision": 10,
+      "revision": 15,
       "tables": 6,
-      "views": 18,
+      "views": 19,
       "schema": {
         "file": "chores-schema.json",
-        "hash": "ce89c4639e06f3a9"
+        "hash": "6f96dbff476ba83d"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "chores-lang-en.json",
-          "hash": "e555c590439b4f9e"
+          "hash": "22c0b525a79f5ac7"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "chores-lang-fi.json",
-          "hash": "a858699212785260"
+          "hash": "6904d0ad315969ff"
         }
       ],
       "data": {

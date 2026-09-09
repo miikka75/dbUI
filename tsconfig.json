@@ -44,6 +44,7 @@
     "pivot.js",
     "rsvp.js",
     "board.js",
+    "scan.js",
     "live-sync.js",
     "backend-helpers.js",
     "csp.js"

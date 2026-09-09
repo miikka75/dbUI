@@ -83,7 +83,71 @@
     return html + '</div>';
   }
 
-  var M = { escape: escape, cell: cell, table: table, printable: printable, embed: embed, cardHtml: cardHtml };
+  // A sheet of scannable labels, one per catalogue row: the name people read, the barcode a scanner
+  // reads, and the code in text underneath. The text is not decoration -- it is the fallback a scuffed
+  // label needs, and typing it is the arrangement the scan view shipped on.
+  //
+  // `items` is [{ code, label }]. Scan is read lazily rather than captured at module load: index.html
+  // loads print.js BEFORE scan.js, so a module-scope capture would take undefined.
+  function labels(items, ctx) {
+    var Scan = (typeof module !== 'undefined' && module.exports) ? require('./scan') : root.Scan;
+    var h = '<div class="labels">';
+    (items || []).forEach(function(it) {
+      h += '<div class="label"><b>' + escape(it.label) + '</b>';
+      // QR when there is an encoder, because that is the one a PHONE can act on: it carries the deep
+      // link, so any camera app opens the app on the right view with the code already resolved. A 1D
+      // code carries the bare text, which no camera app offers to do anything with.
+      var m = ctx.qr && it.link ? ctx.qr(it.link) : null;
+      if (m) { h += qrSvg(m); }
+      else {
+        // No encoder (never loaded, or /vendor missing and offline) -> Code 39, which needs none. It is
+        // read by a handheld wedge scanner rather than a camera, which is the fallback this sheet had
+        // before the encoder was vendored.
+        var enc = Scan.code39(it.code);
+        // A code neither can carry says so on the sheet. Printing the row with no code at all would be
+        // a door nobody can scan and nobody knows is missing until they are standing at it.
+        h += enc ? barcode(enc) : '<div class="nocode">' + escape(ctx.t('scan.no_barcode')) + '</div>';
+      }
+      // The STORED code, not the uppercased Code 39 form: this line is what somebody types when a
+      // label is scuffed, matching is case-insensitive either way, and under a QR the uppercase
+      // form would simply be wrong.
+      h += '<code>' + escape(it.code) + '</code></div>';
+    });
+    return h + '</div>';
+  }
+
+  // One QR as inline SVG, from a module matrix (`size` + `isDark(row, col)`) rather than from the
+  // encoder itself -- so this file stays pure over ctx and its Node tests need no vendored 56 KB.
+  //
+  // A QUIET ZONE of four modules on every side is not decoration: without it a decoder cannot find the
+  // symbol against the label's border, and the code reads as unscannable rather than as wrong.
+  function qrSvg(m, px) {
+    var q = 4, side = m.size + q * 2, rects = '';
+    for (var r = 0; r < m.size; r++) {
+      // Run-length along each row: one <rect> per horizontal run instead of per module, which is the
+      // difference between a few hundred rects and a few thousand on a sheet of them.
+      var run = 0;
+      for (var c = 0; c <= m.size; c++) {
+        var dark = c < m.size && m.isDark(r, c);
+        if (dark) { run++; continue; }
+        if (run) rects += '<rect x="' + (q + c - run) + '" y="' + (q + r) + '" width="' + run + '" height="1"/>';
+        run = 0;
+      }
+    }
+    var w = px || 120;
+    return '<svg viewBox="0 0 ' + side + ' ' + side + '" width="' + w + '" height="' + w + '" shape-rendering="crispEdges">'
+      + '<rect width="' + side + '" height="' + side + '" fill="#fff"/><g fill="#000">' + rects + '</g></svg>';
+  }
+
+  // One barcode as inline SVG. `preserveAspectRatio="none"` lets the sheet stretch it to the label
+  // width: the bars scale together, so the wide-to-narrow ratio the decoder measures is unchanged.
+  function barcode(enc, height) {
+    var h = height || 46, rects = '';
+    enc.bars.forEach(function(b) { rects += '<rect x="' + b.x + '" y="0" width="' + b.w + '" height="' + h + '" fill="#000"/>'; });
+    return '<svg viewBox="0 0 ' + enc.width + ' ' + h + '" width="100%" height="' + h + '" preserveAspectRatio="none" shape-rendering="crispEdges">' + rects + '</svg>';
+  }
+
+  var M = { escape: escape, cell: cell, table: table, printable: printable, embed: embed, cardHtml: cardHtml, labels: labels, barcode: barcode, qrSvg: qrSvg };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else root.Print = M;
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));

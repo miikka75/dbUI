@@ -577,6 +577,15 @@
                     <span>{{ rt }}</span>
                     <v-icon v-if="a.isTranslatableList(rt)" size="x-small" style="margin-left:auto;opacity:0.45">mdi-translate</v-icon>
                   </div>
+                  <!-- A sheet of scannable labels for these rows, offered only where something scans
+                       them. The title names the view the codes link to, so a catalogue read by two scan
+                       views does not silently print for whichever came first. -->
+                  <template v-slot:append>
+                    <v-btn v-if="a.scanViewForCatalog(rt)" icon="mdi-printer" size="x-small" variant="text"
+                           :title="a.t('scan.print_codes') + ' — ' + a.t('view.' + a.scanViewForCatalog(rt))"
+                           :data-testid="'ref-print-' + rt"
+                           @click.stop="a.printScanLabels(a.scanViewForCatalog(rt))"></v-btn>
+                  </template>
                 </v-list-item>
               </template>
             <!-- Hierarchical mode (2 data columns) -->
