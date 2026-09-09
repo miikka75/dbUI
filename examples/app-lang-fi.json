@@ -164,6 +164,7 @@
       "scan.ambiguous": "Koodi on usealla rivillä",
       "scan.recent": "Juuri luettu",
       "scan.print_codes": "Tulosta koodit",
+      "scan.print_code": "Tulosta tämä koodi",
       "scan.no_barcode": "Koodia ei voi tulostaa viivakoodina",
       "scan.camera": "Lue kameralla",
       "scan.no_code_found": "Kuvassa ei ole koodia",

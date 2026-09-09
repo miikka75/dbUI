@@ -164,6 +164,7 @@
       "scan.ambiguous": "That code is on more than one row",
       "scan.recent": "Just scanned",
       "scan.print_codes": "Print codes",
+      "scan.print_code": "Print this code",
       "scan.no_barcode": "This code cannot be printed as a barcode",
       "scan.camera": "Scan with the camera",
       "scan.no_code_found": "No code in that picture",

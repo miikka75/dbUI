@@ -66,6 +66,13 @@ async function scan(page, code) {
   await page.locator('[data-testid="scan-code"] input').press('Enter');
   await expect(page.locator('[data-testid="scan-outcome"]')).toBeVisible();
 }
+// Open the Lookup editor and EXPAND one catalogue. The rows live inside a collapsed v-list-group, so
+// selecting the table is not enough — a person clicks the group open, and so does this.
+async function openLookup(page, table) {
+  await page.evaluate(() => window.appInstance.selectTab('__lookup'));
+  await page.locator('.v-list-item:has([data-testid="ref-print-' + table + '"])').first().click();
+  await expect(page.locator('[data-testid^="ref-print-row-"]').first()).toBeVisible();
+}
 const outcome = (page) => page.locator('[data-testid="scan-outcome"]').getAttribute('data-outcome');
 const visits = (page) => page.evaluate(() => (appInstance.dataCache.visits || []).length);
 
@@ -421,4 +428,32 @@ test('a view with no nav tab still answers a deep link — the link names the VI
   await expect(page.locator('[data-testid="scan-outcome"]')).toBeVisible({ timeout: 20000 });
   expect(await page.evaluate(() => appInstance.currentTable)).toBe('walk_auto');
   expect(await outcome(page)).toBe('created');
+});
+
+test('one catalogue row prints one label, from the row itself', async ({ page }) => {
+  test.setTimeout(90000);
+  await setup(page);
+  await page.evaluate(() => { window.__p = null; appInstance._printOpen = (t, b) => { window.__p = { t, b }; }; });
+  await openLookup(page, 'ref_controls');
+  await page.locator('[data-testid="ref-print-row-c1"]').click();
+  await expect.poll(() => page.evaluate(() => !!window.__p)).toBe(true);
+  const printed = await page.evaluate(() => window.__p);
+
+  // One label, for that row only — the catalogue has two.
+  expect((printed.b.match(/class="label"/g) || []).length).toBe(1);
+  expect(printed.b).toContain('<b>Back door</b>');
+  expect(printed.b).not.toContain('Roof hatch');
+  // Printed under the name of the thing it labels, and with no heading: an <h2> repeating the one word
+  // already on the label is noise on a sticker.
+  expect(printed.t).toBe('Back door');
+  expect(printed.b).not.toContain('<h2>');
+});
+
+test('a lookup nothing scans offers no per-row printer', async ({ page }) => {
+  test.setTimeout(90000);
+  await setup(page);
+  await openLookup(page, 'ref_controls');
+  await expect(page.locator('[data-testid="ref-print-row-c1"]')).toBeVisible();
+  // `visits` is not a lookup and nothing resolves codes against it; the button is offered per CATALOGUE.
+  expect(await page.evaluate(() => appInstance.scanViewForCatalog('visits'))).toBe('');
 });
