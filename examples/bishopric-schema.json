@@ -652,6 +652,29 @@
           {
             "mode": "union",
             "bare": true,
+            "readonly": true,
+            "hideEmpty": true,
+            "columns": [
+              "person"
+            ],
+            "sources": [
+              "admin_callings"
+            ],
+            "filter": {
+              "$or": [
+                {
+                  "status": "recently_baptized"
+                },
+                {
+                  "status": "moved_in"
+                }
+              ]
+            },
+            "markdown": "{{t:text.welcome_header}}\n\n{{self}}\n\n{{t:text.welcome_footer}}"
+          },
+          {
+            "mode": "union",
+            "bare": true,
             "columns": [
               "person",
               "organization",
@@ -717,29 +740,6 @@
               ]
             },
             "markdown": "{{t:text.ordination_header}}\n\n{{self}}\n\n{{t:text.ordination_footer}}"
-          },
-          {
-            "mode": "union",
-            "bare": true,
-            "readonly": true,
-            "hideEmpty": true,
-            "columns": [
-              "person"
-            ],
-            "sources": [
-              "admin_callings"
-            ],
-            "filter": {
-              "$or": [
-                {
-                  "status": "recently_baptized"
-                },
-                {
-                  "status": "moved_in"
-                }
-              ]
-            },
-            "markdown": "{{t:text.welcome_header}}\n\n{{self}}\n\n{{t:text.welcome_footer}}"
           },
           {
             "view": "doc_sacrament_intro"
@@ -1118,106 +1118,106 @@
   "tables": {
     "ref_statuses": [
       {
-        "id": "st-15",
-        "position": "1",
-        "phase": "consideration",
-        "status": "needs_calling"
-      },
-      {
-        "id": "st-1",
-        "position": "2",
-        "phase": "consideration",
-        "status": "under_discussion"
-      },
-      {
-        "id": "st-2",
-        "position": "3",
-        "phase": "consideration",
-        "status": "praying_about_it"
-      },
-      {
-        "id": "st-3",
-        "position": "4",
-        "phase": "consideration",
-        "status": "approved_by_bishopric"
-      },
-      {
-        "id": "st-4",
-        "position": "5",
-        "phase": "call",
-        "status": "called"
-      },
-      {
-        "id": "st-5",
-        "position": "6",
-        "phase": "call",
-        "status": "accepted"
-      },
-      {
-        "id": "st-6",
-        "position": "7",
-        "phase": "call",
-        "status": "sustained"
-      },
-      {
-        "id": "st-7",
-        "position": "8",
-        "phase": "call",
-        "status": "sustaining_recorded"
-      },
-      {
-        "id": "st-8",
-        "position": "9",
-        "phase": "setting_apart",
-        "status": "set_apart"
-      },
-      {
-        "id": "st-9",
-        "position": "10",
-        "phase": "setting_apart",
-        "status": "setting_apart_recorded"
-      },
-      {
-        "id": "st-10",
-        "position": "11",
-        "phase": "release",
-        "status": "needs_release"
-      },
-      {
-        "id": "st-11",
-        "position": "12",
-        "phase": "release",
-        "status": "released"
-      },
-      {
-        "id": "st-12",
-        "position": "13",
-        "phase": "release",
-        "status": "release_done"
-      },
-      {
-        "id": "st-13",
-        "position": "14",
-        "phase": "release",
-        "status": "release_recorded"
-      },
-      {
-        "id": "st-14",
-        "position": "15",
-        "phase": "declined",
-        "status": "declined"
-      },
-      {
         "id": "st-16",
-        "position": "16",
+        "position": "1",
         "phase": "welcome",
         "status": "recently_baptized"
       },
       {
         "id": "st-17",
-        "position": "17",
+        "position": "2",
         "phase": "welcome",
         "status": "moved_in"
+      },
+      {
+        "id": "st-15",
+        "position": "3",
+        "phase": "consideration",
+        "status": "needs_calling"
+      },
+      {
+        "id": "st-1",
+        "position": "4",
+        "phase": "consideration",
+        "status": "under_discussion"
+      },
+      {
+        "id": "st-2",
+        "position": "5",
+        "phase": "consideration",
+        "status": "praying_about_it"
+      },
+      {
+        "id": "st-3",
+        "position": "6",
+        "phase": "consideration",
+        "status": "approved_by_bishopric"
+      },
+      {
+        "id": "st-4",
+        "position": "7",
+        "phase": "call",
+        "status": "called"
+      },
+      {
+        "id": "st-5",
+        "position": "8",
+        "phase": "call",
+        "status": "accepted"
+      },
+      {
+        "id": "st-6",
+        "position": "9",
+        "phase": "call",
+        "status": "sustained"
+      },
+      {
+        "id": "st-7",
+        "position": "10",
+        "phase": "call",
+        "status": "sustaining_recorded"
+      },
+      {
+        "id": "st-8",
+        "position": "11",
+        "phase": "setting_apart",
+        "status": "set_apart"
+      },
+      {
+        "id": "st-9",
+        "position": "12",
+        "phase": "setting_apart",
+        "status": "setting_apart_recorded"
+      },
+      {
+        "id": "st-10",
+        "position": "13",
+        "phase": "release",
+        "status": "needs_release"
+      },
+      {
+        "id": "st-11",
+        "position": "14",
+        "phase": "release",
+        "status": "released"
+      },
+      {
+        "id": "st-12",
+        "position": "15",
+        "phase": "release",
+        "status": "release_done"
+      },
+      {
+        "id": "st-13",
+        "position": "16",
+        "phase": "release",
+        "status": "release_recorded"
+      },
+      {
+        "id": "st-14",
+        "position": "17",
+        "phase": "declined",
+        "status": "declined"
       }
     ],
     "ref_callings": [
