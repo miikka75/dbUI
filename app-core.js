@@ -862,6 +862,15 @@ function createVueApp() {
       // defaultSort and the rsvp/pivot views, so every sortable surface orders identically.
       // null when the view does not ask for a search box; [] means "every column the row carries".
       searchCols: function() { return Rows.searchColumns(this.currentConfig || {}); },
+      // What each cell is searched AS: the text the grid renders, which searchRows folds alongside the
+      // raw value. A linked account's name, a translated list value and a ref's label exist only after
+      // displayValue runs, so without this they are on screen and findable by nobody.
+      //   Bound to the CURRENT view (null viewCfg), which is right for all three callers: the two
+      // computeds below, and the board component, whose search branch runs only when it is not an embed.
+      searchLabeler: function() {
+        var self = this;
+        return function(col, val) { return self.displayValue(col, val, '', null); };
+      },
       searchable: function() { return this.searchCols !== null; },
       // Rows the term hides. Shown beside the box, because a filtered list with no count looks like a
       // list that has lost rows.
@@ -871,14 +880,14 @@ function createVueApp() {
       // say which is which, and need no translating.
       searchCount: function() {
         if (!this.searchable || !this.searchTerm) return '';
-        var shown = Rows.searchRows(this.currentData, this.searchTerm, this.searchCols).length;
+        var shown = Rows.searchRows(this.currentData, this.searchTerm, this.searchCols, this.searchLabeler).length;
         return shown + ' / ' + this.currentData.length;
       },
       sortedData: function() {
         // Search narrows what the grid renders; it does not touch currentData, so nothing that WRITES
         // (add, archive, the mirror cascade) sees a filtered list.
         var rows = this.searchable && this.searchTerm
-          ? Rows.searchRows(this.currentData, this.searchTerm, this.searchCols)
+          ? Rows.searchRows(this.currentData, this.searchTerm, this.searchCols, this.searchLabeler)
           : this.currentData;
         if (!this.sortCol) return rows.slice();
         var _dep = this.listsCache;   // list-backed order is read through the runtime-bound cache
@@ -4304,12 +4313,16 @@ function createVueApp() {
         return rv.slots ? rv.slots.slice() : (rv.columns || []).map(function(c) { return c.name; });
       },
       // The header a slot column renders under. A rosterRef slot is a VALUE of the lookup, so its label
-      // lives in that table's own `list.<table>.<value>` namespace -- the same keys `translatableLists`
-      // exposes for a 2-D ref lane, and the same ones its task values use. A schema-named slot keeps
-      // `field.<slot>`. Falls back to the raw name either way.
+      // comes from `listLabel` in that table's namespace -- the same resolver, and therefore the same
+      // answer, as every cell that renders one of those values elsewhere. A schema-named slot is not a
+      // list value at all and keeps `field.<slot>`. Falls back to the raw name either way.
+      //   This used to inline `tOr('list.<table>.<value>')`, which is listLabel minus its first step --
+      // so on a `userlink-name` roster the matrix printed curated values in its headers while the same
+      // people rendered as their profile names in every other view. A third copy of a label rule is
+      // exactly what listLabel's own comment was written about.
       rotationSlotLabel: function(name, col) {
         var rv = (VIEWS[name] || {}).rotation;
-        if (rv && rv.rosterRef) return this.tOr('list.' + rv.rosterRef + '.' + col, col);
+        if (rv && rv.rosterRef) return this.listLabel(rv.rosterRef, col);
         return this.tOr('field.' + col, col);
       },
       // Which column a rotation's cells are read from, and therefore which column's list labels them.
@@ -4337,6 +4350,14 @@ function createVueApp() {
           var rs = rows || [];
           names = names.filter(function(n) { return rs.some(function(r) { var val = r[n]; return Array.isArray(val) ? val.length : !!val; }); });
         }
+        // Narrowed down to nothing -> no columns at all, not a lone `_period`. A rotation with no slot
+        // is a rotation with no content, and a column of dates under a heading reads as a schedule that
+        // failed to load rather than as one that has nothing for you. It happens for a real reason: a
+        // household member who does chores but is not on the duty roster holds no slot, so `mineOnly`
+        // matches none and the matrix they open is theirs and empty.
+        //   Saying so here is also what lets everything downstream act: the optional-embed `?` counts
+        // these columns, and the print path renders from them.
+        if (!names.length) return [];
         return ['_period'].concat(names);
       },
       // A view's `mineOnly` narrows a rotation to the signed-in user's OWN slot, so everyone opens the
@@ -7617,7 +7638,7 @@ function createVueApp() {
         if (this.embed) return appInstance.boardRowsFor ? appInstance.boardRowsFor(this.viewName) : [];
         var rows = appInstance.currentData || [];
         return (appInstance.searchable && appInstance.searchTerm)
-          ? Rows.searchRows(rows, appInstance.searchTerm, appInstance.searchCols)
+          ? Rows.searchRows(rows, appInstance.searchTerm, appInstance.searchCols, appInstance.searchLabeler)
           : rows;
       },
       // A 2-D REF lane: when `board.lane` is a `ref` to a 2-column lookup, the lookup's two dimensions are the

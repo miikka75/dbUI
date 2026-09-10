@@ -842,6 +842,13 @@ tables), with one shared `interval`/`advanceBy` and a `rotateEvery`:
 - **`rotateEvery: 0` / omitted** = no assignment rotation (each slot fixed to `rosters[k]`) — equivalent
   to the `columns` form. Useful list values: `[1]` per-period swap (≡ scalar `1`), `["cycle"]` per-cycle
   swap, `[1, "cycle"]` both. Extra elements just superimpose more swap frequencies (valid but rarely useful).
+- **`skipEmpty`** (`rosterRef` only, default off) leaves a group that carries **nothing** — no rows, or
+  every row blank in `valueCol` — out of the swap ring, and pins its slot to that empty group forever.
+  For a roster that doubles as a roll-call, where a member with no duties is a row that exists to say
+  they are a member; without it their empty group circulates and hands somebody a free period each
+  cycle. Off by default because in the `slots` + `rosters` form an empty roster is a *declared*
+  shortage ("three areas, two crews") that the ring shares out on purpose — which is why the flag is
+  rejected on that form and on the `columns` form, which has no ring at all.
 - **Anchor / interval**: the per-view `rotationAnchors[<viewName>]` (or a literal `anchorDate` on the
   `rotation`) anchors period 0; `interval` accepts the same values as elsewhere.
 - **Display window is assignment-invariant**: `range.from` selects only *which* periods are shown — it
@@ -855,7 +862,9 @@ tables), with one shared `interval`/`advanceBy` and a `rotateEvery`:
   load** (some slots would be unstaffed/double-booked).
 - **Validation**: every `rosters` table must exist; `advanceBy` (if set) must be `calendar`; `interval`
   must be valid; `rosters.length` must be `>= slots.length`; every `rotateEvery` element must be a
-  non-negative integer or `"cycle"`; an explicit `valueCol` must be a real column of every roster table.
+  non-negative integer or `"cycle"` (checked on **both** roster shapes — it belongs to the rotation, not
+  to one form); `skipEmpty` must be boolean and needs `rosterRef`; an explicit `valueCol` must be a real
+  column of every roster table.
 - **Embedding**: a data view can embed a rotationView via a `{ "view": "<rotationViewName>" }` column —
   it renders the generated period table inline (date + slot columns), e.g. a cleaning schedule shown
   inside a program view.
@@ -911,6 +920,13 @@ while a member sees only their own column.
   slot columns rather than all of them.
 - Applies wherever the rotation renders — the view itself, a `{{view:x}}` embed, the print output, and
   the generated duty events a calendar picks up via `rotationSources`.
+- **A viewer who holds no slot sees no matrix.** The narrowing can leave nothing — `mineOnly` on
+  somebody who is a member of the household but not of the roster (a parent who does chores but is not
+  in the rotation), `hideEmpty` on a roster with nothing in it — and the view then has **no columns at
+  all**, not a lone date column. Mark the embed `{{view:<rota>?}}` and the section disappears for that
+  viewer while everyone else still sees theirs; a rotation's `?` counts its **slots**, since its periods
+  are generated rather than stored. The heading above it still renders, as it does for every optional
+  embed.
 - **Display-only**, exactly like `@me` and `obscureNames`: the rosters are still fetched and the
   periods still generated client-side. Real secrecy is a per-roster-table grant (each person's roster
   as its own table, granted only to them) — `mineOnly` is about a legible view, not a security boundary.
@@ -992,6 +1008,12 @@ no schema edit, no deploy, no untranslated key. Removing one is deleting their r
 - `rotateEvery`, `cycle`, `interval`, `range`, `mineOnly` and `anchorDate` behave identically — this is a
   resolver swap, not a second rotation engine. `dev/test/rotation.test.js` asserts the two shapes produce
   the same matrix from the same duties.
+- **A member who is not in the rotation**: give them a row with a blank `valueCol` and set
+  `"skipEmpty": true` on the rotation plus `"hideEmpty": true` on the view. The row makes them a slot
+  (and a value of the lookup, so they stay pickable everywhere the lookup backs a `list:`), `skipEmpty`
+  keeps their empty group out of the swap ring so nobody loses a turn to it, and `hideEmpty` drops the
+  always-empty column from the header. The two flags are deliberately separate: `hideEmpty` is evaluated
+  against the generated rows, so folding them together would make it decide its own input.
 - **`rosterRef` and `slots`+`rosters` are mutually exclusive**; declaring both is a load-time error. The
   older shape is unchanged and still supported.
 
@@ -1324,6 +1346,14 @@ config from the table definition), and applies to the **data** and **board** kin
 - **Diacritics fold both ways**: `saestaja` finds *säestäjä* and `hameen` finds *Hämeen*. Without it a
   Finnish name is findable only by someone who can type the diacritic, which on a phone keyboard is
   most of the point of searching.
+- **It matches what the screen SHOWS as well as what the row stores.** A linked account's name
+  (`userlink-name`), a translated list value and a `ref`'s label are all produced by the renderer, not
+  held on the row, so a raw-value search finds none of them: a reader looking at *Hyväksytty* would
+  have to know the row stores `approved`. Both are folded into the haystack, so the stored key stays
+  findable too and a term may even span the pair (`cara caroline` matches the one row that is both).
+  This deliberately leaves `obscureNames` where it was — a full name still matches a cell abbreviated
+  on screen. That is display-only privacy over rows the viewer has already been served, not an access
+  boundary, and closing it here would cost every stored-key match to buy nothing.
 - **It narrows the VIEW, never the data.** `currentData` is what everything that writes reads — add,
   archive, the mirror cascade — so those never operate on the filtered list.
 - **The term is cleared when you navigate.** A term belongs to the list it was typed over; carrying it

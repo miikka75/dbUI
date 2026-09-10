@@ -1113,6 +1113,49 @@ stops working offline. Everything above it stays inside the app boundary.
 
 Recorded so the roadmap shows what graduated rather than silently shrinking.
 
+- **A rotation narrowed to nothing says so** — `rotationColsFor` returned `['_period']` unconditionally,
+  so a viewer the narrowing left with no slot got a lone column of dates: a heading with a date list
+  under it, which reads as a schedule that failed to load rather than as one that has nothing for you.
+  It has a real trigger rather than a hypothetical one — a household member who does chores but is not
+  on the duty roster holds no slot, so `mineOnly` matches none of them. It returns `[]` now.
+  That alone would have left the section on the page and empty, because the optional-embed `?` could
+  never hide a rotation: a rotation generates its periods from the calendar rather than from `sources`,
+  so `buildRows` reported ZERO rows for every one of them and `{{view:rota?}}` hid a full matrix while a
+  bare embed showed an empty one — the mechanism was inverted, not merely absent. The `view` block's
+  `count` asks `rotationColsFor` for a rotation now, so emptiness means "no slot to show", which is the
+  same question `mineOnly` and `hideEmpty` already answer, and `docHasData` stops reading a
+  rotation-only page as blank. `examples/chores-schema.json` marks its `doc_mine` matrix `?`
+  accordingly. The heading above a hidden optional embed still renders — that is how every `?` in the
+  shipped examples already behaves, and changing it is a separate question about prose, not rotations.
+- **`skipEmpty`** — a roster group that carries nothing (no rows, or every row blank in `valueCol`) is
+  left out of the `rotateEvery` swap ring, so a member with no duties stops being handed somebody else's.
+  Two restrictions are the design rather than caution. It is **off by default**, because in the
+  `slots` + `rosters` form an empty roster states a real thing — *three areas, two crews* — and today's
+  ring shares that shortage out fairly; skipping it would starve one area permanently instead. And it is
+  **`rosterRef` only**, because there a slot exists solely because a row named it, so an empty group is
+  an artifact of a roster doubling as a roll-call; that form is also the only one where `M === N` holds,
+  so "the group this slot owns" names one thing — the `slots` form lets rosters outnumber slots, where a
+  skip rule needs a second branch to avoid stranding a slot that had a live group available. That
+  generalization is declined, not deferred. It pairs with the view-level `hideEmpty` and could not be
+  folded into it: `hideEmpty` is evaluated against the generated rows, so one flag would be deciding its
+  own input. Implementation is a bare `N` ring becoming an index ring, which reduces to the expression it
+  replaced when the flag is off — asserted rather than argued, by a test that runs both settings over a
+  roster with no empty group. It exposed one real bug on the way: `cycle` read `groups[0]` for its
+  cadence, so a duties-less person sorted to `position: 1` handed it a one-period cycle and quietly
+  turned a per-cycle swap into `rotateEvery: 1`; it reads the first RING group now. Also hoisted the
+  `rotateEvery` element validation out of the `slots && rosters` branch it was trapped in, which had left
+  `rosterRef` — the shape that form exists to replace — accepting any junk there and resolving it to no
+  swap at all.
+- **Search matches the rendered text**, not only the stored value: `searchRows` takes an optional
+  `label(col, value)` resolver and folds what the grid shows alongside what the row holds. A linked
+  account's name, a translated list value and a `ref`'s label are all produced by the renderer, so
+  without it a reader looking at *Hyväksytty* had to know the row stores `approved`. Additive rather
+  than a replacement, so every stored key stays findable and a term may span the pair. That
+  deliberately leaves `obscureNames` where it was — display-only privacy over rows the viewer has
+  already been served, not an access boundary, and closing the probe would have cost every stored-key
+  match to buy nothing. Passed as an argument rather than added to rows.js's runtime-bound globals:
+  those exist for values consumed deep in the pipeline, and all three callers of this one are in
+  app-core, so the dependency stays visible at the call site.
 - **`order: "behind"`** — a `rowTiles` board sorted by how much of its OWN goal each tile reached,
   against the default ranking's "who is winning". The reason it is a `stats` key and not a
   `defaultSort` is that the number it sorts on does not exist as a column: `pct` is computed after the
@@ -1175,6 +1218,30 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
 
 ## Declined
 
+- **One roster instead of a list beside it** — renaming `ref_duties` to `ref_members`, pointing
+  `listSources` at it and deleting the `members` list, so the duty roster doubles as the household roll.
+  Declined on the answer to the question the proposal was waiting for: **a parent does chores but is not
+  on the duty roster.** That makes the roster a deliberate SUBSET of the membership, and the two are then
+  not one list maintained twice — which was the entire premise. `ref_duties.person` is already
+  `{ list: "members" }`, a foreign key into the roll rather than a copy of it, so the subset relation is
+  the thing the current shape exists to express. Merging would delete that and make you rebuild it from a
+  placeholder row plus `skipEmpty` plus `hideEmpty`: three mechanisms to reconstruct what one reference
+  gives for free, and a schema in which "is a member of this household" and "is in the duty rotation" can
+  no longer be said apart.
+  Worth keeping from the investigation, because none of it depended on the merge going ahead. A `list:`
+  may already name a LOOKUP TABLE (`lookupListValues`), and every part of the userlink machinery keys on
+  a bare name string — `listSources`, `_list_users`, `isUserLinkList`, `meValueForList`, and the rules'
+  `identityList` — so a table-backed identity source is a coherent schema against today's code. What
+  stops it is that the link PICKER renders only in the Lists tab, gated on `canEditList`, which returns
+  false for a lookup by design; that a lookup rename calls `propagateRefChange` and
+  `migrateListTranslation` but not `migrateListUserLink`, so the account link is silently orphaned; and
+  that modelling the column as `ref:` rather than `list:` empties `identityList` and `stampedOf`, which
+  short-circuits `ownerIdentityOk` permissive and unbinds the stamped column. That second one is a real
+  bug on the shipped `userlink` path today, independent of any of this, and is worth fixing on its own.
+  Two consequences of the answer that DO need acting on, and are not about the merge: identity is 1:1
+  (`_list_users` is keyed `list~value` and `_mirrorIdentity` clears a value from whoever held it before),
+  so two parents who both log chores need two member values rather than a shared "Parent"; and a
+  non-admin parent holds no slot, which is what the empty-`mineOnly` fix in Shipped is for.
 - **Bundling a charting library.** Incompatible with the no-build constraint (static files, CDN Vue,
   no bundler) and with the CSP. The supported answer is the Vuetify primitives already loaded, plus
   inline SVG and the existing `hashColor` where a real mark is needed. `stats` shipped on

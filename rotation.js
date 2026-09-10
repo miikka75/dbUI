@@ -20,6 +20,20 @@
     return v == null ? [] : v;
   }
 
+  // Does a roster group carry anything at all? A group with no rows, or whose every row has a blank
+  // value column, staffs nothing wherever it lands -- which is what `skipEmpty` leaves out of the
+  // rotation ring. THE one place that decides what "blank" means, because a roster's value column is
+  // a multiselect on one schema and a plain select on the next: cellValue has already normalized a
+  // missing column to [], so what is left is an empty ARRAY or an empty SCALAR, and reading only the
+  // first would silently keep half the empty groups in the ring.
+  function isEmptyGroup(group, valueCol) {
+    if (!group || !group.length) return true;
+    return group.every(function(r) {
+      var v = cellValue(r || {}, valueCol);
+      return Array.isArray(v) ? v.length === 0 : (v == null || v === '');
+    });
+  }
+
   function resolveByOccurrence(rotationRows, sourceRows, currentRow, sortKey, valueCol) {
     if (!rotationRows || !rotationRows.length || !currentRow) return [];
     var sorted = (sourceRows || []).slice().sort(function(a, b) {
@@ -128,6 +142,10 @@
   // Either form reads each roster row's `people` column unless `valueCol` names another (form (a)
   // per-column, form (b) once for all rosters) — see cellValue. Slots are just column names, so
   // slots-as-PEOPLE + rosters-of-TASKS gives the transpose: a period x person matrix of task lists.
+  //   `skipEmpty` (form (b) only) drops a group that carries nothing from the swap ring, for the roster
+  // that doubles as a roll-call: a member with no duties is a row that exists to say they are a member,
+  // and rotating their empty group hands somebody a free period every cycle. Off by default, because in
+  // form (a) an empty roster means "three areas, two crews" and sharing that shortage is the point.
   // Slots + their row-groups, from either shape. THE resolver: everything below (and the slot columns
   // the view renders) reads rotations through this, so the two shapes cannot drift apart.
   //
@@ -195,24 +213,42 @@
     var out = [], i, target, row;
 
     if ((rv.slots && rv.rosters) || rv.rosterRef) {
-      var rg = rosterGroups(rv, dataCache), slots = rg.slots, groups = rg.groups, N = groups.length;
+      var rg = rosterGroups(rv, dataCache), slots = rg.slots, groups = rg.groups;
       var interval = rv.interval || 'weekly';
       // DB-backed per-view rotateEvery override (folder config) wins over schema, like anchor/range.
       // undefined override = use schema; a present value (incl. []) is a full replacement.
       var rotateEveryEff = (rotateEveryOverride === undefined) ? rv.rotateEvery : rotateEveryOverride;
       var anchor = resolveAnchorDate(rv, rotationAnchor);
       // Slot-swap sources. `rotateEvery` is a list of independent offsets that are SUMMED into s, then
-      // slot k <- rosters[(k + s) % N] (a bijection for any integer s -> never double-books). Each source:
-      //   * positive integer n -> floor(i/n) % N (period swap: rotate one step every n periods).
-      //   * "cycle"            -> floor((phase+i)/L) % N where L = live roster length (rosters[0]) and
-      //     phase aligns the boundary to the global anchor -- rotates once per FULL roster cycle so even-
-      //     length rosters alternate slots every duty turn (fixes the parity lock).
+      // slot k <- ring[(rank + s) % R] (a bijection for any integer s -> never double-books). R is the
+      // ring size, which is the group count unless `skipEmpty` is on (see below). Each source:
+      //   * positive integer n -> floor(i/n) % R (period swap: rotate one step every n periods).
+      //   * "cycle"            -> floor((phase+i)/L) % R where L = live roster length (the first RING
+      //     roster) and phase aligns the boundary to the global anchor -- rotates once per FULL roster
+      //     cycle so even-length rosters alternate slots every duty turn (fixes the parity lock).
       // A scalar is shorthand for a 1-element list (rotateEvery: 1 == [1]); 0/absent == no swap.
       // Common: [1] fast only, ["cycle"] per-cycle only, [1,"cycle"] both. Member index within a roster
       // advances one step per period (resolveByCalendar) independent of these offsets.
       var sources = (rotateEveryEff == null) ? []
         : (Array.isArray(rotateEveryEff) ? rotateEveryEff : [rotateEveryEff]);
-      var cycleLen = sources.indexOf('cycle') >= 0 ? ((groups[0] || []).length || 0) : 0;
+      // The ring the assignment rotates through, as GROUP INDICES, plus each group's rank in it.
+      // `skipEmpty` leaves a group that carries nothing (isEmptyGroup) out of the ring, so it never
+      // lands in somebody's slot and never costs the live groups a place -- the roll-call shape, where
+      // a member with no duties is a row that exists to say they are a member. Their own slot still
+      // reads their own group, so that column is empty in every period and the view-level `hideEmpty`
+      // drops it from the header.
+      //   With the flag OFF this is the IDENTITY: ring = [0..N-1], rank[k] = k, R = N, and every
+      // expression below reduces to the bare `(k + s) % N` it replaces.
+      var ring = [], rank = {};
+      groups.forEach(function(g, k) {
+        if (rv.skipEmpty && isEmptyGroup(g, rv.valueCol)) return;
+        rank[k] = ring.length; ring.push(k);
+      });
+      var R = ring.length;
+      // The first RING group, not the first group: a duties-less person sorted to position 1 would
+      // otherwise hand `cycle` their row count as the cadence -- one period, which turns a per-cycle
+      // swap into `rotateEvery: 1` and looks like a working rotation.
+      var cycleLen = sources.indexOf('cycle') >= 0 ? ((groups[ring[0]] || []).length || 0) : 0;
       // Absolute period index origin: periods from the rotation ANCHOR to the window start. Both swap
       // sources key off this absolute index so the assignment for a given date is invariant to `from`
       // (the display window) -- moving the window never reshuffles who is in which slot.
@@ -222,12 +258,15 @@
         row = { id: 'rv' + i, _period: target };
         var abs = base + i;   // absolute period index measured from the anchor
         var s = 0;
-        if (N) sources.forEach(function(src) {
-          if (src === 'cycle') { if (cycleLen > 0) s += Math.floor(abs / cycleLen) % N; }
-          else if (typeof src === 'number' && src > 0) { s += Math.floor(abs / src) % N; }
+        if (R) sources.forEach(function(src) {
+          if (src === 'cycle') { if (cycleLen > 0) s += Math.floor(abs / cycleLen) % R; }
+          else if (typeof src === 'number' && src > 0) { s += Math.floor(abs / src) % R; }
         });
         slots.forEach(function(slot, k) {
-          var group = N ? groups[(((k + s) % N) + N) % N] : [];
+          // A slot IN the ring draws the group s steps along it; a SKIPPED slot keeps its own group,
+          // which no ring slot can be holding -- so the assignment stays injective under either branch
+          // and nobody is ever double-booked.
+          var group = !R ? [] : (k in rank) ? groups[ring[(((rank[k] + s) % R) + R) % R]] : groups[k];
           row[slot] = resolveByCalendar(group || [], target, anchor, interval, rv.valueCol);
         });
         out.push(row);
@@ -250,7 +289,7 @@
     resolveByOccurrence: resolveByOccurrence, sortRosterRows: sortRosterRows, resolveByCalendar: resolveByCalendar,
     resolveAnchorDate: resolveAnchorDate, parseInterval: parseInterval, isValidInterval: isValidInterval,
     wholeIntervalsBetween: wholeIntervalsBetween, addIntervals: addIntervals, buildRotationViewRows: buildRotationViewRows,
-    rosterGroups: rosterGroups, isSlot: isSlot
+    rosterGroups: rosterGroups, isSlot: isSlot, isEmptyGroup: isEmptyGroup
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else { root.Rotation = M; for (var k in M) root[k] = M[k]; } // also expose each as a global for bare callers

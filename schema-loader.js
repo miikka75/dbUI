@@ -390,13 +390,6 @@ function validateSchema() {
           else if (badValueCol(t3, rvv.valueCol)) errors.push('rotationView "' + v + '": valueCol "' + rvv.valueCol + '" is not a column of roster table "' + t3 + '"');
         });
         if ((rvv.rosters || []).length < (rvv.slots || []).length) errors.push('rotationView "' + v + '": fewer rosters (' + (rvv.rosters || []).length + ') than slots (' + (rvv.slots || []).length + ') — some slots would be unstaffed or double-booked each period');
-        if (rvv.rotateEvery != null) {
-          var _re = Array.isArray(rvv.rotateEvery) ? rvv.rotateEvery : [rvv.rotateEvery];
-          _re.forEach(function(_e) {
-            var _ok = (_e === 'cycle') || (typeof _e === 'number' && _e >= 0 && _e === Math.floor(_e));
-            if (!_ok) errors.push('rotationView "' + v + '" rotateEvery elements must be a non-negative integer or "cycle" (got ' + JSON.stringify(_e) + ')');
-          });
-        }
       } else {
       (view.rotation.columns || []).forEach(function(c) {
         var nm = (c && c.name) || '?';
@@ -405,6 +398,28 @@ function validateSchema() {
         if (!c || !isValidInterval(c.interval)) errors.push('rotationView "' + v + '" column "' + nm + '" needs a valid interval (daily/weekly/monthly/yearly or "<n><d|w|m|y>" e.g. "3w")');
         if (c && badValueCol(c.rotationTable, c.valueCol)) errors.push('rotationView "' + v + '" column "' + nm + '": valueCol "' + c.valueCol + '" is not a column of rotationTable "' + c.rotationTable + '"');
       });
+      }
+      // `rotateEvery` belongs to the ROTATION, not to one roster shape. This check used to sit inside the
+      // slots+rosters branch, which left a `rosterRef` view — the shape that form exists to replace —
+      // accepting any junk here and silently resolving it to no swap at all.
+      if (rvv.rotateEvery != null) {
+        var _re = Array.isArray(rvv.rotateEvery) ? rvv.rotateEvery : [rvv.rotateEvery];
+        _re.forEach(function(_e) {
+          var _ok = (_e === 'cycle') || (typeof _e === 'number' && _e >= 0 && _e === Math.floor(_e));
+          if (!_ok) errors.push('rotationView "' + v + '" rotateEvery elements must be a non-negative integer or "cycle" (got ' + JSON.stringify(_e) + ')');
+        });
+      }
+      // `skipEmpty` leaves a group that carries nothing out of the swap ring. `rosterRef` only, and not
+      // out of caution: there a slot exists only because a row named it, so an empty group is an artifact
+      // of a roster that doubles as a roll-call. In the slots+rosters form an empty roster is a DECLARED
+      // shortage ("three areas, two crews") that the ring shares out on purpose, and rosters may
+      // outnumber slots — so "the group this slot owns" stops naming one thing.
+      //   Deliberately NOT an error without `rotateEvery`, inert as it is there: the swap can be turned
+      // on at runtime through the per-view `rotationRotateEvery` override, so schema-time inertness is
+      // not provable.
+      if (rvv.skipEmpty != null) {
+        if (typeof rvv.skipEmpty !== 'boolean') errors.push('rotationView "' + v + '": `skipEmpty` must be true or false (got ' + JSON.stringify(rvv.skipEmpty) + ')');
+        else if (rvv.skipEmpty && !rvv.rosterRef) errors.push('rotationView "' + v + '": `skipEmpty` needs `rosterRef` — the slots+rosters form shares an empty roster out across its slots on purpose, and the columns form has no swap ring at all');
       }
       // `mineOnly` sits on the VIEW (beside hideEmpty/obscureNames), not inside `rotation` — putting it
       // in the wrong place would silently show everyone the whole matrix, so name the mistake.

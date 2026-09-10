@@ -233,18 +233,39 @@
   // Every token must appear SOMEWHERE in the row — "kati tup" finds "Kati Tuppurainen" even though no
   // single column contains that string. One substring over the whole term would not, and that is the
   // way people actually type a name they half remember.
-  function searchRows(rows, term, cols) {
+  // `label(col, value) -> rendered text` is optional, and it is what makes the box find what the screen
+  // SHOWS rather than only what the row stores. A linked account's name, a translated list value and a
+  // ref's label all come out of the renderer, not the row -- so without it a Finnish reader looking at
+  // "Hyvaksytty" has to know the row stores `approved`, and a household reading profile names cannot
+  // search for one at all.
+  //   It is folded IN ADDITION to the raw value, never instead of it: the stored key stays findable, so
+  // nothing that matched before stops matching. That deliberately leaves `obscureNames` as it already
+  // is -- a full name still matches a cell abbreviated on screen -- which is display-only privacy over
+  // rows the viewer has already been served, not an access boundary (see SCHEMA.md).
+  //   Absent, this is exactly the raw-value search it replaces.
+  function searchRows(rows, term, cols, label) {
     var q = fold(term).trim();
     if (!q) return rows || [];                 // no term is not a filter: everything, unchanged
     var tokens = q.split(/\s+/);
     var only = (Array.isArray(cols) && cols.length) ? cols : null;
+    // Per-CALL label memo. This runs on every keystroke over every row, and a label costs a list lookup
+    // and a translation each -- but a column's values repeat down the grid, so the same handful of
+    // labels is asked for again and again. Null-prototype, because the keys are row data ("__proto__"
+    // is a legal list value) and `in` on a plain object would answer yes for one nobody stored.
+    var memo = label ? Object.create(null) : null;
+    var rendered = function (col, v) {
+      if (!label) return '';
+      var k = col + ' ' + (Array.isArray(v) ? v.join('') : v);
+      if (!(k in memo)) memo[k] = fold(label(col, v));
+      return memo[k];
+    };
     return (rows || []).filter(function (r) {
       if (!r || typeof r !== 'object') return false;
       var hay = '';
       if (only) {
-        for (var i = 0; i < only.length; i++) hay += ' ' + fold(r[only[i]]);
+        for (var i = 0; i < only.length; i++) hay += ' ' + fold(r[only[i]]) + ' ' + rendered(only[i], r[only[i]]);
       } else {
-        for (var k in r) { if (SEARCH_SKIP.indexOf(k) < 0) hay += ' ' + fold(r[k]); }
+        for (var k in r) { if (SEARCH_SKIP.indexOf(k) < 0) hay += ' ' + fold(r[k]) + ' ' + rendered(k, r[k]); }
       }
       for (var t = 0; t < tokens.length; t++) if (hay.indexOf(tokens[t]) < 0) return false;
       return true;
