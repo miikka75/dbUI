@@ -1049,6 +1049,86 @@ vocabularies and translations. Undoing a row is local; undoing a rename means de
 the list value and the translation key it carried, and `saveLists` prunes — the same asymmetry the
 Leftovers entry above warns about. Worth designing before building.
 
+### One roster, not a list beside it — a lookup table as the identity source
+
+`examples/chores-schema.json` carries the household twice. `members` is a `listSources: "userlink"`
+list of five names; `ref_duties` is a hierarchical lookup whose `person` column is a `select` into that
+same list, adding each person's ordered cycle of task sets underneath. Nothing is duplicated in the
+schema — `ref_duties.person` references the list rather than restating it — but there are two places an
+admin maintains the same household, on two different screens, and only one of them is the one that
+matters for anything except the duty matrix.
+
+The proposal is to delete the list and let the lookup be the roster: rename `ref_duties` to
+`ref_members`, point `listSources` at it, and have every `person`-shaped column select from it.
+
+**Most of this already works.** A `list:` may name a lookup TABLE, not only a list — `lookupListValues`
+(`app-core.js`) resolves it to the distinct values of the table's hierarchy parent, which for this table
+is exactly `person`, deduplicated across Ann's two duty rows. `translatableLists` has accepted a lookup
+name for the same reason since it was written. And the userlink machinery never asks whether a name is a
+real list: `listSources` is a plain name→kind map, `_list_users` documents are `{ list, value, email }`
+where `list` is a namespace string, and `isUserLinkList` / `meValueForList` / `myListValues` /
+`listValuePicture` / `mineOnly: { list }` all follow that string without validating it. The rules layer
+is the same shape — `identityBounds` reads the column's `list:` into `identityList` (`backend-helpers.js`)
+and `setListUser` mirrors the link to `_users/<email>.identity[<name>]`, neither of which cares that the
+name belongs to a table.
+
+So `listSources: { "ref_members": "userlink" }` with `person: { type: "select", list: "ref_members" }` is
+a coherent schema against today's code. Three things stop it working.
+
+**1. There is no way to create the link.** `<list-user-picker>` renders only inside the Lists tab's
+`visibleLists`, gated on `canEditList(name)` — which returns `false` for a lookup table deliberately, and
+correctly: a lookup is maintained in the Lookup editor, which has its own r/rw gate, and no list write
+rule applies to it. The picker therefore can never appear for `ref_members`. That is not cosmetic. With
+no links `@me` resolves to `''` for everybody and fails closed exactly as designed: `chore_mine`,
+`chore_scan` and `reward_mine` render empty, `duty_matrix`'s `mineOnly` matches no slot, and
+`defaultFrom: "@me"` stamps nothing. The picker has to become reachable from the Lookup editor's parent
+rows — which is where the code comment has claimed it lives all along ("Lists opted in to user linking
+(Lookup-editor picker)"), so this closes a gap between comment and screen as much as it adds anything.
+
+**2. Renaming a person orphans their account.** The list path calls `migrateListUserLink` when a value is
+renamed; the lookup path (`app-core.js`, the `renameRefParent` blur) calls `propagateRefChange` and
+`migrateListTranslation` beside it and not the third. Rename "Ann" today and her rows and her label
+follow; her link would not, and would fail closed under the new key. One line, but it has to land with
+the rest rather than after it.
+
+**3. `list:` is required; `ref:` is a silent security downgrade.** Modelling the column as
+`{ type: "ref", table: "ref_members" }` looks more correct and is the trap. Both `identityBounds` and
+`stampedOf` read `d.list`; with a `ref` it is undefined, so `identityList` becomes `''` and
+`ownerIdentityOk` short-circuits permissive — that is the rule stopping a member logging a chore as
+somebody else — while `stampedOf` skips the table entirely and unbinds `home_shopping.added_by`. Neither
+failure announces itself. If this ships, `validateSchema` should reject a `userlink` source naming a
+table that no `list:` column selects from, so the mistake surfaces at load.
+
+**The real cost is conceptual, and it is the decision to make first.** `members` holds five names;
+`ref_duties` covers four. Parent does no chores. Derive the roster from rows and a member with no duty
+row stops being a member: they vanish from `chore_log.person` and `home_shopping.added_by`, and — worse —
+they have no value for an admin to link their account to, so they have no identity at all. For a
+non-admin that is not a display problem: `stampedOk` has no migration grace, so a caller with no identity
+cannot create a `home_shopping` row that carries `added_by`.
+
+**A member can exist without a duty**, and the mechanism is already there: give them a row with an empty
+`tasks`, and set `hideEmpty: true` on `duty_matrix`. `rosterGroups` derives slots from distinct
+`rosterBy` values regardless of what `valueCol` holds, so the row makes Parent a member and a slot; the
+`hideEmpty` branch in `rotationColumns` then drops any slot whose every generated period is empty, so the
+column never renders. `duty_matrix` does not set it today and would need to.
+
+One caveat remains on that placeholder. `rotationColumns` applies `mineOnly` before `hideEmpty`, so a
+duties-less non-admin opening the matrix gets `_period` and nothing else — correct, and it looks broken.
+The other one is gone: the empty group used to occupy a place in the slot-swap ring, which `skipEmpty`
+now takes it out of (see Shipped).
+
+So the merge conflates *is a member of this household* with *is in the duty rotation*, and buys back a
+screen. Whether that trade is right is the question this entry exists to have answered before anything
+is built; the three gaps above are tractable work either way.
+
+Cost: no engine module, no view kind. The picker relocation is the bulk of it — the Lookup editor's
+parent rows gain the component the Lists tab already renders. Then the one-line rename migration, a
+`validateSchema` check, `hideEmpty` on the example view, and a migration in `migrations.js` for the
+collection rename plus the `_list_users` and `_users.identity` keys that carry the old name (the view
+name `duty_matrix` is unchanged, so `config.rotationAnchors` survives untouched). Tests: the lookup-backed
+`@me` resolution and the rename-carries-the-link case, both of which are pure and belong beside the
+existing list-users tests.
+
 ### `tree`
 
 Hierarchies of arbitrary depth. Would generalize the ref-hierarchy the Lookup screen already renders.
@@ -1113,6 +1193,35 @@ stops working offline. Everything above it stays inside the app boundary.
 
 Recorded so the roadmap shows what graduated rather than silently shrinking.
 
+- **`skipEmpty`** — a roster group that carries nothing (no rows, or every row blank in `valueCol`) is
+  left out of the `rotateEvery` swap ring, so a member with no duties stops being handed somebody else's.
+  Two restrictions are the design rather than caution. It is **off by default**, because in the
+  `slots` + `rosters` form an empty roster states a real thing — *three areas, two crews* — and today's
+  ring shares that shortage out fairly; skipping it would starve one area permanently instead. And it is
+  **`rosterRef` only**, because there a slot exists solely because a row named it, so an empty group is
+  an artifact of a roster doubling as a roll-call; that form is also the only one where `M === N` holds,
+  so "the group this slot owns" names one thing — the `slots` form lets rosters outnumber slots, where a
+  skip rule needs a second branch to avoid stranding a slot that had a live group available. That
+  generalization is declined, not deferred. It pairs with the view-level `hideEmpty` and could not be
+  folded into it: `hideEmpty` is evaluated against the generated rows, so one flag would be deciding its
+  own input. Implementation is a bare `N` ring becoming an index ring, which reduces to the expression it
+  replaced when the flag is off — asserted rather than argued, by a test that runs both settings over a
+  roster with no empty group. It exposed one real bug on the way: `cycle` read `groups[0]` for its
+  cadence, so a duties-less person sorted to `position: 1` handed it a one-period cycle and quietly
+  turned a per-cycle swap into `rotateEvery: 1`; it reads the first RING group now. Also hoisted the
+  `rotateEvery` element validation out of the `slots && rosters` branch it was trapped in, which had left
+  `rosterRef` — the shape that form exists to replace — accepting any junk there and resolving it to no
+  swap at all.
+- **Search matches the rendered text**, not only the stored value: `searchRows` takes an optional
+  `label(col, value)` resolver and folds what the grid shows alongside what the row holds. A linked
+  account's name, a translated list value and a `ref`'s label are all produced by the renderer, so
+  without it a reader looking at *Hyväksytty* had to know the row stores `approved`. Additive rather
+  than a replacement, so every stored key stays findable and a term may span the pair. That
+  deliberately leaves `obscureNames` where it was — display-only privacy over rows the viewer has
+  already been served, not an access boundary, and closing the probe would have cost every stored-key
+  match to buy nothing. Passed as an argument rather than added to rows.js's runtime-bound globals:
+  those exist for values consumed deep in the pipeline, and all three callers of this one are in
+  app-core, so the dependency stays visible at the call site.
 - **`order: "behind"`** — a `rowTiles` board sorted by how much of its OWN goal each tile reached,
   against the default ranking's "who is winning". The reason it is a `stats` key and not a
   `defaultSort` is that the number it sorts on does not exist as a column: `pct` is computed after the
@@ -1213,3 +1322,8 @@ schema today.
 Of the scan family, *Scan to log an action* is the entry to build first and the only one worth
 ranking: it needs nothing else to land first, its typed form needs no camera, and building it in
 the other order means writing `scan.js` twice.
+
+The one-roster merge is not ranked either, and for the feed's reason rather than the RSVP one: what it
+needs decided is whether a household member who does no chores is still a member, which is a
+question about the schema's model and not about the code. The three gaps it names are small and
+known; the answer to that question is what determines whether they are worth closing.

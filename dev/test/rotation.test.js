@@ -233,3 +233,99 @@ describe('rotation — rosters from one 2-D lookup (rosterRef)', () => {
     assert.deepEqual(R.rosterGroups(rv, withEve).slots, ['Ann', 'Bob', 'Cara', 'Eve']);
   });
 });
+
+// `skipEmpty` — a member of the roster who is not in the rotation. The ring the assignment rotates
+// through used to be every group the roster produced, so a person holding no tasks still occupied a
+// place in it: somebody got a free period every cycle, and the empty group landed in a real slot.
+describe('rotation — skipEmpty (a group that carries nothing leaves the ring)', () => {
+  // Ann and Bob have duties; Pat is a member with none — the row exists to say Pat is a member.
+  const ROWS = [
+    { id: 'a1', position: 1, person: 'Ann', tasks: ['Wash up'] },
+    { id: 'b1', position: 2, person: 'Bob', tasks: ['Bins'] },
+    { id: 'p1', position: 3, person: 'Pat', tasks: [] }
+  ];
+  const cache = { roster: ROWS };
+  const base = { rosterRef: 'roster', rosterBy: 'person', valueCol: 'tasks', interval: 'weekly' };
+  // anchor === from, so the absolute period index is just the row index.
+  const run = (extra, rows) => R.buildRotationViewRows(
+    { rotation: Object.assign({}, base, { range: { from: '2026-01-05', periods: 4 } }, extra) },
+    rows || cache, '2026-01-05', '2026-01-05');
+  const grid = (rowsOut, who) => rowsOut.map((r) => r[who]);
+
+  it('OFF (the default): the empty group still rotates — a phantom slot', () => {
+    // Pinned deliberately. This is the behaviour the flag opts out of, and it is also the behaviour the
+    // slots+rosters form wants ("three areas, two crews"), so it must not drift.
+    const rows = run({ rotateEvery: 1 });
+    assert.deepEqual(grid(rows, 'Pat'), [[], ['Wash up'], ['Bins'], []]);  // Pat is handed real duties
+    assert.deepEqual(grid(rows, 'Ann'), [['Wash up'], ['Bins'], [], ['Wash up']]); // and Ann gets a free week
+  });
+
+  it('ON: the skipped slot stays empty and the live groups share a ring of two', () => {
+    const rows = run({ rotateEvery: 1, skipEmpty: true });
+    assert.deepEqual(grid(rows, 'Pat'), [[], [], [], []]);
+    assert.deepEqual(grid(rows, 'Ann'), [['Wash up'], ['Bins'], ['Wash up'], ['Bins']]);
+    assert.deepEqual(grid(rows, 'Bob'), [['Bins'], ['Wash up'], ['Bins'], ['Wash up']]);
+  });
+
+  it('ON: the assignment stays injective — no duty is handed to two people in one period', () => {
+    run({ rotateEvery: 1, skipEmpty: true }).forEach((row) => {
+      const handed = ['Ann', 'Bob', 'Pat'].map((p) => JSON.stringify(row[p])).filter((v) => v !== '[]');
+      assert.equal(new Set(handed).size, handed.length, 'double-booked in ' + row._period);
+    });
+  });
+
+  it('OFF is a strict no-op when no group is empty', () => {
+    // The ring rewrite has to reduce to the expression it replaced, not merely agree with it in the
+    // cases someone thought to test.
+    const live = { roster: ROWS.filter((r) => r.person !== 'Pat') };
+    ['cycle', 1, [1, 'cycle'], 0, null].forEach((re) => {
+      assert.deepEqual(run({ rotateEvery: re }, live), run({ rotateEvery: re, skipEmpty: false }, live),
+        'rotateEvery ' + JSON.stringify(re));
+    });
+  });
+
+  it('is inert without rotateEvery — each person keeps their own cycle either way', () => {
+    // duty_matrix's shipped config: with no swap, s is 0 and every slot reads its own group, so the
+    // flag cannot move anything. Turning it on must therefore change nothing at all.
+    assert.deepEqual(run({}), run({ skipEmpty: true }));
+  });
+
+  it('"cycle" reads the first RING group, not the first group', () => {
+    // Pat sorts to position 1, so groups[0] is the empty one. Its single row would give `cycle` a
+    // cadence of ONE period — silently turning a per-cycle swap into rotateEvery: 1.
+    const rows2 = [
+      { id: 'p1', position: 1, person: 'Pat', tasks: [] },
+      { id: 'a1', position: 2, person: 'Ann', tasks: ['A1'] },
+      { id: 'a2', position: 3, person: 'Ann', tasks: ['A2'] },
+      { id: 'b1', position: 4, person: 'Bob', tasks: ['B1'] },
+      { id: 'b2', position: 5, person: 'Bob', tasks: ['B2'] }
+    ];
+    const skipped = run({ rotateEvery: ['cycle'], skipEmpty: true }, { roster: rows2 });
+    // Cadence 2 (Ann's row count): Ann works her own set for a full cycle, then takes Bob's.
+    assert.deepEqual(grid(skipped, 'Ann'), [['A1'], ['A2'], ['B1'], ['B2']]);
+    assert.deepEqual(grid(skipped, 'Pat'), [[], [], [], []]);
+    // Without the flag the cadence collapses to Pat's one row and the swap fires every period.
+    const kept = run({ rotateEvery: ['cycle'] }, { roster: rows2 });
+    assert.deepEqual(grid(kept, 'Ann'), [['A1'], ['B2'], [], ['A2']]);
+  });
+
+  it('every group empty: no throw, nothing assigned', () => {
+    const none = { roster: [{ id: 'x', position: 1, person: 'Pat', tasks: [] }, { id: 'y', position: 2, person: 'Sam', tasks: [] }] };
+    const rows = run({ rotateEvery: 1, skipEmpty: true }, none);
+    assert.deepEqual(grid(rows, 'Pat'), [[], [], [], []]);
+    assert.deepEqual(grid(rows, 'Sam'), [[], [], [], []]);
+  });
+
+  it('isEmptyGroup reads the ARRAY and the SCALAR value shapes, and a missing column', () => {
+    // A roster's value column is a multiselect on one schema and a plain select on the next; reading
+    // only the array shape would leave half the empty groups in the ring.
+    assert.equal(R.isEmptyGroup([], 'tasks'), true);
+    assert.equal(R.isEmptyGroup(undefined, 'tasks'), true);
+    assert.equal(R.isEmptyGroup([{ tasks: [] }, { tasks: [] }], 'tasks'), true);
+    assert.equal(R.isEmptyGroup([{ tasks: [] }, { tasks: ['x'] }], 'tasks'), false);
+    assert.equal(R.isEmptyGroup([{ task: '' }, { task: null }], 'task'), true);
+    assert.equal(R.isEmptyGroup([{ task: '' }, { task: 'Bins' }], 'task'), false);
+    assert.equal(R.isEmptyGroup([{ other: 'x' }], 'tasks'), true);   // column absent -> cellValue []
+    assert.equal(R.isEmptyGroup([{ people: ['A'] }]), false);        // default valueCol
+  });
+});

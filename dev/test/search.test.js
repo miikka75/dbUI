@@ -113,3 +113,80 @@ describe('rows — searchColumns reads the schema setting', () => {
     assert.deepEqual(Rows.searchColumns({ search: [] }), []);
   });
 });
+
+// The `label` argument — searching what the screen SHOWS, not only what the row stores. A linked
+// account's name, a translated list value and a ref's label are all produced by the renderer, so a
+// raw-value haystack finds none of them: the household reads "Caroline Smith" and can only search
+// "Cara", and a Finnish reader looking at "Hyvaksytty" has to know the row stores `approved`.
+describe('rows — searchRows with a rendered-label resolver', () => {
+  const LOG = [
+    { id: '1', person: 'Cara', status: 'approved' },
+    { id: '2', person: 'Ann', status: 'logged' },
+    { id: '3', person: 'Bob', status: 'approved' }
+  ];
+  // Stands in for app-core's displayValue: Cara's account shares a name, Ann's does not.
+  const NAMES = { Cara: 'Caroline Smith', status_approved: 'Hyvaksytty', status_logged: 'Kirjattu' };
+  const label = (col, v) => (col === 'status' ? NAMES['status_' + v] : NAMES[v]) || String(v == null ? '' : v);
+
+  it('finds a value by the name rendered over it', () => {
+    assert.deepEqual(ids(Rows.searchRows(LOG, 'caroline', null, label)), ['1']);
+    assert.deepEqual(ids(Rows.searchRows(LOG, 'smith', null, label)), ['1']);
+  });
+
+  it('finds a translated list value in the language on screen', () => {
+    // The same one argument: a linked name and a translation come out of the same renderer, so there
+    // is no version of this that fixes one and not the other.
+    assert.deepEqual(ids(Rows.searchRows(LOG, 'kirjattu', null, label)), ['2']);
+    assert.deepEqual(ids(Rows.searchRows(LOG, 'hyvaksytty', null, label)), ['1', '3']);
+  });
+
+  it('ADDITIVE: the stored key still matches, so nothing that worked before stops', () => {
+    assert.deepEqual(ids(Rows.searchRows(LOG, 'approved', null, label)), ['1', '3']);
+    assert.deepEqual(ids(Rows.searchRows(LOG, 'cara', null, label)), ['1']);   // curated value, still there
+  });
+
+  it('tokens may span the stored value and the rendered one', () => {
+    assert.deepEqual(ids(Rows.searchRows(LOG, 'cara caroline', null, label)), ['1']);
+  });
+
+  it('a value with no label of its own falls back to itself', () => {
+    assert.deepEqual(ids(Rows.searchRows(LOG, 'ann', null, label)), ['2']);
+  });
+
+  it('honours the named-columns restriction', () => {
+    // `person` only: the status label must not leak into the haystack.
+    assert.deepEqual(ids(Rows.searchRows(LOG, 'caroline', ['person'], label)), ['1']);
+    assert.deepEqual(ids(Rows.searchRows(LOG, 'kirjattu', ['person'], label)), []);
+  });
+
+  it('labels multi-value cells', () => {
+    const rows = [{ id: '1', tasks: ['wash', 'bins'] }, { id: '2', tasks: ['hoover'] }];
+    const l = (col, v) => (Array.isArray(v) ? v.map((x) => ({ wash: 'Tiskaus', bins: 'Roskat', hoover: 'Imurointi' }[x] || x)).join(', ') : String(v));
+    assert.deepEqual(ids(Rows.searchRows(rows, 'roskat', null, l)), ['1']);
+    assert.deepEqual(ids(Rows.searchRows(rows, 'imurointi', null, l)), ['2']);
+  });
+
+  it('omitting the resolver is byte-identical to the raw-value search it replaces', () => {
+    ['usko', 'kati tup', 'hameen', 'bob', 'zzz', ''].forEach((term) => {
+      assert.deepEqual(Rows.searchRows(ROWS, term), Rows.searchRows(ROWS, term, null, null),
+        'term ' + JSON.stringify(term));
+    });
+  });
+
+  it('a list value called "__proto__" is memoized without inheriting an answer', () => {
+    // The memo is keyed by row DATA, so a plain object would report a hit for a key nobody stored.
+    const rows = [{ id: '1', k: '__proto__' }, { id: '2', k: 'plain' }];
+    const l = (col, v) => (v === '__proto__' ? 'Inherited' : String(v));
+    assert.deepEqual(ids(Rows.searchRows(rows, 'inherited', null, l)), ['1']);
+  });
+
+  it('asks the resolver once per distinct (column, value), not once per row', () => {
+    const seen = [];
+    const l = (col, v) => { seen.push(col + '=' + v); return String(v); };
+    Rows.searchRows(LOG, 'zzz', null, l);
+    // 3 rows x 2 searched keys = 6 lookups (`id` is bookkeeping, skipped), but only 5 distinct pairs:
+    // `status=approved` appears on two rows and is asked for once.
+    assert.equal(seen.length, new Set(seen).size);
+    assert.equal(seen.length, 5);
+  });
+});
