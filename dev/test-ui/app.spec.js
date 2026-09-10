@@ -6631,7 +6631,11 @@ test.describe('rotationView (third view kind, e2e)', () => {
     expect(r.tasks).toEqual({ ann: ['dishes', 'trash'], bob: ['laundry'] });
     expect(r.admin).toEqual(['_period', 'ann', 'bob']);  // unrestricted -> the admin matrix
     expect(r.mine).toEqual(['_period', 'bob']);          // slot "bob" matches list value "Bob" case-insensitively
-    expect(r.noIdentity).toEqual(['_period']);           // unresolvable identity shows nothing, not everything
+    // Unresolvable identity shows nothing, not everything — and NOTHING now means no columns at all.
+    // This used to be ['_period']: a lone column of dates under a heading, which reads as a schedule
+    // that failed to load rather than one that has nothing for you. Same intent this line always
+    // stated, carried through to the header. dev/test/rotation-columns.test.js has the unit cases.
+    expect(r.noIdentity).toEqual([]);
   });
 });
 

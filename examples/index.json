@@ -47,7 +47,7 @@
       "title": "Our Home",
       "description": "A household chore tracker — points, approvals, rewards, a weekly rota and a shopping list.",
       "icon": "./examples/chores-favicon.svg",
-      "revision": 11,
+      "revision": 16,
       "tables": 6,
       "views": 19,
       "schema": {
