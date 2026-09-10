@@ -33,6 +33,7 @@ describe('examples/index.json', () => {
       listed.add(b.schema.file);
       for (const l of b.languages) listed.add(l.file);
       if (b.data) listed.add(b.data.file);
+      listed.add(b.about.file);
     }
     const onDisk = fs.readdirSync(DIR).filter((n) => n.endsWith('.json') && n !== 'index.json');
     assert.deepEqual(onDisk.filter((n) => !listed.has(n)).sort(), [], 'unlisted files in examples/');
@@ -41,7 +42,7 @@ describe('examples/index.json', () => {
 
   it('every recorded hash matches the file it names', () => {
     const all = [].concat(MANIFEST.appLanguages);
-    for (const b of MANIFEST.bundles) all.push(b.schema, ...b.languages, ...(b.data ? [b.data] : []));
+    for (const b of MANIFEST.bundles) all.push(b.schema, b.about, ...b.languages, ...(b.data ? [b.data] : []));
     for (const f of all) {
       assert.equal(f.hash, Examples.hashText(fs.readFileSync(path.join(DIR, f.file), 'utf8')),
         f.file + ': recorded hash is stale');
@@ -55,8 +56,23 @@ describe('examples/index.json', () => {
       assert.ok(b.languages.length, b.id + ': no language pack');
       assert.ok(b.languages.some((l) => l.code === 'en'), b.id + ': no English pack, so the picker has no title to show');
       assert.ok(b.title && b.title !== b.id, b.id + ": no app.title in its language pack, so the picker would show the raw id");
-      assert.ok(b.description, b.id + ': no description — add one to DESCRIPTIONS in the generator');
+      assert.ok(b.description, b.id + ': no description — add one to examples/' + b.id + '-about.json');
       assert.ok(b.tables > 0 && b.views > 0, b.id + ': empty schema?');
+    }
+  });
+
+  // The notes are the one field whose entire job is to be READ, so a key that can never match is worse
+  // than a missing one: it fails silently, in the alert, on somebody else's deployment.
+  it('every note is keyed by a revision the bundle has actually reached', () => {
+    for (const b of MANIFEST.bundles) {
+      const about = JSON.parse(fs.readFileSync(path.join(DIR, b.about.file), 'utf8'));
+      assert.equal(b.description, about.description, b.id + ': manifest description drifted from its about file');
+      for (const k of Object.keys(about.notes || {})) {
+        assert.match(k, /^[1-9][0-9]*$/, b.id + ': note key "' + k + '" is not a revision number');
+        assert.ok(Number(k) <= b.revision, b.id + ': note ' + k + ' is ahead of revision ' + b.revision
+          + ' — a note written before the run that bumps the revision never renders');
+        assert.ok(String(about.notes[k]).trim(), b.id + ': note ' + k + ' is empty');
+      }
     }
   });
 

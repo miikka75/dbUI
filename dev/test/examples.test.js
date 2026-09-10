@@ -200,3 +200,49 @@ describe('compare', () => {
     assert.equal(Examples.compare(installed(), null), null);
   });
 });
+
+describe('compare: release notes', () => {
+  // Synthetic, deliberately: these assert the SLICE, and the shipped notes change with every revision.
+  // Revision 29 is absent so a gap in the notes is exercised rather than assumed away.
+  const manifest = {
+    appLanguages: [],
+    bundles: [{
+      id: 'b', title: 'B', revision: 30,
+      schema: { file: 'b-schema.json', hash: 'current' },
+      languages: [],
+      about: { file: 'b-about.json', hash: 'x' },
+      notes: { 28: 'twenty-eight', 30: 'thirty' }
+    }]
+  };
+  // One stale file, so compare() always has something to report and the notes are what varies.
+  const from = (revision) => ({ bundle: 'b', revision: revision, files: { 'b-schema.json': 'stale' } });
+  const textsFrom = (revision) => Examples.compare(from(revision), manifest).notes.map((n) => n.text);
+
+  it('carries what the deployment has not seen, newest first, skipping revisions nobody wrote up', () => {
+    assert.deepEqual(textsFrom(27), ['thirty', 'twenty-eight']);
+    assert.deepEqual(Examples.compare(from(27), manifest).notes[0], { revision: 30, text: 'thirty' });
+  });
+
+  it('excludes the revision already installed — that note described the install, not the update', () => {
+    assert.deepEqual(textsFrom(28), ['thirty']);
+    assert.deepEqual(textsFrom(29), ['thirty']);
+  });
+
+  it('shows the current note only when the installed revision is unknown, never a fabricated history', () => {
+    // revision 0 = installed before the counter was recorded. Listing every note ever written would
+    // assert a history this database cannot vouch for.
+    assert.deepEqual(textsFrom(0), ['thirty']);
+    assert.deepEqual(textsFrom(undefined), ['thirty']);
+  });
+
+  it('is an empty array, never undefined, when there is nothing to say', () => {
+    assert.deepEqual(textsFrom(30), []);                       // up to date on notes, file still moved
+    const noNotes = { appLanguages: [], bundles: [Object.assign({}, manifest.bundles[0], { notes: undefined })] };
+    assert.deepEqual(Examples.compare(from(1), noNotes).notes, []);
+  });
+
+  it('leaves the bundle that ships it alone: a note is never an installable file', () => {
+    // The about file must stay out of fileHashes, or rewording a note would report itself as an update.
+    assert.deepEqual(Object.keys(Examples.fileHashes(manifest.bundles[0], manifest)), ['b-schema.json']);
+  });
+});

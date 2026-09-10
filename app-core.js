@@ -916,7 +916,7 @@ function createVueApp() {
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
-         'settings.examples', 'settings.examples_update', 'settings.examples_reinstall',
+         'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
          'settings.backgrounds',
