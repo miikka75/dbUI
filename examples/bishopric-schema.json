@@ -639,9 +639,33 @@
                 },
                 {
                   "status": "released"
+                },
+                {
+                  "status": "recently_baptized"
+                },
+                {
+                  "status": "moved_in"
                 }
               ]
             }
+          },
+          {
+            "mode": "union",
+            "bare": true,
+            "columns": [
+              "person",
+              "organization",
+              "calling"
+            ],
+            "sources": [
+              "admin_callings"
+            ],
+            "filter": {
+              "status": "released"
+            },
+            "markdown": "{{t:text.releases_header}}\n\n{{self}}\n\n{{t:text.releases_footer}}",
+            "hideEmpty": true,
+            "readonly": true
           },
           {
             "filter": {
@@ -673,24 +697,6 @@
           {
             "mode": "union",
             "bare": true,
-            "columns": [
-              "person",
-              "organization",
-              "calling"
-            ],
-            "sources": [
-              "admin_callings"
-            ],
-            "filter": {
-              "status": "released"
-            },
-            "markdown": "{{t:text.releases_header}}\n\n{{self}}\n\n{{t:text.releases_footer}}",
-            "hideEmpty": true,
-            "readonly": true
-          },
-          {
-            "mode": "union",
-            "bare": true,
             "readonly": true,
             "hideEmpty": true,
             "columns": [
@@ -711,6 +717,29 @@
               ]
             },
             "markdown": "{{t:text.ordination_header}}\n\n{{self}}\n\n{{t:text.ordination_footer}}"
+          },
+          {
+            "mode": "union",
+            "bare": true,
+            "readonly": true,
+            "hideEmpty": true,
+            "columns": [
+              "person"
+            ],
+            "sources": [
+              "admin_callings"
+            ],
+            "filter": {
+              "$or": [
+                {
+                  "status": "recently_baptized"
+                },
+                {
+                  "status": "moved_in"
+                }
+              ]
+            },
+            "markdown": "{{t:text.welcome_header}}\n\n{{self}}\n\n{{t:text.welcome_footer}}"
           },
           {
             "view": "doc_sacrament_intro"
@@ -1177,6 +1206,18 @@
         "position": "15",
         "phase": "declined",
         "status": "declined"
+      },
+      {
+        "id": "st-16",
+        "position": "16",
+        "phase": "welcome",
+        "status": "recently_baptized"
+      },
+      {
+        "id": "st-17",
+        "position": "17",
+        "phase": "welcome",
+        "status": "moved_in"
       }
     ],
     "ref_callings": [
