@@ -9,11 +9,14 @@ schema, and a schema's labels carry no UI prose.
 | file | what it is |
 |------|------------|
 | `bishopric-schema.json` | structure: tables, columns, views, nav, list *names* — plus the `ref_statuses` lookup rows the schema depends on |
+| `bishopric-about.json` | prose a schema cannot state: its one-line `description` and a note per revision |
 | `bishopric-lang-en.json` / `-fi.json` | labels for **this schema**: `tab.*`, `field.*`, `view.*`, `list.*`, `text.*` |
 | `chores-schema.json` | a household chore tracker — points, approvals, rewards, a weekly rota and a shopping list |
+| `chores-about.json` | description + per-revision notes for chores |
 | `chores-lang-en.json` | labels for the chores schema |
 | `chores-data.json` | optional **sample rows** for the chores schema — a household of four, a chore catalogue, a fortnight of logged chores, rewards and a shopping list |
 | `demo-schema.json` | the **demo** — the widest of the three, and the one the test suite runs against: rotations, RSVPs, a board, embeds, doc-views, archive partitions, mirrored tables |
+| `demo-about.json` | description + per-revision notes for the demo |
 | `demo-lang-en.json` / `-es.json` / `-sv.json` | labels for the demo schema, in three languages |
 | `demo-data.json` | sample rows, lists and rotation config for the demo. The dates are literal, so the leaderboard's *this week* and the RSVP demo's *upcoming* age out of the current period — edit them here when it matters |
 | `app-lang-en.json` / `-fi.json` | the **app's own UI**: buttons, messages, settings, calendar. Schema-independent — the browser-tab title lives in the *schema* bundle (`app.title`), since it names the deployment |
@@ -29,6 +32,22 @@ rows.
 them (every column, view, list and translation string) looked like at the time. So when the deployment
 is redeployed with newer examples, **Settings** says which of the files you installed have moved, and
 offers to reinstall.
+
+It also says what the update **brings**, in words: the notes from `<id>-about.json` for every revision
+between the one installed and the one shipping. Reinstalling replaces the schema and the labels, so the
+notes are there to be read before accepting that. A deployment whose recorded revision is `0` — installed
+before the counter existed — is shown the current revision's note alone, since its history is unknown.
+
+Write one as the last step of a change, because the revision it is keyed to is assigned by the generator:
+
+1. edit the schema / lang files
+2. `node scripts/examples-manifest.js` — the revision becomes N
+3. add `"N": "…"` to `<id>-about.json`
+4. run the generator again — the revision **stays** N, and the note is in the manifest
+
+The about file is deliberately outside the hash set that moves the revision, so fixing a note's wording
+does not bump the revision it describes. The generator refuses a note keyed to a revision the bundle has
+not reached, which is the typo that would otherwise simply never appear.
 
 > Reinstalling **replaces** the schema and merges the labels — a schema edit you made in the app is
 > lost. Export first. (The recorded fingerprints exist so this can become a merge rather than a
@@ -68,7 +87,8 @@ node scripts/examples-manifest.js
 ```
 
 A test fails if you forget — and another fails if a file in this folder is not named so the generator
-can place it (`<id>-schema.json`, `<id>-lang-<code>.json`, `<id>-data.json`, `app-lang-<code>.json`).
+can place it (`<id>-schema.json`, `<id>-lang-<code>.json`, `<id>-data.json`, `<id>-about.json`,
+`app-lang-<code>.json`).
 
 ## Import order, by hand
 

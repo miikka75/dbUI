@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "244dfd6cd188474e"
+      "hash": "4a99c2e844c842c2"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "47e15c62b8afdca0"
+      "hash": "ab0f65375d4b23ad"
     }
   ],
   "bundles": [
@@ -40,7 +40,15 @@
           "file": "bishopric-lang-fi.json",
           "hash": "46274bf6e87d0318"
         }
-      ]
+      ],
+      "about": {
+        "file": "bishopric-about.json",
+        "hash": "4826a7f7817e3b71"
+      },
+      "notes": {
+        "29": "Welcome the newly baptized and those who moved in; releases now come before sustainings.",
+        "30": "Welcome block first in ward business, with the note beside each name."
+      }
     },
     {
       "id": "chores",
@@ -71,6 +79,10 @@
       "data": {
         "file": "chores-data.json",
         "hash": "9b7c5215f8b8242f"
+      },
+      "about": {
+        "file": "chores-about.json",
+        "hash": "ba3f0f56f3ee2150"
       }
     },
     {
@@ -108,6 +120,10 @@
       "data": {
         "file": "demo-data.json",
         "hash": "b3882e649780cf22"
+      },
+      "about": {
+        "file": "demo-about.json",
+        "hash": "71ecadf9b59cc18b"
       }
     }
   ]

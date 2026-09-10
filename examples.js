@@ -247,13 +247,32 @@
       return current[name] && current[name] !== stored.files[name];
     });
     if (!changed.length) return null;
+    var revision = entry.revision || 0, installed = stored.revision || 0;
     return {
       bundle: entry.id,
       title: entry.title || entry.id,
-      revision: entry.revision || 0,
-      installedRevision: stored.revision || 0,
-      changed: changed.sort()
+      revision: revision,
+      installedRevision: installed,
+      changed: changed.sort(),
+      notes: notesBetween(entry.notes, installed, revision)
     };
+  }
+
+  // The release notes a deployment has not seen yet: what `changed` names in filenames, said in words.
+  // Newest first, and always an array so a template can bind it without a guard.
+  //
+  // `installed` of 0 is not "behind by everything" -- it is a database installed before the revision was
+  // recorded, so its history is genuinely unknown (see the `|| 0` above). Listing every note ever
+  // written would assert a history we cannot know, so that case shows the CURRENT revision's note only.
+  // A revision nobody wrote a note for is skipped rather than padded with a placeholder.
+  function notesBetween(notes, installed, revision) {
+    var out = [];
+    Object.keys(notes || {}).forEach(function (k) {
+      var n = Number(k);
+      var wanted = installed ? (n > installed && n <= revision) : n === revision;
+      if (wanted) out.push({ revision: n, text: notes[k] });
+    });
+    return out.sort(function (a, b) { return b.revision - a.revision; });
   }
 
   // Every file the manifest knows for one bundle, by filename -> hash. The app-language packs are

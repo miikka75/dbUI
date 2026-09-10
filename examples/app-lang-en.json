@@ -193,6 +193,7 @@
       "settings.import": "Import JSON",
       "settings.examples": "Examples",
       "settings.examples_update": "a newer version ships with this deployment",
+      "settings.examples_notes_more": "and earlier changes",
       "settings.examples_reinstall": "Reinstall",
       "settings.import_export": "Export or import data",
       "settings.name": "Public name",

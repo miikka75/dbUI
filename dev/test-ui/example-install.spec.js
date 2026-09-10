@@ -108,3 +108,33 @@ test('Settings reports an example the deployment has moved on from', async ({ pa
   expect(await page.evaluate(() => appInstance.examples.pick.id)).toBe('chores');
   expect(await page.evaluate(() => appInstance.examples.withData)).toBe(false);
 });
+
+// The notice above answers "something moved" in filenames. This one answers "what will it bring" in
+// words — the bundle author's release notes for the revisions this deployment is behind by.
+test('Settings says in words what an update will bring', async ({ page }) => {
+  test.setTimeout(60000);
+  await emptyApp(page);
+
+  // bishopric is the bundle that ships notes; pin the install a revision behind its earliest one so the
+  // whole list is pending, rather than hard-coding how many notes it has today.
+  const { notes, lowest } = await page.evaluate(async () => {
+    const manifest = await appInstance.fetchExampleManifest();
+    const b = manifest.bundles.find((x) => x.id === 'bishopric');
+    const revisions = Object.keys(b.notes || {}).map(Number).sort((p, q) => p - q);
+    const files = Examples.fileHashes(b, manifest);
+    files['bishopric-schema.json'] = 'staleaaaaaaaaaaa';
+    appInstance.appConfig = Object.assign({}, appInstance.appConfig, {
+      example: { bundle: 'bishopric', revision: revisions[0] - 1, files: files }
+    });
+    return { notes: b.notes, lowest: revisions[0] };
+  });
+
+  await page.evaluate(() => appInstance.selectTab('__settings'));
+  const notice = page.locator('[data-testid="example-update"]');
+  await expect(notice).toBeVisible({ timeout: 10000 });
+
+  // Every pending note is on screen, and it reads as prose rather than as a filename.
+  const shown = notice.locator('[data-testid="example-update-note"]');
+  await expect(shown).toHaveCount(Math.min(Object.keys(notes).length, 5));
+  await expect(notice).toContainText(notes[String(lowest)]);
+});

@@ -692,6 +692,18 @@
                   r{{ a.exampleUpdate.installedRevision }} → r{{ a.exampleUpdate.revision }}
                 </span>
               </div>
+              <!-- What the changed filenames below actually MEAN, when the bundle author wrote it down.
+                   Capped here rather than in compare(): that reports what is pending, this decides how
+                   much of it fits in an alert. Untranslated, like the bundle description it sits under --
+                   these are the author's words, shipped in <id>-about.json, not app chrome. -->
+              <ul v-if="a.exampleUpdate.notes.length" class="mt-1 mb-0" style="font-size:0.8rem">
+                <li v-for="n in a.exampleUpdate.notes.slice(0, 5)" :key="n.revision" data-testid="example-update-note">
+                  {{ n.text }}
+                </li>
+              </ul>
+              <div v-if="a.exampleUpdate.notes.length > 5" class="mt-1" style="font-size:0.78rem;opacity:0.8">
+                {{ a.t('settings.examples_notes_more') }} ({{ a.exampleUpdate.notes.length - 5 }})
+              </div>
               <div class="font-monospace mt-1" style="font-size:0.72rem;opacity:0.7">
                 {{ a.exampleUpdate.changed.join(', ') }}
               </div>
