@@ -655,7 +655,8 @@
             "readonly": true,
             "hideEmpty": true,
             "columns": [
-              "person"
+              "person",
+              "notes"
             ],
             "sources": [
               "admin_callings"
@@ -678,7 +679,8 @@
             "columns": [
               "person",
               "organization",
-              "calling"
+              "calling",
+              "notes"
             ],
             "sources": [
               "admin_callings"
@@ -711,7 +713,8 @@
             "columns": [
               "person",
               "organization",
-              "calling"
+              "calling",
+              "notes"
             ],
             "sources": [
               "admin_callings"
@@ -724,7 +727,8 @@
             "hideEmpty": true,
             "columns": [
               "person",
-              "calling"
+              "calling",
+              "notes"
             ],
             "sources": [
               "admin_callings"
