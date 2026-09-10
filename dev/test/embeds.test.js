@@ -437,3 +437,46 @@ describe('embeds.js — blockRefs (what a page needs loaded)', () => {
     assert.deepEqual(Embeds.blockRefs(null), []);
   });
 });
+
+// A rotation view's rows come from the calendar, not from `sources` — so buildRows reports ZERO for
+// every one of them, and the optional-embed `?` hid a full duty matrix while a bare embed showed an
+// empty one. What emptiness means for a rotation is having no SLOT to show, which is the question
+// rotationColsFor answers (it is where mineOnly and hideEmpty narrow).
+describe('embeds.js — a rotation embed counts its slots, not its rows', () => {
+  const rota = { name: 'rota', kind: 'rotation', rotation: { slots: ['area'], rosters: ['crew'], interval: 'weekly' } };
+  // The narrowed case: rotationColsFor is what returns [] for a viewer who holds no slot.
+  const narrowed = { rotationColsFor: () => [] };
+
+  it('a rotation with slots is NOT hidden by `?`', () => {
+    const ctx = makeCtx({ views: { rota } });
+    const blocks = Embeds.mdBlocks('## Rota\n\n{{view:rota?}}', null, ctx);
+    assert.equal(blocks.filter((b) => b.embedName === 'rota').length, 1);
+  });
+
+  it('a rotation narrowed to no slot IS hidden by `?`', () => {
+    // The parent case end to end: a household member who is not on the duty roster opens the page and
+    // the section is not there, rather than being there and empty.
+    const ctx = makeCtx(Object.assign({ views: { rota } }, narrowed));
+    const blocks = Embeds.mdBlocks('## Rota\n\n{{view:rota?}}', null, ctx);
+    assert.equal(blocks.filter((b) => b.embedName === 'rota').length, 0);
+  });
+
+  it('without `?` it renders either way — hiding is opt-in', () => {
+    const ctx = makeCtx(Object.assign({ views: { rota } }, narrowed));
+    const blocks = Embeds.mdBlocks('{{view:rota}}', null, ctx);
+    assert.equal(blocks.filter((b) => b.embedName === 'rota').length, 1);
+  });
+
+  it('a page whose only embed is a rotation reads as having data', () => {
+    // docHasData drives whether an embedded doc-view shows at all; before this it said no for every
+    // rotation-only page, because buildRows had nothing to report.
+    assert.equal(Embeds.docHasData('{{view:rota}}', null, makeCtx({ views: { rota } })), true);
+    assert.equal(Embeds.docHasData('{{view:rota}}', null, makeCtx(Object.assign({ views: { rota } }, narrowed))), false);
+  });
+
+  it('a non-rotation view still counts its rows', () => {
+    const ctx = makeCtx();
+    assert.equal(Embeds.mdBlocks('{{view:open?}}', null, ctx).length, 1);          // one open task
+    assert.equal(Embeds.mdBlocks('{{table:logs?}}', null, ctx).length, 0);         // no active rows
+  });
+});

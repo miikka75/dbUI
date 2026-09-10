@@ -4350,6 +4350,14 @@ function createVueApp() {
           var rs = rows || [];
           names = names.filter(function(n) { return rs.some(function(r) { var val = r[n]; return Array.isArray(val) ? val.length : !!val; }); });
         }
+        // Narrowed down to nothing -> no columns at all, not a lone `_period`. A rotation with no slot
+        // is a rotation with no content, and a column of dates under a heading reads as a schedule that
+        // failed to load rather than as one that has nothing for you. It happens for a real reason: a
+        // household member who does chores but is not on the duty roster holds no slot, so `mineOnly`
+        // matches none and the matrix they open is theirs and empty.
+        //   Saying so here is also what lets everything downstream act: the optional-embed `?` counts
+        // these columns, and the print path renders from them.
+        if (!names.length) return [];
         return ['_period'].concat(names);
       },
       // A view's `mineOnly` narrows a rotation to the signed-in user's OWN slot, so everyone opens the

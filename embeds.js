@@ -137,7 +137,17 @@
 
   registerBlock('view', {
     resolve: function(name, part, ctx) { return ctx.views[name] ? { embedType: 'view', embedName: name, embedPart: part || null } : null; },
-    count: function(name, part, ctx) { return embedRows('view', name, part, ctx).length; }
+    // A rotation view generates its periods from the calendar rather than from `sources`, so buildRows
+    // reports zero rows for every one of them: `{{view:rota?}}` hid a full matrix, and `docHasData`
+    // read a page whose only embed was a rotation as empty. What emptiness MEANS for a rotation is
+    // having no slot to show, which is what rotationColsFor answers -- it is where `mineOnly` and
+    // `hideEmpty` do their narrowing, so a viewer who holds no slot counts zero and everyone else
+    // counts their columns.
+    count: function(name, part, ctx) {
+      var v = ctx.views[name];
+      if (v && v.rotation) return ctx.rotationColsFor(name, ctx.rotationRowsFor(name, v.rotation), v).length;
+      return embedRows('view', name, part, ctx).length;
+    }
   });
   registerBlock('table', {
     resolve: function(name, part, ctx) { return ctx.schema[name] ? { embedType: 'table', embedName: name, embedPart: part || null } : null; },

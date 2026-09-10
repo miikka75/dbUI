@@ -920,6 +920,13 @@ while a member sees only their own column.
   slot columns rather than all of them.
 - Applies wherever the rotation renders — the view itself, a `{{view:x}}` embed, the print output, and
   the generated duty events a calendar picks up via `rotationSources`.
+- **A viewer who holds no slot sees no matrix.** The narrowing can leave nothing — `mineOnly` on
+  somebody who is a member of the household but not of the roster (a parent who does chores but is not
+  in the rotation), `hideEmpty` on a roster with nothing in it — and the view then has **no columns at
+  all**, not a lone date column. Mark the embed `{{view:<rota>?}}` and the section disappears for that
+  viewer while everyone else still sees theirs; a rotation's `?` counts its **slots**, since its periods
+  are generated rather than stored. The heading above it still renders, as it does for every optional
+  embed.
 - **Display-only**, exactly like `@me` and `obscureNames`: the rosters are still fetched and the
   periods still generated client-side. Real secrecy is a per-roster-table grant (each person's roster
   as its own table, granted only to them) — `mineOnly` is about a legible view, not a security boundary.
