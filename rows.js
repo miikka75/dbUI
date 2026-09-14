@@ -11,6 +11,8 @@
 //                        Node tests set global._listsCache.
 //   root.getColumnList — SCHEMA-bound column->list resolver (defined by app-core.js in the browser).
 //                        Only the list-ordered branch of sortByCol needs it; guarded when absent.
+//   root.getColumnRef  — SCHEMA-bound column->ref-def resolver (same source). Only `groupBy.seed`
+//                        needs it; a caller with no schema bound simply seeds nothing.
 (function(root) {
   var isNode = (typeof module !== 'undefined' && module.exports);
   // fmtDate from calendar.js; rotation resolvers from rotation.js (globals in the browser, required in Node).
@@ -391,19 +393,64 @@
     return filterRows(rows, cfg.filter);
   }
 
+  // The key set an aggregate should produce, taken from the CATALOGUE the group column references
+  // rather than from the rows that happen to exist. Without it a group with nothing in it has no key
+  // and no row -- and on a cadence view that is precisely the row worth seeing: an empty bar is the
+  // feature, a missing bar is the bug.
+  //
+  // Asked for per view (`groupBy.seed`) because aggregateRows serves every aggregate: seeding a
+  // leaderboard over a 400-row roster would grow 400 rows nobody asked for.
+  //
+  // It reads the column's OWN declaration -- `chore` is already `{ type: "ref", table: "ref_chores",
+  // valueCol: "chore" }` -- instead of restating the table on the view, so there is no second place to
+  // be wrong and no way for the two to disagree. That is the rule the lookup `hierarchy:` declaration
+  // settled one entry earlier, and `ref` columns are therefore the whole scope: a `select` takes its
+  // keys from a named list rather than from a table's rows, and validateSchema says so at LOAD rather
+  // than letting `seed: true` quietly do nothing there.
+  function seedKeys(view, ctx) {
+    var gcr = root.getColumnRef;
+    if (!gcr) return [];                       // no schema bound (a bare engine test) -- seed nothing
+    var gb = view.groupBy, keysFrom = gb.from || [gb.column], srcs = view.sources || [];
+    var cache = (ctx && ctx.dataCache) || {}, out = [], seen = {};
+    keysFrom.forEach(function(col) {
+      // The VIEW'S OWN sources, and only those. One column name can be a ref in two tables pointing at
+      // different catalogues, and an any-table scan would pick whichever came first -- seeding a key
+      // set out of a table this view never mentions. It is also what lets validateSchema say something
+      // exactly true at load: the engine looks where the error message says it looks.
+      var def = null;
+      for (var i = 0; i < srcs.length && !def; i++) def = gcr(srcs[i], col);
+      if (!def || !def.table || !def.valueCol) return;
+      // The ACTIVE partition only: a retired catalogue row that was archived rather than deleted is
+      // not a group that should reappear as an empty bar.
+      partitionRows(cache, def.table, 'active').forEach(function(r) {
+        var key = r[def.valueCol];
+        if (key == null || key === '' || seen[key]) return;
+        seen[key] = 1;
+        out.push(key);
+      });
+    });
+    return out;
+  }
+
   // Aggregate a groupBy/collect view's rows into one row per key (collected values -> Nth columns).
-  function aggregateRows(view, rows) {
+  // `ctx` carries the row cache (the same object resolveComputed takes) and is read only by
+  // `groupBy.seed`, which needs the referenced catalogue's rows.
+  function aggregateRows(view, rows, ctx) {
     // Leaderboard-style numeric aggregate: one row per group with a count or a sum, ranked highest-first.
     // aggregate = { count:true } | { sum:"<col>" }, optional `into` (output column, default "total").
     if (view.aggregate && view.groupBy) {
       var akeyCol = view.groupBy.column, akeysFrom = view.groupBy.from || [akeyCol];
       var agg = view.aggregate, sumCol = agg.sum, into = agg.into || 'total', agf = view.groupBy.filter || null;
+      // groupBy.filter matches the aggregated KEY row, so it is one predicate over a key -- applied to
+      // a seeded key and a counted one alike, or a filtered-out group would come back as a zero.
+      var keyOk = function(key) { if (!agf) return true; var tmp = {}; tmp[akeyCol] = key; return condMatches(tmp, agf); };
       var totals = {};
+      if (view.groupBy.seed) seedKeys(view, ctx).forEach(function(key) { if (keyOk(key)) totals[key] = 0; });
       rows.forEach(function(r) {
         akeysFrom.forEach(function(k) {
           var key = r[k];
           if (key == null || key === '') return;
-          if (agf) { var tmp = {}; tmp[akeyCol] = key; if (!condMatches(tmp, agf)) return; }
+          if (!keyOk(key)) return;
           if (totals[key] == null) totals[key] = 0;
           if (sumCol) { var n = Number(r[sumCol]); if (!isNaN(n)) totals[key] += n; }
           else totals[key] += 1;

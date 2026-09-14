@@ -26,6 +26,9 @@ Embedding is free: `embed-view` dispatches on the same classifier, so a new kind
 
 ## Proposed
 
+An entry that is PARTLY built says so in its heading and records what landed inline, rather than being
+split in two: the reasoning for what remains is the same document as the reasoning for what shipped.
+
 ### RSVP attendance verification *(schema pattern, not code)*
 
 "Did the people who signed up actually turn up?" — a verifier marks attendance, and only verified
@@ -52,7 +55,7 @@ Two traps worth writing into SCHEMA.md when this is done:
 Known limitation: `ownerWritableWhile` gates on a column value, not a date. "Editable until the event
 happens" is not expressible; "editable until someone marks attendance" is.
 
-### QR check-in — scan a code to mark attendance
+### QR check-in — scan a code to mark attendance *(scan phase 1.5 — the config branch of the shipped scan view)*
 
 The companion to *RSVP attendance verification* above: instead of the verifier hunting for each name
 in a list, they scan a code and the attendance column is written.
@@ -172,7 +175,7 @@ exists, since without that there is nothing for a scan to do. Of the two, the sh
 better first build — it needs no camera at all in its typed form, so it can ship and be used at a real
 event before any of the decoding work above is done.
 
-### Scan to log an action — the same camera, a row appended
+### Scan to log an action — the same camera, a row appended *(phases 1–4 landed; 1.5 and 5 open)*
 
 QR check-in, above, writes an *answer* onto a row that already exists: someone signed up, and the scan
 records that they turned up. This entry asks whether the same scan can create the record instead — a
@@ -263,9 +266,10 @@ down for a second reason: it makes the Supabase assessment's "no offline cache" 
 rather than a footnote, since on that backend even the open tab needs a connection at the door.
 
 **It makes *Empty groups* load-bearing rather than nice.** The checkpoint nobody visited is the entire
-point of a patrol report, and it is the same hole `chore_cadence` has today — a group is built from the
-rows that exist, so the missing one is invisible. This feature does not need it in order to work, but a
-report that silently omits the skipped door is worse than no report.
+point of a patrol report, and a group built from the rows that exist leaves the missing one invisible.
+That half has since SHIPPED (see Shipped): a report over `checkpoint` — a `ref` into the route — asks
+for `groupBy: { …, seed: true }` and the skipped door is a zero rather than an absence. Nothing here
+depends on it to work, but a report that silently omits the skipped door is worse than no report.
 
 #### What each use case needs
 
@@ -276,7 +280,7 @@ something are small, and two of them are needed by the cases already documented 
 | Use case | The write | What it adds |
 |---|---|---|
 | Chore logged — a code on the dishwasher | Append to `chore_log` | Nothing. This is the baseline |
-| Guard round · orienteering control | Append per checkpoint | **A time, not a date** (2). `once` per round. *Empty groups* for the door nobody opened |
+| Guard round · orienteering control | Append per checkpoint | **A time, not a date** (2). `once` per round. `groupBy.seed` (shipped) for the door nobody opened |
 | Attendance check-in *(the entry above)* | Update the row that exists | `match: "owner"` — the other branch of the same plan |
 | Equipment out and back — tools, AV kit, boats | Append a movement | Nothing. "Who has it now" is a `latest` tile over the log, which `stats` already computes |
 | Training log, reading log, recycling drop-off | Append | Nothing |
@@ -447,70 +451,6 @@ addition to a shape that already exists, which is the reason for not building th
 Phases 2 and 3 can swap. Phase 4 depends on nothing and could be built at any point — it is last
 because it is the only expensive one and, until the offline case is actually in front of someone,
 phase 3 does the same job for free.
-
-### Empty groups — the bar that is missing is the one that matters
-
-Half of *per-row goals* (below, in Shipped). That half made each tile carry its own target; this one
-is about the tiles that never appear.
-
-`aggregateRows` builds its groups from the rows it is handed, so a chore nobody has done this month
-has no group and no tile — and that is precisely the chore a reminder exists for. `chore_cadence`
-demonstrates it today: twelve chores in `ref_chores`, nine tiles, and the three missing ones are the
-neglected ones. **An empty bar is the whole feature; a missing bar is the bug.**
-
-The fix is to seed the group keys from the referenced lookup table rather than from the rows — `chore`
-is a `ref` to `ref_chores`, so the key set is known independently of the data. Independently useful:
-the same hole makes any leaderboard omit everyone who scored nothing, which is the person most worth
-seeing on a scoreboard.
-
-The cost was a decision rather than lines, and the decisions are now made. They are recorded here
-because each one was argued down from a plausible alternative, and an entry that shows only the answer
-gets the alternative re-proposed.
-
-**`seed: true`, not `seedFrom: "ref_chores"`.** `aggregateRows` serves every aggregate view, so seeding
-cannot be unconditional — a leaderboard over a 400-row lookup would grow 400 tiles — which means a key
-on the view either way. It reads the column's own declaration rather than restating it: `chore` is
-already `{ type: "ref", table: "ref_chores", valueCol: "chore" }`, so naming the table again on the
-view creates a second place to be wrong and the two can disagree. That is the failure the `hierarchy:`
-fix was written to end (see Shipped), and it is not worth re-introducing one entry later.
-
-Scoped to `ref` columns first, and say so. "The key set" has more than one origin — `person` is
-`{ type: "select", list: "members" }`, whose keys are a `listSources: users` roster, not a table's rows
-— so covering both means type dispatch. A `seed: true` that quietly does nothing on a `select` is worse
-than one that reports it at load.
-
-**Gate on the target, not on the count.** A key with no `target_per_month` is not on a cadence and gets
-no tile. This is what makes the seeded set self-maintaining: retiring a chore means clearing its
-target, in the Lookup tab, with no schema edit — so "which rows of the lookup count" is answered by
-data that already exists rather than by a new flag. The drop belongs in `stats.js`, which holds the row
-and the resolved goal together; `rows.js` must not learn what a goal is. Wanted under its own name
-(`skipUntargeted` or similar) rather than as a silent rule, because a tile with a value and no goal is
-legitimate elsewhere — a `display: "number"` scorecard is exactly that.
-
-**Hiding zero tiles is NOT the answer, though it looks like one.** For this view the zeros are the
-output; a view that hides them did not need seeding in the first place. It is also not expressible
-today: `filter` runs on source rows, `groupBy.filter` tests a synthetic row built from the key alone
-(`rows.js`) and so never sees a total, and `limit` is a top-N slice rather than a predicate. A real
-predicate over the aggregated row — SQL's `HAVING`, as `groupBy.having` — is a genuine gap and worth
-recording as its own, but it is a different feature and must not be built as this one's excuse.
-
-**Where the zeros sort is settled and shipped** — `rowTiles: { order: "behind" }`, below. It landed
-BEFORE seeding on purpose: it needed no empty groups to be useful (`chore_cadence` had nine real
-tiles and the wrong order), so it could be proven against data that already existed rather than
-arriving as the second unproven behaviour in one change. The zeros now have an order waiting for them:
-nothing done is a ratio of 0 and sorts first, which is the whole point of seeding them.
-
-A seeded row is `{ id: key, <keyCol>: key, <into>: 0 }`. Zero is honest for `count` and `sum`, where
-"nothing" genuinely is zero; it would be a lie for the `avg`/`min` below, which is a reason to land
-those two in the other order or to seed `null` when they arrive.
-
-**"Days since last done" is the other thing this view cannot say.** `aggregateRows` supports `count`
-and `sum` only, so a per-chore group can report "done twice this month" but not "last done 47 days
-ago". The per-row half already exists as `computed.daysSince`, and `stats.js`'s own `reduce` already
-has `min`/`max`/`latest` — the gap is only that the aggregate pipeline has neither. Adding one is
-small. Deciding what the bar then *means* is not: today a full bar is success and overshoot recolours
-to `success`, whereas an overdue bar filling up is bad news, and inverting that per tile is a renderer
-decision this entry does not make.
 
 ### Prose that names its rows — a per-row template for an embed
 
@@ -932,7 +872,7 @@ choose a column by name, so it wants the same care the Lookup editor got.
 Sequencing: worth doing after the feed's token decision, since "who may publish" is the same question
 in a different hat, and answering it once covers both.
 
-### Undo/redo — take the last thing back
+### Undo/redo — take the last thing back *(mechanism, cells and rows landed; the value cascades open)*
 
 Every write in this app is final the moment it happens. A cell edit saves 300ms after the last
 keystroke, a row delete removes a row, a group rename rewrites forty rows across two tables, and the
@@ -1156,6 +1096,36 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   match to buy nothing. Passed as an argument rather than added to rows.js's runtime-bound globals:
   those exist for values consumed deep in the pipeline, and all three callers of this one are in
   app-core, so the dependency stays visible at the call site.
+- **Empty groups** — `groupBy.seed` (rows.js) + `stats.rowTiles.skipUntargeted`, the other half of
+  per-row goals. `aggregateRows` built its groups from the rows it was handed, so a chore nobody had
+  done had no group and no tile — precisely the chore a reminder exists for. It seeds the key set from
+  the CATALOGUE the group column references instead: `chore_cadence` went from nine tiles to twelve,
+  and the three nobody had done now lead its `order: "behind"` list at 0%. An empty bar was the whole
+  feature; a missing bar was the bug.
+  Every decision the entry had argued down held. `seed: true` rather than `seedFrom: "ref_chores"` —
+  it reads the column's own `ref` declaration, so the table is not named twice and the two cannot
+  disagree, which is the failure the `hierarchy:` fix was written to end. `ref` columns only, reported
+  at LOAD rather than quietly doing nothing on a `select`. The target gate under its own name, dropping
+  in `stats.js` where the row and the resolved goal are together, so `rows.js` never learned what a
+  goal is — which is what makes the seeded set self-maintaining: retiring a chore is clearing its
+  target in the Lookup tab, with no schema edit. And zero tiles are not hidden: for this view the zeros
+  ARE the output, and `order: "behind"` (shipped first, on purpose) already had a place to put them.
+  Four things the build settled that the entry had not. **`aggregateRows` needed a context**: it was
+  pure over `(view, rows)` and the key set lives in the row cache, so it now takes the same ctx object
+  `resolveComputed` was already being handed — which collapsed three inline copies of that object into
+  one per call site. The schema half goes through the runtime-bound `getColumnRef` global, the seam
+  `sortByCol`'s list order already used, so rows.js still holds no schema of its own. **`groupBy.filter`
+  has to gate a seeded key exactly as it gates a counted one**, or a group the filter excluded would
+  come back as a zero; making that one `keyOk` predicate retired the duplicated synthetic-row idiom
+  beside it. **An archived catalogue row is not seeded** — a retired row that was filed rather than
+  deleted must not reappear as an empty bar. And **`skipUntargeted` reads the RESOLVED goal**, so the
+  `default: 0` a computed lookup falls back to is dropped alongside a blank one; both mean nobody set a
+  cadence, and a zero goal draws no bar either way. No new load path was needed: the catalogue is the
+  `ref` target of a source column, which `Columns.defTables` already names as a dependency.
+  Two things the entry recorded are unchanged and still open. `groupBy.having` — a real predicate over
+  an aggregated row — remains a genuine gap, and was deliberately not built as this one's excuse. And
+  zero is honest for `count`/`sum` only: if `avg`/`min` ever join the aggregate pipeline, a seeded key
+  wants `null` there rather than a zero that would read as a measurement.
 - **`order: "behind"`** — a `rowTiles` board sorted by how much of its OWN goal each tile reached,
   against the default ranking's "who is winning". The reason it is a `stats` key and not a
   `defaultSort` is that the number it sorts on does not exist as a column: `pct` is computed after the
@@ -1175,7 +1145,8 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   dispatches on type, so a fourth shape cost one branch and spent no new key, and no precedence rule
   had to be invented for a view that set both. It resolves where the row is still in hand and becomes
   a plain number, so `"max"`, the ladder and the pct/over arithmetic never learned about it. Shipped
-  knowingly partial: a chore with no rows still produces no tile (see *Empty groups*, above).
+  knowingly partial — a chore with no rows still produced no tile — and *Empty groups*, above, is the
+  half that closed it.
 - **`timeline`** (#173) — rows with a start *and* end date as bars across periods, closing the gap the
   calendar documents about itself: a calendar places a row on ONE day, so anything spanning days had
   nowhere to go. `timeline.js` reuses `rotation.js`'s interval arithmetic rather than growing a second
@@ -1249,15 +1220,25 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
 
 ## Suggested order
 
-`gallery` next, then `tree`. `gallery` is gated on nothing since `image`/`url` shipped; `tree` is gated
-on wanting it — its prerequisite landed, and what remains is a second hierarchy model that no shipped
-schema has asked for. (`.ics` export and `timeline` were each first here in turn, and have shipped.)
+Two entries here are PARTLY built, and each one's remainder outranks anything unstarted, because a
+half-built mechanism is the only thing on this page that can mislead: it looks finished from the
+outside.
 
-Undo/redo sits ahead of both, and is the one entry on this page that would be first on merit rather
-than on cheapness: it is gated on nothing, it needs no schema change and no backend change, and it is
-the only proposal here that removes an existing sharp edge instead of adding a surface. What holds it
-back is that its cost is an audit of the multi-write call sites rather than an implementation, so it
-wants an uninterrupted sitting rather than a spare afternoon.
+**Undo/redo's value cascades** come first, and are the one item that would be first on merit rather
+than on cheapness. The mechanism, the cell edit and the whole row lifecycle have landed; what is left
+is the rename fan-out (`renameRefParent`, `saveRefField` -> `propagateListChange`/`propagateRefChange`),
+where undoing a rename means deciding what happens to the list value and the translation key it
+carried. That is a design question rather than an audit, and the entry says so.
+
+**Scan phase 1.5** — check-in as config (`match: "owner"` + `codeCol`) — is the cheapest unbuilt thing
+on the page, a resolver branch and a test, and it is what turns the shipped scan view into the QR
+check-in entry above. Worth doing only when somebody actually wants the verifier-scans-attendee
+arrangement; it is not owed to the shipped half.
+
+Then `gallery`, then `tree`. `gallery` is gated on nothing since `image`/`url` shipped; `tree` is gated
+on wanting it — its prerequisite landed, and what remains is a second hierarchy model that no shipped
+schema has asked for. (`.ics` export, `timeline`, `stats`, the scan family and *Empty groups* were each
+first here in turn, and have shipped.)
 
 Database-defined calendars sit outside that line for the same reason the feed does: what it needs
 decided is who may PUBLISH one, which is the feed's open question wearing a different hat.
@@ -1269,14 +1250,9 @@ backend, since the cheapest option is free on Supabase and costs either a second
 function on Firebase. Those belong to whoever owns the deployment, so the entry waits for that answer
 instead of being ranked against features.
 
-Empty groups sits outside that line: it extends a shipped kind rather than adding one, so it competes
-for attention with nothing. It is also the last half of per-row goals — the targets ship, the order
-ships, and what is still missing is the rows that were never there to sort. Its decisions are made and
-written down; what remains is the writing.
-
 The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
 schema today.
 
-Of the scan family, *Scan to log an action* is the entry to build first and the only one worth
-ranking: it needs nothing else to land first, its typed form needs no camera, and building it in
-the other order means writing `scan.js` twice.
+`groupBy.having` (recorded inside *Empty groups*, in Shipped) is unranked on purpose. It is a genuine
+gap — there is no predicate over an aggregated row — but it was named there to stop it being built as
+that feature's excuse, and nothing has asked for it since.

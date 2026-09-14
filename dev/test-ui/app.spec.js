@@ -3088,6 +3088,76 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.inherited).toBe('');                      // a view-level goal is a goal
   });
 
+  // `groupBy.seed` takes the key set from the catalogue the group column references, so that a group
+  // with nothing in it still produces a row. Both refusals below are a view that LOADS and renders and
+  // quietly does none of what the author asked for, which is the class of mistake load time is for.
+  test('validateSchema refuses a seeded groupBy with nothing to seed from', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const errs = (n) => window.validateSchema().filter((e) => e.indexOf(n) >= 0).join(' | ');
+      // `city` is a ref into `cities` (valueCol: city) -- the declaration the seed reads.
+      window.VIEWS.sd_ok = { name: 'sd_ok', sources: ['tasks'], aggregate: { count: true },
+        groupBy: { column: 'city', from: ['city'], seed: true } };
+      const quiet = errs('sd_ok');
+
+      // A `collect` view has no total, so there is no zero to seed a key with.
+      window.VIEWS.sd_collect = { name: 'sd_collect', sources: ['tasks'], collect: 'due',
+        groupBy: { column: 'city', from: ['city'], seed: true }, columns: ['city', 'latest'] };
+      // `status` is a select: its keys come from a named list, not from a table's rows.
+      window.VIEWS.sd_select = { name: 'sd_select', sources: ['tasks'], aggregate: { count: true },
+        groupBy: { column: 'status', from: ['status'], seed: true } };
+      const bad = { collect: errs('sd_collect'), select: errs('sd_select') };
+
+      // `skipUntargeted` drops every tile that resolved no goal -- with no goal at all, that is all of
+      // them, and the view renders as if the database were empty.
+      const agg = { sources: ['tasks'], groupBy: { column: 'status' } };
+      window.VIEWS.sd_untgt = Object.assign({ name: 'sd_untgt' }, agg, {
+        stats: { rowTiles: { label: 'status', value: 'howMany', skipUntargeted: true } } });
+      window.VIEWS.sd_tgt = Object.assign({ name: 'sd_tgt' }, agg, {
+        stats: { rowTiles: { label: 'status', value: 'howMany', goal: { column: 'target' }, skipUntargeted: true } } });
+      const gate = { none: errs('sd_untgt'), withGoal: errs('sd_tgt') };
+
+      ['sd_ok', 'sd_collect', 'sd_select', 'sd_untgt', 'sd_tgt'].forEach((n) => delete window.VIEWS[n]);
+      return { quiet, bad, gate };
+    });
+    expect(r.quiet).toBe('');
+    expect(r.bad.collect).toContain('needs `aggregate`');
+    expect(r.bad.select).toContain('reads the key set off a `ref` column');
+    expect(r.gate.none).toContain('every tile is dropped');
+    expect(r.gate.withGoal).toBe('');
+  });
+
+  // The pipeline proof, in the app rather than in a Node harness: the group key set has to reach
+  // aggregateRows through the SAME context the computeds resolve their lookups out of. Threaded
+  // wrongly, seeding degrades silently to the old behaviour -- a view that simply omits a row.
+  test('a seeded groupBy gives the app a row for a group its data never mentions', async ({ page }) => {
+    await ensureAppReady(page);
+    // A catalogue of three cities and tasks in only two of them. Oslo is the case the feature is for:
+    // in the catalogue `city` references, absent from every row that would have counted it.
+    const put = (tableId, data) => page.request.post('/api/putRow', { data: { tableId, data } });
+    for (const city of ['Bergen', 'Tromso', 'Oslo']) await put('cities', { id: 'c-' + city, city });
+    await put('tasks', { id: 'sd-1', title: 'A', city: 'Bergen', status: 'open' });
+    await put('tasks', { id: 'sd-2', title: 'B', city: 'Bergen', status: 'open' });
+    await put('tasks', { id: 'sd-3', title: 'C', city: 'Tromso', status: 'open' });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => {
+      const view = (name, seed) => ({ name: name, sources: ['tasks'], mode: 'union', readonly: true,
+        aggregate: { count: true, into: 'done' }, columns: ['city', 'done'],
+        groupBy: { column: 'city', from: ['city'], seed: seed } });
+      window.VIEWS.sd_off = view('sd_off', false);
+      window.VIEWS.sd_on = view('sd_on', true);
+    });
+    const cities = () => page.evaluate(() => (window.appInstance.currentData || []).map((r) => r.city + ':' + r.done).sort().join(','));
+
+    await page.evaluate(() => window.appInstance.selectTab('sd_off'));
+    await expect.poll(cities, { timeout: 6000 }).toBe('Bergen:2,Tromso:1');
+
+    await page.evaluate(() => window.appInstance.selectTab('sd_on'));
+    // Zero, not blank: a `count` of nothing genuinely is nothing, and a bar needs a number to fall short of.
+    await expect.poll(cities, { timeout: 6000 }).toBe('Bergen:2,Oslo:0,Tromso:1');
+  });
+
   // A `filter` naming a column that is not there matches NO row -- the view renders an empty list,
   // which reads as "no rows yet" and not as a typo. Spelled the other way round (`{ typo: { empty:
   // true } }`) every row matches and the filter quietly does nothing. Neither is visible downstream:
