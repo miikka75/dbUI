@@ -326,6 +326,28 @@ function validateSchema() {
       if (isEmbed(c) || isViewEmbed(c) || isText(c) || (c && typeof c === 'object' && c.computed)) return;
       if (!colInSources(colName(c))) errors.push('View "' + v + '": column "' + colName(c) + '" not found in sources [' + (view.sources || []).join(', ') + ']');
     });
+    // `groupBy.seed` takes the key set from the catalogue the group column REFERENCES, so that a group
+    // with no rows still produces one. Both conditions are reported rather than ignored, because each
+    // failure mode is a view that loads, renders, and quietly does nothing the author asked for.
+    if (view.groupBy && view.groupBy.seed) {
+      if (!view.aggregate) {
+        errors.push('View "' + v + '": `groupBy.seed` needs `aggregate` — a seeded group is a key with a zero total, and a `collect` view has no total to seed');
+      }
+      // A `select` resolves its keys from a named list, not from a table's rows, so there is nothing
+      // here to read them out of. Scoped to `ref` on purpose (see rows.js seedKeys); saying so at load
+      // is the whole reason the scope is bearable.
+      var seedFrom = view.groupBy.from || [view.groupBy.column];
+      var seedRef = null;
+      seedFrom.forEach(function(col) {
+        (view.sources || []).forEach(function(src) {
+          var rd = Columns.columnRef(SCHEMA, src, col);
+          if (!seedRef && rd && rd.table && rd.valueCol) seedRef = rd;
+        });
+      });
+      if (!seedRef) {
+        errors.push('View "' + v + '": `groupBy.seed` reads the key set off a `ref` column, so [' + seedFrom.join(', ') + '] must include one declaring both `table` and `valueCol` in sources [' + (view.sources || []).join(', ') + ']');
+      }
+    }
     // The view's own row filter, and the filter each of its embeds carries. An inline embed declares its
     // own `sources`; a named-view embed inherits the named view's, with the entry's own keys winning —
     // the same merge embedConfigs performs to build it. A `{view:...}` pointing nowhere is skipped
@@ -627,6 +649,12 @@ function validateSchema() {
           errors.push('stats "' + v + '": `rowTiles.order: "behind"` needs a `goal` to be behind — every tile would be unmeasured and the order would be the one it arrived in');
         }
         stCol(st.rowTiles.goal && st.rowTiles.goal.column, 'rowTiles.goal.column');
+        // `skipUntargeted` drops every tile that resolved no goal. With no goal declared anywhere that
+        // is every tile, so the view renders empty -- which looks like a database with no rows in it
+        // rather than like a schema that asked for this.
+        if (st.rowTiles.skipUntargeted && st.rowTiles.goal === undefined && st.goal === undefined) {
+          errors.push('stats "' + v + '": `rowTiles.skipUntargeted` needs a `goal` to be untargeted BY — with none, every tile is dropped and the view renders empty');
+        }
       }
       (st.tiles || []).forEach(function(t, ti) {
         var at = 'tile ' + ti;

@@ -2804,17 +2804,23 @@ function createVueApp() {
             if (vMe.groupBy) { vMe.groupBy = Object.assign({}, vMe.groupBy); if (vMe.groupBy.filter) vMe.groupBy.filter = self.resolvePeriodTokens(vMe.groupBy.filter, self.periodOffset); }
           }
           var srcRows = buildRows(vMe, cache, part);
+          // One context for the whole pipeline: the computeds resolve their lookups out of it, and a
+          // seeded groupBy reads the referenced catalogue's rows from the same cache.
+          var rctx = { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) };
           // Resolve source-row computeds (e.g. a per-row lookup) BEFORE grouping so an aggregate can sum them.
-          if (view.compute) srcRows = resolveComputed(srcRows, view.compute, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
-          var rows = resolveComputed(aggregateRows(vMe, srcRows), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
+          if (view.compute) srcRows = resolveComputed(srcRows, view.compute, rctx);
+          var rows = resolveComputed(aggregateRows(vMe, srcRows, rctx), view.columns, rctx);
           self.currentData = rows;
           // Rebuild currentData once a late-arriving table lands in dataCache. Declared here (rather
           // than beside the rotation preload below) because the source preload needs it too.
           var recomputeRotation = function() {
             var vMe2 = self._viewWithMe(view);
             var src2 = buildRows(vMe2, self.dataCache, part);
-            if (view.compute) src2 = resolveComputed(src2, view.compute, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
-            self.currentData = resolveComputed(aggregateRows(vMe2, src2), view.columns, { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) });
+            // Rebuilt rather than captured: this runs when a LATE table lands, so the cache it reads
+            // must be the one that exists then -- including the catalogue a seeded groupBy waits for.
+            var rctx2 = { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) };
+            if (view.compute) src2 = resolveComputed(src2, view.compute, rctx2);
+            self.currentData = resolveComputed(aggregateRows(vMe2, src2, rctx2), view.columns, rctx2);
           };
           // Preload the view's OWN sources. Every other branch of loadTableData does this (calendar,
           // rotation, pivot, rsvp via _ensureCached; a bare table lazily below), but the union/join

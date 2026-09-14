@@ -24,7 +24,9 @@
 //             `goal: { column: <col> }` reads the target off the ROW too, which is what lets one view
 //             hold targets that differ per row (bedding monthly, bins weekly), and
 //             `order: "behind"` ranks by how much of its own goal each row has reached rather than by
-//             raw value -- "what is neglected" instead of "who is winning".
+//             raw value -- "what is neglected" instead of "who is winning". `skipUntargeted: true`
+//             drops a row that resolved no goal, which is what keeps a seeded key set to the rows
+//             somebody still means to measure.
 //
 // `goal` sets the bar's 100% mark. A number is an absolute target ("120 sign-ins"). The string "max"
 // means "the largest value among these tiles", which is what a leaderboard wants — the leader's bar is
@@ -202,6 +204,17 @@
       t.over = pct > 100;
       t.pct = Math.max(0, Math.min(100, Math.round(pct)));
     });
+
+    // A key with no TARGET is not on a cadence, and gets no tile. This is what makes a SEEDED key set
+    // (rows.js `groupBy.seed`) self-maintaining: retiring a chore means clearing its target in the
+    // Lookup tab, with no schema edit, so "which catalogue rows count" is answered by data that
+    // already exists rather than by a second flag naming them.
+    //
+    // Under its own name rather than as a silent rule of seeding, because a tile with a value and no
+    // goal is legitimate elsewhere -- a `display: "number"` scorecard is exactly that -- and it reads
+    // the RESOLVED goal, so the `default: 0` a lookup falls back to is dropped alongside a blank one.
+    // Both mean "nobody set a cadence for this", and a zero goal draws no bar either way.
+    if (opts.rowTiles && opts.rowTiles.skipUntargeted) out = out.filter(function(t) { return t.goal !== null; });
 
     // `behind` answers "what is neglected", against the default's "who is winning". A tile with no
     // goal has no answer and sorts LAST rather than first, which is the rule sortRosterRows settled

@@ -157,6 +157,72 @@ describe('rows.js — aggregateRows (the real logic, no more simulated copies)',
     assert.equal(ann.previous, '2026-01-01');
   });
 
+  describe('groupBy.seed — the group that has no rows is the one worth seeing', () => {
+    // The catalogue the group column REFERENCES, and a log that never mentions one of its rows.
+    const cache = {
+      log: [{ id: 'l1', chore: 'Dishes' }, { id: 'l2', chore: 'Dishes' }, { id: 'l3', chore: 'Bins' }],
+      ref_chores: [{ id: 'c1', chore: 'Dishes' }, { id: 'c2', chore: 'Bins' }, { id: 'c3', chore: 'Dust' }]
+    };
+    const view = { sources: ['log'], aggregate: { count: true, into: 'done' }, groupBy: { column: 'chore', from: ['chore'], seed: true } };
+    // The SCHEMA-bound resolver rows.js reads at call time, exactly as app-core defines it.
+    const bindRefs = (refs) => { globalThis.getColumnRef = (t, col) => (refs[col] && (t === null || t === undefined || t === refs[col].in) ? refs[col].def : null); };
+    const choreRef = { chore: { in: 'log', def: { type: 'ref', table: 'ref_chores', valueCol: 'chore' } } };
+
+    it('seeds a key with no rows as a zero, and leaves it last in the ranking', () => {
+      bindRefs(choreRef);
+      const rows = Rows.aggregateRows(view, Rows.buildRows(view, cache, 'active'), { dataCache: cache });
+      assert.deepEqual(rows.map(r => [r.chore, r.done]), [['Dishes', 2], ['Bins', 1], ['Dust', 0]]);
+      // The row is an ordinary aggregate row, so everything downstream — a computed lookup resolving
+      // its target, the stats tile, the sort — treats it like any other.
+      assert.deepEqual(rows[2], { id: 'Dust', chore: 'Dust', done: 0 });
+    });
+
+    it('is off unless the view asks: seeding every aggregate would grow a roster-sized leaderboard', () => {
+      bindRefs(choreRef);
+      const plain = Object.assign({}, view, { groupBy: { column: 'chore', from: ['chore'] } });
+      assert.deepEqual(Rows.aggregateRows(plain, Rows.buildRows(plain, cache, 'active'), { dataCache: cache }).map(r => r.chore), ['Dishes', 'Bins']);
+    });
+
+    it('a seeded key passes the same groupBy.filter a counted one does', () => {
+      // Otherwise a group the filter excludes comes BACK as a zero — the filter would be reading only
+      // half its own key set.
+      bindRefs(choreRef);
+      const filtered = Object.assign({}, view, { groupBy: { column: 'chore', from: ['chore'], seed: true, filter: { chore: { ne: 'Dust' } } } });
+      assert.deepEqual(Rows.aggregateRows(filtered, Rows.buildRows(filtered, cache, 'active'), { dataCache: cache }).map(r => r.chore), ['Dishes', 'Bins']);
+    });
+
+    it('an archived catalogue row is not seeded back as an empty group', () => {
+      bindRefs(choreRef);
+      const withArchived = Object.assign({}, cache, { ref_chores: cache.ref_chores.concat([{ id: 'c4', chore: 'Windows', _status: 'archive' }]) });
+      const keys = Rows.aggregateRows(view, Rows.buildRows(view, withArchived, 'active'), { dataCache: withArchived }).map(r => r.chore);
+      assert.deepEqual(keys, ['Dishes', 'Bins', 'Dust']);
+    });
+
+    it('resolves the ref through the sources the VIEW names, so a shared column name cannot cross wires', () => {
+      // `chore` is a ref in both tables, at different catalogues. The view says which one it reads, and
+      // nothing else is consulted -- an any-table scan would seed keys out of a table it never mentions.
+      globalThis.getColumnRef = (t, col) => {
+        if (col !== 'chore') return null;
+        if (t === 'log') return { type: 'ref', table: 'ref_chores', valueCol: 'chore' };
+        return { type: 'ref', table: 'ref_other', valueCol: 'chore' };
+      };
+      const other = Object.assign({}, cache, { ref_other: [{ id: 'o1', chore: 'Not mine' }] });
+      const keys = Rows.aggregateRows(view, Rows.buildRows(view, other, 'active'), { dataCache: other }).map(r => r.chore);
+      assert.deepEqual(keys, ['Dishes', 'Bins', 'Dust']);
+    });
+
+    it('seeds nothing rather than throwing when no schema is bound or the column is not a ref', () => {
+      delete globalThis.getColumnRef;
+      assert.deepEqual(Rows.aggregateRows(view, Rows.buildRows(view, cache, 'active'), { dataCache: cache }).map(r => r.chore), ['Dishes', 'Bins']);
+      // validateSchema reports both of these at load; the engine still has to be total.
+      bindRefs({ chore: { in: 'log', def: { type: 'ref', table: 'ref_chores' } } });   // no valueCol
+      assert.deepEqual(Rows.aggregateRows(view, Rows.buildRows(view, cache, 'active'), { dataCache: cache }).map(r => r.chore), ['Dishes', 'Bins']);
+      bindRefs(choreRef);
+      assert.deepEqual(Rows.aggregateRows(view, Rows.buildRows(view, cache, 'active'), {}).map(r => r.chore), ['Dishes', 'Bins']);   // catalogue not loaded yet
+      delete globalThis.getColumnRef;
+    });
+  });
+
   it('collectWith annotates each value with the source column (role)', () => {
     const view = { groupBy: { column: 'person', from: ['lead', 'helper'] }, collect: 'date', collectWith: 'role', columns: ['person', 'latest'] };
     const rows = Rows.aggregateRows(view, [{ lead: 'Ann', helper: 'Bob', date: '2026-01-05' }]);

@@ -217,6 +217,23 @@ describe('stats.js — a goal each row carries', () => {
     assert.deepEqual(s.tiles.map((t) => t.label), ['b', 'a']);
   });
 
+  it('skipUntargeted drops the rows nobody set a target for', () => {
+    // The gate that keeps a SEEDED key set (rows.js groupBy.seed) to the rows still being measured:
+    // retiring a chore means clearing its target in the Lookup tab, with no schema edit.
+    const rows = [{ n: 'kept', v: 1, g: 10 }, { n: 'retired', v: 0, g: '' }, { n: 'zeroed', v: 0, g: 0 }];
+    const cfg = (extra) => ({ rowTiles: Object.assign({ label: 'n', value: 'v', goal: { column: 'g' } }, extra) });
+    assert.deepEqual(Stats.build(rows, cfg({})).tiles.map((t) => t.label), ['kept', 'retired', 'zeroed']);
+    // A blank target and the `default: 0` a computed lookup falls back to mean the same thing —
+    // nobody set a cadence — and neither could draw a bar anyway.
+    assert.deepEqual(Stats.build(rows, cfg({ skipUntargeted: true })).tiles.map((t) => t.label), ['kept']);
+  });
+
+  it('skipUntargeted runs before the order and the limit, so N means N tiles that count', () => {
+    const rows = [{ n: 'retired', v: 0, g: 0 }, { n: 'worst', v: 1, g: 10 }, { n: 'mid', v: 5, g: 10 }];
+    assert.deepEqual(Stats.build(rows, { limit: 2, rowTiles: { label: 'n', value: 'v', goal: { column: 'g' }, order: 'behind', skipUntargeted: true } })
+      .tiles.map((t) => t.label), ['worst', 'mid']);
+  });
+
   it('limit takes the first N of the order asked for, not of the order handed over', () => {
     const rows = [{ n: 'lead', v: 9, g: 10 }, { n: 'mid', v: 5, g: 10 }, { n: 'worst', v: 1, g: 10 }];
     assert.deepEqual(Stats.build(rows, { limit: 2, rowTiles: { label: 'n', value: 'v', goal: { column: 'g' }, order: 'behind' } })

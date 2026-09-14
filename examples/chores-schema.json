@@ -475,7 +475,8 @@
         "column": "chore",
         "from": [
           "chore"
-        ]
+        ],
+        "seed": true
       },
       "aggregate": {
         "count": true,
@@ -515,7 +516,8 @@
           "goal": {
             "column": "target"
           },
-          "order": "behind"
+          "order": "behind",
+          "skipUntargeted": true
         }
       }
     },

@@ -447,6 +447,20 @@ Instead of `collect`, use `aggregate` to produce one **numeric** row per group, 
   grouping — e.g. `"filter": { "done_on": { "within": "@month" } }` for this month's board). Use
   `groupBy.filter` only to restrict by the **group key** itself (e.g. `{ "person": "@me" }` for just my
   own row) — a date filter there won't work because `groupBy.filter` matches the key, not source columns.
+- **`groupBy.seed`** (optional, `aggregate` only): take the key set from the **catalogue the group
+  column references** instead of from the rows, so a group with nothing in it still produces a row
+  (`{ id: key, <keyCol>: key, <into>: 0 }`). Without it a chore nobody logged has no group and no row
+  — and on a cadence or a leaderboard that is the row most worth seeing. It reads the column's own
+  `ref` declaration (`{ "type": "ref", "table": "ref_chores", "valueCol": "chore" }`), so the table is
+  never named twice and the two cannot disagree; a group column that is not a `ref` is a load-time
+  error. Off by default, because seeding is not always wanted — a leaderboard over a 400-row roster
+  would grow 400 rows. Seeded keys pass `groupBy.filter` exactly as counted ones do, and an **archived**
+  catalogue row is not seeded back. Pair it with `stats.rowTiles.skipUntargeted` to keep the page to the
+  rows somebody still means to measure.
+
+  ```json
+  "groupBy": { "column": "chore", "from": ["chore"], "seed": true }
+  ```
 - **`period` navigation** (optional): set `"period": "month"` (or `week`/`year`) to show ‹ › controls
   that step a back-offset into the view's bare `@period` tokens (`@month` → `@month-1` = last month…),
   letting users browse past periods. Offset resets to the current period when you open the view.
@@ -1537,10 +1551,11 @@ The two are mutually exclusive; declaring both is a load-time error.
 | Key | Meaning |
 |-----|---------|
 | `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals }` |
-| `rowTiles` | `{ label, value, goal?, order? }` — one tile per row instead |
+| `rowTiles` | `{ label, value, goal?, order?, skipUntargeted? }` — one tile per row instead |
 | `goal` | Default bar target for every tile: a positive number, `"max"` (scale to the largest tile), a **ladder** of levels (below), or `{ "column": "<col>" }` to read the target off each row (`rowTiles` only). No goal = no bar, just a number |
 | `display` | `"bar"` (default) or `"number"`. Per-tile, or view-wide as a default |
 | `limit` | `rowTiles` only: cap the tile count. Applied after `order`, so it is the first N of the order asked for |
+| `rowTiles.skipUntargeted` | Drop a tile that resolved no goal — the gate that keeps a seeded key set (`groupBy.seed`) to the rows still being measured |
 
 **Aggregates**: `count` (needs no `column`), `sum`, `avg`, `min`, `max`, `latest`. Everything but
 `count` requires a `column`, and says so at load rather than showing an em dash forever.
@@ -1572,9 +1587,16 @@ row. The shipped `chore_cadence` view is exactly this, reading `ref_chores.targe
   `{ column }` goal there is a load-time error rather than a tile that silently draws no bar.
 - **A row whose target is blank or non-numeric gets no bar**, and shows its number alone — the same
   thing every other unusable goal does. A chore with no cadence set has no bar to be short of.
-- **A group with no rows produces no tile at all.** `aggregateRows` builds its groups from the rows it
-  is given, so a chore nobody logged is absent rather than an empty bar — which is the one it would be
-  most useful to see. Tracked in ROADMAP.md.
+- **A group with no rows still gets a tile**, as long as the view asks for one: `groupBy.seed` takes
+  the key set from the catalogue the group column references (see **Leaderboard totals**), so a chore
+  nobody logged is an empty bar rather than no bar — which is the one most worth seeing. `chore_cadence`
+  turns it on, and the never-done chores lead its `order: "behind"` list.
+- **`skipUntargeted: true`** drops a tile whose goal resolved to nothing, which is what keeps a seeded
+  key set honest: a catalogue row with no target is not on a cadence and gets no tile. That makes the
+  set **self-maintaining** — retiring a chore means clearing its target in the Lookup tab, with no
+  schema edit — and it is under its own name rather than implied by seeding, because a tile with a
+  value and no goal is legitimate elsewhere (a `display: "number"` scorecard is exactly that). With no
+  `goal` declared anywhere it would drop every tile, so that combination is a load-time error.
 
 ### Which end of the board is the point (`order`)
 

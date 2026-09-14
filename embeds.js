@@ -324,8 +324,11 @@
       // answer onto the row, so the partition goes to buildRows as a parameter.
       var vMe = ctx.viewWithMe(v);
       var esrc = Rows.buildRows(vMe, ctx.dataCache, part || 'active');
-      if (v.compute) esrc = Rows.resolveComputed(esrc, v.compute, { dataCache: ctx.dataCache, rotationAnchor: ctx.anchorForView(v.name) });
-      return Rows.sortByCol(Rows.resolveComputed(Rows.aggregateRows(vMe, esrc), v.columns, { dataCache: ctx.dataCache, rotationAnchor: ctx.anchorForView(v.name) }), v.defaultSort, v);
+      // One context for the embedded view's whole pipeline -- computeds AND a seeded groupBy, which
+      // reads the catalogue its group column references out of the same cache.
+      var ectx = { dataCache: ctx.dataCache, rotationAnchor: ctx.anchorForView(v.name) };
+      if (v.compute) esrc = Rows.resolveComputed(esrc, v.compute, ectx);
+      return Rows.sortByCol(Rows.resolveComputed(Rows.aggregateRows(vMe, esrc, ectx), v.columns, ectx), v.defaultSort, v);
     }
     if (type === 'table' && ctx.schema[name]) return Rows.sortByCol(Rows.partitionRows(ctx.dataCache, name, part || 'active'), ctx.schema[name].defaultSort);
     return [];
