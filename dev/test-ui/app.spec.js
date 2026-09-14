@@ -1281,6 +1281,16 @@ test.describe('Mirror cluster is transitive (master + 2 details)', () => {
 });
 
 test.describe('Import round-trip', () => {
+  // A successful import RELOADS the app 1.5s later (applyBundle -> finishImportReload, delayed so the
+  // snackbar is readable), and boot refetches asynchronously after that. So the app's dataCache is a
+  // moving target for a second or so either side of the reload, and sampling it at one fixed instant
+  // read EMPTY whenever the suite ran under parallel load -- the server assertions above each sample
+  // passed, because the rows were there all along. This polls for the settled state instead, and
+  // tolerates the navigation itself: an evaluate that lands mid-reload throws rather than returning.
+  const appPoll = (page, fn) => expect.poll(async () => {
+    try { return await page.evaluate(fn); } catch (e) { return null; }
+  }, { timeout: 10000 });
+
   test('importing a JSON bundle restores data into correct partitions (active vs archive) with implicit id', async ({ page }) => {
     test.setTimeout(20000);
     const SCH = { defaultLanguage: 'en', tables: { docs: { columns: [{ name: 'title', type: 'text' }], archivable: true } }, views: [{ table: 'docs' }], nav: { items: [{ table: 'docs' }] } };
@@ -1314,12 +1324,10 @@ test.describe('Import round-trip', () => {
     expect(active.headers).toContain('id'); // implicit id present after import
 
     // And the app agrees about which partition each is in.
-    const seen = await page.evaluate(() => ({
+    await appPoll(page, () => ({
       active: window.Rows.partitionRows(appInstance.dataCache, 'docs', 'active').map(r => r.id),
       archive: window.Rows.partitionRows(appInstance.dataCache, 'docs', 'archive').map(r => r.id)
-    }));
-    expect(seen.active).toContain('a1');
-    expect(seen.archive).toContain('z1');
+    })).toEqual({ active: ['a1'], archive: ['z1'] });
   });
 
   test('re-importing an already-migrated bundle changes nothing, and clears a leftover archive row', async ({ page }) => {
@@ -1349,13 +1357,10 @@ test.describe('Import round-trip', () => {
     expect(row._status).toBe('archive', 'a bundle that already carries _status must keep it');
 
     // The stale copy is still in the archive collection -- a bare-key row is not a move, so nothing
-    // cleared it -- and the app must still count the row ONCE, from the active store.
-    const seen = await page.evaluate(() => ({
-      archive: window.Rows.partitionRows(appInstance.dataCache, 'docs', 'archive').map(r => r.id),
-      titles: window.Rows.partitionRows(appInstance.dataCache, 'docs', 'archive').map(r => r.title)
-    }));
-    expect(seen.archive).toEqual(['z1']);
-    expect(seen.titles).toEqual(['Arch1'], 'the stale archive copy won over the migrated row');
+    // cleared it -- and the app must still count the row ONCE, from the active store. A title of
+    // 'Stale' here means the archive copy won over the migrated row.
+    await appPoll(page, () => window.Rows.partitionRows(appInstance.dataCache, 'docs', 'archive')
+      .map(r => r.id + ':' + r.title)).toEqual(['z1:Arch1']);
   });
 
   // The import used to be ONE serial promise chain with no .catch(): a single rejected write silently
