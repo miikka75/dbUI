@@ -8,6 +8,19 @@
   <link rel="apple-touch-icon" href="./icon-512.png">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
+  <!-- Warm the boot chain. Everything below is fetched on EVERY boot, but only after a chain of
+       awaits: the fragments, then vue, then vuetify, then backend-helpers, then app-core -- so the
+       largest file in the app started downloading last, one round trip behind four others. A preload
+       is a fetch into the cache and nothing else: it does not execute, so the ordering the awaits
+       enforce (vuetify needs Vue; app-core needs the domain modules) is untouched, and the vendor
+       files keep their CDN fallback exactly as it was. Relative hrefs, like every other URL in this
+       file, so a copy served from a subdirectory resolves against its own folder.
+       If a vendored dist is absent (the CDN-fallback path), its preload 404s and is simply unused. -->
+  <link rel="preload" as="script" href="vendor/vue.js">
+  <link rel="preload" as="script" href="vendor/vuetify.js">
+  <link rel="preload" as="script" href="backend-helpers.js">
+  <link rel="preload" as="script" href="schema-loader.js">
+  <link rel="preload" as="script" href="app-core.js">
   <!-- iOS standalone (Add to Home Screen) -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -206,12 +219,16 @@
       // calendar geometry + fmtDate, rotation engine, view row pipeline, embed resolution, print). They
       // don't depend on Vue/Vuetify/the SDK, so start downloading them NOW (in parallel, ordered exec)
       // and await just before the schema-loader fragment — they overlap the vue/vuetify/sdk loads for free.
+      // Deliberately NOT hoisted above the fragment fetches, though nothing here needs them: on a
+      // connection-limited transport 26 extra requests queue AHEAD of the markup that gates first
+      // paint, and measured that way round it is a slower app that merely reaches a later phase sooner.
       var appModulesReady = loadScriptsOrdered([
         '/columns.js', '/access-features.js', '/list-access.js', '/list-users.js', '/calendar.js',
         '/rotation.js', '/rows.js', '/events.js', '/ics.js', '/feeds.js', '/timeline.js', '/embeds.js', '/print.js', '/pivot.js', '/rsvp.js', '/form.js', '/board.js', '/stats.js', '/scan.js',
         '/writes.js', '/undo.js', '/migrations.js', '/schema-normalize.js', '/examples.js', '/query.js',
         '/live-sync.js'
       ]);
+
 
       // CDN fallbacks are SRI-pinned (sha384 of the exact npm-package file — jsdelivr /npm/ serves
       // tarball bytes verbatim): a compromised or tampered CDN response fails the integrity check and
@@ -228,10 +245,17 @@
       await loadScript('/backend-helpers.js');
 
       if (backendFile === '/backend-firebase.js') {
-        await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
-        await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js');
-        await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js');
-        await loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js');
+        // Ordered, not serial. Each compat bundle registers itself onto the `firebase` global that
+        // app-compat creates, so app MUST execute first -- which loadScriptsOrdered guarantees
+        // (async=false keeps insertion-order execution) while letting all four download at once.
+        // Awaited one at a time this was four gstatic round trips deep on the critical path, every
+        // boot, which is the phone's whole blank screen on a slow link.
+        await loadScriptsOrdered([
+          'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
+          'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js',
+          'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js',
+          'https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js'
+        ]);
       }
       if (backendFile === '/backend-supabase.js') {
         await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2');

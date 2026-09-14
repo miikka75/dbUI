@@ -111,3 +111,38 @@ test('boot time + phase breakdown reported', async ({ page }) => {
     expect(data.firstPaint != null || data.firstContentfulPaint != null).toBeTruthy();
   }
 });
+
+// The boot request GRAPH, which is the half the clock above cannot see. Every file below is fetched on
+// every boot, and they used to form a chain: the fragments, then vue, then vuetify, then
+// backend-helpers, then app-core -- so the largest file in the app started downloading four round trips
+// after the first one. Measured over HTTP/2 (what Firebase Hosting and Pages serve) with 150ms of
+// server latency, that cost ~490ms of the ~1250ms to mount; the <link rel=preload> set in index.html's
+// head collapses it.
+//
+// Asserted as an ORDERING invariant rather than a duration, for the same reason the budget above is
+// loose: a clock tight enough to catch this on a fast localhost would fail on a loaded CI runner.
+// `app-core.js starts before vue.js has finished` is true whenever the two overlap and false the moment
+// anything re-serializes them -- on the code this replaced, app-core started 363ms after vue ended.
+test('the boot chain downloads in parallel, not one file after another', async ({ page }) => {
+  test.setTimeout(60000);
+  test.skip(TARGET !== '/', 'needs the local server (an external target may serve a different build)');
+  await page.request.post('/api/resetData');
+  await page.request.post('/api/saveSchema', { data: { schema: SCHEMA } });
+  await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+  await page.goto('/', { waitUntil: 'load' });
+  await page.waitForFunction(() => window.__bootMs != null, null, { timeout: 12000 }).catch(() => {});
+
+  const t = await page.evaluate(() => {
+    const pick = (suffix) => {
+      const e = performance.getEntriesByType('resource').filter((r) => r.name.endsWith(suffix)).pop();
+      return e ? { start: Math.round(e.startTime), end: Math.round(e.responseEnd) } : null;
+    };
+    return { vue: pick('/vendor/vue.js'), vuetify: pick('/vendor/vuetify.js'), core: pick('/app-core.js'), loader: pick('/schema-loader.js') };
+  });
+  for (const [name, r] of Object.entries(t)) expect(r, name + ' was never requested').toBeTruthy();
+
+  // Each of the three that used to wait on vue now starts no later than vue finishes.
+  expect(t.vuetify.start, 'vuetify.js waits for vue.js to finish').toBeLessThanOrEqual(t.vue.end);
+  expect(t.core.start, 'app-core.js waits for the vendor chain').toBeLessThanOrEqual(t.vue.end);
+  expect(t.loader.start, 'schema-loader.js waits for the vendor chain').toBeLessThanOrEqual(t.vue.end);
+});
