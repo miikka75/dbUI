@@ -368,3 +368,277 @@ describe('undo — the row lifecycle', () => {
     }
   });
 });
+
+describe('undo — a write that is not a row', () => {
+  // A rename writes three stores with no putRow between them (a list array, a translation key, an
+  // account link). undo.js must hand those to the app without learning what any of them is.
+  beforeEach(() => { Undo.clear(); Undo.configure({ apply: null, vocab: null, onChange: null }); });
+
+  it('routes a non-row change to the vocab handler, and not to the funnel or the cache', async () => {
+    const calls = fakeWrites();
+    const seen = [], patched = [];
+    Undo.configure({ vocab: (c) => { seen.push(c); }, apply: (t, p, c) => patched.push(c) });
+    Undo.record({
+      forward: { type: 'lists', list: 'status', values: ['a', 'b'] },
+      inverse: { type: 'lists', list: 'status', values: ['a'] } });
+
+    await Undo.undo();
+    assert.deepEqual(seen, [{ type: 'lists', list: 'status', values: ['a'] }]);
+    assert.equal(calls.length, 0, 'a list array is not a row and must not reach putRow');
+    assert.equal(patched.length, 0, 'nor the row cache — there is no id to merge onto');
+
+    await Undo.redo();
+    assert.deepEqual(seen.pop(), { type: 'lists', list: 'status', values: ['a', 'b'] });
+  });
+
+  it('fails loudly when no handler is registered, rather than dropping the change', async () => {
+    fakeWrites();
+    Undo.record({ forward: { type: 'trans' }, inverse: { type: 'trans' } });
+    await assert.rejects(() => Undo.undo(), /no handler/);
+  });
+
+  it('an action stays open across an await, so one cascade is one entry', async () => {
+    // The real shape: a rename rewrites the archive partition, and an uncached partition is FETCHED
+    // first. A synchronous-only scope would push every one of those rows as its own entry.
+    fakeWrites();
+    await Undo.action('rename', () => {
+      Undo.record(put('t', 'active', 'a', { g: 'old' }, { g: 'new' }));
+      return Promise.resolve().then(() => {
+        Undo.record(put('t', 'archive', 'b', { g: 'old' }, { g: 'new' }));
+        Undo.record(put('t', 'archive', 'c', { g: 'old' }, { g: 'new' }));
+      });
+    });
+    assert.equal(Undo.canUndo(), true);
+    await Undo.undo();
+    assert.equal(Undo.canUndo(), false, 'the rows fetched after the await belong to the same press');
+  });
+
+  it('closes the entry when the body rejects, rather than leaving it open forever', async () => {
+    fakeWrites();
+    await assert.rejects(() => Undo.action('rename', () => {
+      Undo.record(put('t', 'active', 'a', { g: 'old' }, { g: 'new' }));
+      return Promise.reject(new Error('fetch failed'));
+    }));
+    assert.equal(Undo.canUndo(), true, 'what did happen is still undoable');
+    Undo.record(put('t', 'active', 'z', { g: '0' }, { g: '1' }));
+    await Undo.undo();
+    assert.equal(Undo.canUndo(), true, 'and the next write is its OWN entry, not a guest in the open one');
+  });
+
+  it('_undoVocab sends each change to the store it belongs to', async () => {
+    const { appCoreFn } = require('./app-core-fn');
+    const saved = [], moved = [], linked = [];
+    const self = {
+      listsCache: { status: ['open'] },
+      saveLists: function() { saved.push(this.listsCache.status.slice()); },
+      migrateListTranslation: (ns, from, to) => moved.push([ns, from, to]),
+      setListUserLink: (list, value, email) => linked.push([list, value, email])
+    };
+    const fn = appCoreFn('_undoVocab', {});
+
+    await fn.call(self, { type: 'lists', list: 'status', values: ['open', 'done'] });
+    assert.deepEqual(saved.pop(), ['open', 'done'], 'the whole array, because saveLists writes the whole blob');
+
+    await fn.call(self, { type: 'trans', ns: 'status', from: 'new', to: 'old' });
+    assert.deepEqual(moved.pop(), ['status', 'new', 'old']);
+
+    await fn.call(self, { type: 'link', list: 'status', value: 'open', email: 'a@b.c' });
+    assert.deepEqual(linked.pop(), ['status', 'open', 'a@b.c'],
+      'a link is SET, not moved: after a delete there is nothing left to move from');
+
+    assert.throws(() => fn.call(self, { type: 'nonsense' }), /unknown change/);
+  });
+});
+
+describe('undo — the value cascades', () => {
+  // The shipped members, lifted. A rename is one gesture across four stores, and the failure this
+  // guards is the half-undo: rows put back to a value the vocabulary no longer contains.
+  const { appCoreFn } = require('./app-core-fn');
+
+  function capture() {
+    const ops = [];
+    const orig = Undo.record;
+    Undo.record = (op) => { ops.push(op); return orig.call(Undo, op); };
+    return { ops, restore: () => { Undo.record = orig; } };
+  }
+
+  // _rewriteValueInColumns is the shared engine under every cascade — list rename, list delete, lookup
+  // rename, group rename — so recording there is what makes all four reversible.
+  const rewriter = () => appCoreFn('_rewriteValueInColumns', {
+    aKey: (t) => t + '__archive',
+    Writes: { putRow: () => Promise.resolve() },
+    backend: { getTableData: () => Promise.resolve({ rows: [] }) },
+    parseTableResult: (r) => ({ rows: (r && r.rows) || [] })
+  });
+
+  it('records a partial inverse per rewritten row, carrying the value it held before', async () => {
+    const rows = [{ id: 'r1', status: 'open', title: 'keep' }, { id: 'r2', status: 'done' }];
+    const c = capture();
+    try {
+      await rewriter().call({ dataCache: { tasks: rows }, listsCache: {} },
+        [{ table: 'tasks', col: 'status', multi: false, altList: null }], 'open', 'started');
+    } finally { c.restore(); }
+
+    assert.equal(c.ops.length, 1, 'only the row that held the old value is rewritten, so only it records');
+    assert.equal(c.ops[0].inverse.row.status, 'open');
+    assert.equal(c.ops[0].forward.row.status, 'started');
+    assert.deepEqual(Object.keys(c.ops[0].inverse.row).sort(), ['id', 'status'],
+      'carrying `title` would revert a colleague\'s edit to it');
+    assert.equal(rows[0].status, 'started', 'and the rewrite really happened');
+  });
+
+  it('leaves a row that already held the new value alone — which is why renaming back is not the inverse', async () => {
+    // Renaming A onto an existing B and then re-running the cascade B -> A would drag this row back
+    // with it, and it had nothing to do with the edit.
+    const rows = [{ id: 'r1', status: 'open' }, { id: 'r2', status: 'done' }];
+    const c = capture();
+    try {
+      await rewriter().call({ dataCache: { tasks: rows }, listsCache: {} },
+        [{ table: 'tasks', col: 'status', multi: false, altList: null }], 'open', 'done');
+    } finally { c.restore(); }
+
+    assert.deepEqual(c.ops.map((o) => o.forward.id), ['r1']);
+    assert.equal(rows[1].status, 'done');
+  });
+
+  it('a delete cascade inverts to the value it blanked, and to the whole array for a multiselect', async () => {
+    // This is the sharpest unrecoverable edit in the Lists tab: removing a value empties every cell
+    // that held it.
+    const rows = [{ id: 'r1', people: ['ann', 'bob'] }, { id: 'r2', lead: 'ann' }];
+    const c = capture();
+    try {
+      await rewriter().call({ dataCache: { crew: rows }, listsCache: {} }, [
+        { table: 'crew', col: 'people', multi: true, altList: null },
+        { table: 'crew', col: 'lead', multi: false, altList: null }
+      ], 'ann', null);
+    } finally { c.restore(); }
+
+    const byId = {};
+    c.ops.forEach((o) => { byId[o.forward.id] = o; });
+    assert.deepEqual(byId.r1.inverse.row.people, ['ann', 'bob'], 'the array as it was, not the pruned one');
+    assert.deepEqual(rows[0].people, ['bob']);
+    assert.equal(byId.r2.inverse.row.lead, 'ann');
+    assert.equal(rows[1].lead, '');
+  });
+
+  it('a list rename is ONE entry covering the array, the label, the link and the rows', async () => {
+    // The half-undo this exists to prevent: rows back to a value the list no longer contains.
+    Undo.clear();
+    const written = [], vocab = [];
+    globalThis.Writes = { putRow: () => Promise.resolve(), deleteRow: () => Promise.resolve() };
+    Undo.configure({ apply: null, vocab: (ch) => { vocab.push(ch); } });
+
+    const rows = [{ id: 'r1', status: 'open' }];
+    const self = {
+      canEditList: () => true, isLockedValue: () => false,
+      listsCache: { status: ['open', 'done'] },
+      listUserLinks: { status: { open: 'a@b.c' } },
+      saveLists: () => {},
+      migrateListUserLink: () => {}, migrateListTranslation: () => {},
+      propagateListChange: function() {
+        // Stands in for the real cascade: async (it fetches uncached partitions) and it records rows.
+        return Promise.resolve().then(() => {
+          rows[0].status = 'started';
+          Undo.record({ table: 'tasks', part: 'active',
+            forward: { type: 'put', id: 'r1', row: { id: 'r1', status: 'started' } },
+            inverse: { type: 'put', id: 'r1', row: { id: 'r1', status: 'open' } } });
+          written.push('cascade');
+        });
+      }
+    };
+
+    await appCoreFn('updateListItem2', {}).call(self, 'status', 0, 'started');
+    assert.equal(Undo.canUndo(), true);
+
+    await Undo.undo();
+    assert.equal(Undo.canUndo(), false, 'one gesture, one press — the cascade must not be a second entry');
+    const kinds = vocab.map((v) => v.type);
+    assert.ok(kinds.indexOf('lists') >= 0 && kinds.indexOf('trans') >= 0 && kinds.indexOf('link') >= 0,
+      'the array, the label and the link all have to come back, got ' + kinds.join(','));
+    assert.deepEqual(vocab.find((v) => v.type === 'lists').values, ['open', 'done'],
+      'the list array as it was before the rename');
+    assert.deepEqual(vocab.filter((v) => v.type === 'link').map((v) => [v.value, v.email]),
+      [['started', ''], ['open', 'a@b.c']],
+      'the pair inverts as two state sets: clear the new key, restore the old one');
+  });
+
+  it('a group rename records a partial parent-column inverse for every child', () => {
+    Undo.clear();
+    globalThis.Writes = { putRow: () => Promise.resolve() };
+    const kids = [{ id: 'c1', org: 'Music', calling: 'chorister' },
+                  { id: 'c2', org: 'Music', calling: 'organist' },
+                  { id: 'c3', org: 'Primary', calling: 'teacher' }];
+    const c = capture();
+    try {
+      appCoreFn('renameRefParent', {}).call({
+        canEditCurrentRef: true, isLockedRefValue: () => false,
+        currentRefTable: 'ref_callings', refParentCol: 'org',
+        dataCache: { ref_callings: kids },
+        notify: () => {}, t: (k) => k,
+        migrateListTranslation: () => {},
+        propagateListChange: () => Promise.resolve(0)
+      }, 'Music', 'Music and Choirs');
+    } finally { c.restore(); }
+
+    const rowOps = c.ops.filter((o) => o.forward.type === 'put');
+    assert.deepEqual(rowOps.map((o) => o.forward.id), ['c1', 'c2'], 'only the group\'s own children move');
+    assert.equal(rowOps[0].inverse.row.org, 'Music');
+    assert.deepEqual(Object.keys(rowOps[0].inverse.row).sort(), ['id', 'org'],
+      'a group rename says nothing about a child\'s other columns');
+    assert.equal(kids[0].org, 'Music and Choirs');
+    assert.ok(c.ops.some((o) => o.forward.type === 'trans' && o.inverse.from === 'Music and Choirs'),
+      'the group label has to travel back too');
+  });
+
+  it('a lookup rename records the row and its label in one entry, at blur rather than on the timer', () => {
+    // Recorded at blur because the cascade runs there; the row write stays debounced behind it.
+    const { mock } = require('node:test');
+    mock.timers.reset();
+    mock.timers.enable({ apis: ['setTimeout'] });
+    Undo.clear();
+    globalThis.Writes = { putRow: () => Promise.resolve() };
+
+    const item = { id: 'x1', city: 'Tampre' };
+    const c = capture();
+    try {
+      appCoreFn('saveRefField', {}).call({
+        canEditCurrentRef: true, lockedListValues: {},
+        currentRefTable: 'cities', dataCache: { cities: [item] },
+        saveTimers: {}, notify: () => {}, t: (k) => k, _liveFlush: () => {},
+        migrateListTranslation: () => {},
+        propagateRefChange: () => Promise.resolve(0)
+      }, item, 'city', 'Tampere');
+    } finally { c.restore(); mock.timers.reset(); }
+
+    assert.equal(c.ops.length, 2, 'the row and its translation key, in one entry');
+    assert.equal(c.ops[0].inverse.row.city, 'Tampre');
+    assert.deepEqual(Object.keys(c.ops[0].inverse.row).sort(), ['city', 'id']);
+    assert.deepEqual([c.ops[1].forward.from, c.ops[1].forward.to], ['Tampre', 'Tampere']);
+    assert.deepEqual([c.ops[1].inverse.from, c.ops[1].inverse.to], ['Tampere', 'Tampre']);
+  });
+
+  it('a lookup edit that retires nothing records the row but no rename', () => {
+    // "president" is a calling of nine organizations: changing the one under Music renames nothing.
+    const { mock } = require('node:test');
+    mock.timers.reset();
+    mock.timers.enable({ apis: ['setTimeout'] });
+    Undo.clear();
+    globalThis.Writes = { putRow: () => Promise.resolve() };
+
+    const item = { id: 'x1', calling: 'president' };
+    const other = { id: 'x2', calling: 'president' };
+    const c = capture();
+    try {
+      appCoreFn('saveRefField', {}).call({
+        canEditCurrentRef: true, lockedListValues: {},
+        currentRefTable: 'ref_callings', dataCache: { ref_callings: [item, other] },
+        saveTimers: {}, notify: () => {}, t: (k) => k, _liveFlush: () => {},
+        migrateListTranslation: () => { throw new Error('must not migrate a value still in use'); },
+        propagateRefChange: () => { throw new Error('must not cascade a value still in use'); }
+      }, item, 'calling', 'branch president');
+    } finally { c.restore(); mock.timers.reset(); }
+
+    assert.equal(c.ops.length, 1, 'the row edit alone');
+    assert.equal(c.ops[0].inverse.row.calling, 'president');
+  });
+});

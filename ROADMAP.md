@@ -872,7 +872,7 @@ choose a column by name, so it wants the same care the Lookup editor got.
 Sequencing: worth doing after the feed's token decision, since "who may publish" is the same question
 in a different hat, and answering it once covers both.
 
-### Undo/redo — take the last thing back *(mechanism, cells and rows landed; the value cascades open)*
+### Undo/redo — take the last thing back *(fully landed: mechanism, cells, rows and the value cascades)*
 
 Every write in this app is final the moment it happens. A cell edit saves 300ms after the last
 keystroke, a row delete removes a row, a group rename rewrites forty rows across two tables, and the
@@ -982,12 +982,107 @@ and all three reorders (`moveRowPosition`, `moveRefChild`, `moveRefGroup`). Thre
   guarantee. It poisons the whole action rather than skipping the one op, because an entry that puts
   back three mirrors of four is not an undo and looks like one.
 
-**What remains.** The value cascades, which are a different question from the row ones: the group rename
-(`renameRefParent`) and the lookup cell edit (`saveRefField`) both fan out through
-`propagateListChange` / `propagateRefChange` into `_rewriteValueInColumns`, and onwards into list
-vocabularies and translations. Undoing a row is local; undoing a rename means deciding what happens to
-the list value and the translation key it carried, and `saveLists` prunes — the same asymmetry the
-Leftovers entry above warns about. Worth designing before building.
+**The value cascades — LANDED.** A different question from the row ones. The list rename
+(`updateListItem2`), the list delete (`removeListItem2`), the group rename (`renameRefParent`) and the
+lookup cell edit (`saveRefField`) all fan out through `propagateListChange` / `propagateRefChange` into
+`_rewriteValueInColumns`, and onwards into list vocabularies and translations. Undoing a row is local;
+undoing a rename means deciding what happens to the list value and the translation key it carried.
+
+**One gesture, four stores — and only two of them are rows.** That is the whole difficulty, stated
+plainly:
+
+| What a rename writes | Written through | Row? |
+|---|---|---|
+| Every table cell holding the value | `_rewriteValueInColumns` -> `Writes.putRow` | yes |
+| The vocabulary — a list's array, or a lookup ROW | `backend.saveLists` / `Writes.putRow` | half |
+| The label — `list.<ns>.<value>` in every language | `backend.updateTranslations` | no |
+| The account linked to it | `backend.setListUser` | no |
+
+`undo.js` is row-shaped by design and says so: an op is the change shape `LiveSync.applyChange` already
+reconciles, replayed through the funnel. Three of these four do not fit, and widening `Writes` to carry
+them would be widening the row funnel to hold things that are not rows.
+
+**So `undo.js` learns that not every write is a row, and nothing more than that.** `replay` dispatches on
+`change.type`; anything that is not `put` or `delete` goes to a handler the app registers alongside
+`apply`. The module gains six lines and no knowledge of any store. Three op types, and the reason each
+has the shape it does is that **the op mirrors how its store is actually written**:
+
+- `{ type: 'lists', list, values }` — the whole array. `saveLists` writes the entire blob anyway, so
+  there is no partial to express; snapshot-shaped also means index-free, and therefore still correct if
+  the list was reordered between the edit and the undo.
+- `{ type: 'trans', ns, from, to }` — a key MOVE, because `migrateListTranslation` is already its own
+  inverse under a swap. Reused rather than re-implemented.
+- `{ type: 'link', list, value, email }` — a state SET, not a move. A move cannot revive: after a delete
+  there is no link left to read, so the op has to CARRY the email it restores. A rename records two of
+  these (clear the old, set the new), each exactly invertible.
+
+**Why not simply rename back?** It looks like the cheap answer — the inverse of a rename is a rename —
+and it is wrong wherever the new name already exists. Renaming A onto an existing B and then re-running
+the cascade B -> A would drag back every row that held B all along and had nothing to do with the edit.
+Recording the row half as per-row before-images keeps the inverse exact: the forward rewrite only
+touched rows holding A, so only those are recorded, and a partial patch means taking back a value
+rewrite cannot revert a colleague's edit to another column of the same row.
+
+**An action has to be allowed to span an await, and that is the second change.** `propagateListChange`
+is asynchronous for a real reason: an archive partition that is not cached is FETCHED before it can be
+rewritten. `Undo.action` is a synchronous scope today, so every archived row would land in its own
+entry — the forty-row-rename failure the grouping was built to prevent, one tier down. So `action()`
+gains one branch: a body that returns a thenable holds the group open until it settles. The cost is
+worth stating rather than hiding — a debounced write from elsewhere that fires inside that window joins
+the rename's entry. That MERGES two entries; it cannot corrupt either, since every op still carries its
+own before-image. The alternative, pre-fetching every partition before opening the action, is more code
+for the same window.
+
+**What the forward destroyed, the undo does not restore — and must not compound.** Renaming A onto a
+name B that already exists clobbers B's label and B's account link *today, in the forward direction*.
+The inverse moves the key back to A, which restores A's label faithfully and leaves B's gone — lost by
+the rename, not by taking it back. That is the honest boundary, and the forward clobber is a
+pre-existing bug worth its own fix (it belongs with *Leftovers*, since a merged value is exactly the
+kind of thing that leaves no trace).
+
+**The list delete is in scope even though the entry called this "renames".** `removeListItem2` cascades
+`propagateListChange(name, value, null)`, which BLANKS the value out of every row that stored it — the
+sharpest unrecoverable edit left in the Lists tab, and it costs nothing extra once
+`_rewriteValueInColumns` records: the recording lives in the shared engine, so leaving delete out would
+mean that engine records for some callers and not others, which is not an invariant anyone can hold. It
+needs no translation op, because `removeListItem2` never moved the key — `list.<name>.<value>` is still
+there, so a revived value gets its label back for free.
+
+**`saveRefField` records at blur, not in its debounce**, which is where it differs from `saveField`. The
+cascade already runs at blur (per column, and the editors are `@blur`-bound, so once per edit); the row
+write is debounced 500ms behind it. Recording at blur puts the cascade and the row in one entry without
+moving the cascade into the timer, where a two-column lookup — tab from `city` to `state` — would have
+had to fan out for several columns under one timer key. Two columns edited inside one window then make
+two entries, which is correct: each is a complete unit, and the row op is a partial naming its own
+column. The pending whole-row write is not a race either, because the undo patches the cached row the
+timer will write.
+
+Out of scope, and deliberately: `addListItem2` (a blank value with nothing at risk), `moveListItem`
+(order only), and schema import, which the entry already excludes above.
+
+**Built, and four things it settled that the design had not.**
+
+- **`Undo.undo()` could throw SYNCHRONOUSLY**, and that is a bug the feature merely exposed. `replayAll`
+  maps `replay` over the ops, so a synchronous throw inside one escaped before `Promise.all` ever
+  existed — past `undoLast`'s `.catch`, which is attached to the returned promise, and out as an
+  uncaught error rather than a notice. Both stacks had already been mutated by then. It is the rule
+  `writes.js` states in its own header, arrived at from the other direction: always a promise, including
+  when the failure is synchronous.
+- **`configure` ignored an explicit null**, so `configure({ apply: null })` silently kept the previous
+  handler installed. The undo suite's own `beforeEach` had been assuming otherwise since the mechanism
+  first landed, and passing for unrelated reasons. A key that is PRESENT is now honoured; only an absent
+  one is left alone, which is what still lets one handler be set without disturbing the others.
+- **Recording in the shared engine is what made the list DELETE free**, which is the strongest argument
+  for the placement. `_rewriteValueInColumns` sits under all four cascades, so the delete — the only one
+  of them that destroys data outright — needed nothing at its call site but the list snapshot and the
+  link. Recording at four call sites would have meant four chances to leave one out.
+- **`saveLists` and `setListUserLink` now return their promises.** Neither did, because nothing had ever
+  needed to wait for them; a replay does, and a handler that resolves before the write lands would let
+  an undo report success ahead of the store agreeing.
+
+One property is worth stating because no test can hold it: a rename onto a name that already exists
+still destroys that name's label and link in the FORWARD direction. The undo does not compound it, as
+above — but that forward clobber is real, unreported, and belongs with *Leftovers*.
 
 ### `tree`
 
@@ -1220,15 +1315,11 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
 
 ## Suggested order
 
-Two entries here are PARTLY built, and each one's remainder outranks anything unstarted, because a
-half-built mechanism is the only thing on this page that can mislead: it looks finished from the
-outside.
-
-**Undo/redo's value cascades** come first, and are the one item that would be first on merit rather
-than on cheapness. The mechanism, the cell edit and the whole row lifecycle have landed; what is left
-is the rename fan-out (`renameRefParent`, `saveRefField` -> `propagateListChange`/`propagateRefChange`),
-where undoing a rename means deciding what happens to the list value and the translation key it
-carried. That is a design question rather than an audit, and the entry says so.
+One entry here is PARTLY built, and its remainder outranks anything unstarted, because a half-built
+mechanism is the only thing on this page that can mislead: it looks finished from the outside.
+(Undo/redo was the other, and led this list on merit rather than on cheapness until its value cascades
+shipped — see its entry above, which is kept in place rather than reduced to a Shipped bullet because
+the reasoning behind what landed is the same document as the reasoning for the rest of it.)
 
 **Scan phase 1.5** — check-in as config (`match: "owner"` + `codeCol`) — is the cheapest unbuilt thing
 on the page, a resolver branch and a test, and it is what turns the shipped scan view into the QR

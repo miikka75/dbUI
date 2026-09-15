@@ -18,6 +18,16 @@
 // of the same row. If they edited the SAME cell, the undo wins. That is the honest behaviour of an
 // inverse-op log against live data, and it is not worth pretending otherwise.
 //
+// NOT EVERY WRITE IS A ROW. Renaming a list value also rewrites the list's own array, moves the
+// `list.<ns>.<value>` translation that carries its label, and re-keys the account linked to it — three
+// stores with no putRow between them. Rather than teach this module about any of them, a change whose
+// `type` is neither 'put' nor 'delete' is handed to the handler the app registers as `vocab`. The op
+// stays DATA — serializable, symmetric, replayable in either direction; only the app knows where it
+// lands. Each such op mirrors the shape its store is actually written in: a whole-array snapshot for a
+// list (saveLists writes the entire blob, so there is no partial to express), a key MOVE for a
+// translation (that migration is already its own inverse under a swap), and a state SET for an account
+// link (a revive has no link left to read, so the op must carry the email it restores).
+//
 // UNDO IS A WRITE, NEVER A RESTORE. Every backend subscribes to its tables. An undo that reached into
 // dataCache and put the old values back would leave this client alone in believing them.
 //
@@ -37,6 +47,7 @@
   var depth = 0;        // ref-count: a nested action() JOINS the outer one rather than opening a second
   var replaying = false;
   var applyLocal = null;
+  var vocabApply = null;
   var onChange = null;
 
   // Resolved at CALL time, never captured — same reasoning as writes.js resolving `backend`: the boot
@@ -70,6 +81,12 @@
   // archiveAfter window, would file it away for having sat still.
   function replay(op, side) {
     var change = op[side];
+    // Not a row: no cache to patch and no funnel to take it, so it goes to the app whole. Nothing below
+    // applies — a list array has no id, and stamping `updated_at` on a translation key is meaningless.
+    if (change.type !== 'put' && change.type !== 'delete') {
+      if (!vocabApply) throw new Error('undo: no handler for a ' + change.type + ' change');
+      return Promise.resolve(vocabApply(change));
+    }
     if (change.type === 'put') {
       change = { type: 'put', id: change.id, row: Object.assign({}, change.row, { updated_at: new Date().toISOString() }) };
     }
@@ -84,7 +101,13 @@
     var order = side === 'inverse' ? ops.slice().reverse() : ops;
     replaying = true;
     try {
-      return Promise.all(order.map(function (op) { return replay(op, side); }));
+      // ALWAYS a promise, including when the failure is synchronous — the same rule writes.js states for
+      // the same reason. undo()/redo() have already moved the entry between the stacks by the time this
+      // runs, and undoLast attaches its .catch to the returned promise; a synchronous throw would skip
+      // that handler entirely and surface as an uncaught error instead of a notice.
+      return Promise.all(order.map(function (op) {
+        try { return replay(op, side); } catch (e) { return Promise.reject(e); }
+      }));
     } finally {
       // Cleared synchronously, not in a .then: `record` is only ever called synchronously from a call
       // site, so the flag has done its job by the time replay's promises settle. Leaving it set until
@@ -96,10 +119,14 @@
   var Undo = {
     // apply(table, part, change) patches the local cache and schedules a rebuild; onChange(u, r) reports
     // the stack depths, because a plain module is not reactive and the buttons need to know.
+    // A key that is PRESENT is honoured, including an explicit null — `configure({ apply: null })` has to
+    // mean what it says, or clearing a handler silently leaves the old one installed. Only an absent key
+    // is left alone, which is what lets one handler be set without disturbing the others.
     configure: function (opts) {
       opts = opts || {};
-      if (opts.apply) applyLocal = opts.apply;
-      if (opts.onChange) onChange = opts.onChange;
+      if ('apply' in opts) applyLocal = opts.apply || null;
+      if ('vocab' in opts) vocabApply = opts.vocab || null;
+      if ('onChange' in opts) onChange = opts.onChange || null;
       changed();
     },
 
@@ -107,16 +134,30 @@
     // writes comes back in one press. Without this the first Ctrl+Z of a forty-row rename puts one row
     // back and leaves thirty-nine — which is worse than no undo, because it looks like it worked.
     // Re-entrant: propagateMirror runs inside saveField's action and must extend it, not start another.
+    //
+    // A body that returns a thenable holds the entry open until it settles. That is not a convenience:
+    // a value rename rewrites rows in the archive partition, and an uncached partition is FETCHED first,
+    // so a synchronous-only scope would push each of those rows as its own entry — the forty-row rename
+    // that comes back one row at a time, which is the failure the grouping exists to prevent. The cost
+    // is stated rather than hidden: a debounced write from elsewhere that fires inside that window joins
+    // this entry. It MERGES two actions into one press; it cannot corrupt either, because every op still
+    // carries its own before-image.
     action: function (label, fn) {
       if (replaying) return fn();          // a replay's own writes are not new history
       if (depth === 0) group = { label: label, ops: [] };
       depth++;
-      try {
-        return fn();
-      } finally {
+      var close = function () {
         depth--;
         if (depth === 0) { var g = group; group = null; push(g); }
+      };
+      var out;
+      try { out = fn(); }
+      catch (e) { close(); throw e; }
+      if (out && typeof out.then === 'function') {
+        return out.then(function (v) { close(); return v; }, function (e) { close(); throw e; });
       }
+      close();
+      return out;
     },
 
     // Throw the open action away: this turned out not to be reversible after all. Used where a branch
