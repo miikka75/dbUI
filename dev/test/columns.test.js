@@ -207,7 +207,7 @@ describe('columns.js — a lookup declares its hierarchy, and one function answe
 
   it('infers the historical shape, so a schema written before the declaration is unchanged', () => {
     assert.deepEqual(Columns.lookupCols(callings), ['organization', 'calling']);
-    assert.deepEqual(Columns.lookupHierarchy(callings), { parent: 'organization', value: 'calling' });
+    assert.deepEqual(Columns.lookupHierarchy(callings), { parent: 'organization', value: 'calling', by: 'value' });
   });
 
   it('a third column flattens an UNDECLARED lookup -- the behaviour preserved, not the bug kept', () => {
@@ -222,8 +222,8 @@ describe('columns.js — a lookup declares its hierarchy, and one function answe
                        columns: callings.columns.concat([{ name: 'note', type: 'text' }]) };
     // The editor asks with no hint; a board ref lane asks with its `valueCol`. Same answer, which is
     // the whole invariant: the matrix, the lanes and the editor cannot disagree about the group.
-    assert.deepEqual(Columns.lookupHierarchy(declared), { parent: 'organization', value: 'calling' });
-    assert.deepEqual(Columns.lookupHierarchy(declared, null, 'calling'), { parent: 'organization', value: 'calling' });
+    assert.deepEqual(Columns.lookupHierarchy(declared), { parent: 'organization', value: 'calling', by: 'value' });
+    assert.deepEqual(Columns.lookupHierarchy(declared, null, 'calling'), { parent: 'organization', value: 'calling', by: 'value' });
   });
 
   it('`hierarchy: false` says flat -- a value and its attribute, not a group and its members', () => {
@@ -239,8 +239,8 @@ describe('columns.js — a lookup declares its hierarchy, and one function answe
   it('a ref lane hint names the child; a ref with no valueCol still takes the last column', () => {
     const three = { isLookup: true, columns: [
       { name: 'phase', type: 'text' }, { name: 'code', type: 'text' }, { name: 'status', type: 'text' } ] };
-    assert.deepEqual(Columns.lookupHierarchy(three, null, 'status'), { parent: 'phase', value: 'status' });
-    assert.deepEqual(Columns.lookupHierarchy(three, null, null), { parent: 'phase', value: 'status' });
+    assert.deepEqual(Columns.lookupHierarchy(three, null, 'status'), { parent: 'phase', value: 'status', by: 'value' });
+    assert.deepEqual(Columns.lookupHierarchy(three, null, null), { parent: 'phase', value: 'status', by: 'value' });
     assert.equal(Columns.lookupHierarchy(three), null);                    // no hint, three columns -> flat
   });
 
@@ -250,9 +250,9 @@ describe('columns.js — a lookup declares its hierarchy, and one function answe
 
   it('authored column ORDER decides the parent, not the map key order', () => {
     const map = { isLookup: true, columns: { calling: { type: 'text' }, organization: { type: 'text' } } };
-    assert.deepEqual(Columns.lookupHierarchy(map), { parent: 'calling', value: 'organization' });
+    assert.deepEqual(Columns.lookupHierarchy(map), { parent: 'calling', value: 'organization', by: 'value' });
     // ...and an explicit order (the browser's _columnOrders) wins over both.
-    assert.deepEqual(Columns.lookupHierarchy(map, ['organization', 'calling']), { parent: 'organization', value: 'calling' });
+    assert.deepEqual(Columns.lookupHierarchy(map, ['organization', 'calling']), { parent: 'organization', value: 'calling', by: 'value' });
   });
 
   describe('buildHierarchy', () => {
@@ -286,6 +286,60 @@ describe('columns.js — a lookup declares its hierarchy, and one function answe
 
     it('a flat lookup builds no tree at all', () => {
       assert.deepEqual(Columns.buildHierarchy(rows, null), []);
+    });
+  });
+
+  // `by: "id"` -- the parent column holds another ROW's id, which is the only way a tree here gets
+  // deeper than two. The value model stays the default and the lookups that exist keep it; see ROADMAP
+  // `tree` for why converting one is a data migration rather than a schema edit.
+  describe('buildHierarchy — by: "id"', () => {
+    const h = { parent: 'parent_id', value: 'unit', by: 'id' };
+    const rows = [{ id: 't1', unit: 'Acme', parent_id: '' },
+                  { id: 't2', unit: 'Engineering', parent_id: 't1' },
+                  { id: 't3', unit: 'Backend', parent_id: 't2' },
+                  { id: 't4', unit: 'Support', parent_id: 't1' }];
+    const ids = (ns) => ns.map((n) => n.row.id);
+    const every = (tree) => { const seen = []; (function walk(ns) { ns.forEach((n) => { seen.push(n.row.id); walk(n.children); }); })(tree); return seen.sort(); };
+
+    it('takes its depth from the data, and every node carries a row', () => {
+      const t = Columns.buildHierarchy(rows, h);
+      assert.deepEqual(ids(t), ['t1']);
+      assert.equal(t[0].value, 'Acme');
+      assert.ok(t[0].row);                                        // a value-model group has none
+      assert.deepEqual(ids(t[0].children), ['t2', 't4']);
+      assert.deepEqual(ids(t[0].children[0].children), ['t3']);    // three levels, from three rows
+    });
+
+    it('a parent naming no row surfaces as a root instead of vanishing', () => {
+      const t = Columns.buildHierarchy(rows.concat([{ id: 't9', unit: 'Orphan', parent_id: 'gone' }]), h);
+      assert.deepEqual(ids(t), ['t1', 't9']);
+    });
+
+    it('a cycle is CUT, not merely walked around -- the renderer recurses on this', () => {
+      const cyc = [{ id: 'a', unit: 'A', parent_id: 'b' }, { id: 'b', unit: 'B', parent_id: 'a' }];
+      const t = Columns.buildHierarchy(cyc, h);
+      assert.deepEqual(ids(t), ['a']);
+      assert.deepEqual(ids(t[0].children), ['b']);
+      assert.deepEqual(t[0].children[0].children, []);             // the edge back to `a` is gone
+    });
+
+    it('every row appears exactly once, whatever the parent column says', () => {
+      // The invariant the two cases above are instances of: a self-parent, two mutual loops and a
+      // dangling reference, none of which may cost a row its place in the tree.
+      const messy = rows.concat([{ id: 'x', unit: 'Self', parent_id: 'x' },
+                                 { id: 'y', unit: 'Loop1', parent_id: 'z' },
+                                 { id: 'z', unit: 'Loop2', parent_id: 'y' },
+                                 { id: 'w', unit: 'Gone', parent_id: 'nope' }]);
+      assert.deepEqual(every(Columns.buildHierarchy(messy, h)), messy.map((r) => r.id).sort());
+    });
+
+    it('the mode is declared, never inferred', () => {
+      const idKeyed = { isLookup: true, hierarchy: { parent: 'parent_id', value: 'unit', by: 'id' },
+                        columns: [{ name: 'unit', type: 'text' }, { name: 'parent_id', type: 'text', hidden: true }] };
+      assert.deepEqual(Columns.lookupHierarchy(idKeyed), { parent: 'parent_id', value: 'unit', by: 'id' });
+      // A schema that says nothing cannot mean ids: the inferred shape exists for the two-column
+      // lookups that predate the declaration, and those store values.
+      assert.equal(Columns.lookupHierarchy({ isLookup: true, columns: [{ name: 'a', type: 'text' }, { name: 'b', type: 'text' }] }).by, 'value');
     });
   });
 });

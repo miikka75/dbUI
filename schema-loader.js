@@ -189,10 +189,17 @@ function validateSchema() {
       errors.push('table "' + ht + '": `hierarchy` must be `false` or an object like { "parent": "organization", "value": "calling" }');
       continue;
     }
+    if (hy.by !== undefined && hy.by !== 'value' && hy.by !== 'id') errors.push('table "' + ht + '": `hierarchy.by` must be "value" (the parent column holds the group\'s own value) or "id" (it holds another row\'s id)');
     var hcols = Columns.lookupCols(hd, getColumns(ht));
-    ['parent', 'value'].forEach(function(k) {
-      if (hcols.indexOf(hy[k]) < 0) errors.push('table "' + ht + '": `hierarchy.' + k + '` "' + hy[k] + '" is not an author-facing column of this lookup [' + hcols.join(', ') + ']');
-    });
+    // Under `by: "id"` the parent column holds a row id: plumbing, like `position`, and normally hidden,
+    // so it is checked against EVERY column rather than the author-facing ones. The value column is what
+    // the editor types into in both modes, so that one must still be author-facing.
+    if (hy.by === 'id') {
+      if (!(hy.parent in Columns.columnDefs(hd))) errors.push('table "' + ht + '": `hierarchy.parent` "' + hy.parent + '" is not a column of this lookup');
+    } else if (hcols.indexOf(hy.parent) < 0) {
+      errors.push('table "' + ht + '": `hierarchy.parent` "' + hy.parent + '" is not an author-facing column of this lookup [' + hcols.join(', ') + ']');
+    }
+    if (hcols.indexOf(hy.value) < 0) errors.push('table "' + ht + '": `hierarchy.value` "' + hy.value + '" is not an author-facing column of this lookup [' + hcols.join(', ') + ']');
     if (hy.parent === hy.value) errors.push('table "' + ht + '": `hierarchy.parent` and `hierarchy.value` must be two DIFFERENT columns');
   }
   // `stamped` marks a column the app fills in and nobody rewrites -- it binds a grant-holder, not just

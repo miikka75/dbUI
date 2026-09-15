@@ -907,6 +907,7 @@ function createVueApp() {
          'msg.group_added', 'msg.item_added', 'msg.translation_saved', 'msg.language_added', 'msg.language_renamed', 'msg.language_exists',
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
+         'msg.ref_has_children',
          'pivot.total', 'pivot.empty',
          'stats.empty',
          'scan.code', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
@@ -3213,8 +3214,11 @@ function createVueApp() {
         // a flat catalogue -- while a `ref` column names the value under it. Both come from the one
         // declaration, so a lookup that states a parent which is not simply its first column is picked
         // from correctly here too, instead of by a third copy of the visible-column filter.
+        // ...except under `by: "id"`, where the parent column holds a row id. Offering those as options
+        // would put plumbing in a picker, so an id-keyed catalogue answers with its VALUE column: the
+        // one dimension it has that anyone typed.
         var order = getColumns(name), h = Columns.lookupHierarchy(SCHEMA[name], order);
-        var valueCol = h ? h.parent : Columns.lookupCols(SCHEMA[name], order)[0];
+        var valueCol = h ? (h.by === 'id' ? h.value : h.parent) : Columns.lookupCols(SCHEMA[name], order)[0];
         if (!valueCol) return [];
         var seen = {}, out = [];
         (this.dataCache[name] || []).forEach(function(r) {
@@ -3730,6 +3734,18 @@ function createVueApp() {
         self.pendingConfirm = null;
         self.notify(self.t('msg.deleted'));
       },
+      // Deleting one node of an id-keyed tree. A parent IS a row here, so "delete" has to answer what
+      // becomes of its descendants -- cascade, or re-parent them to its parent -- and that question is
+      // genuinely open (ROADMAP `tree`). Refusing while it still has children is the one answer that
+      // cannot quietly take somebody's rows with it, and it leaves the choice to whoever empties it.
+      deleteRefNode: function(node) {
+        if (!node || !node.row) return;
+        if (node.children && node.children.length) {
+          this.notify(this.t('msg.ref_has_children'));
+          return;
+        }
+        this.deleteRefRow(node.row);
+      },
       addRefParent: function() {
         var self = this;
         if (!self.canEditCurrentRef) return;
@@ -3738,7 +3754,10 @@ function createVueApp() {
         self._createBlankRow(self.currentRefTable);
         self.notify(self.t('msg.group_added'));
         self.$nextTick(function() {
-          var els = document.querySelectorAll('.ref-hierarchy .v-list-group');
+          // TOP-LEVEL groups only. A nested tree puts other groups in the same document, and the row
+          // just added is a new root -- "the last .v-list-group anywhere" would focus whichever group
+          // happened to render last, which under depth is somebody else's child.
+          var els = document.querySelectorAll('.ref-hierarchy > .v-list > .v-list-group');
           if (els.length) {
             var last = els[els.length - 1];
             var cell = last.querySelector('.editable-cell');
@@ -8003,6 +8022,34 @@ function createVueApp() {
   app.component('languages-view', { computed: { a: function() { return appInstance; } }, template: '#languages-view-tpl' });
   app.component('lookup-view', { computed: { a: function() { return appInstance; } }, template: '#lookup-view-tpl' });
   app.component('settings-view', { computed: { a: function() { return appInstance; } }, template: '#settings-view-tpl' });
+
+  // One node of the Lookup editor's hierarchy, rendering its own children as ref-nodes -- the recursion
+  // Columns.buildHierarchy's node shape has always allowed ("a node whose children are NODES is the
+  // shape a deeper hierarchy needs") and the markup did not, having nested the two levels by hand.
+  // Registered globally, which is also what lets the template name itself.
+  // It changes nothing on screen today: every lookup groups by a VALUE its rows carry, so the builder
+  // yields exactly two levels. What it removes is depth being a MARKUP fact. ROADMAP's `tree` entry owns
+  // the other half -- a store that can hold depth at all -- and says why that one is not free.
+  app.component('ref-node', {
+    props: { node: { type: Object, required: true }, table: { type: String, required: true } },
+    computed: {
+      a: function() { return appInstance; },
+      // The edge kind, from the lookup's own declaration -- the same answer every other reader gets.
+      byId: function() { var h = appInstance && appInstance.refHierarchy; return !!h && h.by === 'id'; },
+      // Under ids EVERY node is a group, including one with no children yet: a parent is a row, so the
+      // row with nothing under it is exactly the one you add the first child to, and the expander is
+      // what carries that button. Under values the row-less node is the group, as it always was.
+      isGroup: function() { return this.byId || !this.node.row; },
+      locked: function() { return this.node.row ? this.a.isLockedRefRow(this.node.row) : this.a.refParentLocked(this.node.value); },
+      // What a new child's parent column must hold to land under this node.
+      childOf: function() { return this.byId ? this.node.row.id : this.node.value; },
+      armKey: function() { return this.node.row ? 'ref:' + this.node.row.id : 'refp:' + this.node.value; }
+    },
+    methods: {
+      remove: function() { if (this.node.row) this.a.deleteRefNode(this.node); else this.a.deleteRefParent(this.node.value); }
+    },
+    template: '#ref-node-tpl'
+  });
 
   appInstance = app.mount('#vue-app');
 }

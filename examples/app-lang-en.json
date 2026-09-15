@@ -135,6 +135,7 @@
       "msg.language_renamed": "Language renamed",
       "msg.load_failed": "Failed to load the app",
       "msg.locked": "Locked",
+      "msg.ref_has_children": "Move or delete what is under it first",
       "msg.palette_applied": "Palette applied",
       "msg.paste_hex": "Paste at least 2 #hex colors",
       "msg.registered_admin": "You have been registered as an administrator",

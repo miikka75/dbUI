@@ -1589,6 +1589,52 @@ test.describe('A lookup that declares its hierarchy', () => {
       await expect(page.locator('[data-testid="board-lane-' + lane + '"]')).toBeVisible();
   });
 
+  // `by: "id"`: the parent column holds another ROW's id, so a parent IS a row and the tree is as deep
+  // as the data. The demo bundle ships one (`teams`); this drives the same shape through the editor.
+  test('an id-keyed lookup renders three levels, and refuses to delete a node with children', async ({ page }) => {
+    const ID_KEYED = {
+      defaultLanguage: 'en',
+      tables: {
+        ref_units: {
+          isLookup: true,
+          hierarchy: { parent: 'parent_id', value: 'unit', by: 'id' },
+          // The parent column is plumbing, like `position` -- hidden, and never typed into.
+          columns: [{ name: 'unit', type: 'text' }, { name: 'parent_id', type: 'text', hidden: true }]
+        },
+        tickets: { columns: [{ name: 'title', type: 'text' }] }
+      },
+      views: [{ name: 'tickets_v', sources: ['tickets'], mode: 'union', columns: ['title'] }],
+      nav: { items: [{ view: 'tickets_v' }] }
+    };
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: ID_KEYED } });
+    for (const [id, unit, parent_id] of [['u1', 'Acme', ''], ['u2', 'Engineering', 'u1'], ['u3', 'Backend', 'u2'], ['u4', 'Support', 'u1']])
+      await page.request.post('/api/putRow', { data: { tableId: 'ref_units', data: { id, unit, parent_id }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => appInstance.selectTab('__lookup'));
+    await page.locator('.v-main .v-list-item', { hasText: 'ref_units' }).first().click();
+    await expect.poll(() => page.evaluate(() => appInstance.refTableData.length), { timeout: 6000 }).toBe(4);
+
+    const shape = await page.evaluate(() => {
+      const nest = (ns) => ns.map((n) => [n.value, nest(n.children)]);
+      return { by: appInstance.refHierarchy.by, hasRowOnParent: !!appInstance.refTree[0].row, tree: nest(appInstance.refTree) };
+    });
+    expect(shape).toEqual({ by: 'id', hasRowOnParent: true,
+                            tree: [['Acme', [['Engineering', [['Backend', []]]], ['Support', []]]]] });
+
+    // ...and on screen, level by level, the way a person opens it.
+    await page.locator('.ref-hierarchy .v-list-group__header', { hasText: 'Acme' }).first().locator('.mdi-chevron-down').click();
+    await page.locator('.ref-hierarchy .v-list-group__header', { hasText: 'Engineering' }).first().locator('.mdi-chevron-down').click();
+    await expect(page.locator('.ref-hierarchy .v-list-group .v-list-group .v-list-group__header', { hasText: 'Backend' })).toHaveCount(1);
+
+    // A node with children refuses to go: cascade-or-re-parent is undecided, and either guess loses
+    // rows somebody can still see. Deleting a leaf is an ordinary row delete and still works.
+    await page.evaluate(() => appInstance.deleteRefNode(appInstance.refTree[0]));
+    expect(await page.evaluate(() => appInstance.refTableData.length)).toBe(4);
+  });
+
   test('validateSchema names a hierarchy that groups by a column that is not there', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {

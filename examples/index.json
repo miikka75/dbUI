@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "4a99c2e844c842c2"
+      "hash": "64081049d71e2b03"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "ab0f65375d4b23ad"
+      "hash": "1ae3dc9523082487"
     }
   ],
   "bundles": [
@@ -90,12 +90,12 @@
       "title": "Team Demo",
       "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
       "icon": null,
-      "revision": 4,
-      "tables": 10,
+      "revision": 5,
+      "tables": 11,
       "views": 26,
       "schema": {
         "file": "demo-schema.json",
-        "hash": "9c3e32a9d7456ae3"
+        "hash": "5aa7368587c145e7"
       },
       "languages": [
         {
@@ -119,11 +119,14 @@
       ],
       "data": {
         "file": "demo-data.json",
-        "hash": "b3882e649780cf22"
+        "hash": "b2ea79a757c52f05"
       },
       "about": {
         "file": "demo-about.json",
-        "hash": "71ecadf9b59cc18b"
+        "hash": "0e7ea85740c17c19"
+      },
+      "notes": {
+        "5": "Adds `teams`, a catalogue whose parent column holds another ROW's id (`hierarchy.by: \"id\"`) instead of a group's value — so the Lookup tab shows it three levels deep (Acme > Engineering > Backend) rather than the two every other lookup has. Nothing existing changes: `cities` still groups by value, side by side with it, which is the point of shipping both."
       }
     }
   ]

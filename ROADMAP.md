@@ -1084,11 +1084,27 @@ One property is worth stating because no test can hold it: a rename onto a name 
 still destroys that name's label and link in the FORWARD direction. The undo does not compound it, as
 above — but that forward clobber is real, unreported, and belongs with *Leftovers*.
 
-### `tree`
+### `tree` — depth *(landed: the editor's recursion and an id-keyed store; delete semantics and ordering open)*
 
-Hierarchies of arbitrary depth. Would generalize the ref-hierarchy the Lookup screen already renders.
-The prerequisite half — one declared answer to "which column is the parent", returned as nodes with
-children — shipped (see Shipped), so this is no longer a fifth place guessing at it.
+Hierarchies of arbitrary depth. Two halves, and they are worth pricing apart, because one was nearly
+free and the other is a data migration: the screen that RENDERS depth, and the store that can HOLD it.
+
+**The rendering half — LANDED, and it cost a component.** `buildHierarchy` has always returned nodes
+whose children are nodes ("depth would be a change here rather than at every caller"); the Lookup
+editor was the one place that contradicted it, nesting the child `<v-list-item>` inside the group's
+`<v-list-group>` by hand. That is now one recursive `ref-node` (`#ref-node-tpl`), branching on
+**`node.row`** — null on a group, set on a leaf — rather than on a depth counter, because that is what
+the two kinds of node actually differ by. It renders the same pixels it always did.
+
+Two things worth keeping from building it. The branch **is not "depth 1 vs depth 2"**: under the value
+model a group is a VALUE its rows carry and has no row of its own, so `row` is the honest
+discriminator and stays correct at any depth. And an untested recursion is a claim, not a property —
+nothing in the app builds a third level, so the test stubs `Columns.buildHierarchy` (the single pure
+function that shapes the tree, the way the scan tests stub the one decoder call), hands the real editor
+a group holding a group, and drives it by opening each level. That is what proves Vuetify nests, the
+keys hold, and a leaf under a leaf's sibling is still a row cell.
+
+#### The store: `by` as a mode of the same key
 
 **Not a `parent` COLUMN TYPE, which is how this entry used to propose it.** Building the declaration
 settled the shape: `hierarchy` already names columns, so the second model is a mode of the same key
@@ -1100,23 +1116,101 @@ rather than a second way to say the same thing.
 
 `by: "value"` (the default, and every lookup that exists) means the parent column holds the group's
 VALUE; `by: "id"` means it holds another row's id. `lookupHierarchy` returns the mode, `buildHierarchy`
-branches on it once, and every caller goes on reading nodes with children without learning which model
-it is looking at. One declaration, one resolver, two edge kinds.
+branches on it once, and every READER goes on consuming nodes with children without learning which
+model it is looking at. One declaration, one resolver, two edge kinds.
 
-**Where it belongs is a DATA table, not a lookup, and that is a boundary rather than a preference.** In
-this app a lookup value *is* its identity, in four places at once: `list.<table>.<value>` translation
-keys (`migrateListTranslation` re-keys them on rename), schema filters that pin values by hand — which
-`lockedListValues` then refuses to let anyone rename — `select list: <lookup>` columns storing the
-value, and the exports and rules mirrors comparing those same strings. An id-keyed lookup has to
-choose: keep storing values, and the ids buy depth but not the single-row rename that made them
-attractive; store ids, and a hand-written schema filter has to name `o1` instead of
-`aaronic_priesthood`, in a document whose whole premise is that hand-editing it is the design.
+#### Existing lookups must not be ported, and this is the plan's load-bearing decision
 
-So the value model stays for lookups, `by: "id"` serves the tables that actually want depth — a task
-with subtasks, an agenda item with sub-items — and the two coexist behind one resolver. Which is also
-the reason this is not urgent: every hierarchy in every shipped schema is two levels and value-keyed,
-so `by: "id"` would be a second model with no user, and the write paths do NOT unify (rename
-propagation exists *because* parents are values, and is simply dead under ids).
+The tempting move once the editor recurses is to convert the two-level lookups and be done. **No**, and
+the reason is not taste: in this app a lookup value *is* its identity, in four places at once, each
+with a call site that would have to be answered.
+
+| Where the value is the identity | The call site | What ids would do to it |
+|---|---|---|
+| The group's label | `listLabel(ns, r[parentCol])`, keyed `list.<table>.<value>` | The key becomes `list.ref_callings.o1` — unreadable in the Languages tab, and every deployment's existing keys orphaned |
+| Schema filters pinning a value by hand | `lockedListValues` / `isLockedRefValue`, which refuse the rename that would break them | A hand-written filter names `o1`, in a document whose whole premise is that hand-editing it is the design |
+| `select list: <lookup>` columns | `lookupListValues` returns `hierarchy.parent`'s values as the stored option | Every stored cell in every referring table has to be rewritten to an id |
+| `rosterRef` rotations | `rosterBy` groups on the parent value; slot headers render through the same keys | Same rewrite, plus slot headers that no longer have a value to translate |
+
+And the conversion itself is not a schema edit but a **one-way data migration per deployment**: mint a
+parent row per distinct value (new ids), rewrite every child's parent cell, run
+`_rewriteValueInColumns` across both partitions of every referring table, re-key the translations, and
+hand-edit the pinned filters. `lookup-row-ids.test.js` is the reason the first step is the expensive
+one — *"the id of a row a BUNDLE ships is its identity forever"*, because import merges by id, and a
+minted parent is a new contract with every deployment that reinstalls. Undo now records value cascades,
+so a mis-run is takebackable within the session that ran it; the import contract is not.
+
+So: **the value model stays for lookups.** `by: "id"` serves the tables that actually want depth — a
+task with subtasks, an agenda item with sub-items — and the two coexist behind one resolver.
+
+#### `by: "id"` — LANDED, additively, with the lookups that exist untouched
+
+Built because a three-level example was wanted in the demo bundle and no schema could produce one. It
+is additive in the strict sense: the default stays `by: "value"`, every shipped lookup keeps it, and
+nothing was converted. `demo` now ships `teams` (Acme > Engineering > Backend) beside the value-keyed
+`cities`, which is the pair this entry argues for.
+
+What it cost, against the estimate below: the readers were as cheap as predicted, and the editor was
+cheaper than feared because the recursive `ref-node` had already landed — the branch became `isGroup`
+(under ids every node is a group, since a row with nothing under it is the one you add the first child
+to) plus a row-cell in the activator. `lookupListValues` answers with the VALUE column for an id-keyed
+catalogue, since offering row ids in a picker is offering plumbing.
+
+Three decisions worth keeping, because each was a fork:
+
+- **One answer to three failures.** A parent naming no row, a row parented to itself, and a CYCLE all
+  end with the node promoted to a root and the bad edge CUT. Cutting matters and walking around it does
+  not: a cycle left in the data would recurse the renderer, not merely the walker. The invariant the
+  tests hold is the useful one — *every row appears exactly once, whatever the parent column says* —
+  because a row that drops out of the tree is invisible in the editor and still in the database.
+- **Deleting a node with children is REFUSED, not cascaded.** Cascade-or-re-parent is genuinely open
+  (item 5 below), and both guesses lose rows somebody can still see. Refusing leaves the choice with
+  whoever empties it.
+- **Ordering stayed on the value model.** `position` is one global sequence; item 6 below is unchanged
+  and unbuilt.
+
+Known boundaries, none of them load-bearing for the demo: a `ref` column INTO an id-keyed lookup is
+untested — the picker's duplicate-value disambiguation labels the parent through `listLabel`, which
+under ids would print a row id — and the focus-after-add in `addRefChild` still takes the last matching
+cell in the document, which under depth need not be the row just created. `addRefParent`'s equivalent
+was scoped to top-level groups, which was a real bug once nesting existed.
+
+#### What `by: "id"` cost, and what is still open
+
+Small, in the readers; the work is in the editor's WRITE paths, which are value-shaped throughout.
+Items 1–4 and 7 landed; 5 and 6 are the open ones.
+
+1. **`buildHierarchy` branches once** — index rows by id, hang each row off `row[parent]`, and every
+   node then carries a `row` (under ids a parent IS a row, so the group/leaf branch collapses to "has
+   children"). The editor needs no further change, which is the point of having landed it first.
+2. **Two failures the value model cannot have**, and both must surface rather than vanish: a
+   `parent_id` naming a row that is gone, and a CYCLE. A value-keyed tree is acyclic by construction; an
+   id-keyed one is not, and a row that quietly drops out of the tree is the worst available outcome.
+   Belongs in `scan.js`'s tradition — a tested property of the pure module, not a rendering accident.
+3. **The value-keyed write paths do not port; they go dead** — `renameRefParent`'s whole cascade
+   (`propagateRefChange` → `_rewriteValueInColumns`, `migrateListTranslation`) exists *because* parents
+   are values, and under ids a rename is `saveRefField` on one row. Not shared, not simplified:
+   unreachable for id-keyed tables and still required for value-keyed ones.
+4. **Four editor helpers key on `node.value`** and need an id branch: `_refGroupRows`,
+   `refGroupAtEdge`/`moveRefGroup`, `refParentLocked`, and `addRefChild(parentValue)`, which prefills
+   the parent column with a value. `addRefParent`'s focus query (`.ref-hierarchy .v-list-group`, take
+   the last) is a fifth, and a nesting-specific bug rather than a value one: under depth, "the last
+   group in the DOM" is not "the group just added at the top level".
+5. **Deleting a node becomes a question that has no precedent here** — cascade to descendants, or
+   re-parent them? `deleteRefParent` deletes by value match today and never had to ask, because a group
+   was not a row. Whichever is chosen is one gesture and therefore one `Undo.action`, and the inverse
+   has to put the descendants back *where they were*, not merely back.
+6. **Ordering changes shape.** `position` is numbered globally across the table (`moveRefGroup`
+   renumbers every row, which is why `moveRefChild` renumbers globally too). With depth, order is a
+   per-parent fact, and a global sequence stops expressing it.
+7. **No new access primitive, and nothing in the rules layers.** A self-referencing column is a plain
+   column; rows are rows. Worth stating because it is the one place this feature is cheaper than it
+   looks.
+
+Not scheduled, and deliberately not ranked: `by: "id"` would be a second model with no user until a
+schema genuinely wants depth. When one does, the acceptance is a data table — task/subtask is the
+natural first — rendering three levels in the editor it already has, with a cycle and an orphan each
+reported by `buildHierarchy`'s own tests rather than by a blank screen.
 
 ### `gallery`
 
@@ -1326,9 +1420,11 @@ on the page, a resolver branch and a test, and it is what turns the shipped scan
 check-in entry above. Worth doing only when somebody actually wants the verifier-scans-attendee
 arrangement; it is not owed to the shipped half.
 
-Then `gallery`, then `tree`. `gallery` is gated on nothing since `image`/`url` shipped; `tree` is gated
-on wanting it — its prerequisite landed, and what remains is a second hierarchy model that no shipped
-schema has asked for. (`.ics` export, `timeline`, `stats`, the scan family and *Empty groups* were each
+Then `gallery`. `tree` has since shipped in the only form that was worth building: the editor's
+recursion, and `hierarchy.by: "id"` for tables that want depth, with the value-keyed lookups left
+exactly as they were. What remains of it is two questions nothing has asked yet — what deleting a node
+with children should do, and how order works within a level — and both are recorded in its entry rather
+than ranked here. (`.ics` export, `timeline`, `stats`, the scan family and *Empty groups* were each
 first here in turn, and have shipped.)
 
 Database-defined calendars sit outside that line for the same reason the feed does: what it needs

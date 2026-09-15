@@ -189,18 +189,23 @@
   //
   // Pure over the SHAPE: no row data is consulted, so a hierarchy cannot appear and disappear as rows
   // come and go.
+  // `by` is the EDGE kind, and it is returned on every answer so no caller has to know the default:
+  //   "value" -- the parent column holds the group's value, which every lookup written so far does;
+  //   "id"    -- it holds another ROW's id, which is what lets a tree be deeper than two.
+  // Inference only ever produces "value": a schema that says nothing cannot mean ids, since the whole
+  // point of the inferred shape is the two-column lookup that predates the declaration.
   function lookupHierarchy(tableDef, order, valueHint) {
     if (!tableDef) return null;
     var h = tableDef.hierarchy;
     if (h === false) return null;
-    if (h && h.parent && h.value) return { parent: h.parent, value: h.value };
+    if (h && h.parent && h.value) return { parent: h.parent, value: h.value, by: h.by === 'id' ? 'id' : 'value' };
     var cols = lookupCols(tableDef, order);
     if (arguments.length >= 3 && cols.length >= 2) {
       var value = (valueHint && cols.indexOf(valueHint) >= 0) ? valueHint : cols[cols.length - 1];
-      for (var i = 0; i < cols.length; i++) if (cols[i] !== value) return { parent: cols[i], value: value };
+      for (var i = 0; i < cols.length; i++) if (cols[i] !== value) return { parent: cols[i], value: value, by: 'value' };
       return null;
     }
-    if (cols.length === 2) return { parent: cols[0], value: cols[1] };
+    if (cols.length === 2) return { parent: cols[0], value: cols[1], by: 'value' };
     return null;
   }
 
@@ -212,14 +217,56 @@
   // shape a deeper hierarchy needs, so depth would be a change here rather than at every caller.
   // `row` is null on a group node: a group is a value that rows CARRY, not a row of its own.
   function buildHierarchy(rows, h) {
+    if (!h) return [];
+    return h.by === 'id' ? buildById(rows, h) : buildByValue(rows, h);
+  }
+
+  function buildByValue(rows, h) {
     var out = [], index = {};
-    if (!h) return out;
     (rows || []).forEach(function(r) {
       if (!r) return;
       var key = r[h.parent] == null ? '' : String(r[h.parent]);
       var node = index[key];
       if (!node) { node = index[key] = { value: key, row: null, children: [] }; out.push(node); }
       node.children.push({ value: r[h.value] == null ? '' : String(r[h.value]), row: r, children: [] });
+    });
+    return out;
+  }
+
+  // `by: "id"`: the parent column holds another ROW's id, so a parent IS a row -- every node carries one
+  // -- and the depth is whatever the data says rather than two.
+  //
+  // Two failures the value model cannot have, and deliberately ONE answer to both. A parent naming a row
+  // that is gone, and a CYCLE, leave their rows unreachable from any root; a row that silently drops out
+  // of the tree is the worst outcome available (it is invisible in the editor and still in the
+  // database), and a cycle left in place would recurse the renderer forever. So anything unreached is
+  // promoted to a root and its edge to the missing/looping parent is CUT -- which is what makes the
+  // result safe to render, not merely safe to walk. Every node has at most one in-edge, so cutting one
+  // per cycle breaks it.
+  //
+  // The invariant worth holding onto, and what the tests assert: every row appears exactly once,
+  // whatever the parent column says.
+  function buildById(rows, h) {
+    var nodes = {}, list = [], out = [];
+    (rows || []).forEach(function(r) {
+      if (!r || r.id == null) return;
+      nodes[r.id] = { value: r[h.value] == null ? '' : String(r[h.value]), row: r, children: [] };
+      list.push(nodes[r.id]);
+    });
+    list.forEach(function(n) {
+      var p = n.row[h.parent];
+      var parent = (p == null || p === '') ? null : nodes[p];
+      if (parent && parent !== n) parent.children.push(n);   // a row parented to itself is a root
+      else out.push(n);                                      // a root, or a parent that names no row
+    });
+    var seen = {};
+    var walk = function(n) { if (seen[n.row.id]) return; seen[n.row.id] = 1; n.children.forEach(walk); };
+    out.forEach(walk);
+    list.forEach(function(n) {
+      if (seen[n.row.id]) return;
+      var parent = nodes[n.row[h.parent]];
+      if (parent) parent.children = parent.children.filter(function(c) { return c !== n; });
+      out.push(n); walk(n);
     });
     return out;
   }
