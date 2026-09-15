@@ -3680,22 +3680,33 @@ function createVueApp() {
         var self = this;
         var table = self.currentRefTable;
         var parentCol = self.refParentCol;
-        (self.dataCache[table] || []).forEach(function(row) {
-          if (row[parentCol] === oldParent) {
+        var kids = (self.dataCache[table] || []).filter(function(row) { return row[parentCol] === oldParent; });
+        self.notify(self.t('msg.renamed'));
+        // One entry for one gesture: the children that carry the group value, the group's own label, and
+        // every row in every table that stored it. Returning the cascade's promise keeps the entry open
+        // across the archive fetch inside it — see Undo.action.
+        return Undo.action('rename group', function() {
+          kids.forEach(function(row) {
+            // Partial on both sides: renaming a group says nothing about a child's other columns. The
+            // write below still sends the whole row, as it always has; the op is the narrower truth.
+            Undo.record({ table: table, part: 'active',
+              forward: { type: 'put', id: row.id, row: (function() { var r = { id: row.id }; r[parentCol] = newParent; return r; })() },
+              inverse: { type: 'put', id: row.id, row: (function() { var r = { id: row.id }; r[parentCol] = oldParent; return r; })() } });
             row[parentCol] = newParent;
             row.updated_at = new Date().toISOString();
             Writes.putRow(table, row, 'active');
-          }
+          });
+          Undo.record({ forward: { type: 'trans', ns: table, from: oldParent, to: newParent },
+                        inverse: { type: 'trans', ns: table, from: newParent, to: oldParent } });
+          self.migrateListTranslation(table, oldParent, newParent);   // carry the group's own label
+          // The parent value is stored by every column that reads this lookup as a LIST -- a `select` whose
+          // `list:` names the table, which is how the group dimension of a 2-D lookup is referenced (the
+          // child dimension is the `ref` column beside it). Renaming the group without carrying those left
+          // every such row naming an organization the lookup no longer has: not visible here, and not
+          // visible there either until someone opens the picker and finds their value missing from it.
+          // The child branch of this editor has always propagated; this one never did.
+          return self.propagateListChange(table, oldParent, newParent);
         });
-        // The parent value is stored by every column that reads this lookup as a LIST -- a `select` whose
-        // `list:` names the table, which is how the group dimension of a 2-D lookup is referenced (the
-        // child dimension is the `ref` column beside it). Renaming the group without carrying those left
-        // every such row naming an organization the lookup no longer has: not visible here, and not
-        // visible there either until someone opens the picker and finds their value missing from it.
-        // The child branch of this editor has always propagated; this one never did.
-        self.propagateListChange(table, oldParent, newParent);
-        self.migrateListTranslation(table, oldParent, newParent);   // carry the group's own label
-        self.notify(self.t('msg.renamed'));
       },
       deleteRefParent: function(parent) {
         if (!this.canEditCurrentRef) return;
@@ -3842,7 +3853,6 @@ function createVueApp() {
         // The test is the same one a flat lookup answers trivially -- there a value appears once, so an
         // edit always retires it and this behaves exactly as it always did.
         var retired = !(self.dataCache[refTable] || []).some(function(r) { return r.id !== item.id && r[col] === oldVal; });
-        if (oldVal && value && retired) { self.propagateRefChange(refTable, oldVal, value); self.migrateListTranslation(refTable, oldVal, value); }
         var timerKey = refTable + ':' + item.id;
         clearTimeout(self.saveTimers[timerKey]);
         self.saveTimers[timerKey] = setTimeout(function() {
@@ -3850,11 +3860,32 @@ function createVueApp() {
           // _liveHeld, which would hold every remote change back for the rest of the session.
           delete self.saveTimers[timerKey];
           // Whole row on purpose, unlike saveField: a lookup rename cascades through propagateRefChange
-          // above, so the row this writes is the one the editor just rebuilt in full.
+          // below, so the row this writes is the one the editor just rebuilt in full.
           Writes.putRow(refTable, item, 'active');
           self.notify(self.t('msg.saved'));
           self._liveFlush();
         }, 500);
+        // Recorded at BLUR rather than inside the timer, which is where this differs from saveField. The
+        // cascade below runs here, and both halves must land in one entry — a press that took the rows
+        // back but left the lookup renamed would leave every one of them naming a value the lookup no
+        // longer has. Moving the cascade into the timer instead would have to fan out for every column
+        // edited under one timer key, and a two-column lookup shares one whenever somebody tabs from the
+        // first cell to the second. Two columns inside one window therefore make TWO entries, which is
+        // the right answer: each is complete on its own, and the row op is a partial naming its own
+        // column, so they cannot overwrite each other.
+        //
+        // The pending whole-row write is not a race with an undo taken before it fires: the undo patches
+        // the cached row, and `item` IS that row, so the timer goes on to write what the undo put back.
+        return Undo.action('rename', function() {
+          Undo.record({ table: refTable, part: 'active',
+            forward: { type: 'put', id: item.id, row: (function() { var r = { id: item.id }; r[col] = value; return r; })() },
+            inverse: { type: 'put', id: item.id, row: (function() { var r = { id: item.id }; r[col] = oldVal; return r; })() } });
+          if (!(oldVal && value && retired)) return;
+          Undo.record({ forward: { type: 'trans', ns: refTable, from: oldVal, to: value },
+                        inverse: { type: 'trans', ns: refTable, from: value, to: oldVal } });
+          self.migrateListTranslation(refTable, oldVal, value);
+          return self.propagateRefChange(refTable, oldVal, value);
+        });
       },
       addRefRow: function() {
         var self = this;
@@ -3991,11 +4022,39 @@ function createVueApp() {
         if (!this.canEditList(name)) return;
         var oldVal = this.listsCache[name][i];
         if (this.isLockedValue(name, oldVal)) { this.notify(this.t('msg.locked')); return; }  // filter-pinned value can't be renamed
+        var before = (this.listsCache[name] || []).slice();   // read before the assignment, like every other before-image here
         this.listsCache[name][i] = value;
         this.saveLists();
         // Rename propagation: text is stored in rows, so rewrite the old value -> new value across
         // every table column backed by this list (both partitions). Skip no-ops / blank endpoints.
-        if (oldVal && value && oldVal !== value) { this.propagateListChange(name, oldVal, value); this.migrateListUserLink(name, oldVal, value); this.migrateListTranslation(name, oldVal, value); }
+        if (!(oldVal && value && oldVal !== value)) return;
+        var self = this, after = this.listsCache[name].slice();
+        var email = (this.listUserLinks[name] || {})[oldVal] || '';
+        // ONE entry for the whole rename: the list's own array, the label that travels with the value,
+        // the account keyed by it, and every row that stored it. The body RETURNS the cascade's promise
+        // because an archive partition that is not cached is fetched before it can be rewritten — see
+        // Undo.action on why an entry is allowed to stay open across that.
+        //
+        // Recording runs before the migrations it describes, which is fine: an op is data, and the
+        // `forward` side is a faithful account of what the lines below then do, so a redo re-applies it.
+        return Undo.action('rename', function() {
+          Undo.record({ forward: { type: 'lists', list: name, values: after },
+                        inverse: { type: 'lists', list: name, values: before } });
+          Undo.record({ forward: { type: 'trans', ns: name, from: oldVal, to: value },
+                        inverse: { type: 'trans', ns: name, from: value, to: oldVal } });
+          // Two state sets rather than one move, so the pair inverts exactly. Only when a link exists:
+          // migrateListUserLink is itself a no-op without one, and an op for a link nobody has would
+          // clear a link somebody else made between the rename and the undo.
+          if (email) {
+            Undo.record({ forward: { type: 'link', list: name, value: oldVal, email: '' },
+                          inverse: { type: 'link', list: name, value: oldVal, email: email } });
+            Undo.record({ forward: { type: 'link', list: name, value: value, email: email },
+                          inverse: { type: 'link', list: name, value: value, email: '' } });
+          }
+          self.migrateListUserLink(name, oldVal, value);
+          self.migrateListTranslation(name, oldVal, value);
+          return self.propagateListChange(name, oldVal, value);
+        });
       },
       // Carry a value's translations when it's renamed: list.<ns>.<old> -> list.<ns>.<new> across every
       // language (and clear the old key), so a rename in the Lists/ref editor doesn't orphan its label — the
@@ -4034,11 +4093,26 @@ function createVueApp() {
         if (this.pendingConfirm !== key) { this.armConfirm(key); return; }
         this.pendingConfirm = null;
         var oldVal = this.listsCache[name][i];
+        var before = this.listsCache[name].slice();
         this.listsCache[name].splice(i, 1);
         this.saveLists();
         // Delete cascade: scrub the removed value from stored rows (text storage) so no orphans
         // remain — blank the cell for select columns, drop the element for multiselect columns.
-        if (oldVal) { this.propagateListChange(name, oldVal, null); this.migrateListUserLink(name, oldVal, null); }
+        if (!oldVal) return;
+        var self = this, after = this.listsCache[name].slice();
+        var email = (this.listUserLinks[name] || {})[oldVal] || '';
+        // Undoable for the same reason a rename is, and here it matters more: the cascade BLANKS the
+        // value out of every row that stored it, which is the sharpest unrecoverable edit in this tab.
+        // No translation op — this path never moved the key, so `list.<name>.<value>` is still there and
+        // a revived value gets its label back for nothing.
+        return Undo.action('delete value', function() {
+          Undo.record({ forward: { type: 'lists', list: name, values: after },
+                        inverse: { type: 'lists', list: name, values: before } });
+          if (email) Undo.record({ forward: { type: 'link', list: name, value: oldVal, email: '' },
+                                   inverse: { type: 'link', list: name, value: oldVal, email: email } });
+          self.migrateListUserLink(name, oldVal, null);
+          return self.propagateListChange(name, oldVal, null);
+        });
       },
       moveListItem: function(name, i, dir) {
         if (!this.canEditList(name)) return;
@@ -4046,7 +4120,9 @@ function createVueApp() {
         var tmp = arr[i]; arr.splice(i, 1, arr[j]); arr.splice(j, 1, tmp);
         this.saveLists();
       },
-      saveLists: function() { backend.saveLists(this.listsCache); },
+      // Returns the backend's promise: an undo that puts a list's array back has to be able to wait for
+      // it, the same way every other replayed write is waited on.
+      saveLists: function() { return backend.saveLists(this.listsCache); },
 
       // All [table,col] pairs whose column is backed by `listName` (select or multiselect).
       // altList = the column's listSwitch alt list (if any) — a value still present in the alt list
@@ -4103,7 +4179,13 @@ function createVueApp() {
           var apply = function(rows, partition) {
             var changed = 0;
             (rows || []).forEach(function(row) {
-              var rowChanged = false;
+              // The undo patch is built as we go, because once row[tc.col] is assigned there is nothing
+              // left to read. PARTIAL on both sides, for the reason propagateMirror's is: a value
+              // rewrite says nothing about the row's other columns, so taking it back must not carry
+              // this client's stale copy of them over a colleague's edit. The `forward` patch is
+              // deliberately narrower than the write below — a redo has no reason to be wider than what
+              // actually changed.
+              var patch = { id: row.id }, undoPatch = { id: row.id };
               tcs.forEach(function(tc) {
                 var v = row[tc.col];
                 // listSwitch guard: if oldVal is still a valid option via this column's alt list,
@@ -4112,16 +4194,31 @@ function createVueApp() {
                 if (tc.altList && self.listsCache[tc.altList] && self.listsCache[tc.altList].indexOf(oldVal) >= 0) return;
                 if (tc.multi) {
                   if (Array.isArray(v) && v.indexOf(oldVal) >= 0) {
+                    undoPatch[tc.col] = v.slice();   // a copy: the array below is rebuilt, not mutated, but the cache holds this one
                     row[tc.col] = del ? v.filter(function(x) { return x !== oldVal; })
                                       : v.map(function(x) { return x === oldVal ? newVal : x; });
-                    rowChanged = true;
+                    patch[tc.col] = row[tc.col];
                   }
                 } else if (v === oldVal) {
+                  undoPatch[tc.col] = v;
                   row[tc.col] = del ? '' : newVal;
-                  rowChanged = true;
+                  patch[tc.col] = row[tc.col];
                 }
               });
-              if (rowChanged) { row.updated_at = new Date().toISOString(); Writes.putRow(table, row, partition); changed++; }
+              // More than the id means at least one column moved — the same test `rowChanged` made, read
+              // off the patch that has to exist anyway.
+              if (Object.keys(patch).length > 1) {
+                row.updated_at = patch.updated_at = new Date().toISOString();
+                // Joins the action the caller opened. This is the shared engine for every value cascade
+                // — a list rename, a list DELETE (which blanks the value out of every row that stored
+                // it), a lookup rename and a group rename — so recording here is what makes all four
+                // reversible, and is why none of them records rows for itself.
+                Undo.record({ table: table, part: partition,
+                  forward: { type: 'put', id: row.id, row: patch },
+                  inverse: { type: 'put', id: row.id, row: undoPatch } });
+                Writes.putRow(table, row, partition);
+                changed++;
+              }
             });
             return changed;
           };
@@ -4949,8 +5046,8 @@ function createVueApp() {
       // rendered avatar projection so the change shows immediately in the editor and in every cell.
       setListUserLink: function(list, value, email) {
         var self = this;
-        if (typeof backend === 'undefined' || !backend.setListUser) return;
-        backend.setListUser(list, value, email || '').then(function() {
+        if (typeof backend === 'undefined' || !backend.setListUser) return Promise.resolve();
+        return backend.setListUser(list, value, email || '').then(function() {
           self.loadListUserLinks(); self.loadListAvatars(); self.loadMyListValues();
         }).catch(function(e) { self.notify((e && (e.error || e.message)) || self.t('msg.save_failed')); });
       },
@@ -5671,6 +5768,23 @@ function createVueApp() {
         if (LiveSync.applyChange(rows, change)) this._liveRebuild();
       },
 
+      // The non-row half of a replay: a value rename writes three stores that have no putRow between
+      // them, so undo.js hands those changes here whole rather than learning what any of them is.
+      // Each branch is the store's OWN write, not a second implementation of it — which is why the op
+      // shapes differ: a list is a whole-array blob (saveLists writes every list at once), a translation
+      // is a key move (migrateListTranslation is already its own inverse under a swap), and a link is a
+      // state set, because after a delete there is no link left to move and the op carries the email.
+      _undoVocab: function(change) {
+        var self = this;
+        if (change.type === 'lists') {
+          self.listsCache[change.list] = (change.values || []).slice();
+          return Promise.resolve(self.saveLists());
+        }
+        if (change.type === 'trans') return Promise.resolve(self.migrateListTranslation(change.ns, change.from, change.to));
+        if (change.type === 'link') return Promise.resolve(self.setListUserLink(change.list, change.value, change.email || ''));
+        throw new Error('undo: unknown change type ' + change.type);
+      },
+
       undoLast: function() {
         var self = this;
         return Undo.undo().then(function(label) {
@@ -6255,6 +6369,7 @@ function createVueApp() {
       if (typeof Writes !== 'undefined' && Writes.onWrite) Writes.onWrite(function(t) { self._onWriteRepublish(t); });
       Undo.configure({
         apply: function(table, part, change) { self._undoApply(table, part, change); },
+        vocab: function(change) { return self._undoVocab(change); },
         onChange: function(u, r) { self.undoDepth = u; self.redoDepth = r; }
       });
       // Remote changes that arrived while a cell had focus are held (see _liveHeld); leaving the cell is
