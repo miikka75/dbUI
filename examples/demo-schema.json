@@ -135,6 +135,31 @@
       "isLookup": true,
       "hierarchy": { "parent": "state", "value": "city" }
     },
+    "teams": {
+      "columns": [
+        {
+          "name": "team",
+          "type": "text"
+        },
+        {
+          "name": "parent_id",
+          "type": "text",
+          "hidden": true
+        },
+        {
+          "name": "created_at",
+          "type": "text",
+          "hidden": true
+        },
+        {
+          "name": "updated_at",
+          "type": "text",
+          "hidden": true
+        }
+      ],
+      "isLookup": true,
+      "hierarchy": { "parent": "parent_id", "value": "team", "by": "id" }
+    },
     "crew_rotation": {
       "columns": [
         {

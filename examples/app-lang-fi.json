@@ -135,6 +135,7 @@
       "msg.language_renamed": "Kieli nimetty uudelleen",
       "msg.load_failed": "Sovelluksen lataus epäonnistui",
       "msg.locked": "Lukittu",
+      "msg.ref_has_children": "Siirrä tai poista ensin sen alla olevat",
       "msg.palette_applied": "Paletti otettu käyttöön",
       "msg.paste_hex": "Liitä vähintään 2 #hex-väriä",
       "msg.registered_admin": "Sinut on rekisteröity ylläpitäjäksi",

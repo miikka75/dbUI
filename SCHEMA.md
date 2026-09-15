@@ -158,9 +158,40 @@ invalid and nothing is reported: the count was never something anyone declared.
 distinguishes those from an organization and its callings, so the editor rendered every chore as a
 group whose single child was a number. Only the table can settle it.
 
+**`"by": "id"` — a tree deeper than two.** By default (`by: "value"`, and every lookup written before
+this existed) the parent column holds the group's own VALUE, which makes the table exactly two levels:
+a group is a value its rows carry and has no row of its own. Under `by: "id"` it holds another **row's
+id**, so a parent IS a row and the tree is as deep as the data:
+
+```json
+"teams": {
+  "isLookup": true,
+  "hierarchy": { "parent": "parent_id", "value": "team", "by": "id" },
+  "columns": [ { "name": "team", "type": "text" },
+               { "name": "parent_id", "type": "text", "hidden": true } ]
+}
+```
+
+The demo bundle ships this one. A row with an empty `parent_id` is a root; the Lookup editor renders
+every level and each node takes children of its own.
+
+- **Use it for a NEW table, never by converting one that exists.** In this app a lookup's value is its
+  identity in four places at once — `list.<table>.<value>` translation keys, schema filters that pin
+  values by hand, `select list: <lookup>` columns storing the value, and `rosterRef` rotations — so
+  converting one is a one-way data migration per deployment, not a schema edit. ROADMAP's `tree` entry
+  records what that would cost.
+- **A parent naming no row, a row parented to itself, and a cycle** all resolve the same way: the row
+  becomes a root and the bad edge is cut. A row is never dropped from the tree, and a cycle can never
+  reach the renderer.
+- **Deleting a node that still has children is refused** — whether descendants should cascade or be
+  re-parented is undecided, and either guess loses rows. Empty it first.
+- Ordering arrows and `reorderable` stay on the value model: `position` is one global sequence, which
+  says nothing about a deeper tree.
+
 - `parent` and `value` must both be author-facing columns of that table and must differ —
   `validateSchema` says so at load, because a parent column that is not there groups nothing and
-  renders as one empty group.
+  renders as one empty group. Under `by: "id"` the parent column is plumbing rather than something an
+  author types, so it may be `hidden` (and normally is); only `value` must be author-facing.
 - A `rosterRef` rotation's `rosterBy`/`valueCol` must agree with a declared `hierarchy` (also checked at
   load). The rotation matrix and the Lookup editor read the same rows; grouping them differently is the
   drift the declaration exists to end, and each screen looks correct on its own.

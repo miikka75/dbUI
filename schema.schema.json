@@ -171,8 +171,9 @@
               "required": ["parent", "value"],
               "additionalProperties": false,
               "properties": {
-                "parent": { "type": "string", "description": "The grouping column — the Lookup editor's parent rows, a board ref lane's phase, a rosterRef rotation's slots." },
-                "value": { "type": "string", "description": "The column holding the value under the group — what a `ref` column stores." }
+                "parent": { "type": "string", "description": "The grouping column — the Lookup editor's parent rows, a board ref lane's phase, a rosterRef rotation's slots. Under `by: \"id\"` it holds a row id instead, and is usually `hidden: true` since it is plumbing rather than something an author types." },
+                "value": { "type": "string", "description": "The column holding the value under the group — what a `ref` column stores." },
+                "by": { "type": "string", "enum": ["value", "id"], "description": "What the parent column holds. \"value\" (the default, and every lookup written before this existed) means it holds the group's own value, which makes the table exactly two levels. \"id\" means it holds another ROW's id, so a parent is a row and the tree is as deep as the data — use it for a NEW table, never by converting one whose values are already stored in other tables, translated, or pinned by a schema filter." }
               }
             }
           ]

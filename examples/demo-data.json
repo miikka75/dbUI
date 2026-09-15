@@ -17,6 +17,38 @@
         "city": "Fresno"
       }
     ],
+    "teams": [
+      {
+        "id": "seed-teams-1",
+        "team": "Acme",
+        "parent_id": ""
+      },
+      {
+        "id": "seed-teams-2",
+        "team": "Engineering",
+        "parent_id": "seed-teams-1"
+      },
+      {
+        "id": "seed-teams-3",
+        "team": "Backend",
+        "parent_id": "seed-teams-2"
+      },
+      {
+        "id": "seed-teams-4",
+        "team": "Frontend",
+        "parent_id": "seed-teams-2"
+      },
+      {
+        "id": "seed-teams-5",
+        "team": "Operations",
+        "parent_id": "seed-teams-1"
+      },
+      {
+        "id": "seed-teams-6",
+        "team": "Support",
+        "parent_id": "seed-teams-5"
+      }
+    ],
     "chores": [
       {
         "id": "seed-chores-1",

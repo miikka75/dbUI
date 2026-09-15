@@ -1,4 +1,6 @@
 {
   "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
-  "notes": {}
+  "notes": {
+    "5": "Adds `teams`, a catalogue whose parent column holds another ROW's id (`hierarchy.by: \"id\"`) instead of a group's value — so the Lookup tab shows it three levels deep (Acme > Engineering > Backend) rather than the two every other lookup has. Nothing existing changes: `cities` still groups by value, side by side with it, which is the point of shipping both."
+  }
 }
