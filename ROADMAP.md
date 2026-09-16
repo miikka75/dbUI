@@ -1092,17 +1092,20 @@ free and the other is a data migration: the screen that RENDERS depth, and the s
 **The rendering half — LANDED, and it cost a component.** `buildHierarchy` has always returned nodes
 whose children are nodes ("depth would be a change here rather than at every caller"); the Lookup
 editor was the one place that contradicted it, nesting the child `<v-list-item>` inside the group's
-`<v-list-group>` by hand. That is now one recursive `ref-node` (`#ref-node-tpl`), branching on
-**`node.row`** — null on a group, set on a leaf — rather than on a depth counter, because that is what
-the two kinds of node actually differ by. It renders the same pixels it always did.
+`<v-list-group>` by hand. That is now one recursive `ref-node` (`#ref-node-tpl`), branching on what a
+node IS rather than on a depth counter. It landed on its own, before the store half, and on that day it
+rendered exactly the pixels it always had.
 
-Two things worth keeping from building it. The branch **is not "depth 1 vs depth 2"**: under the value
-model a group is a VALUE its rows carry and has no row of its own, so `row` is the honest
-discriminator and stays correct at any depth. And an untested recursion is a claim, not a property —
-nothing in the app builds a third level, so the test stubs `Columns.buildHierarchy` (the single pure
-function that shapes the tree, the way the scan tests stub the one decoder call), hands the real editor
-a group holding a group, and drives it by opening each level. That is what proves Vuetify nests, the
-keys hold, and a leaf under a leaf's sibling is still a row cell.
+The branch **is not "depth 1 vs depth 2"**, which is the part worth keeping: under the value model a
+group is a VALUE its rows carry and has no row of its own, so `node.row` is the honest discriminator and
+stays correct at any depth. The store half later WIDENED it to `byId || !node.row` rather than replacing
+it (item 1 below) — which is the evidence it was the right question to branch on.
+
+*Superseded, and recorded because it was right at the time:* with nothing in the app building a third
+level, the recursion was first proved by a test that stubbed `Columns.buildHierarchy` and handed the
+real editor a group holding a group. That test was DELETED when `by: "id"` landed. It existed to prove a
+claim that had become demonstrable for real, and a stub kept beside the genuine article is a second
+answer to a question already answered.
 
 #### The store: `by` as a mode of the same key
 
@@ -1114,7 +1117,7 @@ rather than a second way to say the same thing.
 "hierarchy": { "parent": "parent_id", "value": "name", "by": "id" }
 ```
 
-`by: "value"` (the default, and every lookup that exists) means the parent column holds the group's
+`by: "value"` (the default, and every lookup written before this) means the parent column holds the group's
 VALUE; `by: "id"` means it holds another row's id. `lookupHierarchy` returns the mode, `buildHierarchy`
 branches on it once, and every READER goes on consuming nodes with children without learning which
 model it is looking at. One declaration, one resolver, two edge kinds.
@@ -1140,8 +1143,20 @@ one — *"the id of a row a BUNDLE ships is its identity forever"*, because impo
 minted parent is a new contract with every deployment that reinstalls. Undo now records value cascades,
 so a mis-run is takebackable within the session that ran it; the import contract is not.
 
-So: **the value model stays for lookups.** `by: "id"` serves the tables that actually want depth — a
-task with subtasks, an agenda item with sub-items — and the two coexist behind one resolver.
+So: **the value model stays for the lookups that EXIST**, and the two coexist behind one resolver.
+
+That sentence used to read "the value model stays for lookups", with `by: "id"` reserved for data tables
+— a task with subtasks, an agenda item with sub-items. Building it proved the line is drawn in the
+wrong place, and where it actually falls is worth stating, because the shipped example is a lookup:
+
+- **The couplings belong to a lookup's HISTORY, not to lookups as a kind.** Translation keys, filter
+  pins, `select list:` cells and `rosterRef` slots exist because something already points at those
+  values. A catalogue created id-keyed from birth, which nothing references, carries none of them —
+  there is no key to re-key and no stored value to rewrite. The rule is *never convert*, not *never a
+  lookup*.
+- **And a data table could not have shown depth anyway.** The Lookup editor is the only screen that
+  renders a tree at all; `isLookup` is what puts a table in front of it. So `by: "id"` on `tasks` would
+  have been a store nothing could display — the opposite of the acceptance this entry wanted.
 
 #### `by: "id"` — LANDED, additively, with the lookups that exist untouched
 
@@ -1178,11 +1193,16 @@ was scoped to top-level groups, which was a real bug once nesting existed.
 #### What `by: "id"` cost, and what is still open
 
 Small, in the readers; the work is in the editor's WRITE paths, which are value-shaped throughout.
-Items 1–4 and 7 landed; 5 and 6 are the open ones.
+Items 1, 2, 3 and 7 landed as written. **Item 4 landed by halves, and item 6 is the reason**: the two
+helpers the id path actually calls were branched, and the three that exist to serve the reorder arrows
+were not, because an id-keyed lookup renders no arrows to serve. 5 and 6 stay open.
 
 1. **`buildHierarchy` branches once** — index rows by id, hang each row off `row[parent]`, and every
-   node then carries a `row` (under ids a parent IS a row, so the group/leaf branch collapses to "has
-   children"). The editor needs no further change, which is the point of having landed it first.
+   node then carries a `row`. The editor needs no further change, which is the point of having landed
+   it first. *What shipped differs from the guess in the brackets this item used to carry: the branch is
+   `byId || !node.row`, not "has children". Under ids EVERY node is a group, a childless one included,
+   because that is precisely the row you add a first child to — a leaf with no expander has nowhere to
+   put the button.*
 2. **Two failures the value model cannot have**, and both must surface rather than vanish: a
    `parent_id` naming a row that is gone, and a CYCLE. A value-keyed tree is acyclic by construction; an
    id-keyed one is not, and a row that quietly drops out of the tree is the worst available outcome.
@@ -1196,6 +1216,10 @@ Items 1–4 and 7 landed; 5 and 6 are the open ones.
    the parent column with a value. `addRefParent`'s focus query (`.ref-hierarchy .v-list-group`, take
    the last) is a fifth, and a nesting-specific bug rather than a value one: under depth, "the last
    group in the DOM" is not "the group just added at the top level".
+   *Landed: `refParentLocked` and `addRefChild`, through the node's own `locked` and `childOf`, and the
+   focus query, now scoped to `> .v-list > .v-list-group`. NOT branched: `_refGroupRows` and
+   `refGroupAtEdge`/`moveRefGroup`, which exist for the reorder arrows — giving them an id branch would
+   have been writing item 6's answer before deciding it.*
 5. **Deleting a node becomes a question that has no precedent here** — cascade to descendants, or
    re-parent them? `deleteRefParent` deletes by value match today and never had to ask, because a group
    was not a row. Whichever is chosen is one gesture and therefore one `Undo.action`, and the inverse
@@ -1207,10 +1231,13 @@ Items 1–4 and 7 landed; 5 and 6 are the open ones.
    column; rows are rows. Worth stating because it is the one place this feature is cheaper than it
    looks.
 
-Not scheduled, and deliberately not ranked: `by: "id"` would be a second model with no user until a
-schema genuinely wants depth. When one does, the acceptance is a data table — task/subtask is the
-natural first — rendering three levels in the editor it already has, with a cycle and an orphan each
-reported by `buildHierarchy`'s own tests rather than by a blank screen.
+This entry kept `by: "id"` unbuilt on the grounds that it would be **a second model with no user**, and
+what changed is worth recording rather than quietly deleting: the user turned out to be the demo bundle
+itself, which could not show three levels because no schema could produce them. So the acceptance landed
+as `teams` — a LOOKUP, not the task/subtask data table this entry guessed at, for the reason in the
+section above — rendering three levels in the editor it already had, with the dangling parent, the
+self-parent and the cycle each asserted in `buildHierarchy`'s own tests rather than found as a blank
+screen.
 
 ### `gallery`
 
@@ -1409,9 +1436,12 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
 
 ## Suggested order
 
-One entry here is PARTLY built, and its remainder outranks anything unstarted, because a half-built
-mechanism is the only thing on this page that can mislead: it looks finished from the outside.
-(Undo/redo was the other, and led this list on merit rather than on cheapness until its value cascades
+TWO entries here are PARTLY built, and that matters because a half-built mechanism is the only thing on
+this page that can mislead: it looks finished from the outside. Only one of the two is ranked. **Scan**'s
+remainder is, and leads the list below, because it is cheap and its shipped half points at it; `tree`'s
+is not, for the reason given beside `gallery` further down — what is left of it is two questions nothing
+has asked rather than work waiting to be done.
+(Undo/redo was a third, and led this list on merit rather than on cheapness until its value cascades
 shipped — see its entry above, which is kept in place rather than reduced to a Shipped bullet because
 the reasoning behind what landed is the same document as the reasoning for the rest of it.)
 
