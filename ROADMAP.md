@@ -1436,9 +1436,12 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
 
 ## Suggested order
 
-One entry here is PARTLY built, and its remainder outranks anything unstarted, because a half-built
-mechanism is the only thing on this page that can mislead: it looks finished from the outside.
-(Undo/redo was the other, and led this list on merit rather than on cheapness until its value cascades
+TWO entries here are PARTLY built, and that matters because a half-built mechanism is the only thing on
+this page that can mislead: it looks finished from the outside. Only one of the two is ranked. **Scan**'s
+remainder is, and leads the list below, because it is cheap and its shipped half points at it; `tree`'s
+is not, for the reason given beside `gallery` further down — what is left of it is two questions nothing
+has asked rather than work waiting to be done.
+(Undo/redo was a third, and led this list on merit rather than on cheapness until its value cascades
 shipped — see its entry above, which is kept in place rather than reduced to a Shipped bullet because
 the reasoning behind what landed is the same document as the reasoning for the rest of it.)
 
