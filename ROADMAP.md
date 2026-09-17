@@ -674,6 +674,25 @@ missing is everything around it.
 5. **Tokens.** Per-person URLs are what make revocation possible, and they are the decision this whole
    entry already waits on.
 
+**The GUARD for step 3 landed first, deliberately, before any rendering path exists that could trip
+it.** `Feeds.configErrors` replaces `validateSchema`'s inline feed branch and checks the two modes in
+OPPOSITE directions: a shared feed refuses `@me`, a `per-person` one requires it on every source and
+`mineOnly` on every rotation overlay. The inversion is the point — a shared feed carrying `@me` renders
+the publisher's calendar for everyone, which somebody notices, while a per-person feed with one
+unfiltered source among four renders a perfectly plausible calendar containing everybody's rows.
+
+Three things the build settled that the plan above had not.
+
+- **The rule is per SOURCE, not per view.** `events.js` filters a calendar's rows through `s.filter`
+  only; `view.filter` never reaches them. A view-level `@me` on a calendar filters nothing, so accepting
+  one would have been accepting a guard that does not run.
+- **An unrecognised `feed` value is not a feed.** `modeOf` is an explicit allowlist rather than a
+  truthiness test, because a typo could plausibly resolve either way and the two directions fail very
+  differently: read as "shared" it publishes an unfiltered file, read as nothing it publishes nothing
+  and says why. `isFeed` is derived from `modeOf` so the two cannot drift.
+- **It belongs to feeds.js, not to validateSchema** — the division `Scan.configErrors` already set, and
+  what makes this a Node-tested property rather than an error string only a browser executes.
+
 Not scheduled. Steps 1, 2 and 4 are ordinary work; step 3 is a security boundary being asked to hold
 weight it was not designed for, and it should be entered deliberately or not at all.
 

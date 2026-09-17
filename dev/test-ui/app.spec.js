@@ -3579,12 +3579,28 @@ test.describe('v3 @both partition toggle in an embed', () => {
       window.VIEWS.fd_me = { name: 'fd_me', feed: true,
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: { eq: '@me' } } }] } };
       window.VIEWS.fd_ok = { name: 'fd_ok', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
-      return { nocal: errs('fd_nocal'), mine: errs('fd_mine'), me: errs('fd_me'), ok: errs('fd_ok') };
+      // A per-person feed inverts the rule above: @me is REQUIRED on every source, because a source
+      // without one puts its rows in every subscriber's file. Checked here as well as in the unit
+      // suite because the rule lives in feeds.js and this is what proves validateSchema reaches it.
+      window.VIEWS.fd_pp_bad = { name: 'fd_pp_bad', feed: 'per-person',
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } },
+                              { table: 'tasks', dateColumn: 'date' }] } };
+      window.VIEWS.fd_pp_ok = { name: 'fd_pp_ok', feed: 'per-person',
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
+      window.VIEWS.fd_typo = { name: 'fd_typo', feed: 'per-pesron', calendar: { source: 'tasks', dateColumn: 'date' } };
+      return { nocal: errs('fd_nocal'), mine: errs('fd_mine'), me: errs('fd_me'), ok: errs('fd_ok'),
+               ppBad: errs('fd_pp_bad'), ppOk: errs('fd_pp_ok'), typo: errs('fd_typo'),
+               typoPublishes: window.Feeds.isFeed(window.VIEWS.fd_typo) };
     });
     expect(r.nocal).toContain('is not a calendar');
     expect(r.mine).toContain('cannot be combined with `mineOnly`');
     expect(r.me).toContain('cannot be combined with an `@me` filter');
     expect(r.ok).toBe('');
+    expect(r.ppBad).toContain('source 2');
+    expect(r.ppOk).toBe('');
+    // A misspelled mode must not fall back to "shared" — that would publish an unfiltered file.
+    expect(r.typo).toContain('publishes nothing at all');
+    expect(r.typoPublishes).toBe(false);
   });
 
   test('validateSchema names a timeline pointed at the wrong columns', async ({ page }) => {

@@ -111,3 +111,155 @@ describe('feeds.js — the storage path', () => {
     assert.throws(() => Feeds.newId({}), /CSPRNG/);
   });
 });
+
+// --- the `feed` declaration itself -------------------------------------------------------------
+//
+// These are the guard that has to exist BEFORE per-person rendering does. A shared feed and a
+// per-person one are checked in opposite directions, and only one of the two failures is loud: a
+// shared feed carrying @me renders the publisher's own calendar for everyone, which somebody notices,
+// while a per-person feed with ONE unfiltered source renders a perfectly plausible calendar that
+// happens to contain everybody's rows.
+describe('feeds.js — what kind of feed a view declares', () => {
+  it('true and "shared" are the same mode', () => {
+    assert.equal(Feeds.modeOf({ calendar: {}, feed: true }), 'shared');
+    assert.equal(Feeds.modeOf({ calendar: {}, feed: 'shared' }), 'shared');
+  });
+
+  it('"per-person" is its own mode', () => {
+    assert.equal(Feeds.modeOf({ calendar: {}, feed: 'per-person' }), 'per-person');
+    assert.equal(Feeds.isPerPerson({ calendar: {}, feed: 'per-person' }), true);
+    assert.equal(Feeds.isPerPerson(VIEWS.fam), false);
+  });
+
+  // The direction that matters: a typo must not resolve to "shared", which would publish an @me
+  // calendar rendered against whoever pressed publish.
+  it('an unrecognised value is not a feed at all', () => {
+    const v = { calendar: {}, feed: 'per-pesron' };
+    assert.equal(Feeds.modeOf(v), '');
+    assert.equal(Feeds.isFeed(v), false);
+  });
+
+  it('feed on a non-calendar is not a feed, whatever the value says', () => {
+    assert.equal(Feeds.modeOf({ sources: ['events'], feed: 'per-person' }), '');
+    assert.equal(Feeds.modeOf(VIEWS.notcal), '');
+  });
+
+  it('isFeed and modeOf cannot disagree', () => {
+    [true, 'shared', 'per-person', 'nonsense', false, undefined].forEach((f) => {
+      const v = { calendar: {}, feed: f };
+      assert.equal(Feeds.isFeed(v), !!Feeds.modeOf(v), JSON.stringify(f));
+    });
+  });
+});
+
+describe('feeds.js — a SHARED feed refuses @me', () => {
+  const errs = (views, name) => Feeds.configErrors(views, name, views[name]);
+
+  it('accepts an ordinary shared feed', () => {
+    assert.deepEqual(errs(VIEWS, 'fam'), []);
+    assert.deepEqual(errs(VIEWS, 'duty'), []);
+  });
+
+  it('says nothing about a calendar that is not published', () => {
+    assert.deepEqual(errs(VIEWS, 'private_cal'), []);
+  });
+
+  it('refuses feed on a view that is not a calendar', () => {
+    const e = errs(VIEWS, 'notcal');
+    assert.equal(e.length, 1);
+    assert.match(e[0], /not a calendar/);
+  });
+
+  it('refuses an unrecognised feed value, and names it', () => {
+    const v = { calendar: { sources: [{ table: 'events', dateColumn: 'on' }] }, feed: 'yes please' };
+    const e = errs({ x: v }, 'x');
+    assert.equal(e.length, 1);
+    assert.match(e[0], /"yes please"/);
+    assert.match(e[0], /publishes nothing at all/);
+  });
+
+  it('refuses mineOnly, and points at per-person', () => {
+    const v = { calendar: { sources: [{ table: 'events', dateColumn: 'on' }] }, feed: true, mineOnly: true };
+    const e = errs({ x: v }, 'x');
+    assert.match(e.join('\n'), /mineOnly/);
+    assert.match(e.join('\n'), /per-person/);
+  });
+
+  it('refuses an @me filter on a source', () => {
+    const v = { calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] }, feed: true };
+    assert.match(errs({ x: v }, 'x').join('\n'), /@me/);
+  });
+
+  // The spelling a String(cond) check would miss.
+  it('refuses @me written as an operator object', () => {
+    const v = { calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: { eq: '@me' } } }] }, feed: true };
+    assert.match(errs({ x: v }, 'x').join('\n'), /@me/);
+  });
+
+  it('refuses @me nested inside $or', () => {
+    const v = { calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { $or: [{ who: '@me' }, { who: 'x' }] } }] }, feed: true };
+    assert.match(errs({ x: v }, 'x').join('\n'), /@me/);
+  });
+});
+
+describe('feeds.js — a PER-PERSON feed requires @me on every source', () => {
+  const errs = (views, name) => Feeds.configErrors(views, name, views[name]);
+
+  it('accepts one where every source is filtered', () => {
+    const v = { calendar: { sources: [
+      { table: 'events', dateColumn: 'on', filter: { who: '@me' } },
+      { table: 'trips', dateColumn: 'starts', filter: { owner: { eq: '@me' } } }
+    ] }, feed: 'per-person' };
+    assert.deepEqual(errs({ x: v }, 'x'), []);
+  });
+
+  // The whole reason this guard exists: two filtered sources and one that is not reads as a working
+  // calendar and ships the third table to every subscriber.
+  it('refuses when ONE source of several is unfiltered, and names that source', () => {
+    const v = { calendar: { sources: [
+      { table: 'events', dateColumn: 'on', filter: { who: '@me' } },
+      { table: 'salaries', dateColumn: 'on' }
+    ] }, feed: 'per-person' };
+    const e = errs({ x: v }, 'x');
+    assert.equal(e.length, 1);
+    assert.match(e[0], /source 2/);
+    assert.match(e[0], /salaries/);
+  });
+
+  it('names every unfiltered source rather than only the first', () => {
+    const v = { calendar: { sources: [
+      { table: 'a', dateColumn: 'on' }, { table: 'b', dateColumn: 'on' }
+    ] }, feed: 'per-person' };
+    assert.equal(errs({ x: v }, 'x').length, 2);
+  });
+
+  // A view-level filter is not applied to a calendar's rows at all (events.js rowEvents reads
+  // s.filter only), so accepting one here would accept a guard that never runs.
+  it('a view-level @me does not satisfy the rule, because a calendar never applies it', () => {
+    const v = { calendar: { sources: [{ table: 'events', dateColumn: 'on' }] }, filter: { who: '@me' }, feed: 'per-person' };
+    assert.match(errs({ x: v }, 'x').join('\n'), /source 1/);
+  });
+
+  it('refuses a rotation overlay that is not mineOnly', () => {
+    const views = {
+      x: { calendar: { sources: [], rotationSources: [{ view: 'matrix' }] }, feed: 'per-person' },
+      matrix: { rotation: { rosterRef: 'ref_chores', rosterBy: 'chore', valueCol: 'person' } }
+    };
+    const e = errs(views, 'x');
+    assert.match(e.join('\n'), /matrix/);
+    assert.match(e.join('\n'), /mineOnly/);
+  });
+
+  it('accepts a mineOnly rotation overlay', () => {
+    const views = {
+      x: { calendar: { sources: [], rotationSources: [{ view: 'matrix' }] }, feed: 'per-person' },
+      matrix: { mineOnly: true, rotation: { rosterRef: 'ref_chores', rosterBy: 'chore', valueCol: 'person' } }
+    };
+    assert.deepEqual(errs(views, 'x'), []);
+  });
+
+  it('refuses a per-person feed with nothing to filter', () => {
+    const v = { calendar: { sources: [] }, feed: 'per-person' };
+    assert.match(errs({ x: v }, 'x').join('\n'), /nothing to filter/);
+  });
+});
