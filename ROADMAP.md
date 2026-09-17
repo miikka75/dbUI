@@ -557,16 +557,20 @@ Cost: a pure function (schema + what the database holds -> an inventory), Node-t
 deletes reuse writes that already exist. No engine module, no view kind. The same panel is the natural
 home for the example-drift notice Settings already shows.
 
-### A subscribable calendar feed
+### A subscribable calendar feed *(shared-content feeds landed in #174; PER-PERSON feeds are what remain)*
 
-The `.ics` **export** shipped (see Shipped below); this entry is what is left: a URL a calendar client
-can subscribe to, so an edit reaches a phone without anyone re-exporting.
+A URL a calendar client can subscribe to, so an edit reaches a phone without anyone re-exporting. The
+`.ics` export shipped first; the shared-content feed shipped after it, in #174.
+
+**What is left is the per-person half, and only that.** A calendar whose rows are the same for every
+reader is done and in use. A calendar filtered on `@me` — "my duties" — is still refused outright by
+`validateSchema`, and the sections below are the design for lifting that refusal. Read *Per-person
+feeds — the plan* for the shape and *What landed* for what the build already settled; the four-way
+delivery table is kept because it records what was considered, but it no longer describes a choice
+anyone has to make.
 
 The earlier version of this entry priced the feed as the expensive half of a pair. Most of that price
-turned out to be an assumption rather than a cost, and two of its three blockers are gone. What
-remains is one decision, and a choice between four ways of delivering the file. On a Supabase
-deployment the cheapest needs no component at all; on Firebase it does, for a reason that is about
-IDENTITY rather than storage — see option 1.
+turned out to be an assumption rather than a cost.
 
 **The delivery constraint, stated first because everything follows from it.** A calendar client is not
 a browser. Google fetches your URL from *its* servers, Outlook from its own, Apple with an HTTP client
@@ -704,74 +708,66 @@ would overwrite the complete calendar with a truncated one — silent loss for e
 by a perfectly legitimate edit. Gate regeneration on a full-access client; a member's write then
 leaves the feed stale rather than wrong, which is the correct direction to fail.
 
-#### What is actually left
+#### What landed (#174), and what the build settled
 
-**Both decisions were taken on 2026-09-17 by the deployment owner. What remains is work rather than
-judgement — but the scope grew in the one place this entry warned about, so read the third answer
-before pricing any of it.**
+**The shared-content feed SHIPPED.** The decision this section used to wait on — whether row data may
+sit behind a bearer token at all — was taken by building it. The question is kept here because a
+decision that leaves no trace gets re-litigated as reliably as a rejected idea does: this is the app's
+**first bearer token for ROW DATA**. `?mode=…&config=…` share links carry connection config and the
+reader still signs in; the only other token-in-URL is the admin-only CSP read endpoint. A feed URL is
+mailed around, synced to phones and stored on Google's servers indefinitely, with no expiry and no
+second factor. That is a real widening of the surface, and it was accepted deliberately.
 
-The question as it stood is kept here rather than replaced, because a decision that leaves no trace
-gets re-litigated as reliably as a rejected idea does. It was not code: this is the app's **first
-bearer token for ROW DATA**. `?mode=…&config=…` share links carry connection config and the reader
-still signs in; the only token-in-URL today is the admin-only CSP read endpoint. A feed token is mailed
-around, synced to phones and stored on Google's servers indefinitely, with no expiry and no second
-factor. Per-person tokens make it revocable and attributable, which is the best available answer — but
-it is a real widening of the surface, and it belonged to whoever owns the deployment rather than to an
-implementer.
+`publishFeed` renders through the same window and language settings as the download, uploads via
+`backend.uploadFile` at `Feeds.pathFor(id)`, and keeps `{id, url, at}` in the folder config.
+`_onWriteRepublish` marks feeds dirty through `Feeds.forTable` and coalesces at 2s, so a bulk import is
+one upload rather than hundreds. Delivery ended up **backend-agnostic** rather than Supabase-specific:
+`uploadFile` was already the seam for image columns, so the four-way table above priced a choice the
+code did not have to make. What it could not dodge is the Spark trap — `uploadFile` EXISTS on
+backend-firebase whenever Storage initialized, and fails at runtime because Storage needs Blaze. An
+image column survives that by falling back to the `asset:` tier; a feed cannot, since an asset is a
+database row and a subscription needs an HTTP URL. So the failure is remembered in `_blobStoreDown` and
+only the background path honours it — otherwise every edit on such a deployment retries the same doomed
+upload for ever — while a person pressing the button always gets an attempt, which is also how the flag
+clears.
 
-**Answer 1 — yes, and the shape is per-CALENDAR, not per-deployment.** This was asked back as a better
-question than the one put: may different calendars have different link policies? They may, and the
-useful part is that the policy mostly **falls out of the content rather than being chosen**. A calendar
-whose rows are identical for every reader may have one shared URL; a calendar filtered on `@me` has
-different content per person and therefore *must* have one URL each — there is no shared version of it
-to pick. So the config is a single field, forced to `per-person` wherever the content is, and the only
-genuine choice is on the calendars where both would work.
+**Who may publish was answered more strictly than the question assumed.** `canPublishFeeds()` requires
+a full-access client (`!userAllowedTables`), and that gate is doing two jobs that are worth keeping
+apart. One is permission. The other is correctness, and it is the load-bearing one: a restricted
+member's write regenerating from their own `dataCache` would overwrite the complete calendar with a
+truncated one — silent loss for every subscriber, caused by a legitimate edit. Anyone proposing to
+loosen the permission has to answer the second job separately, or the feature fails in the direction
+this entry has warned about throughout.
 
-That also surfaced a use the entry had not noticed and which is now a REASON for the feature rather
-than a consequence: **a shared feed URL grants an outsider read access to one calendar without granting
-them anything in the app.** A cleaning rota handed to a caretaker with no account is not a workaround —
-it is the narrowest grant the system can express, narrower than any table grant, because it carries one
-pre-rendered view of rows the app chose and no ability to reach anything else.
+#### Revoking a link — what the build taught, and what revocation cannot do
 
-**Answer 2 — delivery option 1, on Supabase.** The cheap corner of the four-way table: `_sbUpload`
-exists, `uploadFile` is already the seam, `connect-src` already allows `https://*.supabase.co`, and an
-RLS policy on `storage.objects` is the whole access story. Nothing to deploy, monitor or keep alive.
-The Firebase identity problem documented above is therefore **not on the path** — it stays recorded
-against option 1 so it is not rediscovered, but it prices a deployment this feature is not being built
-for. The three silent-failure details under option 1 (stable path, `contentType: 'text/calendar'` at
-upload time, token in the filename) are now requirements rather than warnings.
+The intuition is that revoking means deleting the file. **The build rejected that, and the reasoning is
+worth keeping**, because "mint a new id and walk away" is the obvious wrong answer and it leaves the
+leaked link serving the last snapshot for ever.
 
-**Answer 3 — per-person feeds are IN SCOPE, which is the expensive answer.** The `my_calendar` shape is
-wanted, so step 3 of *Per-person feeds* above is entered deliberately: `@me` stops being a display
-convenience and has to hold as an ACCESS boundary, because the file is rendered by a full-access client
-and handed to one subscriber. Everything in that numbered list applies, the sentinel discipline in step
-2 especially — an identity that cannot be resolved must yield the no-match token and an EMPTY calendar,
-never an unfiltered one. `validateSchema`'s current refusal of `@me` views as feed sources is the thing
-being replaced, and it should be replaced by a narrower refusal rather than deleted: `@me` allowed only
-where the feed is `per-person`, still refused on a shared one.
+`_blankFeedAt` uploads a **valid but empty VCALENDAR over the old object**. It is deliberately not a
+delete: there is no delete in the backend contract, and adding one would not be better — a 404 leaves
+clients retrying a dead address, while an empty calendar is a clean "there is nothing here" that every
+client understands. What matters either way is that the old URL stops SERVING DATA.
 
-#### Rotating a link, and what revocation cannot do
+Three operations sit on that one primitive. `regenerateFeed` blanks the old file, drops the id so a
+fresh one is minted, and republishes — every existing subscriber breaks, which IS the feature, since it
+is how a link that got out is taken back. `unpublishFeed` blanks and forgets, which exists because
+turning `feed` off in the schema would otherwise stop republishing while leaving the last file
+world-readable at a URL already sitting in people's calendar apps. And the id lives in the folder
+config precisely because the PATH is what makes a subscription stable.
 
-Asked directly, and it belongs here because the answer changes what the token field has to store.
+**What none of them can do is un-tell.** Events already synced to someone's phone stay on that phone; a
+calendar client holds its last successful fetch until the next refresh replaces it. Revocation stops
+future updates and reaches back into nothing. Worth saying out loud to anyone who asks for a link to be
+cut off, because the intuition is usually that it recalls the data.
 
-**Yes, and it is nearly free — on one condition.** The token lives in the filename, so a URL is
-`…/object/public/feeds/<token>.ics` and rotating it is: mint a new token, upload the blob at the new
-path, **delete the old object**, and update the row that holds the subscription URL. The delete is the
-load-bearing step. Skipping it does not leave a dead link; it leaves a live one that has silently
-stopped updating — a calendar still showing last month's rota, which reads as correct and is the worse
-failure. A deleted object 404s, and a calendar client surfaces that as a broken subscription, which is
-the direction to fail.
+#### Four ways to deliver the file *(settled by #174 — kept as a record, not a choice)*
 
-With per-person tokens, rotation is one person's object; the rest are untouched. On a shared calendar
-it is every subscriber re-subscribing at once, which is the cost the shared policy buys its
-outsider-access property with.
-
-**What it cannot do is un-tell.** Events already synced to someone's phone stay on that phone; a
-calendar client holds its last successful fetch and shows it until the next refresh fails. Revocation
-stops *future* updates immediately and reaches back into nothing. That is worth saying out loud to
-anyone who asks for a link to be cut off, because the intuition is usually that it recalls the data.
-
-#### Four ways to deliver the file
+**The build did not have to pick.** `uploadFile` was already the seam for image columns, so a feed
+calls it and each backend answers in its own way — which is option 1 on Supabase and option 4 on a
+Blaze Firebase project, decided by the deployment rather than by this table. What survives from the
+analysis below is the Spark trap, recorded against option 1 and now handled in `_blobStoreDown`.
 
 All four serve the SAME pre-rendered blob, so the app-side work is identical and the choice is
 reversible. What differs is what has to exist, and whether an edit reaches subscribers without waiting.
@@ -865,87 +861,6 @@ Neither is worth revisiting unless the trade changes.
 own schedule, typically many hours, and it is not client-controllable. Write-triggered regeneration
 buys *correctness* — never stale relative to the data — not speed. Anyone wanting an edit on their
 phone within seconds is better served by the export.
-
-### Calendars defined in the DATABASE, not the schema
-
-"Can a new calendar — ushers, cleaning, whatever someone thinks of next — be made without editing the
-schema document?" Today: no. `calendar.sources` is schema, and the app has no schema editor by design
-(SCHEMA.md: *hand-editing this document is the design*), so the routes are Settings → Import or editing
-the file and reinstalling.
-
-The proposal is not a schema editor. It is to let a calendar be a ROW.
-
-**Why this fits rather than fights the architecture.** The split already exists and this lands on the
-side that is already database-backed:
-
-- `_pages` holds doc-view BODIES in the database, not in the schema;
-- folder config holds per-view runtime settings — a rotation's anchor and range, a calendar's `ics`
-  window and language, a feed's URL;
-- lists and lookup tables hold vocabulary.
-
-Schema is structure; the database holds content and per-deployment configuration. A calendar is a
-saved question over tables that already exist — closer to a lookup table than to a column definition.
-
-**Shape.** A `_calendars` system store, one row per calendar:
-
-```json
-{ "id": "ushers", "title": "Ushers",
-  "sources": [ { "table": "duty_usher_dates", "dateColumn": "date", "titleColumns": ["…"] } ],
-  "obscureNames": ["…"], "ics": { "back": "3m", "forward": "1y" } }
-```
-
-Read at boot and merged into `VIEWS` as ordinary calendar views. From there everything downstream is
-inherited and needs no changes at all: rendering, the `.ics` download, publishing, the window and
-language settings, `embed-view` for `{{view:x}}`, and the Settings list, which already enumerates
-`Object.keys(VIEWS)` rather than the nav — so a database-defined calendar appears there with a download
-button without a nav entry existing.
-
-**Two constraints that shape it, both already written into the code.**
-
-1. **A schema change forces a reload.** `columns.js` memoizes schema-static scans in a WeakMap keyed on
-   the schema object, "safe because SCHEMA is built once at load and every runtime schema change forces
-   a full page reload". Adding a CALENDAR does not touch `SCHEMA` (tables), so those caches stay valid —
-   but the honest design is still create-then-reload, matching how installing an example behaves. Not a
-   live-editing feature.
-2. **Rendering is already fail-closed per source.** `events.js` drops any source whose table the viewer
-   cannot reach, so a calendar created by one person cannot show another person rows they could not
-   already open. This is what makes the feature safe to expose at runtime at all, and it is existing
-   behaviour rather than something to add.
-
-**The decision this needs, and it is not the code.** Creating a calendar is harmless — it reveals
-nothing new. PUBLISHING one is not: a feed is world-readable to anyone holding its URL. Today that is a
-schema commit, which is reviewed and deliberate; as a runtime action it becomes a button. So the two
-want different permissions — create for any admin, publish gated more tightly, or not offered on
-database-defined calendars at first. Worth deciding before building, not after.
-
-**Decided 2026-09-17: ONE permission covers both.** If you may create a calendar here, you may publish
-it. The defensible half is that publishing cannot widen what the publisher themselves can see —
-`events.js` drops unreachable sources, so the file contains a subset of what that person could already
-open and hand over by other means. What the decision genuinely gives up is **reviewability**: today
-publishing is a schema commit that somebody reads before it merges, and as a button it is one press by
-one admin with nobody else in the loop.
-
-Two things follow, and they are the price of the simpler permission rather than objections to it.
-
-- **Live feeds must be enumerable.** Somewhere that lists every published calendar, its link policy,
-  who published it and when. With no review step before the fact, the only remaining control is being
-  able to see the result — and a feed nobody can list is a feed nobody can decide to revoke.
-- **Publishing wants a confirmation that says what it does.** Not a permission check wearing a
-  different costume: a sentence naming the audience, because "shared link" and "one link each" mean
-  very different things and the button that does the first is the one that reaches outside the app.
-
-**Cost.** The engine half is small, because everything downstream already exists: a system store, a
-boot merge, and the save-time validation `validateSchema` already performs for `calendar` (a real table,
-a real DATE column, real title columns — each of which otherwise fails as a permanently empty
-calendar). The bulk is the UI nobody has built yet: pick a table, pick its date column, pick title
-columns, repeat per source. That is a small form, but it is the first place the app asks someone to
-choose a column by name, so it wants the same care the Lookup editor got.
-
-Sequencing: worth doing after the feed's token decision, since "who may publish" is the same question
-in a different hat, and answering it once covers both. Both are now answered, and they were answered
-compatibly — the feed's link policy is per-calendar config, which is exactly the kind of field a
-database-defined calendar holds as a row. The two features want building in that order anyway: the feed
-establishes what a calendar's `feed` block means, and this one lets a row carry it.
 
 ### Undo/redo — take the last thing back *(fully landed: mechanism, cells, rows and the value cascades)*
 
@@ -1344,6 +1259,24 @@ stops working offline. Everything above it stays inside the app boundary.
 
 Recorded so the roadmap shows what graduated rather than silently shrinking.
 
+- **Calendars defined in the DATABASE, not the schema** (#176) — a calendar is a row now, so "can we
+  have an ushers calendar?" stops being a schema commit. Everything downstream was inherited exactly as
+  the proposal predicted: rendering, the `.ics` download, publishing, the window and language settings,
+  `embed-view`, and the Settings list, which enumerates `Object.keys(VIEWS)` rather than the nav.
+  **The one thing the proposal got wrong was the storage shape.** It asked for a `_calendars` system
+  store; `firestore.rules` denies clients every underscore-prefixed collection outright, which is the
+  same property the feed's `_checkin` idea RELIES on elsewhere on this page — so the definitions live in
+  the folder config instead, beside the per-view settings they sit next to conceptually. Worth keeping
+  because the mistake is re-makeable: "system store" and "underscore collection" are the same thought in
+  this codebase, and one of them is unreadable by the app on purpose.
+  Two things the build added that the entry had not asked for. A schema view of the same name **wins**,
+  because silently shadowing one from a config row is how a calendar starts disagreeing with the file it
+  appears to come from. And a user-defined calendar may overlay `rotationViews`, which the entry's
+  `sources`-only shape had no room for — generated duties draw on the same grid through the matrix's own
+  resolvers, so a rotation's `obscureNames` masks names here without the calendar repeating it.
+  The permission question the entry said to decide first was decided by `canPublishFeeds()`: publishing
+  needs a full-access client, on both schema and database-defined calendars alike.
+
 - **A rotation narrowed to nothing says so** — `rotationColsFor` returned `['_period']` unconditionally,
   so a viewer the narrowing left with no slot got a lone column of dates: a heading with a date list
   under it, which reads as a schedule that failed to load rather than as one that has nothing for you.
@@ -1532,22 +1465,21 @@ with children should do, and how order works within a level — and both are rec
 than ranked here. (`.ics` export, `timeline`, `stats`, the scan family and *Empty groups* were each
 first here in turn, and have shipped.)
 
-**The subscribable feed and database-defined calendars now rank above both of those**, and did not
-before 2026-09-17, when the judgements they were waiting on were made: a bearer token for row data is
-accepted with the link policy set per calendar, delivery is option 1 on Supabase, per-person feeds are
-in scope, and one permission covers creating and publishing a database-defined calendar. Each answer is
-recorded in the entry it belongs to, with the question it replaced kept beside it.
+**A correction worth leaving visible.** An earlier pass of this section ranked the feed and
+database-defined calendars as the next things to build, and recorded four "decisions" about how to
+build them. Both had already shipped — #174 and #176 — and the entries had simply never been moved out
+of *Proposed*. Three of the four decisions had been answered by the code, one of them (revocation by
+blanking rather than deleting) better than the answer written here. The fault was reading this file as
+the state of the repo. **It is a record of reasoning, not an inventory**, and an entry left in the wrong
+section is the one failure mode it has: a stale proposal reads exactly like a live one. The heading
+convention at the top of this file exists for precisely that, and is now applied to the feed.
 
-They are ranked in that order because the feed defines what a calendar's `feed` block means and the
-other feature lets a row carry one.
-
-**The feed is no longer a small entry, and the growth is all in one place.** Shared-content feeds are
-ordinary work — pre-render, upload, serve. Per-person feeds make `@me` an ACCESS boundary rather than a
-display filter, which is the one thing on this page that fails by LEAKING rather than by disappointing,
-and it is the majority of the cost. Anyone picking this up should read *Per-person feeds — the plan*
-before estimating, and should treat shipping the shared-content half first as the default rather than a
-compromise: it is useful on its own, it is the arrangement that lets an outsider hold a calendar with
-no account, and it establishes every piece of machinery the per-person half then reuses.
+**What remains of the feed is the per-person half, and it is genuinely unbuilt.** It is not ranked in
+the line above, because it is not the same kind of work as the features in it. Shared-content feeds were
+pre-render, upload, serve. Per-person feeds make `@me` an ACCESS boundary rather than a display filter —
+the one thing on this page that fails by LEAKING rather than by disappointing. Anyone picking it up
+should read *Per-person feeds — the plan* before estimating, and should treat `validateSchema`'s current
+refusal of `@me` feed sources as the thing being deliberately replaced, narrowed rather than deleted.
 
 The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
 schema today.
