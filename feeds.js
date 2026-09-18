@@ -165,7 +165,7 @@
     if (!defs[ownerCol]) errors.push(at + '`feedSubscribers` table "' + cfg.table + '" has no "' + ownerCol + '" column — a subscription has to be owner-stamped to be the subscriber\'s own');
     else if (typeOf(ownerCol) !== 'owner') errors.push(at + '`feedSubscribers` column "' + ownerCol + '" must be an `owner` column (it is "' + (typeOf(ownerCol) || 'text') + '") — nothing else stamps the caller or restricts the row to them');
 
-    ['langColumn', 'viewColumn', 'urlColumn'].forEach(function(k) {
+    ['langColumn', 'viewColumn', 'urlColumn', 'activeColumn'].forEach(function(k) {
       if (cfg[k] && !defs[cfg[k]]) errors.push(at + '`feedSubscribers.' + k + '` "' + cfg[k] + '" is not a column of "' + cfg.table + '"');
     });
     if (!cfg.urlColumn) errors.push(at + '`feedSubscribers` needs a `urlColumn` — the subscriber has no other way to learn their own link, and it cannot be published anywhere shared');
@@ -183,6 +183,33 @@
       });
       if (cfg.langColumn && ow.indexOf(cfg.langColumn) < 0) {
         errors.push(at + '`ownerWritable` on "' + cfg.table + '" should include "' + cfg.langColumn + '" — the language is the subscriber\'s own choice, and they cannot change it otherwise');
+      }
+      if (cfg.activeColumn && ow.indexOf(cfg.activeColumn) < 0) {
+        errors.push(at + '`ownerWritable` on "' + cfg.table + '" should include "' + cfg.activeColumn + '" — unsubscribing is the subscriber\'s own decision, and they cannot make it otherwise');
+      }
+    }
+
+    // The orphan guard, and the failure it prevents has no symptom at the moment it happens.
+    //
+    // A subscriber may delete their own self-service row (firestore.rules: the owner branch of `allow
+    // delete`). Their url column is the ONLY record of where their file lives, and they cannot blank it
+    // themselves because uploading needs full access. So an unguarded delete leaves a public file
+    // frozen on its last snapshot that nothing can ever name again to revoke — "unsubscribed" reading
+    // as success while the calendar stays online for good.
+    //
+    // `ownerWritableWhile` is the existing primitive that closes it: gating on the active column
+    // freezes the row the moment they unsubscribe, and `ownerStateOk` governs their DELETE as well as
+    // their edits, so the tombstone survives for the publisher to act on.
+    if (cfg.urlColumn) {
+      if (!cfg.activeColumn) {
+        errors.push(at + '`feedSubscribers` needs an `activeColumn` — unsubscribing has to be a state the publisher can see and act on, because deleting the row destroys the only record of the file\'s path and leaves it public for ever');
+      } else {
+        var owWhile = t.ownerWritableWhile;
+        if (!owWhile || typeof owWhile !== 'object') {
+          errors.push(at + '`feedSubscribers` table "' + cfg.table + '" declares no `ownerWritableWhile`, so a subscriber may delete their own row — which strands their published file with nothing left that knows its path');
+        } else if (!(cfg.activeColumn in owWhile)) {
+          errors.push(at + '`ownerWritableWhile` on "' + cfg.table + '" must gate on "' + cfg.activeColumn + '" — that is what freezes the row once someone unsubscribes, so the publisher can still blank their file');
+        }
       }
     }
     return errors;
@@ -219,6 +246,12 @@
       seen[owner] = 1;
       out.push({
         owner: owner,
+        // Unsubscribing is a STATE CHANGE, not a deletion, and this flag is it. A subscriber cannot
+        // blank their own file (uploading needs full access) and the row is the only record of the
+        // file's path -- so deleting the row would strand a public file nothing can ever name again.
+        // An inactive subscriber is therefore still listed here, because the publisher has work to do
+        // for them: blank the file, then clear the url.
+        active: !cfg.activeColumn || isActive(r[cfg.activeColumn]),
         // Blank, or a language the database no longer declares, falls back to the CALENDAR's language
         // -- resolved by the caller, which is the only layer that knows what a database declares. Never
         // to the session's, which is the rule publishFeed already follows so a subscriber's file does
@@ -229,6 +262,21 @@
       });
     });
     return out.sort(function(a, b) { return a.owner < b.owner ? -1 : a.owner > b.owner ? 1 : 0; });
+  }
+
+  // What counts as still subscribed. Anything not recognisably a "no" is a yes, because the failure
+  // directions are not equal: reading a yes as no stops somebody's calendar updating for a reason they
+  // cannot see, while reading a no as yes leaves one extra file that the revocation pass then blanks.
+  function isActive(v) {
+    if (v === undefined || v === null || v === '') return true;
+    var s = String(v).trim().toLowerCase();
+    return !(s === 'no' || s === 'false' || s === 'off' || s === '0' || s === 'unsubscribed' || s === 'inactive');
+  }
+
+  // Subscribers whose file is still live but who have unsubscribed — the publisher's to-do list, and
+  // the only thing standing between "I unsubscribed" and a public file nobody can reach any more.
+  function pendingRevocation(view, rows, name) {
+    return subscribersOf(view, rows, name).filter(function(s) { return !s.active && s.url; });
   }
 
   function subscriberTableOf(view) {
@@ -269,7 +317,8 @@
   }
 
   var M = { isFeed: isFeed, isPerPerson: isPerPerson, modeOf: modeOf, hasMe: hasMe, configErrors: configErrors,
-            subscribersOf: subscribersOf, subscriberTableOf: subscriberTableOf, forSubscriberTable: forSubscriberTable,
+            subscribersOf: subscribersOf, pendingRevocation: pendingRevocation, isActive: isActive,
+            subscriberTableOf: subscriberTableOf, forSubscriberTable: forSubscriberTable,
             names: names, tablesOf: tablesOf, forTable: forTable, pathFor: pathFor, newId: newId };
   if (isNode) module.exports = M;
   else root.Feeds = M;

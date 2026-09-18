@@ -738,9 +738,59 @@ never taught about. They stay apart because they are acted on differently: a sou
 every subscriber's file, a subscriber write invalidates one person's, and folding them together would
 make somebody changing their language cost a full re-render for everyone.
 
-What remains is step 4 alone: the publish loop that walks `subscribersOf`, renders through
-`_eventsCtxAs`, and uploads one blob per subscriber — plus the cap and the visible count, since this is
-the only part that scales with people rather than with access shapes.
+#### Unsubscribing, and the orphan it must not create
+
+"Unsubscribing is deleting the row" — written above, and WRONG, for a reason only visible once the URL
+was forced into the row. A subscriber may delete their own self-service row: `firestore.rules` allows
+it on the owner branch of `allow delete`. Doing so destroys the only record of where their file lives,
+and they cannot blank it themselves because uploading needs full access. The result is a public file
+frozen on its last snapshot that **nothing can ever name again** — "unsubscribed" reading as success
+while the calendar stays online for good. That is the exact failure `_blankFeedAt` exists to prevent,
+reached from the other end.
+
+So unsubscribing is a STATE the publisher can see: an `activeColumn` in `ownerWritable`, which keeps
+the decision entirely the subscriber's. `ownerWritableWhile` gating on that column freezes the row the
+moment they use it — and `ownerStateOk` governs an owner's DELETE as well as their edits, so the
+tombstone survives for the publisher to act on. Both are required by `configErrors` when a `urlColumn`
+is declared, because the failure has no symptom at the moment it happens. `pendingRevocation` is the
+resulting to-do list: unsubscribed, but the file is still live.
+
+Blank counts as subscribed. Reading a yes as no stops somebody's calendar updating for a reason they
+cannot see; reading a no as yes leaves one file the next pass blanks anyway.
+
+**Revocation is therefore not instant**, and that belongs next to the button rather than in a help
+page: the file dies when a full-access client next runs a pass, not when the subscriber presses
+unsubscribe.
+
+#### Orphans: the ones prevented, and the ones that need sweeping
+
+The guard above closes the orphan a SUBSCRIBER can make. Four others remain, and they share a shape —
+the blob store is the truth about what exists, and the rows are only a derived record of it, so
+anything that updates one without the other strands a file:
+
+- an **admin** deleting a subscriber row (admins bypass `ownerStateOk`);
+- an upload that succeeds while the row write fails — the blob exists and nothing records it;
+- a failed blank during `regenerateFeed`, which leaves the old file live while the row points at the new;
+- `feed` turned off, or the view renamed, with rows still holding URLs.
+
+Perfect bookkeeping will not fix these, because each is a partial failure of the bookkeeping itself.
+**The structural answer is to reconcile rather than to remember**: list the `feeds/` prefix, compare
+against the paths the rows and folder config account for, and blank anything unexpected. That turns the
+requirement from "never lose a record" into "notice later", which is achievable.
+
+It needs one addition to the backend contract — a `listFiles(prefix)` beside `uploadFile`; Supabase
+Storage has `list` and Firebase Storage `listAll`, so it is thin on both. Nothing needs DELETE: an
+orphan that has been blanked is an empty calendar, which is harmless, and blanking is idempotent, so a
+sweep may run over the same file repeatedly without needing to be sure. That is what makes the sweep
+safe to write before it is possible to be certain which files are live.
+
+Not built. It is the right shape for a periodic admin action rather than a write-triggered one, and it
+should be entered with step 4 rather than before it, since the loop is what starts producing files in
+quantity.
+
+What remains is step 4: the publish loop that walks `subscribersOf`, renders through `_eventsCtxAs`,
+uploads one blob per subscriber, and blanks `pendingRevocation` — plus the cap and the visible count,
+since this is the only part that scales with people rather than with access shapes.
 
 Not scheduled. Steps 1, 2 and 4 are ordinary work; step 3 is a security boundary being asked to hold
 weight it was not designed for, and it should be entered deliberately or not at all.

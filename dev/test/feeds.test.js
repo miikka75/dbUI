@@ -205,9 +205,10 @@ describe('feeds.js — a SHARED feed refuses @me', () => {
 describe('feeds.js — a PER-PERSON feed requires @me on every source', () => {
   // A per-person feed also needs somewhere to read subscribers from; that half is its own suite
   // below, so these views carry a valid one and vary only the filtering.
-  const SCHEMA = { subs: { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text' }, ownerWritable: ['lang'] },
+  const SCHEMA = { subs: { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', active: 'text' },
+                           ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } },
                    a: { columns: {} }, b: { columns: {} }, events: { columns: {} }, trips: { columns: {} }, salaries: { columns: {} } };
-  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url' };
+  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', activeColumn: 'active' };
   const errs = (views, name) => Feeds.configErrors(views, name, views[name], SCHEMA);
 
   it('accepts one where every source is filtered', () => {
@@ -278,10 +279,11 @@ describe('feeds.js — a PER-PERSON feed requires @me on every source', () => {
 // publisher will never blank, so the link outlives every revocation the feature offers.
 describe('feeds.js — the subscriber list', () => {
   const SCHEMA = {
-    subs: { columns: { owner: { type: 'owner' }, feed: 'text', lang: 'text', url: 'text' }, ownerWritable: ['lang', 'feed'] },
+    subs: { columns: { owner: { type: 'owner' }, feed: 'text', lang: 'text', url: 'text', active: 'text' },
+            ownerWritable: ['lang', 'feed', 'active'], ownerWritableWhile: { active: 'yes' } },
     events: { columns: {} }
   };
-  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url' };
+  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', activeColumn: 'active' };
   const view = (extra) => Object.assign({
     calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
     feed: 'per-person', feedSubscribers: SUBS
@@ -334,9 +336,10 @@ describe('feeds.js — the subscriber list', () => {
 });
 
 describe('feeds.js — the subscriber table has to be able to hold a secret', () => {
-  const base = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text' }, ownerWritable: ['lang'] };
+  const base = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', active: 'text' },
+                 ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } };
   const view = { calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
-                 feed: 'per-person', feedSubscribers: { table: 'subs', langColumn: 'lang', urlColumn: 'url' } };
+                 feed: 'per-person', feedSubscribers: { table: 'subs', langColumn: 'lang', urlColumn: 'url', activeColumn: 'active' } };
   const errs = (schema, v) => Feeds.configErrors({ x: v || view }, 'x', v || view, schema);
   const withSubs = (o) => ({ events: { columns: {} }, subs: Object.assign({}, base, o) });
 
@@ -381,12 +384,103 @@ describe('feeds.js — the subscriber table has to be able to hold a secret', ()
   });
 
   it('refuses a urlColumn that is not a column', () => {
-    const v = Object.assign({}, view, { feedSubscribers: { table: 'subs', urlColumn: 'nope' } });
+    const v = Object.assign({}, view, { feedSubscribers: { table: 'subs', urlColumn: 'nope', activeColumn: 'active' } });
     assert.match(errs(withSubs({}), v).join('\n'), /`feedSubscribers.urlColumn` "nope" is not a column/);
   });
 
   it('refuses a missing urlColumn — the subscriber could not learn their link', () => {
     const v = Object.assign({}, view, { feedSubscribers: { table: 'subs' } });
     assert.match(errs(withSubs({}), v).join('\n'), /needs a `urlColumn`/);
+  });
+});
+
+// --- unsubscribing, and the orphan it must not create ------------------------------------------
+//
+// A subscriber may delete their own self-service row. Their url column is the ONLY record of where
+// their file lives, and they cannot blank it themselves (uploading needs full access) — so a plain
+// delete leaves a public file frozen on its last snapshot that nothing can ever name again. These
+// assert the two halves that prevent it: unsubscribing is a STATE the publisher can see, and the
+// schema has to freeze the row so the tombstone survives.
+describe('feeds.js — unsubscribing is a state, not a deletion', () => {
+  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', activeColumn: 'active' };
+  const view = { calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
+                 feed: 'per-person', feedSubscribers: SUBS };
+
+  it('an inactive subscriber is still LISTED, because the publisher owes them a blank file', () => {
+    const rows = [{ owner: 'a@x.test', url: 'https://s/a.ics', active: 'no' }];
+    const subs = Feeds.subscribersOf(view, rows, 'x');
+    assert.equal(subs.length, 1);
+    assert.equal(subs[0].active, false);
+  });
+
+  it('pendingRevocation is the publisher\'s to-do list', () => {
+    const rows = [
+      { owner: 'a@x.test', url: 'https://s/a.ics', active: 'no' },   // unsubscribed, file still live
+      { owner: 'b@x.test', url: 'https://s/b.ics', active: 'yes' },  // still subscribed
+      { owner: 'c@x.test', url: '', active: 'no' }                   // already blanked and cleared
+    ];
+    assert.deepEqual(Feeds.pendingRevocation(view, rows, 'x').map((s) => s.owner), ['a@x.test']);
+  });
+
+  // Absent/blank means subscribed: reading a yes as no stops a calendar updating for a reason nobody
+  // can see, while reading a no as yes leaves one file the next revocation pass blanks anyway.
+  it('an absent or blank flag counts as subscribed', () => {
+    [undefined, null, '', 'yes', 'true', 'anything'].forEach((v) => {
+      assert.equal(Feeds.isActive(v), true, JSON.stringify(v));
+    });
+  });
+
+  it('the recognised spellings of "no" all count as unsubscribed', () => {
+    ['no', 'No', ' FALSE ', 'off', '0', 'unsubscribed', 'inactive'].forEach((v) => {
+      assert.equal(Feeds.isActive(v), false, JSON.stringify(v));
+    });
+  });
+
+  it('with no activeColumn configured, everyone is subscribed', () => {
+    const v = { calendar: view.calendar, feed: 'per-person',
+                feedSubscribers: { table: 'subs', urlColumn: 'url' } };
+    assert.equal(Feeds.subscribersOf(v, [{ owner: 'a@x.test', active: 'no' }], 'x')[0].active, true);
+  });
+});
+
+describe('feeds.js — the schema must freeze a row that unsubscribed', () => {
+  const cols = { owner: { type: 'owner' }, lang: 'text', url: 'text', active: 'text' };
+  const view = (subs) => ({ calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
+                            feed: 'per-person', feedSubscribers: subs });
+  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', activeColumn: 'active' };
+  const errs = (tbl, subs) => Feeds.configErrors({ x: view(subs || SUBS) }, 'x', view(subs || SUBS),
+                                                 { events: { columns: {} }, subs: tbl });
+
+  const good = { columns: cols, ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } };
+
+  it('accepts a table that freezes on the active column', () => {
+    assert.deepEqual(errs(good), []);
+  });
+
+  it('refuses a url column with no activeColumn to unsubscribe through', () => {
+    const subs = { table: 'subs', langColumn: 'lang', urlColumn: 'url' };
+    assert.match(errs(good, subs).join('\n'), /needs an `activeColumn`/);
+  });
+
+  // The orphan: without the freeze, the subscriber deletes the row and the file outlives every
+  // revocation the feature has.
+  it('refuses a table with no ownerWritableWhile at all', () => {
+    const t = { columns: cols, ownerWritable: ['lang', 'active'] };
+    assert.match(errs(t).join('\n'), /strands their published file/);
+  });
+
+  it('refuses an ownerWritableWhile that gates on the wrong column', () => {
+    const t = { columns: cols, ownerWritable: ['lang', 'active'], ownerWritableWhile: { lang: 'fi' } };
+    assert.match(errs(t).join('\n'), /must gate on "active"/);
+  });
+
+  it('refuses an active column the subscriber may not write', () => {
+    const t = { columns: cols, ownerWritable: ['lang'], ownerWritableWhile: { active: 'yes' } };
+    assert.match(errs(t).join('\n'), /should include "active"/);
+  });
+
+  it('refuses an activeColumn that is not a column', () => {
+    const subs = { table: 'subs', urlColumn: 'url', activeColumn: 'nope' };
+    assert.match(errs(good, subs).join('\n'), /`feedSubscribers.activeColumn` "nope" is not a column/);
   });
 });

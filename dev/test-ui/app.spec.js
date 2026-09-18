@@ -3587,9 +3587,9 @@ test.describe('v3 @both partition toggle in an embed', () => {
                               { table: 'tasks', dateColumn: 'date' }] } };
       // A per-person feed also needs somewhere to read subscribers from, and that table has to be able
       // to hold a secret: the subscriber writes their language, the publisher writes their URL.
-      window.SCHEMA.feed_subs = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text' },
-                                  ownerWritable: ['lang'] };
-      const SUBS = { table: 'feed_subs', langColumn: 'lang', urlColumn: 'url' };
+      window.SCHEMA.feed_subs = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', active: 'text' },
+                                  ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } };
+      const SUBS = { table: 'feed_subs', langColumn: 'lang', urlColumn: 'url', activeColumn: 'active' };
       window.VIEWS.fd_pp_ok = { name: 'fd_pp_ok', feed: 'per-person', feedSubscribers: SUBS,
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
       // No subscriber table at all: nobody to render for, and nothing would publish.
@@ -3597,15 +3597,21 @@ test.describe('v3 @both partition toggle in an embed', () => {
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
       // The one that cannot be recovered from: a subscriber who may write their own url column can
       // point it somewhere revocation never blanks.
-      window.SCHEMA.feed_subs_open = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text' },
-                                       ownerWritable: ['lang', 'url'] };
+      window.SCHEMA.feed_subs_open = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', active: 'text' },
+                                       ownerWritable: ['lang', 'active', 'url'], ownerWritableWhile: { active: 'yes' } };
       window.VIEWS.fd_pp_open = { name: 'fd_pp_open', feed: 'per-person',
-        feedSubscribers: { table: 'feed_subs_open', langColumn: 'lang', urlColumn: 'url' },
+        feedSubscribers: { table: 'feed_subs_open', langColumn: 'lang', urlColumn: 'url', activeColumn: 'active' },
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
+      // No freeze: the subscriber could delete the row and strand their file for good.
+      window.SCHEMA.feed_subs_nofreeze = { columns: { owner: { type: 'owner' }, url: 'text', active: 'text' },
+                                           ownerWritable: ['active'] };
+      window.VIEWS.fd_pp_nofreeze = { name: 'fd_pp_nofreeze', feed: 'per-person',
+        feedSubscribers: { table: 'feed_subs_nofreeze', urlColumn: 'url', activeColumn: 'active' },
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
       window.VIEWS.fd_typo = { name: 'fd_typo', feed: 'per-pesron', calendar: { source: 'tasks', dateColumn: 'date' } };
       return { nocal: errs('fd_nocal'), mine: errs('fd_mine'), me: errs('fd_me'), ok: errs('fd_ok'),
                ppBad: errs('fd_pp_bad'), ppOk: errs('fd_pp_ok'), typo: errs('fd_typo'),
-               ppNoSubs: errs('fd_pp_nosubs'), ppOpen: errs('fd_pp_open'),
+               ppNoSubs: errs('fd_pp_nosubs'), ppOpen: errs('fd_pp_open'), ppNoFreeze: errs('fd_pp_nofreeze'),
                subTrigger: window.Feeds.forSubscriberTable(window.VIEWS, 'feed_subs'),
                srcTrigger: window.Feeds.forTable(window.VIEWS, 'feed_subs'),
                typoPublishes: window.Feeds.isFeed(window.VIEWS.fd_typo) };
@@ -3618,6 +3624,7 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.ppOk).toBe('');
     expect(r.ppNoSubs).toContain('nobody to render for');
     expect(r.ppOpen).toContain('must not include "url"');
+    expect(r.ppNoFreeze).toContain('strands their published file');
     // A subscriber-table write must reach the feed, though it is not a source of any calendar.
     expect(r.subTrigger).toContain('fd_pp_ok');
     expect(r.srcTrigger).toEqual([]);
