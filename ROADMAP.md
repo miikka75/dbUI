@@ -557,17 +557,20 @@ Cost: a pure function (schema + what the database holds -> an inventory), Node-t
 deletes reuse writes that already exist. No engine module, no view kind. The same panel is the natural
 home for the example-drift notice Settings already shows.
 
-### A subscribable calendar feed *(shared-content feeds landed in #174; PER-PERSON feeds are what remain)*
+### A subscribable calendar feed *(shared feeds landed in #174; the per-person ENGINE has since landed too — its UI and the orphan sweep are what remain)*
 
 A URL a calendar client can subscribe to, so an edit reaches a phone without anyone re-exporting. The
 `.ics` export shipped first; the shared-content feed shipped after it, in #174.
 
-**What is left is the per-person half, and only that.** A calendar whose rows are the same for every
-reader is done and in use. A calendar filtered on `@me` — "my duties" — is still refused outright by
-`validateSchema`, and the sections below are the design for lifting that refusal. Read *Per-person
-feeds — the plan* for the shape and *What landed* for what the build already settled; the four-way
-delivery table is kept because it records what was considered, but it no longer describes a choice
-anyone has to make.
+**What is left is no longer the per-person half — that engine is built.** A calendar whose rows are
+the same for every reader shipped first; a calendar filtered on `@me` now has its guard, its
+render-as-somebody-else path, its subscriber list and its publish loop, each recorded in the sections
+below beside the reasoning that produced it. `validateSchema` no longer refuses `@me` outright: it
+refuses it on a SHARED feed and requires it on every source of a per-person one.
+
+What remains is **the UI and the orphan sweep**, and the UI gap is the one that decides whether anybody
+can use this yet — see *What is not built* at the end of this entry. The four-way delivery table is
+kept because it records what was considered, but it no longer describes a choice anyone has to make.
 
 The earlier version of this entry priced the feed as the expensive half of a pair. Most of that price
 turned out to be an assumption rather than a cost.
@@ -822,8 +825,30 @@ That pass writes each subscriber's id and url back into their row, which is itse
 subscriber table — so `_publishingFeeds` guards against the pass re-arming on its own output, which
 would otherwise republish for ever.
 
-What remains is the orphan sweep above, and the UI: a subscribe button, the language picker, and the
-subscriber's own link. The engine is done.
+#### What is NOT built, stated plainly
+
+The engine is complete and tested; the feature is not usable as a product yet, and the gap is entirely
+in the UI. Recorded here rather than left to be discovered, because "the engine is done" reads as
+"finished" to anybody who did not build it.
+
+- **Nothing in Settings knows about per-person.** The feeds panel reads `feedUrlFor`, which is
+  `appConfig.feeds[name].url` — the SHARED feed's single URL. A per-person feed never writes that, so it
+  shows an empty link beside a publish button that does work. The panel needs a per-person branch:
+  subscriber count, what the last pass did, and the fact that there is no one URL to show.
+- **A database-defined calendar cannot be made per-person.** `calDraft.feed` is a `v-switch`, so the
+  editor can only say published-or-not. Turning it into a three-way choice also means the editor must
+  then ask for the subscriber table, which is the first place that UI would have to name a table and a
+  column — the same problem the Lookup editor already solved, and worth borrowing from rather than
+  inventing.
+- **There is no subscribe button, language picker, or "your link" anywhere.** A subscriber can only
+  reach their row through the ordinary grid, if their nav happens to include the subscriber table. That
+  works — the row is owner-stamped and self-service, so the access model needs nothing — but "add a row
+  to a table" is not a subscribe button, and the language column is a text cell rather than a picker
+  over the languages this database declares.
+- **The orphan sweep** (above): `listFiles(prefix)` plus blanking what nothing accounts for.
+
+Nothing here is blocked. Each is ordinary UI work over an engine that already holds its invariants,
+which is the right order for a feature whose failures are silent.
 
 Not scheduled. Steps 1, 2 and 4 are ordinary work; step 3 is a security boundary being asked to hold
 weight it was not designed for, and it should be entered deliberately or not at all.
@@ -1625,12 +1650,11 @@ the state of the repo. **It is a record of reasoning, not an inventory**, and an
 section is the one failure mode it has: a stale proposal reads exactly like a live one. The heading
 convention at the top of this file exists for precisely that, and is now applied to the feed.
 
-**What remains of the feed is the per-person half, and it is genuinely unbuilt.** It is not ranked in
-the line above, because it is not the same kind of work as the features in it. Shared-content feeds were
-pre-render, upload, serve. Per-person feeds make `@me` an ACCESS boundary rather than a display filter —
-the one thing on this page that fails by LEAKING rather than by disappointing. Anyone picking it up
-should read *Per-person feeds — the plan* before estimating, and should treat `validateSchema`'s current
-refusal of `@me` feed sources as the thing being deliberately replaced, narrowed rather than deleted.
+**The per-person feed's ENGINE has since been built** — guard, render-as, subscriber list, publish
+loop — so what was "genuinely unbuilt" when this paragraph was first written is now the UI and the
+orphan sweep. Both are ranked inside the feed's own entry rather than here, because neither is a
+feature anyone would choose between: one finishes something half-delivered, the other cleans up after
+it.
 
 The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
 schema today.
