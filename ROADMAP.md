@@ -693,6 +693,29 @@ Three things the build settled that the plan above had not.
 - **It belongs to feeds.js, not to validateSchema** — the division `Scan.configErrors` already set, and
   what makes this a Node-tested property rather than an error string only a browser executes.
 
+**Step 2 landed with it: rendering as somebody else.** `ListUsers.valuesForEmail` inverts the admin link
+map for one account — the general form of the self-scoped `myListValues` — and `_eventsCtxAs(identity)`
+swaps the two identity-dependent ctx functions, leaving everything else shared so it cannot drift from
+what the app draws on screen. `resolveMeTokens` and `mineOnlySlot` were refactored onto one identity
+rule (`_listValueOf`) rather than copied, because a copy that drifted would filter one person's calendar
+by another person's name and still render something plausible.
+
+**The trap was `mineOnly`, and it was not in the plan.** `mineOnlySlot` returns `null` — meaning the
+WHOLE matrix — when the caller is a full-access client, which is correct on screen and catastrophic in
+a file. A per-person feed is rendered BY a full-access client FOR somebody else, so deferring to that
+rule would have drawn every slot's duties into every subscriber's file: the admin's own view of the
+rotation, mailed to each of them under their own name. `_mineOnlySlotOf` therefore has no admin branch
+at all. This is the second instance of the entry's own warning — a display-time convenience that
+inverts its meaning once the renderer is not the audience — and the first was `view.filter` not
+reaching a calendar's rows. Both were found by reading the render path rather than the config.
+
+`canReachTable` is deliberately NOT narrowed. The publisher reaches everything, and what makes a
+per-person file that person's own is `@me` alone — held by the static guard above, which refuses a
+per-person feed unless every source carries `@me` and every rotation overlay is `mineOnly`. Narrowing
+at render time as well would be a second, weaker copy of a rule that already holds.
+
+What remains is steps 1 and 4: the subscriber list as rows, and the N-blob publish loop.
+
 Not scheduled. Steps 1, 2 and 4 are ordinary work; step 3 is a security boundary being asked to hold
 weight it was not designed for, and it should be entered deliberately or not at all.
 

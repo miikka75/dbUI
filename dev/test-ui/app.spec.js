@@ -3603,6 +3603,60 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.typoPublishes).toBe(false);
   });
 
+  // Rendering a calendar AS somebody else — the per-person feed's rendering path. The failure this
+  // guards is not a broken calendar but a plausible one containing the wrong person's rows, so every
+  // assertion here is about narrowing: does an identity that cannot be resolved come back EMPTY, and
+  // does a full-access publisher stop seeing the whole matrix when it renders for someone else.
+  test('a calendar renders as another person, and as nobody when the identity is unknown', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true; app.userAllowedTables = null;   // a full-access publisher
+      // A userlink list, so `@me` resolves through the curated value rather than a profile name.
+      app.schemaData = Object.assign({}, app.schemaData || {}, {
+        listSources: Object.assign({}, (app.schemaData || {}).listSources || {}, { assigned_to: 'userlink' })
+      });
+      app.listUserLinks = { assigned_to: { 'Anna': 'anna@x.test', 'Ben': 'ben@x.test' } };
+
+      window.VIEWS.pp_cal = { name: 'pp_cal', feed: 'per-person', calendar: {
+        sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'], filter: { assigned_to: '@me' } }] } };
+      app.dataCache['tasks'] = [
+        { id: 'a', date: '2026-07-08', title: 'Anna task', assigned_to: 'Anna' },
+        { id: 'b', date: '2026-07-09', title: 'Ben task', assigned_to: 'Ben' }
+      ];
+      const win = { from: '2026-07-01', toExclusive: '2026-08-01' };
+      const titles = (ev) => Object.keys(ev || {}).sort()
+        .reduce((acc, d) => acc.concat((ev[d] || []).map((e) => e.title)), []);
+
+      const anna = app.identityFor('anna@x.test');
+      const ghost = app.identityFor('nobody@x.test');
+      return {
+        annaValues: anna.listValues,
+        ghostValues: ghost.listValues,
+        annaTitles: titles(app.calEventsAsFor('pp_cal', win, anna)),
+        benTitles: titles(app.calEventsAsFor('pp_cal', win, app.identityFor('ben@x.test'))),
+        ghostTitles: titles(app.calEventsAsFor('pp_cal', win, ghost)),
+        // The landmine: mineOnlySlot returns null (the WHOLE matrix) for a full-access client, which is
+        // right on screen and catastrophic in a file rendered for somebody else.
+        adminSeesWholeMatrix: app.mineOnlySlot({ mineOnly: { list: 'assigned_to' } }),
+        asAnnaSlot: app._mineOnlySlotOf(anna, { mineOnly: { list: 'assigned_to' } }),
+        asGhostSlot: app._mineOnlySlotOf(ghost, { mineOnly: { list: 'assigned_to' } }),
+        // The signed-in path must still work after being refactored onto the shared rule.
+        myListStillWorks: typeof app.meValueForList('assigned_to')
+      };
+    });
+    expect(r.annaValues).toEqual({ assigned_to: 'Anna' });
+    expect(r.annaTitles).toEqual(['Anna task']);
+    expect(r.benTitles).toEqual(['Ben task']);
+    // The one that matters: an unresolvable subscriber gets an empty calendar, never an unfiltered one.
+    expect(r.ghostValues).toEqual({});
+    expect(r.ghostTitles).toEqual([]);
+    expect(r.adminSeesWholeMatrix).toBe(null);
+    expect(r.asAnnaSlot).toBe('anna');
+    expect(r.asGhostSlot).toBe('');
+    expect(r.myListStillWorks).toBe('string');
+  });
+
   test('validateSchema names a timeline pointed at the wrong columns', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(() => {

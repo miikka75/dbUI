@@ -1609,6 +1609,26 @@ function createVueApp() {
       // Fail-closed per source: a table the user cannot read contributes nothing. When `window` is
       // given, rotationSources' generated duties are added (bounded to that window).
       calEventsFor: function(name, window) { return Events.build(name, window, this._eventsCtx()); },
+      // The same ctx, rendering as SOMEBODY ELSE — the per-person feed's whole rendering path. Only the
+      // two identity-dependent functions are swapped; everything else is shared, so this cannot drift
+      // from what the app itself draws.
+      //
+      // `canReachTable` is deliberately NOT narrowed, and that is a boundary worth stating rather than
+      // leaving to be inferred. The publisher is a full-access client, so it reaches everything, and the
+      // narrowing that makes a per-person file that person's own is `@me` alone. The guard that makes
+      // that safe is static, not dynamic: `Feeds.configErrors` refuses a per-person feed unless EVERY
+      // source carries an `@me` filter and every rotation overlay is `mineOnly`. So the invariant is
+      // "there is no unfiltered source to reach", enforced where a schema is loaded — narrowing here as
+      // well would be a second, weaker copy of a rule that already holds.
+      _eventsCtxAs: function(identity) {
+        var self = this, ctx = this._eventsCtx();
+        ctx.resolveMeTokens = function(f) { return self.resolveMeTokensAs(identity, f); };
+        ctx.rotation = Object.assign({}, ctx.rotation, {
+          mineOnlySlot: function(v) { return self._mineOnlySlotOf(identity, v); }
+        });
+        return ctx;
+      },
+      calEventsAsFor: function(name, window, identity) { return Events.build(name, window, this._eventsCtxAs(identity)); },
       // --- Calendars defined in the DATABASE ----------------------------------------------------
       // A calendar is a saved question over tables that already exist, so it does not have to be part of
       // the schema document. These live in the FOLDER CONFIG -- which already holds per-view runtime
@@ -4496,11 +4516,24 @@ function createVueApp() {
         var mo = view && view.mineOnly;
         if (!mo) return null;
         if (!this.userAllowedTables) return null;   // admin / unrestricted -> whole matrix
+        return this._mineOnlySlotOf(this._myIdentity(), view);
+      },
+      // `mineOnly` narrowed to an ARBITRARY identity, with NO admin escape hatch — and that difference
+      // is the whole reason this is a separate function rather than a parameter on the one above.
+      //
+      // `mineOnlySlot` returns null for a full-access client on purpose: on screen, an admin looking at
+      // a rotation wants the whole matrix. A per-person feed is rendered BY a full-access client FOR
+      // somebody else, so deferring to that rule would draw every slot's duties into every subscriber's
+      // file — the admin's own view of the matrix, mailed to each of them under their own name. The
+      // caller is not the audience here, so the admin branch must not be reachable.
+      _mineOnlySlotOf: function(identity, view) {
+        var mo = view && view.mineOnly;
+        if (!mo) return null;
         // `true` resolves identity through the profile display name; `{ list: "<name>" }` through that
         // list's userlink mapping. The list form is an OBJECT, not a bare string, so it cannot be read
         // as the column array `obscureNames` takes right beside it in the same view config.
         var list = (mo && typeof mo === 'object') ? mo.list : null;
-        return String(this.meValueForList(list) || '').toLowerCase();
+        return String(this._listValueOf(identity, list) || '').toLowerCase();
       },
       // Save the rotateEvery override. opts = { every: n, cycle: bool } -> composed into a summed
       // array (n>0 contributes a per-period swap, cycle contributes the per-cycle swap). opts === null
@@ -5112,17 +5145,51 @@ function createVueApp() {
       // column to ask about (a rotation view's slots are column NAMES, not cells). meValueFor is the
       // column-shaped wrapper.
       meValueForList: function(list) {
-        if (list && this.isUserLinkList(list)) return (this.myListValues || {})[list] || '';
-        return this.myDisplayName;
+        return this._listValueOf(this._myIdentity(), list);
+      },
+      // An IDENTITY is the pair `@me` resolves through: the account's per-list values, and its display
+      // name for lists that are not userlink-backed. `myListValues` is this for the signed-in user; a
+      // per-person feed needs the same thing for somebody else, and the rule for choosing between the
+      // two branches must not exist twice — a copy that drifted would filter one person's calendar by
+      // another person's name and still render something plausible.
+      _myIdentity: function() {
+        return { email: (this.userEmail || ''), listValues: this.myListValues || {}, displayName: this.myDisplayName };
+      },
+      // The identity of an arbitrary account, for rendering a feed as that subscriber. Admin-only data
+      // (`listUserLinks`), which is why only a full-access client publishes.
+      //
+      // An unresolvable email yields empty values and an empty name, which `_listValueOf` turns into ''
+      // and resolveMeTokens turns into the match-nothing sentinel. That chain is the load-bearing one:
+      // it is what makes an unknown subscriber render an EMPTY calendar instead of an unfiltered one.
+      identityFor: function(email) {
+        var e = String(email || '').trim().toLowerCase();
+        return { email: e, listValues: ListUsers.valuesForEmail(this.listUserLinks, e), displayName: this.profileName(e) };
+      },
+      _listValueOf: function(identity, list) {
+        if (list && this.isUserLinkList(list)) return ((identity && identity.listValues) || {})[list] || '';
+        return (identity && identity.displayName) || '';
       },
       // Resolve the "@me" filter token. An empty identity -> a sentinel that matches nothing (the user has
       // no assigned identity yet). Display-only client filter -- it never widens server-enforced access.
       resolveMeTokens: function(filter) {
-        if (filter == null) return filter;
         var self = this;
+        return this._resolveMeWith(filter, function(col) { return self.meValueFor(col); });
+      },
+      // The same walk against an ARBITRARY identity — what a per-person feed renders through. The
+      // sentinel is applied inside the walk rather than by the caller, so every path that resolves
+      // `@me` fails identically: no identity yields a token nothing matches, never a token that is
+      // quietly dropped (which would widen the filter to everybody).
+      resolveMeTokensAs: function(identity, filter) {
+        var self = this;
+        return this._resolveMeWith(filter, function(col) {
+          return self._listValueOf(identity, col ? getColumnList(null, col) : null);
+        });
+      },
+      _resolveMeWith: function(filter, valueForCol) {
+        if (filter == null) return filter;
         // `key` is the column the token sits under, so a userlink list resolves through its own mapping.
         var walk = function(v, key) {
-          if (v === '@me') return self.meValueFor(key) || '\u0000__no_me__';
+          if (v === '@me') return valueForCol(key) || '\u0000__no_me__';
           if (Array.isArray(v)) return v.map(function(x) { return walk(x, key); });
           if (v && typeof v === 'object') {
             var o = {};

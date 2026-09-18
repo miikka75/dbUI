@@ -104,8 +104,40 @@
     return (entry && typeof entry === 'object' && entry.name) || '';
   }
 
+  // The link map INVERTED for one account: { listName: theValueThisAccountIs }. This is the general
+  // form of the app's self-scoped `myListValues` — the same question asked about somebody else — and it
+  // is what lets a full-access client render "the calendar as this person sees it" for a per-person
+  // feed.
+  //
+  // Two properties matter more here than anywhere else this module is used, because a wrong answer is
+  // one person's calendar handed to another rather than a missing avatar.
+  //
+  // An unknown, empty or unlinked email yields {} — NOT a partial map and not a guess. The caller turns
+  // an absent value into the match-nothing sentinel, so an identity that cannot be resolved renders an
+  // EMPTY calendar rather than an unfiltered one. Every early return here is that direction.
+  //
+  // And a list linking one account to SEVERAL values resolves to the first by sorted value rather than
+  // by object order. Ambiguity is a data error either way, but the two failure modes are not equal:
+  // sorted is stable across publishes and across backends (a Firestore snapshot and a kv row list do
+  // not agree on key order), so the subscriber's file does not silently change contents depending on
+  // which copy rendered it. Taking one value narrows — rows under the other are missed — which is the
+  // safe direction.
+  function valuesForEmail(listUsers, email) {
+    var want = String(email || '').trim().toLowerCase(), out = {};
+    if (!want) return out;
+    Object.keys(listUsers || {}).forEach(function(list) {
+      var links = listUsers[list] || {};
+      var hits = Object.keys(links).filter(function(val) {
+        return String(links[val] || '').trim().toLowerCase() === want;
+      });
+      if (hits.length) out[list] = hits.sort()[0];
+    });
+    return out;
+  }
+
   var M = { buildLinkProjection: buildLinkProjection, projectLinks: projectLinks, linkDocId: linkDocId,
-            setLink: setLink, renameValue: renameValue, pictureFor: pictureFor, nameFor: nameFor };
+            setLink: setLink, renameValue: renameValue, pictureFor: pictureFor, nameFor: nameFor,
+            valuesForEmail: valuesForEmail };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else root.ListUsers = M;
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));
