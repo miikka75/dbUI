@@ -98,7 +98,7 @@
   // Why per SOURCE and not per view: events.js filters a calendar's rows through `s.filter` only
   // (rowEvents), never through `view.filter`. A view-level @me on a calendar therefore filters NOTHING,
   // so accepting one here would be accepting a guard that does not run.
-  function configErrors(views, name, view) {
+  function configErrors(views, name, view, schema) {
     var errors = [], f = view && view.feed, at = 'view "' + name + '": ';
     if (f === undefined || f === null || f === false) return errors;
     if (!view.calendar) {
@@ -140,7 +140,114 @@
       if (!rv.mineOnly) errors.push(at + '`feed: "per-person"` overlays rotation "' + rs.view +
                                     '", which is not `mineOnly` — it would draw every slot\'s duties into every subscriber\'s file');
     });
+    return errors.concat(subscriberErrors(schema, name, view));
+  }
+
+  // The subscriber table a per-person feed renders for. Checked here rather than left to the rules
+  // layer because every failure below is silent at runtime: a feed with nowhere to read subscribers
+  // publishes nothing and says nothing, and a table whose url column the owner may write hands each
+  // subscriber the ability to mint a link that revocation cannot reach.
+  function subscriberErrors(schema, name, view) {
+    var errors = [], at = 'view "' + name + '": ', cfg = view.feedSubscribers;
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) {
+      errors.push(at + '`feed: "per-person"` needs `feedSubscribers` naming the table people subscribe in — without one there is nobody to render for');
+      return errors;
+    }
+    if (!cfg.table) { errors.push(at + '`feedSubscribers` needs a `table`'); return errors; }
+    var t = (schema || {})[cfg.table];
+    if (!t) { errors.push(at + '`feedSubscribers.table` "' + cfg.table + '" is not a table'); return errors; }
+    var defs = t.columns || {};
+    var typeOf = function(c) { var d = defs[c]; return (d && typeof d === 'object') ? d.type : d; };
+
+    // The owner column is the whole access story: it is what stamps a row with its creator and what
+    // restricts reading it back to them.
+    var ownerCol = cfg.ownerColumn || 'owner';
+    if (!defs[ownerCol]) errors.push(at + '`feedSubscribers` table "' + cfg.table + '" has no "' + ownerCol + '" column — a subscription has to be owner-stamped to be the subscriber\'s own');
+    else if (typeOf(ownerCol) !== 'owner') errors.push(at + '`feedSubscribers` column "' + ownerCol + '" must be an `owner` column (it is "' + (typeOf(ownerCol) || 'text') + '") — nothing else stamps the caller or restricts the row to them');
+
+    ['langColumn', 'viewColumn', 'urlColumn'].forEach(function(k) {
+      if (cfg[k] && !defs[cfg[k]]) errors.push(at + '`feedSubscribers.' + k + '` "' + cfg[k] + '" is not a column of "' + cfg.table + '"');
+    });
+    if (!cfg.urlColumn) errors.push(at + '`feedSubscribers` needs a `urlColumn` — the subscriber has no other way to learn their own link, and it cannot be published anywhere shared');
+
+    // The half that cannot be recovered from. A table with NO `ownerWritable` is not weakly gated, it
+    // is ungated: the owner may write every column, including the one holding their own URL. Whoever
+    // can set their own url column can point it at a path the publisher will never blank, so the link
+    // outlives every revocation the feature offers.
+    var ow = t.ownerWritable;
+    if (!Array.isArray(ow)) {
+      errors.push(at + '`feedSubscribers` table "' + cfg.table + '" declares no `ownerWritable`, which is not a weak gate but no gate — the subscriber could write every column, their own URL included');
+    } else {
+      [ownerCol, cfg.urlColumn].forEach(function(c) {
+        if (c && ow.indexOf(c) >= 0) errors.push(at + '`ownerWritable` on "' + cfg.table + '" must not include "' + c + '" — a subscriber who can write it can mint a link that revoking the feed does not reach');
+      });
+      if (cfg.langColumn && ow.indexOf(cfg.langColumn) < 0) {
+        errors.push(at + '`ownerWritable` on "' + cfg.table + '" should include "' + cfg.langColumn + '" — the language is the subscriber\'s own choice, and they cannot change it otherwise');
+      }
+    }
     return errors;
+  }
+
+  // WHO a per-person feed is rendered for. Subscribing is a row the person creates for themselves in an
+  // owner-stamped table, so the list is opt-in by construction: rendering one file per USER would
+  // publish a calendar for people who never asked and never look, and would make the cost scale with
+  // headcount instead of with interest.
+  //
+  // The subscription URL lives in the ROW rather than in the folder config, and that is forced rather
+  // than chosen. Folder config is readable by everyone with view access (`_saveFolderConfig`: "local
+  // override for everyone with view access"), and a per-person URL is a bearer credential for ONE
+  // person's calendar -- putting N of them there would hand every member everyone else's. An
+  // owner-stamped row is already read-restricted to its owner, so the row is the only place that is
+  // both readable by the subscriber and unreadable by the rest.
+  //
+  // Which means the row has two halves with different writers, exactly as `chore_log` does: the
+  // subscriber owns the REQUEST (that they subscribe, and in which language), and the publisher owns
+  // the GRANT (the minted id and the URL). `configErrors` is what holds that split, since a subscriber
+  // who could write their own url column could mint a link nothing revokes.
+  function subscribersOf(view, rows, name) {
+    var cfg = (view && view.feedSubscribers) || null;
+    if (!cfg || !isPerPerson(view)) return [];
+    var ownerCol = cfg.ownerColumn || 'owner';
+    var out = [], seen = {};
+    (rows || []).forEach(function(r) {
+      if (!r) return;
+      // One table may serve several feeds; without a viewColumn it serves this one alone.
+      if (cfg.viewColumn && String(r[cfg.viewColumn] || '') !== String(name || '')) return;
+      var owner = String(r[ownerCol] || '').trim().toLowerCase();
+      if (!owner) return;              // an unstamped row has nobody to render for
+      if (seen[owner]) return;         // one file per person, whatever the rows say
+      seen[owner] = 1;
+      out.push({
+        owner: owner,
+        // Blank, or a language the database no longer declares, falls back to the CALENDAR's language
+        // -- resolved by the caller, which is the only layer that knows what a database declares. Never
+        // to the session's, which is the rule publishFeed already follows so a subscriber's file does
+        // not change language according to who edited a row last.
+        lang: cfg.langColumn ? String(r[cfg.langColumn] || '') : '',
+        url: cfg.urlColumn ? String(r[cfg.urlColumn] || '') : '',
+        row: r
+      });
+    });
+    return out.sort(function(a, b) { return a.owner < b.owner ? -1 : a.owner > b.owner ? 1 : 0; });
+  }
+
+  function subscriberTableOf(view) {
+    var cfg = (view && view.feedSubscribers) || null;
+    return (cfg && isPerPerson(view) && cfg.table) ? cfg.table : '';
+  }
+
+  // Which per-person feeds a write to the SUBSCRIBER table affects. Deliberately separate from
+  // `forTable`, which answers "whose CONTENT changed": a subscriber table is not a source of any
+  // calendar, so `forTable` returns nothing for it and a language change or a new subscription would
+  // republish nothing at all -- the stale-forever failure that function exists to prevent, arriving
+  // through a table it was never taught about.
+  //
+  // Kept apart rather than folded in because the two answers are acted on differently. A source write
+  // invalidates every subscriber's file; a subscriber write invalidates ONE person's, and folding them
+  // together would make somebody changing their language cost a full re-render for everyone.
+  function forSubscriberTable(views, tableId) {
+    if (!tableId) return [];
+    return Object.keys(views || {}).filter(function(n) { return subscriberTableOf(views[n]) === tableId; });
   }
 
   // The storage path a feed's file lives at. STABLE across republishes -- the whole point of a
@@ -162,6 +269,7 @@
   }
 
   var M = { isFeed: isFeed, isPerPerson: isPerPerson, modeOf: modeOf, hasMe: hasMe, configErrors: configErrors,
+            subscribersOf: subscribersOf, subscriberTableOf: subscriberTableOf, forSubscriberTable: forSubscriberTable,
             names: names, tablesOf: tablesOf, forTable: forTable, pathFor: pathFor, newId: newId };
   if (isNode) module.exports = M;
   else root.Feeds = M;

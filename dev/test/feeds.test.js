@@ -203,13 +203,18 @@ describe('feeds.js — a SHARED feed refuses @me', () => {
 });
 
 describe('feeds.js — a PER-PERSON feed requires @me on every source', () => {
-  const errs = (views, name) => Feeds.configErrors(views, name, views[name]);
+  // A per-person feed also needs somewhere to read subscribers from; that half is its own suite
+  // below, so these views carry a valid one and vary only the filtering.
+  const SCHEMA = { subs: { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text' }, ownerWritable: ['lang'] },
+                   a: { columns: {} }, b: { columns: {} }, events: { columns: {} }, trips: { columns: {} }, salaries: { columns: {} } };
+  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url' };
+  const errs = (views, name) => Feeds.configErrors(views, name, views[name], SCHEMA);
 
   it('accepts one where every source is filtered', () => {
     const v = { calendar: { sources: [
       { table: 'events', dateColumn: 'on', filter: { who: '@me' } },
       { table: 'trips', dateColumn: 'starts', filter: { owner: { eq: '@me' } } }
-    ] }, feed: 'per-person' };
+    ] }, feed: 'per-person', feedSubscribers: SUBS };
     assert.deepEqual(errs({ x: v }, 'x'), []);
   });
 
@@ -219,7 +224,7 @@ describe('feeds.js — a PER-PERSON feed requires @me on every source', () => {
     const v = { calendar: { sources: [
       { table: 'events', dateColumn: 'on', filter: { who: '@me' } },
       { table: 'salaries', dateColumn: 'on' }
-    ] }, feed: 'per-person' };
+    ] }, feed: 'per-person', feedSubscribers: SUBS };
     const e = errs({ x: v }, 'x');
     assert.equal(e.length, 1);
     assert.match(e[0], /source 2/);
@@ -229,20 +234,20 @@ describe('feeds.js — a PER-PERSON feed requires @me on every source', () => {
   it('names every unfiltered source rather than only the first', () => {
     const v = { calendar: { sources: [
       { table: 'a', dateColumn: 'on' }, { table: 'b', dateColumn: 'on' }
-    ] }, feed: 'per-person' };
+    ] }, feed: 'per-person', feedSubscribers: SUBS };
     assert.equal(errs({ x: v }, 'x').length, 2);
   });
 
   // A view-level filter is not applied to a calendar's rows at all (events.js rowEvents reads
   // s.filter only), so accepting one here would accept a guard that never runs.
   it('a view-level @me does not satisfy the rule, because a calendar never applies it', () => {
-    const v = { calendar: { sources: [{ table: 'events', dateColumn: 'on' }] }, filter: { who: '@me' }, feed: 'per-person' };
+    const v = { calendar: { sources: [{ table: 'events', dateColumn: 'on' }] }, filter: { who: '@me' }, feed: 'per-person', feedSubscribers: SUBS };
     assert.match(errs({ x: v }, 'x').join('\n'), /source 1/);
   });
 
   it('refuses a rotation overlay that is not mineOnly', () => {
     const views = {
-      x: { calendar: { sources: [], rotationSources: [{ view: 'matrix' }] }, feed: 'per-person' },
+      x: { calendar: { sources: [], rotationSources: [{ view: 'matrix' }] }, feed: 'per-person', feedSubscribers: SUBS },
       matrix: { rotation: { rosterRef: 'ref_chores', rosterBy: 'chore', valueCol: 'person' } }
     };
     const e = errs(views, 'x');
@@ -252,14 +257,136 @@ describe('feeds.js — a PER-PERSON feed requires @me on every source', () => {
 
   it('accepts a mineOnly rotation overlay', () => {
     const views = {
-      x: { calendar: { sources: [], rotationSources: [{ view: 'matrix' }] }, feed: 'per-person' },
+      x: { calendar: { sources: [], rotationSources: [{ view: 'matrix' }] }, feed: 'per-person', feedSubscribers: SUBS },
       matrix: { mineOnly: true, rotation: { rosterRef: 'ref_chores', rosterBy: 'chore', valueCol: 'person' } }
     };
     assert.deepEqual(errs(views, 'x'), []);
   });
 
   it('refuses a per-person feed with nothing to filter', () => {
-    const v = { calendar: { sources: [] }, feed: 'per-person' };
+    const v = { calendar: { sources: [] }, feed: 'per-person', feedSubscribers: SUBS };
     assert.match(errs({ x: v }, 'x').join('\n'), /nothing to filter/);
+  });
+});
+
+// --- who a per-person feed is rendered FOR -----------------------------------------------------
+//
+// Subscribing is a row the person creates in an owner-stamped table, so the list is opt-in by
+// construction. The guards below are about the row's two halves having different writers: the
+// subscriber owns the request (that they subscribe, in which language), the publisher owns the grant
+// (the minted URL). A subscriber who can write their own url column can point it somewhere the
+// publisher will never blank, so the link outlives every revocation the feature offers.
+describe('feeds.js — the subscriber list', () => {
+  const SCHEMA = {
+    subs: { columns: { owner: { type: 'owner' }, feed: 'text', lang: 'text', url: 'text' }, ownerWritable: ['lang', 'feed'] },
+    events: { columns: {} }
+  };
+  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url' };
+  const view = (extra) => Object.assign({
+    calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
+    feed: 'per-person', feedSubscribers: SUBS
+  }, extra || {});
+  const errs = (v, name) => Feeds.configErrors({ [name || 'x']: v }, name || 'x', v, SCHEMA);
+
+  it('lists one subscriber per owner, lowercased and sorted', () => {
+    const rows = [{ owner: 'Zoe@x.test' }, { owner: 'anna@X.test' }];
+    const subs = Feeds.subscribersOf(view(), rows, 'x');
+    assert.deepEqual(subs.map((s) => s.owner), ['anna@x.test', 'zoe@x.test']);
+  });
+
+  it('carries each subscriber\'s language and url', () => {
+    const subs = Feeds.subscribersOf(view(), [{ owner: 'a@x.test', lang: 'fi', url: 'https://s/1.ics' }], 'x');
+    assert.equal(subs[0].lang, 'fi');
+    assert.equal(subs[0].url, 'https://s/1.ics');
+  });
+
+  it('a row with no owner is nobody, and is skipped', () => {
+    assert.deepEqual(Feeds.subscribersOf(view(), [{ owner: '' }, { lang: 'fi' }], 'x'), []);
+  });
+
+  it('one file per person however many rows they have', () => {
+    const subs = Feeds.subscribersOf(view(), [{ owner: 'a@x.test' }, { owner: 'a@x.test' }], 'x');
+    assert.equal(subs.length, 1);
+  });
+
+  it('a shared feed has no subscriber list at all', () => {
+    const v = { calendar: { sources: [] }, feed: true, feedSubscribers: SUBS };
+    assert.deepEqual(Feeds.subscribersOf(v, [{ owner: 'a@x.test' }], 'x'), []);
+  });
+
+  it('viewColumn lets one table serve several feeds', () => {
+    const v = view({ feedSubscribers: Object.assign({ viewColumn: 'feed' }, SUBS) });
+    const rows = [{ owner: 'a@x.test', feed: 'x' }, { owner: 'b@x.test', feed: 'other' }];
+    assert.deepEqual(Feeds.subscribersOf(v, rows, 'x').map((s) => s.owner), ['a@x.test']);
+  });
+
+  // The narrow trigger. forTable answers "whose content changed" and returns nothing for a subscriber
+  // table, so without this a language change would republish nothing at all.
+  it('a write to the subscriber table names the feed, though forTable does not', () => {
+    const views = { x: view() };
+    assert.deepEqual(Feeds.forTable(views, 'subs'), []);
+    assert.deepEqual(Feeds.forSubscriberTable(views, 'subs'), ['x']);
+  });
+
+  it('a shared feed has no subscriber table to write to', () => {
+    assert.deepEqual(Feeds.forSubscriberTable({ x: { calendar: {}, feed: true, feedSubscribers: SUBS } }, 'subs'), []);
+  });
+});
+
+describe('feeds.js — the subscriber table has to be able to hold a secret', () => {
+  const base = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text' }, ownerWritable: ['lang'] };
+  const view = { calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
+                 feed: 'per-person', feedSubscribers: { table: 'subs', langColumn: 'lang', urlColumn: 'url' } };
+  const errs = (schema, v) => Feeds.configErrors({ x: v || view }, 'x', v || view, schema);
+  const withSubs = (o) => ({ events: { columns: {} }, subs: Object.assign({}, base, o) });
+
+  it('accepts a correctly gated table', () => {
+    assert.deepEqual(errs(withSubs({})), []);
+  });
+
+  it('refuses a per-person feed that names no subscriber table', () => {
+    const v = Object.assign({}, view); delete v.feedSubscribers;
+    assert.match(errs(withSubs({}), v).join('\n'), /nobody to render for/);
+  });
+
+  it('refuses a subscriber table that does not exist', () => {
+    assert.match(errs({ events: { columns: {} } }).join('\n'), /is not a table/);
+  });
+
+  it('refuses a table whose owner column is not an `owner` column', () => {
+    assert.match(errs(withSubs({ columns: { owner: 'text', lang: 'text', url: 'text' } })).join('\n'), /must be an `owner` column/);
+  });
+
+  it('refuses a table with no owner column at all', () => {
+    assert.match(errs(withSubs({ columns: { lang: 'text', url: 'text' } })).join('\n'), /has no "owner" column/);
+  });
+
+  // The one that cannot be recovered from: no ownerWritable is no gate, not a weak one.
+  it('refuses a table declaring no ownerWritable', () => {
+    const s = withSubs({}); delete s.subs.ownerWritable;
+    assert.match(errs(s).join('\n'), /not a weak gate but no gate/);
+  });
+
+  it('refuses a subscriber-writable url column', () => {
+    assert.match(errs(withSubs({ ownerWritable: ['lang', 'url'] })).join('\n'), /must not include "url"/);
+  });
+
+  it('refuses a subscriber-writable owner column', () => {
+    assert.match(errs(withSubs({ ownerWritable: ['lang', 'owner'] })).join('\n'), /must not include "owner"/);
+  });
+
+  // The opposite direction: a language the subscriber cannot change is a picker that does nothing.
+  it('refuses a language column the subscriber may NOT write', () => {
+    assert.match(errs(withSubs({ ownerWritable: [] })).join('\n'), /should include "lang"/);
+  });
+
+  it('refuses a urlColumn that is not a column', () => {
+    const v = Object.assign({}, view, { feedSubscribers: { table: 'subs', urlColumn: 'nope' } });
+    assert.match(errs(withSubs({}), v).join('\n'), /`feedSubscribers.urlColumn` "nope" is not a column/);
+  });
+
+  it('refuses a missing urlColumn — the subscriber could not learn their link', () => {
+    const v = Object.assign({}, view, { feedSubscribers: { table: 'subs' } });
+    assert.match(errs(withSubs({}), v).join('\n'), /needs a `urlColumn`/);
   });
 });

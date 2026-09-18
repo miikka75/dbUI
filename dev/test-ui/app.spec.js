@@ -3585,11 +3585,29 @@ test.describe('v3 @both partition toggle in an embed', () => {
       window.VIEWS.fd_pp_bad = { name: 'fd_pp_bad', feed: 'per-person',
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } },
                               { table: 'tasks', dateColumn: 'date' }] } };
-      window.VIEWS.fd_pp_ok = { name: 'fd_pp_ok', feed: 'per-person',
+      // A per-person feed also needs somewhere to read subscribers from, and that table has to be able
+      // to hold a secret: the subscriber writes their language, the publisher writes their URL.
+      window.SCHEMA.feed_subs = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text' },
+                                  ownerWritable: ['lang'] };
+      const SUBS = { table: 'feed_subs', langColumn: 'lang', urlColumn: 'url' };
+      window.VIEWS.fd_pp_ok = { name: 'fd_pp_ok', feed: 'per-person', feedSubscribers: SUBS,
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
+      // No subscriber table at all: nobody to render for, and nothing would publish.
+      window.VIEWS.fd_pp_nosubs = { name: 'fd_pp_nosubs', feed: 'per-person',
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
+      // The one that cannot be recovered from: a subscriber who may write their own url column can
+      // point it somewhere revocation never blanks.
+      window.SCHEMA.feed_subs_open = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text' },
+                                       ownerWritable: ['lang', 'url'] };
+      window.VIEWS.fd_pp_open = { name: 'fd_pp_open', feed: 'per-person',
+        feedSubscribers: { table: 'feed_subs_open', langColumn: 'lang', urlColumn: 'url' },
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
       window.VIEWS.fd_typo = { name: 'fd_typo', feed: 'per-pesron', calendar: { source: 'tasks', dateColumn: 'date' } };
       return { nocal: errs('fd_nocal'), mine: errs('fd_mine'), me: errs('fd_me'), ok: errs('fd_ok'),
                ppBad: errs('fd_pp_bad'), ppOk: errs('fd_pp_ok'), typo: errs('fd_typo'),
+               ppNoSubs: errs('fd_pp_nosubs'), ppOpen: errs('fd_pp_open'),
+               subTrigger: window.Feeds.forSubscriberTable(window.VIEWS, 'feed_subs'),
+               srcTrigger: window.Feeds.forTable(window.VIEWS, 'feed_subs'),
                typoPublishes: window.Feeds.isFeed(window.VIEWS.fd_typo) };
     });
     expect(r.nocal).toContain('is not a calendar');
@@ -3598,6 +3616,11 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.ok).toBe('');
     expect(r.ppBad).toContain('source 2');
     expect(r.ppOk).toBe('');
+    expect(r.ppNoSubs).toContain('nobody to render for');
+    expect(r.ppOpen).toContain('must not include "url"');
+    // A subscriber-table write must reach the feed, though it is not a source of any calendar.
+    expect(r.subTrigger).toContain('fd_pp_ok');
+    expect(r.srcTrigger).toEqual([]);
     // A misspelled mode must not fall back to "shared" — that would publish an unfiltered file.
     expect(r.typo).toContain('publishes nothing at all');
     expect(r.typoPublishes).toBe(false);

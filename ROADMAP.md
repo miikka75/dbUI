@@ -714,7 +714,33 @@ per-person file that person's own is `@me` alone — held by the static guard ab
 per-person feed unless every source carries `@me` and every rotation overlay is `mineOnly`. Narrowing
 at render time as well would be a second, weaker copy of a rule that already holds.
 
-What remains is steps 1 and 4: the subscriber list as rows, and the N-blob publish loop.
+**Step 1 landed too: the subscriber list.** A per-person calendar names a `feedSubscribers` table, and
+subscribing is a row the person creates in it — opt-in by construction, so N is subscribers rather than
+headcount, and unsubscribing is deleting the row.
+
+**Where the URL lives was forced, not chosen.** Folder config holds the shared feed's `{id, url, at}`,
+and the obvious move was to keep a map of them there. It cannot: `_saveFolderConfig` is a "local
+override for everyone with view access", so N per-person URLs there would hand every member everyone
+else's bearer token. An owner-stamped row is already read-restricted to its owner, which makes the row
+the only place that is both readable by the subscriber and unreadable by everyone else.
+
+That gives the row **two halves with different writers**, exactly as `chore_log` does: the subscriber
+owns the request (that they subscribe, and in which language), the publisher owns the grant (the minted
+URL). `Feeds.configErrors` holds that split, and the check that matters most is the one for a table
+declaring no `ownerWritable` at all — not a weak gate but no gate, letting a subscriber write their own
+url column and point it at a path revocation never blanks. The language column is checked in the
+opposite direction: absent from `ownerWritable` it is a picker that cannot pick.
+
+**`forSubscriberTable` is deliberately not folded into `forTable`.** A subscriber table is not a source
+of any calendar, so `forTable` returns nothing for it and a language change would have republished
+nothing — the stale-forever failure that function exists to prevent, arriving through a table it was
+never taught about. They stay apart because they are acted on differently: a source write invalidates
+every subscriber's file, a subscriber write invalidates one person's, and folding them together would
+make somebody changing their language cost a full re-render for everyone.
+
+What remains is step 4 alone: the publish loop that walks `subscribersOf`, renders through
+`_eventsCtxAs`, and uploads one blob per subscriber — plus the cap and the visible count, since this is
+the only part that scales with people rather than with access shapes.
 
 Not scheduled. Steps 1, 2 and 4 are ordinary work; step 3 is a security boundary being asked to hold
 weight it was not designed for, and it should be entered deliberately or not at all.

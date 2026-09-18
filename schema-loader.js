@@ -542,7 +542,7 @@ function validateSchema() {
     // source. That rule belongs to feeds.js for the same reason Scan.configErrors owns a scan's: the
     // module that reads a config reports what is wrong with it, and here it also makes the rule a
     // Node-tested property rather than an error string only a browser ever executes.
-    errors = errors.concat(Feeds.configErrors(VIEWS, v, view));
+    errors = errors.concat(Feeds.configErrors(VIEWS, v, view, SCHEMA));
     // A timeline is a data view plus a render config too, so its sources and filter are already checked
     // above; what is checked here is only the `timeline` object. Every one of these fails the way a
     // missing column always fails in this app -- silently, as an empty chart -- because Timeline.build
