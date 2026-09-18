@@ -165,9 +165,10 @@
     if (!defs[ownerCol]) errors.push(at + '`feedSubscribers` table "' + cfg.table + '" has no "' + ownerCol + '" column — a subscription has to be owner-stamped to be the subscriber\'s own');
     else if (typeOf(ownerCol) !== 'owner') errors.push(at + '`feedSubscribers` column "' + ownerCol + '" must be an `owner` column (it is "' + (typeOf(ownerCol) || 'text') + '") — nothing else stamps the caller or restricts the row to them');
 
-    ['langColumn', 'viewColumn', 'urlColumn', 'activeColumn'].forEach(function(k) {
+    ['langColumn', 'viewColumn', 'urlColumn', 'activeColumn', 'idColumn'].forEach(function(k) {
       if (cfg[k] && !defs[cfg[k]]) errors.push(at + '`feedSubscribers.' + k + '` "' + cfg[k] + '" is not a column of "' + cfg.table + '"');
     });
+    if (cfg.urlColumn && !cfg.idColumn) errors.push(at + '`feedSubscribers` needs an `idColumn` beside `urlColumn` — republishing writes to the PATH, and recovering one from a stored URL would mean parsing whichever shape this backend spells a public object in');
     if (!cfg.urlColumn) errors.push(at + '`feedSubscribers` needs a `urlColumn` — the subscriber has no other way to learn their own link, and it cannot be published anywhere shared');
 
     // The half that cannot be recovered from. A table with NO `ownerWritable` is not weakly gated, it
@@ -178,7 +179,7 @@
     if (!Array.isArray(ow)) {
       errors.push(at + '`feedSubscribers` table "' + cfg.table + '" declares no `ownerWritable`, which is not a weak gate but no gate — the subscriber could write every column, their own URL included');
     } else {
-      [ownerCol, cfg.urlColumn].forEach(function(c) {
+      [ownerCol, cfg.urlColumn, cfg.idColumn].forEach(function(c) {
         if (c && ow.indexOf(c) >= 0) errors.push(at + '`ownerWritable` on "' + cfg.table + '" must not include "' + c + '" — a subscriber who can write it can mint a link that revoking the feed does not reach');
       });
       if (cfg.langColumn && ow.indexOf(cfg.langColumn) < 0) {
@@ -258,6 +259,11 @@
         // not change language according to who edited a row last.
         lang: cfg.langColumn ? String(r[cfg.langColumn] || '') : '',
         url: cfg.urlColumn ? String(r[cfg.urlColumn] || '') : '',
+        // The minted id, which is the PATH. Kept beside the url rather than parsed back out of it: the
+        // url's shape is the backend's (Supabase spells a public object one way, Firebase another), so
+        // recovering a path from it would be the one piece of this feature that knows which backend it
+        // is running on. Republishing needs the path and only the path.
+        id: cfg.idColumn ? String(r[cfg.idColumn] || '') : '',
         row: r
       });
     });
@@ -276,7 +282,7 @@
   // Subscribers whose file is still live but who have unsubscribed — the publisher's to-do list, and
   // the only thing standing between "I unsubscribed" and a public file nobody can reach any more.
   function pendingRevocation(view, rows, name) {
-    return subscribersOf(view, rows, name).filter(function(s) { return !s.active && s.url; });
+    return subscribersOf(view, rows, name).filter(function(s) { return !s.active && (s.id || s.url); });
   }
 
   function subscriberTableOf(view) {

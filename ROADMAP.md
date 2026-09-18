@@ -788,9 +788,42 @@ Not built. It is the right shape for a periodic admin action rather than a write
 should be entered with step 4 rather than before it, since the loop is what starts producing files in
 quantity.
 
-What remains is step 4: the publish loop that walks `subscribersOf`, renders through `_eventsCtxAs`,
-uploads one blob per subscriber, and blanks `pendingRevocation` — plus the cap and the visible count,
-since this is the only part that scales with people rather than with access shapes.
+#### Step 4 landed: the pass, its order, and when it runs
+
+`publishPerPersonFeed` blanks whatever unsubscribed, then renders and uploads one file per remaining
+subscriber through `_eventsCtxAs`. Three decisions in it were not obvious from the plan.
+
+**Revocation runs FIRST, and unconditionally.** If the cap or a render failure stops the pass half way,
+the files that should stop serving have already stopped. The other order would make a busy pass the
+reason somebody's calendar stayed online after they left — the cost falling on exactly the person who
+asked to be removed.
+
+**The cap is visible.** `feedSubscriberCap` defaults to 100 and says how many it skipped. This is the
+only part of the feature that scales with PEOPLE rather than with access shapes, and silently rendering
+four hundred calendars because a roster grew is not something that should happen without anyone
+choosing it.
+
+**A subscriber's id is stored, not derived.** The path is `feeds/<id>.ics` and republishing needs the
+path — but recovering one from a stored URL would mean parsing whichever shape the backend spells a
+public object in, which is the one place this feature would have learned which backend it runs on. So
+`idColumn` sits beside `urlColumn`, guarded identically: both are the publisher's to write, because
+either one in a subscriber's hands is a link revocation cannot reach.
+
+**"When a full-access client next runs a pass" was too vague to ship.** Write-triggered republishing
+cannot bound revocation on its own: the person unsubscribing is not full-access, so their own write
+publishes nothing, and if nobody edits a source afterwards their file serves indefinitely. Two things
+close it. `_onWriteRepublish` now also reacts to the SUBSCRIBER table via `forSubscriberTable`, so any
+publisher present acts within the 2s debounce; and `_sweepFeedsOnBoot` runs one pass per per-person
+feed when a publisher opens the app. The worst case is therefore "until an admin next opens the app"
+rather than "until somebody happens to edit a duty" — with no schedule and nothing that has to stay
+awake, which is the property the whole feature was designed around.
+
+That pass writes each subscriber's id and url back into their row, which is itself a write to the
+subscriber table — so `_publishingFeeds` guards against the pass re-arming on its own output, which
+would otherwise republish for ever.
+
+What remains is the orphan sweep above, and the UI: a subscribe button, the language picker, and the
+subscriber's own link. The engine is done.
 
 Not scheduled. Steps 1, 2 and 4 are ordinary work; step 3 is a security boundary being asked to hold
 weight it was not designed for, and it should be entered deliberately or not at all.

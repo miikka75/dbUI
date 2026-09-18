@@ -205,10 +205,10 @@ describe('feeds.js — a SHARED feed refuses @me', () => {
 describe('feeds.js — a PER-PERSON feed requires @me on every source', () => {
   // A per-person feed also needs somewhere to read subscribers from; that half is its own suite
   // below, so these views carry a valid one and vary only the filtering.
-  const SCHEMA = { subs: { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', active: 'text' },
+  const SCHEMA = { subs: { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
                            ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } },
                    a: { columns: {} }, b: { columns: {} }, events: { columns: {} }, trips: { columns: {} }, salaries: { columns: {} } };
-  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', activeColumn: 'active' };
+  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' };
   const errs = (views, name) => Feeds.configErrors(views, name, views[name], SCHEMA);
 
   it('accepts one where every source is filtered', () => {
@@ -279,11 +279,11 @@ describe('feeds.js — a PER-PERSON feed requires @me on every source', () => {
 // publisher will never blank, so the link outlives every revocation the feature offers.
 describe('feeds.js — the subscriber list', () => {
   const SCHEMA = {
-    subs: { columns: { owner: { type: 'owner' }, feed: 'text', lang: 'text', url: 'text', active: 'text' },
+    subs: { columns: { owner: { type: 'owner' }, feed: 'text', lang: 'text', url: 'text', fid: 'text', active: 'text' },
             ownerWritable: ['lang', 'feed', 'active'], ownerWritableWhile: { active: 'yes' } },
     events: { columns: {} }
   };
-  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', activeColumn: 'active' };
+  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' };
   const view = (extra) => Object.assign({
     calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
     feed: 'per-person', feedSubscribers: SUBS
@@ -336,10 +336,10 @@ describe('feeds.js — the subscriber list', () => {
 });
 
 describe('feeds.js — the subscriber table has to be able to hold a secret', () => {
-  const base = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', active: 'text' },
+  const base = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
                  ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } };
   const view = { calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
-                 feed: 'per-person', feedSubscribers: { table: 'subs', langColumn: 'lang', urlColumn: 'url', activeColumn: 'active' } };
+                 feed: 'per-person', feedSubscribers: { table: 'subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' } };
   const errs = (schema, v) => Feeds.configErrors({ x: v || view }, 'x', v || view, schema);
   const withSubs = (o) => ({ events: { columns: {} }, subs: Object.assign({}, base, o) });
 
@@ -384,7 +384,7 @@ describe('feeds.js — the subscriber table has to be able to hold a secret', ()
   });
 
   it('refuses a urlColumn that is not a column', () => {
-    const v = Object.assign({}, view, { feedSubscribers: { table: 'subs', urlColumn: 'nope', activeColumn: 'active' } });
+    const v = Object.assign({}, view, { feedSubscribers: { table: 'subs', urlColumn: 'nope', idColumn: 'fid', activeColumn: 'active' } });
     assert.match(errs(withSubs({}), v).join('\n'), /`feedSubscribers.urlColumn` "nope" is not a column/);
   });
 
@@ -402,7 +402,7 @@ describe('feeds.js — the subscriber table has to be able to hold a secret', ()
 // assert the two halves that prevent it: unsubscribing is a STATE the publisher can see, and the
 // schema has to freeze the row so the tombstone survives.
 describe('feeds.js — unsubscribing is a state, not a deletion', () => {
-  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', activeColumn: 'active' };
+  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' };
   const view = { calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
                  feed: 'per-person', feedSubscribers: SUBS };
 
@@ -438,16 +438,16 @@ describe('feeds.js — unsubscribing is a state, not a deletion', () => {
 
   it('with no activeColumn configured, everyone is subscribed', () => {
     const v = { calendar: view.calendar, feed: 'per-person',
-                feedSubscribers: { table: 'subs', urlColumn: 'url' } };
+                feedSubscribers: { table: 'subs', urlColumn: 'url', idColumn: 'fid' } };
     assert.equal(Feeds.subscribersOf(v, [{ owner: 'a@x.test', active: 'no' }], 'x')[0].active, true);
   });
 });
 
 describe('feeds.js — the schema must freeze a row that unsubscribed', () => {
-  const cols = { owner: { type: 'owner' }, lang: 'text', url: 'text', active: 'text' };
+  const cols = { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' };
   const view = (subs) => ({ calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
                             feed: 'per-person', feedSubscribers: subs });
-  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', activeColumn: 'active' };
+  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' };
   const errs = (tbl, subs) => Feeds.configErrors({ x: view(subs || SUBS) }, 'x', view(subs || SUBS),
                                                  { events: { columns: {} }, subs: tbl });
 
@@ -480,7 +480,7 @@ describe('feeds.js — the schema must freeze a row that unsubscribed', () => {
   });
 
   it('refuses an activeColumn that is not a column', () => {
-    const subs = { table: 'subs', urlColumn: 'url', activeColumn: 'nope' };
+    const subs = { table: 'subs', urlColumn: 'url', idColumn: 'fid', activeColumn: 'nope' };
     assert.match(errs(good, subs).join('\n'), /`feedSubscribers.activeColumn` "nope" is not a column/);
   });
 });

@@ -895,7 +895,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'settings.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'settings.cal_custom', 'settings.cal_custom_note', 'msg.name_taken', 'btn.cancel', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'settings.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'settings.cal_custom', 'settings.cal_custom_note', 'msg.name_taken', 'btn.cancel', 'msg.feed_failed', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1943,12 +1943,14 @@ function createVueApp() {
       // flickers into another language. Everything translated in a calendar (list values, tab labels,
       // view names, rotation slot labels) resolves through this.strings via t/tOr, so this one swap
       // covers all of it without threading a strings map through displayValue's twenty-one call sites.
-      _renderIcs: function(name, win, strings) {
+      // `identity` renders the calendar as THAT person rather than as the signed-in user — a per-person
+      // feed's whole difference. Absent, this is the shared path and nothing changes.
+      _renderIcs: function(name, win, strings, identity) {
         var saved = this.strings;
         if (strings) this.strings = strings;
         try {
           var title = this.tOr('view.' + name, this.tOr('tab.' + name, name));
-          return Ics.build(this.calEventsFor(name, win), {
+          return Ics.build(identity ? this.calEventsAsFor(name, win, identity) : this.calEventsFor(name, win), {
             name: title,
             domain: (typeof Databases !== 'undefined' && Databases.activeKey()) || 'dbui.local'
           });
@@ -2037,6 +2039,7 @@ function createVueApp() {
         var self = this;
         if (!Feeds.isFeed(VIEWS[name])) return Promise.resolve(null);
         if (!this.canPublishFeeds()) return Promise.resolve(null);
+        if (Feeds.isPerPerson(VIEWS[name])) return this.publishPerPersonFeed(name);
         var info = this.feedInfoFor(name) || {};
         var id = info.id || Feeds.newId();
         // The view's own window, the same one the download uses. It matters more here: a subscription
@@ -2077,6 +2080,108 @@ function createVueApp() {
           });
       },
 
+      // How many subscriber files one pass will write. A per-person feed is the only part of this
+      // feature that scales with PEOPLE rather than with access shapes, so the cost has a ceiling and
+      // the ceiling is visible: silently rendering four hundred calendars because a roster table grew
+      // is not a thing that should be able to happen without anyone choosing it.
+      feedSubscriberCap: function() {
+        var n = Number(((this.appConfig || {}).feedLimits || {}).subscribers);
+        return (!isNaN(n) && n > 0) ? n : 100;
+      },
+      // Everyone this per-person feed publishes for, from the subscriber table's own rows.
+      feedSubscribersFor: function(name) {
+        var v = VIEWS[name], t = Feeds.subscriberTableOf(v);
+        return t ? Feeds.subscribersOf(v, this.dataCache[t] || [], name) : [];
+      },
+      // One pass of a per-person feed: blank whatever unsubscribed, then render and upload one file per
+      // remaining subscriber.
+      //
+      // Revocation runs FIRST and unconditionally. If the cap or a render error stops the pass half way
+      // through, the files that should stop serving have already stopped -- the opposite order would
+      // make a busy pass the reason somebody's calendar stayed online after they left.
+      publishPerPersonFeed: function(name) {
+        var self = this, v = VIEWS[name], subTable = Feeds.subscriberTableOf(v);
+        if (!subTable || !this.canPublishFeeds()) return Promise.resolve(null);
+        var cfg = v.feedSubscribers || {};
+        var win = this.calendarCoverFor(name);
+        var viewLang = this.calendarIcsFor(name).lang;
+        var declared = (this.languages || []).map(function(l) { return l.code; });
+        this._publishingFeeds = true;
+        return Promise.resolve(this._ensureCached([subTable]))
+          .then(function() { return self._awaitViewData(name); })
+          .then(function() {
+            var all = self.feedSubscribersFor(name);
+            var revoke = all.filter(function(s) { return !s.active && (s.id || s.url); });
+            var live = all.filter(function(s) { return s.active; });
+            var capped = live.slice(0, self.feedSubscriberCap());
+            var skipped = live.length - capped.length;
+
+            var chain = revoke.reduce(function(p, s) {
+              return p.then(function() {
+                return self._blankFeedAt(s.id).then(function() { return self._clearSubscriberRow(cfg, s); });
+              });
+            }, Promise.resolve());
+
+            return capped.reduce(function(p, s) {
+              return p.then(function() { return self._publishOneSubscriber(name, cfg, s, win, viewLang, declared); });
+            }, chain).then(function() {
+              if (skipped > 0) self.notify(self.t('msg.feed_cap_reached') + ' (' + skipped + ')');
+              return { published: capped.length, revoked: revoke.length, skipped: skipped };
+            });
+          })
+          .catch(function(e) { self._blobStoreDown = true; self.notify(self.t('msg.no_blob_store')); throw e; })
+          .then(function(r) { self._publishingFeeds = false; return r; },
+                function(e) { self._publishingFeeds = false; throw e; });
+      },
+      // Render and upload ONE subscriber's file, then write the id and url back into their row.
+      _publishOneSubscriber: function(name, cfg, sub, win, viewLang, declared) {
+        var self = this;
+        var id = sub.id || Feeds.newId();
+        // Their chosen language, but only one this database still declares. A dropped language falls
+        // back to the CALENDAR's, never to the session's -- a subscriber's file must not change
+        // language according to whoever happened to publish it.
+        var lang = (sub.lang && (!declared.length || declared.indexOf(sub.lang) >= 0)) ? sub.lang : viewLang;
+        return this._icsStringsFor(lang, false).then(function(strings) {
+          var text = self._renderIcs(name, win, strings, self.identityFor(sub.owner));
+          var blob = new Blob([text], { type: 'text/calendar;charset=utf-8' });
+          return backend.uploadFile(blob, { path: Feeds.pathFor(id), contentType: 'text/calendar' });
+        }).then(function(url) {
+          return self._patchSubscriberRow(cfg, sub, id, url);
+        });
+      },
+      // The publisher's half of the row: the minted id and the URL. Written through the ordinary funnel,
+      // so it is an ordinary row update -- `_publishingFeeds` is what stops it re-arming the pass.
+      _patchSubscriberRow: function(cfg, sub, id, url) {
+        var patch = { id: sub.row.id };
+        if (cfg.idColumn) patch[cfg.idColumn] = id;
+        if (cfg.urlColumn) patch[cfg.urlColumn] = url;
+        if (sub.row[cfg.idColumn] === id && sub.row[cfg.urlColumn] === url) return Promise.resolve(url);
+        return Promise.resolve(Writes.putRow(cfg.table, Object.assign({}, sub.row, patch), 'active')).then(function() { return url; });
+      },
+      // After blanking, the row must stop claiming a live file. Leaving the url would show the departed
+      // subscriber a link that now serves an empty calendar, and would make them look live to the next
+      // pass for ever.
+      _clearSubscriberRow: function(cfg, sub) {
+        var patch = {};
+        if (cfg.idColumn) patch[cfg.idColumn] = '';
+        if (cfg.urlColumn) patch[cfg.urlColumn] = '';
+        return Promise.resolve(Writes.putRow(cfg.table, Object.assign({}, sub.row, patch), 'active'));
+      },
+
+      // One pass over every per-person feed, run once when a publisher boots. Deliberately only the
+      // per-person ones: a shared feed's file is already correct unless its data changed, and a write
+      // is what says so. A per-person feed has an obligation no write announces — somebody who
+      // unsubscribed while no publisher was looking.
+      _sweepFeedsOnBoot: function() {
+        var self = this;
+        if (!this.canPublishFeeds() || this._blobStoreDown) return Promise.resolve(null);
+        var due = Feeds.names(VIEWS).filter(function(n) { return Feeds.isPerPerson(VIEWS[n]); });
+        if (!due.length) return Promise.resolve(null);
+        return due.reduce(function(p, n) {
+          return p.then(function() { return self.publishPerPersonFeed(n).catch(function() { return null; }); });
+        }, Promise.resolve());
+      },
+
       // Republish whatever a write invalidated, coalesced. A bulk import writes hundreds of rows and
       // every one of them would otherwise be a full render plus an upload; one publish after the writes
       // stop says the same thing for a fraction of the cost. The delay is short enough that a single
@@ -2085,7 +2190,15 @@ function createVueApp() {
       _onWriteRepublish: function(tableId) {
         var self = this;
         if (!this.canPublishFeeds() || this._blobStoreDown) return;
+        // The publisher writes each subscriber's id and url back into their row, which is itself a
+        // write to the subscriber table. Without this the pass would re-arm itself on its own output
+        // and republish for ever.
+        if (this._publishingFeeds) return;
         Feeds.forTable(VIEWS, tableId).forEach(function(n) { self._feedDirty[n] = 1; });
+        // A subscriber table is not a SOURCE of any calendar, so forTable says nothing about it --
+        // somebody subscribing, unsubscribing or changing their language would otherwise republish
+        // nothing at all, which is the stale-forever failure in a new disguise.
+        Feeds.forSubscriberTable(VIEWS, tableId).forEach(function(n) { self._feedDirty[n] = 1; });
         if (!Object.keys(this._feedDirty).length) return;
         clearTimeout(this._feedTimer);
         this._feedTimer = setTimeout(function() {
@@ -6453,6 +6566,13 @@ function createVueApp() {
       // one place that knows a row was written — and the reason writes.js exists rather than twenty-six
       // call sites. Guarded inside _onWriteRepublish, so a restricted member's write costs nothing.
       if (typeof Writes !== 'undefined' && Writes.onWrite) Writes.onWrite(function(t) { self._onWriteRepublish(t); });
+      // A pass when a full-access client opens the app, which is what bounds how long a revocation can
+      // take. Write-triggered republishing alone cannot do it: a subscriber unsubscribing is not
+      // full-access, so their own write publishes nothing, and if nobody edits a duty afterwards their
+      // file keeps serving indefinitely. This makes the worst case "until an admin next opens the app"
+      // rather than "until someone happens to edit a source table", with no schedule and nothing that
+      // has to stay awake — the property the whole feature was designed around.
+      self._sweepFeedsOnBoot();
       Undo.configure({
         apply: function(table, part, change) { self._undoApply(table, part, change); },
         vocab: function(change) { return self._undoVocab(change); },
