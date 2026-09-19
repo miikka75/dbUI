@@ -1405,6 +1405,44 @@ section above — rendering three levels in the editor it already had, with the 
 self-parent and the cycle each asserted in `buildHierarchy`'s own tests rather than found as a blank
 screen.
 
+### Sorting inside an embed — a clickable header, and a `ref` that knows its own order
+
+Two gaps found while widening the bishopric card (#197). One is a missing affordance; the other makes a
+schema-only answer look available when it is not, which is the more expensive of the two.
+
+**A sub-table cannot be sorted at all.** `embed-view` renders its headers as static `<th>`. Click-to-sort
+already exists twice — the primary grid's table layout and `pivot` — and `SORT_UI` in `app-core.js` is
+the shared contract for it, documented as belonging to "every surface that sorts". `rsvp` and `pivot`
+mix it in because they render their own lists rather than `currentData`; `embed-view` renders its own
+lists too and does not. So a card with six blocks gives the reader whatever `defaultSort` the schema
+chose, per block, permanently. The shape is already there: per-instance `sortCol`/`sortAsc`, `SORT_UI`
+via `Object.assign` as the other two do, and a `sortedRows` computed over `Rows.sortByCol`. State stays
+per instance, which is correct — one member's callings sorting is not another member's.
+
+**A `ref` column sorts alphabetically by its stored key.** "Sort the callings by status" reads like one
+word of config, `"defaultSort": "status"`, and that word produces *accepted, approved_by_bishopric,
+called, declined, moved_in…* — internal keys in English alphabetical order. It is neither the pipeline
+order `ref_statuses` encodes in `position` nor the order of the labels actually on screen, and the
+pipeline is the entire meaning of that column. It would look like it worked.
+
+`listOrderFor` (rows.js) resolves order for **list**-backed columns only: `Columns.columnList` returns
+`def.list`, and a `ref` column has none. Its catalogue order lives in `dataCache[ref.table]` ordered by
+`position`, which `sortByCol(rows, col, view, asc)` cannot reach — it takes no ctx, while
+`resolveComputed` and `aggregateRows` beside it both take `{ dataCache }`. So this is plumbing, not a
+branch: either `sortByCol` gains the ctx its neighbours already carry, or `listOrderFor` gains a ref
+fallback fed by one.
+
+This is the same split the `multiple` flag's note already records. A `select` aimed at a ref table
+through `list` sorts in catalogue order today; an actual `ref` at the same catalogue does not.
+`admin_callings` carries both — `organization` is a `select` on `list: "ref_callings"`, while `calling`
+and `status` are `ref` — so one row sorts two ways over one catalogue depending on how the column was
+declared, which is not a distinction anyone authoring a schema means to make.
+
+**Order matters between the two.** The ref fix is load-bearing; clickable headers on a column that sorts
+alphabetically by key would only make the wrong order easier to reach. Done the other way round, one
+change fixes `defaultSort`, the header click, and the print path at the same time, because all three go
+through `sortByCol`.
+
 ### `gallery`
 
 A media grid. Unblocked since `image`/`url` columns shipped, so this is now mostly layout.
@@ -1633,6 +1671,10 @@ the reasoning behind what landed is the same document as the reasoning for the r
 on the page, a resolver branch and a test, and it is what turns the shipped scan view into the QR
 check-in entry above. Worth doing only when somebody actually wants the verifier-scans-attendee
 arrangement; it is not owed to the shipped half.
+
+**Sorting inside an embed** sits beside it on cost, and its `ref`-order half is the cheaper and the more
+urgent of its two: a column that sorts alphabetically by its stored key is wrong on screen right now,
+wherever a schema already asks for it, rather than being a feature nobody has yet.
 
 Then `gallery`. `tree` has since shipped in the only form that was worth building: the editor's
 recursion, and `hierarchy.by: "id"` for tables that want depth, with the value-keyed lookups left
