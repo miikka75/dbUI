@@ -332,6 +332,24 @@
   function colListSwitch(schema, col) { return colInfo(schema, col).listSwitch; }
   function colAllowNew(schema, col) { return colInfo(schema, col).allowNew; }
   function colIsSorted(schema, col) { return colInfo(schema, col).sorted; }
+  // The HANDLE a lookup row is known by in its identity dimension: the cell if it has one, else the
+  // row's own two dimensions joined. A handle column names each row uniquely where neither dimension
+  // can -- a ward calling is unique only as (organization, calling), and `president` belongs to five
+  // organizations -- but requiring it to be TYPED made the catalogue unusable: the column is reference
+  // plumbing, the lookup editor renders a hierarchy as parent and value only, and a row added in the
+  // app would carry no handle at all and could never be linked to anybody.
+  //
+  // So the cell is an OVERRIDE, not the source. A row that says nothing is named by what it already is,
+  // which means a catalogue that predates the handle needs no migration and a row typed today is
+  // linkable the moment it exists.
+  function rowHandle(tableDef, order, row, col) {
+    var v = row && col ? row[col] : '';
+    if (v != null && v !== '') return String(v);
+    var h = lookupHierarchy(tableDef, order);
+    if (!h) return '';
+    var p = row && row[h.parent], c = row && row[h.value];
+    return (p && c) ? String(p) + '_' + String(c) : '';   // half a pair names nothing
+  }
   // Which dimension of a LOOKUP carries the values accounts are linked to. Derived from the columns
   // that draw on it rather than declared on the table, the same way listOwningTables derives ownership:
   // the schema already states it once per referring column, and a second declaration could disagree
@@ -446,7 +464,7 @@
     tableDefaultCols: tableDefaultCols, tableRefCol: tableRefCol,
     lookupCols: lookupCols, lookupHierarchy: lookupHierarchy, buildHierarchy: buildHierarchy,
     colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate, colIsNumber: colIsNumber,
-    colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted, colListValueCol: colListValueCol, lookupIdentityCol: lookupIdentityCol,
+    colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted, colListValueCol: colListValueCol, lookupIdentityCol: lookupIdentityCol, rowHandle: rowHandle,
     colIsImage: colIsImage, colIsUrl: colIsUrl, colPicker: colPicker,
     colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText,
     defTables: defTables, entryTables: entryTables, tableDeps: tableDeps, mirrorCluster: mirrorCluster

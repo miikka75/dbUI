@@ -1525,6 +1525,17 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   identity columns into `ref` breaks `meeting_agenda.presiding`, which toggles to a visitor through
   `listSwitch`, a select-only feature; they stayed selects for that reason.
 
+  **A defect found only by deploying it** (#PRNUM). The handle began as a column to be TYPED, and the
+  catalogue could not be used that way: the column is hidden plumbing, the lookup editor draws a
+  hierarchy as parent and value only, and `reinstallExample` sets `withData = false` — so an existing
+  database got the schema and no handles, and a position added in the app could never be linked to
+  anybody. The handle is now DERIVED from the row's own two dimensions, with the cell left as an
+  override. That also removes the migration: a catalogue predating the handle names its rows the same
+  way a new one does. The cost is the seven rows that were deliberately excluded — ordinations and
+  class teachers — which are now offered like any other, because a blank cell means "derive" and can no
+  longer mean "not a position". Worth remembering as the shape of the mistake: the feature was proved
+  against imported data and never against a row typed in the app.
+
   **What it still does not do**: `@me` scopes display, never access. A Primary president with an `r`
   grant still reads every row. Per-calling confidentiality is table grants and `owner` rows — a
   different axis, and the reason this entry was about identity and not about permissions.

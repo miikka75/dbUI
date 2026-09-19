@@ -2,14 +2,15 @@
 // it lives in the CATALOGUE rather than in a list beside it.
 //
 // `ref_callings` holds one row per (organization, calling) pair — which is what a ward position is —
-// and a third dimension, `slug`, names each pair uniquely. That dimension is the namespace `@me`, the
+// and each row is known by a HANDLE naming that pair. That handle is the namespace `@me`, the
 // per-person card view and the per-person calendar feed all resolve through: an admin links a position
-// to an account, and `_list_users` stores the pair under `{list: "ref_callings", value: <slug>}`.
+// to an account, and `_list_users` stores it under `{list: "ref_callings", value: <handle>}`.
 //
-// A blank `slug` is how a row says it names no position. An Aaronic Priesthood ordination and a class
-// teacher are rows of this catalogue that several people hold at once, and `_list_users` maps a value
-// to ONE email — so linking one would hand one holder's card to another. Keeping that as DATA rather
-// than as a rule in an import script is the point: it is visible and correctable in the Lookup tab.
+// The handle is DERIVED from the row's own two dimensions, with the `slug` cell left as an override
+// nothing currently uses. It began as data to be typed, which made the catalogue unusable: the column
+// is hidden plumbing, the lookup editor renders a hierarchy as parent and value only, and a row added
+// in the app carried no handle and could never be linked to anybody. Deriving it also means a
+// catalogue that predates the handle needs no migration — which is the property this file pins.
 //
 // Three halves, and the last is the one worth having:
 //
@@ -31,7 +32,9 @@ const read = (f) => JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', f), '
 const doc = read('bishopric-schema.json');
 const schema = doc.schema;
 const catalogue = doc.tables.ref_callings;
-const positions = catalogue.filter((r) => r.slug).map((r) => r.slug);
+// What the app will offer: every row, named the way Columns.rowHandle names it.
+const handleOf = (r) => r.slug || (r.organization + '_' + r.calling);
+const positions = catalogue.map(handleOf);
 const view = schema.views.find((v) => v.name === 'admin_bishopric');
 
 // Every column whose options come from one named namespace, with the dimension it asks for.
@@ -52,17 +55,16 @@ describe('one catalogue holds the organizations, the callings and the positions'
     assert.ok(Object.values(doc.lists).every((v) => !v.length), 'the example ships no populated list at all');
   });
 
-  it('a row names a position, or says it names none', () => {
+  it('every row is named, and no two rows share a name', () => {
     assert.ok(positions.length > 20, 'the point of the change is that most of the ward is in here');
-    assert.equal(new Set(positions).size, positions.length, 'a handle shared by two rows is two people on one card');
-    for (const v of ['bishop', 'counselor1', 'counselor2'])
-      assert.ok(positions.includes(v), v + ' must survive — live rows still hold this spelling');
-    // The seven that must never be an identity, as DATA rather than as a rule somewhere else.
-    const blank = catalogue.filter((r) => !r.slug).map((r) => r.organization + '/' + r.calling);
-    assert.deepEqual(blank.sort(), [
-      'aaronic_priesthood/deacon', 'aaronic_priesthood/priest', 'aaronic_priesthood/teacher',
-      'elders_quorum/teacher', 'primary/teacher', 'relief_society/teacher', 'sunday_school/teacher'
-    ]);
+    // The uniqueness the handle exists for: `president` belongs to five organizations, so neither
+    // dimension names a row on its own. Two rows sharing a handle is two people on one card.
+    assert.equal(new Set(positions).size, positions.length);
+    assert.ok(positions.includes('bishopric_bishop'), 'the bishopric must be in the catalogue');
+    assert.ok(positions.includes('primary_president'));
+    // Nothing is stored: the bundle ships NO handle cells, so every one of these is derived. A
+    // deployment whose catalogue predates the handle gets the same values for the same reason.
+    assert.deepEqual(catalogue.filter((r) => r.slug), [], 'a shipped override is data nobody can edit');
   });
 
   it('every identity column asks for the position dimension, and the organization column does not', () => {
@@ -91,6 +93,7 @@ describe('one catalogue holds the organizations, the callings and the positions'
       for (const v of positions)
         assert.ok(t['list.ref_callings.' + v], code + ' has no label for ' + v + ' — a card headed by a slug');
       assert.equal(t['list.callings.bishop'], undefined, code + ' still carries the retired namespace');
+      assert.equal(t['list.ref_callings.counselor1'], undefined, code + ' still labels a handle nothing derives');
     }
   });
 
@@ -106,7 +109,7 @@ describe('one catalogue holds the organizations, the callings and the positions'
 describe('a calling outside the bishopric reaches its own card', () => {
   const cache = {
     meeting_agenda: [
-      { id: 'm1', date: '2026-03-01', theme: 'Faith', presiding: 'bishop', responsible: 'primary_president' },
+      { id: 'm1', date: '2026-03-01', theme: 'Faith', presiding: 'bishopric_bishop', responsible: 'primary_president' },
       { id: 'm2', date: '2026-04-01', theme: 'Visit', presiding: 'Visiting Seventy', responsible: '' }
     ],
     admin_callings: [{ id: 'c1', date: '2026-02-01', person: 'Ann', organization: 'primary', calling: 'teacher',
@@ -132,7 +135,7 @@ describe('a calling outside the bishopric reaches its own card', () => {
     const keys = cards().map((c) => c.callings);
     assert.ok(keys.includes('primary_president'), 'the Primary president got no card — the whole point');
     assert.ok(keys.includes('ward_executive_secretary'), 'only presidencies would be a narrower tool, not a ward one');
-    assert.ok(keys.includes('bishop'), 'the bishopric must not lose what it already had');
+    assert.ok(keys.includes('bishopric_bishop'), 'the bishopric must not lose what it already had');
     assert.ok(!keys.includes(''), 'an unassigned row must not mint a card for nobody');
     assert.ok(!keys.includes('Visiting Seventy'), 'a visiting authority is not a ward position');
   });
