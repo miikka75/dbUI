@@ -408,6 +408,20 @@ describe('a lookup addressed through more than one of its dimensions', () => {
     assert.equal(Columns.lookupIdentityCol(SCH, 'ref_callings'), 'slug');
   });
 
+  it('is a load dependency, because the picker reads its rows straight out of the cache', () => {
+    // The gap that made a whole view look empty on a real deployment: `defTables` knows five shapes
+    // that resolve a value out of another table, and a `list:` naming a lookup TABLE is a sixth it
+    // cannot recognise -- only the schema says whether a name is a lookup or a plain list. A table
+    // that ALSO refs the same lookup dragged it in anyway, so whether a view worked depended on which
+    // view had been opened first.
+    assert.deepEqual(Columns.tableDeps(SCH, 'duties'), ['ref_callings']);
+    // A plain list is not a table and must not be requested as one.
+    const plain = { t: { columns: { who: { type: 'select', list: 'members' } } } };
+    assert.deepEqual(Columns.tableDeps(plain, 't'), []);
+    // And a lookup does not depend on itself.
+    assert.deepEqual(Columns.tableDeps(SCH, 'ref_callings'), []);
+  });
+
   it('names a row by its own two dimensions when the handle cell is empty', () => {
     // The property the whole design rests on: a catalogue that predates the handle column, and a row
     // typed in the app today, are both named without anybody filling anything in. The column is hidden

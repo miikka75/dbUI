@@ -131,3 +131,25 @@ test('a position added in the app is linkable without anyone filling in a handle
   await expect.poll(() => page.evaluate(() => (appInstance.listUserLinks.ref_positions || {}).music_chorister), { timeout: 6000 })
     .toBe('chorister@x.test');
 });
+
+test('opening a view is enough: the catalogue loads itself', async ({ page }) => {
+  // The bug every other test in this file hid, by calling _ensureCached before asking. A view whose
+  // only link to the catalogue is a `list:` declared no dependency on it, so nothing fetched it and the
+  // picker came up empty — on a real deployment, in a view the schema says is fine.
+  await page.request.post('/api/resetData');
+  await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+  await page.request.post('/api/initSchema', { data: { schema: SCH.tables } });
+  for (const row of ROWS)
+    await page.request.post('/api/putRow', { data: { tableId: 'ref_positions', data: row, tab: 'active' } });
+  await page.request.post('/api/putRow', { data: { tableId: 'duties', data: { id: 'd1', organization: 'primary', responsible: 'primary_president' }, tab: 'active' } });
+  await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+  await page.goto('/');
+  await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+
+  // Open the view the way a reader does — and ask nothing else of the app.
+  await page.evaluate(() => appInstance.selectTab('duties'));
+  await expect.poll(() => page.evaluate(() => appInstance.getListOptions('responsible').length), { timeout: 6000 })
+    .toBe(3);
+  expect(await page.evaluate(() => appInstance.getListOptions('organization').map((o) => o.value)))
+    .toEqual(['primary', 'music']);
+});
