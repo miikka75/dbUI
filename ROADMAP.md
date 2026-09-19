@@ -543,6 +543,26 @@ The badge does not subsume the report. It answers "is this one used?" for things
 report answers "what is left over?" for the things that do not — orphaned page bodies, dead translation
 keys, links pointing at deleted values.
 
+**A second generation is not a leftover, and looks exactly like one.** A hand-picked import REPLACES
+the lists it carries (`self.listsCache = imported.lists`, pruning what it omits — the restore semantics
+`Examples.listsForInstall` deliberately withholds from an example install). Table rows have no such
+rule: `applyBundle` deletes and rewrites **row by row, keyed on id**, and never clears a destination
+table. So the modern replacement for a list — a lookup TABLE — merges where the list it replaced would
+have been overwritten. Import a Finnish deployment's bundle into a database already holding the shipped
+example and `ref_callings` ends up with both generations of rows under different ids, at which point
+`lookupListValues` unions their distinct values into one picker and `admin_responsibilities` offers
+sixteen organizations that translate and fourteen that render raw. Nothing is unreferenced, so the
+badge above stays silent and is right to: this is one live catalogue with two vocabularies in it.
+
+The symmetric fix — a hand-picked import replaces each table it carries, as it already replaces each
+list — is small and is also exactly the wrong-way-round hazard recorded above: the prune that retires a
+list is the prune that emptied a year of vocabularies. A bundle carrying a table's rows partially would
+delete the rest silently. So the same stance applies: **report it, do not sweep it.** A lookup table
+holding values with no translation key beside siblings that have one is not proof of anything on its
+own — a freshly typed value has no key either — but the inventory can say how many rows a catalogue
+holds and how many of its values the schema's own vocabulary accounts for, and let the person read it.
+The delete is already per-row in the Lookup tab.
+
 **Shape:** a panel in Settings beside Examples. One inventory, each entry with what it is and how much
 of it there is ("`hymns` — a list of 200 values, referenced by no column"), and a per-item delete using
 the grid's arm-then-confirm. Never a "delete all", never a prompt on boot; the answer to "is this
@@ -1442,6 +1462,77 @@ declared, which is not a distinction anyone authoring a schema means to make.
 alphabetically by key would only make the wrong order easier to reach. Done the other way round, one
 change fixes `defaultSort`, the header click, and the print path at the same time, because all three go
 through `sortByCol`.
+
+### Callings as identity — the bishopric tool as a ward tool
+
+The bishopric example's identity namespace is a three-value list: `bishopric` = `bishop`,
+`counselor1`, `counselor2`, marked `listSources: "userlink-name"` so each value names a position and
+the cell shows whoever currently holds it. Everything personal in that example hangs off those three
+strings — `@me` filters, the `matchList` clauses #197 collapsed six literals into, `admin_bishopric`'s
+card per member, and the per-person `.ics` feed keyed on the same link.
+
+The proposal is to widen that namespace from the bishopric to **every calling in the ward**, so a
+Primary president signing in gets her own card, her own filtered views, and her own feed, on the same
+machinery. The tool stops being a bishopric tool.
+
+**Most of it is already built, and that is the point.** The identity chain is namespace-agnostic:
+`isUserLinkList` only looks up `listSources[name]` and never checks that the name is a list rather than
+a table, the `_list_users` doc is `{list, value, email}` with `list` an unvalidated string in both the
+rules and the schema-blind backends, and `getMyListValues` is an equality query on the caller's own
+email. `@me`, `matchList`, `groupBy.from`, `mineOnly` and the feed's `identityFor` would all resolve
+against a wider namespace with **no engine change**. And `admin_bishopric` — once #197 widens it to all
+five responsibility tables — already IS the per-person status page this asks for; it is a `groupBy` over
+the identity list, so a wider list is a wider set of cards.
+
+**What does not work is the obvious spelling of it.** `ref_callings` already exists as the ward's
+calling catalogue, and pointing `listSources` at it fails for two separate reasons:
+
+1. **The option value is the wrong dimension.** A `list:` naming a lookup table resolves to that
+   lookup's GROUP dimension — `hierarchy.parent`, which here is `organization`. So the namespace would
+   be `primary`, `relief_society`, …, one identity per organization, which cannot hold a presidency.
+   Take the value column instead and you get `president`, `first_counselor`, `secretary` — which repeat
+   across five organizations and collide. A ward calling is unique only as the PAIR
+   `(organization, calling)`, which is to say: as a ROW. The link map stores one string per account,
+   and `valuesForEmail` deliberately resolves a multi-valued link by taking the first sorted value.
+   There is no string in `ref_callings` that names a calling.
+2. **There is no way to create the links.** `list-user-picker` renders only inside the Lists section of
+   the Lookup tab, gated on `canEditList`, which returns `false` for any `isLookup` table by design —
+   a lookup is maintained as a table, under its own grant, not through the list write path. The Ref
+   data section below it has no picker. An admin could declare the source and then link nobody.
+
+So there are two shapes, and they are not the same size.
+
+**A — a flat `callings` list, `userlink-name`.** Values are ward positions flattened into unique
+strings (`bishop`, `primary_president`, `ym_secretary`), the list replaces `bishopric` in
+`listSources`, and `admin_bishopric` becomes `admin_responsibilities_by_person` with a wider `groupBy`
+and `matchList`. **Schema-only — no engine change, no new primitive, no rules work.** It is precisely
+the case `userlink-name` was documented for: values are roles, the cell shows who holds one. The cost
+is that the vocabulary duplicates `ref_callings`: two catalogues to keep in step and two sets of
+`list.*` keys to translate, and an admin linking ~40 values one at a time in the Lists editor.
+
+**B — link an account to a lookup ROW.** A `ref`-backed identity: the link's `value` is a row id, the
+cell is a `ref` column, and `ref_callings` becomes the single catalogue. This removes the duplication
+and is the honest model of what a calling is. It is also real engine work spread across the link map,
+`_listValueOf`, the ref editor's picker, and the mirrors in three rules layers — and `@me` currently
+resolves to a VALUE compared against a cell, so every column carrying an identity would have to become
+a `ref` as well. That is a migration of the example's data, not a schema edit.
+
+**Do A first.** Not as a stepping stone — as the thing that finds out whether a ward wants this at all.
+A proves the shape with a schema edit; if the duplication then bites, B is a migration away from a
+working system instead of a guess about one. The one signal that would flip the order is a ward wanting
+several people to share a calling or one person to hold two, which A cannot express and B can.
+
+**What neither gives you, and must not be sold as giving you.** `@me` is display-only and never widens
+or narrows server-enforced access. A Primary president with an `r` grant on `admin_callings` still
+READS every row; her view only scopes what is drawn. Per-calling confidentiality is table grants and
+`owner`-stamped rows — a different axis, and the reason this entry is about identity and not about
+permissions. Widening the namespace makes more people's work visible to them; it does not make anyone
+else's work invisible.
+
+Cost, for A: one list, one `listSources` key, one widened view, two language files, a regenerated
+`examples/index.json`. No engine module, no view kind, no rules change. For B: a new identity kind
+through the link map and the ref editor, plus the mirrors — comparable to a view kind, and with a data
+migration on top.
 
 ### `gallery`
 
