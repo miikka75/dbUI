@@ -163,3 +163,55 @@ describe('list-users: pictureFor / nameFor', () => {
     assert.equal(LU.nameFor(null, 'l', 'v'), '');
   });
 });
+
+// --- the link map inverted for one account -----------------------------------------------------
+//
+// `valuesForEmail` is what a per-person feed resolves `@me` through, so its failure mode is not a
+// missing avatar but one person's calendar rendered for another. Every case below is really one
+// question: does an identity that cannot be resolved come back EMPTY rather than partial or guessed?
+describe('list-users — valuesForEmail (what this account IS, per list)', () => {
+  const LINKS = {
+    people: { 'Anna': 'anna@x.test', 'Ben': 'ben@x.test' },
+    crews:  { 'Crew A': 'anna@x.test' }
+  };
+
+  it('inverts the map for one account across every list', () => {
+    assert.deepEqual(LU.valuesForEmail(LINKS, 'anna@x.test'), { people: 'Anna', crews: 'Crew A' });
+  });
+
+  it('returns only the lists the account appears in', () => {
+    assert.deepEqual(LU.valuesForEmail(LINKS, 'ben@x.test'), { people: 'Ben' });
+  });
+
+  it('matches case- and whitespace-insensitively on both sides', () => {
+    assert.deepEqual(LU.valuesForEmail({ p: { 'Anna': '  Anna@X.Test ' } }, 'anna@x.test'), { p: 'Anna' });
+    assert.deepEqual(LU.valuesForEmail(LINKS, 'ANNA@X.TEST').people, 'Anna');
+  });
+
+  // The direction that matters: no identity must mean no rows, never all rows.
+  it('an unknown account resolves to nothing, not to a partial map', () => {
+    assert.deepEqual(LU.valuesForEmail(LINKS, 'nobody@x.test'), {});
+  });
+
+  it('an empty or missing email resolves to nothing', () => {
+    ['', '   ', null, undefined].forEach((e) => {
+      assert.deepEqual(LU.valuesForEmail(LINKS, e), {}, JSON.stringify(e));
+    });
+  });
+
+  it('an empty or missing link map resolves to nothing', () => {
+    assert.deepEqual(LU.valuesForEmail(null, 'anna@x.test'), {});
+    assert.deepEqual(LU.valuesForEmail({}, 'anna@x.test'), {});
+  });
+
+  it('ignores blank links rather than matching a blank email to them', () => {
+    assert.deepEqual(LU.valuesForEmail({ p: { 'Ghost': '', 'Anna': 'anna@x.test' } }, 'anna@x.test'), { p: 'Anna' });
+  });
+
+  // Stable across backends: object key order differs between a Firestore snapshot and a kv row list,
+  // and a subscriber's file must not change contents depending on which copy rendered it.
+  it('an account linked to several values in one list takes the first by SORTED value', () => {
+    assert.deepEqual(LU.valuesForEmail({ p: { 'Zoe': 'a@x.test', 'Anna': 'a@x.test' } }, 'a@x.test'), { p: 'Anna' });
+    assert.deepEqual(LU.valuesForEmail({ p: { 'Anna': 'a@x.test', 'Zoe': 'a@x.test' } }, 'a@x.test'), { p: 'Anna' });
+  });
+});

@@ -50,6 +50,7 @@
       "cal.lang_auto": "Lukijan mukaan",
       "msg.feed_failed": "Syotteen julkaisu epaonnistui",
       "msg.no_blob_store": "Talla asennuksella ei ole tiedostovarastoa — syote vaatii Firebase Storagen (Blaze) tai Supabase Storagen",
+      "msg.feed_cap_reached": "Tilaajaraja tayttyi — osa syotteista jai julkaisematta talla kierroksella",
       "settings.feeds": "Kalenterit",
       "settings.feeds_note": "Lataa kalenteri tiedostona tai hallitse julkaisemiasi linkkeja. Kuka tahansa linkin haltija voi lukea kalenterin.",
       "settings.feed_regenerate": "Uusi osoite",

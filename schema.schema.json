@@ -221,7 +221,20 @@
         "layout": { "type": "string", "enum": ["table", "card", "list"], "description": "`list` is a READING layout: values render read-only, so a row added there has no editor. Use table/card for anything people actually enter data into." },
         "collapsed": { "type": "boolean", "description": "Cards start collapsed (accordion)." },
         "defaultSort": { "type": "string", "description": "Default sort column." },
-        "feed": { "type": "boolean", "description": "Publish this calendar as a subscribable .ics at a stable URL (calendar views only). The app renders the file and uploads it through the backend blob store; the object URL is the subscription and is a BEARER credential — anyone holding it reads the calendar. Republished when a source table changes, by a full-access client only." },
+        "feedSubscribers": {
+          "type": "object",
+          "description": "Where a `feed: \"per-person\"` calendar reads its subscribers. Subscribing is a row the person creates for themselves in an owner-stamped table, so the list is opt-in and unsubscribing is deleting the row. The row has two writers by design: the subscriber owns the request (that they subscribe, and in which language), the publisher owns the grant (the minted URL). The table must therefore declare `ownerWritable` INCLUDING the language column and EXCLUDING the owner and url columns — a subscriber who can write their own url could point it at a path revocation never blanks.",
+          "required": ["table", "urlColumn"],
+          "properties": {
+            "table": { "type": "string", "description": "The owner-stamped table people subscribe in." },
+            "urlColumn": { "type": "string", "description": "Column the publisher writes each subscriber's own .ics URL into. Must NOT be in the table's `ownerWritable`. It lives in the row rather than in folder config because a per-person URL is a bearer credential for one person's calendar, and folder config is readable by everyone with view access." },
+            "langColumn": { "type": "string", "description": "Column holding the subscriber's chosen language for their file. Must be in `ownerWritable` — it is their own choice. Blank, or a language this database no longer declares, falls back to the calendar's own `ics.lang`, never to the session's." },
+            "activeColumn": { "type": "string", "description": "Column the subscriber sets to unsubscribe (\"no\"/\"false\"/\"off\"/\"0\"/\"unsubscribed\"/\"inactive\"; anything else, including blank, counts as subscribed). Required alongside `urlColumn`, and must be in `ownerWritable`. Unsubscribing is a STATE rather than a deletion because the row is the only record of the file's path and the subscriber cannot blank it themselves — so the table must also declare `ownerWritableWhile` gating on this column, which freezes the row once they unsubscribe and keeps the tombstone alive for the publisher to act on." },
+            "viewColumn": { "type": "string", "description": "Column naming which feed a row subscribes to, when one table serves several. Omit when the table serves this calendar alone." },
+            "ownerColumn": { "type": "string", "description": "The `owner`-type column (default \"owner\")." }
+          }
+        },
+        "feed": { "anyOf": [{ "type": "boolean" }, { "enum": ["shared", "per-person"] }], "description": "Publish this calendar as a subscribable .ics at a stable URL (calendar views only). The app renders the file and uploads it through the backend blob store; the object URL is the subscription and is a BEARER credential — anyone holding it reads the calendar. Republished when a source table changes, by a full-access client only. `true` means \"shared\": ONE file every subscriber fetches, which may not use `@me` or `mineOnly` because it has no viewer to resolve them against. \"per-person\" is one file per subscriber and inverts that rule — every source must carry an `@me` filter, and any rotation overlay must be `mineOnly`, since an unfiltered source would put its rows in everybody's file." },
         "hideEmpty": { "type": "boolean", "description": "Hide empty columns. Table layout drops a column empty across ALL rows; card/board layouts drop it per row." },
         "icon": { "type": "string", "description": "MDI icon for the sidebar." },
         "printable": {

@@ -3579,12 +3579,220 @@ test.describe('v3 @both partition toggle in an embed', () => {
       window.VIEWS.fd_me = { name: 'fd_me', feed: true,
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: { eq: '@me' } } }] } };
       window.VIEWS.fd_ok = { name: 'fd_ok', feed: true, calendar: { source: 'tasks', dateColumn: 'date' } };
-      return { nocal: errs('fd_nocal'), mine: errs('fd_mine'), me: errs('fd_me'), ok: errs('fd_ok') };
+      // A per-person feed inverts the rule above: @me is REQUIRED on every source, because a source
+      // without one puts its rows in every subscriber's file. Checked here as well as in the unit
+      // suite because the rule lives in feeds.js and this is what proves validateSchema reaches it.
+      window.VIEWS.fd_pp_bad = { name: 'fd_pp_bad', feed: 'per-person',
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } },
+                              { table: 'tasks', dateColumn: 'date' }] } };
+      // A per-person feed also needs somewhere to read subscribers from, and that table has to be able
+      // to hold a secret: the subscriber writes their language, the publisher writes their URL.
+      window.SCHEMA.feed_subs = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
+                                  ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } };
+      const SUBS = { table: 'feed_subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' };
+      window.VIEWS.fd_pp_ok = { name: 'fd_pp_ok', feed: 'per-person', feedSubscribers: SUBS,
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
+      // No subscriber table at all: nobody to render for, and nothing would publish.
+      window.VIEWS.fd_pp_nosubs = { name: 'fd_pp_nosubs', feed: 'per-person',
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
+      // The one that cannot be recovered from: a subscriber who may write their own url column can
+      // point it somewhere revocation never blanks.
+      window.SCHEMA.feed_subs_open = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
+                                       ownerWritable: ['lang', 'active', 'url'], ownerWritableWhile: { active: 'yes' } };
+      window.VIEWS.fd_pp_open = { name: 'fd_pp_open', feed: 'per-person',
+        feedSubscribers: { table: 'feed_subs_open', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
+      // No freeze: the subscriber could delete the row and strand their file for good.
+      window.SCHEMA.feed_subs_nofreeze = { columns: { owner: { type: 'owner' }, url: 'text', fid: 'text', active: 'text' },
+                                           ownerWritable: ['active'] };
+      window.VIEWS.fd_pp_nofreeze = { name: 'fd_pp_nofreeze', feed: 'per-person',
+        feedSubscribers: { table: 'feed_subs_nofreeze', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
+      window.VIEWS.fd_typo = { name: 'fd_typo', feed: 'per-pesron', calendar: { source: 'tasks', dateColumn: 'date' } };
+      return { nocal: errs('fd_nocal'), mine: errs('fd_mine'), me: errs('fd_me'), ok: errs('fd_ok'),
+               ppBad: errs('fd_pp_bad'), ppOk: errs('fd_pp_ok'), typo: errs('fd_typo'),
+               ppNoSubs: errs('fd_pp_nosubs'), ppOpen: errs('fd_pp_open'), ppNoFreeze: errs('fd_pp_nofreeze'),
+               subTrigger: window.Feeds.forSubscriberTable(window.VIEWS, 'feed_subs'),
+               srcTrigger: window.Feeds.forTable(window.VIEWS, 'feed_subs'),
+               typoPublishes: window.Feeds.isFeed(window.VIEWS.fd_typo) };
     });
     expect(r.nocal).toContain('is not a calendar');
     expect(r.mine).toContain('cannot be combined with `mineOnly`');
     expect(r.me).toContain('cannot be combined with an `@me` filter');
     expect(r.ok).toBe('');
+    expect(r.ppBad).toContain('source 2');
+    expect(r.ppOk).toBe('');
+    expect(r.ppNoSubs).toContain('nobody to render for');
+    expect(r.ppOpen).toContain('must not include "url"');
+    expect(r.ppNoFreeze).toContain('strands their published file');
+    // A subscriber-table write must reach the feed, though it is not a source of any calendar.
+    expect(r.subTrigger).toContain('fd_pp_ok');
+    expect(r.srcTrigger).toEqual([]);
+    // A misspelled mode must not fall back to "shared" — that would publish an unfiltered file.
+    expect(r.typo).toContain('publishes nothing at all');
+    expect(r.typoPublishes).toBe(false);
+  });
+
+  // The per-person publish pass: one file per subscriber, blanking whatever unsubscribed. This is the
+  // only part of the feature that scales with PEOPLE, so the cap and the revocation order are asserted
+  // rather than assumed — a pass that ran out of budget before revoking would leave a departed
+  // subscriber's calendar online, which is the wrong half to skip.
+  test('a per-person feed writes one file per subscriber, and blanks the ones who left', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true; app.userAllowedTables = null;
+      app.schemaData = Object.assign({}, app.schemaData || {}, {
+        listSources: Object.assign({}, (app.schemaData || {}).listSources || {}, { assigned_to: 'userlink' })
+      });
+      app.listUserLinks = { assigned_to: { Anna: 'anna@x.test', Ben: 'ben@x.test' } };
+      window.SCHEMA.pp_subs = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
+                                ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } };
+      window.VIEWS.pp_pub = { name: 'pp_pub', feed: 'per-person',
+        feedSubscribers: { table: 'pp_subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'], filter: { assigned_to: '@me' } }] } };
+      app.dataCache['tasks'] = [
+        { id: 'a', date: '2026-07-08', title: 'Anna task', assigned_to: 'Anna' },
+        { id: 'b', date: '2026-07-09', title: 'Ben task', assigned_to: 'Ben' }
+      ];
+      app.dataCache['pp_subs'] = [
+        { id: 's1', owner: 'anna@x.test', active: 'yes', url: '', fid: '' },
+        { id: 's2', owner: 'ben@x.test', active: 'yes', url: '', fid: '' },
+        { id: 's3', owner: 'gone@x.test', active: 'no', url: 'https://s/old.ics', fid: 'oldid' }
+      ];
+
+      const uploads = [];
+      const realUp = window.backend.uploadFile;
+      window.backend.uploadFile = (blob, opts) => {
+        return blob.text().then((text) => {
+          uploads.push({ path: opts.path, text });
+          return 'https://store.example/' + opts.path;
+        });
+      };
+      const writes = [];
+      const realPut = window.Writes.putRow;
+      window.Writes.putRow = (t, row) => { writes.push({ table: t, row: JSON.parse(JSON.stringify(row)) }); return Promise.resolve(row); };
+
+      const res = await app.publishPerPersonFeed('pp_pub');
+      window.backend.uploadFile = realUp; window.Writes.putRow = realPut;
+
+      const body = (owner) => {
+        const w = writes.filter((x) => x.row.owner === owner).pop();
+        const u = uploads.filter((x) => x.path === 'feeds/' + (w && w.row.fid) + '.ics').pop();
+        return u ? u.text : '';
+      };
+      return {
+        res,
+        annaFile: body('anna@x.test'),
+        benFile: body('ben@x.test'),
+        // The departed subscriber: an empty calendar written over their OLD path, and the row cleared.
+        blanked: uploads.filter((u) => u.path === 'feeds/oldid.ics').map((u) => u.text),
+        goneRow: writes.filter((w) => w.row.owner === 'gone@x.test').pop().row,
+        // Publishing must not re-arm the pass on its own row writes.
+        reentered: app._publishingFeeds
+      };
+    });
+    expect(r.res).toEqual({ published: 2, revoked: 1, skipped: 0 });
+    // Each file carries its own subscriber's rows and nobody else's.
+    expect(r.annaFile).toContain('Anna task');
+    expect(r.annaFile).not.toContain('Ben task');
+    expect(r.benFile).toContain('Ben task');
+    expect(r.benFile).not.toContain('Anna task');
+    // Revocation is a valid but EMPTY calendar over the old path, not a delete.
+    expect(r.blanked.length).toBe(1);
+    expect(r.blanked[0]).toContain('BEGIN:VCALENDAR');
+    expect(r.blanked[0]).not.toContain('VEVENT');
+    expect(r.goneRow.url).toBe('');
+    expect(r.goneRow.fid).toBe('');
+    expect(r.reentered).toBe(false);
+  });
+
+  test('the subscriber cap bounds one pass, and revocation happens before it bites', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true; app.userAllowedTables = null;
+      app.appConfig = Object.assign({}, app.appConfig || {}, { feedLimits: { subscribers: 2 } });
+      window.SCHEMA.cap_subs = { columns: { owner: { type: 'owner' }, url: 'text', fid: 'text', active: 'text' },
+                                 ownerWritable: ['active'], ownerWritableWhile: { active: 'yes' } };
+      window.VIEWS.cap_feed = { name: 'cap_feed', feed: 'per-person',
+        feedSubscribers: { table: 'cap_subs', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
+      app.dataCache['tasks'] = [];
+      app.dataCache['cap_subs'] = [
+        { id: 'c1', owner: 'a@x.test', active: 'yes' }, { id: 'c2', owner: 'b@x.test', active: 'yes' },
+        { id: 'c3', owner: 'c@x.test', active: 'yes' }, { id: 'c4', owner: 'd@x.test', active: 'yes' },
+        { id: 'c5', owner: 'z@x.test', active: 'no', url: 'https://s/z.ics', fid: 'zid' }
+      ];
+      const uploads = [];
+      const realUp = window.backend.uploadFile;
+      window.backend.uploadFile = (blob, opts) => { uploads.push(opts.path); return Promise.resolve('https://s/' + opts.path); };
+      const realPut = window.Writes.putRow;
+      window.Writes.putRow = (t, row) => Promise.resolve(row);
+      const res = await app.publishPerPersonFeed('cap_feed');
+      window.backend.uploadFile = realUp; window.Writes.putRow = realPut;
+      return { res, revokedFirst: uploads[0], total: uploads.length };
+    });
+    expect(r.res.published).toBe(2);
+    expect(r.res.skipped).toBe(2);
+    expect(r.res.revoked).toBe(1);
+    // The departed subscriber's file is blanked BEFORE the cap stops the pass.
+    expect(r.revokedFirst).toBe('feeds/zid.ics');
+    expect(r.total).toBe(3);
+  });
+
+  // Rendering a calendar AS somebody else — the per-person feed's rendering path. The failure this
+  // guards is not a broken calendar but a plausible one containing the wrong person's rows, so every
+  // assertion here is about narrowing: does an identity that cannot be resolved come back EMPTY, and
+  // does a full-access publisher stop seeing the whole matrix when it renders for someone else.
+  test('a calendar renders as another person, and as nobody when the identity is unknown', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(() => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true; app.userAllowedTables = null;   // a full-access publisher
+      // A userlink list, so `@me` resolves through the curated value rather than a profile name.
+      app.schemaData = Object.assign({}, app.schemaData || {}, {
+        listSources: Object.assign({}, (app.schemaData || {}).listSources || {}, { assigned_to: 'userlink' })
+      });
+      app.listUserLinks = { assigned_to: { 'Anna': 'anna@x.test', 'Ben': 'ben@x.test' } };
+
+      window.VIEWS.pp_cal = { name: 'pp_cal', feed: 'per-person', calendar: {
+        sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'], filter: { assigned_to: '@me' } }] } };
+      app.dataCache['tasks'] = [
+        { id: 'a', date: '2026-07-08', title: 'Anna task', assigned_to: 'Anna' },
+        { id: 'b', date: '2026-07-09', title: 'Ben task', assigned_to: 'Ben' }
+      ];
+      const win = { from: '2026-07-01', toExclusive: '2026-08-01' };
+      const titles = (ev) => Object.keys(ev || {}).sort()
+        .reduce((acc, d) => acc.concat((ev[d] || []).map((e) => e.title)), []);
+
+      const anna = app.identityFor('anna@x.test');
+      const ghost = app.identityFor('nobody@x.test');
+      return {
+        annaValues: anna.listValues,
+        ghostValues: ghost.listValues,
+        annaTitles: titles(app.calEventsAsFor('pp_cal', win, anna)),
+        benTitles: titles(app.calEventsAsFor('pp_cal', win, app.identityFor('ben@x.test'))),
+        ghostTitles: titles(app.calEventsAsFor('pp_cal', win, ghost)),
+        // The landmine: mineOnlySlot returns null (the WHOLE matrix) for a full-access client, which is
+        // right on screen and catastrophic in a file rendered for somebody else.
+        adminSeesWholeMatrix: app.mineOnlySlot({ mineOnly: { list: 'assigned_to' } }),
+        asAnnaSlot: app._mineOnlySlotOf(anna, { mineOnly: { list: 'assigned_to' } }),
+        asGhostSlot: app._mineOnlySlotOf(ghost, { mineOnly: { list: 'assigned_to' } }),
+        // The signed-in path must still work after being refactored onto the shared rule.
+        myListStillWorks: typeof app.meValueForList('assigned_to')
+      };
+    });
+    expect(r.annaValues).toEqual({ assigned_to: 'Anna' });
+    expect(r.annaTitles).toEqual(['Anna task']);
+    expect(r.benTitles).toEqual(['Ben task']);
+    // The one that matters: an unresolvable subscriber gets an empty calendar, never an unfiltered one.
+    expect(r.ghostValues).toEqual({});
+    expect(r.ghostTitles).toEqual([]);
+    expect(r.adminSeesWholeMatrix).toBe(null);
+    expect(r.asAnnaSlot).toBe('anna');
+    expect(r.asGhostSlot).toBe('');
+    expect(r.myListStillWorks).toBe('string');
   });
 
   test('validateSchema names a timeline pointed at the wrong columns', async ({ page }) => {
