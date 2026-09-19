@@ -76,9 +76,11 @@ describe('listsForInstall', () => {
 
   it('costs the bishopric example nothing on a filled-in database', () => {
     const shipped = read('bishopric-schema.json').lists;
-    // Every shipped list is empty except `bishopric` -- which is exactly why applying them verbatim hurt.
-    assert.deepEqual(Object.keys(shipped).filter((n) => shipped[n].length), ['bishopric']);
-    const ward = { hymns: ['1. Hymn'], members: ['Someone'], bishopric: ['bishop', 'counselor1'], retired: ['x'] };
+    // Every shipped list is empty except `callings` -- the identity namespace, which ships populated
+    // because a position nobody can select is a position nobody can be linked to. That is exactly why
+    // applying the shipped lists verbatim hurt.
+    assert.deepEqual(Object.keys(shipped).filter((n) => shipped[n].length), ['callings']);
+    const ward = { hymns: ['1. Hymn'], members: ['Someone'], callings: ['bishop', 'counselor1'], retired: ['x'] };
     const after = Examples.listsForInstall(ward, shipped);
     for (const name of Object.keys(ward)) assert.deepEqual(after[name], ward[name], name + ' survived');
     assert.deepEqual(after.cleaners, [], 'a vocabulary the ward never started still arrives');

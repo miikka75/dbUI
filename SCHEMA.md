@@ -2526,7 +2526,7 @@ question a reader has is who currently holds one.
 ```json
 "listSources": {
   "members":   "userlink",        // values are curated names; the link drives @me and the avatar
-  "bishopric": "userlink-name"    // values are roles; the cell shows the linked person
+  "callings":  "userlink-name"    // values are positions; the cell shows the linked person
 }
 ```
 
