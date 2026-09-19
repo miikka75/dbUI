@@ -3341,8 +3341,15 @@ function createVueApp() {
       // free-string list beside it that nothing can score. `translatableLists` already accepts a lookup
       // table name for the same reason. The option VALUE is the lookup's GROUP dimension (see below);
       // the rest of the row is reference data.
-      lookupListValues: function(name) {
+      lookupListValues: function(name, valueCol) {
         if (!name || !SCHEMA[name] || !SCHEMA[name].isLookup) return null;
+        // An explicit dimension wins over the default below. A catalogue with more than one meaningful
+        // column -- an organization, a calling, and the handle naming the pair -- can only be drawn
+        // from ONE of them by a given column, and which one is the referring column's business, not
+        // the table's. Ignored when it names nothing: a typo must not empty the picker silently.
+        if (valueCol && SCHEMA[name].columns && SCHEMA[name].columns[valueCol]) {
+          return this._lookupColumnValues(name, valueCol);
+        }
         // A `list:` names the lookup's GROUP dimension -- the parent of a hierarchy, the name column of
         // a flat catalogue -- while a `ref` column names the value under it. Both come from the one
         // declaration, so a lookup that states a parent which is not simply its first column is picked
@@ -3351,11 +3358,16 @@ function createVueApp() {
         // would put plumbing in a picker, so an id-keyed catalogue answers with its VALUE column: the
         // one dimension it has that anyone typed.
         var order = getColumns(name), h = Columns.lookupHierarchy(SCHEMA[name], order);
-        var valueCol = h ? (h.by === 'id' ? h.value : h.parent) : Columns.lookupCols(SCHEMA[name], order)[0];
-        if (!valueCol) return [];
+        var defaultCol = h ? (h.by === 'id' ? h.value : h.parent) : Columns.lookupCols(SCHEMA[name], order)[0];
+        return defaultCol ? this._lookupColumnValues(name, defaultCol) : [];
+      },
+      // One column of a lookup, deduped and in row order, skipping blanks. A blank is how a row says it
+      // has no value in THIS dimension -- an ordination is a row of the callings catalogue that names no
+      // ward position -- so it must not become an empty option.
+      _lookupColumnValues: function(name, col) {
         var seen = {}, out = [];
         (this.dataCache[name] || []).forEach(function(r) {
-          var v = r[valueCol];
+          var v = r[col];
           if (v == null || v === '' || seen[v]) return;
           seen[v] = 1; out.push(v);
         });
@@ -3364,11 +3376,20 @@ function createVueApp() {
       getListOptions: function(col, altList) {
         var self = this;
         var listName = altList || this.colIsList(col);
-        var fromLookup = this.lookupListValues(listName);
+        // The alternate list of a `listSwitch` is a list of its own, so it never carries the column's
+        // lookup dimension -- passing it through would draw the toggle's options from the wrong table.
+        var fromLookup = this.lookupListValues(listName, altList ? null : Columns.colListValueCol(SCHEMA, col));
         var items = fromLookup || (listName && this.listsCache[listName] ? this.listsCache[listName] : []);
         var result = items.map(function(v) { return { title: self.listLabel(listName, v), value: v }; });
         if (this.colIsSorted(col)) result.sort(function(a, b) { return a.title.localeCompare(b.title); });
         return result;
+      },
+      // The value the account picker links, for one row of a user-linked lookup: its cell in the
+      // dimension the referring columns address. Empty when the row names no identity -- a catalogue row
+      // may exist without being a position anyone holds -- and the picker is then not offered.
+      refIdentityValue: function(row) {
+        var col = Columns.lookupIdentityCol(SCHEMA, this.currentRefTable);
+        return (col && row && row[col]) || '';
       },
       colListSwitch: function(col) { return Columns.colListSwitch(SCHEMA, col); },
       isAltList: function(col, item) {

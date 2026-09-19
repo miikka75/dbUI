@@ -678,6 +678,12 @@
     <template v-slot:append>
       <v-icon v-if="a.isTranslatableRefTable()" size="x-small" style="opacity:0.35">mdi-translate</v-icon>
       <v-icon v-if="a.isLockedRefRow(node.row)" size="x-small" style="opacity:0.4" :title="a.t('list.locked_value')">mdi-lock-outline</v-icon>
+      <!-- A user-linked LOOKUP is linked here, one row at a time, exactly as a user-linked list is
+           linked in the Lists section above. The catalogue is maintained as a table under its own
+           grant, so the picker has to live where the rows are; without it a lookup could declare
+           `listSources` and leave an admin no way to link anybody. -->
+      <list-user-picker v-if="a.isAdmin && a.isUserLinkList(table) && a.refIdentityValue(node.row)"
+                        :list="table" :value="a.refIdentityValue(node.row)"></list-user-picker>
       <template v-if="a.refReorderable">
         <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="a.refChildAtEdge(node.row,-1)" @click="a.moveRefChild(node.row,-1)"></v-btn>
         <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="a.refChildAtEdge(node.row,1)" @click="a.moveRefChild(node.row,1)"></v-btn>

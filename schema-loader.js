@@ -174,6 +174,24 @@ function validateSchema() {
     });
     if (!Array.isArray(SCHEMA[ot].ownerWritable)) errors.push('table "' + ot + '": `ownerWritableWhile` has no effect without `ownerWritable` (nothing bounds an owner-scoped write to begin with)');
   }
+  // `valueCol` on a LIST-backed column says which dimension of a lookup its options come from. It is a
+  // legal key everywhere (Columns.COLUMN_KEYS), so a wrong one is not a vocabulary error -- and it fails
+  // the way every unread key does: silently, with the picker quietly falling back to the lookup's group
+  // dimension, which is a plausible-looking list of the WRONG thing. Both ways of being wrong are
+  // checked here, because neither shows up as an error at the point of use.
+  for (var vt in SCHEMA) {
+    var vdefs = Columns.columnDefs(SCHEMA[vt]);
+    for (var vc in vdefs) {
+      var vd = vdefs[vc];
+      if (!vd || typeof vd !== 'object' || !vd.list || !vd.valueCol) continue;
+      var lt = SCHEMA[vd.list];
+      if (!lt || !lt.isLookup) {
+        errors.push('table "' + vt + '", column "' + vc + '": `valueCol` only has meaning when `list` names a lookup TABLE; "' + vd.list + '" is a plain list, whose values have no columns');
+      } else if (!(vd.valueCol in Columns.columnDefs(lt))) {
+        errors.push('table "' + vt + '", column "' + vc + '": `valueCol` "' + vd.valueCol + '" is not a column of lookup "' + vd.list + '"');
+      }
+    }
+  }
   // `hierarchy` is a lookup's own statement of which column groups it and which holds the value under
   // that group. Three readers ask Columns.lookupHierarchy for it -- the Lookup editor, a board's 2-D ref
   // lane, and this file's `rosterRef` check -- and a wrong one fails the same silent way in all three:
@@ -711,6 +729,16 @@ function validateRefs(schema) {
       });
     }
   }
+  // A user-linked LOOKUP needs a dimension whose values accounts are linked to, and that dimension is
+  // derived from the columns drawing on it. With none, `listSources` is a declaration with no picker
+  // behind it: the Lookup editor offers nothing, so nobody can be linked and every `@me` resolves to
+  // the fail-closed sentinel -- a per-person view that renders empty for everybody, with no error.
+  Object.keys(schema.listSources || {}).forEach(function(ln) {
+    if (!tables[ln] || !tables[ln].isLookup) return;                      // a plain list needs no dimension
+    if (!Columns.lookupIdentityCol(tables, ln)) {
+      errs.push('`listSources` marks lookup "' + ln + '" as user-linked, but no column says which of its dimensions holds the linked values — give the referring column a `valueCol`');
+    }
+  });
   Object.keys(views).forEach(function(n) {
     var v = views[n];
     (v.sources || []).forEach(function(s) { if (!hasTable(s)) errs.push('View "' + n + '" -> missing table "' + s + '"'); });

@@ -2165,10 +2165,25 @@ Use it when a catalogue already exists and a second column only needs the *name*
 example the rotation rosters read `ref_chores`, so every rostered task is a chore the scoreboard can
 price — before, a parallel free-string list held task names that nothing could score.
 
-- **The option value is the lookup's group dimension** — `hierarchy.parent` where the table declares
-  one, else its first author-facing column (its name column, the same one a `ref` column's `valueCol`
-  defaults to). The rest of the row stays reference data: `ref_chores.points` is
+- **The option value is the lookup's group dimension by default** — `hierarchy.parent` where the table
+  declares one, else its first author-facing column (its name column, the same one a `ref` column's
+  `valueCol` defaults to). The rest of the row stays reference data: `ref_chores.points` is
   what the scoreboard's `lookup` computed column reads.
+- **`valueCol` picks a different dimension.** One catalogue can answer several questions — the
+  bishopric example's `ref_callings` holds an `organization`, a `calling`, and a `slug` naming the pair
+  — and which of them a picker should offer is the *column's* business, not the table's, because two
+  columns may legitimately want two different ones:
+
+  ```json
+  { "name": "organization", "type": "select", "list": "ref_callings" },                     // organizations
+  { "name": "responsible",  "type": "select", "list": "ref_callings", "valueCol": "slug" }  // positions
+  ```
+
+  Same key, same meaning as on a `ref`. A blank cell in that dimension contributes no option, so a row
+  can exist in the catalogue without being offered — an ordination is a row of the callings catalogue
+  that names no ward position. `valueCol` naming a column the lookup does not have, or a `list:` that
+  is a plain list, is a load-time error: both would fall back silently to the group dimension, which
+  looks like a working picker full of the wrong values.
 - **Values are deduped** across rows and translate through `list.<table>.<value>`, the same keys
   `translatableLists` exposes when it names a lookup table.
 - **Not editable as a list**: no `allowNew`, and the Lists editor ignores it. A lookup table is
@@ -2529,6 +2544,13 @@ question a reader has is who currently holds one.
   "callings":  "userlink-name"    // values are positions; the cell shows the linked person
 }
 ```
+
+**A lookup TABLE may be the namespace**, not just a list: `"listSources": { "ref_callings": "userlink-name" }`
+links accounts to rows of a catalogue instead of to values of a list beside it. The dimension the links
+are keyed by is the one the referring columns address with `valueCol` — derived rather than declared a
+second time, and a load-time error when no column says which, since the Lookup editor would then have
+no picker to offer and every `@me` would resolve empty. The picker appears per row in the **Lookup**
+tab, where that catalogue is maintained, rather than in the Lists section.
 
 Precedence for a value's label, in `listLabel`: the linked account's name, else the
 `list.<list>.<value>` translation, else the raw value. So it degrades rather than breaks — an unlinked

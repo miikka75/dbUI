@@ -167,13 +167,15 @@
             "listSwitch": {
               "list": "visitors"
             },
-            "list": "callings",
-            "type": "select"
+            "list": "ref_callings",
+            "type": "select",
+            "valueCol": "slug"
           },
           {
             "name": "responsible",
             "type": "select",
-            "list": "callings"
+            "list": "ref_callings",
+            "valueCol": "slug"
           },
           {
             "name": "opening_prayer",
@@ -269,7 +271,8 @@
           {
             "name": "responsible",
             "type": "select",
-            "list": "callings"
+            "list": "ref_callings",
+            "valueCol": "slug"
           },
           {
             "name": "item",
@@ -305,8 +308,9 @@
           },
           {
             "name": "responsible",
-            "list": "callings",
-            "type": "select"
+            "list": "ref_callings",
+            "type": "select",
+            "valueCol": "slug"
           }
         ]
       },
@@ -371,8 +375,9 @@
           },
           {
             "name": "responsible",
-            "list": "callings",
-            "type": "select"
+            "list": "ref_callings",
+            "type": "select",
+            "valueCol": "slug"
           },
           {
             "name": "expires",
@@ -453,8 +458,9 @@
           },
           {
             "name": "responsible",
-            "list": "callings",
-            "type": "select"
+            "list": "ref_callings",
+            "type": "select",
+            "valueCol": "slug"
           },
           {
             "name": "notes",
@@ -521,6 +527,11 @@
           {
             "name": "calling",
             "type": "text"
+          },
+          {
+            "name": "slug",
+            "type": "text",
+            "hidden": true
           },
           {
             "name": "position",
@@ -930,13 +941,22 @@
           "$or": [
             {
               "responsible": {
-                "matchList": "callings"
+                "notEmpty": true
               }
             },
             {
-              "presiding": {
-                "matchList": "callings"
-              }
+              "$and": [
+                {
+                  "presiding": {
+                    "notEmpty": true
+                  }
+                },
+                {
+                  "presiding": {
+                    "notMatchList": "visitors"
+                  }
+                }
+              ]
             }
           ]
         },
@@ -1135,11 +1155,10 @@
     ],
     "listSources": {
       "members": "userlink",
-      "callings": "userlink-name"
+      "ref_callings": "userlink-name"
     },
     "translatableLists": [
       "ref_statuses",
-      "callings",
       "interview_topics",
       "ref_callings"
     ],
@@ -1153,56 +1172,7 @@
     "cleaners": [],
     "accompanists": [],
     "interpreters": [],
-    "visitors": [],
-    "callings": [
-      "bishop",
-      "counselor1",
-      "counselor2",
-      "primary_president",
-      "primary_first_counselor",
-      "primary_second_counselor",
-      "primary_secretary",
-      "primary_nursery_leader",
-      "primary_nursery_assistant",
-      "relief_society_president",
-      "relief_society_first_counselor",
-      "relief_society_second_counselor",
-      "relief_society_secretary",
-      "young_women_president",
-      "young_women_first_counselor",
-      "young_women_second_counselor",
-      "young_women_secretary",
-      "young_single_adults_representative",
-      "young_men_priests_president",
-      "young_men_priests_first_counselor",
-      "young_men_priests_second_counselor",
-      "young_men_priests_secretary",
-      "young_men_teachers_president",
-      "young_men_teachers_first_counselor",
-      "young_men_teachers_second_counselor",
-      "young_men_teachers_secretary",
-      "young_men_deacons_president",
-      "young_men_deacons_first_counselor",
-      "young_men_deacons_second_counselor",
-      "young_men_deacons_secretary",
-      "single_adults_representative",
-      "elders_quorum_president",
-      "elders_quorum_first_counselor",
-      "elders_quorum_second_counselor",
-      "elders_quorum_secretary",
-      "sunday_school_president",
-      "sunday_school_first_counselor",
-      "sunday_school_second_counselor",
-      "sunday_school_secretary",
-      "missionary_work_leader",
-      "music_leader",
-      "music_specialist",
-      "temple_and_family_history_leader",
-      "temple_and_family_history_consultant",
-      "ward_executive_secretary",
-      "ward_technology_specialist",
-      "ward_technology_assistant"
-    ]
+    "visitors": []
   },
   "tables": {
     "ref_statuses": [
@@ -1314,325 +1284,379 @@
         "id": "rc-1",
         "position": "1",
         "organization": "aaronic_priesthood",
-        "calling": "deacon"
+        "calling": "deacon",
+        "slug": ""
       },
       {
         "id": "rc-2",
         "position": "2",
         "organization": "aaronic_priesthood",
-        "calling": "teacher"
+        "calling": "teacher",
+        "slug": ""
       },
       {
         "id": "rc-3",
         "position": "3",
         "organization": "aaronic_priesthood",
-        "calling": "priest"
+        "calling": "priest",
+        "slug": ""
       },
       {
         "id": "rc-4",
         "position": "4",
         "organization": "bishopric",
-        "calling": "bishop"
+        "calling": "bishop",
+        "slug": "bishop"
       },
       {
         "id": "rc-5",
         "position": "5",
         "organization": "bishopric",
-        "calling": "first_counselor"
+        "calling": "first_counselor",
+        "slug": "counselor1"
       },
       {
         "id": "rc-6",
         "position": "6",
         "organization": "bishopric",
-        "calling": "second_counselor"
+        "calling": "second_counselor",
+        "slug": "counselor2"
       },
       {
         "id": "rc-100",
         "position": "100",
         "organization": "primary",
-        "calling": "president"
+        "calling": "president",
+        "slug": "primary_president"
       },
       {
         "id": "rc-101",
         "position": "101",
         "organization": "primary",
-        "calling": "first_counselor"
+        "calling": "first_counselor",
+        "slug": "primary_first_counselor"
       },
       {
         "id": "rc-102",
         "position": "102",
         "organization": "primary",
-        "calling": "second_counselor"
+        "calling": "second_counselor",
+        "slug": "primary_second_counselor"
       },
       {
         "id": "rc-104",
         "position": "104",
         "organization": "primary",
-        "calling": "secretary"
+        "calling": "secretary",
+        "slug": "primary_secretary"
       },
       {
         "id": "rc-105",
         "position": "105",
         "organization": "primary",
-        "calling": "teacher"
+        "calling": "teacher",
+        "slug": ""
       },
       {
         "id": "rc-108",
         "position": "108",
         "organization": "primary_nursery",
-        "calling": "leader"
+        "calling": "leader",
+        "slug": "primary_nursery_leader"
       },
       {
         "id": "rc-115",
         "position": "115",
         "organization": "primary_nursery",
-        "calling": "assistant"
+        "calling": "assistant",
+        "slug": "primary_nursery_assistant"
       },
       {
         "id": "rc-116",
         "position": "116",
         "organization": "relief_society",
-        "calling": "president"
+        "calling": "president",
+        "slug": "relief_society_president"
       },
       {
         "id": "rc-117",
         "position": "117",
         "organization": "relief_society",
-        "calling": "first_counselor"
+        "calling": "first_counselor",
+        "slug": "relief_society_first_counselor"
       },
       {
         "id": "rc-118",
         "position": "118",
         "organization": "relief_society",
-        "calling": "second_counselor"
+        "calling": "second_counselor",
+        "slug": "relief_society_second_counselor"
       },
       {
         "id": "rc-120",
         "position": "121",
         "organization": "relief_society",
-        "calling": "secretary"
+        "calling": "secretary",
+        "slug": "relief_society_secretary"
       },
       {
         "id": "rc-124",
         "position": "124",
         "organization": "young_women",
-        "calling": "president"
+        "calling": "president",
+        "slug": "young_women_president"
       },
       {
         "id": "rc-125",
         "position": "125",
         "organization": "young_women",
-        "calling": "first_counselor"
+        "calling": "first_counselor",
+        "slug": "young_women_first_counselor"
       },
       {
         "id": "rc-126",
         "position": "126",
         "organization": "young_women",
-        "calling": "second_counselor"
+        "calling": "second_counselor",
+        "slug": "young_women_second_counselor"
       },
       {
         "id": "rc-128",
         "position": "128",
         "organization": "young_women",
-        "calling": "secretary"
+        "calling": "secretary",
+        "slug": "young_women_secretary"
       },
       {
         "id": "rc-138",
         "position": "138",
         "organization": "young_single_adults",
-        "calling": "representative"
+        "calling": "representative",
+        "slug": "young_single_adults_representative"
       },
       {
         "id": "rc-148",
         "position": "148",
         "organization": "young_men_priests",
-        "calling": "president"
+        "calling": "president",
+        "slug": "young_men_priests_president"
       },
       {
         "id": "rc-149",
         "position": "149",
         "organization": "young_men_priests",
-        "calling": "first_counselor"
+        "calling": "first_counselor",
+        "slug": "young_men_priests_first_counselor"
       },
       {
         "id": "rc-150",
         "position": "150",
         "organization": "young_men_priests",
-        "calling": "second_counselor"
+        "calling": "second_counselor",
+        "slug": "young_men_priests_second_counselor"
       },
       {
         "id": "rc-152",
         "position": "152",
         "organization": "young_men_priests",
-        "calling": "secretary"
+        "calling": "secretary",
+        "slug": "young_men_priests_secretary"
       },
       {
         "id": "rc-156",
         "position": "156",
         "organization": "young_men_teachers",
-        "calling": "president"
+        "calling": "president",
+        "slug": "young_men_teachers_president"
       },
       {
         "id": "rc-157",
         "position": "157",
         "organization": "young_men_teachers",
-        "calling": "first_counselor"
+        "calling": "first_counselor",
+        "slug": "young_men_teachers_first_counselor"
       },
       {
         "id": "rc-158",
         "position": "158",
         "organization": "young_men_teachers",
-        "calling": "second_counselor"
+        "calling": "second_counselor",
+        "slug": "young_men_teachers_second_counselor"
       },
       {
         "id": "rc-160",
         "position": "160",
         "organization": "young_men_teachers",
-        "calling": "secretary"
+        "calling": "secretary",
+        "slug": "young_men_teachers_secretary"
       },
       {
         "id": "rc-164",
         "position": "164",
         "organization": "young_men_deacons",
-        "calling": "president"
+        "calling": "president",
+        "slug": "young_men_deacons_president"
       },
       {
         "id": "rc-165",
         "position": "165",
         "organization": "young_men_deacons",
-        "calling": "first_counselor"
+        "calling": "first_counselor",
+        "slug": "young_men_deacons_first_counselor"
       },
       {
         "id": "rc-166",
         "position": "166",
         "organization": "young_men_deacons",
-        "calling": "second_counselor"
+        "calling": "second_counselor",
+        "slug": "young_men_deacons_second_counselor"
       },
       {
         "id": "rc-168",
         "position": "168",
         "organization": "young_men_deacons",
-        "calling": "secretary"
+        "calling": "secretary",
+        "slug": "young_men_deacons_secretary"
       },
       {
         "id": "rc-179",
         "position": "179",
         "organization": "single_adults",
-        "calling": "representative"
+        "calling": "representative",
+        "slug": "single_adults_representative"
       },
       {
         "id": "rc-180",
         "position": "180",
         "organization": "elders_quorum",
-        "calling": "president"
+        "calling": "president",
+        "slug": "elders_quorum_president"
       },
       {
         "id": "rc-181",
         "position": "181",
         "organization": "elders_quorum",
-        "calling": "first_counselor"
+        "calling": "first_counselor",
+        "slug": "elders_quorum_first_counselor"
       },
       {
         "id": "rc-182",
         "position": "182",
         "organization": "elders_quorum",
-        "calling": "second_counselor"
+        "calling": "second_counselor",
+        "slug": "elders_quorum_second_counselor"
       },
       {
         "id": "rc-184",
         "position": "184",
         "organization": "elders_quorum",
-        "calling": "secretary"
+        "calling": "secretary",
+        "slug": "elders_quorum_secretary"
       },
       {
         "id": "rc-185",
         "position": "185",
         "organization": "elders_quorum",
-        "calling": "teacher"
+        "calling": "teacher",
+        "slug": ""
       },
       {
         "id": "rc-188",
         "position": "188",
         "organization": "sunday_school",
-        "calling": "president"
+        "calling": "president",
+        "slug": "sunday_school_president"
       },
       {
         "id": "rc-189",
         "position": "189",
         "organization": "sunday_school",
-        "calling": "first_counselor"
+        "calling": "first_counselor",
+        "slug": "sunday_school_first_counselor"
       },
       {
         "id": "rc-190",
         "position": "190",
         "organization": "sunday_school",
-        "calling": "second_counselor"
+        "calling": "second_counselor",
+        "slug": "sunday_school_second_counselor"
       },
       {
         "id": "rc-192",
         "position": "192",
         "organization": "sunday_school",
-        "calling": "secretary"
+        "calling": "secretary",
+        "slug": "sunday_school_secretary"
       },
       {
         "id": "rc-193",
         "position": "193",
         "organization": "sunday_school",
-        "calling": "teacher"
+        "calling": "teacher",
+        "slug": ""
       },
       {
         "id": "rc-196",
         "position": "196",
         "organization": "missionary_work",
-        "calling": "leader"
+        "calling": "leader",
+        "slug": "missionary_work_leader"
       },
       {
         "id": "rc-212",
         "position": "212",
         "organization": "music",
-        "calling": "leader"
+        "calling": "leader",
+        "slug": "music_leader"
       },
       {
         "id": "rc-219",
         "position": "219",
         "organization": "music",
-        "calling": "specialist"
+        "calling": "specialist",
+        "slug": "music_specialist"
       },
       {
         "id": "rc-220",
         "position": "220",
         "organization": "temple_and_family_history",
-        "calling": "leader"
+        "calling": "leader",
+        "slug": "temple_and_family_history_leader"
       },
       {
         "id": "rc-121",
         "position": "900",
         "organization": "relief_society",
-        "calling": "teacher"
+        "calling": "teacher",
+        "slug": ""
       },
       {
         "id": "rc-901",
         "position": "901",
         "organization": "temple_and_family_history",
-        "calling": "consultant"
+        "calling": "consultant",
+        "slug": "temple_and_family_history_consultant"
       },
       {
         "id": "rc-902",
         "position": "902",
         "organization": "ward",
-        "calling": "executive_secretary"
+        "calling": "executive_secretary",
+        "slug": "ward_executive_secretary"
       },
       {
         "id": "mtisz9dlqplpp",
         "position": "903",
         "organization": "ward",
-        "calling": "technology_specialist"
+        "calling": "technology_specialist",
+        "slug": "ward_technology_specialist"
       },
       {
         "id": "rc-903",
         "position": "905",
         "organization": "ward",
-        "calling": "technology_assistant"
+        "calling": "technology_assistant",
+        "slug": "ward_technology_assistant"
       }
     ]
   }
