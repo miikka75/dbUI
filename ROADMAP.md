@@ -1525,7 +1525,7 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   identity columns into `ref` breaks `meeting_agenda.presiding`, which toggles to a visitor through
   `listSwitch`, a select-only feature; they stayed selects for that reason.
 
-  **A defect found only by deploying it** (#PRNUM). The handle began as a column to be TYPED, and the
+  **A defect found only by deploying it** (#200). The handle began as a column to be TYPED, and the
   catalogue could not be used that way: the column is hidden plumbing, the lookup editor draws a
   hierarchy as parent and value only, and `reinstallExample` sets `withData = false` — so an existing
   database got the schema and no handles, and a position added in the app could never be linked to
