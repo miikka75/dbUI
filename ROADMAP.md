@@ -1492,7 +1492,7 @@ stops working offline. Everything above it stays inside the app boundary.
 
 Recorded so the roadmap shows what graduated rather than silently shrinking.
 
-- **Callings as identity — the bishopric tool as a ward tool** (#PRNUM) — `lists.bishopric` held three
+- **Callings as identity — the bishopric tool as a ward tool** (#199) — `lists.bishopric` held three
   roles, and everything personal hung off them: `@me`, the `matchList` filters #197 collapsed six
   literals into, the per-person card view, the per-person feed. A Primary president had no identity, so
   none of it could answer anything for her. The namespace is now the ward's positions, and it lives in
