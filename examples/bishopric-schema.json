@@ -915,20 +915,22 @@
       {
         "groupBy": {
           "from": [
-            "responsible"
+            "responsible",
+            "presiding"
           ],
           "column": "bishopric"
         },
         "filter": {
           "$or": [
             {
-              "responsible": "bishop"
+              "responsible": {
+                "matchList": "bishopric"
+              }
             },
             {
-              "responsible": "counselor1"
-            },
-            {
-              "responsible": "counselor2"
+              "presiding": {
+                "matchList": "bishopric"
+              }
             }
           ]
         },
@@ -936,7 +938,9 @@
         "sources": [
           "meeting_agenda",
           "admin_callings",
-          "admin_interviews"
+          "admin_interviews",
+          "admin_reminders",
+          "admin_responsibilities"
         ],
         "hideArchive": true,
         "readonly": true,
@@ -959,10 +963,27 @@
             "bare": true,
             "mode": "union",
             "filterBy": {
+              "presiding": "bishopric"
+            },
+            "defaultSort": "date",
+            "markdown": "{{t:tab.meeting_agenda}} - {{t:field.presiding}}\n\n{{self}}",
+            "hideEmpty": true
+          },
+          {
+            "sources": [
+              "meeting_agenda"
+            ],
+            "columns": [
+              "date",
+              "theme"
+            ],
+            "bare": true,
+            "mode": "union",
+            "filterBy": {
               "responsible": "bishopric"
             },
             "defaultSort": "date",
-            "markdown": "{{t:tab.meeting_agenda}}\n\n{{self}}",
+            "markdown": "{{t:tab.meeting_agenda}} - {{t:field.responsible}}\n\n{{self}}",
             "hideEmpty": true
           },
           {
@@ -970,14 +991,12 @@
             "filterBy": {
               "responsible": "bishopric"
             },
-            "filter": {
-              "status": "called"
-            },
             "columns": [
               "date",
               "person",
               "organization",
-              "calling"
+              "calling",
+              "status"
             ],
             "sources": [
               "admin_callings"
@@ -1020,6 +1039,22 @@
               "responsible": "bishopric"
             },
             "markdown": "{{t:tab.admin_reminders}}\n\n{{self}}",
+            "hideEmpty": true
+          },
+          {
+            "columns": [
+              "organization"
+            ],
+            "sources": [
+              "admin_responsibilities"
+            ],
+            "mode": "union",
+            "bare": true,
+            "filterBy": {
+              "responsible": "bishopric"
+            },
+            "defaultSort": "organization",
+            "markdown": "{{t:tab.admin_responsibilities}}\n\n{{self}}",
             "hideEmpty": true
           }
         ],
