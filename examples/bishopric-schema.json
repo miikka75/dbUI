@@ -167,13 +167,13 @@
             "listSwitch": {
               "list": "visitors"
             },
-            "list": "bishopric",
+            "list": "callings",
             "type": "select"
           },
           {
             "name": "responsible",
             "type": "select",
-            "list": "bishopric"
+            "list": "callings"
           },
           {
             "name": "opening_prayer",
@@ -269,7 +269,7 @@
           {
             "name": "responsible",
             "type": "select",
-            "list": "bishopric"
+            "list": "callings"
           },
           {
             "name": "item",
@@ -305,7 +305,7 @@
           },
           {
             "name": "responsible",
-            "list": "bishopric",
+            "list": "callings",
             "type": "select"
           }
         ]
@@ -371,7 +371,7 @@
           },
           {
             "name": "responsible",
-            "list": "bishopric",
+            "list": "callings",
             "type": "select"
           },
           {
@@ -453,7 +453,7 @@
           },
           {
             "name": "responsible",
-            "list": "bishopric",
+            "list": "callings",
             "type": "select"
           },
           {
@@ -475,7 +475,10 @@
       },
       "ref_statuses": {
         "isLookup": true,
-        "hierarchy": { "parent": "phase", "value": "status" },
+        "hierarchy": {
+          "parent": "phase",
+          "value": "status"
+        },
         "columns": [
           {
             "name": "phase",
@@ -506,7 +509,10 @@
       },
       "ref_callings": {
         "isLookup": true,
-        "hierarchy": { "parent": "organization", "value": "calling" },
+        "hierarchy": {
+          "parent": "organization",
+          "value": "calling"
+        },
         "columns": [
           {
             "name": "organization",
@@ -918,18 +924,18 @@
             "responsible",
             "presiding"
           ],
-          "column": "bishopric"
+          "column": "callings"
         },
         "filter": {
           "$or": [
             {
               "responsible": {
-                "matchList": "bishopric"
+                "matchList": "callings"
               }
             },
             {
               "presiding": {
-                "matchList": "bishopric"
+                "matchList": "callings"
               }
             }
           ]
@@ -949,9 +955,9 @@
         "collect": "responsible",
         "collapsed": true,
         "mode": "union",
-        "defaultSort": "bishopric",
+        "defaultSort": "callings",
         "columns": [
-          "bishopric",
+          "callings",
           {
             "sources": [
               "meeting_agenda"
@@ -963,7 +969,7 @@
             "bare": true,
             "mode": "union",
             "filterBy": {
-              "presiding": "bishopric"
+              "presiding": "callings"
             },
             "defaultSort": "date",
             "markdown": "{{t:tab.meeting_agenda}} - {{t:field.presiding}}\n\n{{self}}",
@@ -980,7 +986,7 @@
             "bare": true,
             "mode": "union",
             "filterBy": {
-              "responsible": "bishopric"
+              "responsible": "callings"
             },
             "defaultSort": "date",
             "markdown": "{{t:tab.meeting_agenda}} - {{t:field.responsible}}\n\n{{self}}",
@@ -989,7 +995,7 @@
           {
             "defaultSort": "date",
             "filterBy": {
-              "responsible": "bishopric"
+              "responsible": "callings"
             },
             "columns": [
               "date",
@@ -1010,7 +1016,7 @@
             "hideEmpty": true,
             "markdown": "{{t:tab.admin_interviews}}\n\n{{self}}",
             "filterBy": {
-              "responsible": "bishopric"
+              "responsible": "callings"
             },
             "bare": true,
             "mode": "union",
@@ -1036,7 +1042,7 @@
             "mode": "union",
             "bare": true,
             "filterBy": {
-              "responsible": "bishopric"
+              "responsible": "callings"
             },
             "markdown": "{{t:tab.admin_reminders}}\n\n{{self}}",
             "hideEmpty": true
@@ -1051,7 +1057,7 @@
             "mode": "union",
             "bare": true,
             "filterBy": {
-              "responsible": "bishopric"
+              "responsible": "callings"
             },
             "defaultSort": "organization",
             "markdown": "{{t:tab.admin_responsibilities}}\n\n{{self}}",
@@ -1129,11 +1135,11 @@
     ],
     "listSources": {
       "members": "userlink",
-      "bishopric": "userlink-name"
+      "callings": "userlink-name"
     },
     "translatableLists": [
       "ref_statuses",
-      "bishopric",
+      "callings",
       "interview_topics",
       "ref_callings"
     ],
@@ -1143,16 +1149,60 @@
     "interview_topics": [],
     "choristers": [],
     "hymns": [],
-    "bishopric": [
-      "bishop",
-      "counselor1",
-      "counselor2"
-    ],
     "members": [],
     "cleaners": [],
     "accompanists": [],
     "interpreters": [],
-    "visitors": []
+    "visitors": [],
+    "callings": [
+      "bishop",
+      "counselor1",
+      "counselor2",
+      "primary_president",
+      "primary_first_counselor",
+      "primary_second_counselor",
+      "primary_secretary",
+      "primary_nursery_leader",
+      "primary_nursery_assistant",
+      "relief_society_president",
+      "relief_society_first_counselor",
+      "relief_society_second_counselor",
+      "relief_society_secretary",
+      "young_women_president",
+      "young_women_first_counselor",
+      "young_women_second_counselor",
+      "young_women_secretary",
+      "young_single_adults_representative",
+      "young_men_priests_president",
+      "young_men_priests_first_counselor",
+      "young_men_priests_second_counselor",
+      "young_men_priests_secretary",
+      "young_men_teachers_president",
+      "young_men_teachers_first_counselor",
+      "young_men_teachers_second_counselor",
+      "young_men_teachers_secretary",
+      "young_men_deacons_president",
+      "young_men_deacons_first_counselor",
+      "young_men_deacons_second_counselor",
+      "young_men_deacons_secretary",
+      "single_adults_representative",
+      "elders_quorum_president",
+      "elders_quorum_first_counselor",
+      "elders_quorum_second_counselor",
+      "elders_quorum_secretary",
+      "sunday_school_president",
+      "sunday_school_first_counselor",
+      "sunday_school_second_counselor",
+      "sunday_school_secretary",
+      "missionary_work_leader",
+      "music_leader",
+      "music_specialist",
+      "temple_and_family_history_leader",
+      "temple_and_family_history_consultant",
+      "ward_executive_secretary",
+      "ward_technology_specialist",
+      "ward_technology_assistant"
+    ]
   },
   "tables": {
     "ref_statuses": [
@@ -1277,6 +1327,24 @@
         "position": "3",
         "organization": "aaronic_priesthood",
         "calling": "priest"
+      },
+      {
+        "id": "rc-4",
+        "position": "4",
+        "organization": "bishopric",
+        "calling": "bishop"
+      },
+      {
+        "id": "rc-5",
+        "position": "5",
+        "organization": "bishopric",
+        "calling": "first_counselor"
+      },
+      {
+        "id": "rc-6",
+        "position": "6",
+        "organization": "bishopric",
+        "calling": "second_counselor"
       },
       {
         "id": "rc-100",
