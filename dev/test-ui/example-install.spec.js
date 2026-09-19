@@ -117,7 +117,7 @@ test('Settings says in words what an update will bring', async ({ page }) => {
 
   // bishopric is the bundle that ships notes; pin the install a revision behind its earliest one so the
   // whole list is pending, rather than hard-coding how many notes it has today.
-  const { notes, lowest } = await page.evaluate(async () => {
+  const { notes, newest } = await page.evaluate(async () => {
     const manifest = await appInstance.fetchExampleManifest();
     const b = manifest.bundles.find((x) => x.id === 'bishopric');
     const revisions = Object.keys(b.notes || {}).map(Number).sort((p, q) => p - q);
@@ -126,7 +126,9 @@ test('Settings says in words what an update will bring', async ({ page }) => {
     appInstance.appConfig = Object.assign({}, appInstance.appConfig, {
       example: { bundle: 'bishopric', revision: revisions[0] - 1, files: files }
     });
-    return { notes: b.notes, lowest: revisions[0] };
+    // The notice caps at five, newest first, so the note guaranteed to be ON SCREEN is the newest —
+    // not the oldest, which is the first thing elided once a bundle has more than five notes.
+    return { notes: b.notes, newest: revisions[revisions.length - 1] };
   });
 
   await page.evaluate(() => appInstance.selectTab('__settings'));
@@ -136,5 +138,5 @@ test('Settings says in words what an update will bring', async ({ page }) => {
   // Every pending note is on screen, and it reads as prose rather than as a filename.
   const shown = notice.locator('[data-testid="example-update-note"]');
   await expect(shown).toHaveCount(Math.min(Object.keys(notes).length, 5));
-  await expect(notice).toContainText(notes[String(lowest)]);
+  await expect(notice).toContainText(notes[String(newest)]);
 });

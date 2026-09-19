@@ -408,6 +408,26 @@ describe('a lookup addressed through more than one of its dimensions', () => {
     assert.equal(Columns.lookupIdentityCol(SCH, 'ref_callings'), 'slug');
   });
 
+  it('names a row by its own two dimensions when the handle cell is empty', () => {
+    // The property the whole design rests on: a catalogue that predates the handle column, and a row
+    // typed in the app today, are both named without anybody filling anything in. The column is hidden
+    // plumbing and the lookup editor draws a hierarchy as parent and value only, so a handle that had
+    // to be TYPED could never be given one.
+    const order = ['organization', 'slug', 'calling'];
+    const t = SCH.ref_callings;
+    assert.equal(Columns.rowHandle(t, order, { organization: 'primary', calling: 'president' }, 'slug'),
+      'primary_president');
+    // A cell, where there is one, wins: it is an override for a row that must keep an older spelling.
+    assert.equal(Columns.rowHandle(t, order, { organization: 'bishopric', calling: 'bishop', slug: 'bishop' }, 'slug'),
+      'bishop');
+    // Half a pair names nothing rather than something short — `primary_` would collide with the next
+    // half-filled row and quietly put two of them on one card.
+    assert.equal(Columns.rowHandle(t, order, { organization: 'primary' }, 'slug'), '');
+    assert.equal(Columns.rowHandle(t, order, {}, 'slug'), '');
+    // A flat lookup has no pair to join, so it has nothing to derive from and says so.
+    assert.equal(Columns.rowHandle({ columns: { v: { type: 'text' } } }, ['v'], { v: 'x' }, 'slug'), '');
+  });
+
   it('answers null when nothing asks, or when two columns disagree', () => {
     // Null is what keeps the account picker OFF a catalogue whose linkable dimension is ambiguous:
     // guessing would offer to link an organization as though it were a person's position.

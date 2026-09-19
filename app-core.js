@@ -3348,7 +3348,15 @@ function createVueApp() {
         // from ONE of them by a given column, and which one is the referring column's business, not
         // the table's. Ignored when it names nothing: a typo must not empty the picker silently.
         if (valueCol && SCHEMA[name].columns && SCHEMA[name].columns[valueCol]) {
-          return this._lookupColumnValues(name, valueCol);
+          // A HANDLE dimension, so a blank cell derives rather than contributing nothing: see
+          // Columns.rowHandle for why the stored value is an override and not the source.
+          var def = SCHEMA[name], order = getColumns(name), seen = {}, out = [];
+          (this.dataCache[name] || []).forEach(function(r) {
+            var v = Columns.rowHandle(def, order, r, valueCol);
+            if (!v || seen[v]) return;
+            seen[v] = 1; out.push(v);
+          });
+          return out;
         }
         // A `list:` names the lookup's GROUP dimension -- the parent of a hierarchy, the name column of
         // a flat catalogue -- while a `ref` column names the value under it. Both come from the one
@@ -3388,8 +3396,9 @@ function createVueApp() {
       // dimension the referring columns address. Empty when the row names no identity -- a catalogue row
       // may exist without being a position anyone holds -- and the picker is then not offered.
       refIdentityValue: function(row) {
-        var col = Columns.lookupIdentityCol(SCHEMA, this.currentRefTable);
-        return (col && row && row[col]) || '';
+        var t = this.currentRefTable, col = Columns.lookupIdentityCol(SCHEMA, t);
+        if (!col || !t || !SCHEMA[t]) return '';
+        return Columns.rowHandle(SCHEMA[t], getColumns(t), row, col);
       },
       colListSwitch: function(col) { return Columns.colListSwitch(SCHEMA, col); },
       isAltList: function(col, item) {

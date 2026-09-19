@@ -45,10 +45,13 @@ const SCH = {
 // Two organizations, and a `president` in each — the collision that makes the calling dimension
 // useless as an identity and the handle necessary. One row carries NO handle: a catalogue entry that
 // names no position anybody holds.
+// No handles stored: every one of these derives, which is what a catalogue predating the handle looks
+// like. `p3` keeps an explicit one, because a row that must hold an older spelling is the only reason
+// the cell exists at all.
 const ROWS = [
-  { id: 'p1', position: '1', organization: 'primary', calling: 'president', slug: 'primary_president' },
-  { id: 'p2', position: '2', organization: 'primary', calling: 'teacher', slug: '' },
-  { id: 'p3', position: '3', organization: 'music', calling: 'president', slug: 'music_president' }
+  { id: 'p1', position: '1', organization: 'primary', calling: 'president' },
+  { id: 'p2', position: '2', organization: 'primary', calling: 'teacher' },
+  { id: 'p3', position: '3', organization: 'music', calling: 'president', slug: 'the_chorister' }
 ];
 
 async function boot(page) {
@@ -61,7 +64,8 @@ async function boot(page) {
   await page.request.post('/api/updateTranslations', { data: { langCode: 'en', updates: {
     'list.ref_positions.primary': 'Primary', 'list.ref_positions.music': 'Music',
     'list.ref_positions.primary_president': 'Primary — President',
-    'list.ref_positions.music_president': 'Music — President'
+    'list.ref_positions.primary_teacher': 'Primary — Teacher',
+    'list.ref_positions.the_chorister': 'The chorister'
   } } });
   await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
   await page.goto('/');
@@ -82,13 +86,13 @@ test('two columns draw on two dimensions of one catalogue', async ({ page }) => 
   // The column that names no dimension keeps the old behaviour exactly: the lookup's group dimension,
   // deduped — two rows are `primary` and only one option is.
   expect(r.org.map((o) => o.value)).toEqual(['primary', 'music']);
-  // The one that asks for `slug` gets the handles, and the blank row contributes nothing: a row may
-  // exist in the catalogue without being a position anyone can be assigned.
-  expect(r.responsible.map((o) => o.value)).toEqual(['primary_president', 'music_president']);
+  // The one that asks for `slug` gets a handle per row: two derived from the row's own dimensions, one
+  // taken from the cell that overrides it. Nothing had to be typed for the first two.
+  expect(r.responsible.map((o) => o.value)).toEqual(['primary_president', 'primary_teacher', 'the_chorister']);
   // Both dimensions label through the SAME `list.<table>.<value>` namespace, which is what lets one
   // catalogue carry both without a second vocabulary beside it.
   expect(r.org.map((o) => o.title)).toEqual(['Primary', 'Music']);
-  expect(r.responsible.map((o) => o.title)).toEqual(['Primary — President', 'Music — President']);
+  expect(r.responsible.map((o) => o.title)).toEqual(['Primary — President', 'Primary — Teacher', 'The chorister']);
 });
 
 test('the account picker reaches a catalogue maintained as a table', async ({ page }) => {
@@ -98,7 +102,7 @@ test('the account picker reaches a catalogue maintained as a table', async ({ pa
   // and `canEditList` is false for one by design.
   expect(await page.evaluate(() => appInstance.isUserNameList('ref_positions'))).toBe(true);
   const pickers = page.locator('[data-testid="list-user-picker"]');
-  await expect.poll(() => pickers.count(), { timeout: 6000 }).toBe(2);   // one per row that names a position
+  await expect.poll(() => pickers.count(), { timeout: 6000 }).toBe(3);   // every row is nameable, so every row links
 
   // And it links the HANDLE, not the calling — `primary_president`, never the `president` that two
   // rows share. Linking the shared value would put two people's work on one card.
@@ -110,4 +114,20 @@ test('the account picker reaches a catalogue maintained as a table', async ({ pa
   // lands), so this polls rather than reading once.
   await expect.poll(() => page.evaluate(() => appInstance.listUserLinks.ref_positions || null), { timeout: 6000 })
     .toEqual({ primary_president: 'pres@x.test' });
+});
+
+test('a position added in the app is linkable without anyone filling in a handle', async ({ page }) => {
+  await boot(page);
+  // The defect this design exists to remove: the handle column is hidden, and the lookup editor draws
+  // a hierarchy as its parent and value only — so a row added here could never be given one by hand.
+  await page.request.post('/api/putRow', { data: { tableId: 'ref_positions', tab: 'active',
+    data: { id: 'p4', position: '4', organization: 'music', calling: 'chorister' } } });
+  await page.evaluate(() => appInstance._ensureCached(['ref_positions'], null, false));
+  await expect.poll(() => page.evaluate(() => (appInstance.dataCache.ref_positions || []).length), { timeout: 6000 }).toBe(4);
+
+  expect(await page.evaluate(() => appInstance.getListOptions('responsible').map((o) => o.value)))
+    .toContain('music_chorister');
+  await page.evaluate(() => appInstance.setListUserLink('ref_positions', 'music_chorister', 'chorister@x.test'));
+  await expect.poll(() => page.evaluate(() => (appInstance.listUserLinks.ref_positions || {}).music_chorister), { timeout: 6000 })
+    .toBe('chorister@x.test');
 });
