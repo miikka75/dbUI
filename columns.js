@@ -450,8 +450,19 @@
   // reads only the def, never the key.
   function tableDeps(schema, table) {
     var seen = {}, out = [];
+    var add = function(t) { if (t && t !== table && !seen[t]) { seen[t] = 1; out.push(t); } };
     columnDefList(schema && schema[table]).forEach(function(d) {
-      defTables(d).forEach(function(t) { if (t !== table && !seen[t]) { seen[t] = 1; out.push(t); } });
+      defTables(d).forEach(add);
+      // A SIXTH shape, and the one defTables cannot recognise on its own: a `list:` may name a lookup
+      // TABLE rather than a list, and then the picker reads that table's rows straight out of the cache
+      // with no load path of its own -- an empty dropdown that looks like data, exactly what the note
+      // above defTables describes. Only the schema knows whether a name is a lookup or a plain list,
+      // which is why this clause lives here, where the schema is, rather than in defTables.
+      //
+      // It went unnoticed because a table that ALSO has a `ref` at the same lookup is pulled in by that
+      // ref, so a catalogue reached both ways loaded fine and one reached only by `list:` did not --
+      // and whether a view worked then depended on which view you had opened first.
+      if (d && typeof d === 'object' && d.list && schema[d.list] && schema[d.list].isLookup) add(d.list);
     });
     return out;
   }
