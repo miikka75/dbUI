@@ -379,3 +379,44 @@ describe('columns.js — nothing re-implements the shape branch', () => {
     }
   });
 });
+
+describe('a lookup addressed through more than one of its dimensions', () => {
+  // One catalogue can answer several questions: the bishopric example's `ref_callings` holds an
+  // organization, a calling, and the handle naming the pair. Which dimension a column draws on is the
+  // COLUMN's business -- `valueCol`, the same key that means this on a `ref` -- because the table
+  // cannot know which of its columns a given picker wants.
+  // The any-table scanners read the NORMALIZED shape, where `columns` is a map keyed by column name.
+  const SCH = {
+    ref_callings: { isLookup: true, hierarchy: { parent: 'organization', value: 'calling' },
+      columns: { organization: { type: 'text' }, slug: { type: 'text', hidden: true }, calling: { type: 'text' } } },
+    duties: { columns: {
+      organization: { type: 'select', list: 'ref_callings' },                    // the lookup's group dimension
+      responsible:  { type: 'select', list: 'ref_callings', valueCol: 'slug' },  // the handle naming the pair
+      note:         { type: 'text' }
+    } }
+  };
+
+  it('reports the dimension a column asks for, and nothing for one that asks for none', () => {
+    assert.equal(Columns.colListValueCol(SCH, 'responsible'), 'slug');
+    assert.equal(Columns.colListValueCol(SCH, 'organization'), null);   // takes the lookup's own default
+    assert.equal(Columns.colListValueCol(SCH, 'note'), null);
+  });
+
+  it('derives which dimension accounts are linked to, from the columns that draw on it', () => {
+    // Declared once per referring column and derived here, like listOwningTables -- a second
+    // declaration on the table could disagree with the columns, and this cannot.
+    assert.equal(Columns.lookupIdentityCol(SCH, 'ref_callings'), 'slug');
+  });
+
+  it('answers null when nothing asks, or when two columns disagree', () => {
+    // Null is what keeps the account picker OFF a catalogue whose linkable dimension is ambiguous:
+    // guessing would offer to link an organization as though it were a person's position.
+    const none = { ref_x: { isLookup: true, columns: { v: { type: 'text' } } },
+                   t: { columns: { c: { type: 'select', list: 'ref_x' } } } };
+    assert.equal(Columns.lookupIdentityCol(none, 'ref_x'), null);
+
+    const split = JSON.parse(JSON.stringify(SCH));
+    split.duties.columns.organization.valueCol = 'calling';   // now two columns want two different dimensions
+    assert.equal(Columns.lookupIdentityCol(split, 'ref_callings'), null);
+  });
+});

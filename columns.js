@@ -283,7 +283,7 @@
     for (var t in schema) {
       var cols = (schema[t] && schema[t].columns) || {};
       for (var c in cols) {
-        var e = info[c] || (info[c] = { list: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null });
+        var e = info[c] || (info[c] = { list: null, listValueCol: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null });
         var typ = columnType(schema, t, c), d = cols[c];
         if (typ === 'multiselect') e.multiselect = true;
         if (typ === 'date') e.date = true;
@@ -302,6 +302,13 @@
           // the per-cell path (displayValue asks "is it a ref?" and then "which table?").
           if (d.type === 'ref') { e.ref = true; if (e.refDef == null) e.refDef = d; }   // first table wins, as the loop it replaces did
           if (e.list == null && d.list) e.list = d.list;
+          // WHICH dimension of a lookup a list-backed column draws on. A `list:` may name a lookup
+          // TABLE, and such a table has several columns a picker could offer: the bishopric catalogue
+          // holds an organization, a calling, and the handle that names the pair. `valueCol` already
+          // means "the column supplying the value" on a `ref`; it means the same here, and it was
+          // already a legal key on any column -- it simply had no reader, so a select over a
+          // multi-dimensional catalogue was stuck with whichever dimension lookupListValues defaults to.
+          if (e.listValueCol == null && d.list && d.valueCol) e.listValueCol = d.valueCol;
           if (e.listSwitch == null && d.listSwitch) e.listSwitch = d.listSwitch;
           if (d.allowNew) e.allowNew = true;
           if (d.sorted) e.sorted = true;
@@ -311,7 +318,7 @@
     }
     return info;
   }
-  var _EMPTY = { list: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null };
+  var _EMPTY = { list: null, listValueCol: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null };
   function colInfo(schema, col) {
     var m = _scanCache && _scanCache.get(schema);
     if (!m) { m = scanSchema(schema); if (_scanCache) _scanCache.set(schema, m); }
@@ -325,6 +332,22 @@
   function colListSwitch(schema, col) { return colInfo(schema, col).listSwitch; }
   function colAllowNew(schema, col) { return colInfo(schema, col).allowNew; }
   function colIsSorted(schema, col) { return colInfo(schema, col).sorted; }
+  // Which dimension of a LOOKUP carries the values accounts are linked to. Derived from the columns
+  // that draw on it rather than declared on the table, the same way listOwningTables derives ownership:
+  // the schema already states it once per referring column, and a second declaration could disagree
+  // with them. Null when no column asks for a dimension, or when they disagree -- an ambiguous answer
+  // would put the account picker on the wrong column of the catalogue, which is worse than none.
+  function lookupIdentityCol(schemaTables, lookupName) {
+    var seen = {};
+    Object.keys(schemaTables || {}).forEach(function(t) {
+      columnDefList(schemaTables[t]).forEach(function(d) {
+        if (d && typeof d === 'object' && d.list === lookupName && d.valueCol) seen[d.valueCol] = 1;
+      });
+    });
+    var cols = Object.keys(seen);
+    return cols.length === 1 ? cols[0] : null;
+  }
+  function colListValueCol(schema, col) { return colInfo(schema, col).listValueCol; }   // lookup dimension a `list:` column draws on
   function colIsImage(schema, col) { return colInfo(schema, col).image; }
   function colIsUrl(schema, col) { return colInfo(schema, col).url; }
   function colPicker(schema, col) { return colInfo(schema, col).picker; }   // 'chips' | 'toggle' | null (dropdown)
@@ -423,7 +446,7 @@
     tableDefaultCols: tableDefaultCols, tableRefCol: tableRefCol,
     lookupCols: lookupCols, lookupHierarchy: lookupHierarchy, buildHierarchy: buildHierarchy,
     colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate, colIsNumber: colIsNumber,
-    colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted,
+    colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted, colListValueCol: colListValueCol, lookupIdentityCol: lookupIdentityCol,
     colIsImage: colIsImage, colIsUrl: colIsUrl, colPicker: colPicker,
     colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText,
     defTables: defTables, entryTables: entryTables, tableDeps: tableDeps, mirrorCluster: mirrorCluster
