@@ -5905,17 +5905,35 @@ function createVueApp() {
       },
       // Import from a FILE the user picked. The bundle half of the work is applyBundle, which the
       // example picker drives with files it fetched instead.
+      // SEVERAL files, because a contribution ships as several: `<id>-schema.json` beside one
+      // `<id>-lang-<code>.json` per language, which is what the examples manifest reads and what
+      // `exportAsExample` and `exportLanguagePack` produce. Folding them is `Examples.mergeFiles`,
+      // written for exactly this and until now reachable only through the example installer — so
+      // installing a contributed bundle meant importing its files one at a time and hoping the order
+      // was kind. One file still behaves as it always did: mergeFiles over a single file is that file.
       importData: function(event) {
         var self = this;
-        var file = event.target.files[0];
-        if (!file) return;
-        var reader = new FileReader();
-        reader.onload = function(e) {
-          try { self.applyBundle(JSON.parse(e.target.result)); }
-          catch (err) { self.importProgress = null; self.notify(self.t('msg.import_error') + ' ' + err.message); }
-        };
-        reader.readAsText(file);
+        var files = Array.prototype.slice.call(event.target.files || []);
         event.target.value = '';
+        if (!files.length) return;
+        var read = function(f) {
+          return new Promise(function(resolve, reject) {
+            var r = new FileReader();
+            r.onload = function(e) {
+              try { resolve(JSON.parse(e.target.result)); }
+              catch (err) { reject(new Error(f.name + ': ' + err.message)); }
+            };
+            r.onerror = function() { reject(new Error(f.name)); };
+            r.readAsText(f);
+          });
+        };
+        // Sorted by name, so `-schema` lands before `-lang-` regardless of the order the picker hands
+        // them over: mergeFiles takes the LAST value for a repeated key, and a bundle's parts should
+        // not merge differently because somebody ctrl-clicked upwards.
+        files.sort(function(a, b) { return a.name.localeCompare(b.name); });
+        Promise.all(files.map(read))
+          .then(function(parsed) { self.applyBundle(Examples.mergeFiles(parsed)); })
+          .catch(function(err) { self.importProgress = null; self.notify(self.t('msg.import_error') + ' ' + err.message); });
       },
       // THE import: everything that turns a parsed bundle into a database. Two callers -- the file
       // input above, and installExample() with a bundle fetched from examples/ -- so the progress

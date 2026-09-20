@@ -250,3 +250,42 @@ test('export as example: the structure somebody else installs, with no ward in i
   expect(out.body.lists.crew).toEqual([]);
   expect(out.body.lists.ref_grades, 'a lookup is a table, not a list').toBeUndefined();
 });
+
+test('a contribution imports as the files it ships, not one at a time', async ({ page }) => {
+  test.setTimeout(60000);
+  await boot(page);
+  await page.request.post('/api/putRow', { data: { tableId: 'ref_grades', tab: 'active',
+    data: { id: 'g1', grade: 'first' } }, headers: { 'X-User': 'boss@x.test' } });
+  await page.request.post('/api/createLanguage', { data: { code: 'fi', name: 'Suomi', keys: [] },
+    headers: { 'X-User': 'boss@x.test' } });
+  await page.request.post('/api/updateTranslations', { data: { langCode: 'fi', updates: { 'app.title': 'Työkalu' } },
+    headers: { 'X-User': 'boss@x.test' } });
+  await page.reload();
+  await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
+
+  // Exactly what a contributor uploads: the two files the two export actions produce.
+  const grab = (fn) => page.evaluate(async (f) => {
+    const app = window.appInstance;
+    let text = null;
+    const realCreate = URL.createObjectURL, realClick = HTMLAnchorElement.prototype.click;
+    URL.createObjectURL = (b) => { text = b.text(); return 'blob:stub'; };
+    HTMLAnchorElement.prototype.click = function() {};
+    try { await app[f]({ code: 'fi', name: 'Suomi' }); return JSON.parse(await text); }
+    finally { URL.createObjectURL = realCreate; HTMLAnchorElement.prototype.click = realClick; }
+  }, fn);
+  const schemaFile = await grab('exportAsExample');
+  const langFile = await grab('exportLanguagePack');
+
+  // Folded the way the file picker hands them over, which is what importData now does.
+  const merged = await page.evaluate(([a, b]) => {
+    const m = window.Examples.mergeFiles([a, b]);
+    return { hasSchema: !!m.schema, langs: (m.languages || []).map((l) => l.code),
+             title: ((m.translations || {}).fi || {})['app.title'],
+             lookupRows: Object.keys(m.tables || {}) };
+  }, [schemaFile, langFile]);
+
+  expect(merged.hasSchema, 'the structure').toBe(true);
+  expect(merged.langs).toEqual(['fi']);
+  expect(merged.title, 'the pack came with it').toBe('Työkalu');
+  expect(merged.lookupRows).toEqual(['ref_grades']);
+});

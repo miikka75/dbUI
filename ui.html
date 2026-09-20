@@ -725,7 +725,7 @@
                         multiple chips density="compact" variant="outlined" hide-details
                         style="flex:1 1 220px;max-width:340px" data-testid="import-parts"
                         :label="a.t('settings.import_parts')"></v-select>
-              <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
+              <input ref="importFile" type="file" multiple accept=".json" hidden @change="a.importData($event)">
             </div>
             <!-- Not a subset of the backup but a different document: the structure as somebody ELSE would
                  install it, with no ward's data in it. Its own button for that reason. -->

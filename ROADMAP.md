@@ -1592,6 +1592,20 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   rows — the classifier for that already existed as `Examples.asBundle`.
   `<id>-about.json` is deliberately not generated: the manifest refuses a bundle without a non-empty
   `description`, and that sentence belongs to the contributor rather than to the app.
+  **The import takes the whole bundle at once**, which closes the loop: `Examples.mergeFiles` was
+  written to fold a schema file and its language packs into one import and was reachable only through
+  the example installer, so installing a contributed bundle meant importing its files one at a time.
+  Sorted by name before folding, because mergeFiles takes the last value for a repeated key and a
+  bundle should not merge differently because somebody ctrl-clicked upwards.
+  **Why the example export stays its own action rather than the export writing a file per selected
+  part.** Three reasons, and the middle one is the expensive one. An example is a TRANSFORMATION and not
+  a subset — lists declared but emptied, only lookup rows — which no combination of parts produces.
+  Redefining `structure` to mean that would make a structure-only import wipe a ward's vocabularies,
+  because a hand-picked import replaces and prunes lists where an example install fills gaps; today
+  that cannot happen, since a structure-only file carries no `lists` key at all. And a backup is
+  honestly one file: making the common action emit several, which browsers prompt or block on, to serve
+  the rarer one is the wrong way round. One file is a backup, a set of files is a contribution, and the
+  two buttons say which you are making.
   **The receiving half already worked** and is worth knowing: `Examples.asBundle` only reinterprets a
   schema-less file as a bare schema document when its table entries carry `columns`, and rows are
   arrays — so a data-only file lands as data, and `applyBundle` skips the schema step on its own. The
