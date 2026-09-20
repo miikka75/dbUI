@@ -234,18 +234,22 @@ function createVueApp() {
       // carries no roster of anybody, so including one is a decision; and importing a roster is not
       // restoring data, it is granting a list of people access to whatever received the file — which is
       // why the import side defaults off even when the file has members in it.
-      // WHICH PARTS a file carries, and which parts an import applies. Three, because they answer three
-      // different questions and are wanted in different combinations: the STRUCTURE (schema, its
-      // translations, the app config), the DATA (rows, lists, page bodies, image assets) and the USERS
-      // (roles, grants, names, and the value -> account links).
+      // WHICH PARTS a file carries, and which parts an import applies: the STRUCTURE (schema and app
+      // config), the LANGUAGES (every pack, in the shape an example ships), the DATA (rows, lists, page
+      // bodies, image assets) and the USERS (roles, grants, names, and the value -> account links).
+      //
+      // Languages are their own part rather than riding with the schema, because they are separately
+      // CONTRIBUTABLE: a deployment that has translated a shipped example has something to give back
+      // that has nothing to do with its rows or its people. A structure exported without them lands as
+      // raw keys, which is a real way to get it wrong -- hence both selected by default.
       //
       // A selection rather than a switch per part, because the useful requests are subsets and not
       // toggles: "just the structure, to stand up a copy", "just the rows, so restoring does not roll
       // my schema back to last year's", "everything including the people, because I am moving
       // backends". Users is out of both defaults -- a file with a roster holds everybody's email, and
       // an import that applies one grants those people access to whatever received it.
-      exportParts: ['schema', 'data'],
-      importParts: ['schema', 'data'],
+      exportParts: ['schema', 'languages', 'data'],
+      importParts: ['schema', 'languages', 'data'],
       profileSaved: null,       // last-persisted {name, shared, picture} snapshot -> skip redundant blur saves
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
       listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
@@ -934,7 +938,7 @@ function createVueApp() {
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.export_parts', 'settings.import_parts',
-         'part.schema', 'part.data', 'part.users',
+         'part.schema', 'part.languages', 'part.data', 'part.users', 'lang.export_pack',
          'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
@@ -3421,7 +3425,7 @@ function createVueApp() {
       wantsPart: function(which, part) { return (this[which] || []).indexOf(part) >= 0; },
       partOptions: function() {
         var self = this;
-        return ['schema', 'data', 'users'].map(function(p) { return { value: p, title: self.t('part.' + p) }; });
+        return ['schema', 'languages', 'data', 'users'].map(function(p) { return { value: p, title: self.t('part.' + p) }; });
       },
       colListSwitch: function(col) { return Columns.colListSwitch(SCHEMA, col); },
       isAltList: function(col, item) {
@@ -5563,19 +5567,14 @@ function createVueApp() {
           // Data-only files stay IMPORTABLE with no engine change: asBundle only reinterprets a
           // schema-less file as a bare schema document when its table entries carry `columns`, and rows
           // are arrays — so this lands as data, and applyBundle skips the schema step by itself.
-          // Each part assembled only if asked for. Translations travel with the SCHEMA: a structure whose
-          // labels stayed behind lands as raw keys, which is not a usable copy of anything. Lists travel
-          // with the DATA, because a ward types them.
+          // Each part assembled only if asked for. Lists travel with the DATA, because a ward types
+          // them; the app config travels with the STRUCTURE it configures.
           var payload = Object.assign({},
-            self.wantsPart('exportParts', 'schema') ? { schema: schema, languages: self.languages, translations: translations, config: exportableConfig(self.appConfig) } : null,
+            self.wantsPart('exportParts', 'schema') ? { schema: schema, config: exportableConfig(self.appConfig) } : null,
+            self.wantsPart('exportParts', 'languages') ? { languages: self.languages, translations: translations } : null,
             wantData ? { tables: data, lists: self.listsCache } : null,
             extras, { exportedAt: new Date().toISOString() });
-          var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-          var a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = 'drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json';
-          a.click();
-          self.notify(self.t('msg.exported'));
+          self._downloadJson('drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json', payload);
         };
         chain.then(function() {
           // Refuse rather than hand over a file with a hole in it. The tables are named so the user can
@@ -5693,6 +5692,36 @@ function createVueApp() {
         return chain.then(function() {
           return self.loadListUserLinks ? self.loadListUserLinks() : null;
         }).then(function() { return n; });
+      },
+      // One file out of the browser. Extracted because there are now two callers with nothing else in
+      // common -- the whole-deployment export, and one language pack on its own.
+      _downloadJson: function(filename, payload) {
+        var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        this.notify(this.t('msg.exported'));
+      },
+      // One language, in the shape examples/ ships: `{ languages: [{code,name}], translations: {code:{}} }`.
+      // A pack is the unit somebody CONTRIBUTES -- a ward that has translated a shipped example has
+      // something to give back that has nothing to do with its rows or its members -- and the examples
+      // manifest reads one file per language, so this is a file per language rather than a bundle of
+      // them. Offered where a language is edited, since that is where somebody finishes one.
+      //
+      // Named for the installed example where there is one, so the file drops into examples/ under the
+      // name the manifest already expects; otherwise for the app itself.
+      exportLanguagePack: function(lang) {
+        var self = this;
+        if (!lang || !lang.code) return Promise.resolve();
+        var installed = (self.appConfig && self.appConfig.example && self.appConfig.example.bundle) || '';
+        var id = installed || String(self.t('app.title') || 'export').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'export';
+        return Promise.resolve(backend.getTranslations(lang.code)).then(function(t) {
+          var payload = { languages: [{ code: lang.code, name: lang.name || lang.code }] };
+          payload.translations = {};
+          payload.translations[lang.code] = t || {};
+          self._downloadJson(id + '-lang-' + lang.code + '.json', payload);
+        }).catch(function(e) { self.notify((e && e.message) || self.t('msg.save_failed')); });
       },
       // --- The shipped examples ------------------------------------------------------------------
       // examples/ is served by the deployment itself (it survives both publish paths' exclusion lists),
@@ -5896,8 +5925,8 @@ function createVueApp() {
               });
             });
           });
-          // Translations arrive with the structure they label; page bodies and image assets are content.
-          var langCodes = (wantSchema && imported.translations) ? Object.keys(imported.translations) : [];
+          // Page bodies and image assets are content, so they follow the data.
+          var langCodes = (self.wantsPart('importParts', 'languages') && imported.translations) ? Object.keys(imported.translations) : [];
           var pages = (wantData && imported.pages && Array.isArray(imported.pages))
             ? imported.pages.filter(function(p) { return p.id && p.markdown; }) : [];
           // Stored image assets (view backgrounds / image-cell bytes as data URIs). Over-cap entries are

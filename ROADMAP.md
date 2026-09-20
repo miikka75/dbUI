@@ -1566,14 +1566,21 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   structure BACKWARDS: a file taken before an example update, imported after one, restores the rows and
   rolls the schema back with them. The rows look right either way, which is what makes it expensive to
   notice.
-  **The control is a SELECTION of parts rather than a switch per part** — structure, data, users — on
-  each end, because the useful requests are subsets and not toggles: just the structure, to stand up a
+  **The control is a SELECTION of parts rather than a switch per part** — structure, languages, data,
+  users — on each end, because the useful requests are subsets and not toggles: just the structure, to stand up a
   copy; just the rows, so restoring does not roll the schema back to last year's; everything including
   the people, because you are moving backends. Schema-only is the case a pair of switches could not
   express at all, and it is what an example bundle is made of. Structure and data are both selected by
-  default, because a restore into an empty deployment needs both. Translations travel with the schema
-  they label — a structure whose labels stayed behind lands as raw keys — and lists travel with the
-  data, because a ward types them.
+  default, along with languages, because a restore into an empty deployment needs all three and a
+  structure whose labels stayed behind lands as raw keys. Lists travel with the data, because a ward
+  types them.
+  **Languages are separately CONTRIBUTABLE, which is why they are their own part**: a deployment that
+  has translated a shipped example has something to give back that has nothing to do with its rows or
+  its members. The unit is one FILE per language, because that is what the examples manifest reads —
+  so a pack downloads from the Languages tab, where somebody finishes one, named
+  `<id>-lang-<code>.json` after the installed example so it drops into `examples/` under the name the
+  manifest already expects. What comes out is byte-shaped like a shipped pack:
+  `{ languages: [{code, name}], translations: { <code>: {…} } }`.
   **The receiving half already worked** and is worth knowing: `Examples.asBundle` only reinterprets a
   schema-less file as a bare schema document when its table entries carry `columns`, and rows are
   arrays — so a data-only file lands as data, and `applyBundle` skips the schema step on its own. The
