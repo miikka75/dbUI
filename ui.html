@@ -708,6 +708,16 @@
             <v-btn variant="outlined" prepend-icon="mdi-download" data-testid="settings-export-json" @click="a.exportData" class="mr-2 mb-2">{{ a.t('settings.export') }}</v-btn>
             <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()" class="mr-2 mb-2">{{ a.t('settings.import') }}</v-btn>
             <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
+            <!-- Two switches, not one: what a file CARRIES and what an import REPLAYS are separate
+                 decisions. An export without members carries no roster of anybody, and an import that
+                 replays one is granting people access to this deployment rather than restoring data. -->
+            <div class="mb-2">
+              <v-switch v-model="a.exportMembers" color="primary" density="compact" hide-details
+                        data-testid="export-members" :label="a.t('settings.export_members')"></v-switch>
+              <v-switch v-model="a.importMembers" color="warning" density="compact" hide-details
+                        data-testid="import-members" :label="a.t('settings.import_members')"></v-switch>
+              <p class="text-caption" style="opacity:0.7">{{ a.t('settings.members_note') }}</p>
+            </div>
             <v-btn variant="outlined" prepend-icon="mdi-shape-outline" class="mb-2"
                    data-testid="settings-examples" @click="a.openExamples()">{{ a.t('settings.examples') }}</v-btn>
             <!-- Checked on the way into Settings (selectTab), once per session, admin only: this is the

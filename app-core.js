@@ -230,6 +230,12 @@ function createVueApp() {
       accessRequested: false,   // unregistered user: have I already submitted a request this session
       accessRequestName: '',    // optional display name entered on the request banner
       myProfile: { name: '', shared: false, picture: '' },   // this user's opt-in display-name profile (+ optional avatar)
+      // Opt-in on BOTH ends, separately. The export file lands in a Downloads folder and otherwise
+      // carries no roster of anybody, so including one is a decision; and importing a roster is not
+      // restoring data, it is granting a list of people access to whatever received the file — which is
+      // why the import side defaults off even when the file has members in it.
+      exportMembers: false,
+      importMembers: false,
       profileSaved: null,       // last-persisted {name, shared, picture} snapshot -> skip redundant blur saves
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
       listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
@@ -917,6 +923,7 @@ function createVueApp() {
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
+         'settings.export_members', 'settings.import_members', 'settings.members_note',
          'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
@@ -5557,9 +5564,10 @@ function createVueApp() {
           // nothing, i.e. a blank background and broken thumbnails.
           return Promise.all([
             Promise.resolve(backend.getTableData('_pages', 'active')).catch(function() { return null; }),
-            Promise.resolve(backend.getTableData('_assets', 'active')).catch(function() { return null; })
+            Promise.resolve(backend.getTableData('_assets', 'active')).catch(function() { return null; }),
+            self._gatherMembers()
           ]).then(function(res) {
-            var d = res[0], da = res[1];
+            var d = res[0], da = res[1], members = res[2];
             var pages = (d && d.rows || []).filter(function(r) { return r.id && r.markdown; });
             var assets = (da && da.rows || []).filter(function(r) { return r.id && r.src; }).map(function(r) { return { id: r.id, src: r.src }; });
             // Export columns as the documented array-of-objects form (strip runtime-injected id; restore order + name).
@@ -5579,6 +5587,7 @@ function createVueApp() {
             var extras = {};
             if (pages.length) extras.pages = pages;
             if (assets.length) extras.assets = assets;
+            if (members) extras.members = members;
             download(schema, extras);
           }).catch(function() {
             var schema = JSON.parse(JSON.stringify(self.schemaData));
@@ -5586,6 +5595,78 @@ function createVueApp() {
             download(schema, {});
           });
         });
+      },
+      // WHO can reach this deployment, as opposed to what is in it: the registry (role + table grants),
+      // the display names, and the value -> account links. Null unless an admin asked for it.
+      //
+      // Avatars are left behind deliberately. They are `data:` URLs capped near 350KB each, so a
+      // hundred-member profile store would dominate the file — and a member can re-upload a picture,
+      // while nobody can re-derive a grant. The `shared` flag travels as a RECORD and is not replayed on
+      // import: the only write path to somebody else's profile merges the name, and re-asserting a
+      // person's opt-in is a consent decision rather than a restore.
+      //
+      // The links are the reason this exists at all. Since a calling became an identity there are
+      // dozens of them behind `@me`, the per-person cards and the per-person feeds, and they are the one
+      // thing in a deployment that cannot be reconstructed from the data.
+      _gatherMembers: function() {
+        var self = this;
+        if (!this.exportMembers || !this.isAdmin) return Promise.resolve(null);
+        var none = function() { return null; };
+        return Promise.all([
+          (typeof backend_users !== 'undefined' && backend_users.getUsers) ? Promise.resolve(backend_users.getUsers()).catch(none) : null,
+          (typeof backend_users !== 'undefined' && backend_users.getProfiles) ? Promise.resolve(backend_users.getProfiles()).catch(none) : null,
+          backend.getListUserLinks ? Promise.resolve(backend.getListUserLinks()).catch(none) : null
+        ]).then(function(r) {
+          // A refused read must not become an empty roster: the same rule the table gather follows, and
+          // for the same reason — a backup that silently drops people is the one that gets trusted.
+          if (r[0] == null) return null;
+          var profiles = {};
+          Object.keys(r[1] || {}).forEach(function(e) {
+            var p = r[1][e] || {};
+            if (p.name || p.shared) profiles[e] = { name: p.name || '', shared: !!p.shared };
+          });
+          return { users: r[0], profiles: profiles, listUsers: r[2] || {} };
+        });
+      },
+      // Restore the roster. Every write goes through the method that already owns it rather than
+      // touching the stores directly, which is what keeps the BOOTSTRAP SENTINEL honest: `_meta/users`
+      // is two things under one name — a legacy access map, and the document whose mere existence
+      // answers `noUsers()` in both rules layers. Writing `_users` rows without it leaves a populated
+      // registry that still reads as a fresh deployment, and firestore.rules spells out the rest: it
+      // would "hand EVERY signed-in Google account full admin". `setUserRole` mirrors the sentinel on
+      // every call, so routing through it makes that impossible to forget here.
+      //
+      // Names only for profiles (setProfileName merges exactly that); `shared` is carried in the file as
+      // a record of who had opted in, and is not replayed — see _gatherMembers.
+      _applyMembers: function(m) {
+        var self = this, chain = Promise.resolve(), n = { users: 0, names: 0, links: 0 };
+        Object.keys(m.users || {}).forEach(function(email) {
+          var u = m.users[email] || {};
+          if (!u.role) return;
+          chain = chain.then(function() {
+            return Promise.resolve(backend_users.setUserRole(email, u.role, u.user || email, u.tables))
+              .then(function() { n.users++; });
+          });
+        });
+        Object.keys(m.profiles || {}).forEach(function(email) {
+          var name = (m.profiles[email] || {}).name;
+          if (!name || !backend_users.setProfileName) return;
+          chain = chain.then(function() {
+            return Promise.resolve(backend_users.setProfileName(email, name)).then(function() { n.names++; });
+          });
+        });
+        Object.keys(m.listUsers || {}).forEach(function(list) {
+          Object.keys(m.listUsers[list] || {}).forEach(function(value) {
+            var email = m.listUsers[list][value];
+            if (!email || !backend.setListUser) return;
+            chain = chain.then(function() {
+              return Promise.resolve(backend.setListUser(list, value, email)).then(function() { n.links++; });
+            });
+          });
+        });
+        return chain.then(function() {
+          return self.loadListUserLinks ? self.loadListUserLinks() : null;
+        }).then(function() { return n; });
       },
       // --- The shipped examples ------------------------------------------------------------------
       // examples/ is served by the deployment itself (it survives both publish paths' exclusion lists),
@@ -5791,6 +5872,11 @@ function createVueApp() {
           // would only produce a failure row in the progress report.
           var assets = (imported.assets && Array.isArray(imported.assets))
             ? imported.assets.filter(function(a) { return a && a.id && typeof a.src === 'string' && a.src.length <= ASSET_CAP; }) : [];
+          // The roster travels only when the file carries one AND this admin asked for it in the same
+          // gesture as choosing the file. A bundle with members in it is otherwise imported as data,
+          // which is what makes it safe to hand somebody an export to look at.
+          var members = (self.importMembers && self.isAdmin && imported.members && typeof imported.members === 'object')
+            ? imported.members : null;
 
           // Progress + failure state. Two things were wrong before: the run gave no sign of life for the
           // ~minute it takes on a real database, and — worse — the whole thing was ONE serial promise
@@ -5800,7 +5886,7 @@ function createVueApp() {
           var prog = {
             active: true, done: 0, icon: 'mdi-timer-sand', detail: '', errors: [], finished: false,
             total: (imported.schema ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
-                 + langCodes.length + pages.length + assets.length + (imported.config ? 1 : 0)
+                 + langCodes.length + pages.length + assets.length + (imported.config ? 1 : 0) + (members ? 1 : 0)
                  + ((opts && opts.provenance) ? 1 : 0) + 1
           };
           self.importProgress = prog;
@@ -5861,6 +5947,9 @@ function createVueApp() {
               self.listsCache = next;
               return backend.saveLists(next);
             }));
+          }
+          if (members) {
+            chain = chain.then(step('mdi-account-multiple', '', function() { return self._applyMembers(members); }));
           }
           langCodes.forEach(function(code) {
             chain = chain.then(step('mdi-translate', code, function() {
