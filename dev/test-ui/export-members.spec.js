@@ -55,20 +55,29 @@ async function boot(page) {
   await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
 }
 
-// Capture the file the export writes — its NAME as well as its body, because the name is part of what
-// makes a contribution droppable into examples/.
-const namedExport = (page) => page.evaluate(async () => {
+// Capture every file a selection writes — NAMES as well as bodies, because the names are what make a
+// contribution droppable into examples/ without renaming anything.
+const exportFiles = (page) => page.evaluate(async () => {
   const app = window.appInstance;
-  let name = null, text = null;
+  const out = [];
+  let pending = null;
   const realCreate = URL.createObjectURL, realClick = HTMLAnchorElement.prototype.click;
-  URL.createObjectURL = (b) => { text = b.text(); return 'blob:stub'; };
-  HTMLAnchorElement.prototype.click = function() { name = this.download; };
+  URL.createObjectURL = (b) => { pending = b.text(); return 'blob:stub'; };
+  HTMLAnchorElement.prototype.click = function() { out.push({ name: this.download, text: pending }); };
   try {
     await app.exportData();
-    for (let i = 0; i < 100 && !text; i++) await new Promise((r) => setTimeout(r, 50));
-    return { name: name, body: text ? JSON.parse(await text) : null };
+    for (let i = 0; i < 120 && !out.length; i++) await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 1200));   // the set downloads sequentially, with a gap
+    const files = {};
+    for (const f of out) files[f.name] = JSON.parse(await f.text);
+    return files;
   } finally { URL.createObjectURL = realCreate; HTMLAnchorElement.prototype.click = realClick; }
 });
+const oneFile = async (page) => {
+  const files = await exportFiles(page);
+  const names = Object.keys(files);
+  return { name: names[0], body: files[names[0]], count: names.length };
+};
 
 // The export writes a file through a Blob + anchor; capture the payload instead of the download.
 const exported = (page) => page.evaluate(async () => {
@@ -93,7 +102,7 @@ test('an export carries no roster unless it is asked for', async ({ page }) => {
   expect(plain.tables.duty.length).toBe(1);                 // it is still a real backup
   expect(plain.members, 'a backup must not quietly contain everybody\'s email').toBeUndefined();
 
-  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'reference', 'data', 'users']; });
+  await page.evaluate(() => { window.appInstance.exportParts = ['backup', 'users']; });
   const withMembers = await exported(page);
   expect(Object.keys(withMembers.members.users).sort()).toEqual(['boss@x.test', 'helper@x.test']);
   expect(withMembers.members.users['helper@x.test'].tables).toEqual(['duty']);   // the grant, not just the name
@@ -109,7 +118,7 @@ test('avatars stay behind, and the shared flag travels as a record', async ({ pa
   // can re-upload one where nobody can re-derive a grant.
   await page.request.post('/api/setMyProfile', { data: { name: 'Helper', shared: true, picture: 'data:image/png;base64,AAAA' } })
     .catch(() => {});
-  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'reference', 'data', 'users']; });
+  await page.evaluate(() => { window.appInstance.exportParts = ['backup', 'users']; });
   const out = await exported(page);
   for (const p of Object.values(out.members.profiles)) {
     expect(p.picture, 'an avatar reached the file').toBeUndefined();
@@ -120,7 +129,7 @@ test('avatars stay behind, and the shared flag travels as a record', async ({ pa
 test('importing a file with members does nothing to the roster unless asked', async ({ page }) => {
   test.setTimeout(60000);
   await boot(page);
-  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'reference', 'data', 'users']; });
+  await page.evaluate(() => { window.appInstance.exportParts = ['backup', 'users']; });
   const file = await exported(page);
 
   // A different deployment: same schema, nobody in it.
@@ -144,7 +153,7 @@ test('importing a file with members does nothing to the roster unless asked', as
   expect(await roster(), 'a plain import enrolled somebody from the file').not.toContain('helper@x.test');
 
   // Asked for: roles, grants, names and links all land.
-  await page.evaluate((f) => { window.appInstance.importParts = ['schema', 'languages', 'reference', 'data', 'users']; window.appInstance.applyBundle(f); }, file);
+  await page.evaluate((f) => { window.appInstance.importParts = ['backup', 'users']; window.appInstance.applyBundle(f); }, file);
   await expect.poll(roster, { timeout: 20000 }).toContain('helper@x.test');
   const users = await (await page.request.post('/api/getUsers', { data: {}, headers: { 'X-User': 'boss@x.test' } })).json();
   expect(users['helper@x.test'].role).toBe('editor');
@@ -168,7 +177,7 @@ test('the structure is separable: a data-only file, and an import that leaves th
 
   // Now the half that matters: a file whose schema is OLDER than the deployment. Importing it applies
   // that schema and silently rolls the structure back — unless the import is told not to.
-  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'reference', 'data']; });
+  await page.evaluate(() => { window.appInstance.exportParts = ['backup']; });
   const older = await exported(page);
   // An export writes columns as the documented array-of-objects form; this stands in for "a column the
   // deployment has since dropped", i.e. a file whose structure is behind the one in use.
@@ -182,7 +191,7 @@ test('the structure is separable: a data-only file, and an import that leaves th
 
   // And with the switch on, the same file does replace it — and says so, because the rows look
   // identical either way and the structure moving is the one thing you cannot see in them.
-  await page.evaluate((f) => { window.appInstance.importParts = ['schema', 'languages', 'reference', 'data']; window.appInstance.applyBundle(f); }, older);
+  await page.evaluate((f) => { window.appInstance.importParts = ['backup']; window.appInstance.applyBundle(f); }, older);
   await expect.poll(() => page.evaluate(() => Object.keys(appInstance.schemaData.tables.duty.columns || {})), { timeout: 20000 })
     .toContain('gone_since');
 });
@@ -201,35 +210,31 @@ test('schema only: the structure, with nothing a ward typed', async ({ page }) =
   expect(f.members, 'never without asking').toBeUndefined();
 });
 
-test('a language pack exports in the shape examples/ ships, one file per language', async ({ page }) => {
-  test.setTimeout(30000);
+test('languages come out one file per language, in the shape examples/ ships', async ({ page }) => {
+  test.setTimeout(60000);
   await boot(page);
-  await page.request.post('/api/createLanguage', { data: { code: 'fi', name: 'Suomi', keys: [] },
-    headers: { 'X-User': 'boss@x.test' } });
-  await page.request.post('/api/updateTranslations', { data: { langCode: 'fi', updates: { 'app.title': 'Työkalu' } },
-    headers: { 'X-User': 'boss@x.test' } });
+  for (const [code, name, title] of [['fi', 'Suomi', 'Työkalu'], ['sv', 'Svenska', 'Verktyg']]) {
+    await page.request.post('/api/createLanguage', { data: { code: code, name: name, keys: [] },
+      headers: { 'X-User': 'boss@x.test' } });
+    await page.request.post('/api/updateTranslations', { data: { langCode: code, updates: { 'app.title': title } },
+      headers: { 'X-User': 'boss@x.test' } });
+  }
   await page.reload();
   await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
 
-  const out = await page.evaluate(async () => {
-    const app = window.appInstance;
-    let name = null, text = null;
-    const realCreate = URL.createObjectURL, realClick = HTMLAnchorElement.prototype.click;
-    URL.createObjectURL = (b) => { text = b.text(); return 'blob:stub'; };
-    HTMLAnchorElement.prototype.click = function() { name = this.download; };
-    try {
-      await app.exportLanguagePack({ code: 'fi', name: 'Suomi' });
-      return { name: name, body: JSON.parse(await text) };
-    } finally { URL.createObjectURL = realCreate; HTMLAnchorElement.prototype.click = realClick; }
-  });
+  await page.evaluate(() => { window.appInstance.exportParts = ['languages']; });
+  const files = await exportFiles(page);
 
-  // The manifest reads `<id>-lang-<code>.json`, so the file drops into examples/ under the name it
-  // already expects — which is what makes a contribution a copy rather than a rename.
-  expect(out.name).toMatch(/-lang-fi\.json$/);
+  // One file per language, because that is what the examples manifest reads — not one file holding
+  // them all, which imports fine and contributes to nothing.
+  const names = Object.keys(files).sort();
+  expect(names.filter((n) => /-lang-(fi|sv)\.json$/.test(n)).length).toBe(2);
+  const fi = files[names.find((n) => n.endsWith('-lang-fi.json'))];
   // Byte-shape of a shipped pack: the language it declares, and the translations under that code.
-  expect(Object.keys(out.body).sort()).toEqual(['languages', 'translations']);
-  expect(out.body.languages).toEqual([{ code: 'fi', name: 'Suomi' }]);
-  expect(out.body.translations.fi['app.title']).toBe('Työkalu');
+  expect(Object.keys(fi).sort()).toEqual(['languages', 'translations']);
+  expect(fi.languages).toEqual([{ code: 'fi', name: 'Suomi' }]);
+  expect(fi.translations.fi['app.title']).toBe('Työkalu');
+  expect(fi.translations.sv, 'a pack carries its own language and no other').toBeUndefined();
 });
 
 test('an example is a selection now: structure + languages + reference, and no ward in it', async ({ page }) => {
@@ -241,13 +246,15 @@ test('an example is a selection now: structure + languages + reference, and no w
   await page.reload();
   await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
 
-  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'reference']; });
-  const out = await namedExport(page);
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'reference']; });
+  const out = await oneFile(page);
 
   // A file with no ordinary rows and nobody's account in it is a contribution, so it is named the way
   // the examples manifest reads one rather than as a dated backup.
   expect(out.name).toMatch(/-schema\.json$/);
-  expect(Object.keys(out.body).sort()).toEqual(['exportedAt', 'languages', 'lists', 'schema', 'tables', 'translations']);
+  // Byte-shaped like examples/bishopric-schema.json: the structure, the list names, the catalogues.
+  // The packs are their own files beside it, which is how the manifest reads a bundle.
+  expect(Object.keys(out.body).sort()).toEqual(['lists', 'schema', 'tables']);
   expect(out.body.config, "an installer should not inherit this deployment's settings").toBeUndefined();
   // The structure, in the documented column shape rather than the runtime's map.
   expect(Array.isArray(out.body.schema.tables.duty.columns)).toBe(true);
@@ -282,9 +289,13 @@ test('a contribution imports as the files it ships, not one at a time', async ({
     try { await app[f]({ code: 'fi', name: 'Suomi' }); return JSON.parse(await text); }
     finally { URL.createObjectURL = realCreate; HTMLAnchorElement.prototype.click = realClick; }
   }, fn);
-  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'reference']; });
-  const schemaFile = (await namedExport(page)).body;
-  const langFile = await grab('exportLanguagePack');
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'reference']; });
+  const files = await exportFiles(page);
+  const schemaName = Object.keys(files).find((n) => n.endsWith('-schema.json'));
+  const langName = Object.keys(files).find((n) => n.endsWith('-lang-fi.json'));
+  expect(schemaName, 'one selection, the whole bundle').toBeTruthy();
+  expect(langName, 'one file per language, as the manifest reads them').toBeTruthy();
+  const schemaFile = files[schemaName], langFile = files[langName];
 
   // Folded the way the file picker hands them over, which is what importData now does.
   const merged = await page.evaluate(([a, b]) => {
@@ -306,7 +317,7 @@ test('a list declared empty is a declaration, never a restore', async ({ page })
   // The ward has typed its vocabulary. A contribution names the same list and ships it EMPTY, because
   // that is what examples/ does — and a hand-picked import otherwise replaces and prunes lists.
   await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'reference']; });
-  const contribution = (await namedExport(page)).body;
+  const contribution = (await oneFile(page)).body;
   expect(contribution.lists.crew, 'a contribution declares the name and leaves it empty').toEqual([]);
 
   await page.evaluate((f) => {

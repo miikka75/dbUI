@@ -1610,11 +1610,17 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   be a restore of anything, so replacing with it could only destroy. Declarations fill gaps whatever
   their provenance; omission still prunes, which is how a file taken before a list was retired removes
   it again.
-  **The export still writes one file, not one per part.** A backup is honestly one file and restoring
-  it is one import; making the common action emit several — which browsers prompt or block on, with no
-  zip library vendored — to serve the rarer one is the wrong way round. The language packs are the
-  exception because the manifest reads one file per language, and they download individually from the
-  Languages tab.
+  **`backup` is the item that reconciles one file with several.** It is the default and means exactly
+  "as one document": tick it and you get the file you restore from, tick parts instead and each becomes
+  a FILE, laid out the way `examples/` is read — `<id>-schema.json` with the structure and its
+  catalogues, one `<id>-lang-<code>.json` per language, `<id>-data.json` for the rows a ward typed. So
+  a backup and a contribution stop being two features and become two selections, and nothing has to
+  live outside Settings: the per-language download that briefly sat in the Languages tab is gone,
+  because the set already writes one file per language.
+  The files download sequentially with a gap between them — a browser asked for several at once prompts
+  or drops the later ones, and this is the only place in the app that asks for more than one.
+  `lists` follows its meaning in the split too: names the schema declares go with the structure, values
+  a ward typed go with that ward's data.
   **The receiving half already worked** and is worth knowing: `Examples.asBundle` only reinterprets a
   schema-less file as a bare schema document when its table entries carry `columns`, and rows are
   arrays — so a data-only file lands as data, and `applyBundle` skips the schema step on its own. The

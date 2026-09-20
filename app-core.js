@@ -255,8 +255,12 @@ function createVueApp() {
       // my schema back to last year's", "everything including the people, because I am moving
       // backends". Users is out of both defaults -- a file with a roster holds everybody's email, and
       // an import that applies one grants those people access to whatever received it.
-      exportParts: ['schema', 'languages', 'reference', 'data'],
-      importParts: ['schema', 'languages', 'reference', 'data'],
+      // BACKUP is the packaging choice, and the default: one file with every part but the users,
+      // which is the thing you restore from. Tick parts instead and each becomes its own FILE, laid out
+      // the way examples/ is read — `<id>-schema.json`, one `<id>-lang-<code>.json` per language,
+      // `<id>-data.json` — so a contribution is a selection rather than a different feature.
+      exportParts: ['backup'],
+      importParts: ['backup'],
       profileSaved: null,       // last-persisted {name, shared, picture} snapshot -> skip redundant blur saves
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
       listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
@@ -945,7 +949,8 @@ function createVueApp() {
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.export_parts', 'settings.import_parts',
-         'part.schema', 'part.languages', 'part.reference', 'part.data', 'part.users', 'lang.export_pack',
+         'part.backup', 'part.schema', 'part.languages', 'part.reference', 'part.data', 'part.users',
+         'msg.nothing_to_export', 
          'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
@@ -3429,10 +3434,20 @@ function createVueApp() {
         if (!col || !t || !SCHEMA[t]) return '';
         return Columns.rowHandle(SCHEMA[t], getColumns(t), row, col);
       },
-      wantsPart: function(which, part) { return (this[which] || []).indexOf(part) >= 0; },
+      // `backup` stands for every part but the users, so every gate below can keep asking about parts
+      // and none of them has to know the word. Users stays explicit even inside a backup: a file with
+      // everybody's email in it is a decision, not a default.
+      _activeParts: function(which) {
+        var sel = this[which] || [];
+        if (sel.indexOf('backup') < 0) return sel;
+        var all = ['schema', 'languages', 'reference', 'data'];
+        if (sel.indexOf('users') >= 0) all.push('users');
+        return all;
+      },
+      wantsPart: function(which, part) { return this._activeParts(which).indexOf(part) >= 0; },
       partOptions: function() {
         var self = this;
-        return ['schema', 'languages', 'reference', 'data', 'users'].map(function(p) { return { value: p, title: self.t('part.' + p) }; });
+        return ['backup', 'schema', 'languages', 'reference', 'data', 'users'].map(function(p) { return { value: p, title: self.t('part.' + p) }; });
       },
       colListSwitch: function(col) { return Columns.colListSwitch(SCHEMA, col); },
       isAltList: function(col, item) {
@@ -5601,8 +5616,10 @@ function createVueApp() {
             (wantData || wantRef) ? { tables: data } : null,
             lists ? { lists: lists } : null,
             extras, { exportedAt: new Date().toISOString() });
-          self._downloadJson(contribution ? (self._exampleId() + '-schema.json')
-            : ('drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json'), payload);
+          if (self.wantsPart('exportParts', 'backup') || (self.exportParts || []).indexOf('backup') >= 0) {
+            return self._downloadJson('drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json', payload);
+          }
+          return self._downloadFileSet(payload);
         };
         chain.then(function() {
           // Refuse rather than hand over a file with a hole in it. The tables are named so the user can
@@ -5710,13 +5727,13 @@ function createVueApp() {
       },
       // One file out of the browser. Extracted because there are now two callers with nothing else in
       // common -- the whole-deployment export, and one language pack on its own.
-      _downloadJson: function(filename, payload) {
+      _downloadJson: function(filename, payload, announce) {
         var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
         var a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = filename;
         a.click();
-        this.notify(this.t('msg.exported'));
+        if (announce !== false) this.notify(this.t('msg.exported'));
       },
       // The schema as a DOCUMENT rather than as the runtime's copy of it: columns back in the documented
       // array-of-objects form (runtime-injected `id` stripped, author order and names restored), and
@@ -5738,31 +5755,64 @@ function createVueApp() {
         convertViewFilters(schema.views);   // forward-deprecation: array-IN becomes explicit $or
         return schema;
       },
+      // One payload out as the SET of files examples/ is read as, rather than as one document. The
+      // split is by what each file is for, not by part: `<id>-schema.json` carries the structure with
+      // its reference data (that is how a shipped bundle is shaped -- the catalogues live in the schema
+      // file), each language is its own file because the manifest reads one per language, and the rows
+      // a ward typed are the separate `<id>-data.json` the installer offers as a choice.
+      //
+      // Sequentially with a gap: a browser that is asked for several downloads at once prompts or drops
+      // the later ones, and this is the one place in the app that asks for more than one.
+      _downloadFileSet: function(payload) {
+        var self = this, id = this._exampleId(), files = [];
+        var schemaFile = {}, dataFile = {};
+        if (payload.schema) schemaFile.schema = payload.schema;
+        if (payload.config) schemaFile.config = payload.config;
+        // `lists` follows its meaning, the same way it did on the way out: names the schema declares
+        // belong with the structure, values a ward typed belong with that ward's data.
+        if (payload.lists) {
+          var declarations = Object.keys(payload.lists).every(function(n) { return !(payload.lists[n] || []).length; });
+          (declarations ? schemaFile : dataFile).lists = payload.lists;
+        }
+        if (payload.tables && Object.keys(payload.tables).length) {
+          var ref = {}, own = {};
+          Object.keys(payload.tables).forEach(function(k) {
+            var t = k.split('__')[0];
+            if (SCHEMA[t] && SCHEMA[t].isLookup) ref[k] = payload.tables[k]; else own[k] = payload.tables[k];
+          });
+          if (Object.keys(ref).length) schemaFile.tables = ref;
+          if (Object.keys(own).length) dataFile.tables = own;
+        }
+        if (Object.keys(dataFile).length) files.push([id + '-data.json', dataFile]);
+        if (Object.keys(schemaFile).length) files.unshift([id + '-schema.json', schemaFile]);
+        (payload.languages || []).forEach(function(l) {
+          var t = (payload.translations || {})[l.code];
+          if (!t) return;
+          var one = { languages: [{ code: l.code, name: l.name || l.code }], translations: {} };
+          one.translations[l.code] = t;
+          files.push([id + '-lang-' + l.code + '.json', one]);
+        });
+        if (payload.members) files.push([id + '-users.json', { members: payload.members }]);
+        if (payload.pages || payload.assets) {
+          var content = {};
+          if (payload.pages) content.pages = payload.pages;
+          if (payload.assets) content.assets = payload.assets;
+          files.push([id + '-pages.json', content]);
+        }
+        if (!files.length) { self.notify(self.t('msg.nothing_to_export')); return Promise.resolve(); }
+        return files.reduce(function(chain, f, i) {
+          return chain.then(function() {
+            self._downloadJson(f[0], f[1], i === files.length - 1);
+            if (i < files.length - 1) return new Promise(function(r) { setTimeout(r, 400); });
+          });
+        }, Promise.resolve());
+      },
       // The id a contributed file is named for: the installed example where there is one, so the file
       // drops into examples/ under the name the manifest already reads, else a slug of the app's title.
       _exampleId: function() {
         var installed = (this.appConfig && this.appConfig.example && this.appConfig.example.bundle) || '';
         return installed || String(this.t('app.title') || 'export').toLowerCase()
           .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'export';
-      },
-      // One language, in the shape examples/ ships: `{ languages: [{code,name}], translations: {code:{}} }`.
-      // A pack is the unit somebody CONTRIBUTES -- a ward that has translated a shipped example has
-      // something to give back that has nothing to do with its rows or its members -- and the examples
-      // manifest reads one file per language, so this is a file per language rather than a bundle of
-      // them. Offered where a language is edited, since that is where somebody finishes one.
-      //
-      // Named for the installed example where there is one, so the file drops into examples/ under the
-      // name the manifest already expects; otherwise for the app itself.
-      exportLanguagePack: function(lang) {
-        var self = this;
-        if (!lang || !lang.code) return Promise.resolve();
-        var id = self._exampleId();
-        return Promise.resolve(backend.getTranslations(lang.code)).then(function(t) {
-          var payload = { languages: [{ code: lang.code, name: lang.name || lang.code }] };
-          payload.translations = {};
-          payload.translations[lang.code] = t || {};
-          self._downloadJson(id + '-lang-' + lang.code + '.json', payload);
-        }).catch(function(e) { self.notify((e && e.message) || self.t('msg.save_failed')); });
       },
       // --- The shipped examples ------------------------------------------------------------------
       // examples/ is served by the deployment itself (it survives both publish paths' exclusion lists),
@@ -5900,7 +5950,7 @@ function createVueApp() {
       // example picker drives with files it fetched instead.
       // SEVERAL files, because a contribution ships as several: `<id>-schema.json` beside one
       // `<id>-lang-<code>.json` per language, which is what the examples manifest reads and what
-      // `exportAsExample` and `exportLanguagePack` produce. Folding them is `Examples.mergeFiles`,
+      // the export writes when parts are ticked instead of a backup. Folding them is `Examples.mergeFiles`,
       // written for exactly this and until now reachable only through the example installer — so
       // installing a contributed bundle meant importing its files one at a time and hoping the order
       // was kind. One file still behaves as it always did: mergeFiles over a single file is that file.

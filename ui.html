@@ -501,10 +501,6 @@
                     density="compact" variant="outlined" hide-details style="max-width:260px"
                     @click.stop @change="a.renameLang(lang, $event.target.value)"></v-text-field>
                   <template v-slot:append>
-                    <!-- One pack, in the shape examples/ ships: the unit somebody contributes back. -->
-                    <v-btn icon="mdi-download-outline" size="x-small" variant="text" class="mr-1"
-                           :title="a.t('lang.export_pack')" :data-testid="'lang-export-' + lang.code"
-                           @click.stop="a.exportLanguagePack(lang)"></v-btn>
                     <v-btn :icon="a.isArmed('lang:'+lang.code) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed('lang:'+lang.code) ? 'error' : ''" @click.stop="a.deleteLang(lang)" class="mr-2"></v-btn>
                     <v-icon>mdi-chevron-down</v-icon>
                   </template>
