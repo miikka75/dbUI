@@ -75,7 +75,7 @@ test('an export carries no roster unless it is asked for', async ({ page }) => {
   expect(plain.tables.duty.length).toBe(1);                 // it is still a real backup
   expect(plain.members, 'a backup must not quietly contain everybody\'s email').toBeUndefined();
 
-  await page.evaluate(() => { window.appInstance.exportMembers = true; });
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'data', 'users']; });
   const withMembers = await exported(page);
   expect(Object.keys(withMembers.members.users).sort()).toEqual(['boss@x.test', 'helper@x.test']);
   expect(withMembers.members.users['helper@x.test'].tables).toEqual(['duty']);   // the grant, not just the name
@@ -91,7 +91,7 @@ test('avatars stay behind, and the shared flag travels as a record', async ({ pa
   // can re-upload one where nobody can re-derive a grant.
   await page.request.post('/api/setMyProfile', { data: { name: 'Helper', shared: true, picture: 'data:image/png;base64,AAAA' } })
     .catch(() => {});
-  await page.evaluate(() => { window.appInstance.exportMembers = true; });
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'data', 'users']; });
   const out = await exported(page);
   for (const p of Object.values(out.members.profiles)) {
     expect(p.picture, 'an avatar reached the file').toBeUndefined();
@@ -102,7 +102,7 @@ test('avatars stay behind, and the shared flag travels as a record', async ({ pa
 test('importing a file with members does nothing to the roster unless asked', async ({ page }) => {
   test.setTimeout(60000);
   await boot(page);
-  await page.evaluate(() => { window.appInstance.exportMembers = true; });
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'data', 'users']; });
   const file = await exported(page);
 
   // A different deployment: same schema, nobody in it.
@@ -126,7 +126,7 @@ test('importing a file with members does nothing to the roster unless asked', as
   expect(await roster(), 'a plain import enrolled somebody from the file').not.toContain('helper@x.test');
 
   // Asked for: roles, grants, names and links all land.
-  await page.evaluate((f) => { window.appInstance.importMembers = true; window.appInstance.applyBundle(f); }, file);
+  await page.evaluate((f) => { window.appInstance.importParts = ['schema', 'data', 'users']; window.appInstance.applyBundle(f); }, file);
   await expect.poll(roster, { timeout: 20000 }).toContain('helper@x.test');
   const users = await (await page.request.post('/api/getUsers', { data: {}, headers: { 'X-User': 'boss@x.test' } })).json();
   expect(users['helper@x.test'].role).toBe('editor');
@@ -142,7 +142,7 @@ test('the structure is separable: a data-only file, and an import that leaves th
   // A plain export carries the structure, because a restore into an empty deployment has to.
   expect((await exported(page)).schema).toBeTruthy();
 
-  await page.evaluate(() => { window.appInstance.exportSchema = false; });
+  await page.evaluate(() => { window.appInstance.exportParts = ['data']; });
   const dataOnly = await exported(page);
   expect(dataOnly.schema, 'a data-only file must not carry the structure').toBeUndefined();
   expect(dataOnly.tables.duty.length, 'it is still the rows').toBe(1);
@@ -150,13 +150,13 @@ test('the structure is separable: a data-only file, and an import that leaves th
 
   // Now the half that matters: a file whose schema is OLDER than the deployment. Importing it applies
   // that schema and silently rolls the structure back — unless the import is told not to.
-  await page.evaluate(() => { window.appInstance.exportSchema = true; });
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'data']; });
   const older = await exported(page);
   // An export writes columns as the documented array-of-objects form; this stands in for "a column the
   // deployment has since dropped", i.e. a file whose structure is behind the one in use.
   older.schema.tables.duty.columns.push({ name: 'gone_since', type: 'text' });
 
-  await page.evaluate((f) => { window.appInstance.importSchema = false; window.appInstance.applyBundle(f); }, older);
+  await page.evaluate((f) => { window.appInstance.importParts = ['data']; window.appInstance.applyBundle(f); }, older);
   await page.waitForTimeout(5000);
   await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
   expect(await page.evaluate(() => Object.keys(appInstance.schemaData.tables.duty.columns || {})),
@@ -164,7 +164,21 @@ test('the structure is separable: a data-only file, and an import that leaves th
 
   // And with the switch on, the same file does replace it — and says so, because the rows look
   // identical either way and the structure moving is the one thing you cannot see in them.
-  await page.evaluate((f) => { window.appInstance.importSchema = true; window.appInstance.applyBundle(f); }, older);
+  await page.evaluate((f) => { window.appInstance.importParts = ['schema', 'data']; window.appInstance.applyBundle(f); }, older);
   await expect.poll(() => page.evaluate(() => Object.keys(appInstance.schemaData.tables.duty.columns || {})), { timeout: 20000 })
     .toContain('gone_since');
+});
+
+test('schema only: the structure, with nothing a ward typed', async ({ page }) => {
+  test.setTimeout(30000);
+  await boot(page);
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema']; });
+  const f = await exported(page);
+
+  // What a copy of the deployment needs, and nothing a ward typed.
+  expect(Object.keys(f.schema.tables)).toContain('duty');
+  expect(f.translations, 'labels travel with the structure they label').toBeTruthy();
+  expect(f.tables, 'no rows').toBeUndefined();
+  expect(f.lists, 'a list is a vocabulary somebody typed').toBeUndefined();
+  expect(f.members, 'never without asking').toBeUndefined();
 });

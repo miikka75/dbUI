@@ -1546,10 +1546,10 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   nobody able to sign in to anything. The links are what made that expensive — since a calling became
   an identity there are dozens of them behind `@me`, the per-person cards and the per-person feeds, and
   they are the one thing in a deployment that cannot be reconstructed from the data.
-  **Two switches, not one**, because what a file CARRIES and what an import REPLAYS are different
-  decisions: a file with members holds everybody's email, and an import that replays one is granting
-  those people access to whatever received it. The import side is off even when the file has a roster,
-  so handing somebody an export to look at still enrols nobody.
+  **Chosen, not assumed**, because what a file CARRIES and what an import APPLIES are different
+  decisions: a file with members holds everybody's email, and an import that applies one is granting
+  those people access to whatever received it. Users sits outside both defaults, so handing somebody an
+  export to look at still enrols nobody.
   **The sentinel is handled by construction rather than by remembering.** `_meta/users` is a legacy
   access map AND the document whose existence answers `noUsers()` in both rules layers, so a roster
   written straight into `_users` would leave a populated registry reading as a fresh deployment —
@@ -1565,9 +1565,15 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   schema and an import always applied it, which made restoring a backup a quiet way to move the
   structure BACKWARDS: a file taken before an example update, imported after one, restores the rows and
   rolls the schema back with them. The rows look right either way, which is what makes it expensive to
-  notice. Two switches: an export may leave the schema out (the honest artefact for "here are the
-  rows"), and an import may leave the live one alone. Both default to carrying and applying it, because
-  a restore into an empty deployment has to.
+  notice.
+  **The control is a SELECTION of parts rather than a switch per part** — structure, data, users — on
+  each end, because the useful requests are subsets and not toggles: just the structure, to stand up a
+  copy; just the rows, so restoring does not roll the schema back to last year's; everything including
+  the people, because you are moving backends. Schema-only is the case a pair of switches could not
+  express at all, and it is what an example bundle is made of. Structure and data are both selected by
+  default, because a restore into an empty deployment needs both. Translations travel with the schema
+  they label — a structure whose labels stayed behind lands as raw keys — and lists travel with the
+  data, because a ward types them.
   **The receiving half already worked** and is worth knowing: `Examples.asBundle` only reinterprets a
   schema-less file as a bare schema document when its table entries carry `columns`, and rows are
   arrays — so a data-only file lands as data, and `applyBundle` skips the schema step on its own. The

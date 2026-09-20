@@ -705,22 +705,22 @@
             <template v-if="a.isAdmin">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.import_export') }}</p>
-            <!-- Each switch sits with the button it changes, because it changes THAT action and nothing
-                 else: one decides what the file carries, the other what an import replays. Wrapping
-                 rows rather than a fixed pair, so the switch drops under its button on a phone. -->
+            <!-- Each chooser sits with the button it governs: one says what the file will CARRY, the
+                 other which of its parts an import will APPLY. Wrapping rows, so the chooser drops under
+                 its button on a phone rather than squeezing beside it. -->
             <div class="mb-2" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px">
               <v-btn variant="outlined" prepend-icon="mdi-download" data-testid="settings-export-json" @click="a.exportData">{{ a.t('settings.export') }}</v-btn>
-              <v-switch v-model="a.exportMembers" color="primary" density="compact" hide-details
-                        style="flex:0 1 auto" data-testid="export-members" :label="a.t('settings.export_members')"></v-switch>
-              <v-switch v-model="a.exportSchema" color="primary" density="compact" hide-details
-                        style="flex:0 1 auto" data-testid="export-schema" :label="a.t('settings.export_schema')"></v-switch>
+              <v-select v-model="a.exportParts" :items="a.partOptions()" item-title="title" item-value="value"
+                        multiple chips density="compact" variant="outlined" hide-details
+                        style="flex:1 1 220px;max-width:340px" data-testid="export-parts"
+                        :label="a.t('settings.export_parts')"></v-select>
             </div>
             <div class="mb-1" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px">
               <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()">{{ a.t('settings.import') }}</v-btn>
-              <v-switch v-model="a.importMembers" color="warning" density="compact" hide-details
-                        style="flex:0 1 auto" data-testid="import-members" :label="a.t('settings.import_members')"></v-switch>
-              <v-switch v-model="a.importSchema" color="warning" density="compact" hide-details
-                        style="flex:0 1 auto" data-testid="import-schema" :label="a.t('settings.import_schema')"></v-switch>
+              <v-select v-model="a.importParts" :items="a.partOptions()" item-title="title" item-value="value"
+                        multiple chips density="compact" variant="outlined" hide-details
+                        style="flex:1 1 220px;max-width:340px" data-testid="import-parts"
+                        :label="a.t('settings.import_parts')"></v-select>
               <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
             </div>
             <v-btn variant="outlined" prepend-icon="mdi-shape-outline" class="mb-2"

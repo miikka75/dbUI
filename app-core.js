@@ -234,14 +234,18 @@ function createVueApp() {
       // carries no roster of anybody, so including one is a decision; and importing a roster is not
       // restoring data, it is granting a list of people access to whatever received the file — which is
       // why the import side defaults off even when the file has members in it.
-      exportMembers: false,
-      importMembers: false,
-      // The STRUCTURE is separable from the data, on both ends. A file without a schema is the honest
-      // artefact for "here are the rows"; and an import that applies one REPLACES the schema in use, so
-      // restoring last year's backup would quietly roll the structure back with it. Both default to
-      // carrying/applying the schema, because a restore into an empty deployment has to.
-      exportSchema: true,
-      importSchema: true,
+      // WHICH PARTS a file carries, and which parts an import applies. Three, because they answer three
+      // different questions and are wanted in different combinations: the STRUCTURE (schema, its
+      // translations, the app config), the DATA (rows, lists, page bodies, image assets) and the USERS
+      // (roles, grants, names, and the value -> account links).
+      //
+      // A selection rather than a switch per part, because the useful requests are subsets and not
+      // toggles: "just the structure, to stand up a copy", "just the rows, so restoring does not roll
+      // my schema back to last year's", "everything including the people, because I am moving
+      // backends". Users is out of both defaults -- a file with a roster holds everybody's email, and
+      // an import that applies one grants those people access to whatever received it.
+      exportParts: ['schema', 'data'],
+      importParts: ['schema', 'data'],
       profileSaved: null,       // last-persisted {name, shared, picture} snapshot -> skip redundant blur saves
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
       listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
@@ -929,8 +933,8 @@ function createVueApp() {
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
-         'settings.export_members', 'settings.import_members',
-         'settings.export_schema', 'settings.import_schema',
+         'settings.export_parts', 'settings.import_parts',
+         'part.schema', 'part.data', 'part.users',
          'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
@@ -3414,6 +3418,11 @@ function createVueApp() {
         if (!col || !t || !SCHEMA[t]) return '';
         return Columns.rowHandle(SCHEMA[t], getColumns(t), row, col);
       },
+      wantsPart: function(which, part) { return (this[which] || []).indexOf(part) >= 0; },
+      partOptions: function() {
+        var self = this;
+        return ['schema', 'data', 'users'].map(function(p) { return { value: p, title: self.t('part.' + p) }; });
+      },
       colListSwitch: function(col) { return Columns.colListSwitch(SCHEMA, col); },
       isAltList: function(col, item) {
         var key = item && item.id ? item.id + '_' + col : '';
@@ -5523,8 +5532,9 @@ function createVueApp() {
         //
         // So: fetch what is missing, and produce no file at all if any read fails. This also stops boot
         // from being load-bearing for exports, which is what a lazier boot needs.
+        var wantData = this.wantsPart('exportParts', 'data');
         var wanted = [], failed = [];
-        Object.keys(SCHEMA).forEach(function(table) {
+        if (wantData) Object.keys(SCHEMA).forEach(function(table) {
           // Omit what this user cannot read rather than asserting it is empty. Import is additive
           // (delete+put per row), so an omitted table is left untouched on restore exactly as an empty
           // one would be -- but the file no longer says something false about it.
@@ -5553,9 +5563,13 @@ function createVueApp() {
           // Data-only files stay IMPORTABLE with no engine change: asBundle only reinterprets a
           // schema-less file as a bare schema document when its table entries carry `columns`, and rows
           // are arrays — so this lands as data, and applyBundle skips the schema step by itself.
-          var payload = Object.assign({}, self.exportSchema ? { schema: schema } : null,
-            { tables: data, lists: self.listsCache, languages: self.languages, translations: translations },
-            extras, { config: exportableConfig(self.appConfig), exportedAt: new Date().toISOString() });
+          // Each part assembled only if asked for. Translations travel with the SCHEMA: a structure whose
+          // labels stayed behind lands as raw keys, which is not a usable copy of anything. Lists travel
+          // with the DATA, because a ward types them.
+          var payload = Object.assign({},
+            self.wantsPart('exportParts', 'schema') ? { schema: schema, languages: self.languages, translations: translations, config: exportableConfig(self.appConfig) } : null,
+            wantData ? { tables: data, lists: self.listsCache } : null,
+            extras, { exportedAt: new Date().toISOString() });
           var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
           var a = document.createElement('a');
           a.href = URL.createObjectURL(blob);
@@ -5575,8 +5589,8 @@ function createVueApp() {
           // image bytes as data URIs; without them an import lands with `asset:` references resolving to
           // nothing, i.e. a blank background and broken thumbnails.
           return Promise.all([
-            Promise.resolve(backend.getTableData('_pages', 'active')).catch(function() { return null; }),
-            Promise.resolve(backend.getTableData('_assets', 'active')).catch(function() { return null; }),
+            wantData ? Promise.resolve(backend.getTableData('_pages', 'active')).catch(function() { return null; }) : null,
+            wantData ? Promise.resolve(backend.getTableData('_assets', 'active')).catch(function() { return null; }) : null,
             self._gatherMembers()
           ]).then(function(res) {
             var d = res[0], da = res[1], members = res[2];
@@ -5597,8 +5611,8 @@ function createVueApp() {
             });
             convertViewFilters(schema.views);   // emit array-IN filters as explicit $or (forward-deprecation)
             var extras = {};
-            if (pages.length) extras.pages = pages;
-            if (assets.length) extras.assets = assets;
+            if (wantData && pages.length) extras.pages = pages;
+            if (wantData && assets.length) extras.assets = assets;
             if (members) extras.members = members;
             download(schema, extras);
           }).catch(function() {
@@ -5622,7 +5636,7 @@ function createVueApp() {
       // thing in a deployment that cannot be reconstructed from the data.
       _gatherMembers: function() {
         var self = this;
-        if (!this.exportMembers || !this.isAdmin) return Promise.resolve(null);
+        if (!this.wantsPart('exportParts', 'users') || !this.isAdmin) return Promise.resolve(null);
         var none = function() { return null; };
         return Promise.all([
           (typeof backend_users !== 'undefined' && backend_users.getUsers) ? Promise.resolve(backend_users.getUsers()).catch(none) : null,
@@ -5844,14 +5858,18 @@ function createVueApp() {
           // Structural check: block import if the schema has dangling view/table references
           // Both gated together: validating a schema this import will not apply would block the ROWS on a
           // fault in a document nobody is going to read.
-          if (imported.schema && self.importSchema) {
+          if (imported.schema && self.wantsPart('importParts', 'schema')) {
             var refErrs = validateRefs(imported.schema);
             if (refErrs.length) { self.notify(self.t('msg.import_blocked') + ' ' + refErrs[0] + (refErrs.length > 1 ? ' (+' + (refErrs.length - 1) + ' more)' : '')); return; }
           }
 
           // Flatten the row work up front: it dominates the run (two round-trips per row) and so defines
           // both the ordering and the progress total.
-          var tables = imported.tables || {};
+          // The same three parts on the way in. A part the file does not carry is simply absent; a part it
+          // carries that was not asked for is left on the floor, which is the whole point of choosing.
+          var wantSchema = self.wantsPart('importParts', 'schema');
+          var wantData = self.wantsPart('importParts', 'data');
+          var tables = wantData ? (imported.tables || {}) : {};
           var rowJobs = [];
           // This is also the MIGRATION route from partition-as-store to partition-as-field, which is
           // why every row now imports into the active store whatever key it arrived under. A suffixed
@@ -5878,18 +5896,19 @@ function createVueApp() {
               });
             });
           });
-          var langCodes = imported.translations ? Object.keys(imported.translations) : [];
-          var pages = (imported.pages && Array.isArray(imported.pages))
+          // Translations arrive with the structure they label; page bodies and image assets are content.
+          var langCodes = (wantSchema && imported.translations) ? Object.keys(imported.translations) : [];
+          var pages = (wantData && imported.pages && Array.isArray(imported.pages))
             ? imported.pages.filter(function(p) { return p.id && p.markdown; }) : [];
           // Stored image assets (view backgrounds / image-cell bytes as data URIs). Over-cap entries are
           // dropped here rather than attempted: both production rule layers reject them, so importing one
           // would only produce a failure row in the progress report.
-          var assets = (imported.assets && Array.isArray(imported.assets))
+          var assets = (wantData && imported.assets && Array.isArray(imported.assets))
             ? imported.assets.filter(function(a) { return a && a.id && typeof a.src === 'string' && a.src.length <= ASSET_CAP; }) : [];
           // The roster travels only when the file carries one AND this admin asked for it in the same
           // gesture as choosing the file. A bundle with members in it is otherwise imported as data,
           // which is what makes it safe to hand somebody an export to look at.
-          var members = (self.importMembers && self.isAdmin && imported.members && typeof imported.members === 'object')
+          var members = (self.wantsPart('importParts', 'users') && self.isAdmin && imported.members && typeof imported.members === 'object')
             ? imported.members : null;
 
           // Progress + failure state. Two things were wrong before: the run gave no sign of life for the
@@ -5899,8 +5918,8 @@ function createVueApp() {
           // error shown. (The old try/catch only ever caught synchronous errors while BUILDING the chain.)
           var prog = {
             active: true, done: 0, icon: 'mdi-timer-sand', detail: '', errors: [], finished: false,
-            total: ((imported.schema && self.importSchema) ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
-                 + langCodes.length + pages.length + assets.length + (imported.config ? 1 : 0) + (members ? 1 : 0)
+            total: ((imported.schema && self.wantsPart('importParts', 'schema')) ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
+                 + langCodes.length + pages.length + assets.length + ((imported.config && wantSchema) ? 1 : 0) + (members ? 1 : 0)
                  + ((opts && opts.provenance) ? 1 : 0) + 1
           };
           self.importProgress = prog;
@@ -5922,7 +5941,7 @@ function createVueApp() {
 
           var chain = Promise.resolve();
           // Import schema if present (initializes empty databases)
-          if (imported.schema && backend.saveSchema && self.importSchema) {
+          if (imported.schema && backend.saveSchema && self.wantsPart('importParts', 'schema')) {
             chain = chain.then(step('mdi-table-cog', '', function() {
               // Rebuild VIEWS from new schema so lockedListValues works
               if (Array.isArray(imported.schema.views)) {
@@ -5951,7 +5970,7 @@ function createVueApp() {
                 .then(function() { return Writes.putRow(target, job.row, job.tab); });
             }));
           });
-          if (imported.lists) {
+          if (imported.lists && wantData) {
             chain = chain.then(step('mdi-format-list-bulleted', '', function() {
               // An EXAMPLE fills the vocabularies this database has not started and leaves the rest
               // alone; a hand-picked file replaces them (and prunes what it omits), because that is a
@@ -5986,7 +6005,7 @@ function createVueApp() {
           });
           // Restore portable folder config (rotationAnchors, rotationRanges, any future portable key),
           // preserving this environment's `mode`. Excluded keys never cross the import boundary.
-          if (imported.config && backend.setFolderConfig) {
+          if (imported.config && wantSchema && backend.setFolderConfig) {
             chain = chain.then(step('mdi-cog', '', function() {
               var merged = mergeImportedConfig(self.appConfig, imported.config, self.mode);
               self.appConfig = merged;
