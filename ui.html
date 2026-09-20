@@ -712,11 +712,15 @@
               <v-btn variant="outlined" prepend-icon="mdi-download" data-testid="settings-export-json" @click="a.exportData">{{ a.t('settings.export') }}</v-btn>
               <v-switch v-model="a.exportMembers" color="primary" density="compact" hide-details
                         style="flex:0 1 auto" data-testid="export-members" :label="a.t('settings.export_members')"></v-switch>
+              <v-switch v-model="a.exportSchema" color="primary" density="compact" hide-details
+                        style="flex:0 1 auto" data-testid="export-schema" :label="a.t('settings.export_schema')"></v-switch>
             </div>
             <div class="mb-1" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px">
               <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()">{{ a.t('settings.import') }}</v-btn>
               <v-switch v-model="a.importMembers" color="warning" density="compact" hide-details
                         style="flex:0 1 auto" data-testid="import-members" :label="a.t('settings.import_members')"></v-switch>
+              <v-switch v-model="a.importSchema" color="warning" density="compact" hide-details
+                        style="flex:0 1 auto" data-testid="import-schema" :label="a.t('settings.import_schema')"></v-switch>
               <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
             </div>
             <v-btn variant="outlined" prepend-icon="mdi-shape-outline" class="mb-2"

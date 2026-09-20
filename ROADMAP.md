@@ -1561,6 +1561,25 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   and re-asserting a person's opt-in is a consent decision rather than a restore, so it travels as a
   record and is not applied.
 
+- **The structure is separable from the data, on both ends** (#203) — an export always carried the
+  schema and an import always applied it, which made restoring a backup a quiet way to move the
+  structure BACKWARDS: a file taken before an example update, imported after one, restores the rows and
+  rolls the schema back with them. The rows look right either way, which is what makes it expensive to
+  notice. Two switches: an export may leave the schema out (the honest artefact for "here are the
+  rows"), and an import may leave the live one alone. Both default to carrying and applying it, because
+  a restore into an empty deployment has to.
+  **The receiving half already worked** and is worth knowing: `Examples.asBundle` only reinterprets a
+  schema-less file as a bare schema document when its table entries carry `columns`, and rows are
+  arrays — so a data-only file lands as data, and `applyBundle` skips the schema step on its own. The
+  export was the only end that could not produce one.
+  `validateRefs` is gated with the write rather than left running: validating a schema the import will
+  not apply would block the ROWS on a fault in a document nobody is going to read.
+  **A notice saying "the schema was replaced" was built and then removed**, which is worth recording so
+  it is not re-proposed: the progress dialog is deliberately wordless because an import runs before any
+  translations are loaded and is often the very thing installing them, so every step there is an icon
+  and a count that reads the same in any language. A sentence in that dialog contradicts the one
+  constraint it has.
+
 - **Calendars defined in the DATABASE, not the schema** (#176) — a calendar is a row now, so "can we
   have an ushers calendar?" stops being a schema commit. Everything downstream was inherited exactly as
   the proposal predicted: rendering, the `.ics` download, publishing, the window and language settings,

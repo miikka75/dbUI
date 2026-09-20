@@ -236,6 +236,12 @@ function createVueApp() {
       // why the import side defaults off even when the file has members in it.
       exportMembers: false,
       importMembers: false,
+      // The STRUCTURE is separable from the data, on both ends. A file without a schema is the honest
+      // artefact for "here are the rows"; and an import that applies one REPLACES the schema in use, so
+      // restoring last year's backup would quietly roll the structure back with it. Both default to
+      // carrying/applying the schema, because a restore into an empty deployment has to.
+      exportSchema: true,
+      importSchema: true,
       profileSaved: null,       // last-persisted {name, shared, picture} snapshot -> skip redundant blur saves
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
       listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
@@ -924,6 +930,7 @@ function createVueApp() {
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.export_members', 'settings.import_members',
+         'settings.export_schema', 'settings.import_schema',
          'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
@@ -5543,7 +5550,12 @@ function createVueApp() {
         // Shared tail for both branches below: assemble the bundle around the cleaned schema + extras,
         // then download it (the stringify/Blob/anchor dance was duplicated verbatim in then/catch).
         var download = function(schema, extras) {
-          var payload = Object.assign({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations }, extras, { config: exportableConfig(self.appConfig), exportedAt: new Date().toISOString() });
+          // Data-only files stay IMPORTABLE with no engine change: asBundle only reinterprets a
+          // schema-less file as a bare schema document when its table entries carry `columns`, and rows
+          // are arrays — so this lands as data, and applyBundle skips the schema step by itself.
+          var payload = Object.assign({}, self.exportSchema ? { schema: schema } : null,
+            { tables: data, lists: self.listsCache, languages: self.languages, translations: translations },
+            extras, { config: exportableConfig(self.appConfig), exportedAt: new Date().toISOString() });
           var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
           var a = document.createElement('a');
           a.href = URL.createObjectURL(blob);
@@ -5830,7 +5842,9 @@ function createVueApp() {
           // is the one place that distinction is made.
           imported = Examples.asBundle(imported);
           // Structural check: block import if the schema has dangling view/table references
-          if (imported.schema) {
+          // Both gated together: validating a schema this import will not apply would block the ROWS on a
+          // fault in a document nobody is going to read.
+          if (imported.schema && self.importSchema) {
             var refErrs = validateRefs(imported.schema);
             if (refErrs.length) { self.notify(self.t('msg.import_blocked') + ' ' + refErrs[0] + (refErrs.length > 1 ? ' (+' + (refErrs.length - 1) + ' more)' : '')); return; }
           }
@@ -5885,7 +5899,7 @@ function createVueApp() {
           // error shown. (The old try/catch only ever caught synchronous errors while BUILDING the chain.)
           var prog = {
             active: true, done: 0, icon: 'mdi-timer-sand', detail: '', errors: [], finished: false,
-            total: (imported.schema ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
+            total: ((imported.schema && self.importSchema) ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
                  + langCodes.length + pages.length + assets.length + (imported.config ? 1 : 0) + (members ? 1 : 0)
                  + ((opts && opts.provenance) ? 1 : 0) + 1
           };
@@ -5908,7 +5922,7 @@ function createVueApp() {
 
           var chain = Promise.resolve();
           // Import schema if present (initializes empty databases)
-          if (imported.schema && backend.saveSchema) {
+          if (imported.schema && backend.saveSchema && self.importSchema) {
             chain = chain.then(step('mdi-table-cog', '', function() {
               // Rebuild VIEWS from new schema so lockedListValues works
               if (Array.isArray(imported.schema.views)) {

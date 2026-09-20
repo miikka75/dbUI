@@ -134,3 +134,37 @@ test('importing a file with members does nothing to the roster unless asked', as
   await expect.poll(() => page.evaluate(() => (appInstance.listUserLinks.crew || {}).lead), { timeout: 10000 })
     .toBe('boss@x.test');
 });
+
+test('the structure is separable: a data-only file, and an import that leaves the schema alone', async ({ page }) => {
+  test.setTimeout(60000);
+  await boot(page);
+
+  // A plain export carries the structure, because a restore into an empty deployment has to.
+  expect((await exported(page)).schema).toBeTruthy();
+
+  await page.evaluate(() => { window.appInstance.exportSchema = false; });
+  const dataOnly = await exported(page);
+  expect(dataOnly.schema, 'a data-only file must not carry the structure').toBeUndefined();
+  expect(dataOnly.tables.duty.length, 'it is still the rows').toBe(1);
+  expect(dataOnly.lists.crew).toEqual(['lead', 'second']);
+
+  // Now the half that matters: a file whose schema is OLDER than the deployment. Importing it applies
+  // that schema and silently rolls the structure back — unless the import is told not to.
+  await page.evaluate(() => { window.appInstance.exportSchema = true; });
+  const older = await exported(page);
+  // An export writes columns as the documented array-of-objects form; this stands in for "a column the
+  // deployment has since dropped", i.e. a file whose structure is behind the one in use.
+  older.schema.tables.duty.columns.push({ name: 'gone_since', type: 'text' });
+
+  await page.evaluate((f) => { window.appInstance.importSchema = false; window.appInstance.applyBundle(f); }, older);
+  await page.waitForTimeout(5000);
+  await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
+  expect(await page.evaluate(() => Object.keys(appInstance.schemaData.tables.duty.columns || {})),
+    'the import applied a schema it was told to leave alone').not.toContain('gone_since');
+
+  // And with the switch on, the same file does replace it — and says so, because the rows look
+  // identical either way and the structure moving is the one thing you cannot see in them.
+  await page.evaluate((f) => { window.appInstance.importSchema = true; window.appInstance.applyBundle(f); }, older);
+  await expect.poll(() => page.evaluate(() => Object.keys(appInstance.schemaData.tables.duty.columns || {})), { timeout: 20000 })
+    .toContain('gone_since');
+});
