@@ -1581,6 +1581,17 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   `<id>-lang-<code>.json` after the installed example so it drops into `examples/` under the name the
   manifest already expects. What comes out is byte-shaped like a shipped pack:
   `{ languages: [{code, name}], translations: { <code>: {…} } }`.
+  **And the schema half of a contribution is a different document from a backup**, so it is a different
+  button: an example is a structure somebody ELSE installs, which means no ward's data in it. Two rules,
+  both read off what `examples/` ships rather than invented — every referenced list is declared and
+  EMPTY (a list is a vocabulary the installing ward types, and `listsForInstall` fills the gap without
+  touching one that has values), and only `isLookup` tables carry rows (reference data the schema is
+  useless without; sample rows for an ordinary table are the separate `<id>-data.json` the installer
+  offers as a choice). Both rules are pinned against the shipped bundles in `examples.test.js`, which is
+  what caught that chores and demo are BARE SCHEMA documents whose `tables` is a column map rather than
+  rows — the classifier for that already existed as `Examples.asBundle`.
+  `<id>-about.json` is deliberately not generated: the manifest refuses a bundle without a non-empty
+  `description`, and that sentence belongs to the contributor rather than to the app.
   **The receiving half already worked** and is worth knowing: `Examples.asBundle` only reinterprets a
   schema-less file as a bare schema document when its table entries carry `columns`, and rows are
   arrays — so a data-only file lands as data, and `applyBundle` skips the schema step on its own. The

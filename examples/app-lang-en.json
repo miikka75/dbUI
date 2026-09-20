@@ -199,6 +199,7 @@
       "settings.examples_reinstall": "Reinstall",
       "settings.examples_update": "a newer version ships with this deployment",
       "settings.export": "Export JSON",
+      "settings.export_example": "Export as example",
       "settings.export_parts": "Include",
       "settings.feed_not_republishing": "not updating",
       "settings.feed_regenerate": "New address",

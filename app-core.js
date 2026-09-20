@@ -938,7 +938,7 @@ function createVueApp() {
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.export_parts', 'settings.import_parts',
-         'part.schema', 'part.languages', 'part.data', 'part.users', 'lang.export_pack',
+         'part.schema', 'part.languages', 'part.data', 'part.users', 'lang.export_pack', 'settings.export_example',
          'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
@@ -5595,20 +5595,7 @@ function createVueApp() {
             var d = res[0], da = res[1], members = res[2];
             var pages = (d && d.rows || []).filter(function(r) { return r.id && r.markdown; });
             var assets = (da && da.rows || []).filter(function(r) { return r.id && r.src; }).map(function(r) { return { id: r.id, src: r.src }; });
-            // Export columns as the documented array-of-objects form (strip runtime-injected id; restore order + name).
-            var schema = JSON.parse(JSON.stringify(self.schemaData));
-            if (schema.tables) Object.keys(schema.tables).forEach(function(t) {
-              var c = schema.tables[t].columns;
-              if (c && typeof c === 'object' && !Array.isArray(c)) {
-                delete c.id;
-                var order = (window._columnOrders && window._columnOrders[t]) || Object.keys(c);
-                schema.tables[t].columns = order.filter(function(n) { return n !== 'id' && (n in c); }).map(function(n) {
-                  var def = c[n];
-                  return (def && typeof def === 'object') ? Object.assign({ name: n }, def) : { name: n };
-                });
-              }
-            });
-            convertViewFilters(schema.views);   // emit array-IN filters as explicit $or (forward-deprecation)
+            var schema = self._exportableSchema();
             var extras = {};
             if (wantData && pages.length) extras.pages = pages;
             if (wantData && assets.length) extras.assets = assets;
@@ -5703,6 +5690,68 @@ function createVueApp() {
         a.click();
         this.notify(this.t('msg.exported'));
       },
+      // The schema as a DOCUMENT rather than as the runtime's copy of it: columns back in the documented
+      // array-of-objects form (runtime-injected `id` stripped, author order and names restored), and
+      // array-IN filters emitted as explicit `$or`. Two callers now -- the backup and the example --
+      // and a file that only one of them normalized would be a schema the other could not read back.
+      _exportableSchema: function() {
+        var schema = JSON.parse(JSON.stringify(this.schemaData));
+        if (schema.tables) Object.keys(schema.tables).forEach(function(t) {
+          var c = schema.tables[t].columns;
+          if (c && typeof c === 'object' && !Array.isArray(c)) {
+            delete c.id;
+            var order = (window._columnOrders && window._columnOrders[t]) || Object.keys(c);
+            schema.tables[t].columns = order.filter(function(n) { return n !== 'id' && (n in c); }).map(function(n) {
+              var def = c[n];
+              return (def && typeof def === 'object') ? Object.assign({ name: n }, def) : { name: n };
+            });
+          }
+        });
+        convertViewFilters(schema.views);   // forward-deprecation: array-IN becomes explicit $or
+        return schema;
+      },
+      // The id a contributed file is named for: the installed example where there is one, so the file
+      // drops into examples/ under the name the manifest already reads, else a slug of the app's title.
+      _exampleId: function() {
+        var installed = (this.appConfig && this.appConfig.example && this.appConfig.example.bundle) || '';
+        return installed || String(this.t('app.title') || 'export').toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'export';
+      },
+      // The deployment as an EXAMPLE rather than as a backup, which is a different document: an example
+      // is a structure somebody else installs, so it carries no ward's data. Two rules, both taken from
+      // what examples/ actually ships rather than invented here:
+      //
+      //   - every list it references is DECLARED AND EMPTY. None of the three shipped bundles seeds a
+      //     list, because a list is a vocabulary the installing ward types; `Examples.listsForInstall`
+      //     then fills the gap on install without touching one that already has values.
+      //   - only `isLookup` tables carry rows. A lookup is reference data the schema is useless
+      //     without -- a status pipeline, a callings catalogue -- while every other table is somebody's
+      //     rows. Sample data for the other tables is a separate `<id>-data.json` the installer offers
+      //     as a choice, which is not this file.
+      //
+      // The remaining file, `<id>-about.json`, is deliberately not generated: the manifest requires a
+      // non-empty `description`, and that sentence is the contributor's, not something the app knows.
+      exportAsExample: function() {
+        var self = this;
+        var lookups = Object.keys(SCHEMA).filter(function(t) { return SCHEMA[t].isLookup; });
+        var failed = [];
+        return Promise.all(lookups.map(function(t) {
+          if (self.dataCache[t]) return { t: t, rows: self.dataCache[t] };
+          return Promise.resolve(backend.getTableData(t, 'active'))
+            .then(function(r) { return { t: t, rows: parseTableResult(r).rows }; })
+            .catch(function() { failed.push(t); return null; });
+        })).then(function(res) {
+          // Same stance as the backup: a reference table that could not be read is not an empty one,
+          // and an example shipping an empty catalogue is a schema nobody can use.
+          if (failed.length) { self.notify(self.t('msg.load_failed') + ' ' + failed.join(', ')); return; }
+          var tables = {};
+          res.forEach(function(r) { if (r && r.rows && r.rows.length) tables[r.t] = r.rows; });
+          var lists = {};
+          Object.keys(ListAccess.listOwnershipMap(SCHEMA)).forEach(function(n) { if (!SCHEMA[n]) lists[n] = []; });
+          self._downloadJson(self._exampleId() + '-schema.json',
+            { schema: self._exportableSchema(), lists: lists, tables: tables });
+        });
+      },
       // One language, in the shape examples/ ships: `{ languages: [{code,name}], translations: {code:{}} }`.
       // A pack is the unit somebody CONTRIBUTES -- a ward that has translated a shipped example has
       // something to give back that has nothing to do with its rows or its members -- and the examples
@@ -5714,8 +5763,7 @@ function createVueApp() {
       exportLanguagePack: function(lang) {
         var self = this;
         if (!lang || !lang.code) return Promise.resolve();
-        var installed = (self.appConfig && self.appConfig.example && self.appConfig.example.bundle) || '';
-        var id = installed || String(self.t('app.title') || 'export').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'export';
+        var id = self._exampleId();
         return Promise.resolve(backend.getTranslations(lang.code)).then(function(t) {
           var payload = { languages: [{ code: lang.code, name: lang.name || lang.code }] };
           payload.translations = {};

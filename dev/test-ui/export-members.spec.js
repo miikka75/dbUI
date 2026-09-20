@@ -15,7 +15,10 @@ const { test, expect } = require('./server-fixture');
 
 const SCH = {
   defaultLanguage: 'en',
-  tables: { duty: { columns: [{ name: 'who', type: 'select', list: 'crew' }] } },
+  tables: {
+    // A reference catalogue and a table of somebody's work: an example carries the first and not the second.
+    ref_grades: { isLookup: true, columns: [{ name: 'grade', type: 'text' }] },
+    duty: { columns: [{ name: 'who', type: 'select', list: 'crew' }, { name: 'grade', type: 'ref', table: 'ref_grades', valueCol: 'grade' }] } },
   lists: { crew: ['lead', 'second'] },
   listSources: { crew: 'userlink-name' },
   views: [{ name: 'duty', sources: ['duty'], mode: 'union', columns: ['who'] }],
@@ -212,4 +215,38 @@ test('a language pack exports in the shape examples/ ships, one file per languag
   expect(Object.keys(out.body).sort()).toEqual(['languages', 'translations']);
   expect(out.body.languages).toEqual([{ code: 'fi', name: 'Suomi' }]);
   expect(out.body.translations.fi['app.title']).toBe('Työkalu');
+});
+
+test('export as example: the structure somebody else installs, with no ward in it', async ({ page }) => {
+  test.setTimeout(30000);
+  await boot(page);
+  // A reference catalogue the schema is useless without, and a row of somebody's actual work.
+  await page.request.post('/api/putRow', { data: { tableId: 'ref_grades', tab: 'active',
+    data: { id: 'g1', grade: 'first' } }, headers: { 'X-User': 'boss@x.test' } });
+  await page.reload();
+  await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
+
+  const out = await page.evaluate(async () => {
+    const app = window.appInstance;
+    let name = null, text = null;
+    const realCreate = URL.createObjectURL, realClick = HTMLAnchorElement.prototype.click;
+    URL.createObjectURL = (b) => { text = b.text(); return 'blob:stub'; };
+    HTMLAnchorElement.prototype.click = function() { name = this.download; };
+    try {
+      await app.exportAsExample();
+      return { name: name, body: JSON.parse(await text) };
+    } finally { URL.createObjectURL = realCreate; HTMLAnchorElement.prototype.click = realClick; }
+  });
+
+  expect(out.name).toMatch(/-schema\.json$/);
+  expect(Object.keys(out.body).sort()).toEqual(['lists', 'schema', 'tables']);
+  // The structure, in the documented column shape rather than the runtime's map.
+  expect(Array.isArray(out.body.schema.tables.duty.columns)).toBe(true);
+  // A lookup is reference data the schema cannot work without; `duty` is somebody's rows and stays home.
+  expect(out.body.tables.ref_grades.map((r) => r.grade)).toEqual(['first']);
+  expect(out.body.tables.duty, 'rows a ward typed are not an example').toBeUndefined();
+  // Every referenced list is DECLARED and EMPTY: the installing ward types its own, and
+  // Examples.listsForInstall fills the gap without touching one that already has values.
+  expect(out.body.lists.crew).toEqual([]);
+  expect(out.body.lists.ref_grades, 'a lookup is a table, not a list').toBeUndefined();
 });

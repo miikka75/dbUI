@@ -199,6 +199,7 @@
       "settings.examples_reinstall": "Asenna uudelleen",
       "settings.examples_update": "tämän julkaisun mukana tulee uudempi versio",
       "settings.export": "Vie JSON",
+      "settings.export_example": "Vie esimerkkinä",
       "settings.export_parts": "Sisällöt",
       "settings.feed_not_republishing": "ei paivity",
       "settings.feed_regenerate": "Uusi osoite",
