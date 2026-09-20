@@ -1540,7 +1540,7 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   grant still reads every row. Per-calling confidentiality is table grants and `owner` rows — a
   different axis, and the reason this entry was about identity and not about permissions.
 
-- **Exporting the members, not just the data** (#PRNUM) — an export was the data and never the people:
+- **Exporting the members, not just the data** (#203) — an export was the data and never the people:
   `_users` (role + table grants), `_profiles` and `_list_users` (the value → account links) all stayed
   behind, so a deployment could be restored, or moved between backends, with every row intact and
   nobody able to sign in to anything. The links are what made that expensive — since a calling became
