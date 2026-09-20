@@ -1462,6 +1462,53 @@ declared, which is not a distinction anyone authoring a schema means to make.
 alphabetically by key would only make the wrong order easier to reach. Done the other way round, one
 change fixes `defaultSort`, the header click, and the print path at the same time, because all three go
 through `sortByCol`.
+### Exporting the members, not just the data
+
+An export is schema, rows, lists, languages, pages, assets and config. It is not the people: `_users`
+(role + table grants), `_profiles` (display name, the *share my name* flag, avatar), `_list_users` (the
+value → account links) and `_access_requests` all stay behind. So a deployment can be restored, or moved
+from Firebase to Supabase, and arrive with every row intact and nobody able to sign in to anything.
+
+**The links are what turned this from convenience into a gap.** Before, the missing pieces were a
+roster an admin could retype in ten minutes. Since callings became identities there are roughly fifty
+value → account links behind `@me`, the per-person cards and the per-person calendar feeds, and
+recreating them by hand is the migration. Nothing else in the export is like that: rows come back
+exactly, and these come back only if somebody remembers who held what.
+
+**Why it is not simply added to the export.** The file lands in a Downloads folder. Today it contains no
+roster of anybody — names and emails appear only where someone typed them into a row — and widening it
+turns every backup into a personal-data file. So this is an **opt-in on both ends**: a checkbox on
+export, and a separate one on import defaulting OFF, because importing a roster is not restoring data —
+it is granting a list of strangers access to whatever deployment you imported it into. The two
+checkboxes are the feature; the copying is the easy part.
+
+**The trap, which is the reason this needs writing down before it is built.** `_meta/users` is doing two
+jobs under one name. Its CONTENT is the legacy access map, superseded by `/_users/<email>` and kept only
+as a fallback for deployments that never migrated. Its EXISTENCE is the bootstrap sentinel: both rules
+layers ask `noUsers()` / `app_no_users()`, and `firestore.rules` says what happens if it goes — "deleting
+that doc while /_users docs exist would flip noUsers() true and hand EVERY signed-in Google account full
+admin". So an import that writes `_users` rows into a deployment where that document does not exist
+leaves a populated registry that still reads as a fresh one, and every account that signs in next is an
+admin. **The sentinel has to be written in the same step as the rows**, `{}` if there is nothing to put
+in it, and that ordering belongs in the import rather than in a note somebody has to remember.
+
+Worth separating while here: the fallback READ is genuinely legacy and could go once every deployment
+has `_users` rows — but it cannot go first, because removing it locks out anyone whose admin never
+opened the Users tab (which is what performs the additive migration, in `backend-kv.getUsers` and its
+Firestore twin). The sentinel is not legacy at all, and cannot go while rules have no way to ask whether
+a collection is empty. Two different lifetimes, one name, which is exactly why "it is legacy, delete it"
+is the wrong instinct here.
+
+**Shape.** Three more reads on the way out and three more write loops on the way in, all through paths
+that are already admin-only, plus the sentinel write above. Avatars are `data:` URLs capped near 350KB
+each, so a hundred-member profile store is a file people will notice — worth carrying names and the
+shared flag and leaving pictures behind, since a member can re-upload one and nobody can re-derive a
+grant. `_access_requests` is pending state, not history, and should stay behind.
+
+Cost: no engine module, no view kind, no rules change. The work is the two checkboxes, the sentinel
+ordering, and a security review of what the resulting file is — which is most of it, and is the reason
+the estimate is not "small".
+
 ### `gallery`
 
 A media grid. Unblocked since `image`/`url` columns shipped, so this is now mostly layout.
