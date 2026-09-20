@@ -705,19 +705,21 @@
             <template v-if="a.isAdmin">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.import_export') }}</p>
-            <v-btn variant="outlined" prepend-icon="mdi-download" data-testid="settings-export-json" @click="a.exportData" class="mr-2 mb-2">{{ a.t('settings.export') }}</v-btn>
-            <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()" class="mr-2 mb-2">{{ a.t('settings.import') }}</v-btn>
-            <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
-            <!-- Two switches, not one: what a file CARRIES and what an import REPLAYS are separate
-                 decisions. An export without members carries no roster of anybody, and an import that
-                 replays one is granting people access to this deployment rather than restoring data. -->
-            <div class="mb-2">
+            <!-- Each switch sits with the button it changes, because it changes THAT action and nothing
+                 else: one decides what the file carries, the other what an import replays. Wrapping
+                 rows rather than a fixed pair, so the switch drops under its button on a phone. -->
+            <div class="mb-2" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px">
+              <v-btn variant="outlined" prepend-icon="mdi-download" data-testid="settings-export-json" @click="a.exportData">{{ a.t('settings.export') }}</v-btn>
               <v-switch v-model="a.exportMembers" color="primary" density="compact" hide-details
-                        data-testid="export-members" :label="a.t('settings.export_members')"></v-switch>
-              <v-switch v-model="a.importMembers" color="warning" density="compact" hide-details
-                        data-testid="import-members" :label="a.t('settings.import_members')"></v-switch>
-              <p class="text-caption" style="opacity:0.7">{{ a.t('settings.members_note') }}</p>
+                        style="flex:0 1 auto" data-testid="export-members" :label="a.t('settings.export_members')"></v-switch>
             </div>
+            <div class="mb-1" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px">
+              <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()">{{ a.t('settings.import') }}</v-btn>
+              <v-switch v-model="a.importMembers" color="warning" density="compact" hide-details
+                        style="flex:0 1 auto" data-testid="import-members" :label="a.t('settings.import_members')"></v-switch>
+              <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
+            </div>
+            <p class="text-caption mb-3" style="opacity:0.7">{{ a.t('settings.members_note') }}</p>
             <v-btn variant="outlined" prepend-icon="mdi-shape-outline" class="mb-2"
                    data-testid="settings-examples" @click="a.openExamples()">{{ a.t('settings.examples') }}</v-btn>
             <!-- Checked on the way into Settings (selectTab), once per session, admin only: this is the
