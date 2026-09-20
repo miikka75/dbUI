@@ -251,9 +251,9 @@ describe('compare: release notes', () => {
 });
 
 describe('what a <id>-schema.json is, which is what "export as example" has to produce', () => {
-  // `exportAsExample` strips a live deployment down to the shape examples/ ships, by two rules read off
-  // these files rather than invented: every referenced list is DECLARED AND EMPTY, and the only tables
-  // carrying rows are lookups. Both rules are assumptions about the shipped bundles, so they are pinned
+  // Selecting structure + languages + reference strips a live deployment down to the shape examples/
+  // ships, by two rules read off these files rather than invented: every referenced list is DECLARED
+  // AND EMPTY, and the only tables carrying rows are lookups. Both rules are assumptions about the shipped bundles, so they are pinned
   // HERE — the day an example seeds a list or ships rows for an ordinary table, the exporter is wrong
   // and this says so instead of a contributor finding out from a rejected pull request.
   const BUNDLES = ['bishopric-schema.json', 'chores-schema.json', 'demo-schema.json'];

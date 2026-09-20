@@ -1581,8 +1581,14 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   `<id>-lang-<code>.json` after the installed example so it drops into `examples/` under the name the
   manifest already expects. What comes out is byte-shaped like a shipped pack:
   `{ languages: [{code, name}], translations: { <code>: {…} } }`.
-  **And the schema half of a contribution is a different document from a backup**, so it is a different
-  button: an example is a structure somebody ELSE installs, which means no ward's data in it. Two rules,
+  **And the schema half of a contribution is a different document from a backup**, which turned out to
+  be a missing PART rather than a mode: what an example adds over a plain schema export is REFERENCE
+  data — the lookup catalogues, and the names of the lists the schema declares, each empty. Named for
+  what it is, it combines, and `structure + languages + reference` IS a contributable example with no
+  separate button. ("Example" could not be an item in that list: a mode cannot be combined, and
+  "structure + example" means nothing.) A file carrying no ordinary rows and nobody's account is named
+  `<id>-schema.json` rather than as a dated backup, and leaves this deployment's `config` behind, since
+  no shipped bundle carries one. Two rules,
   both read off what `examples/` ships rather than invented — every referenced list is declared and
   EMPTY (a list is a vocabulary the installing ward types, and `listsForInstall` fills the gap without
   touching one that has values), and only `isLookup` tables carry rows (reference data the schema is
@@ -1597,15 +1603,18 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   the example installer, so installing a contributed bundle meant importing its files one at a time.
   Sorted by name before folding, because mergeFiles takes the last value for a repeated key and a
   bundle should not merge differently because somebody ctrl-clicked upwards.
-  **Why the example export stays its own action rather than the export writing a file per selected
-  part.** Three reasons, and the middle one is the expensive one. An example is a TRANSFORMATION and not
-  a subset — lists declared but emptied, only lookup rows — which no combination of parts produces.
-  Redefining `structure` to mean that would make a structure-only import wipe a ward's vocabularies,
-  because a hand-picked import replaces and prunes lists where an example install fills gaps; today
-  that cannot happen, since a structure-only file carries no `lists` key at all. And a backup is
-  honestly one file: making the common action emit several, which browsers prompt or block on, to serve
-  the rarer one is the wrong way round. One file is a backup, a set of files is a contribution, and the
-  two buttons say which you are making.
+  **The hazard that made `reference` worth getting right.** A hand-picked import REPLACES and prunes
+  lists where an example install fills gaps — so a file declaring lists empty would wipe every
+  vocabulary a ward had typed, and the contribution path would be the fastest way to lose a year of
+  work. The rule that fixes it is one an empty list argues for itself: a list with nothing in it cannot
+  be a restore of anything, so replacing with it could only destroy. Declarations fill gaps whatever
+  their provenance; omission still prunes, which is how a file taken before a list was retired removes
+  it again.
+  **The export still writes one file, not one per part.** A backup is honestly one file and restoring
+  it is one import; making the common action emit several — which browsers prompt or block on, with no
+  zip library vendored — to serve the rarer one is the wrong way round. The language packs are the
+  exception because the manifest reads one file per language, and they download individually from the
+  Languages tab.
   **The receiving half already worked** and is worth knowing: `Examples.asBundle` only reinterprets a
   schema-less file as a bare schema document when its table entries carry `columns`, and rows are
   arrays — so a data-only file lands as data, and `applyBundle` skips the schema step on its own. The

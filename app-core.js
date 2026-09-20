@@ -235,8 +235,15 @@ function createVueApp() {
       // restoring data, it is granting a list of people access to whatever received the file — which is
       // why the import side defaults off even when the file has members in it.
       // WHICH PARTS a file carries, and which parts an import applies: the STRUCTURE (schema and app
-      // config), the LANGUAGES (every pack, in the shape an example ships), the DATA (rows, lists, page
-      // bodies, image assets) and the USERS (roles, grants, names, and the value -> account links).
+      // config), the LANGUAGES (every pack, in the shape an example ships), the REFERENCE data (lookup
+      // catalogues, and the names of the lists the schema declares), the DATA (ordinary rows, the
+      // list VALUES a ward typed, page bodies, image assets) and the USERS (roles, grants, names, and
+      // the value -> account links).
+      //
+      // Reference is its own part because it is what separates an EXAMPLE from a backup: a status
+      // pipeline or a callings catalogue is data the schema is useless without, while a meeting row is
+      // somebody's work. Structure + languages + reference IS a contributable example, which is why
+      // there is no separate "export as example" mode -- a mode cannot be combined, and this can.
       //
       // Languages are their own part rather than riding with the schema, because they are separately
       // CONTRIBUTABLE: a deployment that has translated a shipped example has something to give back
@@ -248,8 +255,8 @@ function createVueApp() {
       // my schema back to last year's", "everything including the people, because I am moving
       // backends". Users is out of both defaults -- a file with a roster holds everybody's email, and
       // an import that applies one grants those people access to whatever received it.
-      exportParts: ['schema', 'languages', 'data'],
-      importParts: ['schema', 'languages', 'data'],
+      exportParts: ['schema', 'languages', 'reference', 'data'],
+      importParts: ['schema', 'languages', 'reference', 'data'],
       profileSaved: null,       // last-persisted {name, shared, picture} snapshot -> skip redundant blur saves
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
       listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
@@ -938,7 +945,7 @@ function createVueApp() {
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
          'settings.export_parts', 'settings.import_parts',
-         'part.schema', 'part.languages', 'part.data', 'part.users', 'lang.export_pack', 'settings.export_example',
+         'part.schema', 'part.languages', 'part.reference', 'part.data', 'part.users', 'lang.export_pack',
          'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
@@ -3425,7 +3432,7 @@ function createVueApp() {
       wantsPart: function(which, part) { return (this[which] || []).indexOf(part) >= 0; },
       partOptions: function() {
         var self = this;
-        return ['schema', 'languages', 'data', 'users'].map(function(p) { return { value: p, title: self.t('part.' + p) }; });
+        return ['schema', 'languages', 'reference', 'data', 'users'].map(function(p) { return { value: p, title: self.t('part.' + p) }; });
       },
       colListSwitch: function(col) { return Columns.colListSwitch(SCHEMA, col); },
       isAltList: function(col, item) {
@@ -5537,8 +5544,12 @@ function createVueApp() {
         // So: fetch what is missing, and produce no file at all if any read fails. This also stops boot
         // from being load-bearing for exports, which is what a lazier boot needs.
         var wantData = this.wantsPart('exportParts', 'data');
+        var wantRef = this.wantsPart('exportParts', 'reference');
         var wanted = [], failed = [];
-        if (wantData) Object.keys(SCHEMA).forEach(function(table) {
+        // A lookup is reference data and every other table is somebody's work, so the two parts read
+        // different tables rather than one part reading all of them and the other filtering after.
+        Object.keys(SCHEMA).forEach(function(table) {
+          if (SCHEMA[table].isLookup ? !wantRef : !wantData) return;
           // Omit what this user cannot read rather than asserting it is empty. Import is additive
           // (delete+put per row), so an omitted table is left untouched on restore exactly as an empty
           // one would be -- but the file no longer says something false about it.
@@ -5569,12 +5580,29 @@ function createVueApp() {
           // are arrays — so this lands as data, and applyBundle skips the schema step by itself.
           // Each part assembled only if asked for. Lists travel with the DATA, because a ward types
           // them; the app config travels with the STRUCTURE it configures.
+          // `lists` is written once and means two different things. With the DATA, it is the vocabulary
+          // a ward typed and the file is a restore of it. Without the data but with the reference part,
+          // it is the list NAMES the schema declares, each empty — which is what examples/ ships, and
+          // what lets an installing ward fill them in itself.
+          var lists = wantData ? self.listsCache : null;
+          if (!lists && wantRef) {
+            lists = {};
+            Object.keys(ListAccess.listOwnershipMap(SCHEMA)).forEach(function(n) { if (!SCHEMA[n]) lists[n] = []; });
+          }
+          // No ordinary rows and nobody's account: this is a contribution rather than a backup. It is
+          // named the way the examples manifest reads one, and it leaves THIS deployment's settings
+          // behind — none of the shipped bundles carries a `config`, and an installer should not
+          // inherit somebody else's theme and provenance along with their schema.
+          var contribution = !wantData && !self.wantsPart('exportParts', 'users');
           var payload = Object.assign({},
-            self.wantsPart('exportParts', 'schema') ? { schema: schema, config: exportableConfig(self.appConfig) } : null,
+            self.wantsPart('exportParts', 'schema') ? Object.assign({ schema: schema },
+              contribution ? null : { config: exportableConfig(self.appConfig) }) : null,
             self.wantsPart('exportParts', 'languages') ? { languages: self.languages, translations: translations } : null,
-            wantData ? { tables: data, lists: self.listsCache } : null,
+            (wantData || wantRef) ? { tables: data } : null,
+            lists ? { lists: lists } : null,
             extras, { exportedAt: new Date().toISOString() });
-          self._downloadJson('drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json', payload);
+          self._downloadJson(contribution ? (self._exampleId() + '-schema.json')
+            : ('drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json'), payload);
         };
         chain.then(function() {
           // Refuse rather than hand over a file with a hole in it. The tables are named so the user can
@@ -5716,41 +5744,6 @@ function createVueApp() {
         var installed = (this.appConfig && this.appConfig.example && this.appConfig.example.bundle) || '';
         return installed || String(this.t('app.title') || 'export').toLowerCase()
           .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'export';
-      },
-      // The deployment as an EXAMPLE rather than as a backup, which is a different document: an example
-      // is a structure somebody else installs, so it carries no ward's data. Two rules, both taken from
-      // what examples/ actually ships rather than invented here:
-      //
-      //   - every list it references is DECLARED AND EMPTY. None of the three shipped bundles seeds a
-      //     list, because a list is a vocabulary the installing ward types; `Examples.listsForInstall`
-      //     then fills the gap on install without touching one that already has values.
-      //   - only `isLookup` tables carry rows. A lookup is reference data the schema is useless
-      //     without -- a status pipeline, a callings catalogue -- while every other table is somebody's
-      //     rows. Sample data for the other tables is a separate `<id>-data.json` the installer offers
-      //     as a choice, which is not this file.
-      //
-      // The remaining file, `<id>-about.json`, is deliberately not generated: the manifest requires a
-      // non-empty `description`, and that sentence is the contributor's, not something the app knows.
-      exportAsExample: function() {
-        var self = this;
-        var lookups = Object.keys(SCHEMA).filter(function(t) { return SCHEMA[t].isLookup; });
-        var failed = [];
-        return Promise.all(lookups.map(function(t) {
-          if (self.dataCache[t]) return { t: t, rows: self.dataCache[t] };
-          return Promise.resolve(backend.getTableData(t, 'active'))
-            .then(function(r) { return { t: t, rows: parseTableResult(r).rows }; })
-            .catch(function() { failed.push(t); return null; });
-        })).then(function(res) {
-          // Same stance as the backup: a reference table that could not be read is not an empty one,
-          // and an example shipping an empty catalogue is a schema nobody can use.
-          if (failed.length) { self.notify(self.t('msg.load_failed') + ' ' + failed.join(', ')); return; }
-          var tables = {};
-          res.forEach(function(r) { if (r && r.rows && r.rows.length) tables[r.t] = r.rows; });
-          var lists = {};
-          Object.keys(ListAccess.listOwnershipMap(SCHEMA)).forEach(function(n) { if (!SCHEMA[n]) lists[n] = []; });
-          self._downloadJson(self._exampleId() + '-schema.json',
-            { schema: self._exportableSchema(), lists: lists, tables: tables });
-        });
       },
       // One language, in the shape examples/ ships: `{ languages: [{code,name}], translations: {code:{}} }`.
       // A pack is the unit somebody CONTRIBUTES -- a ward that has translated a shipped example has
@@ -5964,7 +5957,16 @@ function createVueApp() {
           // carries that was not asked for is left on the floor, which is the whole point of choosing.
           var wantSchema = self.wantsPart('importParts', 'schema');
           var wantData = self.wantsPart('importParts', 'data');
-          var tables = wantData ? (imported.tables || {}) : {};
+          var wantRef = self.wantsPart('importParts', 'reference');
+          // Split the same way the export gathers it: a lookup's rows are reference data, everything
+          // else is somebody's work. A table the SCHEMA does not know is treated as ordinary — a
+          // catalogue this deployment has never heard of cannot be claimed as its reference data.
+          var tables = {};
+          Object.keys(imported.tables || {}).forEach(function(k) {
+            var t = k.split('__')[0];
+            var isRef = !!(SCHEMA[t] && SCHEMA[t].isLookup);
+            if (isRef ? wantRef : wantData) tables[k] = imported.tables[k];
+          });
           var rowJobs = [];
           // This is also the MIGRATION route from partition-as-store to partition-as-field, which is
           // why every row now imports into the active store whatever key it arrived under. A suffixed
@@ -6065,12 +6067,19 @@ function createVueApp() {
                 .then(function() { return Writes.putRow(target, job.row, job.tab); });
             }));
           });
-          if (imported.lists && wantData) {
+          if (imported.lists && (wantData || wantRef)) {
             chain = chain.then(step('mdi-format-list-bulleted', '', function() {
               // An EXAMPLE fills the vocabularies this database has not started and leaves the rest
               // alone; a hand-picked file replaces them (and prunes what it omits), because that is a
               // restore. See Examples.listsForInstall for why the difference matters.
-              var next = (opts && opts.provenance)
+              //
+              // A file whose lists are ALL EMPTY is neither: it is the set of names a schema declares,
+              // which is what the reference part carries and what examples/ ships. It cannot be a
+              // restore, because there is nothing in it to restore — so replacing with it could only
+              // destroy, and it fills gaps whatever its provenance. Omission still prunes, which is how
+              // a file taken before a list was retired removes it again.
+              var declarationsOnly = Object.keys(imported.lists).every(function(n) { return !(imported.lists[n] || []).length; });
+              var next = ((opts && opts.provenance) || declarationsOnly)
                 ? Examples.listsForInstall(self.listsCache, imported.lists) : imported.lists;
               self.listsCache = next;
               return backend.saveLists(next);

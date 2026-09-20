@@ -55,6 +55,21 @@ async function boot(page) {
   await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
 }
 
+// Capture the file the export writes — its NAME as well as its body, because the name is part of what
+// makes a contribution droppable into examples/.
+const namedExport = (page) => page.evaluate(async () => {
+  const app = window.appInstance;
+  let name = null, text = null;
+  const realCreate = URL.createObjectURL, realClick = HTMLAnchorElement.prototype.click;
+  URL.createObjectURL = (b) => { text = b.text(); return 'blob:stub'; };
+  HTMLAnchorElement.prototype.click = function() { name = this.download; };
+  try {
+    await app.exportData();
+    for (let i = 0; i < 100 && !text; i++) await new Promise((r) => setTimeout(r, 50));
+    return { name: name, body: text ? JSON.parse(await text) : null };
+  } finally { URL.createObjectURL = realCreate; HTMLAnchorElement.prototype.click = realClick; }
+});
+
 // The export writes a file through a Blob + anchor; capture the payload instead of the download.
 const exported = (page) => page.evaluate(async () => {
   const app = window.appInstance;
@@ -78,7 +93,7 @@ test('an export carries no roster unless it is asked for', async ({ page }) => {
   expect(plain.tables.duty.length).toBe(1);                 // it is still a real backup
   expect(plain.members, 'a backup must not quietly contain everybody\'s email').toBeUndefined();
 
-  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'data', 'users']; });
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'reference', 'data', 'users']; });
   const withMembers = await exported(page);
   expect(Object.keys(withMembers.members.users).sort()).toEqual(['boss@x.test', 'helper@x.test']);
   expect(withMembers.members.users['helper@x.test'].tables).toEqual(['duty']);   // the grant, not just the name
@@ -94,7 +109,7 @@ test('avatars stay behind, and the shared flag travels as a record', async ({ pa
   // can re-upload one where nobody can re-derive a grant.
   await page.request.post('/api/setMyProfile', { data: { name: 'Helper', shared: true, picture: 'data:image/png;base64,AAAA' } })
     .catch(() => {});
-  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'data', 'users']; });
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'reference', 'data', 'users']; });
   const out = await exported(page);
   for (const p of Object.values(out.members.profiles)) {
     expect(p.picture, 'an avatar reached the file').toBeUndefined();
@@ -105,7 +120,7 @@ test('avatars stay behind, and the shared flag travels as a record', async ({ pa
 test('importing a file with members does nothing to the roster unless asked', async ({ page }) => {
   test.setTimeout(60000);
   await boot(page);
-  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'data', 'users']; });
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'reference', 'data', 'users']; });
   const file = await exported(page);
 
   // A different deployment: same schema, nobody in it.
@@ -129,7 +144,7 @@ test('importing a file with members does nothing to the roster unless asked', as
   expect(await roster(), 'a plain import enrolled somebody from the file').not.toContain('helper@x.test');
 
   // Asked for: roles, grants, names and links all land.
-  await page.evaluate((f) => { window.appInstance.importParts = ['schema', 'languages', 'data', 'users']; window.appInstance.applyBundle(f); }, file);
+  await page.evaluate((f) => { window.appInstance.importParts = ['schema', 'languages', 'reference', 'data', 'users']; window.appInstance.applyBundle(f); }, file);
   await expect.poll(roster, { timeout: 20000 }).toContain('helper@x.test');
   const users = await (await page.request.post('/api/getUsers', { data: {}, headers: { 'X-User': 'boss@x.test' } })).json();
   expect(users['helper@x.test'].role).toBe('editor');
@@ -153,7 +168,7 @@ test('the structure is separable: a data-only file, and an import that leaves th
 
   // Now the half that matters: a file whose schema is OLDER than the deployment. Importing it applies
   // that schema and silently rolls the structure back — unless the import is told not to.
-  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'data']; });
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'reference', 'data']; });
   const older = await exported(page);
   // An export writes columns as the documented array-of-objects form; this stands in for "a column the
   // deployment has since dropped", i.e. a file whose structure is behind the one in use.
@@ -167,7 +182,7 @@ test('the structure is separable: a data-only file, and an import that leaves th
 
   // And with the switch on, the same file does replace it — and says so, because the rows look
   // identical either way and the structure moving is the one thing you cannot see in them.
-  await page.evaluate((f) => { window.appInstance.importParts = ['schema', 'languages', 'data']; window.appInstance.applyBundle(f); }, older);
+  await page.evaluate((f) => { window.appInstance.importParts = ['schema', 'languages', 'reference', 'data']; window.appInstance.applyBundle(f); }, older);
   await expect.poll(() => page.evaluate(() => Object.keys(appInstance.schemaData.tables.duty.columns || {})), { timeout: 20000 })
     .toContain('gone_since');
 });
@@ -181,8 +196,8 @@ test('schema only: the structure, with nothing a ward typed', async ({ page }) =
   // What a copy of the deployment needs, and nothing a ward typed.
   expect(Object.keys(f.schema.tables)).toContain('duty');
   expect(f.translations, 'languages are their own part now').toBeUndefined();
-  expect(f.tables, 'no rows').toBeUndefined();
-  expect(f.lists, 'a list is a vocabulary somebody typed').toBeUndefined();
+  expect(f.tables, 'reference data is its own part now').toBeUndefined();
+  expect(f.lists, 'so are the list names it declares').toBeUndefined();
   expect(f.members, 'never without asking').toBeUndefined();
 });
 
@@ -217,7 +232,7 @@ test('a language pack exports in the shape examples/ ships, one file per languag
   expect(out.body.translations.fi['app.title']).toBe('Työkalu');
 });
 
-test('export as example: the structure somebody else installs, with no ward in it', async ({ page }) => {
+test('an example is a selection now: structure + languages + reference, and no ward in it', async ({ page }) => {
   test.setTimeout(30000);
   await boot(page);
   // A reference catalogue the schema is useless without, and a row of somebody's actual work.
@@ -226,20 +241,14 @@ test('export as example: the structure somebody else installs, with no ward in i
   await page.reload();
   await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
 
-  const out = await page.evaluate(async () => {
-    const app = window.appInstance;
-    let name = null, text = null;
-    const realCreate = URL.createObjectURL, realClick = HTMLAnchorElement.prototype.click;
-    URL.createObjectURL = (b) => { text = b.text(); return 'blob:stub'; };
-    HTMLAnchorElement.prototype.click = function() { name = this.download; };
-    try {
-      await app.exportAsExample();
-      return { name: name, body: JSON.parse(await text) };
-    } finally { URL.createObjectURL = realCreate; HTMLAnchorElement.prototype.click = realClick; }
-  });
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages', 'reference']; });
+  const out = await namedExport(page);
 
+  // A file with no ordinary rows and nobody's account in it is a contribution, so it is named the way
+  // the examples manifest reads one rather than as a dated backup.
   expect(out.name).toMatch(/-schema\.json$/);
-  expect(Object.keys(out.body).sort()).toEqual(['lists', 'schema', 'tables']);
+  expect(Object.keys(out.body).sort()).toEqual(['exportedAt', 'languages', 'lists', 'schema', 'tables', 'translations']);
+  expect(out.body.config, "an installer should not inherit this deployment's settings").toBeUndefined();
   // The structure, in the documented column shape rather than the runtime's map.
   expect(Array.isArray(out.body.schema.tables.duty.columns)).toBe(true);
   // A lookup is reference data the schema cannot work without; `duty` is somebody's rows and stays home.
@@ -273,7 +282,8 @@ test('a contribution imports as the files it ships, not one at a time', async ({
     try { await app[f]({ code: 'fi', name: 'Suomi' }); return JSON.parse(await text); }
     finally { URL.createObjectURL = realCreate; HTMLAnchorElement.prototype.click = realClick; }
   }, fn);
-  const schemaFile = await grab('exportAsExample');
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'reference']; });
+  const schemaFile = (await namedExport(page)).body;
   const langFile = await grab('exportLanguagePack');
 
   // Folded the way the file picker hands them over, which is what importData now does.
@@ -288,4 +298,25 @@ test('a contribution imports as the files it ships, not one at a time', async ({
   expect(merged.langs).toEqual(['fi']);
   expect(merged.title, 'the pack came with it').toBe('Työkalu');
   expect(merged.lookupRows).toEqual(['ref_grades']);
+});
+
+test('a list declared empty is a declaration, never a restore', async ({ page }) => {
+  test.setTimeout(60000);
+  await boot(page);
+  // The ward has typed its vocabulary. A contribution names the same list and ships it EMPTY, because
+  // that is what examples/ does — and a hand-picked import otherwise replaces and prunes lists.
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'reference']; });
+  const contribution = (await namedExport(page)).body;
+  expect(contribution.lists.crew, 'a contribution declares the name and leaves it empty').toEqual([]);
+
+  await page.evaluate((f) => {
+    window.appInstance.importParts = ['schema', 'reference'];
+    window.appInstance.applyBundle(f);
+  }, contribution);
+  await page.waitForTimeout(5000);
+  await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
+
+  // Replacing with nothing could only destroy, so it fills gaps instead. Without this rule the
+  // contribution path itself would be the fastest way to lose a year of typing.
+  expect(await page.evaluate(() => appInstance.listsCache.crew)).toEqual(['lead', 'second']);
 });

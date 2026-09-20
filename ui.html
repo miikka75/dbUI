@@ -727,10 +727,6 @@
                         :label="a.t('settings.import_parts')"></v-select>
               <input ref="importFile" type="file" multiple accept=".json" hidden @change="a.importData($event)">
             </div>
-            <!-- Not a subset of the backup but a different document: the structure as somebody ELSE would
-                 install it, with no ward's data in it. Its own button for that reason. -->
-            <v-btn variant="outlined" prepend-icon="mdi-share-variant-outline" class="mr-2 mb-2"
-                   data-testid="settings-export-example" @click="a.exportAsExample()">{{ a.t('settings.export_example') }}</v-btn>
             <v-btn variant="outlined" prepend-icon="mdi-shape-outline" class="mb-2"
                    data-testid="settings-examples" @click="a.openExamples()">{{ a.t('settings.examples') }}</v-btn>
             <!-- Checked on the way into Settings (selectTab), once per session, admin only: this is the
