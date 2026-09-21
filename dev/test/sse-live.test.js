@@ -2,6 +2,7 @@ const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const { startDevServer, stopDevServer } = require('./dev-server');
 const fs = require('node:fs');
 
 // End-to-end guard for the dev server's live-sync stream (/api/events), the local counterpart of
@@ -13,8 +14,8 @@ const fs = require('node:fs');
 // dev/local.db or the sidecar users.json of a running dev instance.
 
 const DEV_DIR = path.join(__dirname, '..');
-const PORT = 3737 + (process.pid % 200);
-const BASE = 'http://127.0.0.1:' + PORT;
+// Port and readiness are the server's to report — see dev-server.js.
+let BASE;
 const DB_REL = path.join('test', '.sse-' + process.pid + '.db');
 const DB_ABS = path.join(DEV_DIR, DB_REL);
 
@@ -78,23 +79,9 @@ const SCHEMA = {
 
 describe('dev server — live-sync SSE stream', () => {
   before(async () => {
-    child = spawn(process.execPath, ['server.js'], {
-      cwd: DEV_DIR,
-      env: Object.assign({}, process.env, { PORT: String(PORT), APP_DB: DB_REL }),
-      stdio: 'ignore'
-    });
-    let up = false;
-    // 45s: the dev server's default backend is PGlite, so this spawn boots a WebAssembly Postgres and
-    // applies supabase-schema.sql before it answers -- seconds on its own, and node --test runs the
-    // suites that do this concurrently. The ceiling costs nothing when the server is up sooner.
-    const deadline = Date.now() + 45000;
-    while (!up && Date.now() < deadline) {
-      try {
-        const r = await fetch(BASE + '/api/serverInfo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-        up = r.ok;
-      } catch (e) { await new Promise(r => setTimeout(r, 50)); }
-    }
-    assert.ok(up, 'dev server started');
+    const started = await startDevServer(DB_REL);
+    child = started.child;
+    BASE = started.base;
     await post('saveSchema', { schema: SCHEMA });
     await post('initSchema', { schema: SCHEMA.tables });
   });

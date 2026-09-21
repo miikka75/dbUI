@@ -16,11 +16,12 @@ const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const { startDevServer, stopDevServer } = require('./dev-server');
 const fs = require('node:fs');
 
 const DEV_DIR = path.join(__dirname, '..');
-const PORT = 4620 + (process.pid % 200);
-const BASE = 'http://127.0.0.1:' + PORT;
+// Port and readiness are the server's to report — see dev-server.js.
+let BASE;
 const DB_REL = path.join('test', '.adm-' + process.pid + '.db');
 const DB_ABS = path.join(DEV_DIR, DB_REL);
 
@@ -42,19 +43,9 @@ const status = (route, body, user) => post(route, body, user).then((r) => r.stat
 
 describe('dev server — the admin API surface is gated', () => {
   before(async () => {
-    child = spawn(process.execPath, ['server.js'], {
-      cwd: DEV_DIR,
-      env: Object.assign({}, process.env, { PORT: String(PORT), APP_DB: DB_REL }),
-      stdio: 'ignore'
-    });
-    let up = false;
-    // 45s for the same reason the other dev-server suites take it: the default backend is PGlite, so
-    // this spawn boots a WebAssembly Postgres and applies supabase-schema.sql before it answers.
-    const deadline = Date.now() + 45000;
-    while (!up && Date.now() < deadline) {
-      try { up = (await post('serverInfo', {})).ok; } catch (e) { await new Promise((r) => setTimeout(r, 50)); }
-    }
-    assert.ok(up, 'dev server started');
+    const started = await startDevServer(DB_REL);
+    child = started.child;
+    BASE = started.base;
 
     // Bootstrap: no users yet, so the very first schema write and the very first grant must PASS.
     // This is the half of the gate that is easy to break by making it strict, and it is the half a
