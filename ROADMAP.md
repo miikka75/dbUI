@@ -1617,6 +1617,12 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   a backup and a contribution stop being two features and become two selections, and nothing has to
   live outside Settings: the per-language download that briefly sat in the Languages tab is gone,
   because the set already writes one file per language.
+  **The menu says what a backup contains** rather than leaving it to be inferred: while `backup` is
+  ticked the parts it covers are greyed and marked as included, so the list answers "what is in one?"
+  from `_activeParts` itself — a label saying the same thing in words could drift from the function the
+  export actually gates on, and this cannot. Greyed-and-unchecked alone read as "unavailable", which is
+  why they carry a check mark too. `users` is never greyed, because a backup does not carry it until
+  that tick says so.
   The files download sequentially with a gap between them — a browser asked for several at once prompts
   or drops the later ones, and this is the only place in the app that asks for more than one.
   `lists` follows its meaning in the split too: names the schema declares go with the structure, values

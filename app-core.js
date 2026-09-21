@@ -3445,9 +3445,17 @@ function createVueApp() {
         return all;
       },
       wantsPart: function(which, part) { return this._activeParts(which).indexOf(part) >= 0; },
-      partOptions: function() {
-        var self = this;
-        return ['backup', 'schema', 'languages', 'reference', 'data', 'users'].map(function(p) { return { value: p, title: self.t('part.' + p) }; });
+      // The parts, with the ones a BACKUP already contains greyed out while it is chosen. Disabling
+      // them is the only honest way to answer "what is in a backup?": the alternative is a sentence
+      // somewhere that can drift from `_activeParts`, and this cannot, because it asks the same
+      // function. `users` is never greyed -- a backup does not include it until you say so, and that
+      // is exactly the tick that adds it.
+      partOptions: function(which) {
+        var self = this, covered = (this[which] || []).indexOf('backup') >= 0;
+        return ['backup', 'schema', 'languages', 'reference', 'data', 'users'].map(function(p) {
+          return { value: p, title: self.t('part.' + p),
+                   disabled: covered && p !== 'backup' && p !== 'users' };
+        });
       },
       colListSwitch: function(col) { return Columns.colListSwitch(SCHEMA, col); },
       isAltList: function(col, item) {

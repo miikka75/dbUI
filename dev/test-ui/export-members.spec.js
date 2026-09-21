@@ -331,3 +331,27 @@ test('a list declared empty is a declaration, never a restore', async ({ page })
   // contribution path itself would be the fastest way to lose a year of typing.
   expect(await page.evaluate(() => appInstance.listsCache.crew)).toEqual(['lead', 'second']);
 });
+
+test('the parts a backup already contains are shown as contained, not as choices', async ({ page }) => {
+  test.setTimeout(30000);
+  await boot(page);
+
+  // What the menu offers has to answer "what is in a backup?" from the same place the EXPORT answers
+  // it. A sentence in a label could drift from `_activeParts`; asking it cannot.
+  const state = () => page.evaluate(() => appInstance.partOptions('exportParts')
+    .map((o) => o.value + (o.disabled ? ':locked' : '')));
+
+  expect(await state()).toEqual(['backup', 'schema:locked', 'languages:locked', 'reference:locked',
+    'data:locked', 'users']);
+  // `users` is never locked: a backup does not carry it until that tick says so, which is the whole
+  // reason it is a separate part.
+
+  await page.evaluate(() => { window.appInstance.exportParts = ['schema', 'languages']; });
+  expect(await state(), 'unticking the backup hands every part back').toEqual(
+    ['backup', 'schema', 'languages', 'reference', 'data', 'users']);
+
+  // And the lock tracks the SAME expansion the export gates on, so the two cannot disagree.
+  expect(await page.evaluate(() => { window.appInstance.exportParts = ['backup'];
+    return window.appInstance._activeParts('exportParts'); }))
+    .toEqual(['schema', 'languages', 'reference', 'data']);
+});
