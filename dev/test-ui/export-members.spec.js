@@ -386,3 +386,33 @@ test('one refused account does not abandon the rest of the roster', async ({ pag
   expect(out.err, 'and said how much of the roster landed').toMatch(/1\/2 users/);
   expect(out.err).toContain('refused by policy');
 });
+
+test('the importer keeps their own access, and their own entry is applied last', async ({ page }) => {
+  test.setTimeout(60000);
+  await boot(page);
+  await page.evaluate(() => { window.appInstance.exportParts = ['backup', 'users']; });
+  const file = await exported(page);
+
+  // A roster where the importer is NOT first — the shape a real export has, since the file is in
+  // whatever order the registry returned.
+  const out = await page.evaluate(async (f) => {
+    const app = window.appInstance;
+    const order = [];
+    const realSet = window.backend_users.setUserRole;
+    const realGet = window.backend_users.getUsers;
+    window.backend_users.getUsers = () => Promise.resolve({});        // bootstrap: no record of my own
+    window.backend_users.setUserRole = function(uid) { order.push(uid); return Promise.resolve(); };
+    try {
+      app.importParts = ['backup', 'users'];
+      await app._applyMembers(f.members).catch(() => {});
+      return { order: order, me: app.myEmailLc };
+    } finally { window.backend_users.setUserRole = realSet; window.backend_users.getUsers = realGet; }
+  }, file);
+
+  // First: the importer's own record, so the bootstrap does not end under them and refuse the rest.
+  expect(out.order[0]).toBe(out.me);
+  // Last: their record FROM THE FILE, so a file that demotes them does so once everything else landed.
+  expect(out.order[out.order.length - 1]).toBe(out.me);
+  // And everybody else in between, exactly once.
+  expect(out.order.filter((e) => e !== out.me).sort()).toEqual(['helper@x.test']);
+});
