@@ -416,3 +416,35 @@ test('the importer keeps their own access, and their own entry is applied last',
   // And everybody else in between, exactly once.
   expect(out.order.filter((e) => e !== out.me).sort()).toEqual(['helper@x.test']);
 });
+
+test('a part the file carries and the import declines is reported, not passed over', async ({ page }) => {
+  test.setTimeout(60000);
+  await boot(page);
+  await page.evaluate(() => { window.appInstance.setParts('exportParts', ['backup', 'users']); });
+  const file = await exported(page);
+  expect(file.members, 'the file offers a roster').toBeTruthy();
+
+  // The default import selection does NOT include users. Declining is right; declining in silence is
+  // what made a roster that did nothing look exactly like a roster that failed.
+  await page.evaluate((f) => {
+    window.appInstance.setParts('importParts', ['backup']);
+    window.appInstance.applyBundle(f);
+  }, file);
+
+  const errors = page.locator('[data-testid="import-errors"]');
+  await expect(errors).toBeVisible({ timeout: 20000 });
+  // Part IDENTIFIERS, not labels: this dialog runs before translations load.
+  await expect(errors).toContainText('users');
+});
+
+test('the selection survives the reload an import ends with', async ({ page }) => {
+  test.setTimeout(30000);
+  await boot(page);
+  // Held only in the component, a ticked `users` was gone by the time the page came back — so the
+  // retry silently dropped it, and the console showed the default rather than what had run.
+  await page.evaluate(() => { window.appInstance.setParts('importParts', ['backup', 'users']); });
+  await page.reload();
+  await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
+  expect(await page.evaluate(() => appInstance.importParts)).toEqual(['backup', 'users']);
+  expect(await page.evaluate(() => appInstance.wantsPart('importParts', 'users'))).toBe(true);
+});

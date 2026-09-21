@@ -259,8 +259,11 @@ function createVueApp() {
       // which is the thing you restore from. Tick parts instead and each becomes its own FILE, laid out
       // the way examples/ is read — `<id>-schema.json`, one `<id>-lang-<code>.json` per language,
       // `<id>-data.json` — so a contribution is a selection rather than a different feature.
-      exportParts: ['backup'],
-      importParts: ['backup'],
+      // Remembered, because an import RELOADS the page when it finishes. Held only in the component, a
+      // selection was back to `backup` by the time anybody looked -- so a retry silently dropped the
+      // users somebody had just ticked, and the console showed the default rather than what ran.
+      exportParts: getSetting('export_parts', ['backup']),
+      importParts: getSetting('import_parts', ['backup']),
       profileSaved: null,       // last-persisted {name, shared, picture} snapshot -> skip redundant blur saves
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
       listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
@@ -3445,6 +3448,11 @@ function createVueApp() {
         return all;
       },
       wantsPart: function(which, part) { return this._activeParts(which).indexOf(part) >= 0; },
+      // Kept across the reload an import ends with, so a retry means what the last one did.
+      setParts: function(which, list) {
+        this[which] = Array.isArray(list) ? list : [];
+        this.saveSetting(which === 'exportParts' ? 'export_parts' : 'import_parts', this[which]);
+      },
       // The parts, with the ones a BACKUP already contains greyed out while it is chosen. Disabling
       // them is the only honest way to answer "what is in a backup?": the alternative is a sentence
       // somewhere that can drift from `_activeParts`, and this cannot, because it asks the same
@@ -6112,6 +6120,17 @@ function createVueApp() {
           // which is what makes it safe to hand somebody an export to look at.
           var members = (self.wantsPart('importParts', 'users') && self.isAdmin && imported.members && typeof imported.members === 'object')
             ? imported.members : null;
+          // What the file OFFERED that this import will not apply. Declining is correct -- it is the
+          // choice the selection makes -- but declining in SILENCE is not: a roster that quietly does
+          // nothing looks exactly like one that failed, and only the person who ticked the box knows
+          // which they were expecting. Named per part, in the part's own words.
+          var declined = [];
+          [['schema', !!imported.schema], ['languages', !!imported.translations],
+           ['data', !!(imported.tables && Object.keys(imported.tables).length)],
+           ['users', !!(imported.members && typeof imported.members === 'object')]
+          ].forEach(function(p) {
+            if (p[1] && !self.wantsPart('importParts', p[0])) declined.push(p[0]);
+          });
 
           // Progress + failure state. Two things were wrong before: the run gave no sign of life for the
           // ~minute it takes on a real database, and — worse — the whole thing was ONE serial promise
@@ -6121,7 +6140,7 @@ function createVueApp() {
           var prog = {
             active: true, done: 0, icon: 'mdi-timer-sand', detail: '', errors: [], finished: false,
             total: ((imported.schema && self.wantsPart('importParts', 'schema')) ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
-                 + langCodes.length + pages.length + assets.length + ((imported.config && wantSchema) ? 1 : 0) + (members ? 1 : 0)
+                 + langCodes.length + pages.length + assets.length + (declined.length ? 1 : 0) + ((imported.config && wantSchema) ? 1 : 0) + (members ? 1 : 0)
                  + ((opts && opts.provenance) ? 1 : 0) + 1
           };
           self.importProgress = prog;
@@ -6192,6 +6211,13 @@ function createVueApp() {
           }
           if (members) {
             chain = chain.then(step('mdi-account-multiple', '', function() { return self._applyMembers(members); }));
+          }
+          // Last, so it reads as the summary it is rather than as something that failed early. It rides
+          // the error list because that is the one part of this dialog that stays on screen.
+          if (declined.length) {
+            chain = chain.then(step('mdi-tray-remove', declined.join(', '), function() {
+              throw new Error('');   // the icon and the part ids say it; a sentence here could not
+            }));
           }
           langCodes.forEach(function(code) {
             chain = chain.then(step('mdi-translate', code, function() {
