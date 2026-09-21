@@ -236,3 +236,50 @@ describe('the bootstrap sentinel travels with the roster', () => {
     assert.equal(!!(none && none.rows && none.rows[0] && none.rows[0].none), false);
   });
 });
+
+describe('restoring a roster must not take away the authority doing the restoring', () => {
+  // Both policy layers answer "is this a fresh deployment?" with "does ANY user record exist"
+  // (app_no_users() / noUsers()), so whoever set a deployment up is usually admin by that answer alone,
+  // with no record of their own. Writing somebody else's record first ends the bootstrap — and from
+  // that instant the importer is a signed-in nobody.
+  //
+  // This is the policy half, pinned here because it is the part app-core cannot state: the app orders
+  // the writes so it cannot happen, and this says what it is ordering around.
+  it('a bootstrap admin who writes somebody else first is locked out after one row', async () => {
+    const S2 = await createPgliteStorage({});
+    let who = 'owner@ward.test';
+    const kv = createKvBackend(S2, { name: 'local', myEmail: () => who,
+      noUsers: () => S2._query('select public.app_no_users() as none')
+        .then((r) => !!(r && r.rows && r.rows[0] && r.rows[0].none)).catch(() => false) });
+    S2.setCaller(who);
+
+    const admin = async () => (await S2._query('select public.app_is_admin() as a')).rows[0].a;
+    assert.equal(await admin(), true, 'bootstrap: admin with no record of their own');
+
+    let landed = 0;
+    for (const e of ['a@ward.test', 'b@ward.test', 'c@ward.test']) {
+      try { await kv.users.setUserRole(e, 'editor', e, 'all'); } catch (err) { /* refused */ }
+      const rows = await S2._query("select count(*)::int as n from public.kv where store = '_users'");
+      landed = rows.rows[0].n;
+    }
+    assert.equal(landed, 1, 'the first row ends the bootstrap and the rest are refused');
+    assert.ok(!(await admin()), 'and the importer is no longer an admin of their own deployment');
+  });
+
+  it('settling their own record first is what makes the rest land', async () => {
+    const S3 = await createPgliteStorage({});
+    let who = 'owner@ward.test';
+    const kv = createKvBackend(S3, { name: 'local', myEmail: () => who,
+      noUsers: () => S3._query('select public.app_no_users() as none')
+        .then((r) => !!(r && r.rows && r.rows[0] && r.rows[0].none)).catch(() => false) });
+    S3.setCaller(who);
+
+    await kv.users.setUserRole(who, 'admin', who, 'all');          // what _applyMembers does first
+    for (const e of ['a@ward.test', 'b@ward.test', 'c@ward.test']) {
+      await kv.users.setUserRole(e, 'editor', e, 'all');
+    }
+    const rows = await S3._query("select count(*)::int as n from public.kv where store = '_users'");
+    assert.equal(rows.rows[0].n, 4, 'their own record, and everybody the file named');
+    assert.equal((await S3._query('select public.app_is_admin() as a')).rows[0].a, true);
+  });
+});

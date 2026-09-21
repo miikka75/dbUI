@@ -5703,8 +5703,20 @@ function createVueApp() {
       //
       // Names only for profiles (setProfileName merges exactly that); `shared` is carried in the file as
       // a record of who had opted in, and is not replayed — see _gatherMembers.
+      // Restoring a roster can take away the authority that is doing the restoring, and the whole
+      // import with it. Both policy layers answer "is this a fresh deployment?" by asking whether ANY
+      // user record exists -- `app_no_users()` / `noUsers()` -- and whoever set the deployment up is
+      // usually admin by that answer alone, with no record of their own. The first foreign record
+      // written ends the bootstrap, and from that instant the importer is a signed-in nobody: every
+      // remaining write is refused, and they have locked themselves out of their own deployment.
+      // Measured against the real policies, a ten-user roster lands as ONE.
+      //
+      // So the caller's own record is settled FIRST when they have none, and their record FROM THE FILE
+      // is applied LAST -- a file that demotes them takes effect only once everything else has landed,
+      // rather than halfway through.
       _applyMembers: function(m) {
         var self = this, chain = Promise.resolve(), n = { users: 0, names: 0, links: 0 }, failed = [];
+        var mine = self.myEmailLc;            // a computed, not a method
         // EVERY write is caught on its own. A roster is a list of independent facts, and chaining them
         // bare meant the first refusal -- one account a policy would not accept, one stale link --
         // silently abandoned every user, name and link after it, leaving a HALF-RESTORED registry that
@@ -5716,7 +5728,22 @@ function createVueApp() {
             });
           });
         };
-        Object.keys(m.users || {}).forEach(function(email) {
+        // Only when they have no record at all: an existing one is theirs and must not be widened by
+        // an import that was never asked to change it.
+        if (mine && backend_users.getUsers) {
+          chain = chain.then(function() {
+            return Promise.resolve(backend_users.getUsers()).then(function(existing) {
+              if ((existing || {})[mine]) return null;
+              return Promise.resolve(backend_users.setUserRole(mine, 'admin', mine, 'all'))
+                .catch(function(e) { failed.push(mine + ' (keeping your own access): '
+                  + ((e && (e.error || e.message)) || 'refused')); });
+            }).catch(function() { return null; });   // cannot read the roster -> nothing to preserve
+          });
+        }
+        var ordered = Object.keys(m.users || {}).sort(function(a, b) {
+          return (a === mine ? 1 : 0) - (b === mine ? 1 : 0);      // the caller's own entry goes last
+        });
+        ordered.forEach(function(email) {
           var u = m.users[email] || {};
           if (!u.role) { failed.push(email + ': no role in the file'); return; }
           attempt(email, function() {
