@@ -167,6 +167,28 @@
       }
       if (Array.isArray(b.pages)) mergeRows(out, 'pages', b.pages);
       if (Array.isArray(b.assets)) mergeRows(out, 'assets', b.assets);
+      // The roster, which a bundle carries as its own `<id>-users.json`. Folded key by key like the
+      // rest rather than taken whole, so a file holding only members adds to a schema file beside it
+      // instead of replacing what that one brought.
+      //
+      // It was missing from this list, and everything that reads a file goes through here — so a
+      // backup exported WITH users imported without them, silently, since there is nothing left for
+      // applyBundle to decline. The lesson is narrower than "add the key": this function decides what
+      // an import can even SEE, so a part that is not named here does not exist downstream.
+      if (b.members && typeof b.members === 'object') {
+        var M = out.members = out.members || {};
+        ['users', 'profiles'].forEach(function (k) {
+          if (!b.members[k]) return;
+          M[k] = M[k] || {};
+          Object.keys(b.members[k]).forEach(function (email) { M[k][email] = b.members[k][email]; });
+        });
+        if (b.members.listUsers) {
+          M.listUsers = M.listUsers || {};
+          Object.keys(b.members.listUsers).forEach(function (list) {
+            M.listUsers[list] = Object.assign(M.listUsers[list] || {}, b.members.listUsers[list]);
+          });
+        }
+      }
     });
     return out;
   }

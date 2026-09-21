@@ -73,6 +73,13 @@ const exportFiles = (page) => page.evaluate(async () => {
     return files;
   } finally { URL.createObjectURL = realCreate; HTMLAnchorElement.prototype.click = realClick; }
 });
+// What importData does with the chosen files before applyBundle sees them. Every test here used to
+// call applyBundle direct, which is how a roster silently dropped by the FOLD went unnoticed: the part
+// of the path that lost it was the part no test crossed.
+const importFiles = (page, files) => page.evaluate((fs) => {
+  window.appInstance.applyBundle(window.Examples.mergeFiles(fs));
+}, files);
+
 const oneFile = async (page) => {
   const files = await exportFiles(page);
   const names = Object.keys(files);
@@ -145,7 +152,7 @@ test('importing a file with members does nothing to the roster unless asked', as
     { data: {}, headers: { 'X-User': 'boss@x.test' } })).json()).sort();
 
   // Default: the file is imported as DATA. Handing somebody an export to look at must not enrol anyone.
-  await page.evaluate((f) => { window.appInstance.applyBundle(f); }, file);
+  await importFiles(page, [file]);
   // An import RELOADS the page when it finishes. Wait that out before touching app state again, or the
   // reload lands on top of the next step and quietly resets the switch it is about to set.
   await page.waitForTimeout(5000);
@@ -153,7 +160,8 @@ test('importing a file with members does nothing to the roster unless asked', as
   expect(await roster(), 'a plain import enrolled somebody from the file').not.toContain('helper@x.test');
 
   // Asked for: roles, grants, names and links all land.
-  await page.evaluate((f) => { window.appInstance.importParts = ['backup', 'users']; window.appInstance.applyBundle(f); }, file);
+  await page.evaluate(() => { window.appInstance.setParts('importParts', ['backup', 'users']); });
+  await importFiles(page, [file]);
   await expect.poll(roster, { timeout: 20000 }).toContain('helper@x.test');
   const users = await (await page.request.post('/api/getUsers', { data: {}, headers: { 'X-User': 'boss@x.test' } })).json();
   expect(users['helper@x.test'].role).toBe('editor');
