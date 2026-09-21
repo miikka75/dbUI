@@ -401,11 +401,18 @@
               <div class="d-flex align-center" @click="a.currentConfig.collapsed ? (a.expandedCard = a.expandedCard === item.id ? null : item.id) : null" :style="a.currentConfig.collapsed ? 'cursor:pointer' : ''">
                 <div style="flex:1">
                   <!-- Same outlined field as a kanban card (and Settings -> Profile): the label floats into
-                       the notch instead of sitting in a gutter beside the value. -->
+                       the notch instead of sitting in a gutter beside the value.
+                       The first column is a field like any other, so it gets the same `data-cell` editor the
+                       rest of the card gets -- rendering it through `list-value` left whichever column happened
+                       to be first (often the date) the one field on the screen nobody could change.
+                       The exception is a FOLDED accordion card: there the header is the tap target that opens
+                       the card, so it stays a read-only summary until the card is open. Once open, the editor
+                       swallows its own clicks so typing into it does not fold the card shut again. -->
                   <v-field v-if="a.visibleCols.length" class="field-box field-box--roomy" variant="outlined" active
                            :label="a.t('field.' + a.visibleCols[0]) || a.visibleCols[0]">
                     <template v-slot:default="{ props: fp }"><div v-bind="fp" class="field-box-value">
-                      <list-value :col="a.visibleCols[0]" :value="item[a.visibleCols[0]]" :size="28"></list-value>
+                      <list-value v-if="a.currentConfig.collapsed && a.expandedCard !== item.id" :col="a.visibleCols[0]" :value="item[a.visibleCols[0]]" :size="28"></list-value>
+                      <data-cell v-else :item="item" :col="a.visibleCols[0]" @click.stop></data-cell>
                     </div></template>
                   </v-field>
                 </div>
