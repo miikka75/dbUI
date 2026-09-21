@@ -5704,11 +5704,22 @@ function createVueApp() {
       // Names only for profiles (setProfileName merges exactly that); `shared` is carried in the file as
       // a record of who had opted in, and is not replayed — see _gatherMembers.
       _applyMembers: function(m) {
-        var self = this, chain = Promise.resolve(), n = { users: 0, names: 0, links: 0 };
+        var self = this, chain = Promise.resolve(), n = { users: 0, names: 0, links: 0 }, failed = [];
+        // EVERY write is caught on its own. A roster is a list of independent facts, and chaining them
+        // bare meant the first refusal -- one account a policy would not accept, one stale link --
+        // silently abandoned every user, name and link after it, leaving a HALF-RESTORED registry that
+        // looks like a finished import. The same reason the row loop catches per row.
+        var attempt = function(label, run) {
+          chain = chain.then(function() {
+            return Promise.resolve(run()).catch(function(e) {
+              failed.push(label + ': ' + ((e && (e.error || e.message)) || 'refused'));
+            });
+          });
+        };
         Object.keys(m.users || {}).forEach(function(email) {
           var u = m.users[email] || {};
-          if (!u.role) return;
-          chain = chain.then(function() {
+          if (!u.role) { failed.push(email + ': no role in the file'); return; }
+          attempt(email, function() {
             return Promise.resolve(backend_users.setUserRole(email, u.role, u.user || email, u.tables))
               .then(function() { n.users++; });
           });
@@ -5716,7 +5727,7 @@ function createVueApp() {
         Object.keys(m.profiles || {}).forEach(function(email) {
           var name = (m.profiles[email] || {}).name;
           if (!name || !backend_users.setProfileName) return;
-          chain = chain.then(function() {
+          attempt(email, function() {
             return Promise.resolve(backend_users.setProfileName(email, name)).then(function() { n.names++; });
           });
         });
@@ -5724,14 +5735,23 @@ function createVueApp() {
           Object.keys(m.listUsers[list] || {}).forEach(function(value) {
             var email = m.listUsers[list][value];
             if (!email || !backend.setListUser) return;
-            chain = chain.then(function() {
+            attempt(list + '~' + value, function() {
               return Promise.resolve(backend.setListUser(list, value, email)).then(function() { n.links++; });
             });
           });
         });
         return chain.then(function() {
           return self.loadListUserLinks ? self.loadListUserLinks() : null;
-        }).then(function() { return n; });
+        }).then(function() {
+          // Reported as a failure of the STEP once everything else has been attempted, so the progress
+          // dialog says how much of the roster did not land instead of stopping at the first refusal.
+          if (failed.length) {
+            throw new Error(n.users + '/' + (Object.keys(m.users || {}).length) + ' users, '
+              + n.links + ' links — ' + failed.slice(0, 3).join('; ')
+              + (failed.length > 3 ? ' (+' + (failed.length - 3) + ' more)' : ''));
+          }
+          return n;
+        });
       },
       // One file out of the browser. Extracted because there are now two callers with nothing else in
       // common -- the whole-deployment export, and one language pack on its own.
