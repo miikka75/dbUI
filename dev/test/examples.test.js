@@ -88,6 +88,38 @@ describe('listsForInstall', () => {
   });
 });
 
+describe('mergeFiles carries every part a file can hold', () => {
+  // This function decides what an import can even SEE: importData folds the chosen files through it
+  // before applyBundle is handed anything. A part missing from it does not arrive — and cannot be
+  // reported as declined either, because by then there is nothing to decline. `members` was missing
+  // for exactly that reason, so a backup exported WITH users imported without them, in silence.
+  it('the roster survives, folded key by key like everything else', () => {
+    const schemaFile = { schema: { tables: {} },
+      members: { users: { 'a@w.test': { role: 'editor' } }, listUsers: { crew: { lead: 'a@w.test' } } } };
+    const usersFile = { members: { users: { 'b@w.test': { role: 'admin' } },
+      profiles: { 'b@w.test': { name: 'Bee' } }, listUsers: { crew: { second: 'b@w.test' } } } };
+
+    const m = Examples.mergeFiles([schemaFile, usersFile]);
+    assert.deepEqual(Object.keys(m.members.users).sort(), ['a@w.test', 'b@w.test'],
+      'a file holding only members must ADD to the one beside it, not replace what it brought');
+    assert.equal(m.members.profiles['b@w.test'].name, 'Bee');
+    assert.deepEqual(m.members.listUsers.crew, { lead: 'a@w.test', second: 'b@w.test' });
+  });
+
+  it('every key the export can write is one mergeFiles knows', () => {
+    // The two halves of one round trip, pinned against each other: whatever exportData assembles must
+    // survive the fold, or it is dropped between the file and the import with nothing said.
+    const everything = { schema: { tables: {} }, config: { a: 1 }, lists: { crew: [] },
+      tables: { t: [{ id: '1' }] }, translations: { fi: { k: 'v' } },
+      languages: [{ code: 'fi', name: 'Suomi' }], pages: [{ id: 'p', markdown: '#' }],
+      assets: [{ id: 'i', src: 'data:,' }], members: { users: { 'a@w.test': { role: 'admin' } } } };
+    const m = Examples.mergeFiles([everything]);
+    for (const k of Object.keys(everything)) {
+      assert.ok(m[k] !== undefined, '`' + k + '` was dropped by mergeFiles, so no import can see it');
+    }
+  });
+});
+
 describe('mergeFiles', () => {
   it('folds the demo bundle — schema, three language packs, sample rows — into one import', () => {
     const merged = Examples.mergeFiles([
