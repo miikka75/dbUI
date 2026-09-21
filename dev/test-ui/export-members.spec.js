@@ -355,3 +355,34 @@ test('the parts a backup already contains are shown as contained, not as choices
     return window.appInstance._activeParts('exportParts'); }))
     .toEqual(['schema', 'languages', 'reference', 'data']);
 });
+
+test('one refused account does not abandon the rest of the roster', async ({ page }) => {
+  test.setTimeout(60000);
+  await boot(page);
+  await page.evaluate(() => { window.appInstance.exportParts = ['backup', 'users']; });
+  const file = await exported(page);
+  expect(Object.keys(file.members.users).length).toBe(2);
+
+  // A roster is a list of independent facts. Chained bare, the first refusal took every user, name and
+  // link after it with it — and the import still looked finished, because the step reports one error.
+  const out = await page.evaluate(async (f) => {
+    const app = window.appInstance;
+    const real = window.backend_users.setUserRole;
+    let seen = 0;
+    window.backend_users.setUserRole = function(uid) {
+      seen++;
+      if (seen === 1) return Promise.reject(new Error('refused by policy'));
+      return real.apply(this, arguments);
+    };
+    try {
+      app.importParts = ['backup', 'users'];
+      let err = null;
+      await app._applyMembers(f.members).catch((e) => { err = e.message; });
+      return { attempts: seen, err: err };
+    } finally { window.backend_users.setUserRole = real; }
+  }, file);
+
+  expect(out.attempts, 'it stopped at the first refusal').toBe(2);
+  expect(out.err, 'and said how much of the roster landed').toMatch(/1\/2 users/);
+  expect(out.err).toContain('refused by policy');
+});
