@@ -779,6 +779,55 @@ test.describe('Card layout', () => {
     const count = await cards.count();
     expect(count).toBeGreaterThanOrEqual(1);
   });
+
+  // The card's first column is its header field. It used to render read-only, which made whichever
+  // column happened to come first -- `date` here -- the one field on the card nobody could change.
+  const DATED = {
+    defaultLanguage: 'en',
+    tables: { ev: { columns: [{ name: 'when', type: 'date' }, { name: 'what', type: 'text' }] } },
+    views: [{ name: 'main', sources: ['ev'], mode: 'union', layout: 'card', columns: ['when', 'what'] }],
+    nav: { items: [{ view: 'main' }, { table: 'ev' }] }
+  };
+  async function bootCards(page, schema) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema } });
+    await page.request.post('/api/putRow', { data: { tableId: 'ev', data: { id: 'e1', when: '2026-01-02', what: 'Kickoff' } } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'view.main' }).first().click();
+    await viewReady(page, 'main');
+  }
+
+  test('first card column is editable and its edit persists', async ({ page }) => {
+    await bootCards(page, DATED);
+    const dateInput = page.locator('.v-main .v-card .v-card input[type=date]').first();
+    await expect(dateInput).toHaveValue('2026-01-02');
+    await dateInput.fill('2026-03-04');
+    await dateInput.dispatchEvent('change');
+    await expect.poll(async () => (await page.request.post('/api/getTableData', { data: { tableId: 'ev' } }).then(r => r.json()))
+      .rows.find((r) => r.id === 'e1').when).toBe('2026-03-04');
+  });
+
+  // Folded accordion card: the header IS the tap target that opens it, so it stays a read-only summary
+  // until the card is open -- and once open, typing into the field must not fold the card shut. The
+  // FIRST card is auto-expanded (see the sortedData watcher), so this asserts against the second one.
+  test('collapsed cards keep the header tappable, then edit the first column once open', async ({ page }) => {
+    const collapsed = JSON.parse(JSON.stringify(DATED));
+    collapsed.views[0].collapsed = true;
+    await bootCards(page, collapsed);
+    await page.request.post('/api/putRow', { data: { tableId: 'ev', data: { id: 'e2', when: '2026-05-06', what: 'Review' } } });
+    await page.reload();
+    await viewReady(page, 'main');
+    const card = page.locator('.v-main .v-card .v-card', { hasText: 'Review' }).first();
+    await expect(card.locator('input[type=date]')).toHaveCount(0);      // folded: summary only
+    await card.locator('.field-box').first().click();                   // tapping the header opens it
+    const dateInput = card.locator('input[type=date]').first();
+    await expect(dateInput).toHaveValue('2026-05-06');
+    await dateInput.click();                                            // ...and does not fold it again
+    await expect(dateInput).toBeVisible();
+    await expect(card).toContainText('Review');
+  });
 });
 
 test.describe('Import/Export', () => {
