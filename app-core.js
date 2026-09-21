@@ -230,6 +230,37 @@ function createVueApp() {
       accessRequested: false,   // unregistered user: have I already submitted a request this session
       accessRequestName: '',    // optional display name entered on the request banner
       myProfile: { name: '', shared: false, picture: '' },   // this user's opt-in display-name profile (+ optional avatar)
+      // Opt-in on BOTH ends, separately. The export file lands in a Downloads folder and otherwise
+      // carries no roster of anybody, so including one is a decision; and importing a roster is not
+      // restoring data, it is granting a list of people access to whatever received the file — which is
+      // why the import side defaults off even when the file has members in it.
+      // WHICH PARTS a file carries, and which parts an import applies: the STRUCTURE (schema and app
+      // config), the LANGUAGES (every pack, in the shape an example ships), the REFERENCE data (lookup
+      // catalogues, and the names of the lists the schema declares), the DATA (ordinary rows, the
+      // list VALUES a ward typed, page bodies, image assets) and the USERS (roles, grants, names, and
+      // the value -> account links).
+      //
+      // Reference is its own part because it is what separates an EXAMPLE from a backup: a status
+      // pipeline or a callings catalogue is data the schema is useless without, while a meeting row is
+      // somebody's work. Structure + languages + reference IS a contributable example, which is why
+      // there is no separate "export as example" mode -- a mode cannot be combined, and this can.
+      //
+      // Languages are their own part rather than riding with the schema, because they are separately
+      // CONTRIBUTABLE: a deployment that has translated a shipped example has something to give back
+      // that has nothing to do with its rows or its people. A structure exported without them lands as
+      // raw keys, which is a real way to get it wrong -- hence both selected by default.
+      //
+      // A selection rather than a switch per part, because the useful requests are subsets and not
+      // toggles: "just the structure, to stand up a copy", "just the rows, so restoring does not roll
+      // my schema back to last year's", "everything including the people, because I am moving
+      // backends". Users is out of both defaults -- a file with a roster holds everybody's email, and
+      // an import that applies one grants those people access to whatever received it.
+      // BACKUP is the packaging choice, and the default: one file with every part but the users,
+      // which is the thing you restore from. Tick parts instead and each becomes its own FILE, laid out
+      // the way examples/ is read — `<id>-schema.json`, one `<id>-lang-<code>.json` per language,
+      // `<id>-data.json` — so a contribution is a selection rather than a different feature.
+      exportParts: ['backup'],
+      importParts: ['backup'],
       profileSaved: null,       // last-persisted {name, shared, picture} snapshot -> skip redundant blur saves
       profilesByEmail: {},      // admin: all users' {name, shared} profiles, keyed by email (Users table)
       listAvatars: {},          // user-linked lists: viewer-safe { listName: { value: picture } } projection
@@ -917,6 +948,9 @@ function createVueApp() {
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.source', 'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
+         'settings.export_parts', 'settings.import_parts',
+         'part.backup', 'part.schema', 'part.languages', 'part.reference', 'part.data', 'part.users',
+         'msg.nothing_to_export', 
          'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
          'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
@@ -3400,6 +3434,29 @@ function createVueApp() {
         if (!col || !t || !SCHEMA[t]) return '';
         return Columns.rowHandle(SCHEMA[t], getColumns(t), row, col);
       },
+      // `backup` stands for every part but the users, so every gate below can keep asking about parts
+      // and none of them has to know the word. Users stays explicit even inside a backup: a file with
+      // everybody's email in it is a decision, not a default.
+      _activeParts: function(which) {
+        var sel = this[which] || [];
+        if (sel.indexOf('backup') < 0) return sel;
+        var all = ['schema', 'languages', 'reference', 'data'];
+        if (sel.indexOf('users') >= 0) all.push('users');
+        return all;
+      },
+      wantsPart: function(which, part) { return this._activeParts(which).indexOf(part) >= 0; },
+      // The parts, with the ones a BACKUP already contains greyed out while it is chosen. Disabling
+      // them is the only honest way to answer "what is in a backup?": the alternative is a sentence
+      // somewhere that can drift from `_activeParts`, and this cannot, because it asks the same
+      // function. `users` is never greyed -- a backup does not include it until you say so, and that
+      // is exactly the tick that adds it.
+      partOptions: function(which) {
+        var self = this, covered = (this[which] || []).indexOf('backup') >= 0;
+        return ['backup', 'schema', 'languages', 'reference', 'data', 'users'].map(function(p) {
+          return { value: p, title: self.t('part.' + p),
+                   disabled: covered && p !== 'backup' && p !== 'users' };
+        });
+      },
       colListSwitch: function(col) { return Columns.colListSwitch(SCHEMA, col); },
       isAltList: function(col, item) {
         var key = item && item.id ? item.id + '_' + col : '';
@@ -5509,8 +5566,13 @@ function createVueApp() {
         //
         // So: fetch what is missing, and produce no file at all if any read fails. This also stops boot
         // from being load-bearing for exports, which is what a lazier boot needs.
+        var wantData = this.wantsPart('exportParts', 'data');
+        var wantRef = this.wantsPart('exportParts', 'reference');
         var wanted = [], failed = [];
+        // A lookup is reference data and every other table is somebody's work, so the two parts read
+        // different tables rather than one part reading all of them and the other filtering after.
         Object.keys(SCHEMA).forEach(function(table) {
+          if (SCHEMA[table].isLookup ? !wantRef : !wantData) return;
           // Omit what this user cannot read rather than asserting it is empty. Import is additive
           // (delete+put per row), so an omitted table is left untouched on restore exactly as an empty
           // one would be -- but the file no longer says something false about it.
@@ -5536,13 +5598,36 @@ function createVueApp() {
         // Shared tail for both branches below: assemble the bundle around the cleaned schema + extras,
         // then download it (the stringify/Blob/anchor dance was duplicated verbatim in then/catch).
         var download = function(schema, extras) {
-          var payload = Object.assign({ schema: schema, tables: data, lists: self.listsCache, languages: self.languages, translations: translations }, extras, { config: exportableConfig(self.appConfig), exportedAt: new Date().toISOString() });
-          var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-          var a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = 'drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json';
-          a.click();
-          self.notify(self.t('msg.exported'));
+          // Data-only files stay IMPORTABLE with no engine change: asBundle only reinterprets a
+          // schema-less file as a bare schema document when its table entries carry `columns`, and rows
+          // are arrays — so this lands as data, and applyBundle skips the schema step by itself.
+          // Each part assembled only if asked for. Lists travel with the DATA, because a ward types
+          // them; the app config travels with the STRUCTURE it configures.
+          // `lists` is written once and means two different things. With the DATA, it is the vocabulary
+          // a ward typed and the file is a restore of it. Without the data but with the reference part,
+          // it is the list NAMES the schema declares, each empty — which is what examples/ ships, and
+          // what lets an installing ward fill them in itself.
+          var lists = wantData ? self.listsCache : null;
+          if (!lists && wantRef) {
+            lists = {};
+            Object.keys(ListAccess.listOwnershipMap(SCHEMA)).forEach(function(n) { if (!SCHEMA[n]) lists[n] = []; });
+          }
+          // No ordinary rows and nobody's account: this is a contribution rather than a backup. It is
+          // named the way the examples manifest reads one, and it leaves THIS deployment's settings
+          // behind — none of the shipped bundles carries a `config`, and an installer should not
+          // inherit somebody else's theme and provenance along with their schema.
+          var contribution = !wantData && !self.wantsPart('exportParts', 'users');
+          var payload = Object.assign({},
+            self.wantsPart('exportParts', 'schema') ? Object.assign({ schema: schema },
+              contribution ? null : { config: exportableConfig(self.appConfig) }) : null,
+            self.wantsPart('exportParts', 'languages') ? { languages: self.languages, translations: translations } : null,
+            (wantData || wantRef) ? { tables: data } : null,
+            lists ? { lists: lists } : null,
+            extras, { exportedAt: new Date().toISOString() });
+          if (self.wantsPart('exportParts', 'backup') || (self.exportParts || []).indexOf('backup') >= 0) {
+            return self._downloadJson('drive-sync-export-' + new Date().toISOString().slice(0, 10) + '.json', payload);
+          }
+          return self._downloadFileSet(payload);
         };
         chain.then(function() {
           // Refuse rather than hand over a file with a hole in it. The tables are named so the user can
@@ -5556,29 +5641,18 @@ function createVueApp() {
           // image bytes as data URIs; without them an import lands with `asset:` references resolving to
           // nothing, i.e. a blank background and broken thumbnails.
           return Promise.all([
-            Promise.resolve(backend.getTableData('_pages', 'active')).catch(function() { return null; }),
-            Promise.resolve(backend.getTableData('_assets', 'active')).catch(function() { return null; })
+            wantData ? Promise.resolve(backend.getTableData('_pages', 'active')).catch(function() { return null; }) : null,
+            wantData ? Promise.resolve(backend.getTableData('_assets', 'active')).catch(function() { return null; }) : null,
+            self._gatherMembers()
           ]).then(function(res) {
-            var d = res[0], da = res[1];
+            var d = res[0], da = res[1], members = res[2];
             var pages = (d && d.rows || []).filter(function(r) { return r.id && r.markdown; });
             var assets = (da && da.rows || []).filter(function(r) { return r.id && r.src; }).map(function(r) { return { id: r.id, src: r.src }; });
-            // Export columns as the documented array-of-objects form (strip runtime-injected id; restore order + name).
-            var schema = JSON.parse(JSON.stringify(self.schemaData));
-            if (schema.tables) Object.keys(schema.tables).forEach(function(t) {
-              var c = schema.tables[t].columns;
-              if (c && typeof c === 'object' && !Array.isArray(c)) {
-                delete c.id;
-                var order = (window._columnOrders && window._columnOrders[t]) || Object.keys(c);
-                schema.tables[t].columns = order.filter(function(n) { return n !== 'id' && (n in c); }).map(function(n) {
-                  var def = c[n];
-                  return (def && typeof def === 'object') ? Object.assign({ name: n }, def) : { name: n };
-                });
-              }
-            });
-            convertViewFilters(schema.views);   // emit array-IN filters as explicit $or (forward-deprecation)
+            var schema = self._exportableSchema();
             var extras = {};
-            if (pages.length) extras.pages = pages;
-            if (assets.length) extras.assets = assets;
+            if (wantData && pages.length) extras.pages = pages;
+            if (wantData && assets.length) extras.assets = assets;
+            if (members) extras.members = members;
             download(schema, extras);
           }).catch(function() {
             var schema = JSON.parse(JSON.stringify(self.schemaData));
@@ -5586,6 +5660,167 @@ function createVueApp() {
             download(schema, {});
           });
         });
+      },
+      // WHO can reach this deployment, as opposed to what is in it: the registry (role + table grants),
+      // the display names, and the value -> account links. Null unless an admin asked for it.
+      //
+      // Avatars are left behind deliberately. They are `data:` URLs capped near 350KB each, so a
+      // hundred-member profile store would dominate the file — and a member can re-upload a picture,
+      // while nobody can re-derive a grant. The `shared` flag travels as a RECORD and is not replayed on
+      // import: the only write path to somebody else's profile merges the name, and re-asserting a
+      // person's opt-in is a consent decision rather than a restore.
+      //
+      // The links are the reason this exists at all. Since a calling became an identity there are
+      // dozens of them behind `@me`, the per-person cards and the per-person feeds, and they are the one
+      // thing in a deployment that cannot be reconstructed from the data.
+      _gatherMembers: function() {
+        var self = this;
+        if (!this.wantsPart('exportParts', 'users') || !this.isAdmin) return Promise.resolve(null);
+        var none = function() { return null; };
+        return Promise.all([
+          (typeof backend_users !== 'undefined' && backend_users.getUsers) ? Promise.resolve(backend_users.getUsers()).catch(none) : null,
+          (typeof backend_users !== 'undefined' && backend_users.getProfiles) ? Promise.resolve(backend_users.getProfiles()).catch(none) : null,
+          backend.getListUserLinks ? Promise.resolve(backend.getListUserLinks()).catch(none) : null
+        ]).then(function(r) {
+          // A refused read must not become an empty roster: the same rule the table gather follows, and
+          // for the same reason — a backup that silently drops people is the one that gets trusted.
+          if (r[0] == null) return null;
+          var profiles = {};
+          Object.keys(r[1] || {}).forEach(function(e) {
+            var p = r[1][e] || {};
+            if (p.name || p.shared) profiles[e] = { name: p.name || '', shared: !!p.shared };
+          });
+          return { users: r[0], profiles: profiles, listUsers: r[2] || {} };
+        });
+      },
+      // Restore the roster. Every write goes through the method that already owns it rather than
+      // touching the stores directly, which is what keeps the BOOTSTRAP SENTINEL honest: `_meta/users`
+      // is two things under one name — a legacy access map, and the document whose mere existence
+      // answers `noUsers()` in both rules layers. Writing `_users` rows without it leaves a populated
+      // registry that still reads as a fresh deployment, and firestore.rules spells out the rest: it
+      // would "hand EVERY signed-in Google account full admin". `setUserRole` mirrors the sentinel on
+      // every call, so routing through it makes that impossible to forget here.
+      //
+      // Names only for profiles (setProfileName merges exactly that); `shared` is carried in the file as
+      // a record of who had opted in, and is not replayed — see _gatherMembers.
+      _applyMembers: function(m) {
+        var self = this, chain = Promise.resolve(), n = { users: 0, names: 0, links: 0 };
+        Object.keys(m.users || {}).forEach(function(email) {
+          var u = m.users[email] || {};
+          if (!u.role) return;
+          chain = chain.then(function() {
+            return Promise.resolve(backend_users.setUserRole(email, u.role, u.user || email, u.tables))
+              .then(function() { n.users++; });
+          });
+        });
+        Object.keys(m.profiles || {}).forEach(function(email) {
+          var name = (m.profiles[email] || {}).name;
+          if (!name || !backend_users.setProfileName) return;
+          chain = chain.then(function() {
+            return Promise.resolve(backend_users.setProfileName(email, name)).then(function() { n.names++; });
+          });
+        });
+        Object.keys(m.listUsers || {}).forEach(function(list) {
+          Object.keys(m.listUsers[list] || {}).forEach(function(value) {
+            var email = m.listUsers[list][value];
+            if (!email || !backend.setListUser) return;
+            chain = chain.then(function() {
+              return Promise.resolve(backend.setListUser(list, value, email)).then(function() { n.links++; });
+            });
+          });
+        });
+        return chain.then(function() {
+          return self.loadListUserLinks ? self.loadListUserLinks() : null;
+        }).then(function() { return n; });
+      },
+      // One file out of the browser. Extracted because there are now two callers with nothing else in
+      // common -- the whole-deployment export, and one language pack on its own.
+      _downloadJson: function(filename, payload, announce) {
+        var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        if (announce !== false) this.notify(this.t('msg.exported'));
+      },
+      // The schema as a DOCUMENT rather than as the runtime's copy of it: columns back in the documented
+      // array-of-objects form (runtime-injected `id` stripped, author order and names restored), and
+      // array-IN filters emitted as explicit `$or`. Two callers now -- the backup and the example --
+      // and a file that only one of them normalized would be a schema the other could not read back.
+      _exportableSchema: function() {
+        var schema = JSON.parse(JSON.stringify(this.schemaData));
+        if (schema.tables) Object.keys(schema.tables).forEach(function(t) {
+          var c = schema.tables[t].columns;
+          if (c && typeof c === 'object' && !Array.isArray(c)) {
+            delete c.id;
+            var order = (window._columnOrders && window._columnOrders[t]) || Object.keys(c);
+            schema.tables[t].columns = order.filter(function(n) { return n !== 'id' && (n in c); }).map(function(n) {
+              var def = c[n];
+              return (def && typeof def === 'object') ? Object.assign({ name: n }, def) : { name: n };
+            });
+          }
+        });
+        convertViewFilters(schema.views);   // forward-deprecation: array-IN becomes explicit $or
+        return schema;
+      },
+      // One payload out as the SET of files examples/ is read as, rather than as one document. The
+      // split is by what each file is for, not by part: `<id>-schema.json` carries the structure with
+      // its reference data (that is how a shipped bundle is shaped -- the catalogues live in the schema
+      // file), each language is its own file because the manifest reads one per language, and the rows
+      // a ward typed are the separate `<id>-data.json` the installer offers as a choice.
+      //
+      // Sequentially with a gap: a browser that is asked for several downloads at once prompts or drops
+      // the later ones, and this is the one place in the app that asks for more than one.
+      _downloadFileSet: function(payload) {
+        var self = this, id = this._exampleId(), files = [];
+        var schemaFile = {}, dataFile = {};
+        if (payload.schema) schemaFile.schema = payload.schema;
+        if (payload.config) schemaFile.config = payload.config;
+        // `lists` follows its meaning, the same way it did on the way out: names the schema declares
+        // belong with the structure, values a ward typed belong with that ward's data.
+        if (payload.lists) {
+          var declarations = Object.keys(payload.lists).every(function(n) { return !(payload.lists[n] || []).length; });
+          (declarations ? schemaFile : dataFile).lists = payload.lists;
+        }
+        if (payload.tables && Object.keys(payload.tables).length) {
+          var ref = {}, own = {};
+          Object.keys(payload.tables).forEach(function(k) {
+            var t = k.split('__')[0];
+            if (SCHEMA[t] && SCHEMA[t].isLookup) ref[k] = payload.tables[k]; else own[k] = payload.tables[k];
+          });
+          if (Object.keys(ref).length) schemaFile.tables = ref;
+          if (Object.keys(own).length) dataFile.tables = own;
+        }
+        if (Object.keys(dataFile).length) files.push([id + '-data.json', dataFile]);
+        if (Object.keys(schemaFile).length) files.unshift([id + '-schema.json', schemaFile]);
+        (payload.languages || []).forEach(function(l) {
+          var t = (payload.translations || {})[l.code];
+          if (!t) return;
+          var one = { languages: [{ code: l.code, name: l.name || l.code }], translations: {} };
+          one.translations[l.code] = t;
+          files.push([id + '-lang-' + l.code + '.json', one]);
+        });
+        if (payload.members) files.push([id + '-users.json', { members: payload.members }]);
+        if (payload.pages || payload.assets) {
+          var content = {};
+          if (payload.pages) content.pages = payload.pages;
+          if (payload.assets) content.assets = payload.assets;
+          files.push([id + '-pages.json', content]);
+        }
+        if (!files.length) { self.notify(self.t('msg.nothing_to_export')); return Promise.resolve(); }
+        return files.reduce(function(chain, f, i) {
+          return chain.then(function() {
+            self._downloadJson(f[0], f[1], i === files.length - 1);
+            if (i < files.length - 1) return new Promise(function(r) { setTimeout(r, 400); });
+          });
+        }, Promise.resolve());
+      },
+      // The id a contributed file is named for: the installed example where there is one, so the file
+      // drops into examples/ under the name the manifest already reads, else a slug of the app's title.
+      _exampleId: function() {
+        var installed = (this.appConfig && this.appConfig.example && this.appConfig.example.bundle) || '';
+        return installed || String(this.t('app.title') || 'export').toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'export';
       },
       // --- The shipped examples ------------------------------------------------------------------
       // examples/ is served by the deployment itself (it survives both publish paths' exclusion lists),
@@ -5721,17 +5956,35 @@ function createVueApp() {
       },
       // Import from a FILE the user picked. The bundle half of the work is applyBundle, which the
       // example picker drives with files it fetched instead.
+      // SEVERAL files, because a contribution ships as several: `<id>-schema.json` beside one
+      // `<id>-lang-<code>.json` per language, which is what the examples manifest reads and what
+      // the export writes when parts are ticked instead of a backup. Folding them is `Examples.mergeFiles`,
+      // written for exactly this and until now reachable only through the example installer — so
+      // installing a contributed bundle meant importing its files one at a time and hoping the order
+      // was kind. One file still behaves as it always did: mergeFiles over a single file is that file.
       importData: function(event) {
         var self = this;
-        var file = event.target.files[0];
-        if (!file) return;
-        var reader = new FileReader();
-        reader.onload = function(e) {
-          try { self.applyBundle(JSON.parse(e.target.result)); }
-          catch (err) { self.importProgress = null; self.notify(self.t('msg.import_error') + ' ' + err.message); }
-        };
-        reader.readAsText(file);
+        var files = Array.prototype.slice.call(event.target.files || []);
         event.target.value = '';
+        if (!files.length) return;
+        var read = function(f) {
+          return new Promise(function(resolve, reject) {
+            var r = new FileReader();
+            r.onload = function(e) {
+              try { resolve(JSON.parse(e.target.result)); }
+              catch (err) { reject(new Error(f.name + ': ' + err.message)); }
+            };
+            r.onerror = function() { reject(new Error(f.name)); };
+            r.readAsText(f);
+          });
+        };
+        // Sorted by name, so `-schema` lands before `-lang-` regardless of the order the picker hands
+        // them over: mergeFiles takes the LAST value for a repeated key, and a bundle's parts should
+        // not merge differently because somebody ctrl-clicked upwards.
+        files.sort(function(a, b) { return a.name.localeCompare(b.name); });
+        Promise.all(files.map(read))
+          .then(function(parsed) { self.applyBundle(Examples.mergeFiles(parsed)); })
+          .catch(function(err) { self.importProgress = null; self.notify(self.t('msg.import_error') + ' ' + err.message); });
       },
       // THE import: everything that turns a parsed bundle into a database. Two callers -- the file
       // input above, and installExample() with a bundle fetched from examples/ -- so the progress
@@ -5749,14 +6002,29 @@ function createVueApp() {
           // is the one place that distinction is made.
           imported = Examples.asBundle(imported);
           // Structural check: block import if the schema has dangling view/table references
-          if (imported.schema) {
+          // Both gated together: validating a schema this import will not apply would block the ROWS on a
+          // fault in a document nobody is going to read.
+          if (imported.schema && self.wantsPart('importParts', 'schema')) {
             var refErrs = validateRefs(imported.schema);
             if (refErrs.length) { self.notify(self.t('msg.import_blocked') + ' ' + refErrs[0] + (refErrs.length > 1 ? ' (+' + (refErrs.length - 1) + ' more)' : '')); return; }
           }
 
           // Flatten the row work up front: it dominates the run (two round-trips per row) and so defines
           // both the ordering and the progress total.
-          var tables = imported.tables || {};
+          // The same three parts on the way in. A part the file does not carry is simply absent; a part it
+          // carries that was not asked for is left on the floor, which is the whole point of choosing.
+          var wantSchema = self.wantsPart('importParts', 'schema');
+          var wantData = self.wantsPart('importParts', 'data');
+          var wantRef = self.wantsPart('importParts', 'reference');
+          // Split the same way the export gathers it: a lookup's rows are reference data, everything
+          // else is somebody's work. A table the SCHEMA does not know is treated as ordinary — a
+          // catalogue this deployment has never heard of cannot be claimed as its reference data.
+          var tables = {};
+          Object.keys(imported.tables || {}).forEach(function(k) {
+            var t = k.split('__')[0];
+            var isRef = !!(SCHEMA[t] && SCHEMA[t].isLookup);
+            if (isRef ? wantRef : wantData) tables[k] = imported.tables[k];
+          });
           var rowJobs = [];
           // This is also the MIGRATION route from partition-as-store to partition-as-field, which is
           // why every row now imports into the active store whatever key it arrived under. A suffixed
@@ -5783,14 +6051,20 @@ function createVueApp() {
               });
             });
           });
-          var langCodes = imported.translations ? Object.keys(imported.translations) : [];
-          var pages = (imported.pages && Array.isArray(imported.pages))
+          // Page bodies and image assets are content, so they follow the data.
+          var langCodes = (self.wantsPart('importParts', 'languages') && imported.translations) ? Object.keys(imported.translations) : [];
+          var pages = (wantData && imported.pages && Array.isArray(imported.pages))
             ? imported.pages.filter(function(p) { return p.id && p.markdown; }) : [];
           // Stored image assets (view backgrounds / image-cell bytes as data URIs). Over-cap entries are
           // dropped here rather than attempted: both production rule layers reject them, so importing one
           // would only produce a failure row in the progress report.
-          var assets = (imported.assets && Array.isArray(imported.assets))
+          var assets = (wantData && imported.assets && Array.isArray(imported.assets))
             ? imported.assets.filter(function(a) { return a && a.id && typeof a.src === 'string' && a.src.length <= ASSET_CAP; }) : [];
+          // The roster travels only when the file carries one AND this admin asked for it in the same
+          // gesture as choosing the file. A bundle with members in it is otherwise imported as data,
+          // which is what makes it safe to hand somebody an export to look at.
+          var members = (self.wantsPart('importParts', 'users') && self.isAdmin && imported.members && typeof imported.members === 'object')
+            ? imported.members : null;
 
           // Progress + failure state. Two things were wrong before: the run gave no sign of life for the
           // ~minute it takes on a real database, and — worse — the whole thing was ONE serial promise
@@ -5799,8 +6073,8 @@ function createVueApp() {
           // error shown. (The old try/catch only ever caught synchronous errors while BUILDING the chain.)
           var prog = {
             active: true, done: 0, icon: 'mdi-timer-sand', detail: '', errors: [], finished: false,
-            total: (imported.schema ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
-                 + langCodes.length + pages.length + assets.length + (imported.config ? 1 : 0)
+            total: ((imported.schema && self.wantsPart('importParts', 'schema')) ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
+                 + langCodes.length + pages.length + assets.length + ((imported.config && wantSchema) ? 1 : 0) + (members ? 1 : 0)
                  + ((opts && opts.provenance) ? 1 : 0) + 1
           };
           self.importProgress = prog;
@@ -5822,7 +6096,7 @@ function createVueApp() {
 
           var chain = Promise.resolve();
           // Import schema if present (initializes empty databases)
-          if (imported.schema && backend.saveSchema) {
+          if (imported.schema && backend.saveSchema && self.wantsPart('importParts', 'schema')) {
             chain = chain.then(step('mdi-table-cog', '', function() {
               // Rebuild VIEWS from new schema so lockedListValues works
               if (Array.isArray(imported.schema.views)) {
@@ -5851,16 +6125,26 @@ function createVueApp() {
                 .then(function() { return Writes.putRow(target, job.row, job.tab); });
             }));
           });
-          if (imported.lists) {
+          if (imported.lists && (wantData || wantRef)) {
             chain = chain.then(step('mdi-format-list-bulleted', '', function() {
               // An EXAMPLE fills the vocabularies this database has not started and leaves the rest
               // alone; a hand-picked file replaces them (and prunes what it omits), because that is a
               // restore. See Examples.listsForInstall for why the difference matters.
-              var next = (opts && opts.provenance)
+              //
+              // A file whose lists are ALL EMPTY is neither: it is the set of names a schema declares,
+              // which is what the reference part carries and what examples/ ships. It cannot be a
+              // restore, because there is nothing in it to restore — so replacing with it could only
+              // destroy, and it fills gaps whatever its provenance. Omission still prunes, which is how
+              // a file taken before a list was retired removes it again.
+              var declarationsOnly = Object.keys(imported.lists).every(function(n) { return !(imported.lists[n] || []).length; });
+              var next = ((opts && opts.provenance) || declarationsOnly)
                 ? Examples.listsForInstall(self.listsCache, imported.lists) : imported.lists;
               self.listsCache = next;
               return backend.saveLists(next);
             }));
+          }
+          if (members) {
+            chain = chain.then(step('mdi-account-multiple', '', function() { return self._applyMembers(members); }));
           }
           langCodes.forEach(function(code) {
             chain = chain.then(step('mdi-translate', code, function() {
@@ -5883,7 +6167,7 @@ function createVueApp() {
           });
           // Restore portable folder config (rotationAnchors, rotationRanges, any future portable key),
           // preserving this environment's `mode`. Excluded keys never cross the import boundary.
-          if (imported.config && backend.setFolderConfig) {
+          if (imported.config && wantSchema && backend.setFolderConfig) {
             chain = chain.then(step('mdi-cog', '', function() {
               var merged = mergeImportedConfig(self.appConfig, imported.config, self.mode);
               self.appConfig = merged;

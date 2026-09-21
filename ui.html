@@ -705,9 +705,26 @@
             <template v-if="a.isAdmin">
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.import_export') }}</p>
-            <v-btn variant="outlined" prepend-icon="mdi-download" data-testid="settings-export-json" @click="a.exportData" class="mr-2 mb-2">{{ a.t('settings.export') }}</v-btn>
-            <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()" class="mr-2 mb-2">{{ a.t('settings.import') }}</v-btn>
-            <input ref="importFile" type="file" accept=".json" hidden @change="a.importData($event)">
+            <!-- Each chooser sits with the button it governs: one says what the file will CARRY, the
+                 other which of its parts an import will APPLY. Wrapping rows, so the chooser drops under
+                 its button on a phone rather than squeezing beside it. -->
+            <div class="mb-2" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px">
+              <v-btn variant="outlined" prepend-icon="mdi-download" data-testid="settings-export-json" @click="a.exportData">{{ a.t('settings.export') }}</v-btn>
+              <v-select v-model="a.exportParts" :items="a.partOptions('exportParts')" item-title="title" item-value="value"
+                        :item-props="(i) => ({ disabled: i.disabled, appendIcon: i.disabled ? 'mdi-check' : undefined })"
+                        multiple chips density="compact" variant="outlined" hide-details
+                        style="flex:1 1 220px;max-width:340px" data-testid="export-parts"
+                        :label="a.t('settings.export_parts')"></v-select>
+            </div>
+            <div class="mb-1" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px">
+              <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()">{{ a.t('settings.import') }}</v-btn>
+              <v-select v-model="a.importParts" :items="a.partOptions('importParts')" item-title="title" item-value="value"
+                        :item-props="(i) => ({ disabled: i.disabled, appendIcon: i.disabled ? 'mdi-check' : undefined })"
+                        multiple chips density="compact" variant="outlined" hide-details
+                        style="flex:1 1 220px;max-width:340px" data-testid="import-parts"
+                        :label="a.t('settings.import_parts')"></v-select>
+              <input ref="importFile" type="file" multiple accept=".json" hidden @change="a.importData($event)">
+            </div>
             <v-btn variant="outlined" prepend-icon="mdi-shape-outline" class="mb-2"
                    data-testid="settings-examples" @click="a.openExamples()">{{ a.t('settings.examples') }}</v-btn>
             <!-- Checked on the way into Settings (selectTab), once per session, admin only: this is the

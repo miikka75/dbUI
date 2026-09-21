@@ -1540,6 +1540,105 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   grant still reads every row. Per-calling confidentiality is table grants and `owner` rows — a
   different axis, and the reason this entry was about identity and not about permissions.
 
+- **Exporting the members, not just the data** (#203) — an export was the data and never the people:
+  `_users` (role + table grants), `_profiles` and `_list_users` (the value → account links) all stayed
+  behind, so a deployment could be restored, or moved between backends, with every row intact and
+  nobody able to sign in to anything. The links are what made that expensive — since a calling became
+  an identity there are dozens of them behind `@me`, the per-person cards and the per-person feeds, and
+  they are the one thing in a deployment that cannot be reconstructed from the data.
+  **Chosen, not assumed**, because what a file CARRIES and what an import APPLIES are different
+  decisions: a file with members holds everybody's email, and an import that applies one is granting
+  those people access to whatever received it. Users sits outside both defaults, so handing somebody an
+  export to look at still enrols nobody.
+  **The sentinel is handled by construction rather than by remembering.** `_meta/users` is a legacy
+  access map AND the document whose existence answers `noUsers()` in both rules layers, so a roster
+  written straight into `_users` would leave a populated registry reading as a fresh deployment —
+  `firestore.rules` puts the consequence plainly: it would "hand EVERY signed-in Google account full
+  admin". Every write goes through `setUserRole`, which mirrors the sentinel on each call, and
+  `backend-kv-pglite.test.js` pins that against the real policies rather than trusting the comment.
+  Two deliberate omissions: avatars (350KB data URLs each, and a member can re-upload what nobody can
+  re-derive), and replaying `shared` — the only write path to somebody else's profile merges the name,
+  and re-asserting a person's opt-in is a consent decision rather than a restore, so it travels as a
+  record and is not applied.
+
+- **The structure is separable from the data, on both ends** (#203) — an export always carried the
+  schema and an import always applied it, which made restoring a backup a quiet way to move the
+  structure BACKWARDS: a file taken before an example update, imported after one, restores the rows and
+  rolls the schema back with them. The rows look right either way, which is what makes it expensive to
+  notice.
+  **The control is a SELECTION of parts rather than a switch per part** — structure, languages, data,
+  users — on each end, because the useful requests are subsets and not toggles: just the structure, to stand up a
+  copy; just the rows, so restoring does not roll the schema back to last year's; everything including
+  the people, because you are moving backends. Schema-only is the case a pair of switches could not
+  express at all, and it is what an example bundle is made of. Structure and data are both selected by
+  default, along with languages, because a restore into an empty deployment needs all three and a
+  structure whose labels stayed behind lands as raw keys. Lists travel with the data, because a ward
+  types them.
+  **Languages are separately CONTRIBUTABLE, which is why they are their own part**: a deployment that
+  has translated a shipped example has something to give back that has nothing to do with its rows or
+  its members. The unit is one FILE per language, because that is what the examples manifest reads —
+  so a pack downloads from the Languages tab, where somebody finishes one, named
+  `<id>-lang-<code>.json` after the installed example so it drops into `examples/` under the name the
+  manifest already expects. What comes out is byte-shaped like a shipped pack:
+  `{ languages: [{code, name}], translations: { <code>: {…} } }`.
+  **And the schema half of a contribution is a different document from a backup**, which turned out to
+  be a missing PART rather than a mode: what an example adds over a plain schema export is REFERENCE
+  data — the lookup catalogues, and the names of the lists the schema declares, each empty. Named for
+  what it is, it combines, and `structure + languages + reference` IS a contributable example with no
+  separate button. ("Example" could not be an item in that list: a mode cannot be combined, and
+  "structure + example" means nothing.) A file carrying no ordinary rows and nobody's account is named
+  `<id>-schema.json` rather than as a dated backup, and leaves this deployment's `config` behind, since
+  no shipped bundle carries one. Two rules,
+  both read off what `examples/` ships rather than invented — every referenced list is declared and
+  EMPTY (a list is a vocabulary the installing ward types, and `listsForInstall` fills the gap without
+  touching one that has values), and only `isLookup` tables carry rows (reference data the schema is
+  useless without; sample rows for an ordinary table are the separate `<id>-data.json` the installer
+  offers as a choice). Both rules are pinned against the shipped bundles in `examples.test.js`, which is
+  what caught that chores and demo are BARE SCHEMA documents whose `tables` is a column map rather than
+  rows — the classifier for that already existed as `Examples.asBundle`.
+  `<id>-about.json` is deliberately not generated: the manifest refuses a bundle without a non-empty
+  `description`, and that sentence belongs to the contributor rather than to the app.
+  **The import takes the whole bundle at once**, which closes the loop: `Examples.mergeFiles` was
+  written to fold a schema file and its language packs into one import and was reachable only through
+  the example installer, so installing a contributed bundle meant importing its files one at a time.
+  Sorted by name before folding, because mergeFiles takes the last value for a repeated key and a
+  bundle should not merge differently because somebody ctrl-clicked upwards.
+  **The hazard that made `reference` worth getting right.** A hand-picked import REPLACES and prunes
+  lists where an example install fills gaps — so a file declaring lists empty would wipe every
+  vocabulary a ward had typed, and the contribution path would be the fastest way to lose a year of
+  work. The rule that fixes it is one an empty list argues for itself: a list with nothing in it cannot
+  be a restore of anything, so replacing with it could only destroy. Declarations fill gaps whatever
+  their provenance; omission still prunes, which is how a file taken before a list was retired removes
+  it again.
+  **`backup` is the item that reconciles one file with several.** It is the default and means exactly
+  "as one document": tick it and you get the file you restore from, tick parts instead and each becomes
+  a FILE, laid out the way `examples/` is read — `<id>-schema.json` with the structure and its
+  catalogues, one `<id>-lang-<code>.json` per language, `<id>-data.json` for the rows a ward typed. So
+  a backup and a contribution stop being two features and become two selections, and nothing has to
+  live outside Settings: the per-language download that briefly sat in the Languages tab is gone,
+  because the set already writes one file per language.
+  **The menu says what a backup contains** rather than leaving it to be inferred: while `backup` is
+  ticked the parts it covers are greyed and marked as included, so the list answers "what is in one?"
+  from `_activeParts` itself — a label saying the same thing in words could drift from the function the
+  export actually gates on, and this cannot. Greyed-and-unchecked alone read as "unavailable", which is
+  why they carry a check mark too. `users` is never greyed, because a backup does not carry it until
+  that tick says so.
+  The files download sequentially with a gap between them — a browser asked for several at once prompts
+  or drops the later ones, and this is the only place in the app that asks for more than one.
+  `lists` follows its meaning in the split too: names the schema declares go with the structure, values
+  a ward typed go with that ward's data.
+  **The receiving half already worked** and is worth knowing: `Examples.asBundle` only reinterprets a
+  schema-less file as a bare schema document when its table entries carry `columns`, and rows are
+  arrays — so a data-only file lands as data, and `applyBundle` skips the schema step on its own. The
+  export was the only end that could not produce one.
+  `validateRefs` is gated with the write rather than left running: validating a schema the import will
+  not apply would block the ROWS on a fault in a document nobody is going to read.
+  **A notice saying "the schema was replaced" was built and then removed**, which is worth recording so
+  it is not re-proposed: the progress dialog is deliberately wordless because an import runs before any
+  translations are loaded and is often the very thing installing them, so every step there is an icon
+  and a count that reads the same in any language. A sentence in that dialog contradicts the one
+  constraint it has.
+
 - **Calendars defined in the DATABASE, not the schema** (#176) — a calendar is a row now, so "can we
   have an ushers calendar?" stops being a schema commit. Everything downstream was inherited exactly as
   the proposal predicted: rendering, the `.ics` download, publishing, the window and language settings,

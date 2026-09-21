@@ -209,3 +209,30 @@ describe('browser-local kv backend — image columns still work, via the in-data
     assert.ok((await B.getAsset('img_1')).src, 'a member with no table grants must still see stored images');
   });
 });
+
+describe('the bootstrap sentinel travels with the roster', () => {
+  // `_meta/users` is two things under one name. Its CONTENT is the legacy access map, superseded by
+  // /_users/<email>. Its EXISTENCE is what noUsers() / app_no_users() answer in both rules layers, and
+  // firestore.rules states the consequence of losing it at the delete guard: it would "hand EVERY
+  // signed-in Google account full admin".
+  //
+  // That matters beyond housekeeping now that a roster can be RESTORED from an export. Writing _users
+  // rows into a deployment whose sentinel does not exist leaves a populated registry that still reads
+  // as a fresh one. The import therefore routes every write through setUserRole rather than touching
+  // the stores, and this is the property that makes routing sufficient.
+  it('setUserRole writes the per-user row AND the sentinel, so a restore cannot read as a fresh install', async () => {
+    B._test_as('admin@x.com');
+    await U.setUserRole('restored@x.com', 'editor', 'restored@x.com', { tasks: 'r' });
+
+    const rows = await U.getUsers();
+    assert.ok(rows['restored@x.com'], 'the authoritative per-user row');
+    assert.equal(rows['restored@x.com'].role, 'editor');
+
+    const sentinel = await S.getMeta('users');
+    assert.ok(sentinel && !sentinel._value, '_meta/users must EXIST — its absence is what means "fresh deployment"');
+    assert.ok(sentinel['restored@x.com'], 'the mirror the legacy fallback reads');
+    // And the probe both rules layers ask agrees: this deployment is no longer empty.
+    const none = await S._query('select public.app_no_users() as none');
+    assert.equal(!!(none && none.rows && none.rows[0] && none.rows[0].none), false);
+  });
+});

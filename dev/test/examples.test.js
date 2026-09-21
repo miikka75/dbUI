@@ -249,3 +249,45 @@ describe('compare: release notes', () => {
     assert.deepEqual(Object.keys(Examples.fileHashes(manifest.bundles[0], manifest)), ['b-schema.json']);
   });
 });
+
+describe('what a <id>-schema.json is, which is what "export as example" has to produce', () => {
+  // Selecting structure + languages + reference strips a live deployment down to the shape examples/
+  // ships, by two rules read off these files rather than invented: every referenced list is DECLARED
+  // AND EMPTY, and the only tables carrying rows are lookups. Both rules are assumptions about the shipped bundles, so they are pinned
+  // HERE — the day an example seeds a list or ships rows for an ordinary table, the exporter is wrong
+  // and this says so instead of a contributor finding out from a rejected pull request.
+  const BUNDLES = ['bishopric-schema.json', 'chores-schema.json', 'demo-schema.json'];
+
+  for (const file of BUNDLES) {
+    it(file + ' declares its lists empty and carries rows only for lookups', () => {
+      // TWO shapes ship, and only one of them has rows at all: bishopric is bundle-shaped
+      // (`{schema, lists, tables}`), while chores and demo are BARE SCHEMA documents whose `tables` is
+      // the schema's own table map. Asking Examples.asBundle which is which is what the app does, and
+      // is the only way this assertion is about rows rather than about column definitions.
+      const doc = Examples.asBundle(read(file));
+      const schema = doc.schema;
+
+      for (const [name, values] of Object.entries(doc.lists || {})) {
+        assert.deepEqual(values, [], name + ': a list is a vocabulary the installing ward types, so an '
+          + 'example declares it and leaves it empty — listsForInstall then fills the gap without '
+          + 'touching one that already has values');
+      }
+      for (const table of Object.keys(doc.tables || {})) {
+        assert.ok(schema.tables[table] && schema.tables[table].isLookup,
+          table + ': only reference data belongs in the schema file — sample rows for an ordinary '
+          + 'table are the separate <id>-data.json the installer offers as a choice');
+      }
+    });
+  }
+
+  it('every bundle ships the prose the manifest refuses to go without', () => {
+    // scripts/examples-manifest.js throws on a missing or empty `description`, so a contribution that
+    // is only a schema and its packs cannot be installed by anybody. That is why exportAsExample does
+    // not generate this file: the sentence is the contributor's, not something the app could know.
+    for (const file of BUNDLES) {
+      const about = read(file.replace('-schema.json', '-about.json'));
+      assert.equal(typeof about.description, 'string');
+      assert.ok(about.description.trim(), file + ': the one line the picker shows');
+    }
+  });
+});
