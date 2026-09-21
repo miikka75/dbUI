@@ -20,17 +20,20 @@ const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const { startDevServer, stopDevServer } = require('./dev-server');
 const fs = require('node:fs');
 
 const { createPgliteBackend } = require('../backend-pglite');
 
 const DEV_DIR = path.join(__dirname, '..');
-const PORT = 4310 + (process.pid % 200);
-const BASE = 'http://127.0.0.1:' + PORT;
+// Port and readiness are the server's to report — see dev-server.js.
+let BASE;
 const DB_REL = path.join('test', '.gp-' + process.pid + '.db');
-// A SECOND server, this one on --pg, where the JavaScript gates are stood down and the policies are the
-// only gate. Its verdicts must match the first server's, or standing them down changed behaviour.
-const PG_BASE = BASE;
+// The --pg side, where the JavaScript gates are stood down and the policies are the only gate, is built
+// IN-PROCESS below (createPgliteBackend) rather than as a second server. It used to be described here
+// as one, beside a `PG_BASE` that was only ever an alias of this server's own base and was read by
+// nothing -- removed, because a name that promises a second server and delivers the first is worse than
+// no name. Its verdicts must still match, or standing the gates down changed behaviour.
 
 // Two ordinary tables for the grant model, plus one self-service table for the owner model.
 const SCHEMA = {
@@ -159,23 +162,9 @@ async function rlsVerdict(user, table, op) {
 
 before(async () => {
   // --- the JavaScript gate: a real dev server on SQLite ---
-  child = spawn(process.execPath, ['server.js'], {
-    cwd: DEV_DIR,
-    env: Object.assign({}, process.env, { PORT: String(PORT), APP_DB: DB_REL }),
-    stdio: 'ignore'
-  });
-  let up = false;
-  // 45s: this spawns the dev server, which boots a WebAssembly Postgres and applies
-  // supabase-schema.sql before answering -- and node --test runs the suites that do this at the same
-  // time. The ceiling costs nothing when it is up sooner, which it normally is.
-  const deadline = Date.now() + 45000;
-  while (!up && Date.now() < deadline) {
-    try {
-      const r = await post('serverInfo', {});
-      up = r.ok;
-    } catch (e) { await new Promise((r) => setTimeout(r, 50)); }
-  }
-  assert.ok(up, 'dev server started');
+  const started = await startDevServer(DB_REL);
+  child = started.child;
+  BASE = started.base;
 
   await post('saveSchema', { schema: SCHEMA });
   await post('initSchema', { schema: SCHEMA.tables });

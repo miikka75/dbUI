@@ -13,9 +13,13 @@ const fs = require('node:fs');
 // be taught the same thing to keep the four gates saying one thing. These tests pin that: a partial
 // write by a self-service member is allowed exactly when the same write as a full row would have been.
 
+const { startDevServer, stopDevServer } = require('./dev-server');
+
 const DEV_DIR = path.join(__dirname, '..');
-const PORT = 3937 + (process.pid % 200);
-const BASE = 'http://127.0.0.1:' + PORT;
+// The port is the OS's to choose and the server's to announce — see dev-server.js. Polling a port
+// derived from the pid was what turned a slow WebAssembly Postgres boot under CI concurrency into
+// seven tests "cancelled by parent", with nothing on screen about the server that never came up.
+let BASE;
 const DB_REL = path.join('test', '.pwa-' + process.pid + '.db');
 const DB_ABS = path.join(DEV_DIR, DB_REL);
 
@@ -60,23 +64,9 @@ const SCHEMA = {
 
 describe('dev server — self-service writes are gated on the MERGED row', () => {
   before(async () => {
-    child = spawn(process.execPath, ['server.js'], {
-      cwd: DEV_DIR,
-      env: Object.assign({}, process.env, { PORT: String(PORT), APP_DB: DB_REL }),
-      stdio: 'ignore'
-    });
-    let up = false;
-    // 45s: the dev server's default backend is PGlite, so this spawn boots a WebAssembly Postgres and
-    // applies supabase-schema.sql before it answers -- seconds on its own, and node --test runs the
-    // suites that do this concurrently. The ceiling costs nothing when the server is up sooner.
-    const deadline = Date.now() + 45000;
-    while (!up && Date.now() < deadline) {
-      try {
-        const r = await fetch(BASE + '/api/serverInfo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-        up = r.ok;
-      } catch (e) { await new Promise(r => setTimeout(r, 50)); }
-    }
-    assert.ok(up, 'dev server started');
+    const started = await startDevServer(DB_REL);
+    child = started.child;
+    BASE = started.base;
     await post('saveSchema', { schema: SCHEMA });
     await post('initSchema', { schema: SCHEMA.tables });
     // member holds NO grant on `signups` — everything they can do comes from the owner column.
@@ -86,13 +76,7 @@ describe('dev server — self-service writes are gated on the MERGED row', () =>
   });
 
   after(async () => {
-    // Wait for the child to actually exit before sweeping: SQLite writes its -wal/-shm companions out
-    // as it closes, so cleaning while the process is still dying leaves them behind as stray files.
-    if (child) {
-      const exited = new Promise(r => child.once('exit', r));
-      child.kill();
-      await Promise.race([exited, new Promise(r => setTimeout(r, 2000))]);
-    }
+    await stopDevServer(child);   // waits for the exit before the sweep below — see dev-server.js
     for (const f of fs.readdirSync(path.join(DEV_DIR, 'test'))) {
       if (f.startsWith('.pwa-' + process.pid)) { try { fs.rmSync(path.join(DEV_DIR, 'test', f), { recursive: true, force: true }); } catch (e) {} }
     }
