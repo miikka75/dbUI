@@ -6693,11 +6693,7 @@ function createVueApp() {
         if (!el) { el = document.createElement('style'); el.id = 'brand-preview'; document.head.appendChild(el); }
         el.textContent = css;
       },
-      _normHex: function(v) {
-        var m = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec((v || '').trim()); if (!m) return null;
-        var h = m[1]; if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-        return '#' + h.toLowerCase();
-      },
+      _normHex: function(v) { return Brand.normHex(v); },
       _persistTheme: function() { // merge the session's edits into schema.theme + save (frozen-replace pattern)
         var base = (this.schemaData && this.schemaData.theme) || {};
         var theme = { light: Object.assign({}, base.light, this.themeEdit.light), dark: Object.assign({}, base.dark, this.themeEdit.dark) };
@@ -6718,27 +6714,18 @@ function createVueApp() {
       // Parses the #hex codes, sorts by luminance + chroma, and maps roles: lightest->background,
       // 2nd-lightest->surface, darkest->text(on-surface), most-saturated->primary, next->secondary.
       // (Inverted bg/text for dark mode.) One save for the whole set.
-      _rgb: function(hex) { var h = hex.replace('#', ''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; },
-      _luminance: function(hex) { var c = this._rgb(hex); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; },
-      _chroma: function(hex) { var c = this._rgb(hex); return Math.max(c[0], c[1], c[2]) - Math.min(c[0], c[1], c[2]); },
-      _parsePalette: function(str) {
-        var out = [], re = /#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})/g, m;
-        while ((m = re.exec(str || ''))) { var h = m[1]; if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]; out.push('#' + h.toLowerCase()); }
-        return out;
-      },
+      _rgb: function(hex) { return Brand.rgb(hex); },
+      _luminance: function(hex) { return Brand.luminance(hex); },
+      _chroma: function(hex) { return Brand.chroma(hex); },
+      _parsePalette: function(str) { return Brand.parsePalette(str); },
+      // The role mapping itself is Brand.rolesFor (pure, unit-tested). What stays here is the part that
+      // is not: which mode is showing, writing each role through setThemeColor so it live-previews, the
+      // single save for the whole set, and the message.
       applyPalette: function(str) {
-        var self = this, hex = this._parsePalette(str);
-        if (hex.length < 2) { this.notify(this.t('msg.paste_hex')); return; }
+        var self = this;
         var mode = (this.theme === 'dark') ? 'dark' : 'light';
-        var arr = hex.map(function(h) { return { h: h, l: self._luminance(h), c: self._chroma(h) }; });
-        var byL = arr.slice().sort(function(a, b) { return a.l - b.l; });   // dark -> light
-        var byC = arr.slice().sort(function(a, b) { return b.c - a.c; });   // vivid -> dull
-        var n = byL.length, lightest = byL[n - 1].h, darkest = byL[0].h;
-        var secondL = byL[n - 2 >= 0 ? n - 2 : n - 1].h, secondD = byL[1 < n ? 1 : 0].h;
-        var primary = byC[0].h, secondary = byC[1 < byC.length ? 1 : 0].h;
-        var map = (mode === 'dark')
-          ? { background: darkest, surface: secondD, 'on-surface': lightest, primary: primary, secondary: secondary }
-          : { background: lightest, surface: secondL, 'on-surface': darkest, primary: primary, secondary: secondary };
+        var map = Brand.rolesFor(this._parsePalette(str), mode);
+        if (!map) { this.notify(this.t('msg.paste_hex')); return; }
         Object.keys(map).forEach(function(t) { self.setThemeColor(mode, t, map[t]); });
         this._persistTheme();
         this.notify(this.t('msg.palette_applied') + ' (' + mode + ')');

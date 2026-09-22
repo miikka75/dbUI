@@ -193,7 +193,7 @@ Two guards now cover the class rather than the instance: no root member may retu
 predicate with a hardcoded answer is either dead or a flag in disguise), and no offered translation key
 may go unasked-for. Both catch an injected violation.
 
-#### 6. `app-core.js` is a monolith
+#### 6. `app-core.js` is a monolith *(series started: `brand.js` extracted)*
 
 8,669 lines, 600 KB, and essentially one function: `createVueApp()` spans 194–8631, whose `methods`
 object alone is ~5,700 lines. That object is where finding 1 hid — a duplicate key in a literal too
@@ -213,8 +213,28 @@ best-tested code in the repo. What this entry adds is the **next seams**, each a
 | profiles + stored assets | 200 | `loadMyProfile`, `saveAsset`, `_resizeImageFile`, `ensureAssets` |
 | the brand-palette editor | 100 | `themeColor`, `setThemeColor`, `_persistTheme`, `applyPalette` |
 
-Do them one at a time, each with its own test file, in that order — feeds first because it is the most
-self-contained and already has a module to grow into.
+Do them one at a time, each with its own test file.
+
+**The first cut was not the one this list predicted, and the reason is worth keeping.** Feeds was ranked
+first for being "the most self-contained". It is not: `publishFeed` and `publishPerPersonFeed` are
+*orchestration* — they upload through the backend, patch subscriber rows, read view data and notify — so
+moving them needs a ctx bag in the shape of `Events.build(name, window, ctx)`, not a straight lift. That
+is a fine piece of work; it is not the cheapest one.
+
+The **brand-palette editor** was, and it went first as `brand.js`: `normHex`, `parsePalette`, the colour
+measures, and `rolesFor` — which is the only actual algorithm in the theme editor. The effectful half
+stayed in the root, where it belongs (`setThemeColor` live-previews through a dynamic `<style>`,
+`_persistTheme` does the frozen-replace-and-save).
+
+The test value was the point, and it was larger than the line count suggests. The mapping had **one**
+E2E case — five colours, light mode — so dark mode's inversion, the two- and three-colour palettes, and
+every `normHex` input shape rested on nothing. `dev/test/brand.test.js` covers all of it, including a
+property assertion that no palette size can leave a role `undefined` (the index clamps in `rolesFor`
+exist for exactly that, and nothing had ever tested them).
+
+So the ordering rule that came out of it: **rank a seam by how much of it is pure, not by how big it
+is.** On that measure the remaining order is the lookup/ref editor, then profiles + assets, then
+export/import, and feeds last — the reverse of where it started.
 
 ### RSVP attendance verification *(schema pattern, not code)*
 
