@@ -54,6 +54,67 @@ describe('Content-Security-Policy', () => {
     assert.ok(!meta.includes('frame-ancestors'), 'frame-ancestors is invalid in a <meta> delivery');
     assert.ok(builtPolicy().includes('frame-ancestors'), 'header variant keeps frame-ancestors');
   });
+});
+
+// --- The <meta> delivery: the only one GitHub Pages can use ---------------------------------------
+//
+// The app is deployed by deploy-pages.yml, which uploads the repo root to GitHub Pages on every push
+// to main. Pages serves static files and cannot send a custom header, so neither of the other two
+// deliveries reaches it: dev/server.js is not involved, and firebase.json's header is read by Firebase
+// Hosting alone. Until this tag existed the deployed site ran with NO CSP in any mode while a
+// Report-Only header sat in firebase.json looking like coverage.
+describe('Content-Security-Policy — the index.html <meta> delivery', () => {
+  const idx = () => fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const metaTag = () => idx().match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/);
+
+  it('index.html carries a CSP meta tag', () => {
+    assert.ok(metaTag(), 'index.html has a <meta http-equiv="Content-Security-Policy"> — GitHub Pages ' +
+      'has no other way to deliver one. Run `npm run csp:sync` in dev/.');
+  });
+
+  it('the meta tag matches the csp.js builder (no drift)', () => {
+    assert.equal(metaTag()[1], builtPolicy({ meta: true }),
+      'regenerate index.html from csp.js with `npm run csp:sync`');
+  });
+
+  // POSITION IS LOAD-BEARING. A CSP in a <meta> governs only what the parser fetches AFTER it reads
+  // the tag, so anything above it is unprotected. index.html starts fetching in <head>: five preload
+  // links, a manifest and two icons. A tag that drifted below them would still pass the drift test
+  // above while silently exempting every one of those.
+  it('sits before the first fetch-initiating element in the document', () => {
+    const src = idx();
+    const metaAt = src.indexOf('<meta http-equiv="Content-Security-Policy"');
+    const firstFetch = Math.min(...['<link ', '<script'].map((t) => {
+      const i = src.indexOf(t);
+      return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+    }));
+    assert.ok(firstFetch < Number.MAX_SAFE_INTEGER, 'index.html fetches something (preloads/scripts)');
+    assert.ok(metaAt > 0 && metaAt < firstFetch,
+      'the CSP meta must precede every <link>/<script>: a meta CSP does not apply to anything the ' +
+      'parser already fetched above it');
+  });
+
+  // charset has to stay in the document's first bytes for encoding detection, so the meta CSP goes
+  // directly after it. Pinned because "move the CSP to the top of head" is a plausible tidy-up.
+  it('does not displace <meta charset>', () => {
+    const src = idx();
+    assert.ok(src.indexOf('<meta charset=') < src.indexOf('<meta http-equiv="Content-Security-Policy"'),
+      'charset must remain first for encoding detection');
+  });
+
+  it('carries the same inline-script hashes as the header delivery', () => {
+    const tag = metaTag()[1];
+    for (const h of Csp.inlineScriptHashes(idx(), sha256)) {
+      assert.ok(tag.includes(h), 'the meta policy hash-allows inline script ' + h);
+    }
+  });
+
+  // An HTML attribute is delimited by the double quote the regex above relies on. Every source
+  // expression CSP defines is single-quoted, so this holds — but a policy that grew one would be
+  // truncated at the quote and ship as a shorter, weaker, still-valid-looking policy.
+  it('contains no double quote, which would truncate the attribute', () => {
+    assert.ok(!builtPolicy({ meta: true }).includes('"'));
+  });
 
   it('policy shape: no unsafe-inline scripts; eval + Vuetify styles are the accepted exceptions', () => {
     const p = builtPolicy();

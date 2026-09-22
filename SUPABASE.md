@@ -13,7 +13,7 @@ per-row Row-Level-Security (RLS) policy.
 | `supabase-schema.sql` | Postgres `kv` table + RLS mirroring `firestore.rules`. Run once in Supabase. |
 | `.github/workflows/deploy-pages.yml` | Deploy the static site to GitHub Pages on push to `main`. |
 | `dev/test/storage-supabase.test.js` | Unit test for the storage adapter (in-memory fake client). |
-| `dev/sync-csp.js` | `npm run csp:sync` — regenerates firebase.json's CSP header from `csp.js`. Needed after naming a self-hosted origin in `CONNECT_HOSTS`. |
+| `dev/sync-csp.js` | `npm run csp:sync` — regenerates both static copies of the CSP from `csp.js`: firebase.json's header and `index.html`'s `<meta>` (the delivery that covers a GitHub Pages deploy). Needed after naming a self-hosted origin in `CONNECT_HOSTS`. |
 
 Wiring is applied to `index.html` (mode branch, shared-link support, SDK + adapter `loadScript`),
 `ui.html` (setup button + step), `app-core.js` (`saveSupabaseConfig`, `shareLink`, setup fields), and the
