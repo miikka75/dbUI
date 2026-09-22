@@ -2033,11 +2033,34 @@ function createVueApp() {
       },
       // One clipboard helper: the calendar toolbar and the Settings feed list both copy a URL, and a
       // second copy of the try/catch is how the two would come to report success differently.
+      //
+      // There WERE two, and they did exactly that. This object carried `copyText` twice; JS keeps the
+      // second, so the half that reported failure was dead code and the surviving half announced
+      // "copied" unconditionally -- including when writeText REJECTED (a denied permission, or a
+      // document that is not focused). The lie is the whole problem: the user walks away believing a
+      // feed URL is on their clipboard. dev/test/app-core-shape.test.js now fails on a duplicate root
+      // member so this cannot come back, and the two halves are merged here:
+      //   - the async Clipboard API, WITH its rejection path, and
+      //   - the execCommand fallback, which is what makes the button work on a non-secure origin
+      //     (http://, an older browser) where navigator.clipboard is simply absent.
+      // execCommand reports its own success with a boolean, and a false there is the same lie if we
+      // announce "copied" over it, so it feeds the same two outcomes.
       copyText: function(text) {
         var self = this;
-        return Promise.resolve(navigator.clipboard && navigator.clipboard.writeText(text))
-          .then(function() { self.notify(self.t('msg.copied')); })
-          .catch(function() { self.notify(self.t('msg.save_failed')); });
+        var ok = function() { self.notify(self.t('msg.copied')); };
+        var fail = function() { self.notify(self.t('msg.save_failed')); };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          return Promise.resolve(navigator.clipboard.writeText(text)).then(ok, fail);
+        }
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        var copied = false;
+        try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
+        document.body.removeChild(ta);
+        (copied ? ok : fail)();
+        return Promise.resolve();
       },
       feedInfoFor: function(name) { return ((this.appConfig && this.appConfig.feeds) || {})[name] || null; },
       // Blank the file at an id's path: a VALID but empty calendar, uploaded over the old object.
@@ -4873,11 +4896,6 @@ function createVueApp() {
         }
         var req = indexedDB.deleteDatabase('dbui');
         req.onsuccess = req.onerror = req.onblocked = done;
-      },
-      copyText: function(text) {
-        if (navigator.clipboard) { navigator.clipboard.writeText(text); }
-        else { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); }
-        this.notify(this.t('msg.copied'));
       },
       // A deep link: `?view=<scan view>&scan=<code>`. A QR carrying that URL is decoded by the
       // PHONE'S OWN camera -- iOS Camera, Control Center and Android's camera all offer to open a
