@@ -33,6 +33,36 @@ describe('translation keys', () => {
       'offer them and they stay raw in every language: ' + missing.join(', '));
   });
 
+  // The mirror of the first test, and the one that was missing. That one catches a key the app ASKS
+  // for but never offers; this catches a key it OFFERS but never asks for. Both are invisible in the
+  // running app, but the second has a cost the first does not: every dead key is a row in the
+  // Languages editor that a translator is asked to fill in, and a string shipped in every language
+  // pack, for text that can never appear on screen.
+  //
+  // Found four of them. `field.source` belonged to the union-view source column, whose predicate had
+  // been stubbed to `return false` since 2026-05-29 while its three render branches and both
+  // translations stayed; `settings.cal_custom`, `settings.cal_custom_note` and `msg.feed_failed`
+  // outlived whatever UI once asked for them.
+  it('every key staticTranslationKeys() offers is actually asked for', () => {
+    // Literal calls: t('msg.copied'). [^a-z]* absorbs the opening quote and, for a t() inside one of
+    // app-core's template strings, the backslash escaping it.
+    const literal = new Set();
+    for (const m of (appCore + ui).matchAll(/\bt(?:Or)?\([^a-z]*([a-z][a-z0-9_]*\.[a-z0-9_.]+)/gi)) literal.add(m[1]);
+
+    // Concatenated calls: t('role.' + r) can only be checked to its PREFIX, because the second half is
+    // a runtime value. A key under such a prefix counts as asked for.
+    const prefixes = [...(appCore + ui).matchAll(/\bt(?:Or)?\([^a-z]*([a-z][a-z0-9_]*\.)[^a-z0-9_.]*\s*\+/gi)].map((m) => m[1]);
+
+    const orphaned = [...STATIC]
+      .filter((k) => !literal.has(k) && !prefixes.some((p) => k.startsWith(p)))
+      .sort();
+    assert.deepEqual(orphaned, [],
+      'these keys are offered for translation but nothing asks for them, so they are rows a translator ' +
+      'fills in for text that never renders. Delete them from staticTranslationKeys() AND from every ' +
+      'examples/app-lang-*.json (the pack test above requires the two to match exactly): ' +
+      orphaned.join(', '));
+  });
+
   // tOr()'s fallback exists for keys whose default is the DATA being labelled (a column or list value,
   // which reads better raw than as `field.chore_name`) — so every legitimate call builds its key by
   // concatenation. A tOr() on a FULLY LITERAL key is always static UI prose with a hardcoded English

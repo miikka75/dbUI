@@ -29,7 +29,7 @@ Embedding is free: `embed-view` dispatches on the same classifier, so a new kind
 An entry that is PARTLY built says so in its heading and records what landed inline, rather than being
 split in two: the reasoning for what remains is the same document as the reasoning for what shipped.
 
-### Code review 2026-09-22 — six findings, ranked *(1–3 landed)*
+### Code review 2026-09-22 — six findings, ranked *(1–5 landed; 6 is a series, open)*
 
 The previous full-repo review was #57 (2026-07-18). This pass found no rot: 1797 unit tests pass, the
 typecheck is clean, and CI runs the rules tests, the policy differential and the emulator E2E. What it
@@ -40,7 +40,7 @@ plus one deployment that has no CSP at all.
 They are recorded together because they came from one pass, not because they are one piece of work. Each
 is independent and separately shippable.
 
-#### 1. `copyText` is defined twice in the same object
+#### 1. `copyText` is defined twice in the same object *(landed)*
 
 `app-core.js` methods carried two `copyText` keys. JS keeps the **second**, so the promise-based one —
 the only one that reported failure — was dead, and the survivor said "copied" unconditionally even when
@@ -55,7 +55,7 @@ Ranked first because it is the only finding here that is **wrong on screen for a
 ten lines. The duplicate also says something about finding 6: a 5,700-line object literal is a place
 where a second definition of the same key is invisible to review.
 
-#### 2. Raw control bytes in `rows.js`
+#### 2. Raw control bytes in `rows.js` *(landed — and in `pivot.js` and the CSP collector too)*
 
 The per-call label memo built its key with **literal NUL and SOH bytes** in the source rather than
 `'\u0000'` / `'\u0001'` escapes. Behaviourally irrelevant; as a review hazard it is not. `file(1)` calls
@@ -63,7 +63,7 @@ The per-call label memo built its key with **literal NUL and SOH bytes** in the 
 review before the cause was noticed. A file that tooling declines to read is a file that stops being
 reviewed.
 
-#### 3. The deployed app has no CSP at all
+#### 3. The deployed app has no CSP at all *(landed)*
 
 `csp.js` is a genuinely good piece of work — one builder, hash-pinned inline scripts, a drift test that
 fails CI, and the whole Playwright suite running with `CSP=1` **enforcing**. The policy is delivered
@@ -96,7 +96,7 @@ Promoting `firebase.json` from Report-Only to enforcing is a **separate** decisi
 this: Pages is the deployment that needs covering, and the enforcing policy has months of E2E behind it
 there. The Firebase copy stays Report-Only until someone actually deploys to it.
 
-#### 4. "What kind is this view?" has six answers
+#### 4. "What kind is this view?" has six answers *(landed)*
 
 `SchemaNormalize.viewKind` documents itself as *"THE discriminator — every consumer that used to work the
 answer out by probing for a `calendar`/`rotation`/… key asks this instead"*, and `view-kind.test.js`
@@ -165,17 +165,33 @@ mode*, not a schema kind. `page` maps to `doc` only when the view renders its ow
 embeds as `data`, which is the whole `{{self}}` mechanism. The two vocabularies answer different
 questions and the gap between them is now pinned by the same test.
 
-#### 5. `isUnionView` is stubbed `false` with three live consumers
+#### 5. `isUnionView` is stubbed `false` with three live consumers *(landed: deleted)*
 
-#57 stubbed it to `return false`. The three branches that render against it are still there
-(`app-core.js` header list, two in `ui.html`), and `field.source` is still shipped **and translated** in
-both `app-lang-en.json` and `app-lang-fi.json`. The `_source` plumbing itself is live and load-bearing —
-`tableForCol` and `colIsMirrorForTable` both depend on it — so only the user-facing column is dead.
+**Correction to this entry's first draft**, which blamed #57. #57 only moved `app-core.html` to
+`app-core.js`; the stub was already there. It was real once — `this.currentConfig.mode === 'union'`, as
+written in #6 — and was changed to `return false` on **2026-05-29 in d4c5755**, a 404-line commit
+titled "Update app-core.html" with no reason recorded anywhere. Four months dead.
 
-The decision this needs is not technical: either a union view should show which table a row came from,
-or it should not. What it must not stay is a predicate named like a question with a hardcoded answer.
-Deleting the three branches and the two strings is the cheaper half and is what this proposes; restoring
-the column is a feature and belongs in its own entry if anyone wants it.
+The three branches that rendered against it were still there (`app-core.js`'s header list, two in
+`ui.html`), and `field.source` was still shipped **and translated** in both `app-lang-en.json` and
+`app-lang-fi.json`. The `_source` plumbing itself is live and load-bearing — `tableForCol` and
+`colIsMirrorForTable` both depend on it — so only the user-facing column was dead.
+
+**Deleted rather than restored**, because nobody recorded why it was switched off and nobody has asked
+for it back; reinstating a feature somebody deliberately disabled, without knowing what bothered them
+about it, is the worse guess. Restoring is a one-liner if it is ever wanted —
+`isUnionView: function() { return this.currentConfig.mode === 'union'; }` — and that is written here so
+the option survives without the dead code surviving with it.
+
+**Three more dead keys fell out of the guard written for this one.** Asserting that every key
+`staticTranslationKeys()` offers is actually asked for turned up `settings.cal_custom`,
+`settings.cal_custom_note` and `msg.feed_failed` alongside `field.source` — each one a row the
+Languages editor asks a translator to fill in, and a string shipped in every language pack, for text
+that can never appear on screen. All four are gone.
+
+Two guards now cover the class rather than the instance: no root member may return a bare constant (a
+predicate with a hardcoded answer is either dead or a flag in disguise), and no offered translation key
+may go unasked-for. Both catch an injected violation.
 
 #### 6. `app-core.js` is a monolith
 
