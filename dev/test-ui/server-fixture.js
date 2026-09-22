@@ -22,10 +22,14 @@ const READY_TIMEOUT_MS = 60_000;
 // Wait for the server to say which port it bound. It is started with PORT=0 -- "any free port" -- so
 // that N workers never have to agree on numbers, and never collide with a stale server still holding
 // 3000 or 3100 from an earlier run.
-function startServer() {
+// `envOverride` exists for ONE caller: csp-meta.spec.js, which needs a server that does NOT send the
+// CSP header, so that index.html's <meta> tag is the only policy in force. That is the GitHub Pages
+// configuration — a static host cannot send the header at all — and it is the one this app actually
+// deploys to, so it needs proving on its own rather than only alongside the header.
+function startServer(envOverride) {
   const child = spawn(process.execPath, ['server.js'], {
     cwd: DEV_DIR,
-    env: { ...process.env, PORT: '0', APP_DB: ':memory:', CSP: '1' },
+    env: { ...process.env, PORT: '0', APP_DB: ':memory:', CSP: '1', ...(envOverride || {}) },
     // CSP=1 ENFORCES the app's Content-Security-Policy for every E2E test (see /csp.js), so a policy
     // that would break the app fails CI before production flips Report-Only to enforcing.
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -73,3 +77,5 @@ exports.test = base.test.extend({
 });
 
 exports.expect = base.expect;
+exports.startServer = startServer;
+exports.READY_TIMEOUT_MS = READY_TIMEOUT_MS;
