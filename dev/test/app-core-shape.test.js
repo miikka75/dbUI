@@ -155,3 +155,32 @@ describe('copyText — it must not claim success it did not get', () => {
     assert.deepEqual(c.said, ['msg.copied']);
   });
 });
+
+// --- A predicate that is really a constant -------------------------------------------------------
+//
+// `isUnionView` read like a question and answered `return false;` unconditionally, from 2026-05-29
+// until the 2026-09-22 review. It had been real once (`this.currentConfig.mode === 'union'`), and was
+// stubbed in a 404-line commit called "Update app-core.html" with no reason recorded.
+//
+// Nothing was broken by it, which is the problem: its three render branches stayed, `field.source`
+// stayed in staticTranslationKeys() and in both shipped language packs, and every one of those read
+// like a working feature. Four months of code that could not run, guarded by a name that promised it
+// could.
+//
+// A member of the root component that ignores its own inputs is either dead or a flag pretending not
+// to be one. If a genuine constant is ever needed, this test is the place to say so and why.
+describe('app-core.js root component — no predicate with a hardcoded answer', () => {
+  it('no member returns a bare constant, ignoring its inputs', () => {
+    const constants = [];
+    for (const block of ['computed', 'methods']) {
+      const src = rootBlock(block);
+      for (const m of src.matchAll(/^ {6}([A-Za-z_$][\w$]*): function\([^)]*\) \{ return (true|false|null|0|''|\[\]|\{\});? \},?$/gm)) {
+        constants.push(block + '.' + m[1] + ' -> ' + m[2]);
+      }
+    }
+    assert.deepEqual(constants, [],
+      'this member ignores its inputs and always answers the same thing. If it is dead, delete it AND ' +
+      'everything that renders against it (a stub keeps its consumers looking alive). If it is a ' +
+      'deliberate flag, it is not a predicate — name it like a flag and say why here: ' + constants.join(', '));
+  });
+});
