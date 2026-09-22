@@ -1462,6 +1462,96 @@ declared, which is not a distinction anyone authoring a schema means to make.
 alphabetically by key would only make the wrong order easier to reach. Done the other way round, one
 change fixes `defaultSort`, the header click, and the print path at the same time, because all three go
 through `sortByCol`.
+### Narrowing a lookup-backed picker — which rows are OFFERED
+
+A `select` whose `list:` names a lookup offers every row of it. `lookupListValues` sweeps
+`dataCache[name]`, derives each row's value in the asked-for dimension, dedupes, and returns the lot;
+there is no filter anywhere on that path. For a catalogue that is also the ward's identity namespace
+that is fifty-odd options in a column where a handful are plausible, and the ones that are not
+plausible are not merely noise — an ordination is not somebody who can preside at a meeting.
+
+**This capability existed and was spent.** A blank cell in the asked-for dimension contributed no
+option, which is how the bishopric example excluded its ordinations and class teachers — SCHEMA.md
+still describes it as "a row can exist in the catalogue without being offered". Deriving the handle
+(#200) took it away, because a blank cell now means *derive* and can no longer mean *not a position*.
+That trade was the right one — a row typed in the app had no handle at all and could never be linked to
+anybody — but it was recorded as a cost and this is the entry that owes it back.
+
+**`filterBy` does not reach here.** It is a `ref` feature, read in `getRefOptions`, and it narrows by a
+sibling column's value in the same row — `admin_callings.calling` is already filtered to the
+organization that row names. The identity columns cannot become refs: `meeting_agenda.presiding`
+toggles to a visitor through `listSwitch`, which is select-only, and a `ref` stores the calling
+dimension rather than the handle, which is the link `@me` and the per-person card resolve through.
+So the mechanism that exists is the mechanism that cannot be used.
+
+**Two shapes, and they answer different questions.**
+
+- *A marker on the ROW.* The catalogue says a row is not offered, once, for every column that draws on
+  it. Cheap, and it is the honest home for "this is an ordination, not a position". But it is
+  table-wide by construction: a row withheld from `presiding` is withheld from `responsible` too.
+  Blankness is spoken for, so this has to be a column of its own — which means the Lookup editor must
+  be able to set it, and the editor renders a hierarchy as parent and value only. That is the exact
+  wall #200 hit, and any design that needs a hidden column TYPED repeats it.
+- *A narrowing on the COLUMN.* `filterBy`'s meaning extended to a `list:`-on-lookup select, or a static
+  predicate beside it. Per-column is the truthful granularity — the same row may be offerable in one
+  column and not another — at the price of a second filter surface to specify, validate and explain.
+
+**The invariant either shape must not break: narrowing is a PICKER concern, never a label one.** Values
+are stored as text, so a row already holding a value the narrowing excludes has to go on rendering it.
+`getListOptions` feeds the editor; `displayValue`/`listLabel` feed the cell, and they must stay
+unnarrowed or a historical agenda silently blanks the person who actually presided. The same applies to
+everything hanging off the namespace: a withheld row keeps its `list.<table>.<handle>` translation key
+and keeps its account link. It is not offered; it did not stop existing.
+
+**What would tell us it is wrong:** a picker that can no longer reach a value some row already stores,
+with nothing on screen saying why. Whichever shape is built, the check is that the CURRENT value of the
+cell is always among its own options.
+
+Cost: a predicate and its wiring into one function (`lookupListValues`), Node-tested against the
+bishopric catalogue; plus, for the row shape, an editor affordance — which is the larger half, and the
+reason to prefer the column shape unless the exclusion is genuinely a property of the row.
+
+### A linked position that still says which position it is
+
+`listLabel` puts the linked account's profile name FIRST, above the `list.<ns>.<value>` translation, for
+a `userlink-name` list. That is the whole point of the source kind: it exists to ask "who is the
+bishop?" of a value that names a role. Link the bishopric and the agenda reads as people.
+
+**What deploying it showed.** Linking is per row, so a catalogue ends up part linked and part not, and
+then one picker is half people and half roles with nothing on screen separating them. Choosing "the
+second counselor" means already knowing who holds it — the question the column was supposed to answer
+for you. The rendered cell has the same gap in the other direction: a name alone does not say in what
+capacity that person is on the agenda.
+
+**Compose rather than replace** — `Piispa – Miikka Tuppurainen` — is the obvious answer, and there are
+two reasons it is not a one-line change.
+
+- *One rule, not two.* `listLabel` is deliberately the single label rule for the cell AND for the
+  dropdown that edits it. The comment above it records why: they were written twice, and the two copies
+  disagreed the moment the linked name was added. So this must not become "compose in the picker, keep
+  name-only in the cell", however tempting — that is the identical bug with the roles reversed.
+- *`obscureNames` composes badly, and silently.* `displayValue` hands the finished label to
+  `obscureName`, which keeps the first whitespace-separated word and initials the rest. Today
+  "Miikka Tuppurainen" becomes "Miikka T."; a composed label becomes "Piispa –. M. T.", and the name
+  the obscuring exists to protect survives only where it happens to fall. Composition and obscuring
+  have to be made to know about each other — obscure the name half, then compose — or the privacy
+  feature quietly stops working on exactly the views that ask for it.
+
+**So the shape is probably an opt-in on the NAMESPACE, not a new global default.** `listSources`
+already declares how a list's values are displayed (`userlink` shows the value, `userlink-name` shows
+the person); a third kind that shows both is one more answer to the question that field already asks,
+and it lets a dense printed grid keep the short form while the agenda takes the long one. A per-column
+override is the wrong place: two columns over one namespace disagreeing about what a value IS is the
+confusion `valueCol` had to be introduced to resolve, and this is a display rule, not a dimension.
+
+**The cheaper alternative, if composition proves too long in practice:** leave the label alone and mark
+the unlinked entries in the picker instead. That fixes the heterogeneity — the thing that actually
+misleads — without touching a single rendered cell, and it needs no obscuring work at all. It does not
+fix the cell's missing capacity, so it is a smaller change and a smaller answer.
+
+Cost: the composition and its opt-in are small; the `obscureName` interaction is the part that needs a
+test of its own, and a print check on `meeting_agenda`, which is the densest grid the long form lands in.
+
 ### `gallery`
 
 A media grid. Unblocked since `image`/`url` columns shipped, so this is now mostly layout.
