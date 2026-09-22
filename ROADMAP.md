@@ -141,6 +141,30 @@ on both paths or reject it on that shape at load.
 
 Also: `schema-normalize.js`'s header lists **nine** kinds; there are twelve.
 
+**A seventh site, found while fixing the other six.** "Embedding is free" is what the seam at the top
+of this file promises a new view kind: `embed-view` dispatches on the same classifier, so `{{view:x}}`
+renders x properly the day the kind exists. That holds for six kinds. It does not hold for **board,
+form and timeline** — `embed-view`'s template has no branch for any of them, so each falls through to
+the data grid, and embedding a kanban board in a document silently renders a table of its rows.
+
+All three components already accept the `embed` prop, so the gap is in the dispatch rather than in
+them, and the fix looks like three template lines. It is not being taken here, because it is not a
+cleanup — it is three product questions wearing one costume. Does a board keep its drag-between-lanes
+behaviour inside a document, where the surrounding prose is also editable? Does a `form` in a page mean
+a second submit target, or the same one twice? Does a timeline inside a doc-view want its own date
+window or the page's? None of those has been asked by anyone, and guessing wrong ships an embed nobody
+wanted in a place nobody looked.
+
+What HAS changed is that the answer is now written down. `dev/test/view-kind.test.js` asserts the exact
+set of kinds the embed dispatches, and asserts that board/form/timeline are absent from it — so adding
+a kind without an embed branch fails a test instead of surprising whoever first embeds one, and closing
+this gap means deleting a line from a list that names it.
+
+**`doc` is not drift, and must not be "unified" with `page`.** `embed-view`'s `kind` is a *rendering
+mode*, not a schema kind. `page` maps to `doc` only when the view renders its own prose; a sourced page
+embeds as `data`, which is the whole `{{self}}` mechanism. The two vocabularies answer different
+questions and the gap between them is now pinned by the same test.
+
 #### 5. `isUnionView` is stubbed `false` with three live consumers
 
 #57 stubbed it to `return false`. The three branches that render against it are still there

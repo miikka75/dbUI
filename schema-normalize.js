@@ -35,8 +35,12 @@
   }
 
   // What KIND of thing a nav entry is: 'data' | 'page' | 'rotation' | 'calendar' | 'pivot' | 'rsvp' |
-  // 'board' | 'form' | 'group'. THE discriminator — every consumer that used to work the answer out by
-  // probing for a `calendar`/`rotation`/... key asks this instead.
+  // 'board' | 'form' | 'stats' | 'timeline' | 'scan' | 'group'. THE discriminator — every consumer that
+  // used to work the answer out by probing for a `calendar`/`rotation`/... key asks this instead.
+  //
+  // The list is duplicated in schema.schema.json's `kind` enum and derived in Migrations.kindOf;
+  // dev/test/view-kind.test.js holds all three together, because this comment had already fallen three
+  // kinds behind (stats, timeline and scan were missing) before the test was widened to check it.
   //
   // It prefers the `kind` the schema carries (migration v1->v2 writes one, and v3->v4 corrected it for
   // nav groups — that single wrong answer is why this could not read `kind` before), and derives one

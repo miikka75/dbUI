@@ -80,14 +80,37 @@ describe('migrations — the derivation matches what app-core used to infer', ()
     });
   }
 
-  it('the chain in app-core.js still looks the way this test reproduces it', () => {
-    // If someone reorders or extends that chain, this derivation silently stops matching it. Cheap
-    // guard: the fallback branches must still appear in the same order in the source.
+  // This guard used to assert that app-core's fallback chain still appeared in the source in the same
+  // ORDER as `legacy` above, so the two derivations could not drift apart. The chain is gone: the root
+  // `viewKind` computed asks SchemaNormalize.viewKind (which is kindOf) instead of re-deriving.
+  //
+  // So the guard is inverted. Keeping the two in sync is not the goal; having only ONE is. A chain that
+  // came back would be a second derivation to keep in sync again, and -- as the deleted one did -- it
+  // would silently predate whichever kinds were added after it.
+  // Scoped to the viewKind computed ITSELF, not the whole file: `isRotationView` and friends are
+  // perfectly legitimate elsewhere (printView picks a print layout with one). What must not come back
+  // is a chain inside the classifier, deriving an answer the discriminator already has.
+  const viewKindBlock = () => {
     const src = fs.readFileSync(path.join(ROOT, 'app-core.js'), 'utf8');
-    const order = ['isCalendarView', 'isRotationView', 'isPivotView', 'isRsvpView', 'isBoardView'];
-    const at = order.map((n) => src.indexOf('if (this.' + n + ')'));
-    assert.ok(at.every((i) => i > 0), 'the fallback chain moved; re-check kindOf against it');
-    assert.deepEqual(at.slice().sort((a, b) => a - b), at, 'the fallback chain was reordered');
+    const from = src.indexOf('viewKind: function()');
+    const to = src.indexOf('viewComponent: function()');
+    assert.ok(from > 0 && to > from, 'located the root viewKind computed');
+    return src.slice(from, to);
+  };
+
+  it('app-core does not re-derive the kind: no second fallback chain', () => {
+    const block = viewKindBlock();
+    const reDerived = ['isCalendarView', 'isRotationView', 'isPivotView', 'isRsvpView', 'isBoardView', 'isFormView']
+      .filter((n) => block.includes('this.' + n));
+    assert.deepEqual(reDerived, [],
+      'the root viewKind computed is sniffing again. It must ask `this.currentKind` (= ' +
+      'SchemaNormalize.viewKind) -- a chain like that cannot be better than the function it duplicates, ' +
+      'and the last one predated stats, timeline and scan, so an un-migrated view of those kinds fell ' +
+      'through every branch to null and rendered a BLANK SCREEN.');
+  });
+
+  it('the root viewKind computed asks the discriminator', () => {
+    assert.ok(viewKindBlock().includes('this.currentKind'), 'the root viewKind computed reads currentKind');
   });
 });
 

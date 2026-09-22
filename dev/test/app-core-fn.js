@@ -49,19 +49,40 @@ function appCoreFn(name, deps) {
     if (ch === '{') depth++;
     else if (ch === '}') { depth--; if (depth === 0) { byBraces = i; break; } }
   }
-  assert.ok(byIndent > start, 'could not find the end of ' + name + ' by indent');
   assert.ok(byBraces > open, 'could not find the end of ' + name + ' by brace matching');
-  assert.equal(byIndent + 1, byBraces - 6,
-    'the two ways of finding the end of ' + name + ' disagree — brace matching says the member closes ' +
-    'somewhere other than the first `      },` line. Either a nested object literal closes at the root ' +
-    'member indent, or a brace appears inside a string/comment/regex in the body. Read the slice before ' +
-    'trusting this test again: a truncated lift still RUNS, and these assertions are the access model.');
+
+  // SINGLE-LINE members (`name: function(x) { return y; },`) have no `      },` line to find at all, so
+  // the indent derivation cannot speak for them: it silently returns the NEXT multi-line member's
+  // closing line, thousands of characters away, and the cross-check below then fails on a member that
+  // is perfectly well-formed. The root is full of one-liners — every `is<Kind>Name` classifier is one —
+  // and before this branch existed none of them could be lifted, which is a large part of why the
+  // classifiers had no tests.
+  //
+  // They get their own check instead of an exemption. A one-liner's body cannot contain a newline, and
+  // the member must close with `},` exactly as the multi-line form does — so if brace matching ran past
+  // the end of the line, or landed anywhere but a real member close, this fails just as loudly.
+  const singleLine = src.slice(open, byBraces).indexOf('\n') === -1;
+  if (singleLine) {
+    assert.match(src.slice(byBraces, byBraces + 2), /^\},/,
+      'brace matching for the single-line member ' + name + ' did not land on a `},` — a brace inside a ' +
+      'string or comment in the body would do that, and the lift would be silently truncated.');
+  } else {
+    // Multi-line: the two independent derivations must agree. Neither is trustworthy alone; together
+    // they are, because the ways they fail have nothing to do with each other.
+    assert.ok(byIndent > start, 'could not find the end of ' + name + ' by indent');
+    assert.equal(byIndent + 1, byBraces - 6,
+      'the two ways of finding the end of ' + name + ' disagree — brace matching says the member closes ' +
+      'somewhere other than the first `      },` line. Either a nested object literal closes at the root ' +
+      'member indent, or a brace appears inside a string/comment/regex in the body. Read the slice before ' +
+      'trusting this test again: a truncated lift still RUNS, and these assertions are the access model.');
+  }
 
   // The trailing newline matters: a body whose last line ends in a // comment would otherwise swallow
   // the closing brace.
+  const bodyEnd = singleLine ? byBraces : byIndent;
   const names = Object.keys(deps);
   return new Function(...names,
-    'return function(' + src.slice(start + head.length, argsEnd) + ') {' + src.slice(open + 1, byIndent) + '\n};'
+    'return function(' + src.slice(start + head.length, argsEnd) + ') {' + src.slice(open + 1, bodyEnd) + '\n};'
   )(...names.map((n) => deps[n]));
 }
 function runAppCore(name, ctx, ...args) { return appCoreFn(name).apply(ctx, args); }
