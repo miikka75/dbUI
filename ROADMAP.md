@@ -29,6 +29,153 @@ Embedding is free: `embed-view` dispatches on the same classifier, so a new kind
 An entry that is PARTLY built says so in its heading and records what landed inline, rather than being
 split in two: the reasoning for what remains is the same document as the reasoning for what shipped.
 
+### Code review 2026-09-22 — six findings, ranked *(1–3 landed)*
+
+The previous full-repo review was #57 (2026-07-18). This pass found no rot: 1797 unit tests pass, the
+typecheck is clean, and CI runs the rules tests, the policy differential and the emulator E2E. What it
+found instead was **drift between things that are supposed to be one thing** — a discriminator with six
+implementations, a method defined twice, a predicate stubbed to `false` with its consumers left behind —
+plus one deployment that has no CSP at all.
+
+They are recorded together because they came from one pass, not because they are one piece of work. Each
+is independent and separately shippable.
+
+#### 1. `copyText` is defined twice in the same object
+
+`app-core.js` methods carried two `copyText` keys. JS keeps the **second**, so the promise-based one —
+the only one that reported failure — was dead, and the survivor said "copied" unconditionally even when
+`navigator.clipboard.writeText` rejected (denied permission, unfocused document). Users copy feed URLs
+and RSVP share links with it, so the failure it hid is the one that matters: a link that was never on
+the clipboard, reported as copied.
+
+The fix is a merge, not a delete: keep the survivor's `execCommand` fallback (it is what makes the
+button work outside a secure context) and restore the rejection path from the dead one.
+
+Ranked first because it is the only finding here that is **wrong on screen for a user today**, and it is
+ten lines. The duplicate also says something about finding 6: a 5,700-line object literal is a place
+where a second definition of the same key is invisible to review.
+
+#### 2. Raw control bytes in `rows.js`
+
+The per-call label memo built its key with **literal NUL and SOH bytes** in the source rather than
+`'\u0000'` / `'\u0001'` escapes. Behaviourally irrelevant; as a review hazard it is not. `file(1)` calls
+`rows.js` "data", and `grep` refuses to search it — it silently dropped out of two scans during this
+review before the cause was noticed. A file that tooling declines to read is a file that stops being
+reviewed.
+
+#### 3. The deployed app has no CSP at all
+
+`csp.js` is a genuinely good piece of work — one builder, hash-pinned inline scripts, a drift test that
+fails CI, and the whole Playwright suite running with `CSP=1` **enforcing**. The policy is delivered
+twice: `dev/server.js` builds it at runtime, and `firebase.json` carries a static copy.
+
+Neither of those is where this app is deployed. It is served by **GitHub Pages** (`deploy-pages.yml`
+uploads the repo root on every push to main) against a **Supabase** backend, and GitHub Pages cannot
+send a custom header. So the Report-Only header that has been "soaking" since 2026-07-18 is on a host
+the deployment does not use, and the live site runs with **no CSP in any mode**.
+
+The missing delivery is a `<meta http-equiv="Content-Security-Policy">` in `index.html`. `csp.js`
+already anticipated it — `buildPolicy({ meta: true })` exists, strips the header-only directives, and is
+already covered by a test — it was simply never wired to anything. So this is a sync target and a test,
+not a new policy.
+
+Two things a `<meta>` delivery genuinely cannot carry, recorded so they are not rediscovered as bugs:
+
+- **`frame-ancestors`** is header-only. On Pages the app loses clickjacking protection from CSP.
+  GitHub Pages sends its own `X-Frame-Options: deny`, which covers the same ground for this threat; the
+  Firebase header keeps `frame-ancestors` either way.
+- **`report-uri`** is header-only, and on the Spark plan the Cloud Function behind `/csp-report` cannot
+  be deployed anyway. Reporting stays a Firebase-hosting feature.
+
+The meta tag goes **first in `<head>`** — a CSP in `<meta>` governs only what is fetched after it
+parses, so anything above it is unprotected. `sync-csp.js` grows a second target and `csp.test.js` a
+third drift guard. The inline-script hashes are unaffected by the insertion (`inlineScriptHashes` scans
+`<script>` blocks only), so there is no chicken-and-egg between the tag and its own content.
+
+Promoting `firebase.json` from Report-Only to enforcing is a **separate** decision and is NOT part of
+this: Pages is the deployment that needs covering, and the enforcing policy has months of E2E behind it
+there. The Firebase copy stays Report-Only until someone actually deploys to it.
+
+#### 4. "What kind is this view?" has six answers
+
+`SchemaNormalize.viewKind` documents itself as *"THE discriminator — every consumer that used to work the
+answer out by probing for a `calendar`/`rotation`/… key asks this instead"*, and `view-kind.test.js`
+says app-core's seven classifiers were migrated to it. **Four of the seven were.** The vocabulary is
+consistent — `schema.schema.json`, `Migrations.kindOf` and `VIEW_KINDS` all agree on the twelve kinds —
+but the dispatch is not:
+
+| Site | Rule |
+|---|---|
+| `Migrations.kindOf` | canonical derivation |
+| `SchemaNormalize.viewKind` | `declared ?? kindOf` — the documented discriminator |
+| root `viewKind` computed | `declared ??` **its own** 8-branch sniff chain, missing `stats`/`scan`/`timeline` |
+| `isPivot/Rsvp/Stats/ScanName` | delegate to `viewKind` — correct |
+| `isCalendarName`, `isRotationName` | still probe `v.calendar` / `v.rotation` |
+| `isDocViewName` | `markdown && !sources` |
+| `canAccessPage`, `canAccessNavId`, `currentPage` | `typeof markdown === 'string'` |
+| `Embeds.resolveEmbed` | `markdown && !filterBy && name` |
+| embed-view `kind` computed | chains the `is*` predicates, renaming `page` to `doc` |
+
+**The obvious unification is wrong, and that is the finding.** `isDocViewName`'s `!sources` looks like
+drift — `task_doc` in `demo-schema.json` carries `kind: "page"` *and* `sources`, so the discriminator and
+the predicate disagree on a shipped schema. It is not drift. `{{self}}` expands to `{{view:<own name>}}`,
+so `!sources` is exactly what makes `{{self}}` render **the grid** rather than five nested copies of the
+prose before the `depth > 4` cap stops it. Replacing it with `kind === 'page'` would break the feature.
+
+So the work is not "make them all call `viewKind`". It is to **name the distinction that is currently
+spelled as an anonymous shape test**, and keep the two questions apart:
+
+- *What does this view RENDER?* — `viewKind`. `isCalendarName`/`isRotationName` and the root `viewKind`
+  fallback chain should ask it and stop sniffing. The root chain is a second implementation of a
+  function that already exists, and its omission of `stats`/`scan`/`timeline` is a live trap for any
+  schema that reaches it without a stored `kind`.
+- *Does this view render its own prose above its grid?* — today's `!sources` test, renamed to say so
+  (`rendersOwnProse`), commented with the `{{self}}` invariant, and **tested**: nothing currently pins
+  the behaviour that makes `{{self}}` work.
+
+One real gap falls out: `access:` is validated for **any** markdown view and honoured at nav and in the
+doc-embed branch, but a `markdown`+`sources` view embedded elsewhere renders its grid without consulting
+it. Severity is low — Firestore rules govern the rows, and the *body* is not rendered on that path at
+all, so nothing leaks — but an author cannot see that their `access:` is partly inert. Either honour it
+on both paths or reject it on that shape at load.
+
+Also: `schema-normalize.js`'s header lists **nine** kinds; there are twelve.
+
+#### 5. `isUnionView` is stubbed `false` with three live consumers
+
+#57 stubbed it to `return false`. The three branches that render against it are still there
+(`app-core.js` header list, two in `ui.html`), and `field.source` is still shipped **and translated** in
+both `app-lang-en.json` and `app-lang-fi.json`. The `_source` plumbing itself is live and load-bearing —
+`tableForCol` and `colIsMirrorForTable` both depend on it — so only the user-facing column is dead.
+
+The decision this needs is not technical: either a union view should show which table a row came from,
+or it should not. What it must not stay is a predicate named like a question with a hardcoded answer.
+Deleting the three branches and the two strings is the cheaper half and is what this proposes; restoring
+the column is a feature and belongs in its own entry if anyone wants it.
+
+#### 6. `app-core.js` is a monolith
+
+8,669 lines, 600 KB, and essentially one function: `createVueApp()` spans 194–8631, whose `methods`
+object alone is ~5,700 lines. That object is where finding 1 hid — a duplicate key in a literal too
+large for anyone to read as a literal.
+
+This is not a rewrite, and it is explicitly **not** ranked above the five findings before it. The
+extraction series already running (`columns.js`, `rows.js`, `access-features.js`, `schema-normalize.js`,
+`list-access.js`) is the right shape and is visibly working: the extracted modules are the healthiest,
+best-tested code in the repo. What this entry adds is the **next seams**, each already cohesive inside
+`methods` and each a pure module with a Node test:
+
+| Seam | ~lines | Notes |
+|---|---|---|
+| calendar-feed publishing | 300 | `publishFeed`, `publishPerPersonFeed`, `_publishOneSubscriber`, `_sweepFeedsOnBoot` — already leans on `feeds.js` |
+| export / import | 500 | `exportData`, `applyBundle`, `_gatherMembers`, `_applyMembers`, `_downloadFileSet` |
+| the lookup / ref editor | 250 | `addRefParent`, `moveRefChild`, `renameRefParent`, … — a self-contained editor |
+| profiles + stored assets | 200 | `loadMyProfile`, `saveAsset`, `_resizeImageFile`, `ensureAssets` |
+| the brand-palette editor | 100 | `themeColor`, `setThemeColor`, `_persistTheme`, `applyPalette` |
+
+Do them one at a time, each with its own test file, in that order — feeds first because it is the most
+self-contained and already has a module to grow into.
+
 ### RSVP attendance verification *(schema pattern, not code)*
 
 "Did the people who signed up actually turn up?" — a verifier marks attendance, and only verified
@@ -1967,6 +2114,19 @@ Recorded so the roadmap shows what graduated rather than silently shrinking.
   `v-progress-linear` and pulled in nothing — which is the evidence this trade is affordable.
 
 ## Suggested order
+
+**The code-review findings come first, and not because they are features.** Three of the six are
+defects rather than proposals — a clipboard button that lies about having copied, a source file that
+`grep` declines to read, and a deployed site with no Content-Security-Policy in any mode — and each is
+wrong right now rather than missing. They are ranked inside their own entry; what matters here is that
+they sit *above* everything below, including the locale-aware date label, which was first on merit until
+this pass found things that are not merely wrong on screen but, in the CSP case, wrong in production.
+
+The other three findings are not urgent and are ranked accordingly: the view-kind unification is real
+cleanup with a real trap inside it (the `{{self}}` invariant that looks like drift and is not), the
+`isUnionView` stub is a decision rather than a task, and the `app-core.js` split is a series to continue
+rather than a thing to finish.
+
 
 TWO entries here are PARTLY built, and that matters because a half-built mechanism is the only thing on
 this page that can mislead: it looks finished from the outside. Only one of the two is ranked. **Scan**'s
