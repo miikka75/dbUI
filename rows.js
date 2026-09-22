@@ -257,7 +257,12 @@
     var memo = label ? Object.create(null) : null;
     var rendered = function (col, v) {
       if (!label) return '';
-      var k = col + ' ' + (Array.isArray(v) ? v.join('') : v);
+      // The separators are ESCAPES, never the literal bytes. Written literally (as they were until a
+      // review noticed) the file stops being text to the tooling: `file` calls it data and `grep`
+      // refuses to search it, so it drops out of every scan silently -- which is how it went
+      // unexamined. dev/test/source-hygiene.test.js now keeps every tracked source readable.
+      // U+0000/U+0001 are the delimiters because no column name or list value can contain them.
+      var k = col + '\u0000' + (Array.isArray(v) ? v.join('\u0001') : v);
       if (!(k in memo)) memo[k] = fold(label(col, v));
       return memo[k];
     };
