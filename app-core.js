@@ -1006,8 +1006,25 @@ function createVueApp() {
           // A lookup/ref TABLE name is also accepted: expose the distinct values across its non-system columns
           // so a 2-D ref lane (its group + value dimensions) is fully translatable via the same list.<name>.<value> keys.
           if (SCHEMA[name]) {
-            var rcols = SCHEMA[name].columns || {}, seenv = {};
-            (dc[name] || []).forEach(function(r) { for (var c in r) { if (_untranslatableValueCol(rcols, c)) continue; var v = r[c]; if (v && !seenv[v]) { seenv[v] = 1; keys.push('list.' + name + '.' + v); } } });
+            var tdef = SCHEMA[name], rcols = tdef.columns || {}, seenv = {};
+            var push = function(v) { if (v && !seenv[v]) { seenv[v] = 1; keys.push('list.' + name + '.' + v); } };
+            // The HANDLE a row is known by in its identity dimension is DERIVED (Columns.rowHandle), so
+            // it is not among the cell values swept beside it -- and the cell that would override it is
+            // `hidden`, which _untranslatableValueCol skips by design. Both blind spots meet on the same
+            // row, so the one value a picker actually DISPLAYS was the one value nobody could translate:
+            // a position typed in the app rendered its raw `<organization>_<calling>` handle in every
+            // dropdown, with nothing in the Languages editor to fix it, while the positions that arrived
+            // in an example bundle showed their shipped labels. The handle became derived (so that a row
+            // added in the app is linkable at all) and this sweep did not follow it.
+            //
+            // lookupIdentityCol answers null when no column asks for a dimension or when they disagree,
+            // which is the same fail-closed answer the account picker takes: offering a key for the
+            // wrong dimension would pad the editor with labels nothing ever renders.
+            var idCol = Columns.lookupIdentityCol(SCHEMA, name), order = idCol ? getColumns(name) : null;
+            (dc[name] || []).forEach(function(r) {
+              for (var c in r) { if (_untranslatableValueCol(rcols, c)) continue; push(r[c]); }
+              if (idCol) push(Columns.rowHandle(tdef, order, r, idCol));
+            });
           }
         });
         var views = schema.views || {};

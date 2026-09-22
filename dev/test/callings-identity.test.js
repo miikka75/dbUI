@@ -164,3 +164,75 @@ describe('a calling outside the bishopric reaches its own card', () => {
     });
   });
 });
+
+// --- The handle must also be TRANSLATABLE ---------------------------------------------------------
+//
+// A derived handle is what every picker DISPLAYS, so it is the value that needs a label. Two blind
+// spots met on it: the Languages editor sweeps a lookup's stored CELL values, the handle is derived
+// rather than stored, and the `slug` cell that could override it is `hidden` — which that sweep skips
+// on purpose, so that ref_chores.points never shows up as a vocabulary. The result was invisible in
+// exactly the way #200 was: positions that arrived in the example bundle carried shipped labels, while
+// a position TYPED IN THE APP rendered its raw `<organization>_<calling>` in every dropdown, with no
+// key in the Languages editor to fix it. The bundle's own rows could never catch it.
+const { appCoreFn } = require('./app-core-fn');
+
+const offeredKeys = (schemaData, dataCache) => appCoreFn('schemaTranslationKeys', {
+  SCHEMA: schemaData.tables,
+  Columns,
+  getColumns: (t) => Object.keys((schemaData.tables[t] || {}).columns || {}),
+  colName: Columns.colName,
+  VIEWS: {},
+  _untranslatableCol: () => false,
+  // The real predicate, because the hidden-column skip is half of what this test is about.
+  _untranslatableValueCol: (cols, name) => {
+    if (name === 'id' || name === 'created_at' || name === 'updated_at') return true;
+    const d = cols && cols[name];
+    if (d && typeof d === 'object' && d.hidden) return true;
+    return !!{ number: 1, date: 1, owner: 1, url: 1, image: 1 }[(typeof d === 'string') ? d : (d && d.type)];
+  }
+}).call({ schemaData, listsCache: {}, lockedListValues: {}, dataCache, pageCache: {} });
+
+// The example ships its catalogue as a flat array; the loader keys columns by name.
+const schemaData = JSON.parse(JSON.stringify(schema));
+for (const tv of Object.values(schemaData.tables))
+  if (Array.isArray(tv.columns))
+    tv.columns = Object.fromEntries(tv.columns.map((c) => [c.name, c]));
+
+describe('every position the catalogue names can be given a label', () => {
+  it('offers a list.<table>.<handle> key for each row, not just for its two dimensions', () => {
+    const keys = new Set(offeredKeys(schemaData, { ref_callings: catalogue }));
+    const missing = positions.filter((h) => !keys.has('list.ref_callings.' + h));
+    assert.deepEqual(missing, [], 'these positions render as raw handles in every picker, and the ' +
+      'Languages editor offers nothing to translate them with');
+    // The dimensions stay offered: a board lane and the organization columns label through them.
+    assert.ok(keys.has('list.ref_callings.bishopric'));
+    assert.ok(keys.has('list.ref_callings.first_counselor'));
+  });
+
+  it('covers a row TYPED IN THE APP — no slug, a pair the bundle never shipped', () => {
+    // The regression, reduced: `relief_society_third_counselor` was added in the Lookup editor, so it
+    // carries no handle cell and no shipped translation. Its two dimensions were offered and it was
+    // not, which is why the dropdown showed Finnish for every other Relief Society row.
+    const typed = { id: 'new1', organization: 'relief_society', calling: 'third_counselor', position: '999' };
+    const keys = new Set(offeredKeys(schemaData, { ref_callings: catalogue.concat([typed]) }));
+    assert.ok(keys.has('list.ref_callings.relief_society_third_counselor'));
+    assert.ok(keys.has('list.ref_callings.third_counselor'), 'the dimension was never the missing half');
+  });
+
+  it('a stored slug OVERRIDE is offered too, though the column is hidden', () => {
+    const odd = { id: 'new2', organization: 'ward', calling: 'clerk', slug: 'ward_clerk_finance' };
+    const keys = new Set(offeredKeys(schemaData, { ref_callings: catalogue.concat([odd]) }));
+    assert.ok(keys.has('list.ref_callings.ward_clerk_finance'));
+    assert.ok(!keys.has('list.ref_callings.ward_clerk'), 'the cell is the override, not a second name');
+  });
+
+  it('offers no handle key when the referring columns disagree about the dimension', () => {
+    // lookupIdentityCol answers null, and fail-closed is the same answer the account picker gives:
+    // keys for a dimension nothing renders would pad the editor with labels that never appear.
+    const forked = JSON.parse(JSON.stringify(schemaData));
+    forked.tables.meeting_agenda.columns.presiding.valueCol = 'calling';
+    const keys = new Set(offeredKeys(forked, { ref_callings: catalogue }));
+    assert.ok(!keys.has('list.ref_callings.bishopric_bishop'));
+    assert.ok(keys.has('list.ref_callings.bishop'), 'the dimensions are still swept');
+  });
+});
