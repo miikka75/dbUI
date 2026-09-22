@@ -472,17 +472,21 @@ function createVueApp() {
         // The chain below is the fallback for a schema that has not been through the migration -- a
         // fixture built by hand in a test, say. It is also what the migration derives from, so the two
         // cannot disagree.
-        var declared = (VIEWS[ct] || {}).kind;
-        if (declared) return declared;
-        if (this.isCalendarView) return 'calendar';
-        if (this.isRotationView) return 'rotation';
-        if (this.isPivotView) return 'pivot';
-        if (this.isRsvpView) return 'rsvp';
-        if (this.isBoardView) return 'board';
-        if (this.isFormView) return 'form';
-        if (this.currentPage) return 'page';
-        if (this.isDataView) return 'data';
-        return null;
+        // ONE discriminator. `currentKind` IS SchemaNormalize.viewKind: it reads the stored `kind` and
+        // derives one through Migrations.kindOf when the document carries none, so it already answers
+        // for every kind in the vocabulary.
+        //
+        // What stood here was a second implementation of that -- `VIEWS[ct].kind` followed by an
+        // eight-branch sniff chain -- and it could only ever be WORSE than the function it duplicated,
+        // because every branch of the chain consulted `currentKind` anyway. It also predated three
+        // kinds. An un-migrated `stats`, `scan` or `timeline` view fell past every branch (none matched,
+        // `currentPage` was null, and `isDataView` is false once currentKind says something other than
+        // 'data') and returned null -- no component, a BLANK SCREEN, not a mis-rendered one.
+        var k = this.currentKind;
+        if (k) return k;
+        // Not a view at all: a bare TABLE opened from nav renders through the data view. isDataView
+        // carries that rule (and the leading-underscore exclusion), so ask it rather than restate it.
+        return this.isDataView ? 'data' : null;
       },
       viewComponent: function() { return (window.VIEW_KINDS || {})[this.viewKind] || null; },
       // Background for the open view, bound onto the dispatched component in ui.html. Every view kind's
@@ -2284,8 +2288,14 @@ function createVueApp() {
           names.forEach(function(n) { self.publishFeed(n).catch(function() {}); });
         }, 2000);
       },
-      isCalendarName: function(name) { return !!(VIEWS[name] && VIEWS[name].calendar); },
-      isRotationName: function(name) { return !!(VIEWS[name] && VIEWS[name].rotation); },
+      // These ask the discriminator, like their four siblings below. They used to probe `v.calendar` /
+      // `v.rotation` directly -- the exact "work the answer out by sniffing for a body key" that
+      // SchemaNormalize.viewKind exists to replace, and that view-kind.test.js already claimed all
+      // seven classifiers had stopped doing. Four had. A body probe disagrees with the discriminator
+      // wherever a schema carries a hand-written `kind` (schema.schema.json documents that as
+      // supported), and it is one more place to edit for a kind that has not been invented yet.
+      isCalendarName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'calendar'; },
+      isRotationName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'rotation'; },
       isPivotName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'pivot'; },
       // Build a pivot view's grid: resolve its source (a table or view) through the embed row pipeline
       // (so filters/aggregates/computed columns apply), then Pivot.build cross-tabs it. Pure module +
@@ -2366,9 +2376,19 @@ function createVueApp() {
       // ACCESS-GATED server body -- see embed-view's doc branch: it hides the block via canAccessPage
       // and pulls pageCache (loadPage, server-filtered) rather than the world-readable schema seed.
       // A PURE doc-view (markdown page, no own grid). A view that also has `sources` is a data-view whose
-      // markdown is a self-embedding layout wrapper -- its {{self}} -> {{view:self}} must render the GRID,
-      // not recurse into the markdown as a doc. So exclude sourced views here (they embed as `data`).
-      isDocViewName: function(name) { var v = VIEWS[name]; return !!(v && typeof v.markdown === 'string' && !(v.sources && v.sources.length)); },
+      // NOT the same question as `viewKind(v) === 'page'`, and the difference is load-bearing.
+      //
+      // `kind` says what a view IS. This says whether an EMBED of it renders its prose. A view with
+      // BOTH `markdown` and `sources` (demo-schema's `task_doc`) is a `page` by kind, and its
+      // {{self}} token expands to {{view:task_doc}} -- an embed of itself. If that embed rendered the
+      // prose again it would recurse, five levels deep before embed-view's `depth > 4` cap stopped it,
+      // instead of doing the one thing {{self}} means: render MY GRID, here.
+      //
+      // So the sourced case answers false and embeds as `data`. Renamed from `isDocViewName` because
+      // that name read like a kind test, which is precisely the mistake a reader makes here -- the
+      // discriminator and this predicate disagree on a shipped schema, and the discriminator is not
+      // the one that is wrong. dev/test/view-kind.test.js pins both halves.
+      rendersOwnProse: function(name) { var v = VIEWS[name]; return !!(v && typeof v.markdown === 'string' && !(v.sources && v.sources.length)); },
       // Build the self-service RSVP list (upcoming events + the current user's own response per event +
       // tallies), via the pure Rsvp module. Owner identity = the auth email (matches the firestore rules).
       // The response<->event link is derived (not configured): the responses table's `ref` column pointing
@@ -7138,7 +7158,18 @@ function createVueApp() {
       isStats: function() { return this.type === 'view' && !!(appInstance && appInstance.isStatsName(this.name)); },
       isScan: function() { return this.type === 'view' && !!(appInstance && appInstance.isScanName(this.name)); },
       // A doc-view embedded inside another page (only via the no-spec page path; the spec path pre-tags kind='doc').
-      isDoc: function() { return !this.spec && this.type === 'view' && !!(appInstance && appInstance.isDocViewName(this.name)); },
+      isDoc: function() { return !this.spec && this.type === 'view' && !!(appInstance && appInstance.rendersOwnProse(this.name)); },
+      // `kind` HERE is a rendering mode -- which embed body to draw -- and is deliberately not the
+      // schema's view kind, though it borrows most of its words. The one that differs is the one that
+      // matters: the schema kind `page` maps to `doc` only when the view renders its own prose, and a
+      // SOURCED page (demo-schema's task_doc) embeds as `data` instead, which is what makes its {{self}}
+      // token draw the grid rather than recurse. So `doc` is not a synonym for `page` and must not be
+      // renamed into one. dev/test/view-kind.test.js pins both vocabularies and the gap between them.
+      //
+      // board, form and timeline have no branch in the template below, so they fall through to `data`:
+      // embedding a kanban renders a table of its rows. All three components DO accept an `embed` prop,
+      // so the gap is in the dispatch, not in them -- recorded in ROADMAP.md and pinned by that same
+      // test, so it stays a known answer rather than a surprise.
       kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : this.isRsvp ? 'rsvp' : this.isStats ? 'stats' : this.isScan ? 'scan' : this.isDoc ? 'doc' : 'data'); },
       // Render blocks for a doc embed. Spec path carries its own blocks (built from the schema seed by
       // resolveEmbed); the page path builds them here from the ACCESS-GATED body: hidden entirely unless
