@@ -76,7 +76,7 @@ const rest = (path: string, init: RequestInit = {}) =>
 // the origins we cannot enumerate. The token-gated GET is what actually protects anything.
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'content-type',
   'Access-Control-Max-Age': '86400'
 };
@@ -109,14 +109,17 @@ Deno.serve(async (req: Request) => {
     // Constant-time-ish equality is overkill here (the token gates a violation list, not data), but an
     // EMPTY token must never be a valid one -- an unset secret would otherwise publish the log.
     if (!TOKEN || url.searchParams.get('token') !== TOKEN) {
-      return new Response('Forbidden', { status: 403 });
+      return new Response('Forbidden', { status: 403, headers: CORS });
     }
     const res = await rest('csp_reports?select=directive,blocked_uri,sample_document,count,last_seen&order=count.desc');
-    if (!res.ok) return new Response('Storage error', { status: 502 });
+    if (!res.ok) return new Response('Storage error', { status: 502, headers: CORS });
     const violations = await res.json() as Array<{ count: number }>;
     const total = violations.reduce((n, v) => n + Number(v.count || 0), 0);
+    // CORS on the READ too, not just the write. Without it the log is curl-only: a browser fetch is
+    // refused for want of Access-Control-Allow-Origin, which is exactly how the Settings panel proposed
+    // in ROADMAP.md would fail, and how reading it from the app's own console fails today.
     return new Response(JSON.stringify({ total, violations }), {
-      status: 200, headers: { 'Content-Type': 'application/json' }
+      status: 200, headers: Object.assign({ 'Content-Type': 'application/json' }, CORS)
     });
   }
 

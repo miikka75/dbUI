@@ -14,9 +14,20 @@
 // takes over live. Without it every boot-time violation — the interesting ones, since a blocked script
 // is what a bad policy actually does — would happen before any listener existed.
 //
-// THE BLIND SPOT, stated because it cannot be fixed from here: a violation OF connect-src may not be
-// reportable, because the report is itself a connection. Those are the violations most visible in
-// DevTools anyway, so the gap is the least costly one available.
+// TWO BLIND SPOTS, both stated because neither can be fixed from here.
+//
+// 1. A violation OF connect-src may not be reportable, because the report is itself a connection.
+//    Those are the violations most visible in DevTools anyway, so it is the least costly gap.
+//
+// 2. CONTENT BLOCKERS BLOCK THIS. uBlock Origin and friends match URLs that look like telemetry --
+//    and a path ending `/csp-report` looks exactly like telemetry -- so the POST fails with
+//    net::ERR_BLOCKED_BY_CLIENT before it reaches the network. Observed in the browser this was
+//    developed against. Renaming the endpoint would buy a round of cat-and-mouse and no principle,
+//    so it is not attempted.
+//
+//    What it means for the data: the violation log is a SAMPLE, not a census, and it is biased --
+//    it under-represents exactly the users most likely to run extensions that inject into pages
+//    and trip a policy in the first place. A quiet log is evidence, never proof.
 (function(root) {
 
   // One report is one distinct violation. A directive/URI pair is the same key the collectors use
