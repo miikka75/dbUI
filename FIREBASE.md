@@ -19,7 +19,10 @@ and write what, and `storage.rules` does the same for uploaded images.
 
 1. Create project at [console.firebase.google.com](https://console.firebase.google.com)
 2. Enable Firestore Database + Google Auth provider
-3. Add your domain to Authentication → Authorized domains (e.g. `127.0.0.1`)
+3. Add your domain to Authentication → Authorized domains — **every origin the app is served from**,
+   e.g. `127.0.0.1` for local dev and `dbui.ddns.net` for the deployed site. Sign-in fails with
+   `auth/unauthorized-domain` from an origin that is not listed, so a change of hosting domain has to
+   be made here too.
 4. Register Web app → copy config JSON
 5. Firestore → Rules → paste contents of `firestore.rules` → Publish
 6. Run the app, select Firebase mode, paste config → Sign in with Google
@@ -96,3 +99,8 @@ User-side fixes (easiest first):
 Robust fix (no per-user setting): serve the auth handler **same-origin** with the app — host on
 **Firebase Hosting** (or a custom domain whose `authDomain` matches the app's origin). Then the auth
 popup is first-party and no third-party cookies are involved.
+
+> A custom domain on **GitHub Pages** does *not* buy this. `dbui.ddns.net` changes where the app is
+> served, not where the handler is: `authDomain` stays `<projectId>.firebaseapp.com`, which is still a
+> third party to it. Only a host that can serve Firebase's `/__/auth/*` handler under the app's own
+> origin — Firebase Hosting with that domain attached — makes the popup first-party.
