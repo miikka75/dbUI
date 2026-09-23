@@ -4078,59 +4078,31 @@ function createVueApp() {
       // Move a child value up/down WITHIN its group (swap position with the adjacent same-group sibling).
       moveRefChild: function(item, dir) {
         if (!this.refReorderable || !this.canEditCurrentRef) return;
-        var self = this, table = this.currentRefTable, group = this._refGroupRows(item[this.refParentCol]);
-        var i = group.findIndex(function(r) { return r.id === item.id; }), j = i + dir;
-        if (i < 0 || j < 0 || j >= group.length) return;
-        // Move within the ARRAY, then renumber, the way moveRowPosition and moveRefGroup already do.
-        // This used to SWAP the two rows' `position` values, which moves nothing when neither has one:
-        // on a roster whose rows arrived by import or seeding rather than through these very buttons,
-        // every position is empty, the swap wrote undefined over undefined, and the arrows did nothing.
-        //
+        var group = this._refGroupRows(item[this.refParentCol]);
+        var i = group.findIndex(function(r) { return r.id === item.id; });
+        var reordered = Reorder.move(group, i, dir);
+        if (!reordered) return;
         // Renumbered across the WHOLE table, not 1..n within the group: moveRefGroup numbers globally,
-        // so per-group numbering would give every group its own 1..n and collide them.
-        var reordered = group.slice();
-        reordered.splice(j, 0, reordered.splice(i, 1)[0]);
-        var inGroup = {}; group.forEach(function(r) { inGroup[r.id] = 1; });
-        var gi = 0, now = new Date().toISOString();
-        // Walk the table in DISPLAY order, substituting the group's rows in their new order — which
-        // keeps this group occupying exactly the slots it already held.
-        Undo.action('reorder', function() {
-        self.refTableData.forEach(function(r, k) {
-          var row = inGroup[r.id] ? reordered[gi++] : r;
-          var np = String(k + 1);
-          if (String(row.position) === np) return;        // already right: no write, no churn
-          var was = row.position;
-          row.position = np; row.updated_at = now;
-          Undo.record({ table: table, part: 'active',
-            forward: { type: 'put', id: row.id, row: { id: row.id, position: np } },
-            inverse: { type: 'put', id: row.id, row: { id: row.id, position: was } } });
-          // position-only write: reordering says nothing about the row's other columns, so it must not
-          // carry (and overwrite with) our copy of them.
-          Writes.putRow(table, { id: row.id, position: np, updated_at: now }, 'active');
-        });
-        });
+        // so per-group numbering would give every group its own 1..n and collide them. Walk the table
+        // in display order, substituting this group's rows in their new order -- which keeps the group
+        // occupying exactly the slots it already held.
+        var inGroup = {};
+        group.forEach(function(r) { inGroup[r.id] = 1; });
+        var gi = 0;
+        var order = this.refTableData.map(function(r) { return inGroup[r.id] ? reordered[gi++] : r; });
+        this._writeReorder(this.currentRefTable, Reorder.renumber(order));
       },
       // Move a whole group up/down (swap it with the adjacent group), then renumber every row sequentially.
       moveRefGroup: function(parentVal, dir) {
         if (!this.refReorderable || !this.canEditCurrentRef) return;
-        var self = this, table = this.currentRefTable, nodes = this.refTree.slice();
-        var i = nodes.findIndex(function(n) { return n.value === parentVal; }), j = i + dir;
-        if (i < 0 || j < 0 || j >= nodes.length) return;
-        var t = nodes[i]; nodes[i] = nodes[j]; nodes[j] = t;
-        var pos = 1, now = new Date().toISOString();
-        Undo.action('reorder', function() {
-        nodes.forEach(function(n) { n.children.forEach(function(c) { var r = c.row;
-          if (Number(r.position) !== pos) {
-            var was = r.position;
-            r.position = String(pos); r.updated_at = now;
-            Undo.record({ table: table, part: 'active',
-              forward: { type: 'put', id: r.id, row: { id: r.id, position: r.position } },
-              inverse: { type: 'put', id: r.id, row: { id: r.id, position: was } } });
-            Writes.putRow(table, { id: r.id, position: r.position, updated_at: now }, 'active');
-          }
-          pos++;
-        }); });
-        });
+        var i = this.refTree.findIndex(function(n) { return n.value === parentVal; });
+        // Reorder.move splices rather than swapping, which the original did. For the adjacent move an
+        // arrow makes (dir is always +/-1) the two are the same result.
+        var nodes = Reorder.move(this.refTree, i, dir);
+        if (!nodes) return;
+        var order = [];
+        nodes.forEach(function(n) { n.children.forEach(function(c) { order.push(c.row); }); });
+        this._writeReorder(this.currentRefTable, Reorder.renumber(order));
       },
       refChildAtEdge: function(item, dir) { var g = this._refGroupRows(item[this.refParentCol]), i = g.findIndex(function(r) { return r.id === item.id; }); return dir < 0 ? i <= 0 : i >= g.length - 1; },
       refGroupAtEdge: function(parentVal, dir) { var n = this.refTree, i = n.findIndex(function(g) { return g.value === parentVal; }); return dir < 0 ? i <= 0 : i >= n.length - 1; },
@@ -4819,31 +4791,32 @@ function createVueApp() {
         cfg.mode = this.mode;
         this._saveFolderConfig(cfg, viewName);
       },
+      // The three reorder buttons all end the same way -- number the final display order 1..n and
+      // write only what changed -- which is Reorder.renumber, and the writing is _writeReorder. What
+      // differs between them, and all that is left here, is how the final order is built.
       moveRowPosition: function(item, dir) {
         if (!this.isReorderable) return;
-        var self = this, table = this.currentTable;
-        var ordered = this.sortedData.slice();
-        var i = ordered.findIndex(function(r) { return r.id === item.id; });
-        var j = i + dir;
-        if (i < 0 || j < 0 || j >= ordered.length) return;
-        ordered.splice(j, 0, ordered.splice(i, 1)[0]); // move item to its new slot
-        // One action: a single arrow press renumbers every row between the old slot and the new one,
-        // and putting one of them back is not a reorder.
+        var i = this.sortedData.findIndex(function(r) { return r.id === item.id; });
+        var ordered = Reorder.move(this.sortedData, i, dir);
+        if (!ordered) return;                       // an edge: the arrow does nothing
+        this._writeReorder(this.currentTable, Reorder.renumber(ordered));
+      },
+
+      // One action: a single arrow press renumbers every row between the old slot and the new one, and
+      // putting one of them back is not a reorder. The write is position-only -- reordering says
+      // nothing about a row's other columns, so it must not carry (and overwrite with) our copy of them.
+      _writeReorder: function(table, changes) {
+        if (!changes.length) return;
+        var now = new Date().toISOString();
         Undo.action('reorder', function() {
-        ordered.forEach(function(r, k) {
-          var np = k + 1;
-          if (Number(r.position) !== np) {
-            var was = r.position;
-            r.position = String(np); // keep as string — sortedData sorts via localeCompare (number would throw)
-            r.updated_at = new Date().toISOString();
+          changes.forEach(function(c) {
+            c.row.position = c.to;                  // keep as string: sortedData sorts via localeCompare
+            c.row.updated_at = now;
             Undo.record({ table: table, part: 'active',
-              forward: { type: 'put', id: r.id, row: { id: r.id, position: r.position } },
-              inverse: { type: 'put', id: r.id, row: { id: r.id, position: was } } });
-            // position-only write: reordering says nothing about the row's other columns, so it must not
-            // carry (and overwrite with) our copy of them.
-            Writes.putRow(table, { id: r.id, position: r.position, updated_at: r.updated_at }, 'active');
-          }
-        });
+              forward: { type: 'put', id: c.id, row: { id: c.id, position: c.to } },
+              inverse: { type: 'put', id: c.id, row: { id: c.id, position: c.from } } });
+            Writes.putRow(table, { id: c.id, position: c.to, updated_at: now }, 'active');
+          });
         });
       },
 

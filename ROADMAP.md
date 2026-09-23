@@ -193,7 +193,7 @@ Two guards now cover the class rather than the instance: no root member may retu
 predicate with a hardcoded answer is either dead or a flag in disguise), and no offered translation key
 may go unasked-for. Both catch an injected violation.
 
-#### 6. `app-core.js` is a monolith *(series started: `brand.js` extracted)*
+#### 6. `app-core.js` is a monolith *(series started: `brand.js`, then `reorder.js`)*
 
 8,669 lines, 600 KB, and essentially one function: `createVueApp()` spans 194–8631, whose `methods`
 object alone is ~5,700 lines. That object is where finding 1 hid — a duplicate key in a literal too
@@ -235,6 +235,33 @@ exist for exactly that, and nothing had ever tested them).
 So the ordering rule that came out of it: **rank a seam by how much of it is pure, not by how big it
 is.** On that measure the remaining order is the lookup/ref editor, then profiles + assets, then
 export/import, and feeds last — the reverse of where it started.
+
+**The second cut was not a move at all, and that is the better kind.** Going after the lookup/ref
+editor next turned up something more useful than a seam: `moveRowPosition`, `moveRefChild` and
+`moveRefGroup` each ended with the *same* block — walk the final display order, number it 1..n, write
+only what changed, record an undo entry per row. Three copies, and they had already drifted:
+
+- `moveRefChild` compared old and new positions as **strings**, the other two as **numbers**. A stored
+  `'01'` was therefore rewritten to `'1'` by one path and left alone by the other two — and `'01'`
+  sorts before `'1'` under `localeCompare`, which is how `sortedData` orders, so the display order
+  stopped matching the stored one.
+- an older `moveRefChild` **swapped** the two rows' position values rather than renumbering, which
+  moves nothing when neither row has a position — every row of a roster that arrived by import or
+  seeding. The arrows did nothing, silently. The comment recording that fix is what pointed at the
+  duplication.
+
+`reorder.js` owns the arithmetic (`move`, `renumber`) and one new root method, `_writeReorder`, owns
+the undo-and-write. 69 lines of app-core deleted for 42 added, and the three paths now agree by
+construction rather than by three people remembering the same rule.
+
+**Characterisation tests first**, which is the part worth copying next time: `dev/test/reorder.test.js`
+was written against the *original* implementations and had to pass before `reorder.js` existed. A
+reorder writes every row between the old slot and the new one, so a refactor that quietly changed which
+rows get written would not have shown up until somebody's roster came back in a different order.
+
+So the rule gains a second half: **prefer a seam where the duplication is already costing something.**
+A pure move buys tests; removing a triplicated rule buys tests *and* deletes the next bug. Remaining:
+the ref editor's own writes, profiles + assets, export/import, feeds.
 
 ### RSVP attendance verification *(schema pattern, not code)*
 
