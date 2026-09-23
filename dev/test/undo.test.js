@@ -352,9 +352,13 @@ describe('undo — the row lifecycle', () => {
     const rows = [{ id: 'a', position: '1' }, { id: 'b', position: '2' }, { id: 'c', position: '3' }];
     const c = capture();
     try {
-      appCoreFn('moveRowPosition', {
-        Writes: { putRow: () => Promise.resolve() }
-      }).call({ isReorderable: true, currentTable: 'notes', sortedData: rows }, rows[2], -1);
+      // moveRowPosition builds the new order; _writeReorder records and writes it. Lift both, so this
+      // still measures the shipped undo records rather than a stub standing in for them.
+      const Writes = { putRow: () => Promise.resolve() };
+      appCoreFn('moveRowPosition', { Writes }).call({
+        isReorderable: true, currentTable: 'notes', sortedData: rows,
+        _writeReorder: appCoreFn('_writeReorder', { Writes }),
+      }, rows[2], -1);
     } finally { c.restore(); }
 
     assert.ok(c.ops.length >= 2, 'moving c up renumbers c and b, got ' + c.ops.length);
