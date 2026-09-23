@@ -29,7 +29,7 @@ Embedding is free: `embed-view` dispatches on the same classifier, so a new kind
 An entry that is PARTLY built says so in its heading and records what landed inline, rather than being
 split in two: the reasoning for what remains is the same document as the reasoning for what shipped.
 
-### Code review 2026-09-22 — seven findings, ranked *(1–5 landed; 6 is a series in progress; 7 open)*
+### Code review 2026-09-22 — seven findings, ranked *(1–5 and 7 landed; 6 is a series in progress)*
 
 The previous full-repo review was #57 (2026-07-18). This pass found no rot: 1797 unit tests pass, the
 typecheck is clean, and CI runs the rules tests, the policy differential and the emulator E2E. What it
@@ -264,7 +264,7 @@ So the rule gains a second half: **prefer a seam where the duplication is alread
 A pure move buys tests; removing a triplicated rule buys tests *and* deletes the next bug. Remaining:
 the ref editor's own writes, profiles + assets, export/import, feeds.
 
-#### 7. CSP reporting is active nowhere, and on Pages it cannot be made active the usual way
+#### 7. CSP reporting is active nowhere *(landed: the mechanism, off by default until a collector URL is set)*
 
 Finding 3 gave the deployed site an enforcing policy. It did **not** give it violation *reporting*, and
 the two are further apart than they look. Asked directly — "is reporting on, and can it be turned on" —
@@ -314,10 +314,37 @@ than reporting, taken for a reason much smaller than it.
 The policy has been stable and E2E-enforced for months, so the honest ranking is: do this before the
 next substantive edit to `csp.js`, not before the next feature.
 
-Whichever is chosen, `REPORT_URI` in `csp.js` stops being right as a relative `/csp-report`: nothing
-serves that path on Pages, and route A needs an absolute URL. It should become the deployment's
-configured collector URL, named beside `CONNECT_HOSTS` where the other per-deployment origin already
-lives.
+**Route A was built.** `csp-client.js` holds the pure part (de-duplicate by `directive + blockedURI`,
+cap at ten per page load, emit the `{"csp-report": {…}}` envelope all three collectors normalise); an
+inline listener at the top of `index.html` queues violations from before the first fetch in `<head>`,
+because a blocked boot resource is the violation worth hearing about and it happens long before any
+module exists; and `install` drains that queue and takes over live.
+
+`REPORT_URI` was left alone — it is still correct for the Firebase *header*, which is a different
+delivery with a different collector. The page's absolute URL is a new, separate constant,
+`Csp.REPORT_ENDPOINT`, sitting beside `CONNECT_HOSTS` where the other per-deployment origin lives, and
+`npm run csp:sync` bakes it into `index.html`. Keeping the two apart is what lets a deployment run the
+Firebase collector, the Supabase one, or both, without either knowing about the other.
+
+**It ships OFF**, and that is the design rather than an omission: a collector URL belongs to a
+deployment, and a default here would post one deployment's violations to somebody else's table. Turning
+it on is one line plus a sync:
+
+```js
+// csp.js
+var REPORT_ENDPOINT = 'https://<project>.supabase.co/functions/v1/csp-report';
+```
+```
+cd dev && npm run csp:sync
+```
+
+Nothing needs adding to `connect-src` for a `*.supabase.co` collector — the wildcard is already there
+for the backend. A collector anywhere else must be named in `CONNECT_HOSTS`, or the report POST is
+blocked by the very policy it is reporting on; `csp.test.js` checks exactly that whenever the endpoint
+is non-empty.
+
+The blind spot stands and cannot be closed from the page: a violation **of `connect-src`** may not be
+reportable, because the report is itself a connection.
 
 #### What is still open from this pass
 
@@ -326,8 +353,7 @@ seven entries to find out what is left.
 
 | Open | From | Size | Why it is not done |
 |---|---|---|---|
-| **CSP reporting** — listen for `securitypolicyviolation` in the page and POST to the Supabase collector | 7 | small | Needs no new infrastructure; the collector is written and free. Ranked *before the next substantive edit to `csp.js`*, not before the next feature — reporting earns its keep while a policy is changing, and this one has been stable and E2E-enforced for months. |
-| **`REPORT_URI` should be an absolute, per-deployment URL** | 7 | tiny | Falls out of the above. As a relative `/csp-report` it points at a path nothing serves on Pages. |
+| **Set `Csp.REPORT_ENDPOINT` and deploy the collector** | 7 | one line + `npm run csp:sync` | The mechanism landed; only the URL is missing, and it cannot be guessed — it belongs to the deployment. Deploy `supabase/functions/csp-report/` (free), then set the constant. |
 | **`board` / `form` / `timeline` have no embed branch** | 4 | small code, large question | Three product questions wearing one costume: does a board keep drag-between-lanes inside a document? Does a `form` in a page mean a second submit target, or the same one twice? Does a timeline embed want its own date window or the page's? The dispatch set is asserted, so this is a recorded answer rather than an accident. |
 | **`access:` on a `markdown` + `sources` view is half-honoured** | 4 | small | Honoured at nav and in the doc-embed branch, ignored when such a view is embedded elsewhere (it renders its grid, and the body — the protected part — is not rendered on that path at all, so nothing leaks). Either honour it on both paths or reject the combination at load. |
 | **The extraction series** — the ref editor's own writes, then profiles + assets, then export/import, then feeds | 6 | ongoing | Two cuts made (`brand.js`, `reorder.js`). Ranked by how much of each seam is pure and how much duplication it already costs, which is how feeds went from first to last. |

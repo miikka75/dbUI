@@ -2,7 +2,28 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-K5nimKc5PA1d4bon+V8T5tNkuLg+vgj3HPNfTDjvZo8=' https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-AVSdx90AAaaay3LyFG6mmKvAAFJJSQS7qCSLkmMSjbA=' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-v3caOW84HSIlirIqU0Yc7tCZ0R2zXs0a2qSHTHHt0ss=' https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'">
+  <!-- CSP violation reporting, installed BEFORE the first fetch below.
+       `report-uri` is header-only and a <meta> CSP ignores it, so on GitHub Pages -- which cannot send
+       a header at all -- the policy has no way to ask for reports. The page reports for itself
+       instead: this listener queues violations, and csp-client.js drains the queue and posts them once
+       the modules are up. It has to be HERE, above the preloads and the manifest, because a blocked
+       boot resource is exactly the violation worth hearing about and it happens before any module
+       exists. The endpoint is written by `npm run csp:sync`; empty means reporting is off. -->
+  <meta name="csp-report-endpoint" content="">
+  <script>
+    (function () {
+      var q = window.__cspViolationQueue = [];
+      document.addEventListener('securitypolicyviolation', function (e) {
+        if (q.length >= 50) return;   // a looping violation must not grow this without bound
+        q.push({
+          directive: e.effectiveDirective || e.violatedDirective || '?',
+          blockedURI: e.blockedURI || '',
+          documentURI: e.documentURI || location.href
+        });
+      });
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" href="./favicon.svg">
@@ -226,7 +247,7 @@
       var appModulesReady = loadScriptsOrdered([
         '/columns.js', '/access-features.js', '/list-access.js', '/list-users.js', '/calendar.js',
         '/rotation.js', '/rows.js', '/events.js', '/ics.js', '/feeds.js', '/timeline.js', '/embeds.js', '/print.js', '/pivot.js', '/rsvp.js', '/form.js', '/board.js', '/stats.js', '/scan.js',
-        '/brand.js', '/reorder.js', '/writes.js', '/undo.js', '/migrations.js', '/schema-normalize.js', '/examples.js', '/query.js',
+        '/brand.js', '/reorder.js', '/csp-client.js', '/writes.js', '/undo.js', '/migrations.js', '/schema-normalize.js', '/examples.js', '/query.js',
         '/live-sync.js'
       ]);
 

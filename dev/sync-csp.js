@@ -29,6 +29,9 @@ const KEY = 'Content-Security-Policy-Report-Only';
 // detection. Between those two constraints there is exactly one correct spot.
 const CHARSET = '<meta charset="UTF-8">';
 const META_RE = /^[ \t]*<meta http-equiv="Content-Security-Policy"[^>]*>\r?\n/m;
+// The collector URL the PAGE posts to (csp-client.js). Separate from the policy because a <meta>
+// CSP cannot carry report-uri at all - see Csp.REPORT_ENDPOINT for why the page reports for itself.
+const ENDPOINT_RE = /(<meta name="csp-report-endpoint" content=")([^"]*)(">)/;
 
 const idx = fs.readFileSync(INDEX_HTML, 'utf8');
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('base64');
@@ -80,11 +83,23 @@ let changed = 0;
     }
     out = idx.replace(CHARSET, CHARSET + '\n' + tag.replace(/\n$/, ''));
   }
+  // --- 3. the report endpoint csp-client.js posts to ---------------------------------------------
+  if (!ENDPOINT_RE.test(out)) {
+    console.error('index.html has no <meta name="csp-report-endpoint"> to write the collector URL into.');
+    process.exit(1);
+  }
+  if (Csp.REPORT_ENDPOINT.includes('"')) {
+    console.error('REPORT_ENDPOINT contains a double quote and cannot be written into an HTML attribute.');
+    process.exit(1);
+  }
+  out = out.replace(ENDPOINT_RE, (_m, a, _cur, c) => a + Csp.REPORT_ENDPOINT + c);
+
   if (out === idx) {
-    console.log('index.html CSP meta is already up to date.');
+    console.log('index.html CSP meta + report endpoint are already up to date.');
   } else {
     fs.writeFileSync(INDEX_HTML, out);
-    console.log('index.html CSP meta updated from csp.js.');
+    console.log('index.html CSP meta + report endpoint updated from csp.js'
+      + (Csp.REPORT_ENDPOINT ? '.' : ' (reporting is OFF: Csp.REPORT_ENDPOINT is empty).'));
     changed++;
   }
 }

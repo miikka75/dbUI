@@ -66,3 +66,63 @@ test('the app boots under the <meta> CSP alone, with no violations', async ({ pa
   expect(fromPage, 'securitypolicyviolation events under the meta-only policy').toEqual([]);
   expect(violations, 'console CSP errors under the meta-only policy').toEqual([]);
 });
+
+// --- Reporting, which the policy itself cannot ask for ---------------------------------------------
+//
+// `report-uri` is header-only, so under the <meta> delivery the policy has no way to request reports.
+// csp-client.js reports from the page instead. The unit tests cover the de-duplication, the cap and
+// the payload shape; what only a browser can prove is the part the unit tests have to assume: that a
+// REAL violation reaches the inline queue installed above the preloads, and that install() then drains
+// it. If the inline listener were placed too late, or the event shape differed from what fromEvent
+// reads, every unit test would still pass and nothing would ever be reported.
+test('a real violation reaches the inline queue, and install() drains it', async ({ page, metaOnlyURL }) => {
+  await page.goto(metaOnlyURL + '/');
+  await page.waitForSelector('[data-testid="setup-mode-local"], [data-testid="nav-drawer"], .v-application', { timeout: 30_000 });
+
+  // The queue must exist from the very first bytes of <head>, before anything was fetched.
+  expect(await page.evaluate(() => Array.isArray(window.__cspViolationQueue)),
+    'the inline violation queue is installed').toBe(true);
+
+  const result = await page.evaluate(async () => {
+    // Provoke a genuine script-src violation: this origin is not in the policy, so the browser refuses
+    // the load and fires securitypolicyviolation. Nothing is fetched -- it is blocked before the request.
+    window.__cspViolationQueue.length = 0;
+    const el = document.createElement('script');
+    el.src = 'https://blocked.example/evil.js';
+    document.head.appendChild(el);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const queued = window.__cspViolationQueue.slice();
+
+    // Now wire the reporter the way a configured deployment would, with the transport captured.
+    const posted = [];
+    window.CspClient.install('https://collector.example/report', { post: (b) => posted.push(b) });
+    return { queued, posted };
+  });
+
+  expect(result.queued.length, 'the inline listener caught the blocked script').toBeGreaterThan(0);
+  expect(result.queued[0].directive).toContain('script-src');
+  expect(result.queued[0].blockedURI).toContain('blocked.example');
+
+  // install() drained the queue into a report body the collectors understand.
+  expect(result.posted.length, 'install() drained the queue and posted').toBeGreaterThan(0);
+  const body = result.posted[0]['csp-report'];
+  expect(body['effective-directive']).toContain('script-src');
+  expect(body['blocked-uri']).toContain('blocked.example');
+  expect(body['document-uri']).toBeTruthy();
+});
+
+// Reporting is OFF until a deployment sets Csp.REPORT_ENDPOINT, and that must cost nothing: no
+// listener, no posts, no console noise on the overwhelming majority of deployments that never set one.
+test('with no endpoint configured, nothing is posted and nothing breaks', async ({ page, metaOnlyURL }) => {
+  await page.goto(metaOnlyURL + '/');
+  await page.waitForSelector('[data-testid="setup-mode-local"], [data-testid="nav-drawer"], .v-application', { timeout: 30_000 });
+  const r = await page.evaluate(() => ({
+    endpoint: window.CspClient.endpointFrom(document),
+    installed: window.CspClient.install('', {}),
+    reporter: window.__cspReporter,
+  }));
+  expect(r.endpoint, 'ships empty: a collector URL belongs to a deployment').toBe('');
+  expect(r.installed, 'install() with no endpoint does nothing at all').toBeNull();
+  expect(r.reporter, 'so the self-install left no reporter behind either').toBeFalsy();
+});

@@ -320,6 +320,36 @@ One policy, delivered three ways, because the app is deployed three ways:
   `frame-ancestors` + `report-uri`, which a meta tag cannot express. It stays Report-Only: the
   enforcing evidence comes from the E2E run and the Pages deploy, and nobody is currently deploying
   to Hosting. Rename the key to `Content-Security-Policy` when that changes.
+- **Violation reporting is a SEPARATE mechanism, and it is off by default.** `report-uri` is a
+  header-only directive — a `<meta>` CSP ignores it, exactly as it ignores `frame-ancestors` — so on
+  GitHub Pages the policy has no way to ask for reports. The page reports for itself instead:
+  `csp-client.js` listens for `securitypolicyviolation` (which fires however the policy arrived),
+  de-duplicates by directive + blocked URI, caps at ten per page load, and POSTs the same
+  `{"csp-report": {…}}` body all three collectors understand. An inline listener at the top of
+  `index.html` queues violations from before the first fetch in `<head>`, so a blocked boot resource
+  is still reported.
+
+  **To turn it on**, deploy a collector and name it — one line, then a sync:
+
+  ```bash
+  # free collector, no Blaze plan needed
+  supabase functions deploy csp-report --no-verify-jwt
+  supabase secrets set DBUI_CSP_REPORT_TOKEN=<long random string>
+  ```
+  ```js
+  // csp.js
+  var REPORT_ENDPOINT = 'https://<project>.supabase.co/functions/v1/csp-report';
+  ```
+  ```bash
+  cd dev && npm run csp:sync
+  ```
+
+  It ships empty on purpose: a collector URL belongs to a deployment, and a default would post your
+  violations to somebody else's table. A `*.supabase.co` collector needs no `connect-src` change (the
+  wildcard is already there for the backend); a collector anywhere else must be added to
+  `CONNECT_HOSTS`, or the report POST is blocked by the policy it is reporting on — `csp.test.js`
+  checks that whenever the endpoint is set. One gap cannot be closed from the page: a violation *of
+  `connect-src`* may not be reportable, because the report is itself a connection.
 - **Keeping it in sync**: `npm run csp:sync` (in `dev/`) regenerates **both** static copies —
   `firebase.json`'s header and `index.html`'s meta tag — from `csp.js`. `dev/test/csp.test.js` fails
   CI if either drifts, if the meta tag drops below the first `<link>`/`<script>`, or if an inline
