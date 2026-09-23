@@ -217,6 +217,33 @@ cd dev && npm run csp:sync    # bakes it into index.html next to the policy
 `csp:sync` owns every static copy, so the endpoint cannot drift from the constant; `dev/test/csp.test.js`
 fails if it does.
 
+### Checking it end to end
+
+```bash
+cd dev
+DBUI_CSP_REPORT_TOKEN=<token> npm run check:live          # or: node check-supabase.mjs https://your.site
+```
+
+One real request per claim, against the deployment as it actually is: the page serves an **enforcing**
+policy, the tag sits above the first fetch, the collector answers a preflight, accepts a report — and,
+the only check that matters, **a posted report comes back out of the log again**.
+
+That last one exists because a `204` means *accepted* and never *stored*. The collector answers 204 even
+when the write fails, deliberately, so every other check here can pass while nothing is being saved.
+That is not hypothetical: it is the state this deployment sat in, undetected, through four separate
+bugs and a green unit suite — none of which were findable by a test that stubs the network, because all
+four lived exactly where the stub goes.
+
+The canary it posts is a **stable** URI (`healthcheck.invalid`), so repeated runs increment one row
+rather than adding one per run. Remove it whenever you like:
+
+```sql
+delete from public.csp_reports where blocked_uri = 'https://healthcheck.invalid/probe.js';
+```
+
+Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` as well to include the backend checks — `kv` reachable and
+the `uploads` bucket present.
+
 ### Reading the log
 
 **`Storage error` means the table is missing, not that the token is wrong** — a bad token answers
