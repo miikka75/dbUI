@@ -259,6 +259,12 @@ table with the service role, so the log is unreachable from the app itself.
   POST gets no such exemption. Send it and every report is dropped **before leaving the page** — no
   console error, no row, indistinguishable from a site with nothing to report. The function also
   answers `OPTIONS` now, so a client that does send a non-simple type still works.
+- **Content blockers block the report.** uBlock Origin and similar match URLs that look like
+  telemetry, and a path ending `/csp-report` looks exactly like one, so the POST dies with
+  `net::ERR_BLOCKED_BY_CLIENT` before it reaches the network. Nothing can be done about it from the
+  page, and renaming the endpoint only buys a round of cat-and-mouse. **Treat the log as a biased
+  sample, not a census:** it under-represents precisely the users running extensions that inject into
+  pages and trip the policy. To test the pipeline yourself, use a window with extensions disabled.
 - **A violation of `connect-src` may not report itself**, because the report is a connection. This
   cannot be fixed from the page. It is the cheapest gap available: those violations are the most visible
   in DevTools anyway.
