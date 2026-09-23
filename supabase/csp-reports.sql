@@ -1,5 +1,10 @@
 -- csp-reports.sql — storage for the Supabase Edge Function CSP collector
--- (supabase/functions/csp-report/index.ts). Apply once, in the SQL editor or via `supabase db push`.
+-- (supabase/functions/csp-report/index.ts). Apply once, in the dashboard's SQL EDITOR.
+--
+-- NOT via `supabase db push`: that applies migrations from supabase/migrations/, and this file is
+-- deliberately not a migration (see below). This header used to say `db push` would do it, which
+-- fails silently in the worst way -- the collector then accepts every report, answers 204, and
+-- stores nothing, so the gap only surfaces on the first read as "Storage error".
 --
 -- WHY THIS EXISTS SEPARATELY FROM supabase-schema.sql: the collector is useful whether or not
 -- Supabase is the app's backend. Somebody on Firestore who only wants somewhere free to receive CSP

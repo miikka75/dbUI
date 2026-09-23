@@ -180,8 +180,11 @@ exists. The blocker here is the delivery, not the plan.
 ### Turning it on
 
 ```bash
-# 1. Storage. SQL editor, or:
-npx supabase@latest db push          # applies supabase/csp-reports.sql
+# 1. Storage: paste supabase/csp-reports.sql into the dashboard's SQL EDITOR and run it.
+#    NOT `supabase db push` -- that applies migrations from supabase/migrations/, and this file is
+#    deliberately not one (see its header). An earlier version of this document said otherwise; the
+#    symptom is a collector that accepts reports, answers 204 to every browser, and then returns
+#    "Storage error" on the first read, because the table was never created.
 
 # 2. The collector. --no-verify-jwt is REQUIRED and is not a loosening: browsers post violation
 #    reports with no credentials of any kind, so a function demanding a JWT receives nothing.
@@ -207,6 +210,13 @@ cd dev && npm run csp:sync    # bakes it into index.html next to the policy
 fails if it does.
 
 ### Reading the log
+
+**`Storage error` means the table is missing, not that the token is wrong** — a bad token answers
+`Forbidden`, so getting this far proves the token is right. Apply `supabase/csp-reports.sql` in the SQL
+editor. The write path hides this: the function logs the storage failure and returns 204 regardless,
+because a collector that 500s at a browser teaches it nothing, so reports are accepted and dropped until
+the first read says so.
+
 
 ```
 GET https://<project-ref>.supabase.co/functions/v1/csp-report?token=<your token>
