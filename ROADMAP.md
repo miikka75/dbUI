@@ -371,6 +371,63 @@ One thing deliberately **not** on this list: promoting `firebase.json` from `Rep
 It is not a task until somebody deploys to Firebase Hosting, and a CSP on a host nothing serves from is
 what finding 3 was about in the first place.
 
+### Supabase setup — what a fresh project still costs, and what is worth automating
+
+Prompted by a direct question after the CSP collector went in: does `SUPABASE.md` carry every step, and
+is anything reducible?
+
+**Completeness: yes, with one placement bug.** Auditing the documented steps against what the code
+actually reaches for, nothing required is missing. `supabase-schema.sql` is doing more work than its
+name suggests and that is why the list is short — one paste covers the `kv` table, every RLS policy and
+helper function, the realtime publication, **and** the `uploads` storage bucket with its size/MIME
+limits and four object policies. A reader could easily assume a Storage bucket needs creating by hand;
+it does not.
+
+The placement bug: **"Re-run `supabase-schema.sql` after upgrading"** is a clause inside a bullet under
+*How it maps to Firestore*, four sections below setup. It is not a footnote — it is how an existing
+deployment picks up new policies — and nobody upgrading reads the Firestore mapping table.
+
+**Automation: mostly not possible, and the possible part is not the expensive part.**
+
+The CLI has no way to run a loose `.sql` file. `supabase db push` applies migrations from
+`supabase/migrations/`; `migration up` targets the *local* database; there is no `db execute`. So the
+only routes to automating the two SQL pastes are:
+
+| Route | Cost |
+|---|---|
+| Convert both files to migrations | Fights their design. `supabase-schema.sql` is deliberately idempotent and re-runnable, and `csp-reports.sql` is deliberately standalone so somebody on **Firestore** can run the collector without the app's schema. Migrations run once and are history-tracked; both would lose the property they were built for, and the SQL-editor path would go with them. |
+| `psql -f` against the pooler URL | Needs psql installed, which it is not on this machine. Adds a prerequisite to remove a paste. |
+| A Node script using `pg` | A new dependency, for a step run once per project. |
+
+And none of it touches the genuinely manual half: creating the project, creating a Google OAuth client
+in a different vendor's console, pasting redirect URLs, copying keys. Those are dashboard work by
+nature.
+
+**So the proposal is not to automate the apply — it is to automate the CHECK.** Both failures that
+actually cost time in this deployment were diagnosis problems, not typing problems:
+
+- `csp-reports.sql` was never applied, because the docs said `db push` would do it. The collector then
+  accepted every report, answered 204, stored nothing, and admitted it only on the first authenticated
+  read as `Storage error`.
+- The report POST was dropped by a CORS preflight the collector answered with 405. Nothing appeared
+  anywhere: no console error, no log line, and an empty table is what a *healthy* site looks like.
+
+Both are one HTTP request to detect. A `dev/check-supabase.mjs`, given the project URL and a client
+key, would assert:
+
+- `kv` is reachable through PostgREST (the schema ran at all),
+- the `uploads` bucket exists,
+- `kv` is in the `supabase_realtime` publication, so live sync works,
+- and, when `Csp.REPORT_ENDPOINT` is set: `OPTIONS` answers a preflight rather than 405, a `POST`
+  is accepted, and a token-gated `GET` returns JSON rather than `Storage error`.
+
+It needs no new dependency — `fetch` is built in — and it is the piece that turns "everything looks
+configured" into "everything is". Worth doing *before* the next deployment is stood up, because the
+value is entirely in the first hour of a new project, and near zero afterwards.
+
+The cheap half is worth doing regardless of the script: **move the re-run instruction into the setup
+section**, where the person who needs it is looking.
+
 ### RSVP attendance verification *(schema pattern, not code)*
 
 "Did the people who signed up actually turn up?" — a verifier marks attendance, and only verified

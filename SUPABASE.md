@@ -37,7 +37,15 @@ global `window.supabase`), exactly like the Firebase compat SDK — no ES module
    `https://dbui.ddns.net/` (and `http://localhost:*` for local dev). It must match what the app
    sends as `redirectTo` — `location.origin + location.pathname`, so the *deployed* origin, not the
    `github.io` one it may redirect from.
-4. **SQL Editor**: paste all of `supabase-schema.sql` and **Run** (idempotent).
+4. **SQL Editor**: paste all of `supabase-schema.sql` and **Run**. One paste is the whole backend —
+   the `kv` table, every RLS policy and helper function, the realtime publication, **and** the
+   `uploads` Storage bucket with its size/MIME limits and object policies. There is no bucket to
+   create by hand.
+
+   It is idempotent, and **re-running it is how an existing project picks up new policies**: do that
+   after every upgrade that touches `supabase-schema.sql`, not just on first setup. (The bucket insert
+   is `on conflict do update`, so it also applies limits to a bucket an earlier version created
+   without them.)
 5. **Project Settings → API Keys**: copy the **Project URL** and *one* client key — enter them in the
    app's setup screen (Setup → Supabase). Either key format works; the app passes the key straight to
    `createClient` as an opaque string and never parses it:
@@ -305,9 +313,9 @@ case.
   the stored ownership label to what the schema says rather than to what the writer claims.
 - Uploads are **not** open to any signed-in account. `authenticated` means any Google account on the
   internet and the project config travels in shareable links, so every write policy calls
-  `app_is_registered()` and scopes the object to `<my-email>/…`. Re-run `supabase-schema.sql` after
-  upgrading: the bucket upsert is `on conflict do update`, so it applies the size/MIME limits to a
-  bucket an earlier version created without them.
+  `app_is_registered()` and scopes the object to `<my-email>/…`. Re-running `supabase-schema.sql` after an
+  upgrade is what applies these to an existing project — see step 4 of the setup, which is where that
+  instruction now lives rather than buried here.
 - If you enforce a CSP, `connect-src` must include `https://*.supabase.co` (and `wss://` for realtime).
   `/csp.js` already does; a blocked fetch looks exactly like an empty database.
 - **Access modes** (`tables: { t: 'r' | 'rw' }`) mirror firestore.rules exactly. Reads go through
