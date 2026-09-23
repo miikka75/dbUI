@@ -52,6 +52,27 @@
   //   var CONNECT_HOSTS = ['https://db.example.org', 'wss://db.example.org'];
   var CONNECT_HOSTS = [];
 
+  // WHERE THE PAGE POSTS VIOLATIONS. Empty by default, which means reporting is OFF -- there is no
+  // sensible default here, because a collector URL belongs to a deployment and posting somebody else's
+  // violations to it would be worse than collecting none.
+  //
+  // This is NOT the same thing as REPORT_URI above, and the difference is the whole reason it exists.
+  // `report-uri` is a HEADER-ONLY directive: a <meta> CSP ignores it exactly as it ignores
+  // frame-ancestors. The live site is served by GitHub Pages, which cannot send a header at all, so on
+  // the deployment that matters the policy simply has no way to ask for reports. The page therefore
+  // reports for itself -- `securitypolicyviolation` fires however the policy arrived — and this is the
+  // absolute URL it posts to (see csp-client.js).
+  //
+  // Set it to the deployed collector and run `npm run csp:sync`, which bakes it into index.html:
+  //   var REPORT_ENDPOINT = 'https://<project>.supabase.co/functions/v1/csp-report';
+  // The Supabase Edge Function in supabase/functions/csp-report/ is the free one; the Firebase Cloud
+  // Function collector needs Blaze. Either accepts the body csp-client.js sends.
+  //
+  // Nothing needs adding to connect-src for a *.supabase.co endpoint -- the wildcard is already there
+  // for the backend. A collector on any other origin must be named in CONNECT_HOSTS above, or the
+  // report POST is itself blocked by the policy it is reporting on.
+  var REPORT_ENDPOINT = '';
+
   // opts.scriptHashes: array from inlineScriptHashes; opts.meta: true strips header-only directives
   // (frame-ancestors, report-uri) for a <meta http-equiv> delivery (e.g. GitHub Pages);
   // opts.reportUri: append a report-uri directive (pass REPORT_URI for the production header);
@@ -88,7 +109,7 @@
     return d.join('; ');
   }
 
-  var M = { buildPolicy: buildPolicy, inlineScriptHashes: inlineScriptHashes, REPORT_URI: REPORT_URI };
+  var M = { buildPolicy: buildPolicy, inlineScriptHashes: inlineScriptHashes, REPORT_URI: REPORT_URI, REPORT_ENDPOINT: REPORT_ENDPOINT };
   if (isNode) module.exports = M;
   else root.Csp = M;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

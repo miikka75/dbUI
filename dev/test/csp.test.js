@@ -35,7 +35,7 @@ describe('Content-Security-Policy', () => {
   it('every inline <script> in index.html is hash-allowed (edits must re-sync firebase.json)', () => {
     const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
     const hashes = Csp.inlineScriptHashes(idx, sha256);
-    assert.equal(hashes.length, 2, 'index.html has exactly the two known inline scripts (splash + boot)');
+    assert.equal(hashes.length, 3, 'index.html has exactly the three known inline scripts (CSP violation queue + splash + boot)');
     for (const h of hashes) assert.ok(builtPolicy().includes(h), 'policy includes ' + h);
   });
 
@@ -114,6 +114,46 @@ describe('Content-Security-Policy — the index.html <meta> delivery', () => {
   // truncated at the quote and ship as a shorter, weaker, still-valid-looking policy.
   it('contains no double quote, which would truncate the attribute', () => {
     assert.ok(!builtPolicy({ meta: true }).includes('"'));
+  });
+
+  // --- the report endpoint, which is NOT part of the policy ---------------------------------------
+  //
+  // report-uri is header-only, so the meta delivery cannot ask for reports at all. csp-client.js posts
+  // them from the page instead, to the URL this tag carries. It is written by `npm run csp:sync` from
+  // Csp.REPORT_ENDPOINT, so the two cannot drift.
+  it('index.html carries the report-endpoint tag, matching csp.js', () => {
+    const m = idx().match(/<meta name="csp-report-endpoint" content="([^"]*)">/);
+    assert.ok(m, 'index.html has the endpoint tag for csp-client.js — run `npm run csp:sync`');
+    assert.equal(m[1], Csp.REPORT_ENDPOINT, 'regenerate index.html from csp.js with `npm run csp:sync`');
+  });
+
+  // The listener has to exist before the first fetch in <head>, because a blocked boot resource is the
+  // violation worth hearing about and it happens before any module is loaded. A tag that drifted below
+  // the preloads would still pass every other test here while reporting nothing that matters.
+  it('the violation queue is installed before the first fetch', () => {
+    const src = idx();
+    const at = src.indexOf('__cspViolationQueue');
+    const firstFetch = Math.min(...['<link ', '<script src'].map((t) => {
+      const i = src.indexOf(t);
+      return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+    }));
+    assert.ok(at > 0, 'index.html installs the violation queue inline');
+    assert.ok(at < firstFetch, 'the queue listener must precede every <link>/<script src> in <head>');
+  });
+
+  it('an endpoint, when set, is reachable under the policy', () => {
+    // The report POST is itself subject to connect-src. A collector the policy blocks reports nothing
+    // and says nothing, which is the worst of both. *.supabase.co is already allowed for the backend;
+    // any other origin has to be named in CONNECT_HOSTS.
+    const connect = builtPolicy({ meta: true }).split(';').find((d) => d.trim().startsWith('connect-src '));
+    assert.ok(connect.includes('https://*.supabase.co'),
+      'the free collector lives on Supabase, so its origin must be in connect-src');
+    if (Csp.REPORT_ENDPOINT) {
+      const host = new URL(Csp.REPORT_ENDPOINT).origin;
+      const allowed = /\.supabase\.co$/.test(new URL(Csp.REPORT_ENDPOINT).hostname)
+        || connect.includes(host);
+      assert.ok(allowed, 'REPORT_ENDPOINT (' + host + ') is not permitted by connect-src — add it to CONNECT_HOSTS');
+    }
   });
 
   it('policy shape: no unsafe-inline scripts; eval + Vuetify styles are the accepted exceptions', () => {
