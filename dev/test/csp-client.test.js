@@ -176,6 +176,42 @@ describe('install — wiring, and the queue that catches the early ones', () => 
   });
 });
 
+describe('the transport must not trip a CORS preflight', () => {
+  // FOUND IN PRODUCTION, after everything else was green. The collector is on another origin, so the
+  // report POST is cross-origin. Only text/plain, application/x-www-form-urlencoded and
+  // multipart/form-data are CORS-safelisted; anything else preflights with OPTIONS. The first version
+  // sent `application/csp-report` -- which is what a BROWSER sends for a report-uri report, and those
+  // are CORS-exempt because the browser makes them itself. A page-initiated POST gets no exemption, the
+  // Edge Function answered OPTIONS with 405, and every report was dropped before it left the page.
+  //
+  // Nothing surfaced: a failed beacon is silent, the console stayed clean, and the table stayed empty
+  // exactly as it would on a site with no violations. So the content type is asserted here rather than
+  // left to read like an arbitrary string.
+  const SAFELISTED = ['text/plain', 'application/x-www-form-urlencoded', 'multipart/form-data'];
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'csp-client.js'), 'utf8');
+
+  it('sends a CORS-safelisted content type', () => {
+    const m = src.match(/var TYPE = '([^']+)'/);
+    assert.ok(m, 'the transport names its content type in one place');
+    const base = m[1].split(';')[0].trim().toLowerCase();
+    assert.ok(SAFELISTED.includes(base),
+      base + ' is not CORS-safelisted, so a cross-origin report preflights and is dropped silently');
+  });
+
+  it('does not send application/csp-report, which is the browser-only exemption', () => {
+    assert.ok(!src.includes("'application/csp-report'"),
+      'that type is CORS-exempt only for reports the BROWSER generates from report-uri');
+  });
+
+  // The collector must answer a preflight even so, for any client that does send a non-simple type.
+  it('the Edge Function answers OPTIONS rather than 405', () => {
+    const fn = require('fs').readFileSync(
+      require('path').join(__dirname, '..', '..', 'supabase', 'functions', 'csp-report', 'index.ts'), 'utf8');
+    assert.match(fn, /req\.method === 'OPTIONS'/, 'a 405 to a preflight drops every report, silently');
+    assert.match(fn, /Access-Control-Allow-Origin/, 'and the POST response carries CORS headers');
+  });
+});
+
 describe('loopback never reports — dev and CI are not production telemetry', () => {
   // WRITTEN AFTER GETTING IT WRONG. With an endpoint configured, `npm start` and every E2E run began
   // posting into the deployment's shared collector -- and the E2E suite deliberately provokes a
