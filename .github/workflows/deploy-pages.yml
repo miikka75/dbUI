@@ -27,6 +27,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -105,3 +107,50 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+
+  # Verify what was actually PUBLISHED, not what was committed.
+  #
+  # dev/test/csp.test.js already fails on source drift -- the meta tag not matching csp.js, the tag
+  # sinking below the first fetch. What no unit test can see is the deploy itself: a prune step that
+  # removes the wrong file, Pages serving a stale index.html, or somebody committing a csp.js change
+  # without running `npm run csp:sync`. The CSP is delivered as a <meta> tag because Pages cannot send
+  # a header, which means the policy is part of the payload and can be broken BY deploying.
+  #
+  # A separate job, because the prune above deletes dev/ and .github/ from the working tree before the
+  # upload -- there is no dev/check-supabase.mjs left in the deploy job to run.
+  #
+  # No token, deliberately: this half needs none. It checks that the site serves an ENFORCING policy
+  # positioned above the first fetch, and that the collector is reachable and accepts a report. The
+  # round-trip check (did the report actually get STORED) needs DBUI_CSP_REPORT_TOKEN and is left to
+  # `npm run check:live` by hand, so this workflow holds no secret and writes nothing but the canary.
+  verify:
+    name: Verify the deployed policy
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Retry rather than sleep-and-hope. deploy-pages reports success when the deployment is created,
+      # but the edge can serve the previous copy for a few seconds, and a false red on an unrelated
+      # commit is how a check like this gets ignored and then deleted.
+      - name: Check the deployed policy
+        env:
+          SITE: ${{ needs.deploy.outputs.page_url }}
+        run: |
+          set -u
+          for attempt in 1 2 3 4 5; do
+            echo "::group::attempt $attempt"
+            if node dev/check-supabase.mjs "${SITE:-https://dbui.ddns.net}"; then
+              echo "::endgroup::"
+              exit 0
+            fi
+            echo "::endgroup::"
+            [ "$attempt" = 5 ] && break
+            echo "not green yet; the edge may still be serving the previous copy. retrying in 20s"
+            sleep 20
+          done
+          echo "::error::The deployed site failed its own policy check. The output above names the fix."
+          exit 1
