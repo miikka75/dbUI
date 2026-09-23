@@ -2187,7 +2187,6 @@ cleanup with a real trap inside it (the `{{self}}` invariant that looks like dri
 `isUnionView` stub is a decision rather than a task, and the `app-core.js` split is a series to continue
 rather than a thing to finish.
 
-
 TWO entries here are PARTLY built, and that matters because a half-built mechanism is the only thing on
 this page that can mislead: it looks finished from the outside. Only one of the two is ranked. **Scan**'s
 remainder is, and leads the list below, because it is cheap and its shipped half points at it; `tree`'s
@@ -2197,10 +2196,12 @@ has asked rather than work waiting to be done.
 shipped — see its entry above, which is kept in place rather than reduced to a Shipped bullet because
 the reasoning behind what landed is the same document as the reasoning for the rest of it.)
 
-**The locale-aware date label** is now the cheapest unbuilt thing on the page — a memoized formatter
-and six call sites — and unlike everything below it, it is wrong on screen for every user of every
-deployment right now rather than being a feature nobody has yet. It is ranked first for that reason and
-not for its size.
+**The locale-aware date label** is the cheapest unbuilt thing on the page — a memoized formatter and
+six call sites — and unlike everything below it, it is wrong on screen for every user of every
+deployment right now rather than being a feature nobody has yet. It leads the list below for that
+reason and not for its size. (It led the whole page until the 2026-09-22 review; what displaced it is
+not a better feature but three defects, which is the distinction the paragraph at the top of this
+section is drawing.)
 
 **Scan phase 1.5** — check-in as config (`match: "owner"` + `codeCol`) — is the cheapest unbuilt thing
 after it, a resolver branch and a test, and it is what turns the shipped scan view into the QR
