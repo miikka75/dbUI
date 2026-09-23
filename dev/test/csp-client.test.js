@@ -176,9 +176,72 @@ describe('install — wiring, and the queue that catches the early ones', () => 
   });
 });
 
+describe('loopback never reports — dev and CI are not production telemetry', () => {
+  // WRITTEN AFTER GETTING IT WRONG. With an endpoint configured, `npm start` and every E2E run began
+  // posting into the deployment's shared collector -- and the E2E suite deliberately provokes a
+  // violation to test this very module, so it was about to become the loudest reporter the table had.
+  // The counters are keyed by directive + blocked URI, so that noise is indistinguishable from a real
+  // visitor's, which is what makes it worth preventing rather than filtering later.
+  const loopback = ['localhost', '127.0.0.1', '::1', '[::1]', 'app.localhost'];
+  const real = ['miikka75.github.io', 'example.org', 'csbyjsibxjszduxqetbf.supabase.co'];
+
+  it('recognises every shape a local host takes', () => {
+    for (const h of loopback) assert.equal(CspClient.isLoopback({ hostname: h }), true, h);
+    for (const h of real) assert.equal(CspClient.isLoopback({ hostname: h }), false, h);
+  });
+
+  it('install() declines on loopback even with an endpoint configured', () => {
+    const doc = fakeDoc();
+    const r = CspClient.install('https://collector.example/report', {
+      doc, win: {}, loc: { hostname: '127.0.0.1' }, post: () => { throw new Error('must not post'); },
+    });
+    assert.equal(r, null, 'no reporter');
+    assert.equal(doc.handlers.length, 0, 'and no listener, so a violation costs nothing at all');
+  });
+
+  it('but installs normally on a real host', () => {
+    const doc = fakeDoc();
+    const sent = [];
+    const r = CspClient.install('https://collector.example/report', {
+      doc, win: {}, loc: { hostname: 'miikka75.github.io' }, post: (b) => sent.push(b),
+    });
+    assert.ok(r);
+    doc.fire({ effectiveDirective: 'script-src', blockedURI: 'https://evil/' });
+    assert.equal(sent.length, 1);
+  });
+
+  it('a queued violation from a loopback page is dropped, not deferred', () => {
+    // The inline listener queues regardless of host -- it is four lines and knows nothing. The
+    // decision belongs here, and it must DISCARD rather than hold: a queue that survives would post
+    // on the next navigation to a real host.
+    const win = { __cspViolationQueue: [v('script-src', 'https://blocked.example/evil.js')] };
+    const r = CspClient.install('https://collector.example/report', {
+      doc: fakeDoc(), win, loc: { hostname: 'localhost' }, post: () => { throw new Error('must not post'); },
+    });
+    assert.equal(r, null);
+  });
+});
+
 describe('the endpoint is configuration, not a default', () => {
-  it('ships empty, so no deployment posts to somebody else collector', () => {
-    assert.equal(Csp.REPORT_ENDPOINT, '',
-      'a collector URL belongs to a deployment; a default here would send its violations elsewhere');
+  // This used to assert the endpoint was EMPTY, which stopped being the interesting property the
+  // moment this deployment configured one. What must stay true is weaker and more useful: the value
+  // is either unset, or a real absolute URL that this repo's owner chose. What it must never be is a
+  // plausible-looking default nobody picked -- that is how a fork ends up posting its violations into
+  // somebody else's table without anyone noticing.
+  it('is either unset or an absolute https URL', () => {
+    if (!Csp.REPORT_ENDPOINT) return;                 // unset is a valid, and the default, state
+    const u = new URL(Csp.REPORT_ENDPOINT);           // throws if it is not a URL at all
+    assert.equal(u.protocol, 'https:', 'a report posted over http: is readable by anyone on the path');
+    assert.ok(u.pathname.length > 1, 'an endpoint needs a path, not just an origin');
+  });
+
+  // A fork that changes nothing else inherits this URL, and its violations would land in the original
+  // deployment's table. Nothing can stop that automatically -- but the constant is commented as
+  // per-deployment, and this test names the consequence so the next person to read it knows.
+  it('is a per-deployment value, which a fork must change', () => {
+    assert.match(
+      require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'csp.js'), 'utf8'),
+      /REPORT_ENDPOINT[\s\S]{0,80}?=/,
+      'REPORT_ENDPOINT is still a single named constant, so a fork has one line to change');
   });
 });

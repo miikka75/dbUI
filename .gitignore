@@ -73,3 +73,8 @@ dev/*.png
 dev/*-check.png
 dev/test-ui/tmp-*.spec.js
 dev/tmp-*.mjs
+
+# Supabase CLI scratch: `supabase link` writes the project ref, pooler URL and service versions here.
+# Machine-local state about WHICH project this checkout is linked to, not source — and a fork that
+# inherited it would be pointed at somebody else's project.
+supabase/.temp/

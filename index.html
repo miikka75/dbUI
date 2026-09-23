@@ -10,7 +10,7 @@
        the modules are up. It has to be HERE, above the preloads and the manifest, because a blocked
        boot resource is exactly the violation worth hearing about and it happens before any module
        exists. The endpoint is written by `npm run csp:sync`; empty means reporting is off. -->
-  <meta name="csp-report-endpoint" content="">
+  <meta name="csp-report-endpoint" content="https://csbyjsibxjszduxqetbf.supabase.co/functions/v1/csp-report">
   <script>
     (function () {
       var q = window.__cspViolationQueue = [];

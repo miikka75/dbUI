@@ -82,6 +82,9 @@
     var doc = deps.doc || (typeof document !== 'undefined' ? document : null);
     var win = deps.win || root;
     if (!doc) return null;
+    // `loc` is injectable so the tests can exercise both sides; in the browser it is window.location.
+    var loc = deps.loc || (win && win.location);
+    if (loc && isLoopback(loc)) return null;   // dev/E2E: never report into a shared collector
 
     var post = deps.post || function(body) {
       var json = JSON.stringify(body);
@@ -117,7 +120,22 @@
     return (m && m.getAttribute('content')) || '';
   }
 
-  var M = { reporter: reporter, payload: payload, fromEvent: fromEvent, install: install, endpointFrom: endpointFrom };
+  // A page served from loopback is a DEVELOPMENT page, and its violations are not production
+  // telemetry. Without this, every `npm start` and every E2E run posts into the deployment's shared
+  // collector -- and the E2E suite deliberately provokes a violation to test this very module, so it
+  // would have been the single loudest reporter the table ever saw. The counters are keyed by
+  // directive + blocked URI, so that noise is indistinguishable from a real visitor's.
+  //
+  // Checked here rather than in the test harness, because it is a property of the deployment and not
+  // of the tests: somebody running the app locally against a configured collector should not file
+  // reports into it either.
+  function isLoopback(loc) {
+    var h = (loc && loc.hostname) || '';
+    return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1' || h === ''
+      || /\.localhost$/.test(h);
+  }
+
+  var M = { reporter: reporter, payload: payload, fromEvent: fromEvent, install: install, endpointFrom: endpointFrom, isLoopback: isLoopback };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else {
     root.CspClient = M;

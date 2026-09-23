@@ -94,9 +94,15 @@ test('a real violation reaches the inline queue, and install() drains it', async
 
     const queued = window.__cspViolationQueue.slice();
 
-    // Now wire the reporter the way a configured deployment would, with the transport captured.
+    // Now wire the reporter the way a configured deployment would, with the transport captured. `loc`
+    // is overridden because this page is on loopback, where install() correctly declines -- that guard
+    // is what the test below covers; this one is about the drain, so it opts past it deliberately and
+    // captures the transport rather than letting anything leave the machine.
     const posted = [];
-    window.CspClient.install('https://collector.example/report', { post: (b) => posted.push(b) });
+    window.CspClient.install('https://collector.example/report', {
+      loc: { hostname: 'example.org' },
+      post: (b) => posted.push(b),
+    });
     return { queued, posted };
   });
 
@@ -112,17 +118,39 @@ test('a real violation reaches the inline queue, and install() drains it', async
   expect(body['document-uri']).toBeTruthy();
 });
 
-// Reporting is OFF until a deployment sets Csp.REPORT_ENDPOINT, and that must cost nothing: no
-// listener, no posts, no console noise on the overwhelming majority of deployments that never set one.
-test('with no endpoint configured, nothing is posted and nothing breaks', async ({ page, metaOnlyURL }) => {
+// Two states, and the page must be right in both. An UNCONFIGURED deployment pays nothing -- no
+// listener, no posts -- and a configured one must have an endpoint the policy will actually let it
+// reach, because a report POST is itself subject to connect-src. A collector the policy blocks reports
+// nothing and says nothing, which is the worst of the two failure modes available.
+test('the endpoint the page carries is one connect-src permits', async ({ page, metaOnlyURL }) => {
   await page.goto(metaOnlyURL + '/');
   await page.waitForSelector('[data-testid="setup-mode-local"], [data-testid="nav-drawer"], .v-application', { timeout: 30_000 });
+
   const r = await page.evaluate(() => ({
     endpoint: window.CspClient.endpointFrom(document),
-    installed: window.CspClient.install('', {}),
-    reporter: window.__cspReporter,
+    installedWithNoEndpoint: window.CspClient.install('', {}),
+    policy: document.querySelector('meta[http-equiv="Content-Security-Policy"]').getAttribute('content'),
   }));
-  expect(r.endpoint, 'ships empty: a collector URL belongs to a deployment').toBe('');
-  expect(r.installed, 'install() with no endpoint does nothing at all').toBeNull();
-  expect(r.reporter, 'so the self-install left no reporter behind either').toBeFalsy();
+
+  // Unconfigured is always a valid state and always free.
+  expect(r.installedWithNoEndpoint, 'install() with no endpoint does nothing at all').toBeNull();
+
+  if (!r.endpoint) return;   // nothing configured: the assertions below have nothing to check
+
+  const origin = new URL(r.endpoint).origin;
+  const host = new URL(r.endpoint).hostname;
+  const connect = r.policy.split(';').find((d) => d.trim().startsWith('connect-src '));
+  const allowed = connect.includes(origin) || (/\.supabase\.co$/.test(host) && connect.includes('https://*.supabase.co'));
+  expect(allowed, 'connect-src must permit ' + origin + ' or the report POST is blocked by the policy it reports on').toBe(true);
+
+  // And it did NOT self-install here, because this page is on loopback. That is the point: a dev
+  // server or an E2E worker must never file reports into the deployment's shared collector, and this
+  // suite deliberately provokes a violation two tests above -- which would otherwise have made it the
+  // loudest reporter the table ever saw.
+  const r2 = await page.evaluate(() => ({
+    reporter: window.__cspReporter,
+    loopback: window.CspClient.isLoopback(window.location),
+  }));
+  expect(r2.loopback, 'the E2E server is loopback').toBe(true);
+  expect(r2.reporter, 'so nothing self-installed, and no test violation is posted anywhere').toBeFalsy();
 });
