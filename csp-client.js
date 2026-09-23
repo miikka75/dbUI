@@ -89,13 +89,31 @@
     var post = deps.post || function(body) {
       var json = JSON.stringify(body);
       try {
+        // CONTENT-TYPE IS text/plain ON PURPOSE, and it is the difference between this working and
+        // silently doing nothing.
+        //
+        // The collector is on another origin (the app is on its own domain, the function on
+        // *.supabase.co), so this POST is cross-origin. Only three Content-Type values are
+        // CORS-safelisted — text/plain, application/x-www-form-urlencoded, multipart/form-data — and
+        // anything else makes the request "non-simple" and triggers a preflight OPTIONS. The Edge
+        // Function answers OPTIONS with 405, so the preflight fails and the browser drops the report
+        // before it is ever sent. Nothing appears in the console, nothing reaches the table, and the
+        // page looks exactly like one with no violations to report.
+        //
+        // `application/csp-report` is what a BROWSER sends for a report-uri report, and those are
+        // exempt from CORS precisely because the browser makes them itself. A page-initiated POST gets
+        // no such exemption. The collector does not care either way: it reads the raw body and JSON
+        // parses it, without looking at the type.
+        //
+        // The response stays opaque to us (no Access-Control-Allow-Origin), which costs nothing — the
+        // request is still delivered and processed, and reporting is fire-and-forget in both branches.
+        var TYPE = 'text/plain;charset=UTF-8';
         // sendBeacon survives the page going away, which a violation during unload otherwise would not.
-        // It is fire-and-forget by design: the browser ignores the response, and so must we.
         if (win.navigator && win.navigator.sendBeacon) {
-          win.navigator.sendBeacon(endpoint, new Blob([json], { type: 'application/csp-report' }));
+          win.navigator.sendBeacon(endpoint, new Blob([json], { type: TYPE }));
           return;
         }
-        win.fetch(endpoint, { method: 'POST', body: json, headers: { 'Content-Type': 'application/csp-report' }, keepalive: true })
+        win.fetch(endpoint, { method: 'POST', body: json, headers: { 'Content-Type': TYPE }, mode: 'no-cors', keepalive: true })
           .catch(function() {});          // a failed report must never surface to the user
       } catch (e) { /* reporting must not break the page it is reporting on */ }
     };

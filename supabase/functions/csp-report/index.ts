@@ -65,8 +65,26 @@ const rest = (path: string, init: RequestInit = {}) =>
     }
   });
 
+// CORS. A report posted by the PAGE (csp-client.js) is cross-origin, and only three Content-Type
+// values are CORS-safelisted; anything else preflights. csp-client.js sends text/plain precisely so it
+// does not, but a preflight must still be answered rather than 405'd -- otherwise a collector that
+// looks reachable drops every report from any client that sends a real `application/csp-report`,
+// silently, because a browser never surfaces a failed beacon.
+//
+// `*` is the right origin here: a violation report carries no credentials and no secrets, the endpoint
+// is necessarily public (a browser cannot authenticate one), and the interesting clients are exactly
+// the origins we cannot enumerate. The token-gated GET is what actually protects anything.
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'content-type',
+  'Access-Control-Max-Age': '86400'
+};
+
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
+
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
   if (req.method === 'POST') {
     // Content-Type is application/csp-report or application/reports+json, so read the raw text
@@ -84,7 +102,7 @@ Deno.serve(async (req: Request) => {
     } catch (e) {
       console.error('csp-report: storing failed', e);
     }
-    return new Response(null, { status: 204 });
+    return new Response(null, { status: 204, headers: CORS });
   }
 
   if (req.method === 'GET') {

@@ -243,6 +243,14 @@ table with the service role, so the log is unreachable from the app itself.
   anywhere else goes in `CONNECT_HOSTS` in `csp.js`. A collector the policy blocks reports nothing and
   says nothing, which is the worst of the two available failures — so `csp.test.js` checks this whenever
   the endpoint is set.
+- **The report POST must not trip a CORS preflight.** The collector is on another origin, and only
+  `text/plain`, `application/x-www-form-urlencoded` and `multipart/form-data` are CORS-safelisted —
+  anything else preflights with `OPTIONS`. `csp-client.js` sends `text/plain` for exactly this reason.
+  `application/csp-report`, which looks like the obvious choice, is what a *browser* sends for a
+  `report-uri` report, and those are CORS-exempt because the browser generates them; a page-initiated
+  POST gets no such exemption. Send it and every report is dropped **before leaving the page** — no
+  console error, no row, indistinguishable from a site with nothing to report. The function also
+  answers `OPTIONS` now, so a client that does send a non-simple type still works.
 - **A violation of `connect-src` may not report itself**, because the report is a connection. This
   cannot be fixed from the page. It is the cheapest gap available: those violations are the most visible
   in DevTools anyway.
