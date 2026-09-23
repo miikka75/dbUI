@@ -94,13 +94,28 @@ Deno.serve(async (req: Request) => {
     // 204 regardless: browsers ignore the response, and a collector that 500s at a browser teaches
     // it nothing while making the failure invisible. A storage problem is the operator's to find in
     // the function logs, not the reporting page's.
+    //
+    // res.ok IS CHECKED, and that is not defensive tidiness -- it is the difference between the
+    // sentence above being true and being a lie. `fetch` rejects only on a NETWORK failure; an HTTP
+    // 404 (the RPC missing, or PostgREST's schema cache still stale after the SQL ran) or a 401 (a
+    // service key that is unset or disabled) resolves perfectly happily. So the original
+    // try/catch caught nothing, logged nothing, and returned 204: every report was dropped in
+    // complete silence, with no exception, no log line, and an empty table that looks exactly like a
+    // healthy site. That cost an afternoon of looking in the wrong place.
     try {
-      await Promise.all(rows.map((r) => rest('rpc/csp_report_record', {
+      const results = await Promise.all(rows.map((r) => rest('rpc/csp_report_record', {
         method: 'POST',
         body: JSON.stringify({ p_id: reportId(r), p_directive: r.directive, p_blocked: r.blockedURI, p_doc: r.document })
       })));
+      for (const res of results) {
+        if (res.ok) continue;
+        // The body carries PostgREST's actual complaint ("Could not find the function", a permission
+        // denial, a schema-cache miss), which is the whole value of logging at all.
+        const detail = await res.text().catch(() => '');
+        console.error('csp-report: storing failed', res.status, detail.slice(0, 500));
+      }
     } catch (e) {
-      console.error('csp-report: storing failed', e);
+      console.error('csp-report: storing failed (network)', e);
     }
     return new Response(null, { status: 204, headers: CORS });
   }
