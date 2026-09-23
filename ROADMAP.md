@@ -29,7 +29,7 @@ Embedding is free: `embed-view` dispatches on the same classifier, so a new kind
 An entry that is PARTLY built says so in its heading and records what landed inline, rather than being
 split in two: the reasoning for what remains is the same document as the reasoning for what shipped.
 
-### Code review 2026-09-22 — six findings, ranked *(1–5 landed; 6 is a series, open)*
+### Code review 2026-09-22 — seven findings, ranked *(1–5 landed; 6 is a series in progress; 7 open)*
 
 The previous full-repo review was #57 (2026-07-18). This pass found no rot: 1797 unit tests pass, the
 typecheck is clean, and CI runs the rules tests, the policy differential and the emulator E2E. What it
@@ -38,7 +38,8 @@ implementations, a method defined twice, a predicate stubbed to `false` with its
 plus one deployment that has no CSP at all.
 
 They are recorded together because they came from one pass, not because they are one piece of work. Each
-is independent and separately shippable.
+is independent and separately shippable. **7 was found by fixing 3** — giving the site a policy raised
+the question of whether anything was listening to it, and nothing is.
 
 #### 1. `copyText` is defined twice in the same object *(landed)*
 
@@ -262,6 +263,78 @@ rows get written would not have shown up until somebody's roster came back in a 
 So the rule gains a second half: **prefer a seam where the duplication is already costing something.**
 A pure move buys tests; removing a triplicated rule buys tests *and* deletes the next bug. Remaining:
 the ref editor's own writes, profiles + assets, export/import, feeds.
+
+#### 7. CSP reporting is active nowhere, and on Pages it cannot be made active the usual way
+
+Finding 3 gave the deployed site an enforcing policy. It did **not** give it violation *reporting*, and
+the two are further apart than they look. Asked directly — "is reporting on, and can it be turned on" —
+the answer today is **no, in three separate places at once**:
+
+| Where | Policy delivered | Reporting |
+|---|---|---|
+| GitHub Pages (**the live site**) | `<meta>`, enforcing | **None, and none is possible via the policy** |
+| Firebase Hosting | `Content-Security-Policy-Report-Only` header, with `report-uri /csp-report` | Rewrites to a Cloud Function that **needs Blaze** and is not deployed — the path 404s and the browser drops the report silently. Nothing is deployed to this host anyway. |
+| Supabase Edge Function | — | `supabase/functions/csp-report/` is **written, tested and free to run** — and nothing points at it. |
+
+**The blocker is not billing.** This is worth stating plainly because it is the natural assumption and
+it is wrong: a CSP *header* on Firebase Hosting is ordinary Hosting config and works on the free Spark
+plan. Only the *collector* — a Cloud Function plus a Secret Manager secret — needs Blaze, which is
+exactly why the Supabase Edge Function version exists.
+
+The real blocker is the delivery. **`report-uri` and `report-to` are header-only directives; a `<meta>`
+CSP ignores both**, the same way it ignores `frame-ancestors`. `csp.js` already knows this —
+`if (!opts.meta && opts.reportUri)` — so the meta tag correctly omits it. But the meta tag is the
+*only* policy on the live site, because GitHub Pages cannot send a header at any price. So the
+directive that would enable reporting is precisely the one the live delivery cannot carry.
+
+Two ways out, and they are not equally good:
+
+**A. Report from the page, not from the policy.** `document.addEventListener('securitypolicyviolation',
+…)` fires regardless of how the policy arrived, so the app can POST the violation to the Supabase
+function's absolute URL itself. This is the route that fits the deployment as it is:
+
+- The collector already normalises two browser report shapes, including `{"csp-report": {…}}`, which
+  is the shape a hand-rolled POST should send so all three collectors stay interchangeable.
+- The POST is itself subject to `connect-src`, and `https://*.supabase.co` is already there, so it
+  needs no policy change.
+- Cost: a runtime dependency, and one real blind spot — a violation *of `connect-src` itself* may not
+  be reportable, because the report is a connection. Worth knowing; not worth abandoning the approach
+  over, since `connect-src` violations are the ones most visible in DevTools anyway.
+- It also wants a cap. A page that trips one violation in a loop should not post it a thousand times;
+  de-duplicate by `directive + blockedURI` in the page, which is the same key `reportId` uses
+  server-side.
+
+**B. Serve the app from a host that can send headers.** Firebase Hosting free tier can, and the header
+could point `report-uri` at the Supabase function's absolute URL. This needs no app code at all — but
+it means making Hosting the live surface instead of Pages, which is a deployment decision far larger
+than reporting, taken for a reason much smaller than it.
+
+**A is the recommendation**, and it is not urgent. Reporting earns its place while a policy is being
+*changed* — it is how you find out what a tightening broke for somebody whose browser you do not have.
+The policy has been stable and E2E-enforced for months, so the honest ranking is: do this before the
+next substantive edit to `csp.js`, not before the next feature.
+
+Whichever is chosen, `REPORT_URI` in `csp.js` stops being right as a relative `/csp-report`: nothing
+serves that path on Pages, and route A needs an absolute URL. It should become the deployment's
+configured collector URL, named beside `CONNECT_HOSTS` where the other per-deployment origin already
+lives.
+
+#### What is still open from this pass
+
+Everything below is recorded above with its reasoning; this is the checklist, so nobody has to read
+seven entries to find out what is left.
+
+| Open | From | Size | Why it is not done |
+|---|---|---|---|
+| **CSP reporting** — listen for `securitypolicyviolation` in the page and POST to the Supabase collector | 7 | small | Needs no new infrastructure; the collector is written and free. Ranked *before the next substantive edit to `csp.js`*, not before the next feature — reporting earns its keep while a policy is changing, and this one has been stable and E2E-enforced for months. |
+| **`REPORT_URI` should be an absolute, per-deployment URL** | 7 | tiny | Falls out of the above. As a relative `/csp-report` it points at a path nothing serves on Pages. |
+| **`board` / `form` / `timeline` have no embed branch** | 4 | small code, large question | Three product questions wearing one costume: does a board keep drag-between-lanes inside a document? Does a `form` in a page mean a second submit target, or the same one twice? Does a timeline embed want its own date window or the page's? The dispatch set is asserted, so this is a recorded answer rather than an accident. |
+| **`access:` on a `markdown` + `sources` view is half-honoured** | 4 | small | Honoured at nav and in the doc-embed branch, ignored when such a view is embedded elsewhere (it renders its grid, and the body — the protected part — is not rendered on that path at all, so nothing leaks). Either honour it on both paths or reject the combination at load. |
+| **The extraction series** — the ref editor's own writes, then profiles + assets, then export/import, then feeds | 6 | ongoing | Two cuts made (`brand.js`, `reorder.js`). Ranked by how much of each seam is pure and how much duplication it already costs, which is how feeds went from first to last. |
+
+One thing deliberately **not** on this list: promoting `firebase.json` from `Report-Only` to enforcing.
+It is not a task until somebody deploys to Firebase Hosting, and a CSP on a host nothing serves from is
+what finding 3 was about in the first place.
 
 ### RSVP attendance verification *(schema pattern, not code)*
 
