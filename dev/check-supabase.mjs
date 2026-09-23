@@ -49,30 +49,39 @@ try {
   const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]*)">/.exec(html);
   const ep = /<meta name="csp-report-endpoint" content="([^"]*)">/.exec(html);
 
-  if (!res.ok) fail('site reachable', `${SITE} -> HTTP ${res.status}`);
-  else pass('site reachable', `${SITE} -> ${res.status}`);
-
-  if (!csp) {
-    fail('CSP is delivered', 'no <meta http-equiv="Content-Security-Policy"> in the served HTML — a '
-      + 'static host cannot send the header, so this tag is the whole policy. Run `npm run csp:sync`.');
-  } else if (/report-only/i.test(csp[0])) {
-    fail('CSP is ENFORCING', 'the tag is Report-Only: violations are observed, not blocked');
+  if (!res.ok) {
+    // Everything below reads the BODY, and an error page has a body. GitHub's own 404 ships a
+    // `default-src 'none'` policy, so without this the check cheerfully reports "CSP is ENFORCING"
+    // about a page that is not the app -- a green line derived from the wrong document, which is the
+    // exact species of misleading signal this script exists to remove.
+    fail('site reachable', `${SITE} -> HTTP ${res.status}. Everything below is skipped: the checks read `
+      + 'the served HTML, and an error page has HTML too.');
+    skip('CSP checks', 'the site did not serve a page to check');
   } else {
-    pass('CSP is ENFORCING', csp[1].split(';')[0].trim() + ' …');
+    pass('site reachable', `${SITE} -> ${res.status}`);
+
+    if (!csp) {
+      fail('CSP is delivered', 'no <meta http-equiv="Content-Security-Policy"> in the served HTML — a '
+        + 'static host cannot send the header, so this tag is the whole policy. Run `npm run csp:sync`.');
+    } else if (/report-only/i.test(csp[0])) {
+      fail('CSP is ENFORCING', 'the tag is Report-Only: violations are observed, not blocked');
+    } else {
+      pass('CSP is ENFORCING', csp[1].split(';')[0].trim() + ' …');
+    }
+
+    // Position matters: a meta CSP governs only what is fetched after the parser reaches it.
+    const at = html.indexOf('http-equiv="Content-Security-Policy"');
+    const firstFetch = Math.min(...['<link ', '<script src'].map((t) => {
+      const i = html.indexOf(t); return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+    }));
+    if (at > 0 && at < firstFetch) pass('CSP precedes the first fetch', 'nothing loads unprotected');
+    else if (at > 0) fail('CSP precedes the first fetch', 'the tag sits BELOW the first <link>/<script>, '
+      + 'so everything above it loads with no policy at all');
+
+    endpoint = (ep && ep[1]) || '';
+    if (endpoint) pass('report endpoint published', endpoint);
+    else skip('report endpoint published', 'empty — violation reporting is off for this deployment');
   }
-
-  // Position matters: a meta CSP governs only what is fetched after the parser reaches it.
-  const at = html.indexOf('http-equiv="Content-Security-Policy"');
-  const firstFetch = Math.min(...['<link ', '<script src'].map((t) => {
-    const i = html.indexOf(t); return i < 0 ? Number.MAX_SAFE_INTEGER : i;
-  }));
-  if (at > 0 && at < firstFetch) pass('CSP precedes the first fetch', 'nothing loads unprotected');
-  else if (at > 0) fail('CSP precedes the first fetch', 'the tag sits BELOW the first <link>/<script>, '
-    + 'so everything above it loads with no policy at all');
-
-  endpoint = (ep && ep[1]) || '';
-  if (endpoint) pass('report endpoint published', endpoint);
-  else skip('report endpoint published', 'empty — violation reporting is off for this deployment');
 } catch (e) {
   fail('site reachable', `${SITE}: ${e.message}`);
 }
