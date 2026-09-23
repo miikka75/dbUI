@@ -428,6 +428,51 @@ value is entirely in the first hour of a new project, and near zero afterwards.
 The cheap half is worth doing regardless of the script: **move the re-run instruction into the setup
 section**, where the person who needs it is looking.
 
+### CSP violations in Settings — and the secret a client-side app cannot keep
+
+Asked directly: can the violation log show up in the Settings view? Yes, and the UI half is small — the
+panel sits beside Calendar feeds, which is already an admin-gated block that fetches and renders
+per-deployment state. The whole question is **how the read is authorized**, because the log is behind a
+token and this app ships everything it knows to every visitor.
+
+**The constraint.** `DBUI_CSP_REPORT_TOKEN` gates the collector's `GET`. Baking it into `csp.js` would
+put it in the deployed bundle next to the policy, where any visitor can read it — and the Supabase
+config already travels in shareable links, so there is no precedent for a bundle secret and no way to
+make one. Publishing the token makes the violation log world-readable. That log is not credentials, but
+it names which pages exist and what is being blocked on them, and the POST endpoint is already
+necessarily public, so anyone could then both write and read it.
+
+Three ways out, and the cheapest is the right one:
+
+**A — the admin pastes the token once, stored in `localStorage`.** *(recommended)* Exactly how the
+Supabase URL and key already arrive: a field in Settings, entered per admin per browser, never in the
+deployed files. No change to the Edge Function, no redeploy, and the collector keeps the property its
+header insists on — that it works whether or not Supabase is the app's backend. Roughly a field, a
+fetch, and a table.
+
+**B — authenticate with the caller's Supabase session JWT.** Strictly better security: nothing to
+distribute, and the function could verify the token and check admin status server-side against `kv`,
+which it already reaches with the service role. It is rejected anyway, because it **couples the
+collector to Supabase auth** — and `supabase/functions/csp-report/index.ts` exists precisely so
+somebody on Firestore has somewhere free to send reports. A Firestore deployment has no Supabase JWT
+and would lose the panel entirely.
+
+**C — a `dev/` script instead of a UI.** One `fetch`, prints the table, token from an env var. This is
+the honest baseline: the log is checked a handful of times a year, and a CLI read costs nothing to
+build and nothing to secure. Worth having even alongside A.
+
+**When it is actually worth reading**, which shapes how much UI this deserves: after any edit to
+`csp.js`, after adding a third-party resource (a font, an embed, a new backend origin), and after a
+dependency bump that moves a CDN URL. Not continuously — the counters aggregate, so nothing is lost by
+looking late. A panel that refreshes on demand is right; anything that polls is not.
+
+**Expect extension noise.** Most real-world CSP reports come from browser extensions injecting into the
+page, not from the site. They show a `blocked_uri` of `chrome-extension://`, `moz-extension://`, or an
+empty string, and they are unactionable — the page cannot allowlist them and should not try. A panel
+worth building separates those from same-origin and named-CDN violations, which are the ones that mean
+the policy is actually wrong. Without that split the first real violation arrives buried in noise,
+which is how a reporting feature becomes ignored.
+
 ### RSVP attendance verification *(schema pattern, not code)*
 
 "Did the people who signed up actually turn up?" — a verifier marks attendance, and only verified
