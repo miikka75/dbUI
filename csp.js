@@ -71,7 +71,7 @@
   // Nothing needs adding to connect-src for a *.supabase.co endpoint -- the wildcard is already there
   // for the backend. A collector on any other origin must be named in CONNECT_HOSTS above, or the
   // report POST is itself blocked by the policy it is reporting on.
-  var REPORT_ENDPOINT = '';
+  var REPORT_ENDPOINT = 'https://csbyjsibxjszduxqetbf.supabase.co/functions/v1/csp-report';
 
   // opts.scriptHashes: array from inlineScriptHashes; opts.meta: true strips header-only directives
   // (frame-ancestors, report-uri) for a <meta http-equiv> delivery (e.g. GitHub Pages);

@@ -346,6 +346,15 @@ is non-empty.
 The blind spot stands and cannot be closed from the page: a violation **of `connect-src`** may not be
 reportable, because the report is itself a connection.
 
+**A rule found by getting it wrong.** The first version reported from anywhere. The moment an endpoint
+was configured, the E2E suite — which deliberately provokes a `script-src` violation to test this very
+module — started posting into the live collector from `127.0.0.1`, and so would every `npm start`.
+`install` now declines on loopback. It belongs in the module rather than in the test harness, because
+it is a property of the deployment and not of the tests: somebody running the app locally against a
+configured collector should not file reports into it either. The inline queue still collects
+regardless — it is four lines and knows nothing — and the decision to discard is made here, where it
+can be tested.
+
 #### What is still open from this pass
 
 Everything below is recorded above with its reasoning; this is the checklist, so nobody has to read

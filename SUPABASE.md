@@ -13,6 +13,9 @@ per-row Row-Level-Security (RLS) policy.
 | `supabase-schema.sql` | Postgres `kv` table + RLS mirroring `firestore.rules`. Run once in Supabase. |
 | `.github/workflows/deploy-pages.yml` | Deploy the static site to GitHub Pages on push to `main`. |
 | `dev/test/storage-supabase.test.js` | Unit test for the storage adapter (in-memory fake client). |
+| `supabase/functions/csp-report/` | CSP violation collector as an Edge Function — the FREE one. The Firebase-native collector needs the Blaze plan; this does not. Independent of which backend the app uses. |
+| `supabase/csp-reports.sql` | Storage for it. Standalone and additive — applying it to a project already running `supabase-schema.sql` changes nothing about the app. |
+| `csp-client.js` | Reports violations from the PAGE, because a `<meta>` CSP cannot carry `report-uri`. |
 | `dev/sync-csp.js` | `npm run csp:sync` — regenerates both static copies of the CSP from `csp.js`: firebase.json's header and `index.html`'s `<meta>` (the delivery that covers a GitHub Pages deploy). Needed after naming a self-hosted origin in `CONNECT_HOSTS`. |
 
 Wiring is applied to `index.html` (mode branch, shared-link support, SDK + adapter `loadScript`),
@@ -31,7 +34,9 @@ global `window.supabase`), exactly like the Firebase compat SDK — no ES module
      Supabase provider page).
    - Paste the client ID + secret into Supabase.
 3. **Authentication → URL Configuration → Redirect URLs**: add your site URL, e.g.
-   `https://miikka75.github.io/dbUI/` (and `http://localhost:*` for local dev).
+   `https://dbui.ddns.net/` (and `http://localhost:*` for local dev). It must match what the app
+   sends as `redirectTo` — `location.origin + location.pathname`, so the *deployed* origin, not the
+   `github.io` one it may redirect from.
 4. **SQL Editor**: paste all of `supabase-schema.sql` and **Run** (idempotent).
 5. **Project Settings → API Keys**: copy the **Project URL** and *one* client key — enter them in the
    app's setup screen (Setup → Supabase). Either key format works; the app passes the key straight to
@@ -69,7 +74,8 @@ cp .env.example .env
    your `JWT_SECRET`**, not random strings (Supabase's self-hosting docs carry the generator). The
    example values are published on GitHub, so leaving any of them is the same as running with no auth.
 2. **URLs**: point `SITE_URL`, `API_EXTERNAL_URL` and `SUPABASE_PUBLIC_URL` at your domain, and add the
-   app's own origin (the GitHub Pages URL) to `ADDITIONAL_REDIRECT_URLS`.
+   app's own origin (where the static site is served — `https://dbui.ddns.net/`) to
+   `ADDITIONAL_REDIRECT_URLS`.
 3. **Google sign-in** has no provider UI here — it is env on the `auth` service:
    `GOTRUE_EXTERNAL_GOOGLE_ENABLED=true`, `..._CLIENT_ID`, `..._SECRET`, and
    `..._REDIRECT_URI=https://db.example.org/auth/v1/callback`. Register that redirect URI with Google
@@ -118,11 +124,125 @@ documented degradation to manual refresh and paste-a-URL.
 1. Repo **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 2. Push to `main`. `.github/workflows/deploy-pages.yml` uploads the repo root (minus dev/secret files)
    and publishes it.
+3. Optional, and how the live site is served: **Settings → Pages → Custom domain**, then
+   **Enforce HTTPS** once the certificate is issued (see below).
 
 Config lives in `localStorage` (entered once via setup, or shared via `?mode=supabase&url=…&key=…`), so
 no secrets are baked into the deploy. Alternatively commit a `supabase-config.json`
 (`{"url":"…","anonKey":"…"}`) — the anon key is safe to publish; remove it from the workflow's prune list
 if you want it deployed.
+
+### Custom domain
+
+The live site is <https://dbui.ddns.net/>, a custom domain on the same Pages deploy. Nothing in the app
+had to change for it: `index.html` derives `APP_BASE` from `location.pathname` and every share link,
+QR code, manifest identity and redirect URL is built from `location` at runtime, so moving from the
+`/<repo>/` project path to a domain root is invisible to the code.
+
+What it does take:
+
+- **The domain lives in the Pages settings, not in the repo.** Publishing from a custom Actions workflow
+  means GitHub "ignores any existing `CNAME` file and does not require one" — so adding one here would
+  be inert, and the binding is `gh api repos/<owner>/<repo>/pages`'s `cname` field. A 404 reading
+  *"There isn't a GitHub Pages site here"* while DNS already resolves to GitHub is exactly this field
+  being unset.
+- **DNS.** GitHub asks for a `CNAME` → `<owner>.github.io` for a subdomain, but No-IP does not allow
+  `CNAME` records on its own domains, so a `ddns.net` hostname has to be an **A record** to one of
+  `185.199.108-111.153`. That works, with the costs of the shortcut: a single edge IP instead of four,
+  no `AAAA` (IPv6-only clients cannot reach it), no `TXT` and therefore no domain verification, a free
+  hostname that must be reconfirmed every 30 days — and a **DDNS update client must never be pointed at
+  this hostname**, because it would overwrite the A record with a home IP and take the site down.
+- **HTTPS is not optional here.** Service workers require a secure context, so over plain `http://` the
+  registration in `index.html` silently no-ops: no offline cache, no installable PWA. Google sign-in
+  needs it too. Enforce it as soon as the certificate is approved.
+- **A new origin is a new `localStorage`.** Database configs, the active-database key and PWA installs
+  do not follow the redirect from the old `github.io` URL; returning users land on the setup screen and
+  need the database re-added, or a share link.
+- **Tell the backends about it.** Firebase → Authentication → Authorized domains, and Supabase →
+  Authentication → URL Configuration → Redirect URLs. Both authorize by origin, and neither learns about
+  the move on its own.
+
+## Content-Security-Policy reporting
+
+The app ships an **enforcing** CSP. On GitHub Pages that policy is delivered as a `<meta>` tag, because
+Pages cannot send a custom header at any price — and that one fact decides everything below.
+
+**`report-uri` is a header-only directive.** A `<meta>` CSP ignores it, exactly as it ignores
+`frame-ancestors`. So on this deployment the policy has no way to ask browsers for reports, and the
+usual advice — "point `report-uri` at a collector" — cannot work. The page reports for itself instead:
+`csp-client.js` listens for `securitypolicyviolation`, which fires however the policy arrived.
+
+A common assumption worth correcting: **this is not a billing problem.** A CSP *header* on Firebase
+Hosting is ordinary Hosting config and works on the free Spark plan. Only the Firebase *collector* — a
+Cloud Function plus a Secret Manager secret — needs Blaze, which is exactly why the Edge Function below
+exists. The blocker here is the delivery, not the plan.
+
+### Turning it on
+
+```bash
+# 1. Storage. SQL editor, or:
+npx supabase@latest db push          # applies supabase/csp-reports.sql
+
+# 2. The collector. --no-verify-jwt is REQUIRED and is not a loosening: browsers post violation
+#    reports with no credentials of any kind, so a function demanding a JWT receives nothing.
+npx supabase@latest functions deploy csp-report --no-verify-jwt
+
+# 3. A token. This gates READING the log, not writing to it.
+npx supabase@latest secrets set DBUI_CSP_REPORT_TOKEN=<long random string>
+```
+
+Generate the token with something cryptographic — `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`.
+`base64url` matters: the token travels in a query string, and plain base64 emits `+` and `/`.
+
+Then point the page at it, in `csp.js`, and regenerate:
+
+```js
+var REPORT_ENDPOINT = 'https://<project-ref>.supabase.co/functions/v1/csp-report';
+```
+```bash
+cd dev && npm run csp:sync    # bakes it into index.html next to the policy
+```
+
+`csp:sync` owns every static copy, so the endpoint cannot drift from the constant; `dev/test/csp.test.js`
+fails if it does.
+
+### Reading the log
+
+```
+GET https://<project-ref>.supabase.co/functions/v1/csp-report?token=<your token>
+→ { "total": 12, "violations": [ { directive, blocked_uri, sample_document, count, last_seen }, … ] }
+```
+
+Rows are **counters keyed by `directive + blocked_uri`**, so a violation repeating on every page load
+increments rather than appending — a policy that is wrong in one small way cannot grow the table without
+bound. RLS is on with no policies and `revoke all from anon, authenticated`; the function reaches the
+table with the service role, so the log is unreachable from the app itself.
+
+### Four things worth knowing before you rely on it
+
+- **A page on loopback never reports.** `localhost`, `127.0.0.1` and `::1` are development, and their
+  violations are not production telemetry. Without that rule every `npm start` and every E2E run files
+  into the shared collector — and the E2E suite *deliberately* provokes a violation to test this very
+  module, which would have made CI the loudest reporter the table ever saw.
+- **The POST endpoint is necessarily public.** A browser cannot authenticate a violation report, so
+  anyone who finds the URL can post to it. The damage is bounded by design — 64 KB body cap, ids
+  truncated, counters rather than rows — but there is no rate limit. The token protects *reading*, which
+  is the part that matters.
+- **`connect-src` must permit the collector**, because the report POST is itself a connection. A
+  `*.supabase.co` endpoint needs no change (the wildcard is already there for the backend); a collector
+  anywhere else goes in `CONNECT_HOSTS` in `csp.js`. A collector the policy blocks reports nothing and
+  says nothing, which is the worst of the two available failures — so `csp.test.js` checks this whenever
+  the endpoint is set.
+- **A violation of `connect-src` may not report itself**, because the report is a connection. This
+  cannot be fixed from the page. It is the cheapest gap available: those violations are the most visible
+  in DevTools anyway.
+
+### If you would rather use the Firebase collector
+
+It works, and it costs money for no benefit here. `functions/index.js` needs **Blaze** (Cloud Functions
+*and* Secret Manager). Its `report-uri /csp-report` rewrite only fires for pages served by **Firebase
+Hosting** — not this deployment — so reaching it from Pages means pointing `REPORT_ENDPOINT` at the
+function's absolute URL and paying for Blaze to receive reports the Edge Function takes for free.
 
 ## How it maps to Firestore
 

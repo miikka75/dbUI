@@ -137,8 +137,8 @@ The setup itself is per-provider, and each guide carries it end to end rather th
   clone with `firebase use --add`, why a bare `firebase deploy` fails on the free plan, and the Firefox
   third-party-cookie problem with Google sign-in.
 - **[SUPABASE.md](SUPABASE.md)** — Postgres + Google auth, the OAuth redirect URIs, running
-  `supabase-schema.sql`, which project key to paste, hosting on GitHub Pages, and how each Firestore
-  rule maps to an RLS policy.
+  `supabase-schema.sql`, which project key to paste, hosting on GitHub Pages (and pointing a custom
+  domain at it), and how each Firestore rule maps to an RLS policy.
 
 Then fill the database: pick one of the shipped examples on the empty-database screen, or
 Settings → Import from JSON for a bundle of your own.
@@ -151,10 +151,10 @@ Share a pre-configured link so new users connect instantly without manual setup:
 
 ```
 # Firebase
-https://your-app.github.io/?mode=firebase&config=BASE64_ENCODED_CONFIG
+https://dbui.ddns.net/?mode=firebase&config=BASE64_ENCODED_CONFIG
 
 # Supabase
-https://your-app.github.io/?mode=supabase&url=PROJECT_URL&key=PUBLISHABLE_KEY
+https://dbui.ddns.net/?mode=supabase&url=PROJECT_URL&key=PUBLISHABLE_KEY
 ```
 
 The app reads URL params on load, stores them in localStorage, then cleans the URL. One click = connected.
@@ -343,6 +343,12 @@ One policy, delivered three ways, because the app is deployed three ways:
   ```bash
   cd dev && npm run csp:sync
   ```
+
+  **A page on loopback never reports.** `localhost`, `127.0.0.1` and `::1` are development, and
+  their violations are not production telemetry — without that rule every `npm start` and every
+  E2E run files into the deployment's shared collector, and the E2E suite deliberately provokes a
+  violation to test this very module. The counters are keyed by directive + blocked URI, so that
+  noise would be indistinguishable from a real visitor's.
 
   It ships empty on purpose: a collector URL belongs to a deployment, and a default would post your
   violations to somebody else's table. A `*.supabase.co` collector needs no `connect-src` change (the
