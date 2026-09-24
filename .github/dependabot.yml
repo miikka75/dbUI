@@ -1,0 +1,44 @@
+# Dependabot version updates.
+# https://docs.github.com/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+#
+# Covers the two npm projects and the GitHub Actions used by the workflows. NOT covered: the browser
+# libraries in vendor/ (Vue, Vuetify, MDI, PGlite, qrcode-generator) — they are pinned in vendor/versions
+# and fetched by update-vendor.sh, which also rewrites the CDN fallback URLs and SRI hashes, so bump those
+# by editing vendor/versions and running that script.
+version: 2
+updates:
+  # Dev tooling + test suites (Playwright, PGlite, Firebase SDK, TypeScript, ...).
+  - package-ecosystem: npm
+    directory: /dev
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      dev-minor-patch:
+        update-types: [minor, patch]
+    # @electric-sql/pglite here must match PGLITE in vendor/versions (the browser copy); bump both
+    # together via update-vendor.sh rather than letting Dependabot move only one side.
+    ignore:
+      - dependency-name: "@electric-sql/pglite"
+
+  # Cloud Functions (CSP report collector).
+  - package-ecosystem: npm
+    directory: /functions
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      functions-minor-patch:
+        update-types: [minor, patch]
+
+  # actions/checkout, actions/setup-node, ... in .github/workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]
