@@ -6,9 +6,9 @@
 //   - receiving the Aaronic Priesthood / being ordained to an office is also put to a vote;
 //   - Aaronic Priesthood QUORUM callings (deacons/teachers/priests presidencies and secretaries) are
 //     sustained in the quorum meeting, and are only ANNOUNCED in sacrament meeting (Handbook 10);
-//   - the elders quorum presidency is presented by the stake presidency, so it sits under STAKE business;
-//   - other elders quorum callings (secretary, teacher) are sustained in the quorum meeting and are not
-//     mentioned in sacrament meeting at all (Handbook 8.3.4–8.3.5).
+//   - the elders quorum presidency is presented by the stake presidency, which brings its own business,
+//     and other elders quorum callings (secretary, teacher) are sustained in the quorum meeting
+//     (Handbook 8.3.4–8.3.5) -- so no elders quorum calling is on this ward program.
 //
 // Each block is a filter over admin_callings. They are written separately, so nothing but this test
 // stops a calling from matching two blocks at once or none at all.
@@ -28,8 +28,6 @@ const block = (header) => {
   return b;
 };
 const BLOCKS = {
-  stake_releases: block('stake_releases_header'),
-  stake_sustaining: block('stake_sustaining_header'),
   releases: block('releases_header'),
   sustaining: block('sustaining_header'),
   announcement: block('quorum_announcement_header'),
@@ -63,20 +61,17 @@ describe('bishopric example — ward business in the sacrament meeting program',
     });
   });
 
-  ['president', 'first_counselor', 'second_counselor'].forEach((calling) => {
-    it('the elders quorum ' + calling + ' is sustained and released under stake business', () => {
-      const row = { organization: 'elders_quorum', calling: calling };
-      assert.deepEqual(landsIn(Object.assign({ status: 'accepted' }, row)), ['stake_sustaining']);
-      assert.deepEqual(landsIn(Object.assign({ status: 'released' }, row)), ['stake_releases']);
-    });
-  });
-
-  ['secretary', 'teacher'].forEach((calling) => {
-    it('the elders quorum ' + calling + ' is left to the quorum meeting', () => {
+  ['president', 'first_counselor', 'second_counselor', 'secretary', 'teacher'].forEach((calling) => {
+    it('the elders quorum ' + calling + ' is not on the ward program', () => {
       const row = { organization: 'elders_quorum', calling: calling };
       assert.deepEqual(landsIn(Object.assign({ status: 'accepted' }, row)), []);
       assert.deepEqual(landsIn(Object.assign({ status: 'released' }, row)), []);
     });
+  });
+
+  it('the program has no stake business blocks', () => {
+    const stake = program.columns.filter((c) => c && typeof c.markdown === 'string' && c.markdown.indexOf('text.stake_') >= 0);
+    assert.deepEqual(stake, []);
   });
 
   it('the ward business header shows only when a ward block has a row', () => {
@@ -95,17 +90,10 @@ describe('bishopric example — ward business in the sacrament meeting program',
     assert.ok(BLOCKS.announcement.markdown.indexOf('sustaining_footer') < 0);
   });
 
-  it('the stake blocks come before ward business', () => {
-    const idx = (b) => program.columns.indexOf(b);
-    assert.ok(idx(BLOCKS.stake_sustaining) < idx(WARD_HEADER));
-    assert.ok(idx(BLOCKS.stake_releases) < idx(BLOCKS.stake_sustaining));
-    assert.equal(program.columns[idx(BLOCKS.stake_releases) - 1], 'stake_business');
-  });
-
   it('every block the program uses has an English and a Finnish text', () => {
     ['en', 'fi'].forEach((code) => {
       const text = fs.readFileSync(path.join(__dirname, '..', '..', 'examples', 'bishopric-lang-' + code + '.json'), 'utf8');
-      ['quorum_announcement_header', 'quorum_announcement_footer', 'stake_releases_header', 'stake_sustaining_header'].forEach((key) => {
+      ['quorum_announcement_header', 'quorum_announcement_footer'].forEach((key) => {
         assert.ok(text.indexOf('"text.' + key + '"') >= 0, code + ' defines text.' + key);
       });
     });
