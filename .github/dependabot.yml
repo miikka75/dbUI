@@ -3,8 +3,8 @@
 #
 # Covers the two npm projects and the GitHub Actions used by the workflows. NOT covered: the browser
 # libraries in vendor/ (Vue, Vuetify, MDI, PGlite, qrcode-generator) — they are pinned in vendor/versions
-# and fetched by update-vendor.sh, which also rewrites the CDN fallback URLs and SRI hashes, so bump those
-# by editing vendor/versions and running that script.
+# and fetched by update-vendor.sh, which also rewrites the CDN fallback URLs and SRI hashes; the
+# .github/workflows/vendor-updates.yml workflow checks npm for those weekly and opens the bump PR.
 version: 2
 updates:
   # Dev tooling + test suites (Playwright, PGlite, Firebase SDK, TypeScript, ...).
@@ -17,8 +17,8 @@ updates:
     groups:
       dev-minor-patch:
         update-types: [minor, patch]
-    # @electric-sql/pglite here must match PGLITE in vendor/versions (the browser copy); bump both
-    # together via update-vendor.sh rather than letting Dependabot move only one side.
+    # @electric-sql/pglite here must match PGLITE in vendor/versions (the browser copy); the vendor-updates
+    # workflow bumps both together, so Dependabot must not move only this side.
     ignore:
       - dependency-name: "@electric-sql/pglite"
 
