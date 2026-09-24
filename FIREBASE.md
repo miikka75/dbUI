@@ -63,6 +63,14 @@ firebase deploy --only hosting,storage          # `storage` here is storage.rule
 Rules before the app, always: the app is what starts making requests, so a deploy that ships new code
 against yesterday's rules is a window where the two disagree.
 
+**`vendor/` is refreshed for you.** Hosting uploads the working tree, and `vendor/` (Vue, Vuetify, MDI,
+the QR encoder, PGlite) is gitignored, so it holds whatever the last local run fetched. The hosting
+`predeploy` hook runs `node scripts/vendor-fetch.mjs`, which brings it to the versions in
+`vendor/versions` (a no-op when it already matches). It needs only Node and npm, so it works on Windows
+and Linux alike. It fails the deploy if the SRI hashes in `index.html` / `app-core.js` do not match the
+fetched files, which means `vendor/versions` was edited without running `./update-vendor.sh`: run that on
+a machine with bash (Linux, WSL or Git Bash) and commit before deploying.
+
 **On the free (Spark) plan, deploy with `--only`.** A bare `firebase deploy` also deploys
 `functions/`, and the CSP report collector there declares a Secret Manager secret — both Cloud
 Functions and Secret Manager need the **Blaze** plan, so the deploy dies before it gets to your app:

@@ -64,7 +64,7 @@ Worth knowing before you rely on it:
   Lock, fails to get it, and says so rather than opening.
 - **Self-hosting it wants the vendored dist.** `vendor/pglite/` is generated, not committed — run
   `./update-vendor.sh` (or `scripts/vendor-pglite.sh`) locally; the GitHub Pages workflow materialises it
-  on every deploy. If it is missing the app falls back to jsdelivr, the same way Vue and Vuetify do, so a
+  on every deploy, and so does the Firebase Hosting `predeploy` hook (`scripts/vendor-fetch.mjs`). If it is missing the app falls back to jsdelivr, the same way Vue and Vuetify do, so a
   fresh fork still boots — but self-hosted stays the intended path, because reaching a CDN is the one
   thing this mode otherwise never does.
 
