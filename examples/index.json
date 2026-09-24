@@ -25,7 +25,7 @@
       "views": 18,
       "schema": {
         "file": "bishopric-schema.json",
-        "hash": "d367e3c456b33002"
+        "hash": "2b061f8225617180"
       },
       "languages": [
         {
@@ -38,7 +38,7 @@
           "code": "fi",
           "name": "Suomi",
           "file": "bishopric-lang-fi.json",
-          "hash": "18bffd1a3b39df38"
+          "hash": "896ea968d0e2f1de"
         }
       ],
       "about": {

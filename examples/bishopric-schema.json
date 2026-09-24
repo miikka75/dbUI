@@ -786,6 +786,31 @@
             "hideEmpty": true,
             "columns": [
               "person",
+              "calling",
+              "notes"
+            ],
+            "sources": [
+              "admin_callings"
+            ],
+            "filter": {
+              "$and": [
+                {
+                  "status": "accepted"
+                },
+                {
+                  "organization": "aaronic_priesthood"
+                }
+              ]
+            },
+            "markdown": "{{t:text.ordination_header}}\n\n{{self}}\n\n{{t:text.ordination_footer}}"
+          },
+          {
+            "mode": "union",
+            "bare": true,
+            "readonly": true,
+            "hideEmpty": true,
+            "columns": [
+              "person",
               "organization",
               "calling",
               "notes"
@@ -814,31 +839,6 @@
               ]
             },
             "markdown": "{{t:text.quorum_announcement_header}}\n\n{{self}}\n\n{{t:text.quorum_announcement_footer}}"
-          },
-          {
-            "mode": "union",
-            "bare": true,
-            "readonly": true,
-            "hideEmpty": true,
-            "columns": [
-              "person",
-              "calling",
-              "notes"
-            ],
-            "sources": [
-              "admin_callings"
-            ],
-            "filter": {
-              "$and": [
-                {
-                  "status": "accepted"
-                },
-                {
-                  "organization": "aaronic_priesthood"
-                }
-              ]
-            },
-            "markdown": "{{t:text.ordination_header}}\n\n{{self}}\n\n{{t:text.ordination_footer}}"
           },
           {
             "view": "doc_sacrament_intro"

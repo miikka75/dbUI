@@ -90,6 +90,12 @@ describe('bishopric example — ward business in the sacrament meeting program',
     assert.ok(BLOCKS.announcement.markdown.indexOf('sustaining_footer') < 0);
   });
 
+  it('the quorum announcement comes last in ward business, after the ordinations', () => {
+    const idx = (b) => program.columns.indexOf(b);
+    assert.equal(idx(BLOCKS.announcement), idx(BLOCKS.ordination) + 1);
+    assert.ok(idx(BLOCKS.ordination) > idx(BLOCKS.sustaining));
+  });
+
   it('every block the program uses has an English and a Finnish text', () => {
     ['en', 'fi'].forEach((code) => {
       const text = fs.readFileSync(path.join(__dirname, '..', '..', 'examples', 'bishopric-lang-' + code + '.json'), 'utf8');
