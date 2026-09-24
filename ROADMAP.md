@@ -473,6 +473,56 @@ worth building separates those from same-origin and named-CDN violations, which 
 the policy is actually wrong. Without that split the first real violation arrives buried in noise,
 which is how a reporting feature becomes ignored.
 
+### Rotating the CSP token from the UI, the way a calendar feed regenerates
+
+Asked directly: can the web UI reset `DBUI_CSP_REPORT_TOKEN` the way **Regenerate** resets a published
+calendar feed? Not as the token is stored today, and the reason is worth writing down because the two
+look far more alike than they are.
+
+**Why the feed can do it.** A feed's secret *is its URL*. `Feeds.newId` makes 16 random bytes in the
+browser, the id goes into `appConfig.feeds[name]` — the app's own storage, which it already writes —
+and the capability is the unguessable path `feeds/<id>.ics` in a public bucket. Regenerate blanks the
+old object, drops the id, and republishes. **The app owns both ends**: it mints the secret and it owns
+the thing the secret protects.
+
+**Why the CSP token cannot.** It is not stored by the app at all. It lives in the Edge Function's
+*environment* (`Deno.env.get('DBUI_CSP_REPORT_TOKEN')`), and function secrets are writable only through
+the Supabase CLI or the Management API. Reaching that API from the browser needs a Supabase **access
+token**, which grants control of the entire project — so shipping one in order to rotate a read-gate
+would hand every visitor far more than the thing being protected. That is not a smaller version of the
+feed design; it is the opposite of it.
+
+**What would make it work: move the token to where the app can reach it.** Put it in the database
+rather than the function's environment, and the feed pattern applies almost unchanged.
+
+The interesting question is then what authorizes the rotation, and the obvious answer is the wrong one.
+Gating the write on *admin* would need the app's user model — `app_is_registered()` and friends — and
+that couples the collector to the app's schema, destroying the property it was deliberately built with:
+`supabase/csp-reports.sql` is standalone so somebody running **Firestore** can have a free collector
+without applying the application schema. They have no Supabase user model to check.
+
+So gate it on **the current token instead**: a `rotate` action that requires the token you already
+hold and answers with a new one. No user model, no RLS coupling, no management credential, and it works
+identically for a Firestore deployment. It is the same shape as the feed — a capability, rotatable by
+whoever holds it — which is presumably why the question was asked in those terms.
+
+Sketch:
+
+- a one-row table for the token, reachable only by the service role (as `csp_reports` already is);
+- the function prefers that row and falls back to `Deno.env`, so an existing deployment keeps working
+  and migrates on its first rotation;
+- `POST ?rotate` carrying the current token → mints 32 bytes, stores, returns the new one once;
+- Settings shows it once on rotation and never again, exactly as a regenerated feed URL is shown.
+
+**Bootstrapping still needs the CLI**, and that is fine: the *first* token has to come from somewhere
+outside the app, the same way the `uploads` bucket does. What changes is that every rotation afterwards
+is a button.
+
+**Worth building only alongside the Settings panel**, not before it. Rotation from the UI is only
+useful to an admin who already holds the token there — and the panel is what makes them hold it. On its
+own this is a button that solves a problem nobody has: a token is rotated when it leaks, which has
+happened exactly once, and `npx supabase secrets set` handled it in one line.
+
 ### RSVP attendance verification *(schema pattern, not code)*
 
 "Did the people who signed up actually turn up?" — a verifier marks attendance, and only verified
