@@ -76,6 +76,17 @@ describe('embeds.js — mdBlocks / docHasData / buildEmbedBlock', () => {
     assert.match(blocks[3].html, /Unknown embed/);
   });
 
+  it('an unknown embed escapes its type:name (stored XSS: editor-written page markdown -> v-html / print)', () => {
+    const ctx = makeCtx();
+    const tag = Embeds.mdBlocks('{{view:<img/src=x/onerror=alert(1)>}}', null, ctx).map(b => b.html || '').join('');
+    assert.match(tag, /Unknown embed/);
+    assert.ok(tag.indexOf('<img') < 0, 'raw <img> reached the rendered html: ' + tag);
+    const attr = Embeds.mdBlocks('{{table:x"onmouseover="alert(1)}}', null, ctx).map(b => b.html || '').join('');
+    assert.match(attr, /Unknown embed/);
+    assert.ok(attr.indexOf('"') < 0, 'a raw quote survived: ' + attr);
+    assert.equal(Embeds.escHtml('<a href="x">&</a>'), '&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;');
+  });
+
   it('{{t:key}} substitution, {{self}} expansion, @part suffix, `?` hides empty embeds', () => {
     const ctx = makeCtx({ t: k => (k === 'greet' ? 'Hello' : '') });
     const blocks = Embeds.mdBlocks('{{t:greet}}\n\n{{self}}\n\n{{table:tasks@archive}}\n\n{{table:notes?}}', 'open', ctx)
@@ -351,6 +362,31 @@ describe('embeds.js — safeImgSrc (img src: http(s) + raster data image)', () =
   it('blocks data:text/html and javascript: (same as href)', () => {
     assert.equal(Embeds.safeImgSrc('data:text/html,<script>alert(1)</script>'), '');
     assert.equal(Embeds.safeImgSrc('javascript:alert(1)'), '');
+  });
+});
+
+describe('embeds.js — safeAvatarSrc (profile avatar: base64 png/jpeg/webp data URI only)', () => {
+  it('allows base64 png/jpeg/webp data URIs', () => {
+    for (const u of ['data:image/png;base64,iVBORw0KGgo=', 'data:image/jpeg;base64,/9j/4AAQ', 'data:image/webp;base64,UklGRg==']) {
+      assert.equal(Embeds.safeAvatarSrc(u), u);
+    }
+  });
+  it('blocks http(s) URLs (a tracking beacon rendered to every member)', () => {
+    assert.equal(Embeds.safeAvatarSrc('https://tracker.example/p.png'), '');
+    assert.equal(Embeds.safeAvatarSrc('http://tracker.example/p.png'), '');
+    assert.equal(Embeds.safeAvatarSrc('//tracker.example/p.png'), '');
+  });
+  it('blocks svg, gif, non-base64 and trailing junk', () => {
+    assert.equal(Embeds.safeAvatarSrc('data:image/svg+xml;base64,PHN2Zz4='), '');
+    assert.equal(Embeds.safeAvatarSrc('data:image/gif;base64,R0lGOD=='), '');
+    assert.equal(Embeds.safeAvatarSrc('data:image/png,rawbytes'), '');
+    assert.equal(Embeds.safeAvatarSrc('data:image/png;base64,abc"onerror="x'), '');
+    assert.equal(Embeds.safeAvatarSrc('data:image/png;base64,abc\nhttps://x'), '');
+  });
+  it("empty / missing -> ''", () => {
+    assert.equal(Embeds.safeAvatarSrc(''), '');
+    assert.equal(Embeds.safeAvatarSrc(null), '');
+    assert.equal(Embeds.safeAvatarSrc(undefined), '');
   });
 });
 

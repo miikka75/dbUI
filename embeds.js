@@ -28,7 +28,7 @@
   // A URL safe to place in an href/src attribute: http(s) only. Relative URLs are allowed when they
   // resolve against the page onto http/https. Everything else -- javascript:, data:, vbscript:, file:,
   // or malformed -- returns '' so the attribute renders empty instead of executing. Returns the URL
-  // UNESCAPED; a caller building a raw HTML string must esc() the result, while a Vue :href/:src binding
+  // UNESCAPED; a caller building a raw HTML string must escHtml() the result, while a Vue :href/:src binding
   // escapes automatically. Used by mdToHtml (markdown links) AND the url/image data cells, which store a
   // user-supplied string -- an unchecked `javascript:...` in a url cell runs on click, writer != victim
   // on a shared-write (rsvp) table.
@@ -74,13 +74,25 @@
     return 'url("' + s.replace(/["'()\\\r\n]/g, pct) + '")';
   }
 
+  // HTML-escape a string for text or a double-quoted attribute value. Used by mdToHtml and by the
+  // "Unknown embed" fallback, whose type/name come straight from page markdown an editor controls.
+  function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+  // Safe value for a profile avatar <img src>: ONLY an inline base64 png/jpeg/webp data URI (what the
+  // client-side resize produces), else ''. Avatars render to every member, so an http(s) URL here would
+  // be a tracking beacon on each viewer; the rules (firestore validProfile / supabase app_valid_shape)
+  // enforce the same shape server-side.
+  function safeAvatarSrc(u) {
+    var s = String(u || '');
+    return /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+\/=]*$/.test(s) ? s : '';
+  }
+
   // Tiny markdown -> HTML for pages (headings, bold/italic, lists, links, paragraphs). Embed tokens are
   // split out before this runs. (Moved from schema-loader.js; location is browser-only, so guard.)
   function mdToHtml(md) {
-    var esc = function(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
-    // `url` here is already HTML-escaped (esc ran on the whole line first), so safeUrl's result is used
+    // `url` here is already HTML-escaped (escHtml ran on the whole line first), so safeUrl's result is used
     // as-is -- re-escaping would double-encode & in query strings. safeUrl still drops unsafe schemes.
-    var inline = function(t) { return esc(t).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\*([^*]+)\*/g, '<em>$1</em>').replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) { return '<a href="' + safeUrl(url) + '" target="_blank">' + text + '</a>'; }); };
+    var inline = function(t) { return escHtml(t).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\*([^*]+)\*/g, '<em>$1</em>').replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) { return '<a href="' + safeUrl(url) + '" target="_blank">' + text + '</a>'; }); };
     var lines = String(md || '').split('\n'), out = [], i = 0;
     while (i < lines.length) {
       var l = lines[i], h = /^(#{1,4})\s+(.*)/.exec(l);
@@ -165,7 +177,7 @@
   function buildEmbedBlock(type, name, part, ctx) {
     var h = BLOCKS[type], both = part === BOTH;
     var blk = h && h.resolve(name, both ? null : part, ctx);
-    if (!blk) return { html: '<em>Unknown embed: ' + type + ':' + name + '</em>' };
+    if (!blk) return { html: '<em>Unknown embed: ' + escHtml(type + ':' + name) + '</em>' };
     blk.embedBoth = both;
     return blk;
   }
@@ -363,8 +375,8 @@
     mdToHtml: mdToHtml, setRenderer: setRenderer, registerBlock: registerBlock, buildEmbedBlock: buildEmbedBlock, mdBlocks: mdBlocks, docHasData: docHasData, blockRefs: blockRefs,
     resolveEmbed: resolveEmbed, embedCols: embedCols, embedRows: embedRows, embedRowCount: embedRowCount,
     embedRowsForItem: embedRowsForItem, embedWhenOk: embedWhenOk, embedVisible: embedVisible, safeUrl: safeUrl, safeImgSrc: safeImgSrc,
-    isAssetRef: isAssetRef, assetId: assetId, safeCssUrl: safeCssUrl
+    isAssetRef: isAssetRef, assetId: assetId, safeCssUrl: safeCssUrl, escHtml: escHtml, safeAvatarSrc: safeAvatarSrc
   };
   if (isNode) module.exports = M;
-  else { root.Embeds = M; root.mdToHtml = mdToHtml; root.safeUrl = safeUrl; root.safeImgSrc = safeImgSrc; root.isAssetRef = isAssetRef; root.safeCssUrl = safeCssUrl; } // bare globals: mdToHtml (pageBlocks-era + tests), safeUrl/safeImgSrc (ROOT_PROXY), isAssetRef/safeCssUrl (validateSchema + background style)
+  else { root.Embeds = M; root.mdToHtml = mdToHtml; root.safeUrl = safeUrl; root.safeImgSrc = safeImgSrc; root.isAssetRef = isAssetRef; root.safeCssUrl = safeCssUrl; root.safeAvatarSrc = safeAvatarSrc; } // bare globals: safeAvatarSrc (user-avatar), mdToHtml (pageBlocks-era + tests), safeUrl/safeImgSrc (ROOT_PROXY), isAssetRef/safeCssUrl (validateSchema + background style)
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));

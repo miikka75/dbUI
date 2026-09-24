@@ -2,6 +2,8 @@
 // server and points baseURL at it. See test-ui/server-fixture.js.
 const { test, expect } = require('./server-fixture');
 const SCHEMA = require('./fixture-schema.json');
+// A real 1x1 PNG: the user-avatar only renders base64 png/jpeg/webp data URIs (safeAvatarSrc).
+const PIC_ANN = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
 // Global gate: fail any test that produces an uncaught page error or console error
 // (benign resource/network noise like favicon 404s is ignored).
@@ -5937,7 +5939,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
     await api('resetData');
     // Seed profiles: Ann shared with a photo; Cara has a photo but did NOT share.
-    await api('setMyProfile', { name: 'Ann',  shared: true,  picture: 'PIC_ANN'  }, 'ann@x.com');
+    await api('setMyProfile', { name: 'Ann',  shared: true,  picture: PIC_ANN  }, 'ann@x.com');
     await api('setMyProfile', { name: 'Cara', shared: false, picture: 'PIC_CARA' }, 'cara@x.com');
     // Register an admin + a viewer (once users exist, unregistered callers are non-admin).
     await api('setUserRole', { uid: 'admin@x.com',  role: 'admin',  user: 'admin@x.com',  tables: 'all' });
@@ -5949,10 +5951,10 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     const adminProj  = await (await api('getListAvatars', {}, 'admin@x.com')).json();
     const viewerProj = await (await api('getListAvatars', {}, 'viewer@x.com')).json();
     expect(adminProj).toEqual({ people: {                                          // admin sees both links
-      Ann:  { picture: 'PIC_ANN',  name: 'Ann'  },
+      Ann:  { picture: PIC_ANN,  name: 'Ann'  },
       Cara: { picture: 'PIC_CARA', name: 'Cara' }
     } });
-    expect(viewerProj).toEqual({ people: { Ann: { picture: 'PIC_ANN', name: 'Ann' } } });   // non-admin: shared linked only
+    expect(viewerProj).toEqual({ people: { Ann: { picture: PIC_ANN, name: 'Ann' } } });   // non-admin: shared linked only
     expect(JSON.stringify(viewerProj)).not.toContain('@');                         // ...and never an email
 
     const links = await (await api('getListUserLinks', {}, 'admin@x.com')).json();
@@ -5966,7 +5968,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
     await api('resetData');
-    await api('setMyProfile', { name: 'Ann', shared: true, picture: 'PIC_ANN' }, 'ann@x.com');  // linked user + photo
+    await api('setMyProfile', { name: 'Ann', shared: true, picture: PIC_ANN }, 'ann@x.com');  // linked user + photo
     await api('setListUser', { listName: 'people', value: 'Ann', email: 'ann@x.com' });          // link the value (bootstrap admin)
     await api('saveSchema', { schema: { tables: { roster: { readonly: true, columns: [{ name: 'who', type: 'select', list: 'people' }] } } } });
     await page.goto('/');
@@ -5980,11 +5982,11 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
       app.selectTab('roster');
       return { proj: app.listAvatars, resolved: app.listValuePicture('who', 'Ann') };
     });
-    expect(seeded.proj).toEqual({ people: { Ann: { picture: 'PIC_ANN', name: 'Ann' } } });   // projection loaded at boot
-    expect(seeded.resolved).toBe('PIC_ANN');                        // client resolver maps col->list->picture
+    expect(seeded.proj).toEqual({ people: { Ann: { picture: PIC_ANN, name: 'Ann' } } });   // projection loaded at boot
+    expect(seeded.resolved).toBe(PIC_ANN);                        // client resolver maps col->list->picture
     // the cell renders the avatar image AND still shows the value text
     const avatarImg = page.locator('.v-main .user-avatar img').first();
-    await expect(avatarImg).toHaveAttribute('src', 'PIC_ANN');
+    await expect(avatarImg).toHaveAttribute('src', PIC_ANN);
     await expect(page.locator('.v-main')).toContainText('Ann');
   });
 
@@ -6106,7 +6108,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
     await api('resetData');
-    await api('setMyProfile', { name: 'Ann', shared: true, picture: 'PIC_ANN' }, 'ann@x.com');
+    await api('setMyProfile', { name: 'Ann', shared: true, picture: PIC_ANN }, 'ann@x.com');
     await api('setListUser', { listName: 'people', value: 'Ann', email: 'ann@x.com' });
     // A grouped aggregate (like piispakunta): one card per group value of `role`, whose list is `people`.
     await api('saveSchema', { schema: {
@@ -6131,7 +6133,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     expect(seeded.groupVals).toContain('Ann');   // one card per role value
     // the group card's title renders the linked user's avatar
     const avatarImg = page.locator('.v-main .v-card .user-avatar img').first();
-    await expect(avatarImg).toHaveAttribute('src', 'PIC_ANN');
+    await expect(avatarImg).toHaveAttribute('src', PIC_ANN);
   });
 
   test('user-linked lists: the Lookup editor links a value to a user (admin picker) for userlink-flagged lists', async ({ page }) => {
@@ -6139,7 +6141,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
     await api('resetData');
-    await api('setMyProfile', { name: 'Ann', shared: true, picture: 'PIC_ANN' }, 'ann@x.com');   // a registered, shared user
+    await api('setMyProfile', { name: 'Ann', shared: true, picture: PIC_ANN }, 'ann@x.com');   // a registered, shared user
     await api('setUserRole', { uid: 'local@dev', role: 'admin', user: 'local@dev', tables: 'all' }); // the acting admin
     await api('setUserRole', { uid: 'ann@x.com', role: 'viewer', user: 'ann@x.com', tables: [] });    // so she's a pick option
     await api('saveSchema', { schema: { tables: { roster: { columns: [{ name: 'who', type: 'select', list: 'people' }] } }, listSources: { people: 'userlink', status: 'x' } } });
@@ -6167,7 +6169,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
       return { links: await backend.getListUserLinks(), avatars: window.appInstance.listAvatars, uiLinks: window.appInstance.listUserLinks };
     });
     expect(r.links).toEqual({ people: { Ann: 'ann@x.com' } });   // persisted (raw admin links)
-    expect(r.avatars).toEqual({ people: { Ann: { picture: 'PIC_ANN', name: 'Ann' } } });   // projected for cell rendering
+    expect(r.avatars).toEqual({ people: { Ann: { picture: PIC_ANN, name: 'Ann' } } });   // projected for cell rendering
     expect(r.uiLinks).toEqual({ people: { Ann: 'ann@x.com' } }); // editor state refreshed
   });
 
@@ -6175,7 +6177,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     test.setTimeout(20000);
     const api = (route, data, user) => page.request.post('/api/' + route, { headers: { 'X-User': user || 'local@dev' }, data: data || {} });
     await api('resetData');
-    await api('setMyProfile', { name: 'Ann', shared: true, picture: 'PIC_ANN' }, 'ann@x.com');
+    await api('setMyProfile', { name: 'Ann', shared: true, picture: PIC_ANN }, 'ann@x.com');
     await api('setUserRole', { uid: 'local@dev', role: 'admin', user: 'local@dev', tables: 'all' });
     await api('setUserRole', { uid: 'ann@x.com', role: 'viewer', user: 'ann@x.com', tables: [] });
     await api('saveSchema', { schema: { tables: { roster: { columns: [{ name: 'who', type: 'select', list: 'people' }] } }, listSources: { people: 'userlink' } } });

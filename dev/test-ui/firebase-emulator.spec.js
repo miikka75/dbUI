@@ -12,6 +12,9 @@
 // `test` comes from the fixture, not from Playwright directly: it spawns this worker's own dev
 // server and points baseURL at it. See test-ui/server-fixture.js.
 const { test, expect } = require('./server-fixture');
+// Real base64 data URIs: firestore.rules validProfile only accepts png/jpeg/webp data URIs (or '').
+const PIC_ANN = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+const PIC_CARA = 'data:image/png;base64,Q0FSQQ==';
 
 // This file opts OUT of the suite-wide fullyParallel.
 //
@@ -244,9 +247,9 @@ test('user-linked lists: link projection over Firestore — admin sees all links
 
   // Two people set up their own profiles: Ann shares (with a photo), Cara does not.
   await signIn(page, 'ann@test.com');
-  await page.evaluate(() => backend_users.setMyProfile('Ann', true, 'PIC_ANN'));
+  await page.evaluate((pic) => backend_users.setMyProfile('Ann', true, pic), PIC_ANN);
   await signIn(page, 'cara@test.com');
-  await page.evaluate(() => backend_users.setMyProfile('Cara', false, 'PIC_CARA'));
+  await page.evaluate((pic) => backend_users.setMyProfile('Cara', false, pic), PIC_CARA);
 
   // Admin links both list values to their accounts, then reads the projection.
   await signIn(page, 'admin@test.com');
@@ -256,14 +259,14 @@ test('user-linked lists: link projection over Firestore — admin sees all links
     return backend.getListAvatars();
   });
   expect(adminProj).toEqual({ people: {                                          // admin sees both links
-    Ann:  { picture: 'PIC_ANN',  name: 'Ann'  },
-    Cara: { picture: 'PIC_CARA', name: 'Cara' }
+    Ann:  { picture: PIC_ANN,  name: 'Ann'  },
+    Cara: { picture: PIC_CARA, name: 'Cara' }
   } });
 
   // The registered viewer gets a projection with only the SHARED link, and no email anywhere.
   await signIn(page, 'viewer@test.com');
   const viewerProj = await page.evaluate(() => backend.getListAvatars());
-  expect(viewerProj).toEqual({ people: { Ann: { picture: 'PIC_ANN', name: 'Ann' } } });   // Cara (unshared) hidden
+  expect(viewerProj).toEqual({ people: { Ann: { picture: PIC_ANN, name: 'Ann' } } });   // Cara (unshared) hidden
   expect(JSON.stringify(viewerProj)).not.toContain('@');                         // never an email
   await expectNoCspViolations(page);
 });
