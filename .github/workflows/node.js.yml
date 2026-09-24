@@ -24,9 +24,9 @@ jobs:
         # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
@@ -53,8 +53,8 @@ jobs:
         working-directory: ./functions
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
+    - uses: actions/checkout@v7
+    - uses: actions/setup-node@v7
       with:
         node-version: 22.x   # the runtime functions/package.json "engines" pins
         cache: 'npm'
@@ -79,13 +79,13 @@ jobs:
         working-directory: ./dev
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
+    - uses: actions/checkout@v7
+    - uses: actions/setup-node@v7
       with:
         node-version: 22.x
         cache: 'npm'
         cache-dependency-path: dev/package-lock.json
-    - uses: actions/setup-java@v4   # the Firestore emulator is a JVM
+    - uses: actions/setup-java@v6   # the Firestore emulator is a JVM
       with:
         distribution: temurin
         java-version: '21'
@@ -114,8 +114,8 @@ jobs:
         working-directory: ./dev
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
+    - uses: actions/checkout@v7
+    - uses: actions/setup-node@v7
       with:
         node-version: 22.x
         cache: 'npm'
@@ -134,13 +134,13 @@ jobs:
         working-directory: ./dev
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
+    - uses: actions/checkout@v7
+    - uses: actions/setup-node@v7
       with:
         node-version: 22.x
         cache: 'npm'
         cache-dependency-path: dev/package-lock.json
-    - uses: actions/setup-java@v4   # the Firestore emulator (used by the Firebase-mode spec) is a JVM
+    - uses: actions/setup-java@v6   # the Firestore emulator (used by the Firebase-mode spec) is a JVM
       with:
         distribution: temurin
         java-version: '21'
@@ -171,7 +171,7 @@ jobs:
       run: npm run test:e2e-firebase
     - name: Upload report on failure
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: playwright-report
         path: |
