@@ -1491,14 +1491,14 @@
         "calling": "representative"
       },
       {
-        "id": "rc-young_men_priests-first_assistant",
-        "position": "148",
+        "id": "rc-149",
+        "position": "149",
         "organization": "young_men_priests",
         "calling": "first_assistant"
       },
       {
-        "id": "rc-young_men_priests-second_assistant",
-        "position": "149",
+        "id": "rc-150",
+        "position": "150",
         "organization": "young_men_priests",
         "calling": "second_assistant"
       },
