@@ -177,6 +177,8 @@
       "text.internal": "# Bishopric tool",
       "text.ordination_footer": "Those in favor may show it by the uplifted hand. [Pause briefly.] Those opposed, if any, may also show it. [Pause briefly.]",
       "text.ordination_header": "We propose that the following (receive the Aaronic Priesthood and) be ordained:",
+      "text.quorum_announcement_footer": "[Announcement only — no sustaining vote is taken in sacrament meeting. They are sustained in their quorum meeting.]",
+      "text.quorum_announcement_header": "The following have been called to serve in the Aaronic Priesthood quorums:",
       "text.releases_footer": "Those who wish to express thanks for his/her/their service may do so by raising their hand. [Pause.]",
       "text.releases_header": "The following have been released with thanks from their callings in the ward:",
       "text.sacrament_intro": "We will prepare for the sacrament by singing the sacrament hymn. After the hymn, the sacrament will be blessed and passed to the congregation.",

@@ -719,6 +719,21 @@
                   "organization": {
                     "ne": "aaronic_priesthood"
                   }
+                },
+                {
+                  "organization": {
+                    "ne": "young_men_deacons"
+                  }
+                },
+                {
+                  "organization": {
+                    "ne": "young_men_teachers"
+                  }
+                },
+                {
+                  "organization": {
+                    "ne": "young_men_priests"
+                  }
                 }
               ]
             },
@@ -736,6 +751,42 @@
             "sources": [
               "admin_callings"
             ]
+          },
+          {
+            "mode": "union",
+            "bare": true,
+            "readonly": true,
+            "hideEmpty": true,
+            "columns": [
+              "person",
+              "organization",
+              "calling",
+              "notes"
+            ],
+            "sources": [
+              "admin_callings"
+            ],
+            "filter": {
+              "$and": [
+                {
+                  "status": "accepted"
+                },
+                {
+                  "$or": [
+                    {
+                      "organization": "young_men_deacons"
+                    },
+                    {
+                      "organization": "young_men_teachers"
+                    },
+                    {
+                      "organization": "young_men_priests"
+                    }
+                  ]
+                }
+              ]
+            },
+            "markdown": "{{t:text.quorum_announcement_header}}\n\n{{self}}\n\n{{t:text.quorum_announcement_footer}}"
           },
           {
             "mode": "union",

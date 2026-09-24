@@ -177,6 +177,8 @@
       "text.internal": "# Piispakunnan työkalu",
       "text.ordination_footer": "Ne, jotka kannattavat, voivat osoittaa sen nostamalla kätensä. [Pysähdy hetkeksi.] Jos joku vastustaa ehdotusta, hän voi myös osoittaa sen. [Pysähdy hetkeksi.]",
       "text.ordination_header": "Ehdotamme, että seuraavat henkilöt (saavat Aaronin pappeuden ja) asetetaan virkaan:",
+      "text.quorum_announcement_footer": "[Vain ilmoitus — sakramenttikokouksessa ei äänestetä hyväksymisestä. Heidät hyväksytään koorumin kokouksessa.]",
+      "text.quorum_announcement_header": "Seuraavat on kutsuttu palvelemaan Aaronin pappeuden koorumeissa:",
       "text.releases_footer": "Ne, jotka haluavat kiittää hänen/heidän palvelutyöstään, voivat osoittaa sen nostamalla kätensä. [Pysähdy hetkeksi.]",
       "text.releases_header": "Seuraavat henkilöt vapautetaan kiitoksin seurakunnan palvelutehtävistä:",
       "text.sacrament_intro": "Valmistaudumme sakramenttiin laulamalla sakramenttilaulun. Laulun jälkeen sakramentti siunataan ja jaetaan seurakunnalle.",
