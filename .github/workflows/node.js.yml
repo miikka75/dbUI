@@ -19,7 +19,8 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [20.x, 22.x]
+        # 20.x dropped: it reached end of life in April 2026, and better-sqlite3 13 requires >= 22.
+        node-version: [22.x, 24.x]
         # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
     steps:
@@ -40,6 +41,33 @@ jobs:
     # against PostgreSQL-in-WASM (@electric-sql/pglite). No service container, Docker or JVM needed —
     # unlike the `rules` job below, it is just another unit test.
     - run: npm test
+
+  # The Cloud Function (functions/) has its own dependency tree that nothing else installs: the unit tests
+  # only read functions/index.js as text. So a dependency PR there would pass CI untested and fail at
+  # `firebase deploy`, e.g. a firebase-admin major that firebase-functions does not accept (npm ci ERESOLVE).
+  functions:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./functions
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22.x   # the runtime functions/package.json "engines" pins
+        cache: 'npm'
+        cache-dependency-path: functions/package-lock.json
+    - run: npm ci
+    # A second look at the installed tree: fails on any missing, invalid or peer-mismatched package.
+    - run: npm ls --all > /dev/null
+    # Load the module the way the Firebase CLI does during deploy analysis: catches a removed import path
+    # or an export the new SDK no longer accepts. GCLOUD_PROJECT lets admin.initializeApp() run offline.
+    - name: Load functions/index.js
+      env:
+        GCLOUD_PROJECT: demo-ci
+      run: node -e "const m = require('./index.js'); if (typeof m.cspReport !== 'function') throw new Error('cspReport is not exported')"
 
   # Security-rules suites against the Firebase emulators. These guard the access-control model —
   # the layer with the least other coverage — so they gate merges like the unit tests do.
