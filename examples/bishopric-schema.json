@@ -652,10 +652,23 @@
             "filter": {
               "$or": [
                 {
-                  "status": "accepted"
-                },
-                {
-                  "status": "released"
+                  "$and": [
+                    {
+                      "$or": [
+                        {
+                          "status": "accepted"
+                        },
+                        {
+                          "status": "released"
+                        }
+                      ]
+                    },
+                    {
+                      "organization": {
+                        "ne": "elders_quorum"
+                      }
+                    }
+                  ]
                 },
                 {
                   "status": "recently_baptized"
@@ -703,7 +716,16 @@
               "admin_callings"
             ],
             "filter": {
-              "status": "released"
+              "$and": [
+                {
+                  "status": "released"
+                },
+                {
+                  "organization": {
+                    "ne": "elders_quorum"
+                  }
+                }
+              ]
             },
             "markdown": "{{t:text.releases_header}}\n\n{{self}}\n\n{{t:text.releases_footer}}",
             "hideEmpty": true,
@@ -718,6 +740,26 @@
                 {
                   "organization": {
                     "ne": "aaronic_priesthood"
+                  }
+                },
+                {
+                  "organization": {
+                    "ne": "young_men_deacons"
+                  }
+                },
+                {
+                  "organization": {
+                    "ne": "young_men_teachers"
+                  }
+                },
+                {
+                  "organization": {
+                    "ne": "young_men_priests"
+                  }
+                },
+                {
+                  "organization": {
+                    "ne": "elders_quorum"
                   }
                 }
               ]
@@ -736,6 +778,42 @@
             "sources": [
               "admin_callings"
             ]
+          },
+          {
+            "mode": "union",
+            "bare": true,
+            "readonly": true,
+            "hideEmpty": true,
+            "columns": [
+              "person",
+              "organization",
+              "calling",
+              "notes"
+            ],
+            "sources": [
+              "admin_callings"
+            ],
+            "filter": {
+              "$and": [
+                {
+                  "status": "accepted"
+                },
+                {
+                  "$or": [
+                    {
+                      "organization": "young_men_deacons"
+                    },
+                    {
+                      "organization": "young_men_teachers"
+                    },
+                    {
+                      "organization": "young_men_priests"
+                    }
+                  ]
+                }
+              ]
+            },
+            "markdown": "{{t:text.quorum_announcement_header}}\n\n{{self}}\n\n{{t:text.quorum_announcement_footer}}"
           },
           {
             "mode": "union",
@@ -1413,22 +1491,16 @@
         "calling": "representative"
       },
       {
-        "id": "rc-148",
-        "position": "148",
-        "organization": "young_men_priests",
-        "calling": "president"
-      },
-      {
         "id": "rc-149",
         "position": "149",
         "organization": "young_men_priests",
-        "calling": "first_counselor"
+        "calling": "first_assistant"
       },
       {
         "id": "rc-150",
         "position": "150",
         "organization": "young_men_priests",
-        "calling": "second_counselor"
+        "calling": "second_assistant"
       },
       {
         "id": "rc-152",
