@@ -113,14 +113,35 @@ describe('bishopric example — ward business in the sacrament meeting program',
     assert.equal(wardHeader({ status: 'child_blessing' }), true);
   });
 
-  it('a recently baptized convert is confirmed, then welcomed into the ward', () => {
+  // Confirmation may happen at the baptismal service or in sacrament meeting, so each kind of new member
+  // has a "to be confirmed" and an "already confirmed" status, and only the first is listed for confirmation.
+  it('a convert still to be confirmed is confirmed, then welcomed into the ward', () => {
     assert.deepEqual(landsIn({ status: 'recently_baptized' }), ['confirmation', 'welcome']);
   });
 
-  it('a baptized child of record is recognized, without a welcome vote', () => {
-    assert.deepEqual(landsIn({ status: 'child_baptized' }), ['child_baptized']);
+  it('a convert confirmed at the baptism is only welcomed', () => {
+    assert.deepEqual(landsIn({ status: 'convert_confirmed' }), ['welcome']);
+    assert.equal(wardHeader({ status: 'convert_confirmed' }), true);
+  });
+
+  it('a child of record still to be confirmed is confirmed, then recognized without a welcome vote', () => {
+    assert.deepEqual(landsIn({ status: 'child_baptized' }), ['confirmation', 'child_baptized']);
     assert.ok(BLOCKS.child_baptized.markdown.indexOf('welcome_footer') < 0);
     assert.equal(wardHeader({ status: 'child_baptized' }), true);
+  });
+
+  it('a child of record confirmed at the baptism is only recognized', () => {
+    assert.deepEqual(landsIn({ status: 'child_confirmed' }), ['child_baptized']);
+    assert.equal(wardHeader({ status: 'child_confirmed' }), true);
+  });
+
+  it('every Welcome-phase status appears on the program, and the Welcome lane comes before needs_calling', () => {
+    const st = doc.tables.ref_statuses;
+    const welcome = st.filter((r) => r.phase === 'welcome').map((r) => r.status);
+    assert.deepEqual(welcome, ['child_blessing', 'recently_baptized', 'convert_confirmed', 'child_baptized', 'child_confirmed', 'moved_in']);
+    welcome.forEach((status) => assert.ok(landsIn({ status }).length > 0, status + ' is on the program'));
+    const pos = (x) => Number(st.filter((r) => r.status === x)[0].position);
+    assert.equal(pos('needs_calling'), pos('moved_in') + 1);
   });
 
   it('a member who moved in is only welcomed', () => {

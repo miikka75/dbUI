@@ -681,6 +681,12 @@
                 },
                 {
                   "status": "child_baptized"
+                },
+                {
+                  "status": "convert_confirmed"
+                },
+                {
+                  "status": "child_confirmed"
                 }
               ]
             }
@@ -715,7 +721,14 @@
               "admin_callings"
             ],
             "filter": {
-              "status": "recently_baptized"
+              "$or": [
+                {
+                  "status": "recently_baptized"
+                },
+                {
+                  "status": "child_baptized"
+                }
+              ]
             },
             "markdown": "{{t:text.confirmation_header}}\n\n{{self}}\n\n{{t:text.confirmation_footer}}"
           },
@@ -737,6 +750,9 @@
                   "status": "recently_baptized"
                 },
                 {
+                  "status": "convert_confirmed"
+                },
+                {
                   "status": "moved_in"
                 }
               ]
@@ -756,7 +772,14 @@
               "admin_callings"
             ],
             "filter": {
-              "status": "child_baptized"
+              "$or": [
+                {
+                  "status": "child_baptized"
+                },
+                {
+                  "status": "child_confirmed"
+                }
+              ]
             },
             "markdown": "{{t:text.child_baptized_header}}\n\n{{self}}\n\n{{t:text.child_baptized_footer}}"
           },
@@ -1324,104 +1347,116 @@
         "status": "recently_baptized"
       },
       {
-        "id": "st-welcome-child_baptized",
+        "id": "st-welcome-convert_confirmed",
         "position": "3",
+        "phase": "welcome",
+        "status": "convert_confirmed"
+      },
+      {
+        "id": "st-welcome-child_baptized",
+        "position": "4",
         "phase": "welcome",
         "status": "child_baptized"
       },
       {
+        "id": "st-welcome-child_confirmed",
+        "position": "5",
+        "phase": "welcome",
+        "status": "child_confirmed"
+      },
+      {
         "id": "st-17",
-        "position": "4",
+        "position": "6",
         "phase": "welcome",
         "status": "moved_in"
       },
       {
         "id": "st-15",
-        "position": "5",
+        "position": "7",
         "phase": "consideration",
         "status": "needs_calling"
       },
       {
         "id": "st-1",
-        "position": "6",
+        "position": "8",
         "phase": "consideration",
         "status": "under_discussion"
       },
       {
         "id": "st-2",
-        "position": "7",
+        "position": "9",
         "phase": "consideration",
         "status": "praying_about_it"
       },
       {
         "id": "st-3",
-        "position": "8",
+        "position": "10",
         "phase": "consideration",
         "status": "approved_by_bishopric"
       },
       {
         "id": "st-4",
-        "position": "9",
+        "position": "11",
         "phase": "call",
         "status": "called"
       },
       {
         "id": "st-5",
-        "position": "10",
+        "position": "12",
         "phase": "call",
         "status": "accepted"
       },
       {
         "id": "st-6",
-        "position": "11",
+        "position": "13",
         "phase": "call",
         "status": "sustained"
       },
       {
         "id": "st-7",
-        "position": "12",
+        "position": "14",
         "phase": "call",
         "status": "sustaining_recorded"
       },
       {
         "id": "st-8",
-        "position": "13",
+        "position": "15",
         "phase": "setting_apart",
         "status": "set_apart"
       },
       {
         "id": "st-9",
-        "position": "14",
+        "position": "16",
         "phase": "setting_apart",
         "status": "setting_apart_recorded"
       },
       {
         "id": "st-10",
-        "position": "15",
+        "position": "17",
         "phase": "release",
         "status": "needs_release"
       },
       {
         "id": "st-11",
-        "position": "16",
+        "position": "18",
         "phase": "release",
         "status": "released"
       },
       {
         "id": "st-12",
-        "position": "17",
+        "position": "19",
         "phase": "release",
         "status": "release_done"
       },
       {
         "id": "st-13",
-        "position": "18",
+        "position": "20",
         "phase": "release",
         "status": "release_recorded"
       },
       {
         "id": "st-14",
-        "position": "19",
+        "position": "21",
         "phase": "declined",
         "status": "declined"
       }
