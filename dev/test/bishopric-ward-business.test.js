@@ -31,7 +31,6 @@ const BLOCKS = {
   blessing: block('blessing_header'),
   confirmation: block('confirmation_header'),
   welcome: block('welcome_header'),
-  child_baptized: block('child_baptized_header'),
   releases: block('releases_header'),
   sustaining: block('sustaining_header'),
   announcement: block('quorum_announcement_header'),
@@ -100,9 +99,9 @@ describe('bishopric example — ward business in the sacrament meeting program',
     assert.ok(idx(BLOCKS.ordination) > idx(BLOCKS.sustaining));
   });
 
-  it('ward business runs blessing, confirmation, welcome, recognition, releases, sustainings, ordinations, announcements', () => {
+  it('ward business runs blessing, confirmation, welcome, releases, sustainings, ordinations, announcements', () => {
     const idx = (b) => program.columns.indexOf(b);
-    const order = ['blessing', 'confirmation', 'welcome', 'child_baptized', 'releases', 'sustaining', 'ordination', 'announcement'];
+    const order = ['blessing', 'confirmation', 'welcome', 'releases', 'sustaining', 'ordination', 'announcement'];
     order.forEach((k, i) => { if (i) assert.equal(idx(BLOCKS[k]), idx(BLOCKS[order[i - 1]]) + 1, k + ' follows ' + order[i - 1]); });
     assert.equal(idx(BLOCKS.blessing), idx(WARD_HEADER) + 1);
   });
@@ -113,33 +112,25 @@ describe('bishopric example — ward business in the sacrament meeting program',
     assert.equal(wardHeader({ status: 'child_blessing' }), true);
   });
 
-  // Confirmation may happen at the baptismal service or in sacrament meeting, so each kind of new member
-  // has a "to be confirmed" and an "already confirmed" status, and only the first is listed for confirmation.
-  it('a convert still to be confirmed is confirmed, then welcomed into the ward', () => {
+  // Confirmation may happen at the baptismal service or in sacrament meeting, so a new member is either
+  // "baptized, to be confirmed" (listed for confirmation) or "baptized and confirmed" (not listed again).
+  it('someone baptized and still to be confirmed is confirmed, then welcomed into the ward', () => {
     assert.deepEqual(landsIn({ status: 'recently_baptized' }), ['confirmation', 'welcome']);
   });
 
-  it('a convert confirmed at the baptism is only welcomed', () => {
-    assert.deepEqual(landsIn({ status: 'convert_confirmed' }), ['welcome']);
-    assert.equal(wardHeader({ status: 'convert_confirmed' }), true);
-  });
-
-  it('a child of record still to be confirmed is confirmed, then recognized without a welcome vote', () => {
-    assert.deepEqual(landsIn({ status: 'child_baptized' }), ['confirmation', 'child_baptized']);
-    assert.ok(BLOCKS.child_baptized.markdown.indexOf('welcome_footer') < 0);
-    assert.equal(wardHeader({ status: 'child_baptized' }), true);
-  });
-
-  it('a child of record confirmed at the baptism is only recognized', () => {
-    assert.deepEqual(landsIn({ status: 'child_confirmed' }), ['child_baptized']);
-    assert.equal(wardHeader({ status: 'child_confirmed' }), true);
+  it('someone confirmed at the baptism is only welcomed', () => {
+    assert.deepEqual(landsIn({ status: 'confirmed' }), ['welcome']);
+    assert.equal(wardHeader({ status: 'confirmed' }), true);
   });
 
   it('every Welcome-phase status appears on the program, and the Welcome lane comes before needs_calling', () => {
     const st = doc.tables.ref_statuses;
     const welcome = st.filter((r) => r.phase === 'welcome').map((r) => r.status);
-    assert.deepEqual(welcome, ['child_blessing', 'recently_baptized', 'convert_confirmed', 'child_baptized', 'child_confirmed', 'moved_in']);
-    welcome.forEach((status) => assert.ok(landsIn({ status }).length > 0, status + ' is on the program'));
+    assert.deepEqual(welcome, ['child_blessing', 'recently_baptized', 'confirmed', 'moved_in']);
+    welcome.forEach((status) => {
+      assert.ok(landsIn({ status }).length > 0, status + ' is on the program');
+      assert.equal(wardHeader({ status }), true, status + ' shows the ward business header');
+    });
     const pos = (x) => Number(st.filter((r) => r.status === x)[0].position);
     assert.equal(pos('needs_calling'), pos('moved_in') + 1);
   });
@@ -151,7 +142,7 @@ describe('bishopric example — ward business in the sacrament meeting program',
   it('every block the program uses has an English and a Finnish text', () => {
     ['en', 'fi'].forEach((code) => {
       const text = fs.readFileSync(path.join(__dirname, '..', '..', 'examples', 'bishopric-lang-' + code + '.json'), 'utf8');
-      ['quorum_announcement_header', 'quorum_announcement_footer', 'blessing_header', 'blessing_footer', 'confirmation_header', 'confirmation_footer', 'child_baptized_header', 'child_baptized_footer'].forEach((key) => {
+      ['quorum_announcement_header', 'quorum_announcement_footer', 'blessing_header', 'blessing_footer', 'confirmation_header', 'confirmation_footer'].forEach((key) => {
         assert.ok(text.indexOf('"text.' + key + '"') >= 0, code + ' defines text.' + key);
       });
     });
