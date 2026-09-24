@@ -42,15 +42,19 @@ const wardHeader = (row) => Rows.condMatches(row, WARD_HEADER.filter);
 
 describe('bishopric example — ward business in the sacrament meeting program', () => {
   ['young_men_deacons', 'young_men_teachers', 'young_men_priests'].forEach((org) => {
-    it(org + ' callings are announced, not sustained', () => {
-      assert.deepEqual(landsIn({ status: 'accepted', organization: org, calling: 'president' }), ['announcement']);
+    it(org + ' callings are announced once set apart, never sustained', () => {
+      const row = { organization: org, calling: 'president' };
+      assert.deepEqual(landsIn(Object.assign({ status: 'accepted' }, row)), []);
+      assert.equal(wardHeader(Object.assign({ status: 'accepted' }, row)), false);
+      assert.deepEqual(landsIn(Object.assign({ status: 'set_apart' }, row)), ['announcement']);
+      assert.equal(wardHeader(Object.assign({ status: 'set_apart' }, row)), true);
     });
   });
 
   it('the priests quorum has assistants, not a youth presidency (the bishop is its president)', () => {
     const callings = doc.tables.ref_callings.filter((r) => r.organization === 'young_men_priests').map((r) => r.calling);
     assert.deepEqual(callings, ['first_assistant', 'second_assistant', 'secretary']);
-    assert.deepEqual(landsIn({ status: 'accepted', organization: 'young_men_priests', calling: 'first_assistant' }), ['announcement']);
+    assert.deepEqual(landsIn({ status: 'set_apart', organization: 'young_men_priests', calling: 'first_assistant' }), ['announcement']);
   });
 
   it('an ordination is put to a vote in its own block', () => {
@@ -79,10 +83,15 @@ describe('bishopric example — ward business in the sacrament meeting program',
 
   it('the ward business header shows only when a ward block has a row', () => {
     assert.equal(wardHeader({ status: 'accepted', organization: 'primary', calling: 'president' }), true);
-    assert.equal(wardHeader({ status: 'accepted', organization: 'young_men_deacons', calling: 'president' }), true);
+    assert.equal(wardHeader({ status: 'set_apart', organization: 'young_men_deacons', calling: 'president' }), true);
     assert.equal(wardHeader({ status: 'moved_in' }), true);
     assert.equal(wardHeader({ status: 'accepted', organization: 'elders_quorum', calling: 'president' }), false);
     assert.equal(wardHeader({ status: 'released', organization: 'elders_quorum', calling: 'secretary' }), false);
+  });
+
+  it('a ward calling set apart after its sustaining is not on the program again', () => {
+    assert.deepEqual(landsIn({ status: 'set_apart', organization: 'primary', calling: 'president' }), []);
+    assert.equal(wardHeader({ status: 'set_apart', organization: 'primary', calling: 'president' }), false);
   });
 
   it('a calling not yet accepted is in none of them', () => {
