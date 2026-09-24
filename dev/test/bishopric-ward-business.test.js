@@ -46,6 +46,12 @@ describe('bishopric example — ward business in the sacrament meeting program',
     });
   });
 
+  it('the priests quorum has assistants, not a youth presidency (the bishop is its president)', () => {
+    const callings = doc.tables.ref_callings.filter((r) => r.organization === 'young_men_priests').map((r) => r.calling);
+    assert.deepEqual(callings, ['first_assistant', 'second_assistant', 'secretary']);
+    assert.deepEqual(landsIn({ status: 'accepted', organization: 'young_men_priests', calling: 'first_assistant' }), ['announcement']);
+  });
+
   it('an ordination is put to a vote in its own block', () => {
     assert.deepEqual(landsIn({ status: 'accepted', organization: 'aaronic_priesthood', calling: 'deacon' }), ['ordination']);
   });
