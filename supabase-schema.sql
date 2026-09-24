@@ -278,7 +278,9 @@ returns boolean language sql immutable as $$
       and jsonb_typeof(val -> 'name') = 'string'
       and length(val ->> 'name') <= 100
       and (not (val ? 'shared')  or jsonb_typeof(val -> 'shared') = 'boolean')
-      and (not (val ? 'picture') or (jsonb_typeof(val -> 'picture') = 'string' and length(val ->> 'picture') <= 350000))
+      and (not (val ? 'picture') or (jsonb_typeof(val -> 'picture') = 'string' and length(val ->> 'picture') <= 350000
+                                   -- base64 png/jpeg/webp data URI or '' (removal): no http(s) tracking beacons
+                                   and (val ->> 'picture') ~ '^(data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]*)?$'))
     when store = '_list_users' then
       not exists (select 1 from jsonb_object_keys(val) k where k <> all (array['list','value','email','shared']))
       and jsonb_typeof(val -> 'list')  = 'string' and length(val ->> 'list')  <= 200

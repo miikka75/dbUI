@@ -84,7 +84,13 @@ await ok('profile with a picture data-URL is allowed',
 await ok('non-string picture is denied',
   assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true, picture: 123 })));
 await ok('oversized picture is denied',
-  assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true, picture: 'x'.repeat(350001) })));
+  assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true, picture: 'data:image/png;base64,' + 'A'.repeat(350000) })));
+await ok('https picture URL is denied (a tracking beacon on every member)',
+  assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true, picture: 'https://tracker.example/p.png' })));
+await ok('svg data-URI picture is denied',
+  assertFails(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true, picture: 'data:image/svg+xml;base64,PHN2Zz4=' })));
+await ok("empty picture ('' = removed) is allowed",
+  assertSucceeds(setDoc(doc(viewer, '_profiles/viewer@x.com'), { name: 'Vic', shared: true, picture: '' })));
 
 // --- _pages (doc-view bodies): readable by every registered user, writable by editors/admins. ---
 // (Restricted members previously hit the data catch-all's hasTableAccess('_pages') gate, which no

@@ -8084,7 +8084,7 @@ function createVueApp() {
     computed: {
       // A directly-supplied picture (e.g. a list-value's server-projected avatar, where the caller has no
       // email to resolve) wins; otherwise resolve from the email's profile.
-      pic: function() { return this.picture || appInstance.profilePicture(this.email); },
+      pic: function() { return window.safeAvatarSrc(this.picture || appInstance.profilePicture(this.email)); },
       // Given name wins; otherwise the shared email->display-name rule (admins may fall back to the raw
       // email, non-admins get '' -> the generic account icon). Named/pictured users are unaffected.
       label: function() { return this.name || appInstance.userLabel(this.email); },

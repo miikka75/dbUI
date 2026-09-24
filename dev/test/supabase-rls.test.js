@@ -457,9 +457,18 @@ describe('supabase RLS — _profiles shape validation', () => {
     await as('viewer@x.com');
     assert.equal(await tryUpdate('_profiles', 'viewer@x.com', prof({ role: 'admin' })), 'denied');
   });
+  it('a picture that is not a base64 png/jpeg/webp data URI is rejected (no tracking-beacon URLs)', async () => {
+    await as('viewer@x.com');
+    assert.equal(await tryUpdate('_profiles', 'viewer@x.com', prof({ picture: 'https://tracker.example/p.png' })), 'denied');
+    assert.equal(await tryUpdate('_profiles', 'viewer@x.com', prof({ picture: 'data:image/svg+xml;base64,PHN2Zz4=' })), 'denied');
+  });
+  it("an empty picture ('' = removed) is accepted", async () => {
+    await as('viewer@x.com');
+    assert.equal(await tryUpdate('_profiles', 'viewer@x.com', prof({ picture: '' })), 'ok');
+  });
   it('an oversized picture is rejected (the jsonb-has-no-1MB-limit case)', async () => {
     await as('viewer@x.com');
-    assert.equal(await tryUpdate('_profiles', 'viewer@x.com', prof({ picture: 'x'.repeat(350001) })), 'denied');
+    assert.equal(await tryUpdate('_profiles', 'viewer@x.com', prof({ picture: 'data:image/png;base64,' + 'A'.repeat(350000) })), 'denied');
   });
   it('a shared profile is world-readable; an unshared one is not', async () => {
     await seed('_profiles', 'ann@x.com',  { name: 'Ann',  shared: true });
