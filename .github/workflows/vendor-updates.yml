@@ -1,0 +1,132 @@
+# Weekly check for new releases of the browser libraries pinned in vendor/versions (Vue, Vuetify, MDI,
+# PGlite, qrcode-generator). Dependabot cannot read that file, so this does its job for vendor/: when a
+# newer version is on npm it bumps vendor/versions, runs ./update-vendor.sh (which rewrites the CDN
+# fallback URLs and SRI hashes to match) and opens or refreshes one pull request.
+#
+# PGlite has a second pin, the dev/ devDependency the Node-side tests use; it is bumped here in the same
+# PR (dependabot.yml ignores it for that reason).
+#
+# Token: a PR opened with the default GITHUB_TOKEN does not trigger other workflows, so Node.js CI would
+# not run on it. Store a fine-grained PAT or GitHub App token (contents + pull-requests: write) as the
+# VENDOR_UPDATE_TOKEN repository secret to get CI on these PRs; without it the PR still opens, and closing
+# and reopening it starts CI.
+name: Vendor updates
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'   # Mondays, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: vendor-updates
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+
+      - name: Compare vendor/versions with npm latest
+        id: bump
+        run: |
+          # KEY in vendor/versions -> npm package name.
+          declare -A PKG=(
+            [VUE]=vue
+            [VUETIFY]=vuetify
+            [MDI]=@mdi/font
+            [PGLITE]=@electric-sql/pglite
+            [QRCODE]=qrcode-generator
+          )
+          . vendor/versions
+          # Newest stable version matching a semver range (npm prints a string for one match, an array
+          # for several).
+          newest() { npm view "$1@$2" version --json | node -e '
+            let v = JSON.parse(require("fs").readFileSync(0, "utf8") || "null");
+            v = [].concat(v || []).filter(x => !x.includes("-")); console.log(v.at(-1) || "")'; }
+          changes=""
+          for key in VUE VUETIFY MDI PGLITE QRCODE; do
+            pkg="${PKG[$key]}"
+            current="${!key}"
+            # Only bumps within the current major (^, so 0.x stays within its minor) are applied: a major
+            # can change the package layout update-vendor.sh and deploy-pages.yml copy from (qrcode-generator
+            # 2.x moved qrcode.js into dist/), so it needs a hand-made PR. It is reported, not applied.
+            target="$(newest "$pkg" "^${current}")"
+            latest="$(npm view "$pkg" version)"
+            if [ -z "$target" ] || [ -z "$latest" ]; then
+              echo "::error::npm returned no version for $pkg"; exit 1
+            fi
+            if [ "$latest" != "$target" ]; then
+              echo "::warning::$pkg $latest is out (breaking range); update it by hand"
+              echo "- \`$pkg\` $latest is available but not applied (breaking range)" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            if [ "$target" != "$current" ]; then
+              sed -i "s|^${key}=.*|${key}=${target}|" vendor/versions
+              changes+="- \`$pkg\`: ${current} → ${target}"$'\n'
+            fi
+          done
+          if [ -z "$changes" ]; then
+            echo "vendor/versions is up to date."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s' "$changes" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          { echo 'changes<<EOF'; printf '%s' "$changes"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+
+      - name: Apply the bump (CDN URLs, SRI hashes, vendor dists)
+        if: steps.bump.outputs.changed == 'true'
+        run: ./update-vendor.sh
+
+      - name: Keep dev/'s PGlite devDependency in step with vendor/versions
+        if: steps.bump.outputs.changed == 'true'
+        working-directory: dev
+        run: |
+          . ../vendor/versions
+          if [ "$(node -p "require('./package.json').devDependencies['@electric-sql/pglite']")" != "^${PGLITE}" ]; then
+            npm install --save-dev --ignore-scripts "@electric-sql/pglite@^${PGLITE}"
+          fi
+
+      - name: Check the pins agree
+        if: steps.bump.outputs.changed == 'true'
+        working-directory: dev
+        run: |
+          npm ci
+          node --test test/deploy-config.test.js
+
+      - name: Open or update the pull request
+        if: steps.bump.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.VENDOR_UPDATE_TOKEN || github.token }}
+          branch: automation/vendor-updates
+          delete-branch: true
+          # vendor/* is gitignored apart from vendor/versions, so the downloaded dists stay out of the
+          # commit; only the pins, fallback URLs, SRI hashes and dev/ PGlite pin are committed.
+          add-paths: |
+            vendor/versions
+            index.html
+            style.html
+            app-core.js
+            backend-local-pglite.js
+            dev/package.json
+            dev/package-lock.json
+          commit-message: Bump vendored front-end libraries
+          title: Bump vendored front-end libraries
+          labels: dependencies
+          body: |
+            Newer releases of libraries pinned in `vendor/versions`:
+
+            ${{ steps.bump.outputs.changes }}
+            Applied with `./update-vendor.sh`, which also refreshes the jsdelivr fallback URLs and their SRI
+            hashes. Only updates within each library's current major version are applied automatically; see
+            the workflow run summary for any newer major versions, which need a manual update.
+
+            Opened by the **Vendor updates** workflow.

@@ -208,12 +208,22 @@ describe('deploy config — the browser-local Postgres backend', () => {
     assert.match(wf, /qrcode-generator@/, 'deploy-pages.yml no longer materialises vendor/qrcode.js');
   });
 
-  // Three places materialise vendor/ and they must agree, or the QR encoder is present in one
+  // Firebase Hosting uploads the working tree, where vendor/ is whatever the last local run left, so the
+  // predeploy hook is what brings it to vendor/versions. It runs on the deploying machine (Windows
+  // included), hence a Node script rather than update-vendor.sh.
+  it('the Firebase Hosting deploy materialises vendor/ first, with a script that runs on Windows', () => {
+    const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'firebase.json'), 'utf8'));
+    const hooks = [].concat(cfg.hosting.predeploy || []);
+    assert.ok(hooks.includes('node scripts/vendor-fetch.mjs'), 'firebase.json hosting.predeploy no longer runs vendor-fetch.mjs');
+    assert.ok(fs.existsSync(path.join(ROOT, 'scripts', 'vendor-fetch.mjs')));
+  });
+
+  // Four places materialise vendor/ and they must agree, or the QR encoder is present in one
   // environment and absent in another -- where the label sheet silently prints Code 39 instead, which
   // looks like a design choice rather than a missing file.
   it('every path that materialises vendor/ knows about the QR encoder', () => {
     for (const f of [['update-vendor.sh'], ['.claude', 'hooks', 'session-start.sh'],
-                     ['.github', 'workflows', 'deploy-pages.yml']]) {
+                     ['.github', 'workflows', 'deploy-pages.yml'], ['scripts', 'vendor-fetch.mjs']]) {
       const src = fs.readFileSync(path.join(ROOT, ...f), 'utf8');
       assert.match(src, /qrcode/, f.join('/') + ' does not materialise vendor/qrcode.js');
     }

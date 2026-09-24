@@ -1,0 +1,53 @@
+# Dependabot version updates.
+# https://docs.github.com/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+#
+# Covers the two npm projects and the GitHub Actions used by the workflows. NOT covered: the browser
+# libraries in vendor/ (Vue, Vuetify, MDI, PGlite, qrcode-generator) — they are pinned in vendor/versions
+# and fetched by update-vendor.sh, which also rewrites the CDN fallback URLs and SRI hashes; the
+# .github/workflows/vendor-updates.yml workflow checks npm for those weekly and opens the bump PR.
+version: 2
+updates:
+  # Dev tooling + test suites (Playwright, PGlite, Firebase SDK, TypeScript, ...).
+  - package-ecosystem: npm
+    directory: /dev
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # A dependency joins the FIRST group it matches. Packages that pin each other's versions share a group
+    # with no update-types filter, so even a major bump arrives in one PR instead of two that each fail
+    # alone (@firebase/rules-unit-testing peers on firebase ^12).
+    groups:
+      dev-firebase:
+        patterns: ["firebase", "@firebase/*"]
+      dev-minor-patch:
+        update-types: [minor, patch]
+    # @electric-sql/pglite here must match PGLITE in vendor/versions (the browser copy); the vendor-updates
+    # workflow bumps both together, so Dependabot must not move only this side.
+    ignore:
+      - dependency-name: "@electric-sql/pglite"
+
+  # Cloud Functions (CSP report collector).
+  - package-ecosystem: npm
+    directory: /functions
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # firebase-functions declares which firebase-admin majors it accepts (6.x: up to ^13), so a lone
+    # firebase-admin major fails `npm ci` with ERESOLVE. Keep the pair in one PR, majors included.
+    groups:
+      functions-firebase:
+        patterns: ["firebase-admin", "firebase-functions"]
+      functions-minor-patch:
+        update-types: [minor, patch]
+
+  # actions/checkout, actions/setup-node, ... in .github/workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]
