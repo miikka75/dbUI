@@ -654,19 +654,59 @@
                 {
                   "$and": [
                     {
-                      "$or": [
-                        {
-                          "status": "accepted"
-                        },
-                        {
-                          "status": "released"
-                        }
-                      ]
+                      "status": "released"
                     },
                     {
                       "organization": {
                         "ne": "elders_quorum"
                       }
+                    }
+                  ]
+                },
+                {
+                  "$and": [
+                    {
+                      "status": "accepted"
+                    },
+                    {
+                      "organization": {
+                        "ne": "elders_quorum"
+                      }
+                    },
+                    {
+                      "organization": {
+                        "ne": "young_men_deacons"
+                      }
+                    },
+                    {
+                      "organization": {
+                        "ne": "young_men_teachers"
+                      }
+                    },
+                    {
+                      "organization": {
+                        "ne": "young_men_priests"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "$and": [
+                    {
+                      "status": "set_apart"
+                    },
+                    {
+                      "$or": [
+                        {
+                          "organization": "young_men_deacons"
+                        },
+                        {
+                          "organization": "young_men_teachers"
+                        },
+                        {
+                          "organization": "young_men_priests"
+                        }
+                      ]
                     }
                   ]
                 },
@@ -864,7 +904,7 @@
             "filter": {
               "$and": [
                 {
-                  "status": "accepted"
+                  "status": "set_apart"
                 },
                 {
                   "$or": [
