@@ -46,6 +46,18 @@ global `window.supabase`), exactly like the Firebase compat SDK — no ES module
    after every upgrade that touches `supabase-schema.sql`, not just on first setup. (The bucket insert
    is `on conflict do update`, so it also applies limits to a bucket an earlier version created
    without them.)
+
+   Or run it from a shell with `psql`. That is handier for the re-run after each upgrade:
+
+   ```bash
+   psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 --single-transaction -f supabase-schema.sql
+   ```
+
+   The two flags make the run all or nothing, like the SQL Editor's: a plain `psql -f` carries on past
+   an error and can leave the policies half-applied. `SUPABASE_DB_URL` is the connection string from
+   the dashboard's **Connect** button. The direct connection is IPv6-only on the free plan, so from an
+   IPv4-only network use the **Session pooler** string (not the Transaction pooler). Not
+   `supabase db push`: that applies only files in `supabase/migrations/`, and this file is not one.
 5. **Project Settings → API Keys**: copy the **Project URL** and *one* client key — enter them in the
    app's setup screen (Setup → Supabase). Either key format works; the app passes the key straight to
    `createClient` as an opaque string and never parses it:
@@ -91,7 +103,8 @@ cp .env.example .env
 4. **Terminate TLS in front of Kong** (the whole stack enters on `:8000`) with Caddy or Traefik. Not
    optional: Google OAuth and the browser's realtime `wss://` both require https.
 5. `docker compose pull && docker compose up -d`, then run all of `supabase-schema.sql` through
-   Studio's SQL editor or `psql`.
+   Studio's SQL editor or `psql` (the same command as **Supabase project setup** step 4, with your
+   own Postgres connection string).
 6. In the app's setup screen: **Project URL** is your domain, and the key is the `ANON_KEY` you
    generated — the legacy `eyJ…` shape, which is still accepted (**Supabase project setup** step 5).
 
@@ -188,7 +201,9 @@ exists. The blocker here is the delivery, not the plan.
 ### Turning it on
 
 ```bash
-# 1. Storage: paste supabase/csp-reports.sql into the dashboard's SQL EDITOR and run it.
+# 1. Storage: create the table. From a shell (SUPABASE_DB_URL as in setup step 4):
+psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 --single-transaction -f supabase/csp-reports.sql
+#    Or paste supabase/csp-reports.sql into the dashboard's SQL EDITOR and run it.
 #    NOT `supabase db push` -- that applies migrations from supabase/migrations/, and this file is
 #    deliberately not one (see its header). An earlier version of this document said otherwise; the
 #    symptom is a collector that accepts reports, answers 204 to every browser, and then returns
@@ -237,9 +252,11 @@ four lived exactly where the stub goes.
 The canary it posts is a **stable** URI (`healthcheck.invalid`), so repeated runs increment one row
 rather than adding one per run. Remove it whenever you like:
 
-```sql
-delete from public.csp_reports where blocked_uri = 'https://healthcheck.invalid/probe.js';
+```bash
+psql "$SUPABASE_DB_URL" -c "delete from public.csp_reports where blocked_uri = 'https://healthcheck.invalid/probe.js';"
 ```
+
+Or run the same `delete` in the SQL Editor.
 
 Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` as well to include the backend checks — `kv` reachable and
 the `uploads` bucket present.
