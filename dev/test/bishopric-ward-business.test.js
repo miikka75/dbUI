@@ -28,6 +28,10 @@ const block = (header) => {
   return b;
 };
 const BLOCKS = {
+  blessing: block('blessing_header'),
+  confirmation: block('confirmation_header'),
+  welcome: block('welcome_header'),
+  child_baptized: block('child_baptized_header'),
   releases: block('releases_header'),
   sustaining: block('sustaining_header'),
   announcement: block('quorum_announcement_header'),
@@ -96,10 +100,37 @@ describe('bishopric example — ward business in the sacrament meeting program',
     assert.ok(idx(BLOCKS.ordination) > idx(BLOCKS.sustaining));
   });
 
+  it('ward business runs blessing, confirmation, welcome, recognition, releases, sustainings, ordinations, announcements', () => {
+    const idx = (b) => program.columns.indexOf(b);
+    const order = ['blessing', 'confirmation', 'welcome', 'child_baptized', 'releases', 'sustaining', 'ordination', 'announcement'];
+    order.forEach((k, i) => { if (i) assert.equal(idx(BLOCKS[k]), idx(BLOCKS[order[i - 1]]) + 1, k + ' follows ' + order[i - 1]); });
+    assert.equal(idx(BLOCKS.blessing), idx(WARD_HEADER) + 1);
+  });
+
+  it('a child to be blessed is named and blessed, with no vote', () => {
+    assert.deepEqual(landsIn({ status: 'child_blessing' }), ['blessing']);
+    ['sustaining_footer', 'welcome_footer', 'ordination_footer'].forEach((vote) => assert.ok(BLOCKS.blessing.markdown.indexOf(vote) < 0, vote));
+    assert.equal(wardHeader({ status: 'child_blessing' }), true);
+  });
+
+  it('a recently baptized convert is confirmed, then welcomed into the ward', () => {
+    assert.deepEqual(landsIn({ status: 'recently_baptized' }), ['confirmation', 'welcome']);
+  });
+
+  it('a baptized child of record is recognized, without a welcome vote', () => {
+    assert.deepEqual(landsIn({ status: 'child_baptized' }), ['child_baptized']);
+    assert.ok(BLOCKS.child_baptized.markdown.indexOf('welcome_footer') < 0);
+    assert.equal(wardHeader({ status: 'child_baptized' }), true);
+  });
+
+  it('a member who moved in is only welcomed', () => {
+    assert.deepEqual(landsIn({ status: 'moved_in' }), ['welcome']);
+  });
+
   it('every block the program uses has an English and a Finnish text', () => {
     ['en', 'fi'].forEach((code) => {
       const text = fs.readFileSync(path.join(__dirname, '..', '..', 'examples', 'bishopric-lang-' + code + '.json'), 'utf8');
-      ['quorum_announcement_header', 'quorum_announcement_footer'].forEach((key) => {
+      ['quorum_announcement_header', 'quorum_announcement_footer', 'blessing_header', 'blessing_footer', 'confirmation_header', 'confirmation_footer', 'child_baptized_header', 'child_baptized_footer'].forEach((key) => {
         assert.ok(text.indexOf('"text.' + key + '"') >= 0, code + ' defines text.' + key);
       });
     });
