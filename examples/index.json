@@ -20,7 +20,7 @@
       "title": "Bishopric Tool",
       "description": "A ward bishopric’s working tool — meeting programs, assignments, interviews and a members roster.",
       "icon": "./examples/bishopric-favicon.svg",
-      "revision": 39,
+      "revision": 36,
       "tables": 13,
       "views": 18,
       "schema": {
@@ -43,7 +43,7 @@
       ],
       "about": {
         "file": "bishopric-about.json",
-        "hash": "e947e8328a313bcc"
+        "hash": "821c6170a67c25be"
       },
       "notes": {
         "29": "Welcome the newly baptized and those who moved in; releases now come before sustainings.",
@@ -52,10 +52,7 @@
         "32": "Responsibilities can be assigned to any ward calling, not only the bishopric's three. Assigning to a calling is what gives its holder a card of their own.",
         "33": "The callings catalogue carries the assignment names itself, so the separate list of positions is gone — a position is a row in Lookup, beside the organization and calling it belongs to.",
         "34": "A position is now named by its own organization and calling, so nothing has to be typed for it and a calling you add in Lookup can be linked to an account straight away. UPDATING AN EXISTING DATABASE: the bishopric's three names change — bishop, counselor1 and counselor2 become bishopric_bishop, bishopric_first_counselor and bishopric_second_counselor. They cannot be renamed in Lists, because the old programme view pins them, so migrate through a file: Settings → export; in the file replace those three names wherever they appear, and add three rows to ref_callings with organization bishopric and callings bishop, first_counselor and second_counselor; then Settings → import that file. Your lists, rows and languages all travel in that file, so nothing else moves. Afterwards, in Lookup, link each position to its account again — the links were keyed to the old list and do not follow. SKIPPING IT IS SAFE: nothing is deleted, every card still appears, and the only loss is that those three show their bare name and cannot be linked until you do it.",
-        "36": "Aaronic Priesthood quorum callings (deacons, teachers and priests quorum presidencies and secretaries) move out of the sustaining block into their own announcement in ward business: per the General Handbook they are sustained in the quorum meeting and only announced in sacrament meeting.",
-        "37": "Elders quorum presidency releases and sustainings move from ward business to stake business, since the stake presidency presents them. Other elders quorum callings, such as secretary and teacher, leave the program: per the General Handbook they are sustained and released in the quorum meeting.",
-        "38": "The deacons, teachers and priests quorums are now named under the Aaronic Priesthood (for example “Aaronic Priesthood – Priests Quorum – First Assistant”) instead of the Young Men. The priests quorum has a first and a second assistant instead of a youth president and counselors, since the bishop is its president. UPDATING AN EXISTING DATABASE: an update does not add catalogue rows, so in Lookup add first_assistant and second_assistant under young_men_priests, and remove the priests president and counselor rows once nobody holds them. Existing callings keep their names.",
-        "39": "The elders quorum presidency blocks under stake business are removed again: this is a ward tool, and the stake presidency brings its own business to the meeting. Elders quorum callings stay out of ward business."
+        "36": "Ward business follows the General Handbook for priesthood quorum callings. Aaronic Priesthood quorum callings are announced in sacrament meeting without a vote, in a block of their own; they are sustained in the quorum meeting. Elders quorum callings leave the program: the stake presidency presents the presidency, and the quorum sustains the secretary and teachers. The deacons, teachers and priests quorums are now named under the Aaronic Priesthood (for example “Aaronic Priesthood – Priests Quorum – First Assistant”), and the priests quorum has a first and a second assistant instead of a youth president and counselors, since the bishop is its president. UPDATING AN EXISTING DATABASE: an update does not add catalogue rows, so in Lookup add first_assistant and second_assistant under young_men_priests, and remove the priests president and counselor rows once nobody holds them. Existing callings keep their names."
       }
     },
     {
