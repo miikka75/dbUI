@@ -1342,6 +1342,10 @@ test.describe('Import round-trip', () => {
     try { return await page.evaluate(fn); } catch (e) { return null; }
   }, { timeout: 10000 });
 
+  // A clean import says so in a snackbar before it reloads the page -- the signal that every write it
+  // queued has landed. (A failed or partial one holds its dialog open instead, so this times out.)
+  const importComplete = (page) => expect(page.getByText('msg.import_complete')).toBeVisible({ timeout: 10000 });
+
   test('importing a JSON bundle restores data into correct partitions (active vs archive) with implicit id', async ({ page }) => {
     test.setTimeout(20000);
     const SCH = { defaultLanguage: 'en', tables: { docs: { columns: [{ name: 'title', type: 'text' }], archivable: true } }, views: [{ table: 'docs' }], nav: { items: [{ table: 'docs' }] } };
@@ -1358,7 +1362,7 @@ test.describe('Import round-trip', () => {
 
     const bundle = { schema: SCH, tables: { docs: [{ id: 'a1', title: 'Active1' }], docs__archive: [{ id: 'z1', title: 'Arch1' }] } };
     await page.setInputFiles('input[type=file][accept=".json"]', { name: 'import.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bundle)) });
-    await page.waitForTimeout(2000); // FileReader + chained per-row writes
+    await importComplete(page);
 
     const active = await (await page.request.post('/api/getTableData', { data: { tableId: 'docs', tab: 'active' } })).json();
     const archive = await (await page.request.post('/api/getTableData', { data: { tableId: 'docs', tab: 'archive' } })).json();
@@ -1400,7 +1404,7 @@ test.describe('Import round-trip', () => {
     // Already migrated: the row carries _status and arrives under the BARE key.
     const bundle = { schema: SCH, tables: { docs: [{ id: 'z1', title: 'Arch1', _status: 'archive' }] } };
     await page.setInputFiles('input[type=file][accept=".json"]', { name: 'import.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bundle)) });
-    await page.waitForTimeout(2000);
+    await importComplete(page);
 
     const active = await (await page.request.post('/api/getTableData', { data: { tableId: 'docs', tab: 'active' } })).json();
     const row = active.rows.find(r => r.id === 'z1');
@@ -1441,7 +1445,7 @@ test.describe('Import round-trip', () => {
     test.setTimeout(20000);
     await openSettings(page, I18N_SCH);
     await page.setInputFiles('input[type=file][accept=".json"]', { name: 'import.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(I18N_BUNDLE)) });
-    await page.waitForTimeout(2500);
+    await importComplete(page);
 
     const fi = await (await page.request.post('/api/getTranslations', { data: { langCode: 'fi' } })).json();
     expect(fi['tab.docs']).toBe('Asiakirjat');
@@ -1775,14 +1779,20 @@ test.describe('Renaming in a two-column lookup', () => {
   const assignments = (page) => page.request.post('/api/getTableData', { data: { tableId: 'assignments' } })
     .then((r) => r.json()).then((d) => Object.fromEntries((d.rows || []).map((r) => [r.id, r.org + '/' + r.duty])));
 
+  // The first two tests assert what did NOT change, so they need the edit to have SETTLED before they
+  // look: saveRefField's promise covers any cascade it starts, and the edited row reaching the server
+  // covers the fire-and-forget write of the row itself.
+  const refDuty = (page, id) => page.request.post('/api/getTableData', { data: { tableId: 'ref_duties' } })
+    .then((r) => r.json()).then((d) => ((d.rows || []).find((r) => r.id === id) || {}).duty);
+
   test('editing one row\'s value leaves the parents that still use it alone', async ({ page }) => {
     await openDuties(page);
     // Music's "president" becomes "leader". Ward's is a different row and a different calling.
     await page.evaluate(() => {
       const row = appInstance.dataCache.ref_duties.find((r) => r.id === 'd1');
-      appInstance.saveRefField(row, 'duty', 'leader');
+      return appInstance.saveRefField(row, 'duty', 'leader');
     });
-    await page.waitForTimeout(1500);
+    await expect.poll(() => refDuty(page, 'd1')).toBe('leader');
     expect(await assignments(page)).toEqual({ a1: 'music/president', a2: 'ward/president' });   // Bo untouched
     // ...and the label the OTHER parents still need is still theirs.
     const en = await page.request.post('/api/getTranslations', { data: { langCode: 'en' } }).then((r) => r.json());
@@ -1794,9 +1804,9 @@ test.describe('Renaming in a two-column lookup', () => {
     // "clerk" is ward's alone, so editing it IS a rename of the value: rows and label follow.
     await page.evaluate(() => {
       const row = appInstance.dataCache.ref_duties.find((r) => r.id === 'd3');
-      appInstance.saveRefField(row, 'duty', 'secretary');
+      return appInstance.saveRefField(row, 'duty', 'secretary');
     });
-    await page.waitForTimeout(1500);
+    await expect.poll(() => refDuty(page, 'd3')).toBe('secretary');
     const en = await page.request.post('/api/getTranslations', { data: { langCode: 'en' } }).then((r) => r.json());
     expect(en['list.ref_duties.president']).toBe('President');   // untouched by an unrelated rename
     expect(await page.evaluate(() => appInstance.dataCache.ref_duties.find((r) => r.id === 'd3').duty)).toBe('secretary');
@@ -1805,12 +1815,10 @@ test.describe('Renaming in a two-column lookup', () => {
   test('renaming the group carries the rows that name it', async ({ page }) => {
     await openDuties(page);
     await page.evaluate(() => appInstance.renameRefParent('ward', 'seurakunta'));
-    await page.waitForTimeout(1500);
-    const rows = await assignments(page);
-    expect(rows.a2).toBe('seurakunta/president');   // Bo's organization followed the rename
-    expect(rows.a1).toBe('music/president');        // ...and Ann's did not
-    const en = await page.request.post('/api/getTranslations', { data: { langCode: 'en' } }).then((r) => r.json());
-    expect(en['list.ref_duties.seurakunta']).toBe('Ward');   // the group's own label came along
+    await expect.poll(async () => (await assignments(page)).a2).toBe('seurakunta/president');   // Bo's organization followed the rename
+    expect((await assignments(page)).a1).toBe('music/president');                               // ...and Ann's did not
+    await expect.poll(() => page.request.post('/api/getTranslations', { data: { langCode: 'en' } })
+      .then((r) => r.json()).then((en) => en['list.ref_duties.seurakunta'])).toBe('Ward');   // the group's own label came along
   });
 });
 
