@@ -2072,63 +2072,24 @@ Geographic view. Ranked last deliberately: it would be the first view to depend 
 provider**, which means a new CSP origin, a third-party dependency at render time, and a feature that
 stops working offline. Everything above it stays inside the app boundary.
 
-### A date reads one way in the grid and another in its own editor
-
-A date cell being EDITED is a native `<input type="date">`, which the browser paints in the OS locale —
-`22.09.2026` on a Finnish machine. The same cell at rest renders `2026-09-22`. Nothing decided that;
-read-only dates go through `Calendar.toDateStr`, and a stored date is already ten characters, so it is
-returned untouched.
-
-**`toDateStr` is not a formatter, and that is the whole trap.** It is a NORMALIZER — it coerces a
-timestamp down to a date key — and display is only one of its callers. `events.js` uses it to compute
-the day an event buckets into, and `rotation.js` builds `_period` from the same `fmtDate`. Localize it
-where it stands and calendars stop grouping and the rotation loses its periods, for a change that was
-only ever about how a cell looks. So this is a SECOND function beside it, swapped in at the sites that
-render to a person and nowhere else:
-
-- `cellParts` (the read-only grid cell — the one anybody actually notices)
-- the rotation `_period` headers, both the block and the inline form
-- the calendar event row's date column, both forms
-- `Print.cell`
-
-The `<input>`'s `:value` and `events.js` keep `toDateStr`. Those want the key, not the label.
-
-**Locale-aware rather than a hardcoded `dd.mm.yyyy`, which would be cheaper and wrong.** The app
-already formats dates through `Intl` against `calLocale()` — the calendar's weekday names, its month
-title, the day heading and the agenda labels all do. Hardcoding one region's order into the grid does
-not harmonize anything; it mints a THIRD convention beside the locale-aware calendar and the OS-driven
-picker, and the first non-Finnish language anyone adds exposes it. The difference in work is about ten
-lines.
-
-**What it costs beyond the swap.** Date formatting currently stays out of the print ctx on purpose:
-`toDateStr` is a pure primitive, so the comment reasons that taking it from the root "would only let
-the printed date drift from the one on screen". Once formatting depends on the CURRENT LANGUAGE that
-reasoning inverts — it has to come from the root, and drift becomes possible again — so the print ctx
-entry and the web path must be the same function, and that comment has to be rewritten rather than
-left standing. The formatter also has to memoize its `Intl.DateTimeFormat` per locale; built per call
-it is one constructor per cell on a full grid.
-
-**What it does not touch.** Sorting compares `a[col]`, the raw stored value, so `sortByCol` is
-unaffected. Writes are unaffected too: a date is edited through `input type="date"`, which emits ISO,
-and nothing anywhere parses a DISPLAYED date back. This is display-only, which is what makes it small.
-
-**The residue, which is not a follow-up.** A browser gives no control over how `type="date"` renders —
-it follows the OS, not the app's language. So after this the cell follows the app language and the
-picker follows the machine. Identical for a Finnish deployment on a Finnish machine, and visibly
-different for that same deployment opened in an `en-US` browser. Closing it completely means replacing
-the native input with a custom picker, which costs the OS date picker on mobile: a much larger change
-answering a much smaller question. Record it as known residue and stop there.
-
-One detail worth pinning when it is built: `dateStyle: "short"` renders `22.9.2026` in `fi`, unpadded,
-while the native picker shows `22.09.2026`. Asking for `{ day: "2-digit", month: "2-digit", year:
-"numeric" }` makes the two agree in the one place they can.
-
-Cost: one memoized formatter, six call sites, one print ctx entry, and the test assertions that pin
-ISO today — `print.test.js` has six of them. No engine module, no schema key, no migration.
-
 ## Shipped
 
 Recorded so the roadmap shows what graduated rather than silently shrinking.
+
+- **A date reads the same in the grid as in the calendar** — read-only dates rendered ISO
+  (`2026-09-22`) while the calendar and the native picker used the locale. `Calendar.dateLabel(v, locale)`
+  is a SECOND function beside `toDateStr`, not a change to it: `toDateStr` is a normalizer whose output
+  `events.js` buckets by and `rotation.js` builds `_period` from, so localizing it would have broken
+  grouping. The label takes `calLocale()` (the app language, like the calendar), memoizes one
+  `Intl.DateTimeFormat` per locale, and asks for 2-digit day/month so `fi` reads `22.09.2026` like the
+  picker rather than `dateStyle:"short"`'s `22.9.2026`. Swapped in at the sites that render to a person —
+  `list-value` (every read-only cell), both rotation `_period` headers, both RSVP event rows, `Print.cell`
+  — and nowhere else: the `<input>`'s `:value`, sorting (raw stored value) and writes (ISO from the
+  picker) are untouched. `dateLabel` is now a print ctx entry, inverting the old comment: once the label
+  depends on the current language, taking it from the root is what keeps print and screen the same.
+  **Known residue, not a follow-up:** the native picker follows the OS, the label follows the app, so an
+  `fi` deployment opened in an `en-US` browser shows two conventions; closing that means a custom picker
+  and losing the mobile OS one.
 
 - **Callings as identity — the bishopric tool as a ward tool** (#199) — `lists.bishopric` held three
   roles, and everything personal hung off them: `@me`, the `matchList` filters #197 collapsed six
@@ -2468,6 +2429,7 @@ defects rather than proposals — a clipboard button that lies about having copi
 wrong right now rather than missing. They are ranked inside their own entry; what matters here is that
 they sit *above* everything below, including the locale-aware date label, which was first on merit until
 this pass found things that are not merely wrong on screen but, in the CSP case, wrong in production.
+(The date label has since shipped — see Shipped.)
 
 The other three findings are not urgent and are ranked accordingly: the view-kind unification is real
 cleanup with a real trap inside it (the `{{self}}` invariant that looks like drift and is not), the
@@ -2483,15 +2445,8 @@ has asked rather than work waiting to be done.
 shipped — see its entry above, which is kept in place rather than reduced to a Shipped bullet because
 the reasoning behind what landed is the same document as the reasoning for the rest of it.)
 
-**The locale-aware date label** is the cheapest unbuilt thing on the page — a memoized formatter and
-six call sites — and unlike everything below it, it is wrong on screen for every user of every
-deployment right now rather than being a feature nobody has yet. It leads the list below for that
-reason and not for its size. (It led the whole page until the 2026-09-22 review; what displaced it is
-not a better feature but three defects, which is the distinction the paragraph at the top of this
-section is drawing.)
-
 **Scan phase 1.5** — check-in as config (`match: "owner"` + `codeCol`) — is the cheapest unbuilt thing
-after it, a resolver branch and a test, and it is what turns the shipped scan view into the QR
+now that the date label has shipped, a resolver branch and a test, and it is what turns the shipped scan view into the QR
 check-in entry above. Worth doing only when somebody actually wants the verifier-scans-attendee
 arrangement; it is not owed to the shipped half.
 
