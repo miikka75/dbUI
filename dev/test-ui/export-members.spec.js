@@ -64,14 +64,21 @@ const exportFiles = (page) => page.evaluate(async () => {
   const realCreate = URL.createObjectURL, realClick = HTMLAnchorElement.prototype.click;
   URL.createObjectURL = (b) => { pending = b.text(); return 'blob:stub'; };
   HTMLAnchorElement.prototype.click = function() { out.push({ name: this.download, text: pending }); };
+  // The set downloads sequentially, with a gap, and exportData does not hand back that chain -- so take
+  // it from _downloadFileSet, which does. (A single backup file skips the set and is complete at once.)
+  let set = null;
+  const realSet = app._downloadFileSet;
+  app._downloadFileSet = function(p) { return (set = realSet.call(this, p)); };
   try {
     await app.exportData();
-    for (let i = 0; i < 120 && !out.length; i++) await new Promise((r) => setTimeout(r, 50));
-    await new Promise((r) => setTimeout(r, 1200));   // the set downloads sequentially, with a gap
+    for (let i = 0; i < 120 && !set && !out.length; i++) await new Promise((r) => setTimeout(r, 50));
+    await set;
     const files = {};
     for (const f of out) files[f.name] = JSON.parse(await f.text);
     return files;
-  } finally { URL.createObjectURL = realCreate; HTMLAnchorElement.prototype.click = realClick; }
+  } finally {
+    URL.createObjectURL = realCreate; HTMLAnchorElement.prototype.click = realClick; app._downloadFileSet = realSet;
+  }
 });
 // What importData does with the chosen files before applyBundle sees them. Every test here used to
 // call applyBundle direct, which is how a roster silently dropped by the FOLD went unnoticed: the part
@@ -79,6 +86,15 @@ const exportFiles = (page) => page.evaluate(async () => {
 const importFiles = (page, files) => page.evaluate((fs) => {
   window.appInstance.applyBundle(window.Examples.mergeFiles(fs));
 }, files);
+
+// Every import below leaves out a part its file carries, and an import that declines a part reports
+// that in its dialog and holds it open -- it does NOT end with the reload a clean import does. Wait for
+// it to finish, so the next step never reads state an unfinished import is still writing.
+const importFinished = async (page, run) => {
+  await run();
+  await expect.poll(() => page.evaluate(() => !!(appInstance.importProgress && appInstance.importProgress.finished)),
+    { timeout: 15000 }).toBe(true);
+};
 
 const oneFile = async (page) => {
   const files = await exportFiles(page);
@@ -152,11 +168,7 @@ test('importing a file with members does nothing to the roster unless asked', as
     { data: {}, headers: { 'X-User': 'boss@x.test' } })).json()).sort();
 
   // Default: the file is imported as DATA. Handing somebody an export to look at must not enrol anyone.
-  await importFiles(page, [file]);
-  // An import RELOADS the page when it finishes. Wait that out before touching app state again, or the
-  // reload lands on top of the next step and quietly resets the switch it is about to set.
-  await page.waitForTimeout(5000);
-  await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
+  await importFinished(page, () => importFiles(page, [file]));
   expect(await roster(), 'a plain import enrolled somebody from the file').not.toContain('helper@x.test');
 
   // Asked for: roles, grants, names and links all land.
@@ -191,9 +203,9 @@ test('the structure is separable: a data-only file, and an import that leaves th
   // deployment has since dropped", i.e. a file whose structure is behind the one in use.
   older.schema.tables.duty.columns.push({ name: 'gone_since', type: 'text' });
 
-  await page.evaluate((f) => { window.appInstance.importParts = ['data']; window.appInstance.applyBundle(f); }, older);
-  await page.waitForTimeout(5000);
-  await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
+  await importFinished(page, () => page.evaluate((f) => {
+    window.appInstance.importParts = ['data']; window.appInstance.applyBundle(f);
+  }, older));
   expect(await page.evaluate(() => Object.keys(appInstance.schemaData.tables.duty.columns || {})),
     'the import applied a schema it was told to leave alone').not.toContain('gone_since');
 
@@ -328,12 +340,10 @@ test('a list declared empty is a declaration, never a restore', async ({ page })
   const contribution = (await oneFile(page)).body;
   expect(contribution.lists.crew, 'a contribution declares the name and leaves it empty').toEqual([]);
 
-  await page.evaluate((f) => {
+  await importFinished(page, () => page.evaluate((f) => {
     window.appInstance.importParts = ['schema', 'reference'];
     window.appInstance.applyBundle(f);
-  }, contribution);
-  await page.waitForTimeout(5000);
-  await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 10000 });
+  }, contribution));
 
   // Replacing with nothing could only destroy, so it fills gaps instead. Without this rule the
   // contribution path itself would be the fastest way to lose a year of typing.
