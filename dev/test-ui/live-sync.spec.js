@@ -152,12 +152,13 @@ test.describe('Live sync between two clients', () => {
 
       await typeInto(pageA, TITLE, 'TitleFromA');
       await typeInto(pageB, CONTENT, 'ContentFromB');
-      await pageB.waitForTimeout(2000);
 
-      const data = await pageB.request.post('/api/getTableData', { data: { tableId: 'notes', tab: 'active' } }).then(r => r.json());
-      const stored = (data.rows || []).find(r => r.id === 'lv1');
-      expect(stored.title).toBe('TitleFromA');
-      expect(stored.content).toBe('ContentFromB');
+      // Whichever write lands second decides, so a clobber is final: poll until both columns are there.
+      await expect.poll(async () => {
+        const data = await pageB.request.post('/api/getTableData', { data: { tableId: 'notes', tab: 'active' } }).then(r => r.json());
+        const stored = (data.rows || []).find(r => r.id === 'lv1') || {};
+        return [stored.title, stored.content];
+      }).toEqual(['TitleFromA', 'ContentFromB']);
     } finally {
       await ctxA.close(); await ctxB.close();
     }
