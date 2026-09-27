@@ -752,21 +752,16 @@
           <v-card-text>
             <div class="mb-4">
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.nav_layout') }}</p>
-            <!-- Layout and list/tiles on one row. On a phone the five labels do not fit, so the buttons show
-                 icons only there, the label kept as their title and accessible name. List/tiles is how a page of
-                 entries is drawn (browse levels, and a group's page in any layout); it overrides the schema's `display`
-                 on every level, for this person only. -->
-            <div class="d-flex flex-wrap align-center" style="gap:12px">
-            <v-btn-toggle :aria-label="a.t('settings.nav_layout')" :model-value="a.navLayout" @update:model-value="v => v && a.setNavLayout(v)" mandatory divided variant="outlined" density="compact" color="primary" class="nav-choice" data-testid="nav-layout-toggle">
+            <!-- ONE choice: the drawer, the top tabs, or browse drawn as a list or as tiles. List and Tiles are
+                 browse's two faces rather than a second switch, which would sit "selected" in the layouts it
+                 does not apply to. On a phone the labels do not fit, so the buttons are icon-only there, the
+                 label kept as their title and accessible name. -->
+            <v-btn-toggle :aria-label="a.t('settings.nav_layout')" :model-value="a.navChoice" @update:model-value="v => v && a.setNavChoice(v)" mandatory divided variant="outlined" density="compact" color="primary" class="nav-choice" data-testid="nav-layout-toggle">
               <v-btn value="drawer" class="text-none" data-testid="nav-layout-drawer" :title="a.t('settings.nav_drawer')" :aria-label="a.t('settings.nav_drawer')"><v-icon icon="mdi-dock-left"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('settings.nav_drawer') }}</span></v-btn>
               <v-btn value="tabs" class="text-none" data-testid="nav-layout-tabs" :title="a.t('settings.tabs_nav')" :aria-label="a.t('settings.tabs_nav')"><v-icon icon="mdi-dock-top"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('settings.tabs_nav') }}</span></v-btn>
-              <v-btn value="browse" class="text-none" data-testid="nav-layout-browse" :title="a.t('settings.nav_browse')" :aria-label="a.t('settings.nav_browse')"><v-icon icon="mdi-view-grid-outline"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('settings.nav_browse') }}</span></v-btn>
+              <v-btn value="list" class="text-none" data-testid="nav-layout-list" :title="a.t('settings.nav_list')" :aria-label="a.t('settings.nav_list')"><v-icon icon="mdi-format-list-bulleted"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('settings.nav_list') }}</span></v-btn>
+              <v-btn value="tiles" class="text-none" data-testid="nav-layout-tiles" :title="a.t('settings.nav_tiles')" :aria-label="a.t('settings.nav_tiles')"><v-icon icon="mdi-apps"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('settings.nav_tiles') }}</span></v-btn>
             </v-btn-toggle>
-            <v-btn-toggle :aria-label="a.t('settings.nav_display')" :model-value="a.navDisplay" @update:model-value="v => v && a.setNavDisplay(v)" mandatory divided variant="outlined" density="compact" color="primary" class="nav-choice" data-testid="nav-display-toggle">
-              <v-btn value="list" class="text-none" data-testid="nav-display-list" :title="a.t('settings.nav_list')" :aria-label="a.t('settings.nav_list')"><v-icon icon="mdi-format-list-bulleted"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('settings.nav_list') }}</span></v-btn>
-              <v-btn value="tiles" class="text-none" data-testid="nav-display-tiles" :title="a.t('settings.nav_tiles')" :aria-label="a.t('settings.nav_tiles')"><v-icon icon="mdi-apps"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('settings.nav_tiles') }}</span></v-btn>
-            </v-btn-toggle>
-            </div>
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.data') }}</p>
             <v-btn variant="outlined" prepend-icon="mdi-refresh" :loading="a.syncing" data-testid="settings-refresh" @click="a.refreshData" class="mr-2 mb-2">{{ a.t('settings.refresh') }}</v-btn>

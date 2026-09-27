@@ -106,8 +106,7 @@ input[type="date"]:focus { outline: none; border-color: rgb(var(--v-theme-primar
   .board-lane-row { flex-direction: column; overflow-x: visible; }
   .board-lane { flex: 1 1 auto; min-width: 0; width: 100%; min-height: 0; }
 }
-/* Settings -> Navigation: on a phone its buttons are icon-only, and at Vuetify's 64px minimum the five of
-   them miss one row by a few pixels. */
+/* Settings -> Navigation: on a phone its buttons are icon-only, and need no more than an icon's width. */
 @media (max-width: 599.98px) {
   .nav-choice .v-btn { min-width: 48px; padding: 0 12px; }
 }
