@@ -276,6 +276,21 @@ test.describe('image/url column types', () => {
     await page.waitForTimeout(150);
   }
 
+  // Settings -> Appearance: expand the section if it is collapsed, and open one entry's dialog.
+  async function editAppearance(page, id) {
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    const row = page.locator('[data-testid="appearance-row-' + id + '"]');
+    if (!(await row.isVisible())) await page.locator('[data-testid="appearance-section-toggle"]').click();
+    await row.click();
+    await expect(page.locator('[data-testid="appearance-dialog"]')).toBeVisible();
+  }
+  // Pick a background file in the open dialog and wait for it to land in the draft (it is resized first).
+  async function pickBackground(page, name, mimeType, base64) {
+    if (!(await page.evaluate(() => window.appInstance.appearanceDraft.bgMode === 'image'))) await page.locator('[data-testid="appearance-bg-image"]').click();
+    await page.locator('[data-testid="appearance-bg-file"]').setInputFiles({ name, mimeType, buffer: Buffer.from(base64, 'base64') });
+    await expect.poll(() => page.evaluate(() => !!(window.appInstance.appearanceDraft && window.appInstance.appearanceDraft.bgData)), { timeout: 8000 }).toBe(true);
+  }
+
   test('image column uploads a file to the local dev store + persists + serves the URL', async ({ page }) => {
     test.setTimeout(20000);
     await openGallery(page);
@@ -410,14 +425,15 @@ test.describe('image/url column types', () => {
     test.setTimeout(25000);
     await openGallery(page, { dropUploader: true });
 
-    // Upload through the Settings -> Backgrounds row for the `gallery` screen. The section is collapsed by
-    // default (it is one row per screen, and expanded it would push the rest of Settings out of view).
-    await page.evaluate(() => window.appInstance.selectTab('__settings'));
-    await page.locator('[data-testid="bg-section-toggle"]').click();
-    await page.waitForSelector('[data-testid="bg-upload-gallery"]', { state: 'visible', timeout: 6000 });
+    // Upload through Settings -> Appearance for the `gallery` screen: its dialog's Background -> Image. The
+    // section is collapsed by default (one row per entry, and expanded it would push the rest of Settings
+    // out of view). Nothing is written until Save.
+    await editAppearance(page, 'gallery');
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-    await page.locator('[data-testid="bg-row"] input[type=file]').first()
-      .setInputFiles({ name: 'hero.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+    await pickBackground(page, 'hero.png', 'image/png', png);
+    const before = await (await page.request.post('/api/getTableData', { data: { tableId: '_assets', tab: 'active' } })).json();
+    expect((before.rows || []).some((r) => r.id === 'bg_gallery'), 'written before Save').toBe(false);
+    await page.locator('[data-testid="appearance-save"]').click();
     await expect(page.locator('[data-testid="bg-thumb-gallery"]')).toBeVisible({ timeout: 6000 });
 
     // Stored as a REFERENCE in the synced folder config; the bytes are an _assets row keyed bg_<view>.
@@ -523,20 +539,19 @@ test.describe('image/url column types', () => {
     await expect.poll(styleOf, { timeout: 6000 }).toContain('background-image');
     expect(await cfgBg()).toBeUndefined();
 
-    // Remove it from Settings -> Backgrounds.
-    await page.evaluate(() => window.appInstance.selectTab('__settings'));
-    await page.locator('[data-testid="bg-section-toggle"]').click();
-    await page.locator('[data-testid="bg-remove-welcome"]').click();
+    // Remove it from Settings -> Appearance: Background -> None.
+    await editAppearance(page, 'welcome');
+    await page.locator('[data-testid="appearance-bg-none"]').click();
+    await page.locator('[data-testid="appearance-save"]').click();
     await expect.poll(cfgBg, { timeout: 4000 }).toEqual({ image: '' });   // tombstone, not a deleted entry
 
     // It is really gone from the view, not restored by the schema default.
     await page.evaluate(() => window.appInstance.selectTab('welcome'));
     await expect.poll(styleOf, { timeout: 4000 }).not.toContain('background-image');
 
-    // Restore is offered only in this state, and drops the override.
-    await page.evaluate(() => window.appInstance.selectTab('__settings'));
-    await expect(page.locator('[data-testid="bg-restore-welcome"]')).toBeVisible();
-    await page.locator('[data-testid="bg-restore-welcome"]').click();
+    // "Schema default" drops the override.
+    await editAppearance(page, 'welcome');
+    await page.locator('[data-testid="appearance-reset"]').click();
     await expect.poll(cfgBg, { timeout: 4000 }).toBeUndefined();
     await page.evaluate(() => window.appInstance.selectTab('welcome'));
     await expect.poll(styleOf, { timeout: 4000 }).toContain('background-image');
@@ -577,7 +592,7 @@ test.describe('image/url column types', () => {
     expect(await page.evaluate(() => window.appInstance.currentTable)).toBe('docs');
 
     await page.evaluate(() => window.appInstance.selectTab('__settings'));
-    await page.locator('[data-testid="bg-section-toggle"]').click();
+    await page.locator('[data-testid="appearance-section-toggle"]').click();
     const thumb = page.locator('[data-testid="bg-thumb-welcome"]');
     await expect(thumb).toBeVisible({ timeout: 6000 });
     expect(await thumb.getAttribute('src')).toBe(png);
@@ -592,11 +607,9 @@ test.describe('image/url column types', () => {
     const rgba = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAE0lEQVR42mN4K+P0H4QZYIB0AQC20hJRzHsr0AAAAABJRU5ErkJggg==';
     await openGallery(page, { dropUploader: true });   // no bucket -> the _assets path, which re-encodes
 
-    await page.evaluate(() => window.appInstance.selectTab('__settings'));
-    await page.locator('[data-testid="bg-section-toggle"]').click();
-    await page.waitForSelector('[data-testid="bg-upload-gallery"]', { state: 'visible', timeout: 6000 });
-    await page.locator('[data-testid="bg-row"]:has([data-testid="bg-upload-gallery"]) input[type=file]')
-      .setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: Buffer.from(rgba.split(',')[1], 'base64') });
+    await editAppearance(page, 'gallery');
+    await pickBackground(page, 'logo.png', 'image/png', rgba.split(',')[1]);
+    await page.locator('[data-testid="appearance-save"]').click();
     await expect(page.locator('[data-testid="bg-thumb-gallery"]')).toBeVisible({ timeout: 10000 });
 
     const assets = await (await page.request.post('/api/getTableData', { data: { tableId: '_assets', tab: 'active' } })).json();
@@ -625,8 +638,9 @@ test.describe('image/url column types', () => {
 
     // An OPAQUE source still takes JPEG, which is the better trade for a photo.
     const opaque = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-    await page.locator('[data-testid="bg-row"]:has([data-testid="bg-upload-gallery"]) input[type=file]')
-      .setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from(opaque, 'base64') });
+    await editAppearance(page, 'gallery');
+    await pickBackground(page, 'photo.png', 'image/png', opaque);
+    await page.locator('[data-testid="appearance-save"]').click();
     await expect.poll(async () => {
       const a = await (await page.request.post('/api/getTableData', { data: { tableId: '_assets', tab: 'active' } })).json();
       const r = (a.rows || []).find((x) => x.id === 'bg_gallery');
@@ -5472,6 +5486,10 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     expect(ids).toContain('grp:Data[tasks,notes]');                               // nav group
     expect(ids).toContain('all_items[summary_cards,quick_list,notes_list]');      // nested clickable parent, inside grp:Work
     expect(ids.some(s => s.startsWith('grp:Leaderboards['))).toBe(true);          // a group three levels down
+    // The shipped demo passes its own load-time check: every error here reaches its users as a toast.
+    // (It did not, for a while: `chore_stats` sums a column its `compute` declares, which the stats-tile
+    // check did not count.)
+    expect(await page.evaluate(() => validateSchema())).toEqual([]);
   });
 
   test('demo pages render embeds (combined + aggregate + archive) and all layouts', async ({ page }) => {
@@ -6398,6 +6416,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     expect(r.readBack).toBe('#ff0000');
     // the editor renders (admin): a picker + a text field per token, sun/moon icons per mode
     await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="appearance-section-toggle"]').click();   // Theme lives under Appearance, collapsed by default
     await expect(page.locator('[data-testid="theme-light-primary"]')).toBeVisible();
     await expect(page.locator('[data-testid="theme-txt-light-primary"]')).toBeVisible();
   });
@@ -6425,6 +6444,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     expect(r.primary).toBe('#d4a373');   // most saturated -> primary
     expect(r.secondary).toBe('#faedcd'); // next most saturated -> secondary
     await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="appearance-section-toggle"]').click();   // Theme lives under Appearance, collapsed by default
     await expect(page.locator('[data-testid="theme-palette"]')).toBeVisible();
     // Reactivity: the per-token fields must refresh to the pasted palette (themeColor reads the
     // reactive themeEdit/schema.theme, not the non-reactive $vuetify.theme.themes).

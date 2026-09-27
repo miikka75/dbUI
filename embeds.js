@@ -57,6 +57,11 @@
   // The id charset is deliberately narrow: it becomes a document id / jsonb key on every backend.
   function isAssetRef(v) { return /^asset:[\w.-]+$/.test(String(v || '')); }
   function assetId(v) { return isAssetRef(v) ? String(v).slice(6) : ''; }
+  // `icon:<mdi-name>` — a BACKGROUND drawn from the icon font (a faint watermark) instead of a picture.
+  // Bare `icon:` means the nav entry's own icon, so the watermark follows it when the icon changes. The
+  // app draws it onto a canvas and hands the result to the ordinary background pipeline as an image.
+  function isIconRef(v) { return /^icon:(mdi-[a-z0-9-]+)?$/.test(String(v || '')); }
+  function iconRefName(v) { return isIconRef(v) ? String(v).slice(5) : ''; }
 
   // A CSS `url("…")` token for a background-image, or '' when the address isn't a safe image source.
   // safeImgSrc returns the ORIGINAL string (not the URL-normalized one), so a value that satisfies
@@ -375,8 +380,8 @@
     mdToHtml: mdToHtml, setRenderer: setRenderer, registerBlock: registerBlock, buildEmbedBlock: buildEmbedBlock, mdBlocks: mdBlocks, docHasData: docHasData, blockRefs: blockRefs,
     resolveEmbed: resolveEmbed, embedCols: embedCols, embedRows: embedRows, embedRowCount: embedRowCount,
     embedRowsForItem: embedRowsForItem, embedWhenOk: embedWhenOk, embedVisible: embedVisible, safeUrl: safeUrl, safeImgSrc: safeImgSrc,
-    isAssetRef: isAssetRef, assetId: assetId, safeCssUrl: safeCssUrl, escHtml: escHtml, safeAvatarSrc: safeAvatarSrc
+    isAssetRef: isAssetRef, assetId: assetId, isIconRef: isIconRef, iconRefName: iconRefName, safeCssUrl: safeCssUrl, escHtml: escHtml, safeAvatarSrc: safeAvatarSrc
   };
   if (isNode) module.exports = M;
-  else { root.Embeds = M; root.mdToHtml = mdToHtml; root.safeUrl = safeUrl; root.safeImgSrc = safeImgSrc; root.isAssetRef = isAssetRef; root.safeCssUrl = safeCssUrl; root.safeAvatarSrc = safeAvatarSrc; } // bare globals: safeAvatarSrc (user-avatar), mdToHtml (pageBlocks-era + tests), safeUrl/safeImgSrc (ROOT_PROXY), isAssetRef/safeCssUrl (validateSchema + background style)
+  else { root.Embeds = M; root.mdToHtml = mdToHtml; root.safeUrl = safeUrl; root.safeImgSrc = safeImgSrc; root.isAssetRef = isAssetRef; root.isIconRef = isIconRef; root.safeCssUrl = safeCssUrl; root.safeAvatarSrc = safeAvatarSrc; } // bare globals: safeAvatarSrc (user-avatar), mdToHtml (pageBlocks-era + tests), safeUrl/safeImgSrc (ROOT_PROXY), isAssetRef/safeCssUrl (validateSchema + background style)
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));

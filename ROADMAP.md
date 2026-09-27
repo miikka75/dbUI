@@ -2175,6 +2175,56 @@ decoration, and it waits until someone asks for it.
 **Cost:** medium overall. Phase 1 is the most delicate (history against boot, the scan link and
 `?db=`); phases 2 and 3 are most of the visible work; 4 and 5 are small.
 
+### Appearance — one editor for a nav entry's icon, image and background *(built on `nav-appearance`, stacked on #230)*
+
+Settings → Backgrounds already lists one row per nav screen with an upload, a thumbnail and the
+rendering controls, so a separate "icon/image picker" would have been a second list of the same
+entries. Instead Backgrounds becomes **Appearance**: the same admin-only section, now a tree of the
+nav, each row opening one dialog that sets how the entry is **shown in menus** and what is **behind
+its page**.
+
+```
+┌─ Chores ───────────────────────────────────────────── ✕ ─┐
+│  Menu        ( ● Icon | Image )                          │
+│    🔍 [ broom      ]   🧹 🧽 🪣 🧺 🗑 🧴 ✨ 🏠                │
+│ ──────────────────────────────────────────────────────── │
+│  Background  ( None | ● Icon | Image )                   │
+│    🧹 same as menu [change]                               │
+│    Fit [ Width ▾ ] 40%   Position ┌─┬─┬─┐  Opacity ─●─ 0.08│
+│ ──────────────────────────────────────────────────────── │
+│  [↺ Schema default]                      [Cancel] [Save] │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Decisions:**
+
+- **Two questions, two values.** The menu marker (icon, or an image cropped to a 16:9 tile cover /
+  a list thumbnail) and the page background (faded, fit/position/opacity) are separate settings. The
+  same picture is often wrong for both — a watermark makes a poor cover, a vivid photo hurts a grid.
+- **Schema defaults, deployment overrides.** The schema keeps `icon` and gains `image` / `focus` on a
+  nav item; `appConfig.navAppearance[<id>]` overrides them, exactly as `appConfig.backgrounds` already
+  overrides `views[x].background`. Both round-trip through export/import untouched (`exportableConfig`).
+  An empty `image` is a tombstone that hides a schema default, as backgrounds already do.
+- **Overrides apply in `Nav.build`,** so the drawer, tabs, bottom bar, breadcrumb, tiles and list rows
+  all follow from one place. The drawer, tabs and breadcrumb keep showing the icon; tiles and list rows
+  show the image when there is one.
+- **An icon can be the background.** `background.image: "icon:mdi-broom"` (or bare `"icon:"`, the
+  entry's own menu icon) is drawn from the icon font onto a canvas and handed to the existing
+  background pipeline as an image — opacity, fit, position and `fixed` unchanged. Drawn in the theme's
+  primary colour, redrawn on a theme switch.
+- **The icon list comes from the stylesheet.** `vendor/mdi.css` is same-origin, so its 7,448
+  `.mdi-*::before` rules are read at runtime; there is no name list to ship. Behind the CDN fallback
+  the rules are unreadable, and the search box takes a typed name instead.
+- **Nothing is written until Save.** Uploads are resized into the draft and written to `_assets` on
+  Save, so Cancel leaves the old picture intact even though asset ids are deterministic.
+- **Groups join the list.** Since #230 a group has a page, so it can have a background too; the old
+  list skipped groups, and also skipped a top-level view that had entries of its own.
+- **No previews in the dialog.** The Appearance row's thumbnails update on Save, and the page shows
+  the result.
+
+**Not included:** entries hidden from admins (`hideFromAdmin`) — the old Backgrounds list could not
+reach them either.
+
 ### `gallery`
 
 A media grid. Unblocked since `image`/`url` columns shipped, so this is now mostly layout.

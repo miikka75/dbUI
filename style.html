@@ -106,6 +106,26 @@ input[type="date"]:focus { outline: none; border-color: rgb(var(--v-theme-primar
   .board-lane-row { flex-direction: column; overflow-x: visible; }
   .board-lane { flex: 1 1 auto; min-width: 0; width: 100%; min-height: 0; }
 }
+/* A group's page with a background. Every other view paints its background on a card, whose surface colour
+   is what the fade layer (a surface-coloured scrim) blends into; a level page is bare, so it gets that
+   surface here, and the height a corner watermark needs rather than just its tiles' height. */
+.nav-level--bg { background-color: rgb(var(--v-theme-surface)); border-radius: 4px; padding: 12px; min-height: calc(100vh - 170px); }
+/* A nav entry's image: a tile's 16:9 cover, a list row's thumbnail. object-position (from the entry's
+   `focus`) decides which part of a photo survives the crop. */
+.nav-tile-img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px 4px 0 0; }
+.nav-row-img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; }
+/* Settings -> Appearance: the row thumbnails and the icon picker's grid. */
+.appearance-thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; vertical-align: middle; }
+.appearance-thumb--bg { width: 48px; }
+/* Search results: ONE row, scrolled sideways, always taking its height — empty or full, nothing below moves. */
+.icon-row { display: flex; gap: 4px; height: 50px; overflow-x: auto; overflow-y: hidden; align-items: flex-start; }
+/* The Menu section's content, Icon or Image, in one fixed height: the search row plus its result row, or
+   the image controls, which wrap onto more lines on a phone. */
+.appearance-slot { height: 98px; }
+@media (max-width: 599.98px) { .appearance-slot { height: 150px; } }
+.icon-choice { flex: 0 0 40px; width: 40px; height: 40px; border-radius: 6px; border: 1px solid transparent; background: rgb(var(--v-theme-on-surface), 0.04); cursor: pointer; color: inherit; }
+.icon-choice:hover { background: rgb(var(--v-theme-on-surface), 0.1); }
+.icon-choice--on { border-color: rgb(var(--v-theme-primary)); background: rgb(var(--v-theme-primary), 0.14); color: rgb(var(--v-theme-primary)); }
 /* Settings -> Navigation: on a phone its buttons are icon-only, and need no more than an icon's width. */
 @media (max-width: 599.98px) {
   .nav-choice .v-btn { min-width: 48px; padding: 0 12px; }

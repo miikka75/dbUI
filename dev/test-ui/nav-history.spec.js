@@ -121,3 +121,22 @@ test.describe('Deeper than the drawer draws', () => {
     await expect(page.locator('[data-testid="nav-level-below"] [data-testid="nav-level-item-attendance"]')).toBeVisible();
   });
 });
+
+test.describe('A schema error found at boot', () => {
+  // The schema is checked before the translations load, so a notice raised at once showed the raw key
+  // `msg.schema_error`. It is held until the labels arrive, then shown translated.
+  test('is shown once the labels have loaded, in the user\'s language', async ({ page }) => {
+    const BAD = Object.assign({}, SCHEMA, { views: (SCHEMA.views || []).concat([{ name: 'broken_stats', kind: 'stats', sources: ['tasks'], stats: { tiles: [{ label: 'x', agg: 'sum', column: 'no_such_col' }] } }]) });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: BAD } });
+    // An existing admin, so boot raises no 'registered you as admin' notice to overwrite this one.
+    await page.request.post('/api/setUserRole', { data: { uid: 'local@dev', role: 'admin', user: 'local@dev', tables: 'all' } });
+    await page.request.post('/api/createLanguage', { data: { code: 'en', name: 'English', keys: ['msg.schema_error'] } });
+    await page.request.post('/api/updateTranslations', { data: { langCode: 'en', updates: { 'msg.schema_error': 'Schema problem:' } } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await expect.poll(() => page.evaluate(() => window.appInstance && window.appInstance.snackText), { timeout: 8000 })
+      .toMatch(/^Schema problem: stats "broken_stats".*no_such_col/);
+  });
+});
