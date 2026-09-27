@@ -128,3 +128,42 @@ describe('descriptions, display, and translation keys', () => {
   });
 
 });
+
+describe('appearance: images and deployment overrides', () => {
+  const items = [
+    { group: 'Data', icon: 'mdi-database', image: 'https://x.test/data.jpg', focus: 'top', items: [{ table: 'tasks' }] },
+    { view: 'board', image: 'asset:tile_board' },
+    { view: 'home' },
+  ];
+
+  it('carries a schema image and its focus, defaulting focus to center', () => {
+    const tabs = Nav.build(items, t, all, opts());
+    assert.equal(tabs[0].image, 'https://x.test/data.jpg');
+    assert.equal(tabs[0].focus, 'top');
+    assert.equal(tabs[1].focus, 'center');
+    assert.equal(tabs[2].image, undefined);
+  });
+
+  it('applies overrides over the schema: icon, image, focus, and an empty image as a tombstone', () => {
+    const appearance = {
+      'grp:Data': { image: '' },                                   // hides the schema's image
+      board: { icon: 'mdi-star', image: 'asset:mine', focus: 'bottom' },
+      home: { icon: 'mdi-home' },
+    };
+    const tabs = Nav.build(items, t, all, opts({ appearance }));
+    assert.equal(tabs[0].image, undefined);
+    assert.equal(tabs[0].icon, 'mdi-database');
+    assert.equal(tabs[1].icon, 'mdi-star');
+    assert.equal(tabs[1].image, 'asset:mine');
+    assert.equal(tabs[1].focus, 'bottom');
+    assert.equal(tabs[2].icon, 'mdi-home');
+    assert.equal(tabs[2].image, undefined);
+  });
+
+  it('rejects a non-text image and an unknown focus', () => {
+    const errs = Nav.errors({ items: [{ view: 'a', image: 3 }, { view: 'b', focus: 'left' }] });
+    assert.equal(errs.length, 2);
+    assert.match(errs[0], /"a": `image` must be text/);
+    assert.match(errs[1], /"b": `focus` must be/);
+  });
+});

@@ -520,7 +520,7 @@
 <!-- A group's page: its entries as a list, so opening a group lands somewhere rather than on a blank
      screen. Reached by a group's drawer header or top tab, or its tile or row on another level. -->
 <template id="nav-level-tpl">
-  <div v-if="node" :data-testid="below ? 'nav-level-below' : 'nav-level'">
+  <div v-if="node" :class="{ 'nav-level--bg': !below && !!a.viewBackground }" :data-testid="below ? 'nav-level-below' : 'nav-level'">
     <div v-if="!below" class="d-flex align-center mb-3" style="gap:10px">
       <v-icon :icon="node.icon" color="primary"></v-icon>
       <h2 class="text-h6" style="margin:0">{{ node.title }}</h2>
@@ -528,8 +528,10 @@
     <v-row v-if="a.levelDisplay(node) === 'tiles'" dense data-testid="nav-level-tiles">
       <v-col v-for="c in node.children" :key="c.id" cols="12" sm="6" md="4" lg="3">
         <v-card variant="outlined" class="h-100" :data-testid="'nav-level-item-' + c.id" @click="a.selectTab(c.id)">
+          <!-- An entry's image is the tile's cover, cropped to 16:9 around its focus; without one, the icon. -->
+          <img v-if="c.image && a.assetSrc(c.image)" :src="a.assetSrc(c.image)" class="nav-tile-img" :style="{ objectPosition: 'center ' + (c.focus || 'center') }" loading="lazy" alt="" :data-testid="'nav-tile-img-' + c.id">
           <v-card-item>
-            <template v-slot:prepend><v-icon :icon="c.icon" color="primary" size="32"></v-icon></template>
+            <template v-if="!(c.image && a.assetSrc(c.image))" v-slot:prepend><v-icon :icon="c.icon" color="primary" size="32"></v-icon></template>
             <v-card-title class="text-wrap">{{ c.title }}</v-card-title>
           </v-card-item>
           <v-card-text v-if="c.description" style="opacity:0.75">{{ c.description }}</v-card-text>
@@ -537,7 +539,12 @@
       </v-col>
     </v-row>
     <v-list v-else border rounded :lines="node.children.some(function(c) { return c.description; }) ? 'two' : 'one'">
-      <v-list-item v-for="c in node.children" :key="c.id" :prepend-icon="c.icon" :title="c.title" :subtitle="c.description" append-icon="mdi-chevron-right" :data-testid="'nav-level-item-' + c.id" @click="a.selectTab(c.id)"></v-list-item>
+      <v-list-item v-for="c in node.children" :key="c.id" :title="c.title" :subtitle="c.description" append-icon="mdi-chevron-right" :data-testid="'nav-level-item-' + c.id" @click="a.selectTab(c.id)">
+        <template #prepend>
+          <img v-if="c.image && a.assetSrc(c.image)" :src="a.assetSrc(c.image)" class="nav-row-img mr-4" :style="{ objectPosition: 'center ' + (c.focus || 'center') }" loading="lazy" alt="">
+          <v-icon v-else :icon="c.icon"></v-icon>
+        </template>
+      </v-list-item>
     </v-list>
   </div>
 </template>
@@ -941,83 +948,140 @@
               </div>
             </template>
             <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2">{{ a.t('settings.theme') }}</p>
-            <v-text-field :label="a.t('settings.theme_palette')" @change="a.applyPalette($event.target.value)" @keydown.enter="a.applyPalette($event.target.value)" data-testid="theme-palette" spellcheck="false" density="compact" hide-details variant="outlined" style="max-width:320px" class="mb-3 font-monospace"></v-text-field>
-            <div v-for="m in [{ k: 'light', icon: 'mdi-weather-sunny' }, { k: 'dark', icon: 'mdi-weather-night' }]" :key="m.k" class="d-flex align-center mb-2" style="gap:8px" data-testid="theme-editor">
-              <v-icon size="small" style="opacity:0.55; flex:0 0 auto">{{ m.icon }}</v-icon>
-              <div class="d-flex flex-wrap" style="gap:6px 10px; flex:1 1 0; min-width:0">
-                <div v-for="tk in a.themeTokens" :key="tk.key" class="d-flex flex-column" style="width:84px">
-                  <span class="text-caption" style="font-size:0.58rem; opacity:0.7; line-height:1.1">{{ tk.label }}</span>
-                  <div class="d-flex align-center" style="gap:3px">
-                    <input type="color" :value="a.themeColor(m.k, tk.key)" @input="a.setThemeColor(m.k, tk.key, $event.target.value)" @change="a.commitTheme(m.k, tk.key, $event.target.value)" :title="tk.key" :data-testid="'theme-' + m.k + '-' + tk.key" style="width:26px; height:24px; padding:0; border:1px solid rgb(var(--v-theme-outline),0.3); border-radius:5px; background:none; cursor:pointer">
-                    <input type="text" :value="a.themeColor(m.k, tk.key)" @change="a.commitTheme(m.k, tk.key, $event.target.value)" @keydown.enter="a.commitTheme(m.k, tk.key, $event.target.value)" spellcheck="false" :data-testid="'theme-txt-' + m.k + '-' + tk.key" style="width:52px; font-size:0.68rem; font-family:monospace; padding:2px 3px; border:1px solid rgb(var(--v-theme-outline),0.25); border-radius:4px; background:transparent; color:inherit">
-                  </div>
-                </div>
-              </div>
-            </div>
-            <v-btn size="small" variant="text" prepend-icon="mdi-restore" @click="a.resetTheme()" class="mt-1">{{ a.t('settings.theme_reset') }}</v-btn>
-            <v-divider class="my-4"></v-divider>
-            <!-- Per-view background images. Written to the SYNCED FOLDER CONFIG (appConfig.backgrounds),
-                 not the schema, so swapping a picture doesn't rewrite the schema doc; the schema's own
-                 `views[x].background` stays the shipped default that this overrides. The bytes go to the
-                 _assets table as a data URI (no Storage bucket needed) via saveAsset. Rendering modes:
-                 `fit` (cover/contain/tile/width) + a 3x3 position grid + an opacity scrim. -->
-            <!-- Collapsed by default: one row per navigable screen is tall, and expanded it would push the
-                 profile/users sections below it out of view (which also stops v-img, an intersection-loaded
-                 component, from rendering the avatar at all). -->
-            <p class="text-subtitle-2 mb-2" style="cursor:pointer" data-testid="bg-section-toggle"
-               @click="a.settings._collapseBackgrounds = !a.settings._collapseBackgrounds">
-              <v-icon size="small">{{ a.settings._collapseBackgrounds ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
-              {{ a.t('settings.backgrounds') }}
+            <!-- Appearance: the theme palette, then one row per nav entry (a tree, groups included), each opening one
+                 dialog for how the
+                 entry is SHOWN IN MENUS (icon, or an image for tiles and list rows) and what is BEHIND ITS PAGE
+                 (none, an icon drawn faint, or an image). Written to the SYNCED FOLDER CONFIG —
+                 appConfig.navAppearance and appConfig.backgrounds — not the schema, whose `icon` / `image` /
+                 `views[x].background` stay the shipped defaults these override. Uploaded bytes go to _assets.
+                 Collapsed by default: one row per entry is tall, and expanded it would push the sections below
+                 out of view (which also stops v-img, an intersection-loaded component, rendering the avatar). -->
+            <p class="text-subtitle-2 mb-2" style="cursor:pointer" data-testid="appearance-section-toggle"
+               @click="a.settings._collapseAppearance = !a.settings._collapseAppearance">
+              <v-icon size="small">{{ a.settings._collapseAppearance ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
+              {{ a.t('settings.appearance') }}
             </p>
-            <div v-for="tgt in a.backgroundTargets" v-show="!a.settings._collapseBackgrounds" :key="tgt.id" class="mb-3" data-testid="bg-row">
-              <div class="d-flex align-center flex-wrap" style="gap:8px">
-                <img v-if="a.assetSrc(a.backgroundForView(tgt.id).image)" :src="a.assetSrc(a.backgroundForView(tgt.id).image)" class="cell-thumb" alt="" :data-testid="'bg-thumb-' + tgt.id">
-                <div v-else class="cell-thumb d-flex align-center justify-center" style="width:96px; opacity:0.35; font-size:0.6rem">—</div>
-                <span style="flex:1 1 120px; min-width:0; font-size:0.85rem">{{ tgt.title }}</span>
-                <input type="file" accept="image/*" :ref="'bgFile_' + tgt.id" style="display:none" @change="a.uploadViewBackground(tgt.id, $event)">
-                <v-btn size="x-small" variant="text" :loading="a.bgBusy === tgt.id"
-                       :icon="a.backgroundForView(tgt.id).image ? 'mdi-image-edit' : 'mdi-image-plus'"
-                       :title="a.backgroundForView(tgt.id).image ? a.t('bg.replace') : a.t('bg.upload')"
-                       :data-testid="'bg-upload-' + tgt.id"
-                       @click="$refs['bgFile_' + tgt.id][0].click()"></v-btn>
-                <v-btn v-if="a.backgroundForView(tgt.id).image" size="x-small" variant="text" icon="mdi-close" :title="a.t('bg.remove')" :data-testid="'bg-remove-' + tgt.id" @click="a.saveViewBackground(tgt.id, { image: '' })"></v-btn>
-                <!-- Only for a view whose SCHEMA declares a background that the config is currently hiding:
-                     removing it stores a tombstone, and this drops that override to bring the default back. -->
-                <v-btn v-if="a.backgroundHidden(tgt.id)" size="x-small" variant="text" icon="mdi-restore" :title="a.t('bg.restore')" :data-testid="'bg-restore-' + tgt.id" @click="a.restoreViewBackground(tgt.id)"></v-btn>
-              </div>
-              <!-- Rendering controls appear only once there is an image to render. -->
-              <div v-if="a.backgroundForView(tgt.id).image" class="d-flex align-center flex-wrap mt-1 ml-2" style="gap:10px 14px">
-                <v-select :model-value="a.backgroundForView(tgt.id).fit || 'cover'" :items="a.bgFitItems" :label="a.t('bg.fit')"
-                          density="compact" variant="outlined" hide-details style="max-width:150px"
-                          @update:model-value="a.saveViewBackground(tgt.id, { fit: $event })"></v-select>
-                <v-text-field v-if="a.backgroundForView(tgt.id).fit === 'width'" :model-value="a.backgroundForView(tgt.id).width || 50"
-                              :label="a.t('bg.width')" type="number" min="1" max="100" suffix="%"
-                              density="compact" variant="outlined" hide-details style="max-width:110px"
-                              @change="a.saveViewBackground(tgt.id, { width: Number($event.target.value) })"></v-text-field>
-                <!-- 3x3 background-position grid: visual, so no translated label per value (the cell's
-                     `title` carries the CSS keyword). Unselected cells need a resting FILL, not just a
-                     faint outline — with a transparent background the grid read as one lone square and
-                     didn't look like a control at all. -->
-                <div>
-                  <span class="card-field-label">{{ a.t('bg.position') }}</span>
-                  <div class="bg-pos-grid" :data-testid="'bg-position-' + tgt.id">
-                    <div v-for="(row, ri) in a.bgPositionGrid" :key="ri" class="d-flex" style="gap:3px">
-                      <div v-for="p in row" :key="p" class="bg-pos-cell" :class="{ 'bg-pos-cell--on': (a.backgroundForView(tgt.id).position || 'center') === p }"
-                           :title="p" @click="a.saveViewBackground(tgt.id, { position: p })"></div>
+            <!-- Theme (the deployment's palette) and the per-entry looks below it: everything about how the app
+                 LOOKS, in one section. -->
+            <div v-show="!a.settings._collapseAppearance" class="ml-5" data-testid="appearance-body">
+              <p class="text-body-2 font-weight-medium mb-2">{{ a.t('settings.theme') }}</p>
+              <v-text-field :label="a.t('settings.theme_palette')" @change="a.applyPalette($event.target.value)" @keydown.enter="a.applyPalette($event.target.value)" data-testid="theme-palette" spellcheck="false" density="compact" hide-details variant="outlined" style="max-width:320px" class="mb-3 font-monospace"></v-text-field>
+              <div v-for="m in [{ k: 'light', icon: 'mdi-weather-sunny' }, { k: 'dark', icon: 'mdi-weather-night' }]" :key="m.k" class="d-flex align-center mb-2" style="gap:8px" data-testid="theme-editor">
+                <v-icon size="small" style="opacity:0.55; flex:0 0 auto">{{ m.icon }}</v-icon>
+                <div class="d-flex flex-wrap" style="gap:6px 10px; flex:1 1 0; min-width:0">
+                  <div v-for="tk in a.themeTokens" :key="tk.key" class="d-flex flex-column" style="width:84px">
+                    <span class="text-caption" style="font-size:0.58rem; opacity:0.7; line-height:1.1">{{ tk.label }}</span>
+                    <div class="d-flex align-center" style="gap:3px">
+                      <input type="color" :value="a.themeColor(m.k, tk.key)" @input="a.setThemeColor(m.k, tk.key, $event.target.value)" @change="a.commitTheme(m.k, tk.key, $event.target.value)" :title="tk.key" :data-testid="'theme-' + m.k + '-' + tk.key" style="width:26px; height:24px; padding:0; border:1px solid rgb(var(--v-theme-outline),0.3); border-radius:5px; background:none; cursor:pointer">
+                      <input type="text" :value="a.themeColor(m.k, tk.key)" @change="a.commitTheme(m.k, tk.key, $event.target.value)" @keydown.enter="a.commitTheme(m.k, tk.key, $event.target.value)" spellcheck="false" :data-testid="'theme-txt-' + m.k + '-' + tk.key" style="width:52px; font-size:0.68rem; font-family:monospace; padding:2px 3px; border:1px solid rgb(var(--v-theme-outline),0.25); border-radius:4px; background:transparent; color:inherit">
                     </div>
                   </div>
                 </div>
-                <div style="min-width:150px">
-                  <span class="card-field-label">{{ a.t('bg.opacity') }}</span>
-                  <v-slider :model-value="a.backgroundForView(tgt.id).opacity == null ? 0.5 : a.backgroundForView(tgt.id).opacity"
-                            :min="0" :max="1" :step="0.05" density="compact" hide-details
-                            @end="a.saveViewBackground(tgt.id, { opacity: $event })"></v-slider>
-                </div>
-                <v-checkbox :model-value="!!a.backgroundForView(tgt.id).fixed" :label="a.t('bg.fixed')" density="compact" hide-details
-                            @update:model-value="a.saveViewBackground(tgt.id, { fixed: !!$event })"></v-checkbox>
               </div>
+              <v-btn size="small" variant="text" prepend-icon="mdi-restore" @click="a.resetTheme()" class="mt-1">{{ a.t('settings.theme_reset') }}</v-btn>
+            <p class="text-body-2 font-weight-medium mt-4 mb-1">{{ a.t('appearance.entries') }}</p>
+            <!-- Capped width: across a wide screen the thumbnail and edit button sat a whole screen away from the
+                 name they belong to. -->
+            <v-list density="compact" class="py-0 mb-2" style="max-width:560px" data-testid="appearance-list">
+              <v-list-item v-for="r in a.appearanceRows" :key="r.id" :data-testid="'appearance-row-' + r.id" :style="{ paddingInlineStart: (8 + r.depth * 20) + 'px' }" @click="a.openAppearance(r.id)">
+                <template #prepend>
+                  <img v-if="r.node.image && a.assetSrc(r.node.image)" :src="a.assetSrc(r.node.image)" class="appearance-thumb mr-3" alt="" :data-testid="'appearance-image-' + r.id">
+                  <v-icon v-else :icon="r.node.icon" class="mr-3" :data-testid="'appearance-icon-' + r.id"></v-icon>
+                </template>
+                <v-list-item-title style="font-size:0.85rem">{{ r.title }}</v-list-item-title>
+                <template #append>
+                  <img v-if="a.backgroundSrc(r.id, a.backgroundForView(r.id).image)" :src="a.backgroundSrc(r.id, a.backgroundForView(r.id).image)" class="appearance-thumb appearance-thumb--bg mr-2" alt="" :data-testid="'bg-thumb-' + r.id">
+                  <span v-else class="appearance-thumb appearance-thumb--bg mr-2 d-inline-flex align-center justify-center" style="opacity:0.35;font-size:0.7rem">—</span>
+                  <v-icon size="small" icon="mdi-pencil" :title="a.t('btn.edit')" :aria-label="a.t('btn.edit')"></v-icon>
+                </template>
+              </v-list-item>
+            </v-list>
             </div>
+            <!-- The dialog. No previews: the row's thumbnails change on Save, and the page shows the result.
+                 One size throughout: switching Icon / Image / None changes what is inside, never the frame, so
+                 the buttons stay where the pointer is; the content scrolls inside when it outgrows it. -->
+            <v-dialog :model-value="!!a.appearanceDraft" @update:model-value="v => { if (!v) a.appearanceDraft = null; }" :width="a.mobile ? undefined : 620" :fullscreen="a.mobile" scrollable>
+              <v-card v-if="a.appearanceDraft" :height="a.mobile ? undefined : 600" data-testid="appearance-dialog">
+                <v-card-title class="d-flex align-center">
+                  <span style="flex:1 1 auto; min-width:0" class="text-truncate">{{ a.appearanceDraft.title }}</span>
+                  <v-btn icon="mdi-close" variant="text" size="small" :aria-label="a.t('btn.cancel')" @click="a.appearanceDraft = null"></v-btn>
+                </v-card-title>
+                <v-card-text class="pt-1">
+                  <!-- Menu: how the entry is shown in menus, tiles and list rows. -->
+                  <div class="d-flex align-center flex-wrap mb-2" style="gap:12px">
+                    <span class="text-subtitle-2" style="min-width:96px">{{ a.t('appearance.menu') }}</span>
+                    <v-btn-toggle v-model="a.appearanceDraft.menuMode" mandatory divided variant="outlined" density="compact" color="primary">
+                      <v-btn value="icon" class="text-none" data-testid="appearance-menu-icon">{{ a.t('appearance.icon') }}</v-btn>
+                      <v-btn value="image" class="text-none" data-testid="appearance-menu-image">{{ a.t('appearance.image') }}</v-btn>
+                    </v-btn-toggle>
+                  </div>
+                  <!-- A fixed-height slot, so Icon and Image take the same room and Background never moves. -->
+                  <div class="appearance-slot" data-testid="appearance-menu-slot">
+                  <icon-picker v-if="a.appearanceDraft.menuMode === 'icon'" v-model="a.appearanceDraft.icon" testid="menu-icon"></icon-picker>
+                  <div v-else class="d-flex align-center flex-wrap" style="gap:10px">
+                    <img v-if="a.appearanceDraft.imageData || a.assetSrc(a.appearanceDraft.image)" :src="a.appearanceDraft.imageData || a.assetSrc(a.appearanceDraft.image)" class="appearance-thumb" alt="">
+                    <input type="file" accept="image/*" ref="appearanceMenuFile" style="display:none" data-testid="appearance-menu-file" @change="a.pickAppearanceFile('menu', $event)">
+                    <v-btn size="small" variant="outlined" prepend-icon="mdi-image-plus" class="text-none" :loading="a.appearanceDraft.busy === 'menu'" @click="$refs.appearanceMenuFile.click()">{{ a.t('img.upload') }}</v-btn>
+                    <v-text-field v-if="!a.appearanceDraft.imageData" v-model="a.appearanceDraft.image" :label="a.t('img.url')" density="compact" variant="outlined" hide-details style="flex:1 1 200px" data-testid="appearance-menu-url"></v-text-field>
+                    <v-select v-model="a.appearanceDraft.focus" :items="a.focusItems" :label="a.t('appearance.focus')" density="compact" variant="outlined" hide-details style="max-width:140px"></v-select>
+                    <div v-if="!a.appearanceDraft.busy && !a.appearanceHasImage('menu')" class="text-caption text-error w-100" data-testid="appearance-menu-need">{{ a.t('appearance.need_image') }}</div>
+                  </div>
+                  </div>
+                  <v-divider class="my-4"></v-divider>
+                  <!-- Background: what is behind the entry's page. -->
+                  <div class="d-flex align-center flex-wrap mb-2" style="gap:12px">
+                    <span class="text-subtitle-2" style="min-width:96px">{{ a.t('appearance.background') }}</span>
+                    <v-btn-toggle :model-value="a.appearanceDraft.bgMode" @update:model-value="v => a.setAppearanceBgMode(v)" mandatory divided variant="outlined" density="compact" color="primary">
+                      <v-btn value="none" class="text-none" data-testid="appearance-bg-none">{{ a.t('appearance.none') }}</v-btn>
+                      <v-btn value="icon" class="text-none" data-testid="appearance-bg-icon">{{ a.t('appearance.icon') }}</v-btn>
+                      <v-btn value="image" class="text-none" data-testid="appearance-bg-image">{{ a.t('appearance.image') }}</v-btn>
+                    </v-btn-toggle>
+                  </div>
+                  <template v-if="a.appearanceDraft.bgMode === 'icon'">
+                    <v-btn-toggle :model-value="a.appearanceDraft.bgIcon ? 'other' : 'same'" @update:model-value="v => a.appearanceDraft.bgIcon = (v === 'other' ? (a.appearanceDraft.bgIcon || a.appearanceDraft.icon) : '')" mandatory divided variant="outlined" density="compact" class="mb-2">
+                      <v-btn value="same" class="text-none" data-testid="appearance-bg-same"><v-icon :icon="a.appearanceDraft.icon" class="mr-2"></v-icon>{{ a.t('appearance.same_as_menu') }}</v-btn>
+                      <v-btn value="other" class="text-none" data-testid="appearance-bg-other">{{ a.t('appearance.other_icon') }}</v-btn>
+                    </v-btn-toggle>
+                    <icon-picker v-if="a.appearanceDraft.bgIcon" v-model="a.appearanceDraft.bgIcon" testid="bg-icon"></icon-picker>
+                  </template>
+                  <div v-if="a.appearanceDraft.bgMode === 'image'" class="d-flex align-center flex-wrap mb-2" style="gap:10px">
+                    <img v-if="a.appearanceDraft.bgData || a.assetSrc(a.appearanceDraft.bgImage)" :src="a.appearanceDraft.bgData || a.assetSrc(a.appearanceDraft.bgImage)" class="appearance-thumb appearance-thumb--bg" alt="">
+                    <input type="file" accept="image/*" ref="appearanceBgFile" style="display:none" data-testid="appearance-bg-file" @change="a.pickAppearanceFile('bg', $event)">
+                    <v-btn size="small" variant="outlined" prepend-icon="mdi-image-plus" class="text-none" :loading="a.appearanceDraft.busy === 'bg'" @click="$refs.appearanceBgFile.click()">{{ a.t('img.upload') }}</v-btn>
+                    <v-text-field v-if="!a.appearanceDraft.bgData" v-model="a.appearanceDraft.bgImage" :label="a.t('img.url')" density="compact" variant="outlined" hide-details style="flex:1 1 200px" data-testid="appearance-bg-url"></v-text-field>
+                    <div v-if="!a.appearanceDraft.busy && !a.appearanceHasImage('bg')" class="text-caption text-error w-100" data-testid="appearance-bg-need">{{ a.t('appearance.need_image') }}</div>
+                  </div>
+                  <!-- Rendering controls, for either kind of background. -->
+                  <div v-if="a.appearanceDraft.bgMode !== 'none'" class="d-flex align-center flex-wrap mt-2" style="gap:10px 14px">
+                    <v-select v-model="a.appearanceDraft.fit" :items="a.bgFitItems" :label="a.t('bg.fit')" density="compact" variant="outlined" hide-details style="max-width:150px" data-testid="appearance-bg-fit"></v-select>
+                    <v-text-field v-if="a.appearanceDraft.fit === 'width'" v-model.number="a.appearanceDraft.width" :label="a.t('bg.width')" type="number" min="1" max="100" suffix="%" density="compact" variant="outlined" hide-details style="max-width:110px"></v-text-field>
+                    <!-- 3x3 background-position grid: visual, so no translated label per value (the cell's
+                         `title` carries the CSS keyword). Unselected cells need a resting FILL, not just a
+                         faint outline — with a transparent background the grid read as one lone square and
+                         didn't look like a control at all. -->
+                    <div>
+                      <span class="card-field-label">{{ a.t('bg.position') }}</span>
+                      <div class="bg-pos-grid" data-testid="appearance-bg-position">
+                        <div v-for="(row, ri) in a.bgPositionGrid" :key="ri" class="d-flex" style="gap:3px">
+                          <div v-for="p in row" :key="p" class="bg-pos-cell" :class="{ 'bg-pos-cell--on': a.appearanceDraft.position === p }" :title="p" @click="a.appearanceDraft.position = p"></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div style="min-width:150px; flex:1 1 150px">
+                      <span class="card-field-label">{{ a.t('bg.opacity') }}</span>
+                      <v-slider v-model="a.appearanceDraft.opacity" :min="0" :max="1" :step="0.02" density="compact" hide-details thumb-label></v-slider>
+                    </div>
+                    <v-checkbox v-model="a.appearanceDraft.fixed" :label="a.t('bg.fixed')" density="compact" hide-details></v-checkbox>
+                  </div>
+                </v-card-text>
+                <v-card-actions class="flex-wrap">
+                  <v-btn variant="text" prepend-icon="mdi-restore" class="text-none" data-testid="appearance-reset" @click="a.resetAppearance()">{{ a.t('appearance.schema_default') }}</v-btn>
+                  <v-spacer></v-spacer>
+                  <v-btn variant="text" data-testid="appearance-cancel" @click="a.appearanceDraft = null">{{ a.t('btn.cancel') }}</v-btn>
+                  <v-btn color="primary" variant="flat" data-testid="appearance-save" :disabled="!a.appearanceReady()" :loading="!!a.appearanceDraft.busy" @click="a.saveAppearance()">{{ a.t('btn.save') }}</v-btn>
+                </v-card-actions>
+              </v-card>
+            </v-dialog>
             <v-divider v-if="a.knownDatabases.length > 1" class="my-4"></v-divider>
             <template v-if="a.knownDatabases.length > 1">
               <p class="text-subtitle-2 mb-1">{{ a.t('settings.databases') }}</p>
