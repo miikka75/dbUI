@@ -9,7 +9,7 @@ const BROWSE = Object.assign({}, SCHEMA, { nav: { layout: 'browse', items: [
   { group: 'Data', icon: 'mdi-database', items: [{ table: 'tasks' }, { group: 'More', items: [{ table: 'notes' }] }] },
 ] } });
 
-async function boot(page, { url = '/', width = 1280 } = {}) {
+async function boot(page, { width = 1280 } = {}) {
   await page.setViewportSize({ width, height: 800 });
   await page.request.post('/api/resetData');
   await page.request.post('/api/saveSchema', { data: { schema: BROWSE } });
@@ -17,7 +17,7 @@ async function boot(page, { url = '/', width = 1280 } = {}) {
     localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local');
     localStorage.removeItem('app_nav_layout');
   });
-  await page.goto(url);
+  await page.goto('/');
   await page.waitForSelector('[data-testid="nav-level"], [data-testid="breadcrumb"]', { timeout: 6000 });
 }
 
@@ -70,16 +70,20 @@ test.describe('Browse layout', () => {
     await expect(page.locator('[data-testid="breadcrumb"]')).toBeVisible();
   });
 
-  test('a deep link opens its screen with the path above it; an unknown one opens home', async ({ page }) => {
-    await boot(page, { url: '/?at=notes' });
+  test('a reload keeps the screen and the path above it; a stale entry opens home', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => appInstance.selectTab('notes'));
+    await page.reload();
     await expect.poll(() => current(page)).toBe('notes');
     await expect(page.locator('[data-testid="crumb-grp:More"]')).toBeVisible();
-    await page.goto('/?at=nope');
+    await page.evaluate(() => history.replaceState({ screen: 'nope' }, ''));
+    await page.reload();
     await expect.poll(() => current(page)).toBe('__home');
   });
 
   test('a phone gets one step up instead of the whole path', async ({ page }) => {
-    await boot(page, { url: '/?at=notes', width: 390 });
+    await boot(page, { width: 390 });
+    await page.evaluate(() => appInstance.selectTab('notes'));
     await expect(page.locator('[data-testid="crumb-up"]')).toContainText('More');
     await page.locator('[data-testid="crumb-up"]').click();
     await expect.poll(() => current(page)).toBe('grp:More');
@@ -91,8 +95,9 @@ test.describe('Browse layout', () => {
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: SCHEMA } });
     await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.removeItem('app_nav_layout'); });
-    await page.goto('/?at=__settings');
-    await page.waitForSelector('[data-testid="nav-layout-browse"]', { timeout: 6000 });
+    await page.goto('/');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading && !!appInstance.currentTable, null, { timeout: 6000 });
+    await page.evaluate(() => appInstance.selectTab('__settings'));
     await page.locator('[data-testid="nav-layout-browse"]').click();
     await expect(page.locator('.v-navigation-drawer')).toHaveCount(0);
     await expect(page.locator('[data-testid="browse-system-menu"]')).toBeVisible();

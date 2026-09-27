@@ -1,5 +1,5 @@
-// nav.test.js — the nav tree (Nav.build), finding a node in it (Nav.find / Nav.flatten), and the `?at=`
-// parameter that puts the open screen in the address bar (Nav.readAt / Nav.withAt).
+// nav.test.js — the nav tree (Nav.build), its rules (Nav.errors), its translation keys, and finding a
+// node in it (Nav.find / Nav.flatten).
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -69,27 +69,6 @@ describe('Nav.find / Nav.flatten', () => {
   it('flattens depth-first, parents before children, without dividers', () => {
     assert.deepEqual(Nav.flatten(tabs).map((n) => n.id),
       ['home', 'grp:Data', 'tasks', 'grp:Deep', 'notes', 'board', 'rota', '__settings']);
-  });
-});
-
-describe('Nav.readAt / Nav.withAt', () => {
-  it('reads the open screen from a query string', () => {
-    assert.equal(Nav.readAt('?db=x&at=tasks'), 'tasks');
-    assert.equal(Nav.readAt('?at=grp%3AData'), 'grp:Data');
-    assert.equal(Nav.readAt(''), null);
-    assert.equal(Nav.readAt('?at='), null);
-  });
-
-  it('sets `at` and keeps every other parameter', () => {
-    assert.equal(Nav.withAt('?db=club&user=a%40b.c', 'tasks'), '?db=club&user=a%40b.c&at=tasks');
-    assert.equal(Nav.withAt('?at=home&db=club', 'tasks'), '?at=tasks&db=club');
-    assert.equal(Nav.withAt('', 'grp:Data'), '?at=grp%3AData');
-    assert.equal(Nav.readAt(Nav.withAt('', 'grp:Data')), 'grp:Data');
-  });
-
-  it('removes `at` for a falsy id, leaving no bare "?"', () => {
-    assert.equal(Nav.withAt('?at=home', null), '');
-    assert.equal(Nav.withAt('?db=x&at=home', ''), '?db=x');
   });
 });
 

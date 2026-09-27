@@ -2605,13 +2605,12 @@ from the authenticated session — never asked for.
 - **Nesting** is any depth. The drawer and top tabs draw two levels; a deeper group opens as its
   page (below), and a deeper view with `items` lists them beneath itself, so every entry is reachable in
   every layout.
-- **A group's page.** Opening a group — its drawer header, its top tab, a `?at=grp:<label>` link —
-  shows a page listing its entries. A group's id is its label, and so is its translation key
+- **A group's page.** Opening a group — its drawer header, its top tab, its tile or row — shows a page listing its entries. A group's id is its label, and so is its translation key
   (`nav.<label>`), so two groups with one label are rejected at load.
-- **`?at=<id>`** in the address bar is the open screen: every selection is a history entry, so
-  Back/Forward and a reload keep the user's place, and a link can open a screen directly. It resolves
-  against the user's own access-filtered nav — a link to a screen they cannot reach opens the first
-  screen. Boot writes nothing; other query parameters are kept.
+- **History.** Every screen opened is a browser history entry, so Back/Forward move between screens
+  and a reload keeps the open one. The screen is kept in the entry's state, not the URL — the address
+  bar never changes, and there are no links to individual screens. An entry naming a screen the user
+  can no longer reach opens the first screen.
 - **`layout: "browse"`** — no drawer, no bottom bar. Home lists the top level; a group opens as a page
   of its entries; a view with `items` lists them beneath itself; a breadcrumb (`Home › Group › View`,
   on a phone just `‹ Parent`) leads back up, and the system screens move to a cog in the app bar.

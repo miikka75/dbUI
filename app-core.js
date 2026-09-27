@@ -1570,9 +1570,9 @@ function createVueApp() {
       // Mobile bottom-nav "More": open the drawer AND expand every group so all sub-items are visible at once.
       openMoreDrawer: function() { this.openedGroups = this.allGroupIds.slice(); this.drawerOpen = true; },
       // A selection is a history entry, so Back/Forward and a reload keep the user's place. `quiet`
-      // selects without one: boot and Back/Forward, where the address bar already says where we are.
+      // selects without one: boot and Back/Forward, where the browser already has the entry.
       selectTab: function(id, quiet) {
-        if (!quiet && id !== this.currentTable) this._recordAt(id);
+        if (!quiet && id !== this.currentTable) this._pushScreen(id);
         this.currentTable = id;
         if (id === '__settings') this.checkExampleUpdates();
         if (id === '__languages') this._ensureTranslatableLookups();
@@ -4960,14 +4960,17 @@ function createVueApp() {
         var pend = this._pendingScanFromUrl();
         if (pend) { this.pendingScan = pend; this.selectTab(pend.view, true); return; }
         if (this.currentTable) return;
-        var id = this._screenAt(location.search);
+        // A reload keeps the history entry, and with it the screen it recorded.
+        var id = this._screenFor(this._historyScreen());
         if (id) this.selectTab(id, true);
       },
-      // The screen a query string's `?at=` opens. It resolves against the ACCESS-FILTERED tree, so a link
-      // to a screen this user cannot reach — or no `at` at all — opens the first screen: home in browse
-      // mode, the first entry otherwise.
-      _screenAt: function(search) {
-        var id = Nav.readAt(search), browse = this.navLayout === 'browse';
+      _historyScreen: function() { try { return (history.state && history.state.screen) || null; } catch (e) { return null; } },
+      // The screen a history entry opens. It resolves against the ACCESS-FILTERED tree, so an entry naming
+      // a screen this user can no longer reach (a grant revoked, a view removed) — or no screen at all,
+      // the entry the app was opened on — opens the first screen: home in browse mode, the first entry
+      // otherwise.
+      _screenFor: function(id) {
+        var browse = this.navLayout === 'browse';
         if (browse && id === '__home') return id;
         var hit = Nav.find(this.sidebarTabs, id);
         if (hit) return hit.node.id;
@@ -4975,16 +4978,15 @@ function createVueApp() {
         var ft = this.sidebarTabs.find(function(t) { return !t.divider; });
         return ft ? ft.id : null;
       },
-      // Push the open screen into the address bar. Only `at` changes; every other parameter stays.
-      // Boot writes nothing: the landing URL has no `at`, and Back to it opens the first screen, which
-      // is what landing there showed.
-      _recordAt: function(id) {
-        try { history.pushState({ at: id }, '', location.pathname + Nav.withAt(location.search, id) + location.hash); } catch (e) {}
+      // A history entry per screen, so the browser's Back leaves the screen rather than the app. The
+      // screen travels in the entry's STATE, not the URL: the address bar stays as it is, and there is no
+      // screen-level link to keep working. Boot records nothing; Back to the entry the app was opened on
+      // opens the first screen, which is what opening it showed.
+      _pushScreen: function(id) {
+        try { history.pushState({ screen: id }, ''); } catch (e) {}
       },
-      // Back/Forward. An entry with no `at` (the landing page), or one naming a screen this user can no
-      // longer reach (a grant revoked, a view removed), opens the first screen rather than a blank one.
       _onPopState: function() {
-        var id = this._screenAt(location.search);
+        var id = this._screenFor(this._historyScreen());
         if (id && id !== this.currentTable) this.selectTab(id, true);
       },
       loadUsers: function() {
