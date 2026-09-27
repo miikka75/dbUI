@@ -22,6 +22,22 @@
   // so this is where it belongs; app-core keeps calling it bare through the global below.
   function toDateStr(v) { if (!v) return ''; var s = String(v); if (s.length === 10) return s; return fmtDate(new Date(s)); }
 
+  // A stored date as a PERSON reads it, in `locale` (`22.09.2026` in fi, `09/22/2026` in en-US). This is
+  // a second function beside toDateStr on purpose: toDateStr is a NORMALIZER whose output is a key --
+  // events.js buckets by it and rotation.js builds _period from fmtDate -- so localizing it would break
+  // grouping for a change that is only about how a cell looks. Use this where a date is rendered to a
+  // person and nowhere else; an <input type="date"> :value still wants the key.
+  // 2-digit day/month rather than dateStyle:'short' (`22.9.2026` in fi), so the label agrees with the
+  // native picker in the one place the two can. A value that is not a real date falls back to its key.
+  var labelFmts = {};
+  function dateLabel(v, locale) {
+    var key = toDateStr(v); if (!key) return '';
+    var p = key.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2]);
+    if (isNaN(d.getTime())) return key;
+    var f = labelFmts[locale] || (labelFmts[locale] = new Intl.DateTimeFormat(locale, { day: '2-digit', month: '2-digit', year: 'numeric' }));
+    return f.format(d);
+  }
+
   // 42-cell (6x7) month grid whose weeks start on `weekStart` (0=Sun..1=Mon), containing `anchor`.
   // `today` (a 'YYYY-MM-DD' string) drives the isToday flag; `anchor` defaults to it.
   function cellsMonth(anchor, weekStart, today) {
@@ -97,7 +113,7 @@
   function rotationSources(views, name) { var v = views[name]; return (v && v.calendar && v.calendar.rotationSources) || []; }
 
   var C = {
-    fmtDate: fmtDate, toDateStr: toDateStr, cellsMonth: cellsMonth, cellsWeek: cellsWeek, windowFor: windowFor,
+    fmtDate: fmtDate, toDateStr: toDateStr, dateLabel: dateLabel, cellsMonth: cellsMonth, cellsWeek: cellsWeek, windowFor: windowFor,
     hashColor: hashColor, paletteAt: paletteAt, sources: sources, rotationSources: rotationSources
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = C;

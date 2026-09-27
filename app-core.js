@@ -3419,6 +3419,8 @@ function createVueApp() {
       colIsUrl: function(col) { return Columns.colIsUrl(SCHEMA, col); },
       colPicker: function(col) { return Columns.colPicker(SCHEMA, col); },
       toDateStr: function(v) { return toDateStr(v); },
+      // A date as displayed, in the app language's locale (calendar.js dateLabel). Display only.
+      dateLabel: function(v) { return Calendar.dateLabel(v, this.calLocale()); },
       // Whether the active backend can store an uploaded file (Firebase Storage). Other backends lack it,
       // so an `image` column degrades to a paste-a-URL text input. See uploadFile.
       canUploadFiles: function() { return !!(typeof backend !== 'undefined' && backend && backend.uploadFile); },
@@ -6767,6 +6769,7 @@ function createVueApp() {
         return {
           t: function(k) { return self.t(k); },
           colIsDate: function(c) { return self.colIsDate(c); },
+          dateLabel: function(v) { return self.dateLabel(v); },
           displayValue: function(c, v) { return self.displayValue(c, v); },
           isColumnHidden: function(c, item) { return self.isColumnHidden(c, item); },
           colHideEmpty: function(c) { return self.colHideEmpty(c); },
@@ -7068,7 +7071,8 @@ function createVueApp() {
     // Asset-backed values have no meaningful href (safeUrl rejects data:), so the cell drops the
     // "open in a new tab" wrapper for them rather than emitting an <a> with an empty href.
     isAsset: function(u) { return (typeof isAssetRef === 'function') ? isAssetRef(u) : false; },
-    toDateStr: toDateStr
+    toDateStr: toDateStr,
+    dateLabel: function(v) { return appInstance ? appInstance.dateLabel(v) : toDateStr(v); }
   };
 
 
@@ -7517,7 +7521,7 @@ function createVueApp() {
     template: ''
       + '<div style="display:grid; gap:8px; padding:8px">'
       + '<div v-for="row in rows" :key="row.id" style="padding:8px 12px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:8px">'
-      + '<div style="font-weight:600; margin-bottom:4px">{{ toDateStr(row._period) }}</div>'
+      + '<div style="font-weight:600; margin-bottom:4px">{{ dateLabel(row._period) }}</div>'
       + '<div v-for="col in slotCols" :key="col" style="font-size:0.9rem"><span style="opacity:0.6">{{ slotHead(col) }}: </span><list-value :col="col" :ns-col="valueNs(col)" :value="row[col]" :view-cfg="viewCfg()"></list-value></div>'
       + '</div></div>'
   });
@@ -7527,7 +7531,7 @@ function createVueApp() {
     template: ''
       + '<div style="padding:4px 0">'
       + '<div v-for="row in rows" :key="row.id" style="padding:4px 12px; border-bottom:1px solid rgb(var(--v-theme-outline),0.08); font-size:0.9rem">'
-      + '<span style="font-weight:600; margin-right:8px">{{ toDateStr(row._period) }}</span>'
+      + '<span style="font-weight:600; margin-right:8px">{{ dateLabel(row._period) }}</span>'
       + '<span v-for="(col, i) in slotCols" :key="col"><span style="opacity:0.6">{{ slotHead(col) }}: </span><list-value :col="col" :ns-col="valueNs(col)" :value="row[col]" :view-cfg="viewCfg()"></list-value><span v-if="i < slotCols.length - 1" style="opacity:0.3"> · </span></span>'
       + '</div></div>'
   });
@@ -8050,7 +8054,7 @@ function createVueApp() {
   // avatar in front when there is one. This is THE single place a list value + optional avatar is drawn, so
   // avatars appear consistently wherever a value is printed — read-only cells, embeds, the compact list
   // layout, rotation slots, the pivot axes, and group-card titles. Non-list columns just render their text;
-  // dates (and the synthetic _period) pass through toDateStr. Drop-in for `{{ displayValue(col, val) }}`.
+  // dates (and the synthetic _period) pass through dateLabel. Drop-in for `{{ displayValue(col, val) }}`.
   app.component('list-value', {
     props: { col: { type: String, required: true }, value: {}, size: { type: [Number, String], default: 18 },
              nsCol: { type: String, default: '' },     // resolve labels/avatars from THIS column's list instead
@@ -8058,7 +8062,7 @@ function createVueApp() {
     computed: {
       items: function() {
         var col = this.col, v = this.value, a = appInstance, cfg = this.viewCfg;
-        if (col === '_period' || a.colIsDate(col)) return (v == null || v === '') ? [] : [{ text: a.toDateStr(v), pic: '' }];
+        if (col === '_period' || a.colIsDate(col)) return (v == null || v === '') ? [] : [{ text: a.dateLabel(v), pic: '' }];
         var arr = Array.isArray(v) ? v : ((v == null || v === '') ? [] : [v]);
         var ns = this.nsCol || '';
         return arr.filter(function(x) { return x != null && x !== ''; }).map(function(x) {
@@ -8313,7 +8317,7 @@ function createVueApp() {
       + '</tr></thead>'
       + '<tbody>'
       + '<tr v-for="ev in events" :key="ev.id">'
-      + '<td style="white-space:nowrap">{{ toDateStr(ev.date) }}</td>'
+      + '<td style="white-space:nowrap">{{ a.dateLabel(ev.date) }}</td>'
       + '<td>{{ ev.title }}</td>'
       + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker></td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
@@ -8324,7 +8328,7 @@ function createVueApp() {
       + '</v-table>'
       + '<div v-else class="pa-1">'
       + '<v-card v-for="ev in events" :key="ev.id" variant="tonal" class="mb-2 pa-3">'
-      + '<div>{{ toDateStr(ev.date) }}</div>'
+      + '<div>{{ a.dateLabel(ev.date) }}</div>'
       + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}</div>'
       + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
