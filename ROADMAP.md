@@ -2080,14 +2080,16 @@ Each phase ships on its own and leaves every existing layout at least as good as
 
 #### What the build changed from the plan below
 
-- **`?db=` does not stay in the URL.** `index.html` strips it at boot (with `?mode=` and a shared link's
-  config), and it used to strip the WHOLE query string to do so — which would have eaten a
-  `?db=x&at=y` link. It now deletes only the parameters it consumes.
-- **Boot writes nothing to the address bar.** The plan had boot `replaceState` its screen so Back had
-  somewhere to land; it does not need to. The landing URL has no `at`, and Back to it opens the first
-  screen — what landing there showed. Three existing tests assert that boot leaves the URL alone.
-- **`buildNavTabs` moved into `nav.js`** (`Nav.build`, with `find`, `flatten`, `readAt`, `withAt`,
-  `errors`, `translationKeys`), so the tree is Node-tested rather than only reachable from Playwright.
+- **No `?at=`: the screen lives in the history entry's STATE, not the URL.** Links to individual
+  screens were not wanted, and without them the parameter bought nothing: `history.pushState({ screen },
+  '')` gives Back/Forward an entry per screen, and browsers keep `history.state` across a reload, so a
+  reload still returns to the screen. The address bar never changes, which also removed the need to
+  touch `index.html`'s query-string stripping (a `?db=x&at=y` link would have lost its `at`). The
+  first build did use `?at=`; it was taken out before merge.
+- **Boot pushes nothing.** Back to the entry the app was opened on opens the first screen — what
+  opening it showed.
+- **`buildNavTabs` moved into `nav.js`** (`Nav.build`, with `find`, `flatten`, `errors`,
+  `translationKeys`), so the tree is Node-tested rather than only reachable from Playwright.
   The nav checks that need no schema moved with it; `validateRefs` keeps the missing-view/table ones.
 - **No depth limit, in any layout.** Rejecting depth > 1 outside browse (phase 5) did not survive
   contact with the Settings override: a browse schema viewed by someone who chose the drawer would

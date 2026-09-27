@@ -518,7 +518,7 @@
 </template>
 
 <!-- A group's page: its entries as a list, so opening a group lands somewhere rather than on a blank
-     screen. Reached by a group's drawer header or top tab, or a ?at=grp:<label> link. -->
+     screen. Reached by a group's drawer header or top tab, or its tile or row on another level. -->
 <template id="nav-level-tpl">
   <div v-if="node" :data-testid="below ? 'nav-level-below' : 'nav-level'">
     <div v-if="!below" class="d-flex align-center mb-3" style="gap:10px">

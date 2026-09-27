@@ -1,15 +1,9 @@
-// nav.js — Pure navigation tree: build it from `nav.items`, find a node in it, and read/write the
-// `?at=` parameter that says which node is open. Framework-agnostic + Node-tested, mirroring
-// board.js / pivot.js / reorder.js.
+// nav.js — Pure navigation tree: build it from `nav.items`, check it, and find a node in it.
+// Framework-agnostic + Node-tested, mirroring board.js / pivot.js / reorder.js.
 //   Browser: <script src="/nav.js">, then Nav.build(items, t, canAccess, opts). Node: const Nav = require('../nav').
 //
 // The tree is what every nav renderer draws — the drawer, the top tabs, the bottom bar — so it is
 // built once here and access-filtered here, and the renderers only decide how deep to draw it.
-//
-// WHY `?at=` AND NOT THE HASH: the hash belongs to Supabase (`detectSessionInUrl` reads OAuth and
-// magic-link tokens from it), `?db=` to databases.js, and `?view=` to the scan deep link, which is a
-// scan contract and not a routing parameter. So the open node gets a parameter of its own, and every
-// write keeps the others.
 (function(root) {
   // items      the schema's nav.items
   // t          translate(key) -> string ('' when missing)
@@ -131,19 +125,7 @@
     return hit;
   }
 
-  // The open node named by a query string ('?db=x&at=tasks' -> 'tasks'), or null.
-  function readAt(search) { return new URLSearchParams(search || '').get('at') || null; }
-
-  // The query string with `at` set to id (or removed, for a falsy id), every other parameter kept in
-  // its place. Returns '' or a string starting with '?', ready to follow location.pathname.
-  function withAt(search, id) {
-    var p = new URLSearchParams(search || '');
-    if (id) p.set('at', id); else p['delete']('at');
-    var q = p.toString();
-    return q ? '?' + q : '';
-  }
-
-  var M = { build: build, errors: errors, translationKeys: translationKeys, flatten: flatten, find: find, readAt: readAt, withAt: withAt };
+  var M = { build: build, errors: errors, translationKeys: translationKeys, flatten: flatten, find: find };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else root.Nav = M;
 })(typeof self !== 'undefined' ? self : this);
