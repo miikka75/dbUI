@@ -2,6 +2,7 @@
   "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
   "notes": {
     "5": "Adds `teams`, a catalogue whose parent column holds another ROW's id (`hierarchy.by: \"id\"`) instead of a group's value — so the Lookup tab shows it three levels deep (Acme > Engineering > Backend) rather than the two every other lookup has. Nothing existing changes: `cities` still groups by value, side by side with it, which is the point of shipping both.",
-    "6": "The navigation is now a set of pages instead of a 22-entry drawer (`nav.layout: \"browse\"`): the home screen shows tiles for six sections, each section opens as a page of its own entries, and a breadcrumb leads back up. Every screen the old menu had is still there, grouped. Each person can switch back to the side menu under Settings -> Navigation."
+    "6": "The navigation is now a set of pages instead of a 22-entry drawer (`nav.layout: \"browse\"`): the home screen shows tiles for six sections, each section opens as a page of its own entries, and a breadcrumb leads back up. Every screen the old menu had is still there, grouped. Each person can switch back to the side menu under Settings -> Navigation.",
+    "7": "Settings gains an Appearance section — the theme, plus an icon, image and background for every menu entry — and a single Navigation choice (Side menu, Top navigation, List, Tiles). Their labels now come in Spanish and Swedish as well as English, and the old Background images labels are gone."
   }
 }

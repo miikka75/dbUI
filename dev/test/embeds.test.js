@@ -405,6 +405,20 @@ describe('embeds.js — asset references (the no-bucket image tier)', () => {
   });
 });
 
+describe('embeds.js — icon references (a background drawn from the icon font)', () => {
+  it('recognizes icon:<mdi-name> and bare icon:', () => {
+    assert.equal(Embeds.isIconRef('icon:mdi-broom'), true);
+    assert.equal(Embeds.iconRefName('icon:mdi-broom'), 'mdi-broom');
+    assert.equal(Embeds.isIconRef('icon:'), true);                // the entry's own icon
+    assert.equal(Embeds.iconRefName('icon:'), '');
+  });
+  it('rejects anything that is not an mdi class name', () => {
+    for (const bad of ['icon:broom', 'icon:mdi-Broom', 'icon:mdi-a b', 'icon:mdi-a"', 'mdi-broom', 'asset:x', '', null]) {
+      assert.equal(Embeds.isIconRef(bad), false, String(bad));
+    }
+  });
+});
+
 describe('embeds.js — safeCssUrl (background-image url() token)', () => {
   it('wraps a safe image source in a url() token', () => {
     assert.equal(Embeds.safeCssUrl('https://cdn.example.com/a.png'), 'url("https://cdn.example.com/a.png")');

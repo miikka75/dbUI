@@ -272,7 +272,7 @@
           "required": ["image"],
           "additionalProperties": false,
           "properties": {
-            "image": { "type": "string", "minLength": 1, "description": "An https URL, a raster data: URI, or \"asset:<id>\" (bytes in the _assets table — the no-bucket tier)." },
+            "image": { "type": "string", "minLength": 1, "description": "An https URL, a raster data: URI, \"asset:<id>\" (bytes in the _assets table — the no-bucket tier), or \"icon:<mdi-name>\" — that icon drawn as the image in the theme's primary colour; bare \"icon:\" is the nav entry's own icon." },
             "fit": { "type": "string", "enum": ["cover", "contain", "tile", "width"] },
             "width": { "type": "number", "minimum": 1, "maximum": 100, "description": "Percentage, with fit: \"width\"." },
             "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
@@ -311,6 +311,8 @@
         "icon": { "type": "string", "description": "MDI icon name." },
         "title": { "type": "string", "description": "Override the entry's label." },
         "description": { "type": "string", "description": "BROWSE ONLY: a line shown under the entry's title on its tile or list row. Translatable as nav.desc.<group label | view | table>; this text is the fallback." },
+        "image": { "type": "string", "description": "A picture shown in place of the icon on the entry's tile (a 16:9 cover) and list row (a thumbnail): an https URL, a raster data: URI, or \"asset:<id>\". The drawer, tabs and breadcrumb keep the icon. Settings -> Appearance can override it." },
+        "focus": { "type": "string", "enum": ["top", "center", "bottom"], "description": "Which part of `image` a tile keeps when it crops. Default center." },
         "display": { "type": "string", "enum": ["list", "tiles"], "description": "BROWSE ONLY: on a group or a view with entries, how its page draws them. Defaults to the nav's `display`." },
         "adminOnly": { "type": "boolean", "description": "Hide the entry from non-admins; on a group, the whole branch. TIDINESS, NOT ACCESS CONTROL — what a member may read is decided by their table grants, and a hidden entry is still reachable if something links to it." },
         "hideFromAdmin": { "type": "boolean", "description": "The mirror, for views about being a PARTICIPANT: an admin is exempt from mineOnly, so a personal page embedding a mineOnly rotation would show them everyone else's column under a heading reading \"My tasks\". Setting both flags hides the entry from every user and is rejected at load." }

@@ -331,8 +331,8 @@ function validateSchema() {
       var bgv = view.background;
       if (!bgv || typeof bgv !== 'object' || Array.isArray(bgv)) errors.push('View "' + v + '": `background` must be an object, e.g. { "image": "https://…", "fit": "cover" }');
       else {
-        if (typeof bgv.image !== 'string' || !bgv.image) errors.push('View "' + v + '": `background.image` must be a non-empty string (an https URL or "asset:<id>")');
-        else if (!isAssetRef(bgv.image) && !safeImgSrc(bgv.image)) errors.push('View "' + v + '": `background.image` "' + bgv.image + '" is not a usable image source (http(s) URL, raster data: URI, or "asset:<id>")');
+        if (typeof bgv.image !== 'string' || !bgv.image) errors.push('View "' + v + '": `background.image` must be a non-empty string (an https URL, "asset:<id>" or "icon:<mdi-name>")');
+        else if (!isAssetRef(bgv.image) && !isIconRef(bgv.image) && !safeImgSrc(bgv.image)) errors.push('View "' + v + '": `background.image` "' + bgv.image + '" is not a usable image source (http(s) URL, raster data: URI, "asset:<id>", or "icon:<mdi-name>")');
         if (bgv.fit !== undefined && ['cover', 'contain', 'tile', 'width'].indexOf(bgv.fit) < 0) errors.push('View "' + v + '": `background.fit` must be one of cover/contain/tile/width');
         if (bgv.fit === 'width' && bgv.width !== undefined && !(Number(bgv.width) >= 1 && Number(bgv.width) <= 100)) errors.push('View "' + v + '": `background.width` must be a percentage between 1 and 100');
         if (bgv.opacity !== undefined && !(Number(bgv.opacity) >= 0 && Number(bgv.opacity) <= 1)) errors.push('View "' + v + '": `background.opacity` must be a number between 0 and 1');
@@ -343,8 +343,11 @@ function validateSchema() {
     // sources, or one the view declares itself (a `computed`). Shared by the column check below and by
     // the stats-tile check further down, so the two cannot disagree about what a column IS.
     var colInSources = function(col) { return colOfTables(view.sources, col); };
+    // `compute` counts too: the pipeline resolves it onto every source row before anything reads them —
+    // it is how a stats tile sums a per-row lookup (the demo's `chore_stats` "Points this month").
     var viewDeclaresCol = function(col) {
-      return (view.columns || []).some(function(c) { return !isEmbed(c) && !isViewEmbed(c) && !isText(c) && colName(c) === col; });
+      return (view.columns || []).some(function(c) { return !isEmbed(c) && !isViewEmbed(c) && !isText(c) && colName(c) === col; })
+        || (view.compute || []).some(function(c) { return c && typeof c === 'object' && c.computed && c.name === col; });
     };
     // Check columns exist in at least one source (skip aggregate views)
     if (!view.groupBy) (view.columns || []).forEach(function(c) {

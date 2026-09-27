@@ -159,6 +159,44 @@ var BG_FITS = {
 // the crop, so a short card can still show a photo's subject rather than its middle.
 var BG_POSITIONS = ['center', 'top', 'bottom', 'left', 'right', 'top left', 'top right', 'bottom left', 'bottom right'];
 
+// --- The icon font, read as data ---
+// Settings -> Appearance picks from every Material Design icon, and a background can be an icon drawn
+// large and faint. Both read the font the app already loads rather than shipping a list of 7,000 names:
+// vendor/mdi.css is same-origin, so its `.mdi-<name>::before` rules are readable at runtime. Behind the
+// CDN fallback they are not (a cross-origin sheet throws on cssRules), and the list comes back empty —
+// the picker then takes a typed name instead.
+var MDI_NAMES = null;
+function mdiIconNames() {
+  if (MDI_NAMES) return MDI_NAMES;
+  var seen = {}, out = [];
+  Array.prototype.forEach.call(document.styleSheets || [], function(sheet) {
+    var rules;
+    try { rules = sheet.cssRules; } catch (e) { return; }
+    Array.prototype.forEach.call(rules || [], function(r) {
+      var m = /^\.(mdi-[a-z0-9-]+)::?before$/.exec(r.selectorText || '');
+      if (m && !seen[m[1]]) { seen[m[1]] = 1; out.push(m[1]); }
+    });
+  });
+  if (out.length) MDI_NAMES = out;   // an empty read (sheet not loaded yet) is retried next time
+  return out;
+}
+// The character an mdi class draws: the ::before `content` the stylesheet gives it, read off a probe.
+function mdiGlyph(name) {
+  var el = document.createElement('i');
+  el.className = 'mdi ' + name;
+  el.style.cssText = 'position:absolute;visibility:hidden';
+  document.body.appendChild(el);
+  var c = getComputedStyle(el, '::before').content;
+  el.remove();
+  if (!c || c === 'none' || c === 'normal') return '';
+  return c.replace(/^["']|["']$/g, '');
+}
+// Drawn icons as PNG data URIs, per icon and colour. Not reactive state: a background that asks for one
+// before the font has loaded gets '' and is re-asked when iconFontTick moves.
+var ICON_IMAGES = {};
+var ICON_FONT = '"Material Design Icons"';
+var iconFontLoading = null;
+
 var app; // Vue app instance
 var appInstance; // Mounted root component proxy
 var backend; // Set by backend adapter loaded after this file
@@ -301,6 +339,10 @@ function createVueApp() {
       sortCol: null,
       sortAsc: true,
       strings: {},
+      // A schema error found at boot, held until the labels arrive: the schema is checked before the
+      // translations load, so notifying at once showed the raw key `msg.schema_error`. The `strings` watcher
+      // shows it; every boot path assigns strings, the no-languages one included.
+      pendingSchemaError: '',
       languages: [],
       currentLang: '',
       editingLang: null,
@@ -327,10 +369,10 @@ function createVueApp() {
       redoDepth: 0,
       snackbar: false,
       snackText: '',
-      // _collapseBackgrounds starts COLLAPSED (unlike the others): the section is one row per navigable
+      // _collapseAppearance starts COLLAPSED (unlike the others): the section is one row per navigable
       // screen, so expanded by default it pushes everything below it off-screen — which also stops
       // Vuetify's v-img from ever rendering the profile avatar, since v-img loads on intersection.
-      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false, _collapseBackgrounds: true },
+      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false, _collapseAppearance: true },
       appConfig: null,
       saveTimers: {},
       // Live sync (see the _live* methods). _liveSubs maps a store name -> its unsubscribe function, so
@@ -369,7 +411,8 @@ function createVueApp() {
       pageCache: {},
       assetCache: {},   // { '<assetId>': dataUri | '' } — '' is a cached MISS (missing/denied), so render never re-requests
       _assetPending: {},// in-flight asset reads, so a repeated render can't queue the same fetch twice
-      bgBusy: '',       // view name whose background upload is in flight (Settings spinner)
+      appearanceDraft: null, // Settings -> Appearance: the entry being edited, as a draft (nothing is written until Save)
+      iconFontTick: 0,       // moves when the icon font finishes loading, so icon backgrounds redraw
       expandedCard: null,
       listSwitchOverrides: {}, // {itemId_col: true} — tracks which cells are toggled to alt list
     }; },
@@ -391,7 +434,7 @@ function createVueApp() {
         var canAccess = function(id) { return self.canAccessNavId(id); };
         var navCfg = self.navConfig;
         var navItems = (navCfg && Array.isArray(navCfg.items)) ? navCfg.items : [];
-        return Nav.build(navItems, self.t.bind(self), canAccess, { isAdmin: self.isAdmin, hasLookup: self.refTables.length || Object.keys(self.visibleLists).length, views: VIEWS, schema: SCHEMA, display: navCfg && navCfg.display });
+        return Nav.build(navItems, self.t.bind(self), canAccess, { isAdmin: self.isAdmin, hasLookup: self.refTables.length || Object.keys(self.visibleLists).length, views: VIEWS, schema: SCHEMA, display: navCfg && navCfg.display, appearance: (self.appConfig && self.appConfig.navAppearance) || {} });
       },
       bottomNavTabs: function() {
         // Schema can define explicit bottom nav items: nav.bottomNav = ["view1", "view2", ...]
@@ -433,18 +476,28 @@ function createVueApp() {
           { key: 'on-surface', label: 'Text' }, { key: 'error', label: 'Error' }, { key: 'success', label: 'Success' }
         ];
       },
-      // Screens a background can be set on: the navigable tabs, flattened (groups contribute their
-      // children, not themselves), minus the system screens. Titles come from sidebarTabs already
-      // translated, so the Settings list needs no key of its own per view.
-      backgroundTargets: function() {
+      // Settings -> Appearance: every nav entry, in tree order, with its depth for indenting. Groups are in
+      // it (a group has a page, so it can have a background), and so is a view that has entries of its
+      // own; the old Backgrounds list skipped both. System screens are not. Titles and icons come from
+      // sidebarTabs, already translated and already carrying the overrides.
+      appearanceRows: function() {
         var out = [];
-        (this.sidebarTabs || []).forEach(function(t) {
-          if (!t || t.divider) return;
-          if (t.children) { t.children.forEach(function(c) { if (c && c.id) out.push({ id: c.id, title: c.title }); }); return; }
-          if (String(t.id).slice(0, 4) === 'grp:' || String(t.id).slice(0, 2) === '__') return;
-          out.push({ id: t.id, title: t.title });
-        });
+        (function walk(list, depth) {
+          (list || []).forEach(function(n) {
+            if (!n || n.divider || String(n.id).slice(0, 2) === '__') return;
+            out.push({ id: n.id, title: n.title, depth: depth, node: n });
+            walk(n.children, depth + 1);
+          });
+        })(this.sidebarTabs, 0);
         return out;
+      },
+      // The Appearance dialog's focus choices, spelled out for the translation-keys guard (see bgFitItems).
+      focusItems: function() {
+        return [
+          { value: 'top', title: this.t('appearance.focus_top') },
+          { value: 'center', title: this.t('appearance.focus_center') },
+          { value: 'bottom', title: this.t('appearance.focus_bottom') }
+        ];
       },
       // `fit` options for the Settings picker (see BG_FITS for what each maps to). Keys are spelled out
       // rather than built as 'bg.fit_' + k: the translation-keys drift guard scans for literal t('…')
@@ -976,7 +1029,7 @@ function createVueApp() {
          'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'settings.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
-         'bg.upload', 'bg.replace', 'bg.remove', 'bg.restore', 'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
+         'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
          'bg.fit', 'bg.fit_cover', 'bg.fit_contain', 'bg.fit_tile', 'bg.fit_width',
          'btn.undo', 'btn.redo', 'msg.undone', 'msg.redone', 'settings.data', 'settings.refresh',
          'msg.saved', 'msg.save_failed', 'msg.upload_failed', 'msg.choose_image', 'msg.image_too_large', 'msg.image_read_failed', 'msg.image_invalid', 'msg.image_process_failed',
@@ -999,9 +1052,11 @@ function createVueApp() {
          'part.backup', 'part.schema', 'part.languages', 'part.reference', 'part.data', 'part.users',
          'msg.nothing_to_export', 
          'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
-         'settings.reset', 'settings.confirm_reset', 'settings.nav_layout', 'settings.nav_drawer', 'settings.tabs_nav', 'settings.nav_list', 'settings.nav_tiles', 'settings.user_access', 'settings.user_access_title',
+         'settings.reset', 'settings.confirm_reset', 'settings.nav_layout', 'settings.nav_drawer', 'settings.tabs_nav', 'settings.nav_list', 'settings.nav_tiles', 'settings.appearance',
+         'appearance.menu', 'appearance.background', 'appearance.icon', 'appearance.image', 'appearance.none', 'appearance.search',
+         'appearance.same_as_menu', 'appearance.other_icon', 'appearance.focus',
+         'appearance.focus_top', 'appearance.focus_center', 'appearance.focus_bottom', 'appearance.schema_default', 'appearance.need_image', 'appearance.entries', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
-         'settings.backgrounds',
          'settings.databases', 'settings.databases_hint', 'settings.switch', 'settings.forget',
          'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.tables_view', 'settings.add_user', 'settings.all',
          'role.admin', 'role.editor', 'role.viewer',
@@ -1397,7 +1452,7 @@ function createVueApp() {
               self.schemaData = Object.freeze(parsed);
               self._tableOrder = Object.keys(parsed.tables || {});
               var schemaErrors = validateSchema();
-              if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify(self.t('msg.schema_error') + ' ' + schemaErrors[0]); }
+              if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.pendingSchemaError = schemaErrors[0]; }
             } else {
               // Same as the bootData path below: "no schema" may mean an empty database or a read that
               // failed, and a refused write must not reject into the console.
@@ -1436,7 +1491,7 @@ function createVueApp() {
               ensureImplicitId(SCHEMA, window._columnOrders); // re-run with overridden orders
               self.schemaData = Object.freeze(parsedSchema);
               var schemaErrors = validateSchema();
-              if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.notify(self.t('msg.schema_error') + ' ' + schemaErrors[0]); }
+              if (schemaErrors.length) { console.warn('Schema errors:', schemaErrors); self.pendingSchemaError = schemaErrors[0]; }
             } else {
               // No schema came back. That is USUALLY a first boot -- but it is also what a read that
               // failed looks like, and the two are indistinguishable from here: `schema: null` carries
@@ -4624,7 +4679,7 @@ function createVueApp() {
       // exactly one declaration, so a hostile URL cannot append further CSS (see safeCssUrl).
       backgroundStyleFor: function(name) {
         var bg = this.backgroundForView(name);
-        var url = bg && bg.image ? safeCssUrl(this.assetSrc(bg.image)) : '';
+        var url = bg && bg.image ? safeCssUrl(this.backgroundSrc(name, bg.image)) : '';
         if (!url) return null;
         var op = (bg.opacity == null) ? 0.5 : Math.max(0, Math.min(1, Number(bg.opacity)));
         var scrim = 'rgba(var(--v-theme-surface),' + (1 - op) + ')';
@@ -4679,19 +4734,160 @@ function createVueApp() {
         cfg.mode = this.mode;
         this._saveFolderConfig(cfg, viewName);
       },
-      // Settings: pick a file for a view's background -> store it as the asset `bg_<view>` and point at it.
-      uploadViewBackground: function(viewName, ev) {
+      // A background's image address as a displayable src. `icon:` is drawn from the icon font — bare
+      // `icon:` meaning the entry's own menu icon, so the watermark follows it when the icon changes.
+      backgroundSrc: function(name, image) {
+        if (!isIconRef(image)) return this.assetSrc(image);
+        var icon = Embeds.iconRefName(image);
+        if (!icon) { var hit = Nav.find(this.sidebarTabs, name); icon = hit ? hit.node.icon : ''; }
+        return this.iconImage(icon);
+      },
+      // An icon drawn large on a canvas, as a PNG data URI, in the theme's primary colour — so it follows
+      // the light/dark switch rather than going dark-on-dark the way a photo can. Until the font has loaded
+      // the glyph would draw as nothing, so a miss asks the browser to load it and returns ''; iconFontTick
+      // moves when it has, and whatever asked re-runs.
+      iconImage: function(name) {
+        if (!/^mdi-[a-z0-9-]+$/.test(name || '')) return '';
+        var self = this;
+        void this.iconFontTick; void this.theme;   // dependencies: a redraw when either moves
+        var colors = (this.$vuetify && this.$vuetify.theme && this.$vuetify.theme.current && this.$vuetify.theme.current.colors) || {};
+        var color = colors.primary || '#1976d2', key = name + '|' + color;
+        if (ICON_IMAGES[key]) return ICON_IMAGES[key];
+        if (!document.fonts || !document.fonts.check('96px ' + ICON_FONT)) {
+          if (document.fonts && !iconFontLoading) {
+            iconFontLoading = document.fonts.load('96px ' + ICON_FONT).then(function() { iconFontLoading = null; self.iconFontTick++; }, function() { iconFontLoading = null; });
+          }
+          return '';
+        }
+        var glyph = mdiGlyph(name);
+        if (!glyph) return '';
+        try {
+          var c = document.createElement('canvas');
+          c.width = c.height = 512;
+          var ctx = c.getContext('2d');
+          ctx.font = '448px ' + ICON_FONT;
+          ctx.fillStyle = color;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(glyph, 256, 256);
+          ICON_IMAGES[key] = c.toDataURL('image/png');
+        } catch (e) { return ''; }
+        return ICON_IMAGES[key];
+      },
+      // Icons for the Appearance picker: every name containing each word typed, capped so the grid stays
+      // light. Nothing until something is typed; the picker shows the chosen icon beside the search box.
+      iconChoices: function(query) {
+        var words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+        if (!words.length) return [];
+        return mdiIconNames().filter(function(n) { return words.every(function(w) { return n.indexOf(w) >= 0; }); }).slice(0, 60);
+      },
+      // The raw schema nav item behind an entry id, for the defaults an override is measured against.
+      _navItem: function(id) {
+        var hit = null;
+        (function walk(items) {
+          (items || []).some(function(it) {
+            if (!it) return false;
+            if ((it.group && 'grp:' + it.group === id) || it.view === id || it.table === id) { hit = it; return true; }
+            walk(it.items);
+            return !!hit;
+          });
+        })(this.navConfig && this.navConfig.items);
+        return hit || {};
+      },
+      // Settings -> Appearance: open the dialog on a draft of the entry's menu look and background.
+      openAppearance: function(id) {
+        var hit = Nav.find(this.sidebarTabs, id);
+        if (!hit) return;
+        var n = hit.node, bg = this.backgroundForView(id), bgIcon = isIconRef(bg.image);
+        this.appearanceDraft = {
+          id: id, title: n.title,
+          startIcon: n.icon, icon: n.icon, menuMode: n.image ? 'image' : 'icon',
+          image: n.image || '', imageData: '', focus: n.focus || 'center',
+          bgMode: !bg.image ? 'none' : (bgIcon ? 'icon' : 'image'),
+          bgIcon: bgIcon ? Embeds.iconRefName(bg.image) : '', bgImage: bgIcon ? '' : (bg.image || ''), bgData: '',
+          fit: bg.fit || 'cover', width: bg.width || 40, position: bg.position || 'center',
+          opacity: bg.opacity == null ? 0.5 : bg.opacity, fixed: !!bg.fixed, busy: ''
+        };
+      },
+      // Switching the background's kind resets the rendering to what suits it: a photo fills the page at
+      // half strength; an icon is a small, faint mark in a corner — filling a page with a glyph just blurs it.
+      setAppearanceBgMode: function(mode) {
+        var d = this.appearanceDraft;
+        if (!d || !mode || mode === d.bgMode) return;
+        if (mode === 'icon') Object.assign(d, { fit: 'width', width: 25, position: 'bottom right', opacity: 0.08 });
+        else if (mode === 'image') Object.assign(d, { fit: 'cover', position: 'center', opacity: 0.5 });
+        d.bgMode = mode;
+      },
+      // A picked file goes into the draft as a resized data URI; it is written to _assets only on Save, so
+      // Cancel leaves the stored picture alone even though asset ids are deterministic.
+      pickAppearanceFile: function(which, ev) {
         var self = this, input = ev && ev.target, file = input && input.files && input.files[0];
-        if (input) input.value = '';            // reset so re-picking the same file fires @change again
-        if (!file) return;
-        this.bgBusy = viewName;
-        this.saveAsset('bg_' + viewName, file).then(function(ref) {
-          self.bgBusy = '';
-          self.saveViewBackground(viewName, { image: ref });
-        }).catch(function(e) {
-          self.bgBusy = '';
-          self.notify((e && e.message) || self.t('msg.upload_failed'));
-        });
+        if (input) input.value = '';
+        if (!file || !this.appearanceDraft) return;
+        if (!/^image\//.test(file.type || '')) { this.notify(this.t('msg.choose_image')); return; }
+        var d0 = this.appearanceDraft;
+        d0.busy = which;                         // a large photo takes a moment to resize; Save waits for it
+        this._fitImageToCap(file, ASSET_CAP).then(function(src) {
+          if (which === 'menu') d0.imageData = src; else d0.bgData = src;
+        }).catch(function(e) { self.notify((e && e.message) || self.t('msg.upload_failed')); })
+          .then(function() { if (d0.busy === which) d0.busy = ''; });
+      },
+      // Whether a chosen Image has a picture yet: a file picked in this dialog, or an address that is an
+      // asset reference or a usable image URL. Save is disabled until each chosen Image has one, and the
+      // dialog says so under the controls rather than failing on Save.
+      appearanceHasImage: function(which) {
+        var d = this.appearanceDraft;
+        if (!d) return false;
+        var data = which === 'menu' ? d.imageData : d.bgData, addr = String((which === 'menu' ? d.image : d.bgImage) || '').trim();
+        return !!data || isAssetRef(addr) || !!safeImgSrc(addr);
+      },
+      appearanceReady: function() {
+        var d = this.appearanceDraft;
+        return !!d && !d.busy && (d.menuMode !== 'image' || this.appearanceHasImage('menu')) && (d.bgMode !== 'image' || this.appearanceHasImage('bg'));
+      },
+      // Save both halves in one config write. Overrides are measured against the schema, so an entry left
+      // as the schema has it stores nothing, and turning off a schema-declared image stores the empty
+      // tombstone that hides it (as backgrounds already do).
+      saveAppearance: function() {
+        var self = this, d = this.appearanceDraft;
+        if (!d) return;
+        var aid = String(d.id).replace(/[^\w.-]/g, '_'), writes = [];
+        var menuImage = d.menuMode !== 'image' ? '' : (d.imageData ? 'asset:tile_' + aid : String(d.image || '').trim());
+        var bgImage = d.bgMode === 'none' ? '' : d.bgMode === 'icon' ? 'icon:' + (d.bgIcon || '') : (d.bgData ? 'asset:bg_' + aid : String(d.bgImage || '').trim());
+        if (!this.appearanceReady()) return;     // the button is disabled then; this guards a stray Enter
+        if (d.imageData) writes.push(Writes.putRow('_assets', { id: 'tile_' + aid, src: d.imageData }, 'active'));
+        if (d.bgData) writes.push(Writes.putRow('_assets', { id: 'bg_' + aid, src: d.bgData }, 'active'));
+        Promise.all(writes).then(function() {
+          if (d.imageData) self.assetCache['tile_' + aid] = d.imageData;
+          if (d.bgData) self.assetCache['bg_' + aid] = d.bgData;
+          var cfg = Object.assign({}, self.appConfig || {}), item = self._navItem(d.id);
+          cfg.navAppearance = Object.assign({}, cfg.navAppearance || {});
+          var look = Object.assign({}, cfg.navAppearance[d.id]);
+          if (d.icon !== d.startIcon) look.icon = d.icon;
+          if (menuImage === (item.image || '') && (!menuImage || d.focus === (item.focus || 'center'))) { delete look.image; delete look.focus; }
+          else { look.image = menuImage; if (menuImage) look.focus = d.focus; else delete look.focus; }
+          if (Object.keys(look).length) cfg.navAppearance[d.id] = look; else delete cfg.navAppearance[d.id];
+          cfg.backgrounds = Object.assign({}, cfg.backgrounds || {});
+          if (bgImage) cfg.backgrounds[d.id] = { image: bgImage, fit: d.fit, width: Number(d.width) || 40, position: d.position, opacity: Number(d.opacity), fixed: !!d.fixed };
+          else if (self.schemaBackground(d.id)) cfg.backgrounds[d.id] = { image: '' };   // tombstone: hide the schema default
+          else delete cfg.backgrounds[d.id];
+          cfg.mode = self.mode;
+          self._saveFolderConfig(cfg, d.id);
+          self.appearanceDraft = null;
+        }).catch(function(e) { self.notify((e && e.message) || self.t('msg.save_failed')); });
+      },
+      // Drop both overrides, so the schema's icon, image and background apply again.
+      resetAppearance: function() {
+        var d = this.appearanceDraft;
+        if (!d) return;
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.navAppearance = Object.assign({}, cfg.navAppearance || {});
+        cfg.backgrounds = Object.assign({}, cfg.backgrounds || {});
+        delete cfg.navAppearance[d.id];
+        delete cfg.backgrounds[d.id];
+        cfg.mode = this.mode;
+        this._saveFolderConfig(cfg, d.id);
+        this.appearanceDraft = null;
       },
       // Per-view range override (periods + optional fixed start) in synced folder config
       // rotationRanges[viewName], merged over the schema rotation.range default — mirrors the per-view
@@ -5303,11 +5499,16 @@ function createVueApp() {
         var self = this;
         var bg = this.backgroundForView(this.currentTable);
         if (bg && bg.image) this.ensureAssets([bg.image]);
+        // A page of entries shows each entry's menu image.
+        var level = this.currentNavNode;
+        if (level && level.children) this.ensureAssets(level.children.map(function(c) { return c.image; }).filter(Boolean));
         // Settings is the one screen that displays OTHER views' backgrounds (a thumbnail per row), so it
         // needs all of their bytes, not just its own. Without this every row for a view not yet visited
         // this session showed the "no background" placeholder even though one was set.
         if (this.currentTable === '__settings') {
-          this.ensureAssets(this.backgroundTargets.map(function(t) { return self.backgroundForView(t.id).image; }).filter(Boolean));
+          var refs = [];
+          this.appearanceRows.forEach(function(r) { refs.push(r.node.image, self.backgroundForView(r.id).image); });
+          this.ensureAssets(refs.filter(Boolean));
         }
       },
       // Asset refs held by cells in the rows now on screen. Driven by a watcher on currentData rather than
@@ -6991,6 +7192,12 @@ function createVueApp() {
     },
 
     watch: {
+      strings: function() {
+        if (!this.pendingSchemaError) return;
+        var e = this.pendingSchemaError;
+        this.pendingSchemaError = '';
+        this.notify(this.t('msg.schema_error') + ' ' + e);
+      },
       // Screen changed -> fetch the bytes of its background asset, if it has one. Watching currentTable
       // (rather than hooking a load path) is what makes this work on EVERY kind: selectTab routes doc
       // views to loadPage and the system screens to nothing at all, so anything hung off loadTableData
@@ -8705,6 +8912,28 @@ function createVueApp() {
   app.component('languages-view', { computed: { a: function() { return appInstance; } }, template: '#languages-view-tpl' });
   app.component('lookup-view', { computed: { a: function() { return appInstance; } }, template: '#lookup-view-tpl' });
   app.component('settings-view', { computed: { a: function() { return appInstance; } }, template: '#settings-view-tpl' });
+  // Settings -> Appearance: search the icon font and pick one. v-model is the mdi class name.
+  app.component('icon-picker', {
+    props: { modelValue: String, testid: { type: String, default: 'icon' } },
+    emits: ['update:modelValue'],
+    data: function() { return { q: '' }; },
+    computed: {
+      a: function() { return appInstance; },
+      choices: function() { return appInstance.iconChoices(this.q); }
+    },
+    template: ''
+      + '<div>'
+      + '<div class="d-flex align-center mb-2" style="gap:10px">'
+      + '<span class="icon-choice icon-choice--on d-inline-flex align-center justify-center" style="width:40px;flex:0 0 40px" :title="modelValue" :data-testid="testid + \'-current\'"><v-icon :icon="modelValue"></v-icon></span>'
+      + '<v-text-field v-model="q" :label="a.t(\'appearance.search\')" prepend-inner-icon="mdi-magnify" density="compact" variant="outlined" hide-details clearable :data-testid="testid + \'-search\'"'
+      + ' @keydown.enter="/^mdi-[a-z0-9-]+$/.test(q || \'\') && $emit(\'update:modelValue\', q)"></v-text-field>'
+      + '</div>'
+      + '<div class="icon-row" :data-testid="testid + \'-results\'">'
+      + '<button v-for="n in choices" :key="n" type="button" class="icon-choice" :class="{ \'icon-choice--on\': n === modelValue }" :title="n" :aria-label="n" :aria-pressed="n === modelValue" :data-testid="testid + \'-\' + n" @click="$emit(\'update:modelValue\', n)"><v-icon :icon="n"></v-icon></button>'
+      + '</div>'
+      + '</div>'
+  });
+
   // A nav level: a group's page, browse mode's home, or — `below` — the list of a view's own children
   // under that view. The node comes from the ACCESS-FILTERED tree, so it never lists a screen the user
   // cannot open.

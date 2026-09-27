@@ -358,7 +358,7 @@ Any view kind can carry a background image on its card:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `image` | string | **Required.** Either an `http(s)` URL / raster `data:` URI, or `asset:<id>` — a reference to a row in the `_assets` store (see **where the bytes live**) |
+| `image` | string | **Required.** An `http(s)` URL / raster `data:` URI, `asset:<id>` — a reference to a row in the `_assets` store (see **where the bytes live**) — or `icon:<mdi-name>`, an icon drawn as the image (below) |
 | `fit` | string | `cover` (default, fill and crop), `contain` (fit whole, may letterbox), `tile` (natural size, repeated), or `width` (scale to `width`% of the card, aspect ratio preserved) |
 | `width` | number | 1–100, only with `fit: "width"`: the percentage of the card's width to scale to. Height follows the image's own ratio |
 | `position` | string | `center` (default), `top`, `bottom`, `left`, `right`, or a corner pair (`"top left"`). With `cover` this decides **which part survives the crop** |
@@ -369,6 +369,13 @@ Any view kind can carry a background image on its card:
 would fade the view's content along with the image. So a translucent scrim is stacked over the image
 inside the same `background-image` list, coloured with the theme's own `surface` token — which means
 the fade follows the light/dark toggle and body text keeps its contrast for free.
+
+**An icon as the background.** `"image": "icon:mdi-broom"` draws that Material Design icon onto a
+canvas in the theme's `primary` colour and uses the result as the image, so every field above applies.
+Bare `"icon:"` means the nav entry's own icon, and follows it when the icon changes. A faint corner mark
+suits it — `{ "image": "icon:", "fit": "width", "width": 25, "position": "bottom right", "opacity": 0.08 }`,
+which is what Settings → Appearance sets when Icon is chosen. It is redrawn when the theme switches, so
+it never goes dark-on-dark the way a photo can.
 
 Backgrounds never print: the print path builds its own HTML rather than cloning the view.
 
@@ -392,12 +399,13 @@ graphic-style art), an opaque photo becomes JPEG. So a logo with a transparent b
 `fit: "width"` watermark and lets the card surface show through. SVG is not accepted as an image
 source anywhere — it can carry script.
 
-An upload from **Settings → Backgrounds** prefers tier 2 and falls back to tier 3 — including when
-Storage is present but *unbilled*, where the upload fails at runtime rather than being absent. The
-same applies to `image` columns, so an image column works on every backend.
+An upload from **Settings → Appearance** goes to tier 3, so it works on every backend. An `image`
+column prefers tier 2 and falls back to tier 3 — including when Storage is present but *unbilled*,
+where the upload fails at runtime rather than being absent.
 
-Asset ids are deterministic for backgrounds (`bg_<viewName>`), so replacing one overwrites in place
-rather than orphaning the old bytes.
+Asset ids are deterministic for Appearance uploads — `bg_<entry>` for a background, `tile_<entry>` for
+a menu image, with a group's `grp:` becoming `grp_` — so replacing one overwrites in place rather than
+orphaning the old bytes. The dialog writes them only on Save, so Cancel leaves the stored picture alone.
 
 #### Schema default vs. runtime override
 
@@ -2621,6 +2629,16 @@ from the authenticated session — never asked for.
   for every level, or on a group / a view with `items` for its own page.
 - **`description`** (browse) — a line under the entry's title on its tile or list row. Translatable
   as `nav.desc.<group label | view | table>`; the authored text is the fallback.
+- **`image`** / **`focus`** — a picture shown in place of the icon on the entry's tile (a 16:9 cover)
+  and list row (a thumbnail); the drawer, tabs and breadcrumb keep the icon. Same address forms as a
+  background's `image` (`https:`, raster `data:`, `asset:<id>`). `focus` (`top` / `center` / `bottom`,
+  default `center`) is which part of the picture a tile keeps when it crops.
+- **Settings → Appearance** (admins) — the schema's `icon`, `image` and `focus`, and a view's
+  `background`, are the shipped defaults; an admin overrides them per entry without touching the
+  schema. One dialog per entry sets how it is shown in menus (Icon | Image) and what is behind its page
+  (None | Icon | Image). The overrides live in the synced folder config (`appConfig.navAppearance`,
+  `appConfig.backgrounds`) and travel with export/import; **Schema default** drops them. Groups are
+  included — a group's page can have a background too.
 - **`adminOnly`** (boolean, optional) — hide the entry from non-admins. On a `{group}` it hides the
   whole branch. Use it for admin-facing plumbing (the tables behind a rotation, reference data) that
   members read *through* another view but never need in their own menu, and for approval surfaces: a

@@ -8,13 +8,26 @@
   // items      the schema's nav.items
   // t          translate(key) -> string ('' when missing)
   // canAccess  (viewOrTableId) -> boolean
-  // opts       { isAdmin, hasLookup, views, schema, display }
+  // opts       { isAdmin, hasLookup, views, schema, display, appearance }
   //
   // A node carries what a renderer draws: id, title, icon, and — where the schema gives them — the
   // `description` a tile or list row shows under the title, and on a node with children the
-  // `display` its page uses ('list' | 'tiles'; a group's own, else the nav's, else 'list').
+  // `display` its page uses ('list' | 'tiles'; a group's own, else the nav's, else 'list'). An `image`
+  // (with its crop `focus`) is what tiles and list rows show in place of the icon.
+  //
+  // `opts.appearance` is the deployment's override per entry id (appConfig.navAppearance, edited in
+  // Settings -> Appearance) over the schema's `icon` / `image` / `focus`. It is applied HERE, so every
+  // renderer of the tree follows it. An override `image: ''` is a tombstone hiding the schema's image.
   function build(navItems, t, canAccess, opts) {
-    var views = opts.views || {}, schema = opts.schema || {};
+    var views = opts.views || {}, schema = opts.schema || {}, looks = opts.appearance || {};
+    function look(tb, it) {
+      var ov = looks[tb.id] || {};
+      if (ov.icon) tb.icon = ov.icon;
+      var own = ov.image !== undefined;
+      var img = own ? ov.image : it.image;
+      if (img) { tb.image = img; tb.focus = (own ? ov.focus : it.focus) || 'center'; }
+      return tb;
+    }
     // The description is translatable under nav.desc.<group label | view | table>; the authored text is
     // the fallback, since t() answers an untranslated key with the key itself.
     function describe(tb, it, key) {
@@ -39,7 +52,7 @@
       if (it.hideFromAdmin && opts.isAdmin) return null;
       if (it.group) {
         var ch = (it.items || []).map(node).filter(Boolean);
-        return ch.length ? withKids(describe({ id: 'grp:' + it.group, title: t('nav.' + it.group) || it.group, icon: it.icon || 'mdi-folder' }, it, it.group), it, ch) : null;
+        return ch.length ? withKids(look(describe({ id: 'grp:' + it.group, title: t('nav.' + it.group) || it.group, icon: it.icon || 'mdi-folder' }, it, it.group), it), it, ch) : null;
       }
       var gid = it.view || it.table;
       if (!gid || !canAccess(gid)) return null;
@@ -48,7 +61,7 @@
       var isV = !!it.view, isDoc = isV && typeof views[gid].markdown === 'string';
       var isRot = isV && !!views[gid].rotation;
       var tb = { id: gid, title: t((isV ? 'view.' : 'tab.') + gid) || gid, icon: it.icon || (isDoc ? 'mdi-file-document-outline' : (isRot ? 'mdi-calendar-clock' : (isV ? 'mdi-view-list' : 'mdi-table'))) };
-      return withKids(describe(tb, it, gid), it, (it.items || []).map(node).filter(Boolean));
+      return withKids(look(describe(tb, it, gid), it), it, (it.items || []).map(node).filter(Boolean));
     }
     var tabs = [];
     (navItems || []).forEach(function(it) { var tb = node(it); if (tb) tabs.push(tb); });
@@ -62,6 +75,8 @@
   // The nav's own rules — the ones that need no schema to check. validateRefs adds the ones that do
   // (an entry naming a view or table that does not exist).
   var DISPLAYS = ['list', 'tiles'];
+  // Which part of an image a 16:9 tile keeps when it crops.
+  var FOCUS = ['top', 'center', 'bottom'];
   function errors(nav) {
     var errs = [], groups = {};
     if (nav && nav.display !== undefined && DISPLAYS.indexOf(nav.display) < 0) errs.push('Nav -> `display` must be "list" or "tiles" (got ' + JSON.stringify(nav.display) + ')');
@@ -75,6 +90,8 @@
       if (it.adminOnly && it.hideFromAdmin) errs.push('Nav -> "' + (it.view || it.table || it.group) + '" sets both `adminOnly` and `hideFromAdmin`, which hides it from every user');
       if (it.display !== undefined && DISPLAYS.indexOf(it.display) < 0) errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `display` must be "list" or "tiles" (got ' + JSON.stringify(it.display) + ')');
       if (it.description !== undefined && typeof it.description !== 'string') errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `description` must be text');
+      if (it.image !== undefined && typeof it.image !== 'string') errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `image` must be text (an https URL or "asset:<id>")');
+      if (it.focus !== undefined && FOCUS.indexOf(it.focus) < 0) errs.push('Nav -> "' + (it.view || it.table || it.group) + '": `focus` must be "top", "center" or "bottom"');
       // A group's id IS its label ('grp:' + label), and so is its translation key (nav.<label>), so two
       // groups with one label are one screen in the address bar and one title in every language.
       if (it.group) {
@@ -125,7 +142,7 @@
     return hit;
   }
 
-  var M = { build: build, errors: errors, translationKeys: translationKeys, flatten: flatten, find: find };
+  var M = { FOCUS: FOCUS, build: build, errors: errors, translationKeys: translationKeys, flatten: flatten, find: find };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else root.Nav = M;
 })(typeof self !== 'undefined' ? self : this);
