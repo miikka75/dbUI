@@ -106,6 +106,11 @@ input[type="date"]:focus { outline: none; border-color: rgb(var(--v-theme-primar
   .board-lane-row { flex-direction: column; overflow-x: visible; }
   .board-lane { flex: 1 1 auto; min-width: 0; width: 100%; min-height: 0; }
 }
+/* Settings -> Navigation: on a phone its buttons are icon-only, and at Vuetify's 64px minimum the five of
+   them miss one row by a few pixels. */
+@media (max-width: 599.98px) {
+  .nav-choice .v-btn { min-width: 48px; padding: 0 12px; }
+}
 /* One row's field, shared by the kanban card and the card layout: a real <v-field variant="outlined">, so
    the notched outline and the floated top-left label come from Vuetify itself and match Settings -> Profile
    exactly. Only spacing and the nested editor need styling here — the notch sizes itself off the label, so
