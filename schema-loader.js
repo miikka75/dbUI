@@ -757,43 +757,8 @@ function validateRefs(schema) {
   (function walk(items) { (items || []).forEach(function(it) {
     if (it.view && !hasView(it.view) && !hasTable(it.view)) errs.push('Nav -> missing view "' + it.view + '"');
     if (it.table && !hasTable(it.table)) errs.push('Nav -> missing table "' + it.table + '"');
-    // A truthy non-boolean (e.g. "admin") would hide the entry too, but silently reads as a role name
-    // rather than the flag it is — say so rather than let it look like it does something finer.
-    if (it.adminOnly !== undefined && typeof it.adminOnly !== 'boolean') errs.push('Nav -> `adminOnly` must be true or false (got ' + JSON.stringify(it.adminOnly) + ')');
-    if (it.hideFromAdmin !== undefined && typeof it.hideFromAdmin !== 'boolean') errs.push('Nav -> `hideFromAdmin` must be true or false (got ' + JSON.stringify(it.hideFromAdmin) + ')');
-    // Both together hides the entry from EVERYONE, which is never what anyone means by writing them.
-    if (it.adminOnly && it.hideFromAdmin) errs.push('Nav -> "' + (it.view || it.table || it.group) + '" sets both `adminOnly` and `hideFromAdmin`, which hides it from every user');
     if (it.items) walk(it.items);
   }); })(schema.nav && schema.nav.items);
-  return errs;
-}
-// NavService: build sidebar/tab model from nav config. Pure function (no Vue dependency).
-// t(key): translator, canAccess(id): permission check, opts: {isAdmin, hasLookup}
-function buildNavTabs(navItems, t, canAccess, opts) {
-  var tabs = [];
-  function navTab(it) {
-    // `adminOnly` hides an entry (a group and everything under it, or a single view/table) from
-    // non-admins; `hideFromAdmin` is its mirror, for the views that are about being a PARTICIPANT —
-    // "my chores", "my rewards" — which an admin who only approves is not. Both are TIDINESS, not
-    // access control: what a member may read or write is decided by their table grants, and these only
-    // keep the wrong menu out of the wrong hands. Put either on a group to hide the whole branch.
-    if (it.adminOnly && !opts.isAdmin) return null;
-    if (it.hideFromAdmin && opts.isAdmin) return null;
-    if (it.group) { var ch = (it.items || []).map(navTab).filter(Boolean); return ch.length ? { id: 'grp:' + it.group, title: t('nav.' + it.group) || it.group, icon: it.icon || 'mdi-folder', children: ch } : null; }
-    var gid = it.view || it.table;
-    if (!gid || !canAccess(gid)) return null;
-    if (it.view && !VIEWS[gid]) return null;
-    if (it.table && !SCHEMA[gid]) return null;
-    var isV = !!it.view, isDoc = isV && typeof VIEWS[gid].markdown === 'string';
-    var isRot = isV && VIEWS[gid] && !!VIEWS[gid].rotation;
-    var tb = { id: gid, title: t((isV ? 'view.' : 'tab.') + gid) || gid, icon: it.icon || (isDoc ? 'mdi-file-document-outline' : (isRot ? 'mdi-calendar-clock' : (isV ? 'mdi-view-list' : 'mdi-table'))) };
-    if (it.items) { var kids = it.items.map(navTab).filter(Boolean); if (kids.length) tb.children = kids; }
-    return tb;
-  }
-  navItems.forEach(function(it) { var tb = navTab(it); if (tb) tabs.push(tb); });
-  tabs.push({ divider: true });
-  if (opts.isAdmin) tabs.push({ id: '__languages', title: t('tab.languages'), icon: 'mdi-translate' });
-  if (opts.hasLookup) tabs.push({ id: '__lookup', title: t('tab.lookup'), icon: 'mdi-database-outline' });
-  tabs.push({ id: '__settings', title: t('tab.settings'), icon: 'mdi-cog-outline' });
-  return tabs;
+  // The rest of the nav's rules need no schema, so they live with the tree they protect (nav.js).
+  return errs.concat(Nav.errors(schema.nav));
 }

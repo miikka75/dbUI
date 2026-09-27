@@ -390,18 +390,17 @@ function createVueApp() {
         var canAccess = function(id) { return self.canAccessNavId(id); };
         var navCfg = self.navConfig;
         var navItems = (navCfg && Array.isArray(navCfg.items)) ? navCfg.items : [];
-        return buildNavTabs(navItems, self.t.bind(self), canAccess, { isAdmin: self.isAdmin, hasLookup: self.refTables.length || Object.keys(self.visibleLists).length });
+        return Nav.build(navItems, self.t.bind(self), canAccess, { isAdmin: self.isAdmin, hasLookup: self.refTables.length || Object.keys(self.visibleLists).length, views: VIEWS, schema: SCHEMA, display: navCfg && navCfg.display });
       },
       bottomNavTabs: function() {
         // Schema can define explicit bottom nav items: nav.bottomNav = ["view1", "view2", ...]
         var navCfg = this.navConfig;
         if (navCfg && Array.isArray(navCfg.bottomNav)) {
-          var all = this.sidebarTabs; var flat = []; all.forEach(function(t) { if (t.divider) return; flat.push(t); if (t.children) t.children.forEach(function(c) { flat.push(c); }); });
-          return navCfg.bottomNav.map(function(id) { return flat.find(function(t) { return t.id === id; }); }).filter(Boolean);
+          var all = this.sidebarTabs;
+          return navCfg.bottomNav.map(function(id) { var hit = Nav.find(all, id); return hit && hit.node; }).filter(Boolean);
         }
         // Fallback: first 5 flattened items
-        var tabs = []; this.sidebarTabs.forEach(function(t) { if (t.divider) return; tabs.push(t); if (t.children) t.children.forEach(function(c) { tabs.push(c); }); });
-        return tabs.slice(0, 5);
+        return Nav.flatten(this.sidebarTabs).slice(0, 5);
       },
       bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
       // The view-kind computeds, all off ONE discriminator (SchemaNormalize.viewKind, which reads the
@@ -468,6 +467,7 @@ function createVueApp() {
         if (ct === '__languages') return 'languages';
         if (ct === '__lookup') return 'lookup';
         if (ct === '__settings') return 'settings';
+        if (ct === '__home' || String(ct).slice(0, 4) === 'grp:') return 'level';
         // A migrated schema SAYS what each view is (migrations.js v1->v2), so ask rather than sniff.
         // The chain below is the fallback for a schema that has not been through the migration -- a
         // fixture built by hand in a test, say. It is also what the migration derives from, so the two
@@ -518,7 +518,42 @@ function createVueApp() {
       // renumber around rows the person cannot see.
       isReorderable: function() { var t = this.currentTable; return !!(SCHEMA[t] && SCHEMA[t].reorderable && this.isDataView && !this.viewingArchive && this.canMutateRows && !this.searchTerm); },
       navConfig: function() { return (this.schemaData && this.schemaData.nav) || null; },
-      navLayout: function() { return this.navLayoutOverride || (this.navConfig && this.navConfig.layout) || 'drawer'; },
+      // One of 'drawer' | 'tabs' | 'browse'; anything else (a typo, a value from a newer build) is the drawer.
+      navLayout: function() { var v = this.navLayoutOverride || (this.navConfig && this.navConfig.layout); return v === 'tabs' || v === 'browse' ? v : 'drawer'; },
+      // Browse mode's root: the top-level entries, as the page a user starts on and returns to. The system
+      // screens are not on it — in browse they live in the app bar's cog menu.
+      navHome: function() {
+        var kids = this.sidebarTabs.filter(function(t) { return !t.divider && String(t.id).slice(0, 2) !== '__'; });
+        return { id: '__home', title: this.appTitle, icon: 'mdi-home', children: kids, display: (this.navConfig && this.navConfig.display) || 'list' };
+      },
+      systemTabs: function() { return this.sidebarTabs.filter(function(t) { return !t.divider && String(t.id).slice(0, 2) === '__'; }); },
+      // The open screen's node in the nav tree, or null for a screen reached some other way (a table
+      // opened from a calendar's "add", say).
+      currentNavNode: function() {
+        // Nothing is open until boot has finished, and asking before then is not harmless: it would build
+        // sidebarTabs, which caches refTables, which reads the non-reactive SCHEMA — empty during boot,
+        // and nothing reactive would ever tell it otherwise. The Lookup tab stayed empty for good.
+        if (!this.currentTable) return null;
+        if (this.currentTable === '__home') return this.navHome;
+        var hit = Nav.find(this.sidebarTabs, this.currentTable);
+        return hit && hit.node;
+      },
+      // A view's own entries, listed beneath it when the nav itself does not show them: always in browse,
+      // and in the drawer and top tabs for a view below the top level, since those draw two levels. So
+      // every entry is reachable in every layout, however deep the schema nests it.
+      belowEntries: function() {
+        var n = this.currentNavNode;
+        if (!n || !n.children || this.viewKind === 'level') return false;
+        if (this.navLayout === 'browse') return true;
+        var hit = Nav.find(this.sidebarTabs, this.currentTable);
+        return !!hit && hit.path.length > 0;
+      },
+      // Browse mode's breadcrumb: home, the groups above the open screen, the screen. Empty on home.
+      crumbs: function() {
+        if (this.navLayout !== 'browse' || !this.currentTable || this.currentTable === '__home') return [];
+        var hit = Nav.find(this.sidebarTabs, this.currentTable);
+        return [this.navHome].concat(hit ? hit.path.concat(hit.node) : []);
+      },
       currentPage: function() {
         var v = VIEWS[this.currentTable];
         if (!v || typeof v.markdown !== 'string') return null;
@@ -957,7 +992,7 @@ function createVueApp() {
          'part.backup', 'part.schema', 'part.languages', 'part.reference', 'part.data', 'part.users',
          'msg.nothing_to_export', 
          'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
-         'settings.reset', 'settings.confirm_reset', 'settings.tabs_nav', 'settings.user_access', 'settings.user_access_title',
+         'settings.reset', 'settings.confirm_reset', 'settings.nav_layout', 'settings.nav_drawer', 'settings.tabs_nav', 'settings.nav_browse', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
          'settings.backgrounds',
          'settings.databases', 'settings.databases_hint', 'settings.switch', 'settings.forget',
@@ -1029,6 +1064,7 @@ function createVueApp() {
             });
           }
         });
+        keys = keys.concat(Nav.translationKeys(schema.nav));
         var views = schema.views || {};
         function addViewKeys(arr) {
           (arr || []).forEach(function(v) {
@@ -1533,7 +1569,10 @@ function createVueApp() {
       // Navigation
       // Mobile bottom-nav "More": open the drawer AND expand every group so all sub-items are visible at once.
       openMoreDrawer: function() { this.openedGroups = this.allGroupIds.slice(); this.drawerOpen = true; },
-      selectTab: function(id) {
+      // A selection is a history entry, so Back/Forward and a reload keep the user's place. `quiet`
+      // selects without one: boot and Back/Forward, where the address bar already says where we are.
+      selectTab: function(id, quiet) {
+        if (!quiet && id !== this.currentTable) this._recordAt(id);
         this.currentTable = id;
         if (id === '__settings') this.checkExampleUpdates();
         if (id === '__languages') this._ensureTranslatableLookups();
@@ -4917,8 +4956,34 @@ function createVueApp() {
       _autoSelectTab: function() {
         // A deep-linked code names the view it belongs to, so it decides which tab opens.
         var pend = this._pendingScanFromUrl();
-        if (pend) { this.pendingScan = pend; this.selectTab(pend.view); return; }
-        if (!this.currentTable) { var ft = this.sidebarTabs.find(function(t) { return !t.divider; }); if (ft) this.selectTab(ft.id); }
+        if (pend) { this.pendingScan = pend; this.selectTab(pend.view, true); return; }
+        if (this.currentTable) return;
+        var id = this._screenAt(location.search);
+        if (id) this.selectTab(id, true);
+      },
+      // The screen a query string's `?at=` opens. It resolves against the ACCESS-FILTERED tree, so a link
+      // to a screen this user cannot reach — or no `at` at all — opens the first screen: home in browse
+      // mode, the first entry otherwise.
+      _screenAt: function(search) {
+        var id = Nav.readAt(search), browse = this.navLayout === 'browse';
+        if (browse && id === '__home') return id;
+        var hit = Nav.find(this.sidebarTabs, id);
+        if (hit) return hit.node.id;
+        if (browse) return '__home';
+        var ft = this.sidebarTabs.find(function(t) { return !t.divider; });
+        return ft ? ft.id : null;
+      },
+      // Push the open screen into the address bar. Only `at` changes; every other parameter stays.
+      // Boot writes nothing: the landing URL has no `at`, and Back to it opens the first screen, which
+      // is what landing there showed.
+      _recordAt: function(id) {
+        try { history.pushState({ at: id }, '', location.pathname + Nav.withAt(location.search, id) + location.hash); } catch (e) {}
+      },
+      // Back/Forward. An entry with no `at` (the landing page), or one naming a screen this user can no
+      // longer reach (a grant revoked, a view removed), opens the first screen rather than a blank one.
+      _onPopState: function() {
+        var id = this._screenAt(location.search);
+        if (id && id !== this.currentTable) this.selectTab(id, true);
       },
       loadUsers: function() {
         var self = this;
@@ -6962,6 +7027,7 @@ function createVueApp() {
     mounted: function() {
       var self = this;
       window.addEventListener('resize', function() { self.mobile = window.innerWidth < 768; self.windowWidth = window.innerWidth; });
+      window.addEventListener('popstate', function() { self._onPopState(); });
       // Republish calendar feeds when their data changes. Registered on the write funnel, which is the
       // one place that knows a row was written — and the reason writes.js exists rather than twenty-six
       // call sites. Guarded inside _onWriteRepublish, so a restricted member's write costs nothing.
@@ -7419,7 +7485,8 @@ function createVueApp() {
   // componentized; the top-level dispatch is a single <component :is="viewComponent"> lookup in ui.html.
   window.VIEW_KINDS = {
     calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', form: 'form-view', stats: 'stats-view', timeline: 'timeline-view', scan: 'scan-view', page: 'page-view', data: 'data-view',
-    languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view'   // system screens
+    languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view',  // system screens
+    level: 'nav-level'                                                                // a nav group's page
   };
 
   app.component('cal-event-row', {
@@ -8620,6 +8687,17 @@ function createVueApp() {
   app.component('languages-view', { computed: { a: function() { return appInstance; } }, template: '#languages-view-tpl' });
   app.component('lookup-view', { computed: { a: function() { return appInstance; } }, template: '#lookup-view-tpl' });
   app.component('settings-view', { computed: { a: function() { return appInstance; } }, template: '#settings-view-tpl' });
+  // A nav level: a group's page, browse mode's home, or — `below` — the list of a view's own children
+  // under that view. The node comes from the ACCESS-FILTERED tree, so it never lists a screen the user
+  // cannot open.
+  app.component('nav-level', {
+    props: { below: { type: Boolean, default: false } },
+    computed: {
+      a: function() { return appInstance; },
+      node: function() { return appInstance.currentNavNode; }
+    },
+    template: '#nav-level-tpl'
+  });
 
   // One node of the Lookup editor's hierarchy, rendering its own children as ref-nodes -- the recursion
   // Columns.buildHierarchy's node shape has always allowed ("a node whose children are NODES is the

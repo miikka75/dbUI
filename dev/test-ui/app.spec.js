@@ -2451,13 +2451,13 @@ test.describe('v3 live nav layout switch', () => {
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
   }
-  test('Settings toggle flips drawer -> tabs live (navLayoutOverride)', async ({ page }) => {
+  test('Settings toggle switches drawer -> tabs live (navLayoutOverride)', async ({ page }) => {
     test.setTimeout(20000);
     await boot(page);
     await expect(page.locator('.v-tabs')).toHaveCount(0);
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
     await page.waitForTimeout(200);
-    await page.locator('[data-testid="nav-layout-toggle"] input').dispatchEvent('click');
+    await page.locator('[data-testid="nav-layout-tabs"]').click();
     await expect.poll(() => page.evaluate(() => appInstance.navLayout)).toBe('tabs');
     await expect(page.locator('.v-tabs')).not.toHaveCount(0);
     await expect(page.locator('.v-navigation-drawer')).toHaveCount(0);
@@ -2474,7 +2474,7 @@ test.describe('v3 live nav layout switch', () => {
     await homeTab.hover();
     await expect(homeTab.locator('.tab-label')).toHaveCSS('opacity', '1');
     // toggle back to drawer; never any extension row
-    await page.locator('[data-testid="nav-layout-toggle"] input').dispatchEvent('click');
+    await page.locator('[data-testid="nav-layout-drawer"]').click();
     await expect.poll(() => page.evaluate(() => appInstance.navLayout)).toBe('drawer');
     await expect(page.locator('.v-toolbar__extension')).toHaveCount(0);
     await expect(page.locator('.v-app-bar-nav-icon')).toHaveCount(1);
@@ -5455,6 +5455,9 @@ test.describe('calendar view', () => {
 
 test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
   const DEMO = require('../../examples/demo-schema.json');
+  // The demo navigates by pages (`layout: "browse"`), so there is no drawer to wait for: booted means a
+  // screen is open — home, on a bare URL.
+  const demoReady = (page) => page.waitForFunction(() => window.appInstance && !appInstance.loading && !!appInstance.currentTable, null, { timeout: 6000 });
   test('boots and nav exposes a group + nested items', async ({ page }) => {
     test.setTimeout(20000);
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -5463,10 +5466,12 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
-    const ids = await page.evaluate(() => appInstance.sidebarTabs.map(t => t.id + (t.children ? '[' + t.children.map(c => c.id).join(',') + ']' : '')));
-    expect(ids.some(s => s.startsWith('grp:Data['))).toBe(true);                 // nav group
-    expect(ids.some(s => s.startsWith('all_items[summary_cards,quick_list,notes_list]'))).toBe(true); // nested clickable parent
+    await demoReady(page);
+    expect(await page.evaluate(() => appInstance.currentTable)).toBe('__home');   // browse boots to home
+    const ids = await page.evaluate(() => Nav.flatten(appInstance.sidebarTabs).map(t => t.id + (t.children ? '[' + t.children.map(c => c.id).join(',') + ']' : '')));
+    expect(ids).toContain('grp:Data[tasks,notes]');                               // nav group
+    expect(ids).toContain('all_items[summary_cards,quick_list,notes_list]');      // nested clickable parent, inside grp:Work
+    expect(ids.some(s => s.startsWith('grp:Leaderboards['))).toBe(true);          // a group three levels down
   });
 
   test('demo pages render embeds (combined + aggregate + archive) and all layouts', async ({ page }) => {
@@ -5479,9 +5484,10 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
+    await page.evaluate(() => appInstance.selectTab('combined_page'));
     await page.waitForTimeout(200);
-    // combined_page (auto-selected): all embeds present, incl. the archive embed (archived rows seeded)
+    // combined_page: all embeds present, incl. the archive embed (archived rows seeded)
     const embeds = await page.evaluate(() => appInstance.pageBlocks.filter(b => b.embedName).map(b => b.embedName));
     expect(embeds).toEqual(['combined', 'attendance', 'tasks', 'notes']);        // {{table:tasks@archive?}} -> 'tasks' (visible: has archived rows)
     // aggregate embed computes rows (regression: not blank)
@@ -5512,7 +5518,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     // selectTab starts the loads this page's embeds need -- the archive partition behind
     // {{table:tasks@archive?}} among them -- so the block list is not complete on the next tick.
     // Reading it synchronously raced, and lost once the suite started running eight workers deep:
@@ -5553,7 +5559,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     await page.evaluate(() => window.appInstance.selectTab('chore_heatmap'));
     await viewReady(page, 'chore_heatmap');
     const r = await page.evaluate(() => {
@@ -5582,7 +5588,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     const r = await page.evaluate(() => {
       const a = window.appInstance;
       a.usersLoaded = true;
@@ -5610,7 +5616,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     const r = await page.evaluate(() => {
       const app = window.appInstance;
       app.myProfile = { name: 'Ann Smith', shared: true, picture: '' };   // profile name != curated value
@@ -5656,7 +5662,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     const r = await page.evaluate(async () => {
       const app = window.appInstance;
       window.VIEWS.list_t = { name: 'list_t', sources: ['tickets'], mode: 'join', layout: 'list', columns: ['title'] };
@@ -5684,7 +5690,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     const r = await page.evaluate(() => {
       const app = window.appInstance;
       // A view with a per-row conditional column, and a doc-view that embeds it by token.
@@ -5722,7 +5728,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     const r = await page.evaluate(() => {
       const app = window.appInstance;
       app.currentUserEmail = 'kid@x.com';
@@ -5776,7 +5782,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     const r = await page.evaluate(() => {
       const app = window.appInstance;
       app.currentUserEmail = 'me@x.com';
@@ -5812,7 +5818,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     const r = await page.evaluate(() => {
       const app = window.appInstance;
       app.currentUserEmail = 'me@x.com';   // the owner identity
@@ -5890,7 +5896,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     const r = await page.evaluate(async () => {
       // ann opts in with a name; zoe does not share at all
       localStorage.setItem('test_user', 'ann@x.com'); await backend_users.setMyProfile('Ann', true);
@@ -6315,7 +6321,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('app_theme', 'light'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     const r = await page.evaluate(() => {
       const app = window.appInstance;
       const themes = app.$vuetify.theme.themes.value || app.$vuetify.theme.themes;
@@ -6340,7 +6346,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('app_theme', 'light'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     // First boot stashed the brand palette (both modes) for the pre-Vue splash.
     const cache = await page.evaluate(() => JSON.parse(localStorage.getItem('brand_splash') || 'null'));
     expect(cache.light.p).toBe('#00695c');   // brand primary cached (light)
@@ -6359,7 +6365,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('app_theme', 'light'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     const r = await page.evaluate(() => {
       const app = window.appInstance;
       const before = app.themeColor('light', 'primary');           // demo brand teal
@@ -6404,7 +6410,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await page.goto('/');
     await page.evaluate(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('app_theme', 'light'); });
     await page.reload();
-    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await demoReady(page);
     const r = await page.evaluate(() => {
       const app = window.appInstance;
       const parsed = app._parsePalette('["#ccd5ae","#e9edc9","#fefae0"]').length;   // extract # hexes from the array literal

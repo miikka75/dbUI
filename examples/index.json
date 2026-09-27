@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "d9179ced10ba610f"
+      "hash": "3330f0c17681f923"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "232cf8355213e4c7"
+      "hash": "20cde499ee8dfde7"
     }
   ],
   "bundles": [
@@ -97,31 +97,31 @@
       "title": "Team Demo",
       "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
       "icon": null,
-      "revision": 5,
+      "revision": 6,
       "tables": 11,
       "views": 26,
       "schema": {
         "file": "demo-schema.json",
-        "hash": "5aa7368587c145e7"
+        "hash": "f4abd0b007dfffee"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "demo-lang-en.json",
-          "hash": "bbdb166a1b544620"
+          "hash": "dd64fa457bb2fdfb"
         },
         {
           "code": "es",
           "name": "Español",
           "file": "demo-lang-es.json",
-          "hash": "e8e253778197485d"
+          "hash": "4d98f2aadd515d74"
         },
         {
           "code": "sv",
           "name": "Svenska",
           "file": "demo-lang-sv.json",
-          "hash": "2c8f671fbb67979d"
+          "hash": "5d8b0226294ca4c0"
         }
       ],
       "data": {
@@ -130,10 +130,11 @@
       },
       "about": {
         "file": "demo-about.json",
-        "hash": "0e7ea85740c17c19"
+        "hash": "9987d89068eb18d2"
       },
       "notes": {
-        "5": "Adds `teams`, a catalogue whose parent column holds another ROW's id (`hierarchy.by: \"id\"`) instead of a group's value — so the Lookup tab shows it three levels deep (Acme > Engineering > Backend) rather than the two every other lookup has. Nothing existing changes: `cities` still groups by value, side by side with it, which is the point of shipping both."
+        "5": "Adds `teams`, a catalogue whose parent column holds another ROW's id (`hierarchy.by: \"id\"`) instead of a group's value — so the Lookup tab shows it three levels deep (Acme > Engineering > Backend) rather than the two every other lookup has. Nothing existing changes: `cities` still groups by value, side by side with it, which is the point of shipping both.",
+        "6": "The navigation is now a set of pages instead of a 22-entry drawer (`nav.layout: \"browse\"`): the home screen shows tiles for six sections, each section opens as a page of its own entries, and a breadcrumb leads back up. Every screen the old menu had is still there, grouped. Each person can switch back to the side menu under Settings -> Navigation."
       }
     }
   ]

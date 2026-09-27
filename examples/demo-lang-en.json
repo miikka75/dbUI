@@ -151,7 +151,26 @@
       "bg.fit_contain": "Fit whole",
       "bg.fit_tile": "Tile",
       "bg.fit_width": "Scale to width",
-      "bg.restore": "Restore default background"
+      "bg.restore": "Restore default background",
+      "nav.Documents": "Documents",
+      "nav.Work": "Work",
+      "nav.Tickets": "Tickets",
+      "nav.Chores": "Chores",
+      "nav.Leaderboards": "Leaderboards",
+      "nav.Crew": "Crew",
+      "nav.Data": "Data",
+      "view.showcase": "Showcase",
+      "view.combined_page": "Combined",
+      "view.progress_report_page": "Progress Report",
+      "view.task_doc": "Task Document",
+      "view.active_work": "Active Work",
+      "view.all_items": "All Items",
+      "view.summary_cards": "Summary Cards",
+      "view.quick_list": "Quick List",
+      "view.notes_list": "Notes List",
+      "view.tickets_board": "Tickets Board",
+      "view.crewrota": "Crew Rota",
+      "tab.crew_rotation": "Crew Rotation"
     }
   }
 }

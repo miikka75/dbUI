@@ -248,14 +248,14 @@
 
     <!-- App Bar -->
     <v-app-bar v-if="!loading" density="compact" elevation="1">
-      <v-app-bar-nav-icon @click="mobile ? (drawerOpen = !drawerOpen) : (rail = !rail)"></v-app-bar-nav-icon>
+      <v-app-bar-nav-icon v-if="navLayout !== 'browse'" @click="mobile ? (drawerOpen = !drawerOpen) : (rail = !rail)"></v-app-bar-nav-icon>
       <v-app-bar-title style="flex:0 1 auto" class="mr-2">{{ appTitle }}</v-app-bar-title>
       <!-- Inline tabs after the title when nav.layout === 'tabs' (single-row bar, no extension). rail => icon-only (hover expands text). -->
       <v-tabs v-if="navLayout === 'tabs'" :model-value="currentTable" density="compact" show-arrows class="nav-tabs" :class="{ 'nav-icons-only': rail }" style="flex:1 1 auto; min-width:0">
         <template v-for="t in sidebarTabs" :key="t.id || 'd'">
           <v-menu v-if="t.children" open-on-hover location="bottom">
             <template v-slot:activator="{ props }">
-              <v-tab v-bind="props" :value="t.id" :active="currentTable === t.id" :class="{ 'nav-tab-active': t.children && t.children.some(c => c.id === currentTable) }" :prepend-icon="t.icon" append-icon="mdi-menu-down" @click="String(t.id).slice(0,4) !== 'grp:' && selectTab(t.id)"><span class="tab-label">{{ t.title }}</span></v-tab>
+              <v-tab v-bind="props" :value="t.id" :active="currentTable === t.id" :class="{ 'nav-tab-active': t.children && t.children.some(c => c.id === currentTable) }" :prepend-icon="t.icon" append-icon="mdi-menu-down" @click="selectTab(t.id)"><span class="tab-label">{{ t.title }}</span></v-tab>
             </template>
             <v-list density="compact">
               <v-list-item v-for="child in t.children" :key="child.id" :value="child.id" :active="currentTable === child.id" :prepend-icon="child.icon" :title="child.title" class="subview-item" @click="selectTab(child.id)"></v-list-item>
@@ -273,10 +273,19 @@
       <v-btn icon="mdi-undo" :disabled="!undoDepth" :title="t('btn.undo')" :aria-label="t('btn.undo')" data-testid="undo" @click="undoLast"></v-btn>
       <v-btn icon="mdi-redo" :disabled="!redoDepth" :title="t('btn.redo')" :aria-label="t('btn.redo')" data-testid="redo" @click="redoLast"></v-btn>
       <v-btn :icon="theme === 'dark' ? 'mdi-weather-sunny' : 'mdi-weather-night'" @click="toggleTheme"></v-btn>
+      <!-- Browse mode has no drawer to hold the system screens, so they sit behind the cog. -->
+      <v-menu v-if="navLayout === 'browse'" location="bottom end">
+        <template v-slot:activator="{ props }">
+          <v-btn v-bind="props" icon="mdi-cog-outline" :title="t('tab.settings')" :aria-label="t('tab.settings')" data-testid="browse-system-menu"></v-btn>
+        </template>
+        <v-list density="compact">
+          <v-list-item v-for="s in systemTabs" :key="s.id" :prepend-icon="s.icon" :title="s.title" :active="currentTable === s.id" :data-testid="'browse-system-' + s.id" @click="selectTab(s.id)"></v-list-item>
+        </v-list>
+      </v-menu>
     </v-app-bar>
 
     <!-- Sidebar -->
-    <v-navigation-drawer v-if="!loading && navLayout !== 'tabs'" :permanent="!mobile" :temporary="mobile" :rail="rail && !mobile" :expand-on-hover="rail && !mobile" :model-value="mobile ? drawerOpen : true" @update:model-value="drawerOpen = $event">
+    <v-navigation-drawer v-if="!loading && navLayout === 'drawer'" :permanent="!mobile" :temporary="mobile" :rail="rail && !mobile" :expand-on-hover="rail && !mobile" :model-value="mobile ? drawerOpen : true" @update:model-value="drawerOpen = $event">
       <v-list density="compact" nav v-model:opened="openedGroups">
         <template v-for="(tab, tidx) in sidebarTabs" :key="tab.id || ('d'+tidx)">
           <div v-if="tab.divider" style="border-top:1px solid currentColor; opacity:0.2; margin:8px 0"></div>
@@ -292,7 +301,7 @@
     </v-navigation-drawer>
 
     <!-- Main Content -->
-    <v-main :style="mobile ? 'padding-bottom: 64px' : ''">
+    <v-main :style="mobile && navLayout === 'drawer' ? 'padding-bottom: 64px' : ''">
       <v-container fluid class="pa-4">
         <!-- Access notice: signed-in user matches no _meta/users record -> all reads are denied by
              rules. Hardcoded English (translations aren't loaded for an unregistered user). -->
@@ -324,6 +333,17 @@
           </v-card-text>
         </v-card>
 
+        <!-- Browse mode's breadcrumb: every crumb but the last goes back up. A phone has no room for the
+             whole path, so it gets the one step that matters: back to the parent. -->
+        <nav v-if="crumbs.length" class="d-flex align-center flex-wrap mb-3" style="gap:2px" data-testid="breadcrumb" :aria-label="t('settings.nav_layout')">
+          <v-btn v-if="mobile" variant="text" size="small" class="text-none" prepend-icon="mdi-chevron-left" data-testid="crumb-up" @click="selectTab(crumbs[crumbs.length - 2].id)">{{ crumbs[crumbs.length - 2].title }}</v-btn>
+          <template v-else v-for="(c, i) in crumbs" :key="c.id">
+            <v-icon v-if="i" size="small" style="opacity:0.45">mdi-chevron-right</v-icon>
+            <v-btn v-if="i < crumbs.length - 1" variant="text" size="small" class="text-none" :prepend-icon="i ? undefined : c.icon" :data-testid="'crumb-' + c.id" @click="selectTab(c.id)">{{ c.title }}</v-btn>
+            <span v-else class="px-2" style="font-weight:600;font-size:0.875rem" aria-current="page">{{ c.title }}</span>
+          </template>
+        </nav>
+
         <!-- Archive Toggle -->
         <v-tabs v-if="hasArchive" v-model="viewingArchive" density="compact" class="mb-3">
           <v-tab :value="false">{{ t('btn.show_active') }}</v-tab>
@@ -343,6 +363,9 @@
              :style carries the view's optional background image: every kind's template has a SINGLE root
              element, so Vue's attribute fallthrough merges it onto that card — one binding for all kinds. -->
         <component v-if="viewComponent" :is="viewComponent" :key="currentTable" :style="viewBackground"></component>
+        <!-- A view with entries of its own lists them under itself (see belowEntries), so a document can be
+             the introduction to its section. -->
+        <nav-level v-if="belowEntries" below class="mt-4"></nav-level>
 
         <!-- Data view dispatches via VIEW_KINDS.data (<component :is="viewComponent"> above);
              markup lives in the #data-view-tpl template at the end of this file. -->
@@ -360,7 +383,7 @@
     <v-btn v-if="mobile && canAddRows && isDataView" icon="mdi-plus" color="primary" size="large" style="position:fixed; bottom:72px; right:16px; z-index:100" elevation="4" @click="addRow"></v-btn>
 
     <!-- Bottom navigation for mobile -->
-    <v-bottom-navigation v-if="mobile && !loading && navLayout !== 'tabs'" :model-value="currentTable" @update:model-value="selectTab($event)" grow>
+    <v-bottom-navigation v-if="mobile && !loading && navLayout === 'drawer'" :model-value="currentTable" @update:model-value="selectTab($event)" grow>
       <v-btn v-for="tab in bottomNavVisible" :key="tab.id" :value="tab.id" size="small">
         <v-icon>{{ tab.icon || 'mdi-view-list' }}</v-icon>
         <span style="font-size:0.6rem; max-width:64px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ tab.title }}</span>
@@ -492,6 +515,31 @@
           </div>
           </template>
         </v-card>
+</template>
+
+<!-- A group's page: its entries as a list, so opening a group lands somewhere rather than on a blank
+     screen. Reached by a group's drawer header or top tab, or a ?at=grp:<label> link. -->
+<template id="nav-level-tpl">
+  <div v-if="node" :data-testid="below ? 'nav-level-below' : 'nav-level'">
+    <div v-if="!below" class="d-flex align-center mb-3" style="gap:10px">
+      <v-icon :icon="node.icon" color="primary"></v-icon>
+      <h2 class="text-h6" style="margin:0">{{ node.title }}</h2>
+    </div>
+    <v-row v-if="node.display === 'tiles'" dense data-testid="nav-level-tiles">
+      <v-col v-for="c in node.children" :key="c.id" cols="12" sm="6" md="4" lg="3">
+        <v-card variant="outlined" class="h-100" :data-testid="'nav-level-item-' + c.id" @click="a.selectTab(c.id)">
+          <v-card-item>
+            <template v-slot:prepend><v-icon :icon="c.icon" color="primary" size="32"></v-icon></template>
+            <v-card-title class="text-wrap">{{ c.title }}</v-card-title>
+          </v-card-item>
+          <v-card-text v-if="c.description" style="opacity:0.75">{{ c.description }}</v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
+    <v-list v-else border rounded :lines="node.children.some(function(c) { return c.description; }) ? 'two' : 'one'">
+      <v-list-item v-for="c in node.children" :key="c.id" :prepend-icon="c.icon" :title="c.title" :subtitle="c.description" append-icon="mdi-chevron-right" :data-testid="'nav-level-item-' + c.id" @click="a.selectTab(c.id)"></v-list-item>
+    </v-list>
+  </div>
 </template>
 
 <template id="languages-view-tpl">
@@ -703,7 +751,12 @@
           <v-card-title>{{ a.t('tab.settings') }}</v-card-title>
           <v-card-text>
             <div class="mb-4">
-            <v-switch :model-value="a.navLayout === 'tabs'" @update:model-value="v => a.setNavLayout(v ? 'tabs' : 'drawer')" color="primary" density="compact" hide-details :label="a.t('settings.tabs_nav')" data-testid="nav-layout-toggle"></v-switch>
+            <p class="text-subtitle-2 mb-2">{{ a.t('settings.nav_layout') }}</p>
+            <v-btn-toggle :model-value="a.navLayout" @update:model-value="v => v && a.setNavLayout(v)" mandatory divided variant="outlined" density="compact" color="primary" data-testid="nav-layout-toggle">
+              <v-btn value="drawer" prepend-icon="mdi-dock-left" class="text-none" data-testid="nav-layout-drawer">{{ a.t('settings.nav_drawer') }}</v-btn>
+              <v-btn value="tabs" prepend-icon="mdi-dock-top" class="text-none" data-testid="nav-layout-tabs">{{ a.t('settings.tabs_nav') }}</v-btn>
+              <v-btn value="browse" prepend-icon="mdi-view-grid-outline" class="text-none" data-testid="nav-layout-browse">{{ a.t('settings.nav_browse') }}</v-btn>
+            </v-btn-toggle>
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.data') }}</p>
             <v-btn variant="outlined" prepend-icon="mdi-refresh" :loading="a.syncing" data-testid="settings-refresh" @click="a.refreshData" class="mr-2 mb-2">{{ a.t('settings.refresh') }}</v-btn>

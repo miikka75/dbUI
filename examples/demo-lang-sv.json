@@ -151,7 +151,26 @@
       "bg.fit_contain": "Anpassa helt",
       "bg.fit_tile": "Upprepa",
       "bg.fit_width": "Skala till bredd",
-      "bg.restore": "Återställ standardbakgrund"
+      "bg.restore": "Återställ standardbakgrund",
+      "nav.Documents": "Dokument",
+      "nav.Work": "Arbete",
+      "nav.Tickets": "Ärenden",
+      "nav.Chores": "Sysslor",
+      "nav.Leaderboards": "Topplistor",
+      "nav.Crew": "Besättning",
+      "nav.Data": "Data",
+      "view.showcase": "Skyltfönster",
+      "view.combined_page": "Kombinerad",
+      "view.progress_report_page": "Lägesrapport",
+      "view.task_doc": "Uppgiftsdokument",
+      "view.active_work": "Pågående arbete",
+      "view.all_items": "Alla poster",
+      "view.summary_cards": "Sammanfattningskort",
+      "view.quick_list": "Snabblista",
+      "view.notes_list": "Anteckningslista",
+      "view.tickets_board": "Ärendetavla",
+      "view.crewrota": "Besättningsschema",
+      "tab.crew_rotation": "Besättningsrotation"
     }
   }
 }

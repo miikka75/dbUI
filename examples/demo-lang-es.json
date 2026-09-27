@@ -151,7 +151,26 @@
       "bg.fit_contain": "Ajustar completo",
       "bg.fit_tile": "Mosaico",
       "bg.fit_width": "Escalar al ancho",
-      "bg.restore": "Restaurar fondo predeterminado"
+      "bg.restore": "Restaurar fondo predeterminado",
+      "nav.Documents": "Documentos",
+      "nav.Work": "Trabajo",
+      "nav.Tickets": "Tickets",
+      "nav.Chores": "Tareas del hogar",
+      "nav.Leaderboards": "Clasificaciones",
+      "nav.Crew": "Equipo",
+      "nav.Data": "Datos",
+      "view.showcase": "Escaparate",
+      "view.combined_page": "Combinado",
+      "view.progress_report_page": "Informe de progreso",
+      "view.task_doc": "Documento de tareas",
+      "view.active_work": "Trabajo activo",
+      "view.all_items": "Todos los elementos",
+      "view.summary_cards": "Tarjetas resumen",
+      "view.quick_list": "Lista rápida",
+      "view.notes_list": "Lista de notas",
+      "view.tickets_board": "Tablero de tickets",
+      "view.crewrota": "Turnos del equipo",
+      "tab.crew_rotation": "Rotación del equipo"
     }
   }
 }
