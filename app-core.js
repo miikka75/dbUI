@@ -316,6 +316,7 @@ function createVueApp() {
       drawerOpen: false,
       openedGroups: [],
       navLayoutOverride: localStorage.getItem('app_nav_layout') || null,
+      navDisplayOverride: localStorage.getItem('app_nav_display') || null,
       mobile: window.innerWidth < 768,
       windowWidth: window.innerWidth,
       theme: localStorage.getItem('app_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
@@ -520,6 +521,10 @@ function createVueApp() {
       navConfig: function() { return (this.schemaData && this.schemaData.nav) || null; },
       // One of 'drawer' | 'tabs' | 'browse'; anything else (a typo, a value from a newer build) is the drawer.
       navLayout: function() { var v = this.navLayoutOverride || (this.navConfig && this.navConfig.layout); return v === 'tabs' || v === 'browse' ? v : 'drawer'; },
+      // How a nav level draws its entries: 'list' | 'tiles'. The schema sets it on the nav and per group;
+      // a person's own choice in Settings overrides both, on every level.
+      navDisplay: function() { var v = this.navDisplayOverride || (this.navConfig && this.navConfig.display); return v === 'tiles' ? 'tiles' : 'list'; },
+      levelDisplay: function() { var self = this; return function(node) { return self.navDisplayOverride || (node && node.display) || 'list'; }; },
       // Browse mode's root: the top-level entries, as the page a user starts on and returns to. The system
       // screens are not on it — in browse they live in the app bar's cog menu.
       navHome: function() {
@@ -992,7 +997,7 @@ function createVueApp() {
          'part.backup', 'part.schema', 'part.languages', 'part.reference', 'part.data', 'part.users',
          'msg.nothing_to_export', 
          'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
-         'settings.reset', 'settings.confirm_reset', 'settings.nav_layout', 'settings.nav_drawer', 'settings.tabs_nav', 'settings.nav_browse', 'settings.user_access', 'settings.user_access_title',
+         'settings.reset', 'settings.confirm_reset', 'settings.nav_layout', 'settings.nav_drawer', 'settings.tabs_nav', 'settings.nav_browse', 'settings.nav_display', 'settings.nav_list', 'settings.nav_tiles', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
          'settings.backgrounds',
          'settings.databases', 'settings.databases_hint', 'settings.switch', 'settings.forget',
@@ -1272,6 +1277,7 @@ function createVueApp() {
 
       notify: function(text) { this.snackText = text; this.snackbar = true; },
       setNavLayout: function(v) { this.navLayoutOverride = v; localStorage.setItem('app_nav_layout', v); },
+      setNavDisplay: function(v) { this.navDisplayOverride = v; localStorage.setItem('app_nav_display', v); },
 
       // A schema that was upgraded on load is saved back ONCE, so the chain stops re-running and the
       // next migration starts from a known version. Deliberately narrow:

@@ -90,6 +90,29 @@ test.describe('Browse layout', () => {
     await expect(page.locator('.v-bottom-navigation')).toHaveCount(0);
   });
 
+  test('a person can choose list or tiles in Settings, over the schema, on every level', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    const TILED = Object.assign({}, BROWSE, { nav: Object.assign({}, BROWSE.nav, { display: 'tiles' }) });
+    await page.request.post('/api/saveSchema', { data: { schema: TILED } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await expect(page.locator('[data-testid="nav-level-tiles"]')).toBeVisible();   // the schema's choice
+
+    await page.locator('[data-testid="browse-system-menu"]').click();
+    await page.locator('[data-testid="browse-system-__settings"]').click();
+    await page.locator('[data-testid="nav-display-list"]').click();
+    await page.evaluate(() => appInstance.selectTab('__home'));
+    await expect(page.locator('[data-testid="nav-level"] .v-list')).toBeVisible();
+    await expect(page.locator('[data-testid="nav-level-tiles"]')).toHaveCount(0);
+    await page.evaluate(() => appInstance.selectTab('grp:Data'));
+    await expect(page.locator('[data-testid="nav-level-tiles"]')).toHaveCount(0);   // every level, not just home
+
+    await page.reload();                                                              // remembered in this browser
+    await expect(page.locator('[data-testid="nav-level"] .v-list')).toBeVisible();
+    await expect(page.locator('[data-testid="nav-level-tiles"]')).toHaveCount(0);
+  });
+
   test('Settings switches a drawer schema into browse, live', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.request.post('/api/resetData');

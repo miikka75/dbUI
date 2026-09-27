@@ -525,7 +525,7 @@
       <v-icon :icon="node.icon" color="primary"></v-icon>
       <h2 class="text-h6" style="margin:0">{{ node.title }}</h2>
     </div>
-    <v-row v-if="node.display === 'tiles'" dense data-testid="nav-level-tiles">
+    <v-row v-if="a.levelDisplay(node) === 'tiles'" dense data-testid="nav-level-tiles">
       <v-col v-for="c in node.children" :key="c.id" cols="12" sm="6" md="4" lg="3">
         <v-card variant="outlined" class="h-100" :data-testid="'nav-level-item-' + c.id" @click="a.selectTab(c.id)">
           <v-card-item>
@@ -756,6 +756,13 @@
               <v-btn value="drawer" prepend-icon="mdi-dock-left" class="text-none" data-testid="nav-layout-drawer">{{ a.t('settings.nav_drawer') }}</v-btn>
               <v-btn value="tabs" prepend-icon="mdi-dock-top" class="text-none" data-testid="nav-layout-tabs">{{ a.t('settings.tabs_nav') }}</v-btn>
               <v-btn value="browse" prepend-icon="mdi-view-grid-outline" class="text-none" data-testid="nav-layout-browse">{{ a.t('settings.nav_browse') }}</v-btn>
+            </v-btn-toggle>
+            <!-- How a page of entries is drawn (browse levels, and a group's page in any layout). Overrides
+                 the schema's `display` on every level, for this person only. -->
+            <p class="text-subtitle-2 mt-4 mb-2">{{ a.t('settings.nav_display') }}</p>
+            <v-btn-toggle :model-value="a.navDisplay" @update:model-value="v => v && a.setNavDisplay(v)" mandatory divided variant="outlined" density="compact" color="primary" data-testid="nav-display-toggle">
+              <v-btn value="list" prepend-icon="mdi-format-list-bulleted" class="text-none" data-testid="nav-display-list">{{ a.t('settings.nav_list') }}</v-btn>
+              <v-btn value="tiles" prepend-icon="mdi-apps" class="text-none" data-testid="nav-display-tiles">{{ a.t('settings.nav_tiles') }}</v-btn>
             </v-btn-toggle>
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.data') }}</p>
