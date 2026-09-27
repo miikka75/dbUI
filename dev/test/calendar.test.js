@@ -97,6 +97,18 @@ describe('calendar.js — source resolution', () => {
 });
 
 describe('calendar.js — primitives', () => {
+  // dateLabel is display-only and must NOT change toDateStr: events bucket and rotations build _period
+  // from the key, so localizing the key would break grouping.
+  it('dateLabel renders a stored date in the given locale; toDateStr keeps the key', () => {
+    assert.equal(Calendar.dateLabel('2026-09-02', 'fi'), '02.09.2026');   // padded, matching the native picker
+    assert.equal(Calendar.dateLabel('2026-09-02', 'en-US'), '09/02/2026');
+    assert.equal(Calendar.dateLabel('2026-09-02T12:00:00', 'fi'), '02.09.2026');   // a timestamp narrows to its day
+    assert.equal(Calendar.dateLabel('', 'fi'), '');
+    assert.equal(Calendar.dateLabel(null, 'fi'), '');
+    assert.equal(Calendar.dateLabel('not a date', 'fi'), 'not a date');   // no RangeError from Intl
+    assert.equal(Calendar.toDateStr('2026-09-02'), '2026-09-02');
+  });
+
   it('hashColor is deterministic and returns a palette hex', () => {
     assert.equal(Calendar.hashColor('team-a'), Calendar.hashColor('team-a'));
     assert.match(Calendar.hashColor('team-a'), /^#[0-9a-f]{6}$/);

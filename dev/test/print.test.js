@@ -1,14 +1,16 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const Print = require('../../print');
+const Calendar = require('../../calendar');
 
 // Minimal print ctx (what app-core's _printCtx() builds from live state). displayValue echoes the raw
 // value; dates/period are the only cell formatting branch, and they go through calendar.js's real
-// toDateStr rather than a ctx stub.
+// dateLabel (in `fi`, as the root would pass it for a Finnish UI) rather than a stub.
 function makeCtx(over) {
   return Object.assign({
     t: k => k,                                   // echo the i18n key so we can assert labels
     colIsDate: c => c === 'date',
+    dateLabel: v => Calendar.dateLabel(v, 'fi'),
     displayValue: (c, v) => (v == null ? '' : String(v)),
     isColumnHidden: () => false,
     colHideEmpty: () => false,
@@ -29,17 +31,17 @@ describe('print.js — escape', () => {
 });
 
 describe('print.js — cell', () => {
-  it('dates and the rotation _period go through toDateStr; others through displayValue', () => {
+  it('dates and the rotation _period go through ctx.dateLabel; others through displayValue', () => {
     const ctx = makeCtx();
-    // Probed with a value the two branches render DIFFERENTLY: a full timestamp, which toDateStr
+    // Probed with a value the two branches render DIFFERENTLY: a full timestamp, which dateLabel
     // narrows to its date and the raw echo would not. No 'T' suffix trickery -- a string without a
     // zone is parsed as LOCAL time, so this is the same answer in every timezone the CI runs in.
-    assert.equal(Print.cell('date', '2026-07-06T12:00:00', ctx), '2026-07-06');
-    assert.equal(Print.cell('_period', '2026-07-06T12:00:00', ctx), '2026-07-06');
+    assert.equal(Print.cell('date', '2026-07-06T12:00:00', ctx), '06.07.2026');
+    assert.equal(Print.cell('_period', '2026-07-06T12:00:00', ctx), '06.07.2026');
     assert.equal(Print.cell('title', '2026-07-06T12:00:00', ctx), '2026-07-06T12:00:00');
     // And a stored 'YYYY-MM-DD' passes through untouched rather than being round-tripped via Date,
     // which would apply a timezone to a date that has none.
-    assert.equal(Print.cell('date', '2026-07-06', ctx), '2026-07-06');
+    assert.equal(Print.cell('date', '2026-07-06', ctx), '06.07.2026');
   });
 });
 
@@ -48,13 +50,13 @@ describe('print.js — table', () => {
     const ctx = makeCtx();
     const html = Print.table(['title', 'date'], [{ title: 'A<b>', date: '2026-07-06' }], ctx);
     assert.match(html, /<th>field.title<\/th><th>field.date<\/th>/);
-    assert.match(html, /<td>A&lt;b&gt;<\/td><td>2026-07-06<\/td>/);
+    assert.match(html, /<td>A&lt;b&gt;<\/td><td>06.07.2026<\/td>/);
   });
 
   it('the rotation _period column header uses the field.period key', () => {
     const html = Print.table(['_period', 'area'], [{ _period: '2026-01-01', area: 'A' }], makeCtx());
     assert.match(html, /<th>field.period<\/th>/);
-    assert.match(html, /<td>2026-01-01<\/td><td>A<\/td>/);
+    assert.match(html, /<td>01.01.2026<\/td><td>A<\/td>/);
   });
 });
 
@@ -117,7 +119,7 @@ describe('print.js — cardHtml', () => {
     const html = Print.cardHtml(['title', 'date'], { title: 'Hi', date: '2026-07-06' }, ctx);
     assert.match(html, /^<div class="card"><dl>/);
     assert.match(html, /<dt>field.title<\/dt><dd>Hi<\/dd>/);
-    assert.match(html, /<dt>field.date<\/dt><dd>2026-07-06<\/dd>/);
+    assert.match(html, /<dt>field.date<\/dt><dd>06.07.2026<\/dd>/);
   });
 
   it('hidden columns and empty+hideEmpty columns are dropped', () => {
