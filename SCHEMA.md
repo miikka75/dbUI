@@ -2614,10 +2614,11 @@ from the authenticated session — never asked for.
 - **`layout: "browse"`** — no drawer, no bottom bar. Home lists the top level; a group opens as a page
   of its entries; a view with `items` lists them beneath itself; a breadcrumb (`Home › Group › View`,
   on a phone just `‹ Parent`) leads back up, and the system screens move to a cog in the app bar.
-  Each user can switch layout under **Settings → Navigation**.
+  Each person can override the layout under **Settings → Navigation**, one choice of four: Side menu,
+  Top navigation, List, Tiles — the last two being browse drawn each way. It is remembered in their
+  browser, and List / Tiles then applies to every level, over the schema's `display`.
 - **`display`** (browse) — `"tiles"` draws a level as a card grid instead of a list. Set it on `nav`
-  for every level, or on a group / a view with `items` for its own page. Each person can override it on every
-  level under **Settings → Navigation** (List / Tiles), remembered in their browser.
+  for every level, or on a group / a view with `items` for its own page.
 - **`description`** (browse) — a line under the entry's title on its tile or list row. Translatable
   as `nav.desc.<group label | view | table>`; the authored text is the fallback.
 - **`adminOnly`** (boolean, optional) — hide the entry from non-admins. On a `{group}` it hides the

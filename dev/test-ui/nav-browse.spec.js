@@ -101,7 +101,7 @@ test.describe('Browse layout', () => {
 
     await page.locator('[data-testid="browse-system-menu"]').click();
     await page.locator('[data-testid="browse-system-__settings"]').click();
-    await page.locator('[data-testid="nav-display-list"]').click();
+    await page.locator('[data-testid="nav-layout-list"]').click();
     await page.evaluate(() => appInstance.selectTab('__home'));
     await expect(page.locator('[data-testid="nav-level"] .v-list')).toBeVisible();
     await expect(page.locator('[data-testid="nav-level-tiles"]')).toHaveCount(0);
@@ -121,8 +121,18 @@ test.describe('Browse layout', () => {
     await page.goto('/');
     await page.waitForFunction(() => window.appInstance && !appInstance.loading && !!appInstance.currentTable, null, { timeout: 6000 });
     await page.evaluate(() => appInstance.selectTab('__settings'));
-    await page.locator('[data-testid="nav-layout-browse"]').click();
+    // One control: Tiles is browse drawn as tiles, and choosing it selects nothing else.
+    await page.locator('[data-testid="nav-layout-tiles"]').click();
     await expect(page.locator('.v-navigation-drawer')).toHaveCount(0);
     await expect(page.locator('[data-testid="browse-system-menu"]')).toBeVisible();
+    await expect(page.locator('[data-testid="nav-layout-toggle"] .v-btn--active')).toHaveCount(1);
+    await page.evaluate(() => appInstance.selectTab('__home'));
+    await expect(page.locator('[data-testid="nav-level-tiles"]')).toBeVisible();
+    // Back to the side menu: browse's list/tiles no longer shows as selected.
+    await page.evaluate(() => appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="nav-layout-drawer"]').click();
+    await expect(page.locator('.v-navigation-drawer')).toHaveCount(1);
+    await expect(page.locator('[data-testid="nav-layout-toggle"] .v-btn--active')).toHaveCount(1);
+    await expect(page.locator('[data-testid="nav-layout-drawer"]')).toHaveClass(/v-btn--active/);
   });
 });
