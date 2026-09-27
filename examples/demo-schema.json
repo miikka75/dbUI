@@ -887,56 +887,153 @@
     }
   ],
   "nav": {
-    "layout": "drawer",
+    "layout": "browse",
+    "display": "tiles",
     "items": [
       {
-        "view": "combined_page"
-      },
-      {
-        "view": "attendance",
-        "icon": "mdi-account-group"
-      },
-      {
-        "icon": "mdi-progress-clock",
-        "view": "progress_report_page"
-      },
-      {
-        "icon": "mdi-view-dashboard-variant",
-        "view": "showcase"
-      },
-      {
-        "icon": "mdi-text-box",
-        "view": "task_doc"
-      },
-      {
-        "icon": "mdi-clipboard-list-outline",
-        "view": "active_work"
-      },
-      {
-        "icon": "mdi-view-column-outline",
-        "view": "tickets_board"
-      },
-      {
-        "icon": "mdi-source-branch",
-        "view": "ticket_pipeline"
-      },
-      {
-        "view": "all_items",
+        "group": "Documents",
+        "icon": "mdi-file-document-multiple-outline",
+        "description": "Pages that mix prose with live, editable tables",
         "items": [
           {
-            "view": "summary_cards"
+            "view": "showcase",
+            "icon": "mdi-view-dashboard-variant",
+            "description": "Every kind of element on one page"
           },
           {
-            "view": "quick_list"
+            "view": "combined_page",
+            "icon": "mdi-file-document-outline",
+            "description": "Two sources in one grid, with attendance below"
           },
           {
-            "view": "notes_list"
+            "view": "progress_report_page",
+            "icon": "mdi-progress-clock",
+            "description": "Open and finished work, side by side"
+          },
+          {
+            "view": "task_doc",
+            "icon": "mdi-text-box",
+            "description": "Prose above a view's own grid"
+          }
+        ]
+      },
+      {
+        "group": "Work",
+        "icon": "mdi-briefcase-outline",
+        "description": "Tasks and notes, sliced several ways",
+        "items": [
+          {
+            "view": "active_work",
+            "icon": "mdi-clipboard-list-outline"
+          },
+          {
+            "view": "attendance",
+            "icon": "mdi-account-group"
+          },
+          {
+            "view": "all_items",
+            "icon": "mdi-format-list-bulleted",
+            "description": "Everything, with three narrower views of it",
+            "items": [
+              {
+                "view": "summary_cards"
+              },
+              {
+                "view": "quick_list"
+              },
+              {
+                "view": "notes_list"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "group": "Tickets",
+        "icon": "mdi-ticket-outline",
+        "description": "Kanban boards over one table",
+        "items": [
+          {
+            "view": "tickets_board",
+            "icon": "mdi-view-column-outline"
+          },
+          {
+            "view": "ticket_pipeline",
+            "icon": "mdi-source-branch"
+          }
+        ]
+      },
+      {
+        "group": "Chores",
+        "icon": "mdi-broom",
+        "description": "A household rota: calendar, heatmap and scores",
+        "items": [
+          {
+            "view": "my_chores",
+            "icon": "mdi-account-check"
+          },
+          {
+            "view": "chore_calendar",
+            "icon": "mdi-calendar-check"
+          },
+          {
+            "view": "chore_heatmap",
+            "icon": "mdi-grid"
+          },
+          {
+            "group": "Leaderboards",
+            "icon": "mdi-trophy",
+            "description": "Points per person, by period",
+            "items": [
+              {
+                "view": "leaderboard_week",
+                "icon": "mdi-trophy-variant"
+              },
+              {
+                "view": "leaderboard",
+                "icon": "mdi-trophy"
+              },
+              {
+                "view": "chores_last_month",
+                "icon": "mdi-history"
+              }
+            ]
+          },
+          {
+            "table": "chore_log"
+          },
+          {
+            "table": "chores",
+            "icon": "mdi-format-list-checks"
+          }
+        ]
+      },
+      {
+        "group": "Crew",
+        "icon": "mdi-account-multiple",
+        "description": "Rotations, practices and sign-ups",
+        "items": [
+          {
+            "view": "crewrota",
+            "icon": "mdi-calendar-clock"
+          },
+          {
+            "table": "crew_rotation"
+          },
+          {
+            "view": "my_rsvp",
+            "icon": "mdi-account-check"
+          },
+          {
+            "table": "practices",
+            "icon": "mdi-whistle"
           }
         ]
       },
       {
         "group": "Data",
         "icon": "mdi-database",
+        "description": "The raw tables",
         "items": [
           {
             "table": "tasks"
@@ -945,51 +1042,6 @@
             "table": "notes"
           }
         ]
-      },
-      {
-        "view": "crewrota"
-      },
-      {
-        "table": "crew_rotation"
-      },
-      {
-        "view": "chore_calendar",
-        "icon": "mdi-calendar-check"
-      },
-      {
-        "view": "chore_heatmap",
-        "icon": "mdi-grid"
-      },
-      {
-        "view": "my_rsvp",
-        "icon": "mdi-account-check"
-      },
-      {
-        "table": "practices",
-        "icon": "mdi-whistle"
-      },
-      {
-        "table": "chore_log"
-      },
-      {
-        "view": "leaderboard",
-        "icon": "mdi-trophy"
-      },
-      {
-        "view": "leaderboard_week",
-        "icon": "mdi-trophy-variant"
-      },
-      {
-        "view": "chores_last_month",
-        "icon": "mdi-history"
-      },
-      {
-        "view": "my_chores",
-        "icon": "mdi-account-check"
-      },
-      {
-        "table": "chores",
-        "icon": "mdi-format-list-checks"
       }
     ]
   }

@@ -2588,18 +2588,38 @@ from the authenticated session — never asked for.
 ## nav (structure + layout)
 ```json
 "nav": {
-  "layout": "drawer",            // "drawer" (default) | "tabs" (top, desktop)
+  "layout": "drawer",            // "drawer" (default) | "tabs" (top, desktop) | "browse" (pages)
+  "display": "list",             // browse only: "list" (default) | "tiles"
   "items": [
     { "view": "home", "icon": "mdi-home" },
-    { "group": "Data", "icon": "mdi-database", "items": [ { "view": "combined" }, { "table": "tasks" } ] },
+    { "group": "Data", "icon": "mdi-database", "description": "The raw tables",
+      "items": [ { "view": "combined" }, { "table": "tasks" } ] },
     { "view": "attendance" }
   ],
   "bottomNav": ["home", "combined", "attendance"]
 }
 ```
-- Item kinds: `{view}`, `{table}`, or `{group, items:[...]}` (one level). A `{view}` may point
-  at a data view or a view with `markdown`.
+- Item kinds: `{view}`, `{table}`, or `{group, items:[...]}`. A `{view}` may point at a data view or
+  a view with `markdown`, and may carry `items` of its own — the view is then its section's page.
 - Each item: optional `icon`, `title`. Access-filtered (a view needs all its sources).
+- **Nesting** is any depth. The drawer and top tabs draw two levels; a deeper group opens as its
+  page (below), and a deeper view with `items` lists them beneath itself, so every entry is reachable in
+  every layout.
+- **A group's page.** Opening a group — its drawer header, its top tab, a `?at=grp:<label>` link —
+  shows a page listing its entries. A group's id is its label, and so is its translation key
+  (`nav.<label>`), so two groups with one label are rejected at load.
+- **`?at=<id>`** in the address bar is the open screen: every selection is a history entry, so
+  Back/Forward and a reload keep the user's place, and a link can open a screen directly. It resolves
+  against the user's own access-filtered nav — a link to a screen they cannot reach opens the first
+  screen. Boot writes nothing; other query parameters are kept.
+- **`layout: "browse"`** — no drawer, no bottom bar. Home lists the top level; a group opens as a page
+  of its entries; a view with `items` lists them beneath itself; a breadcrumb (`Home › Group › View`,
+  on a phone just `‹ Parent`) leads back up, and the system screens move to a cog in the app bar.
+  Each user can switch layout under **Settings → Navigation**.
+- **`display`** (browse) — `"tiles"` draws a level as a card grid instead of a list. Set it on `nav`
+  for every level, or on a group / a view with `items` for its own page.
+- **`description`** (browse) — a line under the entry's title on its tile or list row. Translatable
+  as `nav.desc.<group label | view | table>`; the authored text is the fallback.
 - **`adminOnly`** (boolean, optional) — hide the entry from non-admins. On a `{group}` it hides the
   whole branch. Use it for admin-facing plumbing (the tables behind a rotation, reference data) that
   members read *through* another view but never need in their own menu, and for approval surfaces: a
@@ -2680,5 +2700,5 @@ must be edited by hand before it will render correctly. There is no migration to
   **row**, not a list item — nothing seeds a list beside the table (see "A `list:` may name a lookup
   TABLE"); the ref/lookup editor locks the row.
 - **Translation keys** are auto-generated: `tab.*`, `view.*`, `field.*`, `list.*.*`,
-  `nav.<group>` (group labels), and `{{t:<key>}}` tokens in markdown views — all collected
+  `nav.<group>` (group labels), `nav.desc.<id>` (nav descriptions), and `{{t:<key>}}` tokens in markdown views — all collected
   into the Languages tab.

@@ -288,7 +288,8 @@
       "description": "The navigation tree. References views and tables by name; system tabs (Lookup / Languages / Settings) are appended automatically.",
       "additionalProperties": false,
       "properties": {
-        "layout": { "type": "string", "enum": ["drawer", "tabs"], "description": "Side drawer (default) or top tabs on desktop." },
+        "layout": { "type": "string", "enum": ["drawer", "tabs", "browse"], "description": "Side drawer (default), top tabs on desktop, or browse: no drawer — home lists the top level, a group opens as a page listing its entries, and a breadcrumb leads back up. Each user can override it in Settings." },
+        "display": { "type": "string", "enum": ["list", "tiles"], "description": "BROWSE ONLY: how a level's entries are drawn — a list (default) or a grid of tiles. A group or a view with entries may override it with its own." },
         "items": { "type": "array", "items": { "$ref": "#/$defs/navItem" } },
         "bottomNav": {
           "type": "array",
@@ -300,15 +301,17 @@
 
     "navItem": {
       "type": "object",
-      "description": "One entry: a view, a table, or a group of them (one level deep). Access-filtered — a view needs all its sources.",
+      "description": "One entry: a view, a table, or a group of them, nested to any depth. Access-filtered — a view needs all its sources.",
       "additionalProperties": false,
       "properties": {
         "view": { "type": "string", "description": "Name of a view — a data view or a document." },
         "table": { "type": "string", "description": "Name of a table, shown as its own tab." },
         "group": { "type": "string", "description": "Group label; its children go in `items`." },
-        "items": { "type": "array", "items": { "$ref": "#/$defs/navItem" }, "description": "Children of a group. One level only." },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/navItem" }, "description": "Children of a group, or a view's own entries. Any depth: browse draws every level as a page; the drawer and top tabs draw two levels and open a deeper group as its page, which lists its entries." },
         "icon": { "type": "string", "description": "MDI icon name." },
         "title": { "type": "string", "description": "Override the entry's label." },
+        "description": { "type": "string", "description": "BROWSE ONLY: a line shown under the entry's title on its tile or list row. Translatable as nav.desc.<group label | view | table>; this text is the fallback." },
+        "display": { "type": "string", "enum": ["list", "tiles"], "description": "BROWSE ONLY: on a group or a view with entries, how its page draws them. Defaults to the nav's `display`." },
         "adminOnly": { "type": "boolean", "description": "Hide the entry from non-admins; on a group, the whole branch. TIDINESS, NOT ACCESS CONTROL — what a member may read is decided by their table grants, and a hidden entry is still reachable if something links to it." },
         "hideFromAdmin": { "type": "boolean", "description": "The mirror, for views about being a PARTICIPANT: an admin is exempt from mineOnly, so a personal page embedding a mineOnly rotation would show them everyone else's column under a heading reading \"My tasks\". Setting both flags hides the entry from every user and is rejected at load." }
       },

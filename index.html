@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-AVSdx90AAaaay3LyFG6mmKvAAFJJSQS7qCSLkmMSjbA=' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-v3caOW84HSIlirIqU0Yc7tCZ0R2zXs0a2qSHTHHt0ss=' https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-AVSdx90AAaaay3LyFG6mmKvAAFJJSQS7qCSLkmMSjbA=' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-OcfuWYYrz7b9C6o1AKP5AEJvJda7YNHdlgZu/dFmjVY=' https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'">
   <!-- CSP violation reporting, installed BEFORE the first fetch below.
        `report-uri` is header-only and a <meta> CSP ignores it, so on GitHub Pages -- which cannot send
        a header at all -- the policy has no way to ask for reports. The page reports for itself
@@ -181,12 +181,17 @@
             if (qp.get('folder')) localStorage.setItem('app_folder', qp.get('folder'));
           }
         }
-        // Strip params from the URL so a refresh doesn't re-apply / leak config. Outside the
+        // Strip the params consumed above so a refresh doesn't re-apply / leak config. Outside the
         // `if (urlMode)` above because `?db=` arrives WITHOUT a mode — it is how an installed app
         // names itself, and it has to be cleaned up for the same reason as the rest: the choice is
         // persisted the moment it is applied, so a param left in the bar can only go stale and
-        // contradict it on the next reload.
-        if (urlMode || dbKey) history.replaceState(null, '', location.origin + location.pathname);
+        // contradict it on the next reload. Only THESE go: `?at=` (the screen to open) and a scan
+        // link's `?scan=&view=` are read later, by the app, and a link may carry them beside `?db=`.
+        if (urlMode || dbKey) {
+          ['db', 'mode', 'folder', 'config', 'url', 'key', 'k', 'd', 'p'].forEach(function(n) { qp['delete'](n); });
+          var rest = qp.toString();
+          history.replaceState(null, '', location.origin + location.pathname + (rest ? '?' + rest : ''));
+        }
       } catch(e) {}
 
       var mode = localStorage.getItem('app_mode');
@@ -247,7 +252,7 @@
       var appModulesReady = loadScriptsOrdered([
         '/columns.js', '/access-features.js', '/list-access.js', '/list-users.js', '/calendar.js',
         '/rotation.js', '/rows.js', '/events.js', '/ics.js', '/feeds.js', '/timeline.js', '/embeds.js', '/print.js', '/pivot.js', '/rsvp.js', '/form.js', '/board.js', '/stats.js', '/scan.js',
-        '/brand.js', '/reorder.js', '/csp-client.js', '/writes.js', '/undo.js', '/migrations.js', '/schema-normalize.js', '/examples.js', '/query.js',
+        '/brand.js', '/reorder.js', '/nav.js', '/csp-client.js', '/writes.js', '/undo.js', '/migrations.js', '/schema-normalize.js', '/examples.js', '/query.js',
         '/live-sync.js'
       ]);
 

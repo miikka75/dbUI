@@ -2046,6 +2046,133 @@ fix the cell's missing capacity, so it is a smaller change and a smaller answer.
 Cost: the composition and its opt-in are small; the `obscureName` interaction is the part that needs a
 test of its own, and a print check on `meeting_agenda`, which is the densest grid the long form lands in.
 
+### `nav.layout: "browse"` — drill-down navigation instead of a drawer *(phases 1–5 built on branch `nav-browse`; 6 not planned)*
+
+Proposed 2026-09-27. Navigation as the page itself, in the manner of churchofjesuschrist.org/study: the
+home screen is a list (or grid of tiles) of the top-level nav entries; opening a group replaces it with
+a list of that group's entries; opening a view shows the view. No drawer, no bottom bar — a breadcrumb
+at the top (`Home › Rotations › Cleaning`) is the whole of the chrome, and each crumb is a way back.
+
+**Most of it exists.** `buildNavTabs` (`schema-loader.js`) already produces the tree, already drops
+what the user cannot access, already hides a group left empty by that, and already applies
+`adminOnly`/`hideFromAdmin`. It even recurses — a group inside a group builds today; only the drawer
+markup and the schema's "one level only" stop at two. A browse layout is a third renderer of the same
+tree, beside the drawer and the top tabs, so no nav entry changes shape and `layout` stays the switch:
+
+```json
+"nav": { "layout": "browse", "display": "tiles", "items": [ … ] }
+```
+
+**Three facts found while planning, each of which decides something below:**
+
+- **Nothing reaches the URL.** `selectTab` sets `currentTable` and stops, so browser Back — and
+  Android's back gesture in the installed PWA — leaves the app. Drill-down without Back is broken,
+  which makes routing phase 1 rather than a detail.
+- **The URL has owners already.** The hash belongs to Supabase (`detectSessionInUrl: true` reads the
+  OAuth/magic-link tokens from it), `?db=` to `databases.js`, and `?view=` is the scan contract
+  (`_pendingScanFromUrl` says in as many words that it is not a general routing parameter). Routing
+  takes a new query parameter, `?at=`, and every write preserves the others.
+- **Selecting a group already happens and already shows nothing.** The drawer's group activator calls
+  `selectTab('grp:<label>')`, and nothing renders a `grp:` id, so the main area goes blank. The level
+  page (phase 2) fills that hole in the drawer layout before browse mode exists.
+
+Each phase ships on its own and leaves every existing layout at least as good as it found it.
+
+#### What the build changed from the plan below
+
+- **`?db=` does not stay in the URL.** `index.html` strips it at boot (with `?mode=` and a shared link's
+  config), and it used to strip the WHOLE query string to do so — which would have eaten a
+  `?db=x&at=y` link. It now deletes only the parameters it consumes.
+- **Boot writes nothing to the address bar.** The plan had boot `replaceState` its screen so Back had
+  somewhere to land; it does not need to. The landing URL has no `at`, and Back to it opens the first
+  screen — what landing there showed. Three existing tests assert that boot leaves the URL alone.
+- **`buildNavTabs` moved into `nav.js`** (`Nav.build`, with `find`, `flatten`, `readAt`, `withAt`,
+  `errors`, `translationKeys`), so the tree is Node-tested rather than only reachable from Playwright.
+  The nav checks that need no schema moved with it; `validateRefs` keeps the missing-view/table ones.
+- **No depth limit, in any layout.** Rejecting depth > 1 outside browse (phase 5) did not survive
+  contact with the Settings override: a browse schema viewed by someone who chose the drawer would
+  still lose its third level. Instead every entry is reachable everywhere — the drawer and tabs already
+  open a second-level group as its page, and a second-level view with `items` lists them beneath
+  itself (`belowEntries`).
+- **The breadcrumb sits at the top of the page, not in the app bar**, which had no room for it on a
+  phone. The home crumb is the app's title, so no "Home" string needed translating.
+- **`nav.<group>` keys were never offered in the Languages editor**, though SCHEMA.md said they were.
+  `Nav.translationKeys` now offers them, with the new `nav.desc.*` keys.
+- **The demo switched to browse** (revision 6): six sections as tiles, a Leaderboards group three
+  levels down, and English/Spanish/Swedish titles for the views that never had one — the drawer had
+  been showing those as raw keys.
+
+#### Phase 1 — history and deep links, for every layout
+
+- A pure helper beside `buildNavTabs`: `findNavNode(tabs, id)` → `{ node, path }` (the ancestor groups
+  from the root), walking the tree **recursively** from the start so later depth costs nothing. It
+  replaces the two hand-rolled two-level flattens in `bottomNavTabs`.
+- `selectTab(id)` does `history.pushState` with `?at=<id>`, preserving every other parameter; a
+  `popstate` handler selects the entry in the state without pushing again. Re-selecting the current
+  entry pushes nothing.
+- Boot: `_autoSelectTab` keeps the scan link first, then honours `?at=` if `findNavNode` finds the id
+  in the ACCESS-FILTERED tree (an id the user cannot reach falls back silently to the first entry, the
+  same as today), and records the result with `replaceState` so the first Back leaves rather than
+  landing on an empty screen.
+- Out of scope: dialogs and in-view state (calendar month, pivot period, search term). Back closes
+  nothing but the screen.
+- Tests: `findNavNode` in `dev/test` (nesting, access-filtered, `grp:` ids, system tabs); a
+  `dev/test-ui` spec — click A then B, Back shows A, Forward shows B; reload on `?at=B` opens B; an
+  inaccessible `?at=` opens the first entry; `?db=` survives all of it.
+
+#### Phase 2 — the level page, in the layouts that exist
+
+- A `nav-level` component, registered where the main area dispatches, rendering a `grp:` node's
+  children as a `v-list`; clicking one is `selectTab`. The drawer's blank group screen becomes a
+  table of contents. The top-tabs layout's group tab keeps its dropdown and gains the same page.
+- `grp:` ids are the group's label, so two groups with one label would open the same page — they
+  already share the `nav.<label>` translation key, so they are one label twice rather than two.
+  `validateSchema` rejects a duplicate group label.
+- Tests: validation for the duplicate; the UI spec clicks a drawer group and sees its children.
+
+#### Phase 3 — `layout: "browse"`
+
+- `navLayout === 'browse'` hides the drawer, the bottom navigation and the top tabs.
+- **Home** is the root level: the same `nav-level`, over the top-level items, as the id `__home` —
+  the entry boot selects when there is no `?at=`.
+- **Breadcrumb** in the app bar from `findNavNode(...).path`: `Home › Group › View`, every crumb but
+  the last a link. On a phone it collapses to a `‹ <parent>` chip, since the path does not fit.
+- **System screens** (Settings, Languages, Lookup) leave the tree for a cog menu in the app bar.
+- The Settings switch between drawer and tabs becomes a three-way choice; `setNavLayout` and the
+  `app_nav_layout` override already take any value.
+- Schema: `"browse"` in the `layout` enum; SCHEMA.md's nav section; one shipped example switched to it
+  so the layout has a real schema in CI, not only the fixture.
+- Tests: the UI spec boots in browse — home lists the top level, drill two levels, breadcrumb back to
+  home, Back from home leaves; no drawer is rendered; Settings is reachable from the cog.
+
+#### Phase 4 — tiles and descriptions
+
+- `display: "list" | "tiles"` on `nav`, overridable on a group: a top level of a few sections reads
+  best as tiles, a long leaf level as a list. Tiles are a responsive card grid — icon, title,
+  description — one column on a phone.
+- `description` on any nav item: authored text as the default, translated under a `nav.desc.<id>` key
+  collected into the Languages tab like `nav.<group>`. It shows on tiles and as the list subtitle.
+- Tests: `validateSchema` for both fields; `translation-keys.test.js` for the new key; the UI spec
+  renders the tile grid.
+
+#### Phase 5 — a view with children, and depth
+
+- `{ view, items }` is the book-and-chapters case: in browse it renders the view with its children
+  listed beneath it, so a markdown doc-view becomes the introduction to its own section. The drawer
+  already shows such an entry as an expandable group and is unchanged.
+- Depth: browse draws any depth; the drawer and tabs draw two levels, and anything deeper disappears
+  from them without a word today. `validateSchema` rejects depth > 1 unless `layout` is `browse`, and
+  the "one level only" wording in `schema.schema.json` and SCHEMA.md says the same.
+- Tests: validation both ways; the UI spec opens a view-with-children and a third-level group.
+
+#### Phase 6 — not planned: tile images
+
+The site uses cover art. A nav `image` URL would work as the `image` column type does, but it is
+decoration, and it waits until someone asks for it.
+
+**Cost:** medium overall. Phase 1 is the most delicate (history against boot, the scan link and
+`?db=`); phases 2 and 3 are most of the visible work; 4 and 5 are small.
+
 ### `gallery`
 
 A media grid. Unblocked since `image`/`url` columns shipped, so this is now mostly layout.
