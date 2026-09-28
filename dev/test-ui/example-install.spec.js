@@ -43,6 +43,9 @@ test('an empty database offers the examples, and installing one fills it', async
   await expect(page.locator('[data-testid="empty-db-offer"]')).toBeVisible();
   await page.locator('[data-testid="empty-db-examples"]').click();
   await expect(page.locator('[data-testid="example-picker"]')).toBeVisible();
+  // No language is installed yet, so the dialog's words come from the shipped English pack (tEx), not raw keys.
+  await expect(page.locator('[data-testid="example-picker"]')).toContainText('Start from an example');
+  await expect(page.locator('[data-testid="example-picker"]')).not.toContainText('examples.');
 
   // The chores bundle: small, and the only one shipping sample rows AND a single language, so the
   // assertions below stay about the mechanism rather than about which files happen to exist.
