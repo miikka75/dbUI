@@ -3883,6 +3883,74 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.total).toBe(3);
   });
 
+  // The subscriber's side: the calendar's own Subscribe menu. What it writes is the SUBSCRIBER's half
+  // of the row only (which feed, which language, that they are subscribed) — the id and url arrive from
+  // a publisher's pass, simulated here by filling them in. Unsubscribing is a state, and subscribing
+  // again is a new row beside the frozen one.
+  test('a member subscribes to a per-person feed, sees their link, and unsubscribes', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      window.SCHEMA.ppui_subs = { columns: { owner: { type: 'owner' }, feed: 'text', lang: 'text', url: 'text', fid: 'text', active: 'text' },
+                                  ownerWritable: ['feed', 'lang', 'active'], ownerWritableWhile: { active: 'yes' } };
+      window.VIEWS.ppui = { name: 'ppui', feed: 'per-person',
+        feedSubscribers: { table: 'ppui_subs', viewColumn: 'feed', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'], filter: { assigned_to: '@me' } }] } };
+      app.dataCache['tasks'] = [];
+      app.dataCache['ppui_subs'] = [
+        // Somebody else's subscription, which the menu must never show as mine.
+        { id: 'other', owner: 'someone@else.test', feed: 'ppui', active: 'yes', url: 'https://s/feeds/theirs.ics', fid: 'theirs' }
+      ];
+      window.__ppWrites = [];
+      window.__realPut = window.Writes.putRow;
+      window.Writes.putRow = (t, row) => { window.__ppWrites.push({ table: t, row: JSON.parse(JSON.stringify(row)) }); return Promise.resolve(row); };
+      app.selectTab('ppui');
+    });
+    const cal = page.locator('[data-testid="cal-view"]');
+    await expect(cal).toBeVisible();
+    await cal.locator('[data-testid="cal-subscribe-btn"]').click();
+    const menu = page.locator('[data-testid="cal-subscribe"]');
+    await expect(menu.locator('[data-testid="cal-subscribe-go"]')).toBeVisible();
+    await expect(menu.locator('[data-testid="cal-sub-url"]')).toHaveCount(0);
+
+    await menu.locator('[data-testid="cal-subscribe-go"]').click();
+    await expect(menu.locator('[data-testid="cal-sub-pending"]')).toBeVisible();
+    const made = await page.evaluate(() => {
+      const me = window.appInstance.currentUserEmail;
+      const row = window.appInstance.dataCache['ppui_subs'].find((r) => r.owner === me);
+      // What a publisher's pass does: mint the path and write the url back into the row.
+      row.fid = 'mine'; row.url = 'https://s/feeds/mine.ics';
+      return { me, row: Object.assign({}, row) };
+    });
+    expect(made.row.feed).toBe('ppui');
+    expect(made.row.active).toBe('yes');
+    await expect(menu.locator('[data-testid="cal-sub-url"] input')).toHaveValue('https://s/feeds/mine.ics');
+
+    // Unsubscribe takes two presses, and writes only the active column.
+    await menu.locator('[data-testid="cal-unsubscribe"]').click();
+    await expect(menu.locator('[data-testid="cal-sub-revoking"]')).toHaveCount(0);
+    await menu.locator('[data-testid="cal-unsubscribe"]').click();
+    await expect(menu.locator('[data-testid="cal-sub-revoking"]')).toBeVisible();
+    const unsub = await page.evaluate(() => window.__ppWrites.filter((w) => w.table === 'ppui_subs').pop().row);
+    expect(Object.keys(unsub).sort()).toEqual(['active', 'id', 'updated_at']);
+    expect(unsub.active).toBe('no');
+
+    // Subscribing again is a new row; the frozen one stays for the publisher to blank.
+    await menu.locator('[data-testid="cal-subscribe-go"]').click();
+    await expect(menu.locator('[data-testid="cal-sub-pending"]')).toBeVisible();
+    const after = await page.evaluate(() => {
+      window.Writes.putRow = window.__realPut;
+      const app = window.appInstance, me = app.currentUserEmail;
+      return {
+        mine: app.dataCache['ppui_subs'].filter((r) => r.owner === me).map((r) => r.active),
+        owed: window.Feeds.pendingRevocation(window.VIEWS.ppui, app.dataCache['ppui_subs'], 'ppui').map((s) => s.id)
+      };
+    });
+    expect(after.mine).toEqual(['no', 'yes']);
+    expect(after.owed).toEqual(['mine']);
+  });
+
   // Rendering a calendar AS somebody else — the per-person feed's rendering path. The failure this
   // guards is not a broken calendar but a plausible one containing the wrong person's rows, so every
   // assertion here is about narrowing: does an identity that cannot be resolved come back EMPTY, and

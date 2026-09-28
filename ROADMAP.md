@@ -1071,7 +1071,7 @@ Cost: a pure function (schema + what the database holds -> an inventory), Node-t
 deletes reuse writes that already exist. No engine module, no view kind. The same panel is the natural
 home for the example-drift notice Settings already shows.
 
-### A subscribable calendar feed *(shared feeds landed in #174; the per-person ENGINE has since landed too — its UI and the orphan sweep are what remain)*
+### A subscribable calendar feed *(shared feeds landed in #174; the per-person engine and the subscriber's own UI have since landed — the admin UI and the orphan sweep are what remain)*
 
 A URL a calendar client can subscribe to, so an edit reaches a phone without anyone re-exporting. The
 `.ics` export shipped first; the shared-content feed shipped after it, in #174.
@@ -1354,11 +1354,20 @@ in the UI. Recorded here rather than left to be discovered, because "the engine 
   then ask for the subscriber table, which is the first place that UI would have to name a table and a
   column — the same problem the Lookup editor already solved, and worth borrowing from rather than
   inventing.
-- **There is no subscribe button, language picker, or "your link" anywhere.** A subscriber can only
-  reach their row through the ordinary grid, if their nav happens to include the subscriber table. That
-  works — the row is owner-stamped and self-service, so the access model needs nothing — but "add a row
-  to a table" is not a subscribe button, and the language column is a text cell rather than a picker
-  over the languages this database declares.
+- ~~There is no subscribe button, language picker, or "your link" anywhere.~~ **Landed:** a
+  per-person calendar's toolbar carries a Subscribe menu for every member who can reach the subscriber
+  table — subscribe, the file's language (a picker over the languages this database declares, blank
+  meaning the calendar's own), their link with a copy button, and a two-press unsubscribe with the
+  "not instant" note beside it. It writes only the subscriber's half of the row, through the ordinary
+  create path and one-column patches, so it needed no access rule of its own.
+
+  Building it found one gap in the engine. An unsubscribed row is frozen for good, so subscribing again
+  has to be a NEW row — and `subscribersOf` kept the FIRST row per person, so the old "no" would have
+  shadowed the new "yes" and the person would never get a file. It now lets the active row publish
+  wherever it sits, and lists every departed row that still holds a file separately, since each is a
+  different path to blank. `Feeds.subscriptionOf` (the state the menu shows) reads through the same
+  function, so the menu and the pass cannot disagree. Also new: `configErrors` requires a `viewColumn`
+  to be owner-writable, because the subscriber's own create is what sets it.
 - **The orphan sweep** (above): `listFiles(prefix)` plus blanking what nothing accounts for.
 
 Nothing here is blocked. Each is ordinary UI work over an engine that already holds its invariants,

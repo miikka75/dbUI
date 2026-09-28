@@ -185,6 +185,9 @@
       if (cfg.langColumn && ow.indexOf(cfg.langColumn) < 0) {
         errors.push(at + '`ownerWritable` on "' + cfg.table + '" should include "' + cfg.langColumn + '" — the language is the subscriber\'s own choice, and they cannot change it otherwise');
       }
+      if (cfg.viewColumn && ow.indexOf(cfg.viewColumn) < 0) {
+        errors.push(at + '`ownerWritable` on "' + cfg.table + '" should include "' + cfg.viewColumn + '" — it says which calendar a row subscribes to, and a new subscription could not say so otherwise');
+      }
       if (cfg.activeColumn && ow.indexOf(cfg.activeColumn) < 0) {
         errors.push(at + '`ownerWritable` on "' + cfg.table + '" should include "' + cfg.activeColumn + '" — unsubscribing is the subscriber\'s own decision, and they cannot make it otherwise');
       }
@@ -236,38 +239,96 @@
     var cfg = (view && view.feedSubscribers) || null;
     if (!cfg || !isPerPerson(view)) return [];
     var ownerCol = cfg.ownerColumn || 'owner';
-    var out = [], seen = {};
+    var byOwner = {}, owners = [];
     (rows || []).forEach(function(r) {
       if (!r) return;
       // One table may serve several feeds; without a viewColumn it serves this one alone.
       if (cfg.viewColumn && String(r[cfg.viewColumn] || '') !== String(name || '')) return;
       var owner = String(r[ownerCol] || '').trim().toLowerCase();
       if (!owner) return;              // an unstamped row has nobody to render for
-      if (seen[owner]) return;         // one file per person, whatever the rows say
-      seen[owner] = 1;
-      out.push({
-        owner: owner,
-        // Unsubscribing is a STATE CHANGE, not a deletion, and this flag is it. A subscriber cannot
-        // blank their own file (uploading needs full access) and the row is the only record of the
-        // file's path -- so deleting the row would strand a public file nothing can ever name again.
-        // An inactive subscriber is therefore still listed here, because the publisher has work to do
-        // for them: blank the file, then clear the url.
-        active: !cfg.activeColumn || isActive(r[cfg.activeColumn]),
-        // Blank, or a language the database no longer declares, falls back to the CALENDAR's language
-        // -- resolved by the caller, which is the only layer that knows what a database declares. Never
-        // to the session's, which is the rule publishFeed already follows so a subscriber's file does
-        // not change language according to who edited a row last.
-        lang: cfg.langColumn ? String(r[cfg.langColumn] || '') : '',
-        url: cfg.urlColumn ? String(r[cfg.urlColumn] || '') : '',
-        // The minted id, which is the PATH. Kept beside the url rather than parsed back out of it: the
-        // url's shape is the backend's (Supabase spells a public object one way, Firebase another), so
-        // recovering a path from it would be the one piece of this feature that knows which backend it
-        // is running on. Republishing needs the path and only the path.
-        id: cfg.idColumn ? String(r[cfg.idColumn] || '') : '',
-        row: r
-      });
+      if (!byOwner[owner]) { byOwner[owner] = []; owners.push(owner); }
+      byOwner[owner].push(entryOf(cfg, owner, r));
+    });
+    var out = [];
+    owners.forEach(function(owner) {
+      var mine = byOwner[owner];
+      // One file per person, whatever the rows say -- and the ACTIVE row is the one that publishes,
+      // wherever it sits. An unsubscribed row is frozen for good (ownerWritableWhile), so subscribing
+      // again is a NEW row beside the tombstone; taking the first row regardless would let the old
+      // "no" shadow the new "yes" and the person would never get a file.
+      var live = mine.filter(function(s) { return s.active; })[0];
+      // Every departed row that still holds a file is listed on its own: each is a different path, and
+      // each is a public file the revocation pass has to blank.
+      var owed = mine.filter(function(s) { return !s.active && (s.id || s.url); });
+      if (live) out.push(live);
+      out.push.apply(out, owed);
+      if (!live && !owed.length) out.push(mine[0]);
     });
     return out.sort(function(a, b) { return a.owner < b.owner ? -1 : a.owner > b.owner ? 1 : 0; });
+  }
+
+  function entryOf(cfg, owner, r) {
+    return {
+      owner: owner,
+      // Unsubscribing is a STATE CHANGE, not a deletion, and this flag is it. A subscriber cannot
+      // blank their own file (uploading needs full access) and the row is the only record of the
+      // file's path -- so deleting the row would strand a public file nothing can ever name again.
+      // An inactive subscriber is therefore still listed, because the publisher has work to do for
+      // them: blank the file, then clear the url.
+      active: !cfg.activeColumn || isActive(r[cfg.activeColumn]),
+      // Blank, or a language the database no longer declares, falls back to the CALENDAR's language
+      // -- resolved by the caller, which is the only layer that knows what a database declares. Never
+      // to the session's, which is the rule publishFeed already follows so a subscriber's file does
+      // not change language according to who edited a row last.
+      lang: cfg.langColumn ? String(r[cfg.langColumn] || '') : '',
+      url: cfg.urlColumn ? String(r[cfg.urlColumn] || '') : '',
+      // The minted id, which is the PATH. Kept beside the url rather than parsed back out of it: the
+      // url's shape is the backend's (Supabase spells a public object one way, Firebase another), so
+      // recovering a path from it would be the one piece of this feature that knows which backend it
+      // is running on. Republishing needs the path and only the path.
+      id: cfg.idColumn ? String(r[cfg.idColumn] || '') : '',
+      row: r
+    };
+  }
+
+  // The signed-in person's own standing with a per-person feed, which is what the Subscribe control
+  // shows. Read through subscribersOf so the control and the publish pass cannot disagree about who is
+  // subscribed:
+  //   'active'   -- subscribed; `sub.url` is their link once a publisher has run a pass (blank before).
+  //   'revoking' -- unsubscribed, and a file of theirs is still live until the next pass blanks it.
+  //   'none'     -- nothing to show but the Subscribe button (a cleared tombstone counts as none).
+  function subscriptionOf(view, rows, name, me) {
+    var who = String(me || '').trim().toLowerCase();
+    if (!who || !isPerPerson(view)) return { state: 'none', sub: null };
+    var mine = subscribersOf(view, rows, name).filter(function(s) { return s.owner === who; });
+    var live = mine.filter(function(s) { return s.active; })[0];
+    if (live) return { state: 'active', sub: live };
+    if (mine.some(function(s) { return s.id || s.url; })) return { state: 'revoking', sub: null };
+    return { state: 'none', sub: null };
+  }
+
+  // The values a subscriber writes into the active column. Subscribing writes the value the table's
+  // `ownerWritableWhile` gate lists first -- anything else and the new row would be frozen the moment it
+  // exists, so the person could never change their language or unsubscribe. Unsubscribing writes a
+  // recognised "no" that the gate does NOT list, which is what freezes the row into a tombstone.
+  function activeValues(table, cfg) {
+    var gate = (table && table.ownerWritableWhile) || {};
+    var listed = (cfg && cfg.activeColumn && gate[cfg.activeColumn] !== undefined) ? gate[cfg.activeColumn] : [];
+    listed = (Array.isArray(listed) ? listed : [listed]).map(String);
+    var on = listed.filter(function(v) { return isActive(v); })[0];
+    var off = ['no', 'unsubscribed', 'false', 'off', 'inactive', '0'].filter(function(v) { return listed.indexOf(v) < 0; })[0];
+    return { on: on === undefined ? 'yes' : on, off: off };
+  }
+
+  // The row a Subscribe press creates, as a prefill for the ordinary create path (which stamps the
+  // owner). Only the subscriber's half: which feed, which language, and that they are subscribed. The
+  // publisher's half (id, url) is left blank, which is also what the rules demand of an owner create.
+  function subscribeRow(view, table, name, lang) {
+    var cfg = (view && view.feedSubscribers) || {}, row = {};
+    if (cfg.viewColumn) row[cfg.viewColumn] = name;
+    if (cfg.langColumn && lang) row[cfg.langColumn] = lang;
+    if (cfg.activeColumn) row[cfg.activeColumn] = activeValues(table, cfg).on;
+    return row;
   }
 
   // What counts as still subscribed. Anything not recognisably a "no" is a yes, because the failure
@@ -323,7 +384,7 @@
   }
 
   var M = { isFeed: isFeed, isPerPerson: isPerPerson, modeOf: modeOf, hasMe: hasMe, configErrors: configErrors,
-            subscribersOf: subscribersOf, pendingRevocation: pendingRevocation, isActive: isActive,
+            subscribersOf: subscribersOf, subscriptionOf: subscriptionOf, activeValues: activeValues, subscribeRow: subscribeRow, pendingRevocation: pendingRevocation, isActive: isActive,
             subscriberTableOf: subscriberTableOf, forSubscriberTable: forSubscriberTable,
             names: names, tablesOf: tablesOf, forTable: forTable, pathFor: pathFor, newId: newId };
   if (isNode) module.exports = M;
