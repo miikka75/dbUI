@@ -1854,9 +1854,50 @@ by a legitimate edit. Their write leaves the feed stale instead, which is the sa
 tables that trigger it are the calendar's sources *and* the rosters behind any rotation overlay — a duty
 roster lives in a lookup table the calendar never names, and editing it changes what the feed says.
 
-**A feed cannot use `mineOnly` or an `@me` filter**, and `validateSchema` refuses both. A published
-file has no viewer to resolve "me" against, so it would be rendered as whoever pressed publish and then
-served to everyone — the failure here that leaks rather than merely disappoints.
+**A shared feed cannot use `mineOnly` or an `@me` filter**, and `validateSchema` refuses both. A
+published file has no viewer to resolve "me" against, so it would be rendered as whoever pressed
+publish and then served to everyone — the failure here that leaks rather than merely disappoints. For a
+calendar that is different for each person, use a per-person feed.
+
+#### Per-person feeds (`feed: "per-person"`)
+
+One file per **subscriber**, each rendered as that person sees the calendar. The rule inverts: every
+source must carry an `@me` filter and every overlaid rotation must be `mineOnly`, because an unfiltered
+source would put its rows in everybody's file.
+
+Subscribing is a row the person creates for themselves in an owner-stamped table, named by
+`feedSubscribers`:
+
+```json
+"tables": {
+  "cal_subs": {
+    "columns": { "owner": { "type": "owner" }, "lang": "text", "active": "text", "fid": "text", "url": "text" },
+    "ownerWritable": ["lang", "active"],
+    "ownerWritableWhile": { "active": "yes" }
+  }
+},
+"views": {
+  "my_calendar": { "feed": "per-person",
+    "feedSubscribers": { "table": "cal_subs", "langColumn": "lang", "activeColumn": "active",
+                         "idColumn": "fid", "urlColumn": "url" },
+    "calendar": { "sources": [{ "table": "duties", "dateColumn": "on", "filter": { "who": "@me" } }] } }
+}
+```
+
+The row has two writers. The subscriber owns the request — `langColumn`, `activeColumn`, and
+`viewColumn` if one table serves several calendars — so those must be in `ownerWritable`. The publisher
+owns the grant — `idColumn` (the file's path) and `urlColumn` (their link) — so those must NOT be: a
+subscriber who could write their own url could point it at a file revocation never reaches.
+
+**Unsubscribing is a state, not a deletion.** The row is the only record of where the file lives, and
+the subscriber cannot blank it themselves. So `ownerWritableWhile` must gate on the active column: once
+it says "no" the row is frozen, and the next publisher pass blanks the file and clears the url.
+Subscribing again makes a new row, and so a new link.
+
+The calendar's toolbar has a **Subscribe** menu for every member who can reach the subscriber table:
+subscribe, pick the file's language, copy their link, unsubscribe. The link appears once a full-access
+client runs a pass — on its next write to a source or to the subscriber table, or when it next opens the
+app. Revocation waits for the same pass.
 
 **Subscriptions are not live.** Calendar clients refresh external `.ics` on their own schedule, often
 many hours, and it is not controllable from here. Publishing on write buys *correctness* — the file

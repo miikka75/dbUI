@@ -484,3 +484,68 @@ describe('feeds.js — the schema must freeze a row that unsubscribed', () => {
     assert.match(errs(good, subs).join('\n'), /`feedSubscribers.activeColumn` "nope" is not a column/);
   });
 });
+
+// --- the subscriber's own side: subscribe, resubscribe, the state the control shows ---------------
+//
+// An unsubscribed row is frozen for good, so subscribing again is a NEW row beside the tombstone. The
+// publish pass and the Subscribe control both read subscribersOf, and both have to let that new row
+// win — otherwise the old "no" shadows the new "yes" and the person never gets a file.
+describe('feeds.js — subscribing, and subscribing again', () => {
+  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' };
+  const view = { calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
+                 feed: 'per-person', feedSubscribers: SUBS };
+  const TABLE = { ownerWritableWhile: { active: 'yes' } };
+
+  it('a new active row wins over an earlier tombstone, and the tombstone still owes a blank', () => {
+    const rows = [{ owner: 'a@x.test', active: 'no', url: 'https://s/old.ics', fid: 'old' },
+                  { owner: 'a@x.test', active: 'yes' }];
+    const subs = Feeds.subscribersOf(view, rows, 'x');
+    assert.equal(subs.filter((s) => s.active).length, 1);
+    assert.deepEqual(Feeds.pendingRevocation(view, rows, 'x').map((s) => s.id), ['old']);
+  });
+
+  it('still one file per person when two rows are both active', () => {
+    const rows = [{ owner: 'a@x.test', active: 'yes', fid: 'one' }, { owner: 'a@x.test', active: 'yes', fid: 'two' }];
+    assert.deepEqual(Feeds.subscribersOf(view, rows, 'x').map((s) => s.id), ['one']);
+  });
+
+  it('subscriptionOf: none, active, revoking — case-blind on the email', () => {
+    assert.equal(Feeds.subscriptionOf(view, [], 'x', 'a@x.test').state, 'none');
+    const live = Feeds.subscriptionOf(view, [{ owner: 'A@x.test', active: 'yes', url: 'https://s/a.ics' }], 'x', 'a@X.test');
+    assert.equal(live.state, 'active');
+    assert.equal(live.sub.url, 'https://s/a.ics');
+    assert.equal(Feeds.subscriptionOf(view, [{ owner: 'a@x.test', active: 'no', fid: 'old' }], 'x', 'a@x.test').state, 'revoking');
+    // Blanked and cleared by the publisher: nothing left to wait for.
+    assert.equal(Feeds.subscriptionOf(view, [{ owner: 'a@x.test', active: 'no' }], 'x', 'a@x.test').state, 'none');
+  });
+
+  it('subscriptionOf never reports somebody else\'s row, nor any row when signed out', () => {
+    const rows = [{ owner: 'b@x.test', active: 'yes', url: 'https://s/b.ics' }];
+    assert.equal(Feeds.subscriptionOf(view, rows, 'x', 'a@x.test').state, 'none');
+    assert.equal(Feeds.subscriptionOf(view, rows, 'x', '').state, 'none');
+  });
+
+  // Subscribing must land INSIDE the ownerWritableWhile gate, or the new row is frozen on arrival and
+  // the person can neither pick a language nor unsubscribe; unsubscribing must land outside it.
+  it('activeValues subscribes inside the gate and unsubscribes outside it', () => {
+    assert.deepEqual(Feeds.activeValues(TABLE, SUBS), { on: 'yes', off: 'no' });
+    assert.deepEqual(Feeds.activeValues({ ownerWritableWhile: { active: ['', 'no'] } }, SUBS), { on: '', off: 'unsubscribed' });
+    const v = Feeds.activeValues(TABLE, SUBS);
+    assert.equal(Feeds.isActive(v.on), true);
+    assert.equal(Feeds.isActive(v.off), false);
+  });
+
+  it('subscribeRow is only the subscriber\'s half — never an id or a url', () => {
+    const v = Object.assign({}, view, { feedSubscribers: Object.assign({ viewColumn: 'feed' }, SUBS) });
+    assert.deepEqual(Feeds.subscribeRow(v, TABLE, 'x', 'fi'), { feed: 'x', lang: 'fi', active: 'yes' });
+    assert.deepEqual(Feeds.subscribeRow(view, TABLE, 'x', ''), { active: 'yes' });
+  });
+
+  it('refuses a viewColumn the subscriber may not write — their new row could not say which calendar', () => {
+    const subs = Object.assign({ viewColumn: 'feed' }, SUBS);
+    const v = Object.assign({}, view, { feedSubscribers: subs });
+    const schema = { events: { columns: {} }, subs: { columns: { owner: { type: 'owner' }, feed: 'text', lang: 'text', url: 'text', fid: 'text', active: 'text' },
+                                                     ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } } };
+    assert.match(Feeds.configErrors({ x: v }, 'x', v, schema).join('\n'), /should include "feed"/);
+  });
+});
