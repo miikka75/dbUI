@@ -220,7 +220,7 @@ function obscureName(s) {
 var PRINT_CSS = 'body{font-family:system-ui;margin:20px;font-size:13px}.card{border:1px solid #ddd;padding:12px;margin-bottom:12px;border-radius:6px;page-break-inside:avoid}dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0}dt{font-weight:bold;font-size:13px;opacity:0.7}dd{margin:0;font-size:13px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:4px 8px;text-align:left;font-size:13px}th{background:#f5f5f5}.embed{margin:8px 0;padding:8px;background:#f9f9f9;border-radius:4px}.embed h4{margin:0 0 4px;font-size:13px;opacity:0.7}h1,h2,h3,h4,h5,h6{font-size:13px;margin:6px 0}.labels{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.label{border:1px solid #ddd;border-radius:6px;padding:10px 8px;text-align:center;page-break-inside:avoid}.label b{display:block;font-size:14px;margin-bottom:6px}.label code{display:block;margin-top:4px;font-family:monospace;font-size:11px;letter-spacing:1px}.label .nocode{font-size:11px;color:#a00;padding:14px 0}@media print{button{display:none}}';
 // Click-to-sort header behaviour, shared by every surface that sorts: the root (the data grid, via
 // its own sortCol/sortAsc) and the components that keep their own sort state because they render
-// their own lists rather than currentData (rsvp, pivot). Mix into `methods` with Object.assign, like
+// their own lists rather than currentData (rsvp, pivot, embed-view). Mix into `methods` with Object.assign, like
 // ROOT_PROXY. The contract lives here once: first click ascending, clicking the same column flips.
 // `this` supplies sortCol/sortAsc, so it works for the root instance and a component alike.
 var SORT_UI = {
@@ -228,7 +228,8 @@ var SORT_UI = {
     if (this.sortCol === col) this.sortAsc = !this.sortAsc;
     else { this.sortCol = col; this.sortAsc = true; }
   },
-  sortIcon: function(col) { return this.sortCol !== col ? '' : (this.sortAsc ? ' ▲' : ' ▼'); }
+  // No arrow on screen -- no sortable header shows one -- so the direction reaches assistive tech only.
+  ariaSort: function(col) { return this.sortCol !== col ? null : (this.sortAsc ? 'ascending' : 'descending'); }
 };
 
 function createVueApp() {
@@ -3247,6 +3248,7 @@ function createVueApp() {
 
       // The grid's header click — same contract as rsvp/pivot, so it comes from the same place (SORT_UI).
       toggleSort: SORT_UI.toggleSort,
+      ariaSort: SORT_UI.ariaSort,
 
       // Cell editing
       saveField: function(item, col, value, ownerId) {
@@ -7551,12 +7553,12 @@ function createVueApp() {
       + '<template v-else-if="spec">'
       + '<template v-if="spec.inlineBlocks" v-for="(blk, bi) in spec.inlineBlocks" :key="\'ib\'+bi">'
       + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
-      + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle + \';cursor:pointer\'" @click="toggleSort(ec)" :aria-sort="sortCol === ec ? (sortAsc ? \'ascending\' : \'descending\') : null" :data-testid="\'embed-sort-\' + ec">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
+      + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle + \';cursor:pointer\'" @click="toggleSort(ec)" :aria-sort="ariaSort(ec)" :data-testid="\'embed-sort-\' + ec">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
       + '<tbody><tr v-for="er in shown" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]" :view-cfg="obscureCfg"></list-value></td></tr></tbody></table>'
       + '</template>'
       + '<template v-else>'
       + '<div v-if="header" style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t(\'tab.\' + spec.config.table) || spec.config.table }} ({{ rows.length }})</div>'
-      + '<table v-if="roLayout===\'table\'" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle + \';cursor:pointer\'" @click="toggleSort(ec)" :aria-sort="sortCol === ec ? (sortAsc ? \'ascending\' : \'descending\') : null" :data-testid="\'embed-sort-\' + ec">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
+      + '<table v-if="roLayout===\'table\'" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle + \';cursor:pointer\'" @click="toggleSort(ec)" :aria-sort="ariaSort(ec)" :data-testid="\'embed-sort-\' + ec">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
       + '<tbody><tr v-for="er in shown" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]" :view-cfg="obscureCfg"></list-value></td></tr></tbody></table>'
       + '<div v-else-if="roLayout===\'card\'" style="display:grid; gap:6px"><div v-for="er in rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in colsFor(er)" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span><list-value :col="ec" :value="er[ec]" :view-cfg="obscureCfg"></list-value></span></div></div>'
       + '<div v-else class="d-flex align-center flex-wrap ga-1"><v-chip v-for="er in rows" :key="er.id" size="small" variant="tonal" color="secondary" label><span v-for="(ec, i) in colsFor(er)" :key="ec">{{ er[ec] }}<span v-if="i < colsFor(er).length - 1" style="opacity:0.4"> · </span></span></v-chip></div>'
@@ -7580,7 +7582,7 @@ function createVueApp() {
       + '<div v-if="canMutateRow(item)" style="text-align:right"><v-btn v-if="hasArchive" :icon="isArchArmed(item) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" :color="isArchArmed(item) ? \'warning\' : \'\'" @click="archRow(item)"></v-btn><v-btn :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isDelArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></div>'
       + '</v-card></div>'
       + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
-      + '<thead><tr><th v-for="c in cols" :key="c" style="cursor:pointer" @click="toggleSort(c)" :aria-sort="sortCol === c ? (sortAsc ? \'ascending\' : \'descending\') : null" :data-testid="\'embed-sort-\' + c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
+      + '<thead><tr><th v-for="c in cols" :key="c" style="cursor:pointer" @click="toggleSort(c)" :aria-sort="ariaSort(c)" :data-testid="\'embed-sort-\' + c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
       + '<tbody><tr v-for="(item, ri) in shown" :key="item.id || ri"><td v-for="col in cols" :key="col">'
       + '<data-cell v-if="!colHidden(col, item)" :item="item" :col="col" :owner="name" :readonly="!!effPart" :embed="true"></data-cell>'
       + '</td><td v-if="canMutate" style="white-space:nowrap"><template v-if="canMutateRow(item)">'
@@ -8052,9 +8054,9 @@ function createVueApp() {
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="pivot-view">'
       + '<v-table density="compact" class="my-1"><template v-slot:default>'
       + '<thead><tr>'
-      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));cursor:pointer" @click="toggleSort(\'__row__\')" data-testid="pivot-sort-row">{{ head(cfg.row) }}{{ sortIcon(\'__row__\') }}</th>'
-      + '<th v-for="(c, ci) in grid.columns" :key="c" style="text-align:center;cursor:pointer" @click="toggleSort(ci)"><list-value :col="cfg.column" :value="c" :view-cfg="viewCfg"></list-value>{{ sortIcon(ci) }}</th>'
-      + '<th v-if="hasTotals" style="text-align:center;font-weight:700;cursor:pointer" @click="toggleSort(\'__total__\')">{{ a.t(\'pivot.total\') }}{{ sortIcon(\'__total__\') }}</th>'
+      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));cursor:pointer" @click="toggleSort(\'__row__\')" :aria-sort="ariaSort(\'__row__\')" data-testid="pivot-sort-row">{{ head(cfg.row) }}</th>'
+      + '<th v-for="(c, ci) in grid.columns" :key="c" style="text-align:center;cursor:pointer" @click="toggleSort(ci)" :aria-sort="ariaSort(ci)"><list-value :col="cfg.column" :value="c" :view-cfg="viewCfg"></list-value></th>'
+      + '<th v-if="hasTotals" style="text-align:center;font-weight:700;cursor:pointer" @click="toggleSort(\'__total__\')" :aria-sort="ariaSort(\'__total__\')">{{ a.t(\'pivot.total\') }}</th>'
       + '</tr></thead>'
       + '<tbody>'
       + '<tr v-for="r in rows" :key="r.key">'
@@ -8619,10 +8621,10 @@ function createVueApp() {
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="rsvp-view">'
       + '<v-table v-if="!a.mobile" density="compact">'
       + '<thead><tr>'
-      + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'date\')" data-testid="rsvp-sort-date">{{ a.t(\'rsvp.date\') }}{{ sortIcon(\'date\') }}</th>'
-      + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'title\')">{{ a.t(\'rsvp.title\') }}{{ sortIcon(\'title\') }}</th>'
-      + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'myStatus\')">{{ a.t(\'rsvp.your_response\') }}{{ sortIcon(\'myStatus\') }}</th>'
-      + '<th v-if="cfg.showCounts" class="text-left" style="cursor:pointer" @click="toggleSort(\'total\')">{{ a.t(\'rsvp.responses\') }}{{ sortIcon(\'total\') }}</th>'
+      + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'date\')" :aria-sort="ariaSort(\'date\')" data-testid="rsvp-sort-date">{{ a.t(\'rsvp.date\') }}</th>'
+      + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'title\')" :aria-sort="ariaSort(\'title\')">{{ a.t(\'rsvp.title\') }}</th>'
+      + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'myStatus\')" :aria-sort="ariaSort(\'myStatus\')">{{ a.t(\'rsvp.your_response\') }}</th>'
+      + '<th v-if="cfg.showCounts" class="text-left" style="cursor:pointer" @click="toggleSort(\'total\')" :aria-sort="ariaSort(\'total\')">{{ a.t(\'rsvp.responses\') }}</th>'
       // "Who" is a status-grouped name roster, not a single value -- nothing coherent to order by.
       + '<th v-if="showRoster" class="text-left">{{ a.t(\'rsvp.who\') }}</th>'
       + '</tr></thead>'
