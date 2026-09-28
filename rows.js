@@ -7,10 +7,11 @@
 //   Node:    const Rows = require('../rows');
 //
 // Runtime-bound globals (looked up through `root` at call time, never captured):
-//   root._listsCache   — the loaded named lists (matchList/notMatchList operators, list-ordered sort).
+//   root._listsCache   — the loaded named lists (matchList/notMatchList operators).
 //                        Node tests set global._listsCache.
-//   root.getColumnList — SCHEMA-bound column->list resolver (defined by app-core.js in the browser).
-//                        Only the list-ordered branch of sortByCol needs it; guarded when absent.
+//   root.getColumnOrder — column -> its values in PRESENTED order (a list's authored order, a lookup
+//                        catalogue's row order), or null (defined by app-core.js in the browser). Only
+//                        the ordered branch of sortByCol needs it; guarded when absent.
 //   root.getColumnRef  — SCHEMA-bound column->ref-def resolver (same source). Only `groupBy.seed`
 //                        needs it; a caller with no schema bound simply seeds nothing.
 (function(root) {
@@ -188,16 +189,22 @@
                          : sa.localeCompare(sb, undefined, { numeric: true });
   }
 
-  // Resolve a column's list order, if it is list-backed (via root.getColumnList + root._listsCache,
-  // both runtime-bound). `view` lets an aggregate's groupBy column inherit its source column's list.
+  // Resolve a column's value order, if something other than the values decides it: a named list's
+  // authored order, or -- for a `ref`, or a `select` whose list names a lookup table -- the catalogue's
+  // row order, which for `ref_statuses` IS the pipeline. Without the second, "defaultSort": "status"
+  // sorted by stored key: accepted, approved_by_bishopric, called... Which order a column has is the
+  // root's question (it owns SCHEMA and the loaded rows), so it is asked through root.getColumnOrder.
+  // `view` lets an aggregate's groupBy column inherit its source column's order.
   function listOrderFor(col, view) {
-    var gcl = root.getColumnList;
-    var ln = gcl ? gcl(null, col) : null;
-    if (!ln && gcl && view && view.groupBy && typeof view.groupBy === 'object' && view.groupBy.column === col && view.groupBy.from) {
-      for (var i = 0; i < view.groupBy.from.length && !ln; i++) ln = gcl(null, view.groupBy.from[i]);
+    var gco = root.getColumnOrder;
+    if (!gco) return null;
+    var vals = gco(col);
+    if (!vals && view && view.groupBy && typeof view.groupBy === 'object' && view.groupBy.column === col && view.groupBy.from) {
+      for (var i = 0; i < view.groupBy.from.length && !vals; i++) vals = gco(view.groupBy.from[i]);
     }
-    if (!ln || !root._listsCache || !root._listsCache[ln]) return null;
-    var order = {}; root._listsCache[ln].forEach(function(v, i) { order[v] = i; });
+    if (!vals) return null;
+    // First occurrence wins: a hierarchical catalogue can list one value under two groups.
+    var order = {}; vals.forEach(function(v, i) { if (!Object.prototype.hasOwnProperty.call(order, v)) order[v] = i; });
     return order;
   }
 
@@ -618,4 +625,4 @@
   else { root.Rows = M; for (var k in M) root[k] = M[k]; } // also expose each as a global for bare callers
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));
 // ^ globalThis (not `this`): in Node CJS, module-scope `this` is module.exports, and the runtime-bound
-//   lookups (root._listsCache / root.getColumnList) must see the real global that tests assign to.
+//   lookups (root._listsCache / root.getColumnOrder) must see the real global that tests assign to.

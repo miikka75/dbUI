@@ -1597,6 +1597,51 @@ test.describe('The Lookup editor loads what it edits', () => {
   });
 });
 
+test.describe('A column backed by a lookup sorts in catalogue order', () => {
+  // "defaultSort": "status" on a ref column sorted by the STORED KEY -- accepted, approved, called... --
+  // which is neither the pipeline the lookup's `position` encodes nor anything on screen. A `select`
+  // whose list names the lookup did the same. Both now read the catalogue, and so does the picker.
+  const CAT = {
+    defaultLanguage: 'en',
+    tables: {
+      ref_steps: {
+        isLookup: true, reorderable: true, defaultSort: 'position',
+        columns: [{ name: 'step', type: 'text' }, { name: 'position', type: 'number', hidden: true }]
+      },
+      tasks: {
+        defaultSort: 'step',
+        columns: [{ name: 'title', type: 'text' },
+                  { name: 'step', type: 'ref', table: 'ref_steps', valueCol: 'step' },
+                  { name: 'kind', type: 'select', list: 'ref_steps' }]
+      }
+    },
+    nav: { items: [{ table: 'tasks' }] }
+  };
+
+  test('grid sort and picker follow position, not the key', async ({ page }) => {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: CAT } });
+    // Row ids, positions and keys each disagree, so only the position order can produce the expectation.
+    for (const [id, step, position] of [['a', 'done', 3], ['b', 'todo', 1], ['c', 'doing', 2]])
+      await page.request.post('/api/putRow', { data: { tableId: 'ref_steps', data: { id, step, position }, tab: 'active' } });
+    for (const [id, step] of [['t1', 'done'], ['t2', 'doing'], ['t3', 'todo']])
+      await page.request.post('/api/putRow', { data: { tableId: 'tasks', data: { id, title: id, step, kind: step }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => appInstance.selectTab('tasks'));
+    const PIPE = ['todo', 'doing', 'done'];
+    await expect.poll(() => page.evaluate(() => appInstance.sortedData.map((r) => r.step)), { timeout: 6000 }).toEqual(PIPE);
+    const r = await page.evaluate(() => {
+      appInstance.sortCol = 'kind';
+      return { kind: appInstance.sortedData.map((x) => x.kind),
+               picker: appInstance.getRefOptions('step', {}).map((o) => o.value),
+               list: appInstance.getListOptions('kind').map((o) => o.value) };
+    });
+    expect(r).toEqual({ kind: PIPE, picker: PIPE, list: PIPE });
+  });
+});
+
 test.describe('A lookup that declares its hierarchy', () => {
   // The Lookup editor asked "does this table have exactly two author-facing columns?" and the board's
   // ref lane asked "which column is the valueCol, and what is the other one?" -- so a lookup with a

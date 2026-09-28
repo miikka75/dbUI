@@ -1919,7 +1919,7 @@ section above — rendering three levels in the editor it already had, with the 
 self-parent and the cycle each asserted in `buildHierarchy`'s own tests rather than found as a blank
 screen.
 
-### Sorting inside an embed — a clickable header, and a `ref` that knows its own order
+### Sorting inside an embed — a clickable header, and a `ref` that knows its own order *(the `ref` order landed; the header is open)*
 
 Two gaps found while widening the bishopric card (#197). One is a missing affordance; the other makes a
 schema-only answer look available when it is not, which is the more expensive of the two.
@@ -1956,6 +1956,26 @@ declared, which is not a distinction anyone authoring a schema means to make.
 alphabetically by key would only make the wrong order easier to reach. Done the other way round, one
 change fixes `defaultSort`, the header click, and the print path at the same time, because all three go
 through `sortByCol`.
+
+#### What landed: the order, and a correction to the paragraph above
+
+The `select`-through-`list` half of the claim above was **wrong**: `_listsCache` holds named lists only,
+never a lookup table, so `organization` sorted by stored key exactly as `status` did. Both were the same
+bug — nothing in `sortByCol`'s reach knew a lookup's order.
+
+Neither option above was taken as written. The order is the ROOT's question (it owns `SCHEMA`, the
+lookup dimensions and the loaded rows), so `rows.js` now asks it through one runtime-bound resolver,
+`root.getColumnOrder(col)`, in place of `getColumnList` + `_listsCache`; app-core answers with
+`columnValueOrder` — a named list's authored order, a lookup-backed list's catalogue, a `ref`'s
+catalogue. That is the picker's order read back as a sort, so the two cannot disagree.
+
+"A lookup's catalogue order" was already answered twice (the Lookup editor and the board's ref lane,
+both `sortRosterRows` when `reorderable`) and not at all by the pickers, which listed rows in backend
+order. It is now one method, `_catalogueRows`, read by all four — so **the `ref` and lookup-backed
+pickers now also follow `position`**, which is a visible change on any reorderable lookup whose rows
+were stored out of order. A `sorted` list's alphabetising stays a picker-only convenience, as before.
+
+Still open: the clickable header in `embed-view` (the `SORT_UI` mixin), which is now safe to add.
 ### Narrowing a lookup-backed picker — which rows are OFFERED
 
 A `select` whose `list:` names a lookup offers every row of it. `lookupListValues` sweeps
@@ -2629,9 +2649,8 @@ now that the date label has shipped, a resolver branch and a test, and it is wha
 check-in entry above. Worth doing only when somebody actually wants the verifier-scans-attendee
 arrangement; it is not owed to the shipped half.
 
-**Sorting inside an embed** sits beside it on cost, and its `ref`-order half is the cheaper and the more
-urgent of its two: a column that sorts alphabetically by its stored key is wrong on screen right now,
-wherever a schema already asks for it, rather than being a feature nobody has yet.
+**Sorting inside an embed** sits beside it on cost. Its `ref`-order half, the urgent one, has landed;
+what remains is the clickable header, a missing affordance rather than a wrong answer.
 
 Then `gallery`. `tree` has since shipped in the only form that was worth building: the editor's
 recursion, and `hierarchy.by: "id"` for tables that want depth, with the value-keyed lookups left

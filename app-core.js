@@ -62,6 +62,8 @@ var BCP47_LANGS = [
 function getColumnType(table, col) { return Columns.columnType(SCHEMA, table, col); }
 function getColumnList(table, col) { return Columns.columnList(SCHEMA, table, col); }
 function getColumnRef(table, col) { return Columns.columnRef(SCHEMA, table, col); }
+// A column's values in the order they are presented (rows.js sortByCol reads it; see columnValueOrder).
+function getColumnOrder(col) { return appInstance ? appInstance.columnValueOrder(col) : null; }
 function colIsMirror(tables, col, tableName) { return Columns.isMirror(tables, tableName, col); }
 function getTableMirrorSource(tables, tableName) { return Columns.tableMirrorSource(tables, tableName); }
 function getOwnerCol(table) { return Columns.tableOwnerCol(SCHEMA, table); } // table's type:'owner' column name, or null
@@ -1021,7 +1023,8 @@ function createVueApp() {
           ? Rows.searchRows(this.currentData, this.searchTerm, this.searchCols, this.searchLabeler)
           : this.currentData;
         if (!this.sortCol) return rows.slice();
-        var _dep = this.listsCache;   // list-backed order is read through the runtime-bound cache
+        // Value order is read through the runtime-bound getColumnOrder (lists and lookup rows off the
+        // root proxy), so Vue tracks it as a dependency without help.
         return sortByCol(rows, this.sortCol, VIEWS[this.currentTable], this.sortAsc);
       },
       staticTranslationKeys: function() {
@@ -1243,13 +1246,7 @@ function createVueApp() {
       refReorderable: function() { return !!(this.currentRefTable && SCHEMA[this.currentRefTable] && SCHEMA[this.currentRefTable].reorderable); },
       refTableData: function() {
         if (!this.currentRefTable) return [];
-        var rows = this.dataCache[this.currentRefTable] || [];
-        // The same sort the rotation reads these rows through -- a lookup table's order is one question,
-        // and the editor disagreeing with the matrix about it is what `rosterGroups` already warns of.
-        // The inline `(Number(position) || 0)` this replaces put UNPOSITIONED rows first, ahead of every
-        // positioned one, which is the opposite of where they belong.
-        if (this.refReorderable) rows = Rotation.sortRosterRows(rows);
-        return rows;
+        return this._catalogueRows(this.currentRefTable);
       },
       // WHICH column is the group and which the value -- the lookup's own answer (Columns
       // .lookupHierarchy), declared by the table or inferred from two author-facing columns for a
@@ -3554,7 +3551,7 @@ function createVueApp() {
           // A HANDLE dimension, so a blank cell derives rather than contributing nothing: see
           // Columns.rowHandle for why the stored value is an override and not the source.
           var def = SCHEMA[name], order = getColumns(name), seen = {}, out = [];
-          (this.dataCache[name] || []).forEach(function(r) {
+          this._catalogueRows(name).forEach(function(r) {
             var v = Columns.rowHandle(def, order, r, valueCol);
             if (!v || seen[v]) return;
             seen[v] = 1; out.push(v);
@@ -3572,12 +3569,33 @@ function createVueApp() {
         var defaultCol = h ? (h.by === 'id' ? h.value : h.parent) : Columns.lookupCols(SCHEMA[name], order)[0];
         return defaultCol ? this._lookupColumnValues(name, defaultCol) : [];
       },
-      // One column of a lookup, deduped and in row order, skipping blanks. A blank is how a row says it
-      // has no value in THIS dimension -- an ordination is a row of the callings catalogue that names no
-      // ward position -- so it must not become an empty option.
+      // A lookup table's rows in CATALOGUE order -- the one answer to "what order is this lookup in",
+      // asked by the Lookup editor, the board's ref lane, every picker drawn from a lookup, and the sort
+      // (columnValueOrder). A `reorderable` lookup orders by `position` through the same sort the
+      // rotation reads it with; the inline `(Number(position) || 0)` that sortRosterRows replaced put
+      // UNPOSITIONED rows first, ahead of every positioned one. Any other lookup keeps its loaded order.
+      _catalogueRows: function(name) {
+        var rows = this.dataCache[name] || [];
+        return (SCHEMA[name] && SCHEMA[name].reorderable) ? Rotation.sortRosterRows(rows) : rows;
+      },
+      // The order a column's values are PRESENTED in, where something other than the values decides it:
+      // a named list's authored order, a lookup-backed list's catalogue, a `ref`'s catalogue. Null for a
+      // column with none, which sorts by value. This is the picker's order read back as a sort, so the
+      // two cannot disagree -- `status` offered in pipeline order and sorted alphabetically by key was
+      // exactly that disagreement. (A `sorted` list's alphabetising is a picker convenience, not the
+      // column's order, and stays out of it, as it always has.)
+      columnValueOrder: function(col) {
+        var ln = getColumnList(null, col);
+        if (ln) return this.lookupListValues(ln, Columns.colListValueCol(SCHEMA, col)) || this.listsCache[ln] || null;
+        var ref = getColumnRef(null, col);
+        return (ref && ref.table && ref.valueCol) ? this._lookupColumnValues(ref.table, ref.valueCol) : null;
+      },
+      // One column of a lookup, deduped and in catalogue order, skipping blanks. A blank is how a row says
+      // it has no value in THIS dimension -- an ordination is a row of the callings catalogue that names
+      // no ward position -- so it must not become an empty option.
       _lookupColumnValues: function(name, col) {
         var seen = {}, out = [];
-        (this.dataCache[name] || []).forEach(function(r) {
+        this._catalogueRows(name).forEach(function(r) {
           var v = r[col];
           if (v == null || v === '' || seen[v]) return;
           seen[v] = 1; out.push(v);
@@ -4023,7 +4041,7 @@ function createVueApp() {
         var ref = getColumnRef(null, col);   // memoized any-table scan (see colRef); was the same loop
         if (!ref) return [];
         var self = this, ns = ref.table;
-        var rows = this.dataCache[ref.table] || [];
+        var rows = this._catalogueRows(ref.table);
         if (ref.filterBy) {
           var filterBy = ref.filterBy;
           var hasFilter = false;
@@ -8685,11 +8703,7 @@ function createVueApp() {
         var h = Columns.lookupHierarchy(SCHEMA[rf.table], getColumns(rf.table), rf.valueCol || null);
         if (!h) return null;
         var parentCol = h.parent, childCol = h.value;
-        var rows = appInstance.dataCache[rf.table] || [];
-        // Same one sort again -- this is the fourth place that asked, and the third that answered it
-        // differently by inlining the coercion sortRosterRows exists to avoid.
-        if (SCHEMA[rf.table] && SCHEMA[rf.table].reorderable) rows = Rotation.sortRosterRows(rows);  // stable, reorderable order
-        return { table: rf.table, parentCol: parentCol, childCol: childCol, rows: rows };
+        return { table: rf.table, parentCol: parentCol, childCol: childCol, rows: appInstance._catalogueRows(rf.table) };
       },
       // Lane keys in intended order: a ref lane -> the lookup's child values in row order; else explicit
       // `lanes`, else the select column's list (authored order).
