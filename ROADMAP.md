@@ -1919,7 +1919,7 @@ section above — rendering three levels in the editor it already had, with the 
 self-parent and the cycle each asserted in `buildHierarchy`'s own tests rather than found as a blank
 screen.
 
-### Sorting inside an embed — a clickable header, and a `ref` that knows its own order *(the `ref` order landed; the header is open)*
+### Sorting inside an embed — a clickable header, and a `ref` that knows its own order *(both halves landed, #233)*
 
 Two gaps found while widening the bishopric card (#197). One is a missing affordance; the other makes a
 schema-only answer look available when it is not, which is the more expensive of the two.
@@ -1975,7 +1975,11 @@ order. It is now one method, `_catalogueRows`, read by all four — so **the `re
 pickers now also follow `position`**, which is a visible change on any reorderable lookup whose rows
 were stored out of order. A `sorted` list's alphabetising stays a picker-only convenience, as before.
 
-Still open: the clickable header in `embed-view` (the `SORT_UI` mixin), which is now safe to add.
+The header landed with it, as proposed: `embed-view` mixes in `SORT_UI`, keeps `sortCol`/`sortAsc` per
+instance, and renders a `shown` computed that is `rows` untouched until a header is clicked, then
+`Rows.sortByCol` over them — so an embedded `ref` column sorts in the same catalogue order as the grid.
+All three table bodies an embed can draw (the editable table, the read-only spec table, and an inline
+`{{self}}` table) have it. The card, list and chip layouts have no header row and keep `defaultSort`.
 ### Narrowing a lookup-backed picker — which rows are OFFERED
 
 A `select` whose `list:` names a lookup offers every row of it. `lookupListValues` sweeps
@@ -2649,8 +2653,8 @@ now that the date label has shipped, a resolver branch and a test, and it is wha
 check-in entry above. Worth doing only when somebody actually wants the verifier-scans-attendee
 arrangement; it is not owed to the shipped half.
 
-**Sorting inside an embed** sits beside it on cost. Its `ref`-order half, the urgent one, has landed;
-what remains is the clickable header, a missing affordance rather than a wrong answer.
+**Sorting inside an embed** sat beside it on cost, and has shipped (#233) — both the `ref` order and the
+clickable header.
 
 Then `gallery`. `tree` has since shipped in the only form that was worth building: the editor's
 recursion, and `hierarchy.by: "id"` for tables that want depth, with the value-keyed lookups left
