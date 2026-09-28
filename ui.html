@@ -128,18 +128,18 @@
     <!-- The example picker. Reads examples/index.json (same origin -- examples/ is published by the
          deployment itself) and installs a bundle through the ordinary import.
 
-         LITERAL ENGLISH, deliberately, like the setup dialog above it and the progress dialog below:
-         this thing installs the language pack it would need in order to translate itself, so on the
-         database where it matters most t() has nothing to return but raw keys. The Settings BUTTON
-         that opens it is translated -- that one only ever appears on a database that already has a
-         language. -->
+         Translated through tEx(): this dialog installs the language pack it would need in order to
+         translate itself, so on an empty database — where it matters most — t() has nothing to return
+         but raw keys. tEx() answers from the database's own labels when it has them (the dialog also
+         opens from Settings), and otherwise from the shipped English app pack, fetched with the
+         manifest. No English is written here; the pack is the one copy. The setup dialog above and the
+         progress dialog below stay literal English: no database is loaded there. -->
     <v-dialog v-model="examples.open" max-width="640" scrollable>
       <v-card data-testid="example-picker">
-        <v-card-title>Start from an example</v-card-title>
+        <v-card-title>{{ tEx('examples.title') }}</v-card-title>
         <v-card-text>
           <div class="mb-3" style="font-size:0.85rem;opacity:0.8">
-            These ship with this deployment. Installing one writes its tables, views and labels into
-            <strong>this</strong> database — the structure, not the data.
+            {{ tEx('examples.intro') }}
           </div>
           <v-alert v-if="examples.error" type="error" density="compact" class="mb-3" style="font-size:0.8rem"
                    data-testid="example-error">{{ examples.error }}</v-alert>
@@ -157,8 +157,8 @@
               <div style="font-weight:600">{{ b.title }}</div>
               <div style="font-size:0.8rem; opacity:0.75">{{ b.description }}</div>
               <div style="font-size:0.72rem; opacity:0.6" class="mt-1">
-                {{ b.tables }} tables · {{ b.views }} views ·
-                {{ b.languages.map(l => l.name).join(', ') }}<span v-if="b.data"> · sample rows available</span>
+                {{ b.tables }} {{ tEx('examples.tables') }} · {{ b.views }} {{ tEx('examples.views') }} ·
+                {{ b.languages.map(l => l.name).join(', ') }}<span v-if="b.data"> · {{ tEx('examples.sample_rows') }}</span>
               </div>
             </div>
           </div>
@@ -167,7 +167,7 @@
             <v-divider class="my-3"></v-divider>
             <!-- Every pack is preselected: they are a few kB each, and a language you did not install
                  shows as raw keys (`view.chore_board`) the moment someone switches to it. -->
-            <p class="text-subtitle-2 mb-1">Languages</p>
+            <p class="text-subtitle-2 mb-1">{{ tEx('examples.languages') }}</p>
             <div class="d-flex flex-wrap mb-3" style="gap:6px">
               <v-chip v-for="l in examples.pick.languages" :key="l.code" size="small"
                       :variant="exampleLangSelected(l.code) ? 'flat' : 'outlined'"
@@ -175,31 +175,28 @@
                       :data-testid="'example-lang-' + l.code" @click="toggleExampleLang(l.code)">{{ l.name }}</v-chip>
             </div>
             <div style="font-size:0.75rem;opacity:0.65" class="mb-3">
-              The app's own UI text (buttons, messages, settings) installs alongside, for each language
-              this deployment ships it in.
+              {{ tEx('examples.app_text') }}
             </div>
 
             <v-checkbox v-if="examples.pick.data" v-model="examples.withData" density="compact" hide-details
                         data-testid="example-with-data" class="mb-2"
-                        label="Also install its sample rows"></v-checkbox>
+                        :label="tEx('examples.with_data')"></v-checkbox>
             <div v-if="examples.pick.data && examples.withData" style="font-size:0.75rem;opacity:0.65" class="mb-2">
-              Sample rows carry fixed ids, so importing them again later overwrites whatever those rows
-              have become. Fine on an empty database; think twice on one in use.
+              {{ tEx('examples.data_warning') }}
             </div>
 
             <v-alert v-if="hasAnyTables" type="warning" variant="tonal" density="compact" style="font-size:0.8rem"
                      data-testid="example-replace-warning">
-              This database already has a structure. Installing replaces the schema and merges the
-              labels — anything you changed in the schema editor is lost. <strong>Export first.</strong>
+              {{ tEx('examples.replace_warning') }} <strong>{{ tEx('examples.export_first') }}</strong>
             </v-alert>
           </template>
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
-          <v-btn variant="text" @click="examples.open = false">Cancel</v-btn>
+          <v-btn variant="text" @click="examples.open = false">{{ tEx('btn.cancel') }}</v-btn>
           <v-btn color="primary" variant="flat" prepend-icon="mdi-download"
                  :disabled="!examples.pick || examples.busy" :loading="examples.busy"
-                 data-testid="example-install" @click="installExample()">Install</v-btn>
+                 data-testid="example-install" @click="installExample()">{{ tEx('examples.install') }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -925,24 +922,24 @@
             </v-card>
             <!-- Browser-local Postgres only. Deliberately next to Export, because the honest answer to
                  "can I lose this?" is a backup, and the second-best answer is the persistence request
-                 below. Literal English rather than t() keys, matching the other backend-specific copy
-                 (the setup dialog): these strings are about one backend, not about the user's data. -->
+                 below. Translated like the rest of Settings: it was literal English once, on the grounds
+                 that it describes one backend, but it is read inside a loaded database, where the
+                 labels are there to use. -->
             <template v-if="a.mode === 'pglite'">
               <v-divider class="my-4"></v-divider>
-              <p class="text-subtitle-2 mb-2">Local database</p>
+              <p class="text-subtitle-2 mb-2">{{ a.t('local.title') }}</p>
               <div style="font-size:0.85rem" data-testid="local-store">
-                <div>Using <strong>{{ a.fmtBytes(a.localStore.usage) }}</strong><span v-if="a.localStore.quota"> of the {{ a.fmtBytes(a.localStore.quota) }} this browser allows</span>.</div>
+                <div>{{ a.t('local.used') }} <strong>{{ a.fmtBytes(a.localStore.usage) }}</strong><span v-if="a.localStore.quota"> · {{ a.t('local.quota') }} {{ a.fmtBytes(a.localStore.quota) }}</span></div>
                 <div v-if="a.localStore.persisted === true" class="mt-1" data-testid="local-store-persisted">
                   <v-icon size="small" color="success">mdi-shield-check</v-icon>
-                  Marked <strong>persistent</strong> — the browser will not delete it to reclaim space. Only you can.
+                  {{ a.t('local.persistent') }}
                 </div>
                 <div v-else-if="a.localStore.persisted === false" class="mt-1" data-testid="local-store-besteffort">
                   <v-icon size="small" color="warning">mdi-alert</v-icon>
-                  <strong>Best-effort storage.</strong> The browser may delete this database on its own —
-                  when the device runs low on space, or (on Safari) after a long spell without visits.
+                  <strong>{{ a.t('local.best_effort_title') }}</strong> {{ a.t('local.best_effort') }}
                   <div class="mt-2">
-                    <v-btn size="small" variant="outlined" prepend-icon="mdi-shield-lock" data-testid="local-store-persist" @click="a.requestLocalPersistence()">Keep permanently</v-btn>
-                    <span class="ml-2" style="opacity:0.7">Installing this app (PWA) usually persuades the browser to grant it.</span>
+                    <v-btn size="small" variant="outlined" prepend-icon="mdi-shield-lock" data-testid="local-store-persist" @click="a.requestLocalPersistence()">{{ a.t('local.keep') }}</v-btn>
+                    <span class="ml-2" style="opacity:0.7">{{ a.t('local.install_hint') }}</span>
                   </div>
                 </div>
               </div>

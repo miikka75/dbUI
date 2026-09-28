@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "f3f99ebcf38dd0a2"
+      "hash": "30f197e44d31bec6"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "dd35f72c3d5caa72"
+      "hash": "0a82233361ff3c05"
     }
   ],
   "bundles": [
@@ -97,7 +97,7 @@
       "title": "Team Demo",
       "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
       "icon": null,
-      "revision": 7,
+      "revision": 8,
       "tables": 11,
       "views": 26,
       "schema": {
@@ -109,19 +109,19 @@
           "code": "en",
           "name": "English",
           "file": "demo-lang-en.json",
-          "hash": "208a5d88babff5ba"
+          "hash": "f6f2b39433f8391a"
         },
         {
           "code": "es",
           "name": "Español",
           "file": "demo-lang-es.json",
-          "hash": "d0139018027de3a6"
+          "hash": "9f60f10d629705f3"
         },
         {
           "code": "sv",
           "name": "Svenska",
           "file": "demo-lang-sv.json",
-          "hash": "dbfd69bfd17d5df5"
+          "hash": "084d723b79d49fcd"
         }
       ],
       "data": {
@@ -130,12 +130,13 @@
       },
       "about": {
         "file": "demo-about.json",
-        "hash": "3f5969347a031722"
+        "hash": "6f05f524dc4e4132"
       },
       "notes": {
         "5": "Adds `teams`, a catalogue whose parent column holds another ROW's id (`hierarchy.by: \"id\"`) instead of a group's value — so the Lookup tab shows it three levels deep (Acme > Engineering > Backend) rather than the two every other lookup has. Nothing existing changes: `cities` still groups by value, side by side with it, which is the point of shipping both.",
         "6": "The navigation is now a set of pages instead of a 22-entry drawer (`nav.layout: \"browse\"`): the home screen shows tiles for six sections, each section opens as a page of its own entries, and a breadcrumb leads back up. Every screen the old menu had is still there, grouped. Each person can switch back to the side menu under Settings -> Navigation.",
-        "7": "Settings gains an Appearance section — the theme, plus an icon, image and background for every menu entry — and a single Navigation choice (Side menu, Top navigation, List, Tiles). Their labels now come in Spanish and Swedish as well as English, and the old Background images labels are gone."
+        "7": "Settings gains an Appearance section — the theme, plus an icon, image and background for every menu entry — and a single Navigation choice (Side menu, Top navigation, List, Tiles). Their labels now come in Spanish and Swedish as well as English, and the old Background images labels are gone.",
+        "8": "The rest of Settings now speaks Spanish and Swedish too: the theme colour names, the local-database storage notice, and the Examples dialog."
       }
     }
   ]

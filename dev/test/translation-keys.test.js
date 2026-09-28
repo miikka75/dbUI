@@ -24,7 +24,7 @@ const SCHEMA_DERIVED = /^(tab|field|view|board\.group|text|embed)\.|^list\.[^.]+
 describe('translation keys', () => {
   it('every literal t()/tOr() key the app asks for is offered by staticTranslationKeys()', () => {
     const asked = new Set();
-    for (const m of (appCore + ui).matchAll(/\bt(?:Or)?\(\s*'([a-z][a-z0-9_]*\.[a-z0-9_.]+)'/gi)) asked.add(m[1]);
+    for (const m of (appCore + ui).matchAll(/\bt(?:Or|Ex)?\(\s*'([a-z][a-z0-9_]*\.[a-z0-9_.]+)'/gi)) asked.add(m[1]);
     assert.ok(asked.size > 50, 'sanity: found ' + asked.size + ' literal keys');
 
     const missing = [...asked].filter(k => !STATIC.has(k) && !SCHEMA_DERIVED.test(k)).sort();
@@ -47,11 +47,11 @@ describe('translation keys', () => {
     // Literal calls: t('msg.copied'). [^a-z]* absorbs the opening quote and, for a t() inside one of
     // app-core's template strings, the backslash escaping it.
     const literal = new Set();
-    for (const m of (appCore + ui).matchAll(/\bt(?:Or)?\([^a-z]*([a-z][a-z0-9_]*\.[a-z0-9_.]+)/gi)) literal.add(m[1]);
+    for (const m of (appCore + ui).matchAll(/\bt(?:Or|Ex)?\([^a-z]*([a-z][a-z0-9_]*\.[a-z0-9_.]+)/gi)) literal.add(m[1]);
 
     // Concatenated calls: t('role.' + r) can only be checked to its PREFIX, because the second half is
     // a runtime value. A key under such a prefix counts as asked for.
-    const prefixes = [...(appCore + ui).matchAll(/\bt(?:Or)?\([^a-z]*([a-z][a-z0-9_]*\.)[^a-z0-9_.]*\s*\+/gi)].map((m) => m[1]);
+    const prefixes = [...(appCore + ui).matchAll(/\bt(?:Or|Ex)?\([^a-z]*([a-z][a-z0-9_]*\.)[^a-z0-9_.]*\s*\+/gi)].map((m) => m[1]);
 
     const orphaned = [...STATIC]
       .filter((k) => !literal.has(k) && !prefixes.some((p) => k.startsWith(p)))

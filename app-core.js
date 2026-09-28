@@ -315,7 +315,7 @@ function createVueApp() {
       // The example picker (Settings -> Examples, and the first-boot prompt on an empty database).
       // `manifest` is examples/index.json once fetched -- one same-origin GET per session, never at
       // boot. `update` is what Examples.compare() found, or null.
-      examples: { open: false, manifest: null, busy: false, error: '', pick: null, langs: [], withData: true },
+      examples: { open: false, manifest: null, busy: false, error: '', pick: null, langs: [], withData: true, english: {} },
       exampleUpdate: null,
       exampleUpdateChecked: false,
       firestoreRules: '',
@@ -474,9 +474,9 @@ function createVueApp() {
       // Curated palette tokens exposed in the admin theme editor (Vuetify color names + friendly labels).
       themeTokens: function() {
         return [
-          { key: 'primary', label: 'Primary' }, { key: 'secondary', label: 'Secondary' },
-          { key: 'surface', label: 'Surface' }, { key: 'background', label: 'Background' },
-          { key: 'on-surface', label: 'Text' }, { key: 'error', label: 'Error' }, { key: 'success', label: 'Success' }
+          { key: 'primary', label: this.t('theme.primary') }, { key: 'secondary', label: this.t('theme.secondary') },
+          { key: 'surface', label: this.t('theme.surface') }, { key: 'background', label: this.t('theme.background') },
+          { key: 'on-surface', label: this.t('theme.text') }, { key: 'error', label: this.t('theme.error') }, { key: 'success', label: this.t('theme.success') }
         ];
       },
       // Settings -> Appearance: every nav entry, in tree order, with its depth for indenting. Groups are in
@@ -1059,7 +1059,8 @@ function createVueApp() {
          'settings.reset', 'settings.confirm_reset', 'settings.nav_layout', 'settings.nav_drawer', 'settings.tabs_nav', 'settings.nav_list', 'settings.nav_tiles', 'settings.appearance',
          'appearance.menu', 'appearance.background', 'appearance.icon', 'appearance.image', 'appearance.none', 'appearance.search',
          'appearance.same_as_menu', 'appearance.other_icon', 'appearance.focus',
-         'appearance.focus_top', 'appearance.focus_center', 'appearance.focus_bottom', 'appearance.schema_default', 'appearance.need_image', 'appearance.entries', 'settings.user_access', 'settings.user_access_title',
+         'appearance.focus_top', 'appearance.focus_center', 'appearance.focus_bottom', 'theme.primary', 'theme.secondary', 'theme.surface', 'theme.background', 'theme.text', 'theme.error', 'theme.success', 'local.title', 'local.used', 'local.quota', 'local.persistent', 'local.best_effort_title', 'local.best_effort', 'local.keep', 'local.install_hint', 'examples.title', 'examples.intro', 'examples.tables', 'examples.views', 'examples.sample_rows', 'examples.languages', 'examples.app_text', 'examples.with_data', 'examples.data_warning', 'examples.replace_warning', 'examples.export_first', 'examples.install',
+         'appearance.schema_default', 'appearance.need_image', 'appearance.entries', 'settings.user_access', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
          'settings.databases', 'settings.databases_hint', 'settings.switch', 'settings.forget',
          'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.tables_view', 'settings.add_user', 'settings.all',
@@ -6234,10 +6235,27 @@ function createVueApp() {
         if (self.examples.manifest) return;
         self.examples.busy = true;
         self.fetchExampleManifest()
-          .then(function(m) { self.pickExample((m.bundles || [])[0]); })
+          .then(function(m) { self.pickExample((m.bundles || [])[0]); return self._loadExamplesEnglish(m); })
           .catch(function(err) { self.examples.error = String((err && err.message) || err); })
           .then(function() { self.examples.busy = false; });
       },
+      // The dialog's own words on a database with no labels yet (see tEx): the shipped English app pack,
+      // which the manifest names. Skipped when the database already has them.
+      _loadExamplesEnglish: function(m) {
+        var self = this;
+        if (this.strings['examples.title']) return Promise.resolve();
+        var en = ((m && m.appLanguages) || []).filter(function(l) { return l.code === 'en'; })[0];
+        if (!en || !en.file) return Promise.resolve();
+        return fetch(_u('/examples/' + en.file), { cache: 'no-cache' })
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .then(function(p) { self.examples.english = (p && p.translations && p.translations.en) || {}; })
+          .catch(function() {});
+      },
+      // t() for the Examples dialog only. It opens on an empty database, before any language is
+      // installed — the one screen where t() would show a new admin nothing but raw keys — so it falls
+      // back to the English pack fetched with the manifest. Unlike tOr, no English is written in the
+      // markup: a key the pack lacks still shows as the key.
+      tEx: function(key) { return this.strings[key] || this.examples.english[key] || key; },
       // Choosing a bundle preselects its languages: every one it ships, since a language pack is small
       // and a missing one shows raw keys. Sample rows default ON only for a database with nothing in
       // it -- layering demo rows onto real ones is a different, deliberate act.

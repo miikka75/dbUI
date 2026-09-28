@@ -107,7 +107,8 @@ test('tells the user, in Settings, that the browser may evict a best-effort data
   await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
   await expect(page.getByTestId('local-store-besteffort')).toBeVisible();
   await expect(page.getByTestId('local-store-persist')).toBeVisible();
-  await expect(page.getByTestId('local-store')).toContainText('Using');
+  // A fresh local database has no language installed, so the label shows as whatever t() gives it.
+  await expect(page.getByTestId('local-store')).toContainText(await page.evaluate(() => window.appInstance.t('local.used')));
 });
 
 test('the production access policy is enforcing, against the identity in localStorage', async ({ page }) => {
