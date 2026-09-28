@@ -477,7 +477,7 @@
           <v-table v-else-if="a.visibleCols.length" density="compact" hover>
             <template v-slot:default>
             <thead><tr>
-              <th v-for="col in a.visibleCols" :key="col" :class="{ 'col-empty': a.emptyCols[col] }" :title="a.t('field.' + col) || col" @click="a.toggleSort(col)" style="cursor:pointer">{{ a.t('field.' + col) || col }}</th>
+              <th v-for="col in a.visibleCols" :key="col" :class="{ 'col-empty': a.emptyCols[col] }" :title="a.t('field.' + col) || col" @click="a.toggleSort(col)" :aria-sort="a.ariaSort(col)" style="cursor:pointer">{{ a.t('field.' + col) || col }}</th>
               <th class="col-actions"></th>
             </tr></thead>
             <tbody>
