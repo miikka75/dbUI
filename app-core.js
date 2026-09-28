@@ -7397,9 +7397,10 @@ function createVueApp() {
       fontSize: { type: String, default: '0.75rem' }, cellPad: { type: String, default: '2px 6px' }, header: { type: Boolean, default: false },
       depth: { type: Number, default: 0 } // recursion guard for doc-view-in-doc-view embeds
     },
-    // Per-embed inline-edit state for doc-view embeds (each embed edits its own page independently), and
-    // which half of a `@both` embed is showing (per embed: two toggles on one page move independently).
-    data: function() { return { editing: false, docDraft: '', showArchive: false }; },
+    // Per-embed inline-edit state for doc-view embeds (each embed edits its own page independently),
+    // which half of a `@both` embed is showing (per embed: two toggles on one page move independently),
+    // and the reader's header sort -- per instance too: one member's callings sorting is not another's.
+    data: function() { return { editing: false, docDraft: '', showArchive: false, sortCol: null, sortAsc: true }; },
     created: function() {
       // A doc-view embed renders the ACCESS-GATED server body, not the world-readable schema seed. Kick
       // off the single-page read (server-filtered) once, but only if the viewer may see it -- a restricted
@@ -7481,6 +7482,10 @@ function createVueApp() {
         if (this.spec) return (this.spec.config.filterBy && this.row) ? appInstance.embedRowsForItem(this.spec, this.row) : this.spec.rows;
         return appInstance ? appInstance.embedRows(this.type, this.name, this.effPart) : [];
       },
+      // What a table layout renders: `rows` (already in the embed's defaultSort) until the reader clicks a
+      // header, then re-sorted through the same sortByCol the primary grid uses, so a ref or lookup-backed
+      // column sorts in catalogue order here too. colCfg lets an aggregate's key inherit its source's order.
+      shown: function() { return this.sortCol ? Rows.sortByCol(this.rows, this.sortCol, this.colCfg, this.sortAsc) : this.rows; },
       canMutate: function() { return !this.effPart && appInstance && appInstance.canMutateEmbed(this.type, this.name); },
       hasArchive: function() { return !this.effPart && appInstance && appInstance.embedHasArchive(this.type, this.name); },
       layout: function() { return appInstance ? appInstance.embedViewLayout(this.type, this.name) : 'table'; },
@@ -7492,7 +7497,7 @@ function createVueApp() {
       thStyle: function() { return 'text-align:left; padding:' + this.cellPad + '; opacity:0.6; border-bottom:1px solid rgb(var(--v-theme-outline),0.2)'; },
       tdStyle: function() { return 'padding:' + this.cellPad; }
     },
-    methods: Object.assign({}, ROOT_PROXY, {
+    methods: Object.assign({}, ROOT_PROXY, SORT_UI, {
       // Per-row column visibility, evaluated against the EMBEDDED view's own entries (colCfg).
       // Card/list layouts drop the field entirely; a table keeps the column and blanks the cell, which
       // is the same split the primary grid makes.
@@ -7546,13 +7551,13 @@ function createVueApp() {
       + '<template v-else-if="spec">'
       + '<template v-if="spec.inlineBlocks" v-for="(blk, bi) in spec.inlineBlocks" :key="\'ib\'+bi">'
       + '<div v-if="blk.html" v-html="blk.html" style="font-size:0.8rem"></div>'
-      + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]" :view-cfg="obscureCfg"></list-value></td></tr></tbody></table>'
+      + '<table v-else-if="blk.self" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle + \';cursor:pointer\'" @click="toggleSort(ec)" :data-testid="\'embed-sort-\' + ec">{{ t(\'field.\' + ec) || ec }}{{ sortIcon(ec) }}</th></tr></thead>'
+      + '<tbody><tr v-for="er in shown" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]" :view-cfg="obscureCfg"></list-value></td></tr></tbody></table>'
       + '</template>'
       + '<template v-else>'
       + '<div v-if="header" style="font-size:0.8rem; opacity:0.6; margin-bottom:8px">{{ t(\'tab.\' + spec.config.table) || spec.config.table }} ({{ rows.length }})</div>'
-      + '<table v-if="roLayout===\'table\'" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle">{{ t(\'field.\' + ec) || ec }}</th></tr></thead>'
-      + '<tbody><tr v-for="er in rows" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]" :view-cfg="obscureCfg"></list-value></td></tr></tbody></table>'
+      + '<table v-if="roLayout===\'table\'" :style="tblStyle"><thead><tr><th v-for="ec in cols" :key="ec" :style="thStyle + \';cursor:pointer\'" @click="toggleSort(ec)" :data-testid="\'embed-sort-\' + ec">{{ t(\'field.\' + ec) || ec }}{{ sortIcon(ec) }}</th></tr></thead>'
+      + '<tbody><tr v-for="er in shown" :key="er.id"><td v-for="ec in cols" :key="ec" :style="tdStyle"><list-value v-if="!colHidden(ec, er)" :col="ec" :value="er[ec]" :view-cfg="obscureCfg"></list-value></td></tr></tbody></table>'
       + '<div v-else-if="roLayout===\'card\'" style="display:grid; gap:6px"><div v-for="er in rows" :key="er.id" style="font-size:0.75rem; padding:4px 6px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:4px"><span v-for="ec in colsFor(er)" :key="ec" style="display:inline-block; margin-right:12px"><span style="opacity:0.6">{{ t(\'field.\' + ec) || ec }}: </span><list-value :col="ec" :value="er[ec]" :view-cfg="obscureCfg"></list-value></span></div></div>'
       + '<div v-else class="d-flex align-center flex-wrap ga-1"><v-chip v-for="er in rows" :key="er.id" size="small" variant="tonal" color="secondary" label><span v-for="(ec, i) in colsFor(er)" :key="ec">{{ er[ec] }}<span v-if="i < colsFor(er).length - 1" style="opacity:0.4"> · </span></span></v-chip></div>'
       + '</template>'
@@ -7575,8 +7580,8 @@ function createVueApp() {
       + '<div v-if="canMutateRow(item)" style="text-align:right"><v-btn v-if="hasArchive" :icon="isArchArmed(item) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" :color="isArchArmed(item) ? \'warning\' : \'\'" @click="archRow(item)"></v-btn><v-btn :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isDelArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></div>'
       + '</v-card></div>'
       + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
-      + '<thead><tr><th v-for="c in cols" :key="c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
-      + '<tbody><tr v-for="(item, ri) in rows" :key="item.id || ri"><td v-for="col in cols" :key="col">'
+      + '<thead><tr><th v-for="c in cols" :key="c" style="cursor:pointer" @click="toggleSort(c)" :data-testid="\'embed-sort-\' + c">{{ t(\'field.\' + c) || c }}{{ sortIcon(c) }}</th><th v-if="canMutate"></th></tr></thead>'
+      + '<tbody><tr v-for="(item, ri) in shown" :key="item.id || ri"><td v-for="col in cols" :key="col">'
       + '<data-cell v-if="!colHidden(col, item)" :item="item" :col="col" :owner="name" :readonly="!!effPart" :embed="true"></data-cell>'
       + '</td><td v-if="canMutate" style="white-space:nowrap"><template v-if="canMutateRow(item)">'
       + '<v-btn v-if="hasArchive" :icon="isArchArmed(item) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" :color="isArchArmed(item) ? \'warning\' : \'\'" @click="archRow(item)"></v-btn>'

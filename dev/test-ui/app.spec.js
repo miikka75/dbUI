@@ -1615,10 +1615,11 @@ test.describe('A column backed by a lookup sorts in catalogue order', () => {
                   { name: 'kind', type: 'select', list: 'ref_steps' }]
       }
     },
-    nav: { items: [{ table: 'tasks' }] }
+    views: [{ name: 'task_page', kind: 'page', markdown: '{{table:tasks}}' }],
+    nav: { items: [{ table: 'tasks' }, { view: 'task_page' }] }
   };
 
-  test('grid sort and picker follow position, not the key', async ({ page }) => {
+  async function seed(page) {
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: CAT } });
     // Row ids, positions and keys each disagree, so only the position order can produce the expectation.
@@ -1629,6 +1630,10 @@ test.describe('A column backed by a lookup sorts in catalogue order', () => {
     await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.goto('/');
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+  }
+
+  test('grid sort and picker follow position, not the key', async ({ page }) => {
+    await seed(page);
     await page.evaluate(() => appInstance.selectTab('tasks'));
     const PIPE = ['todo', 'doing', 'done'];
     await expect.poll(() => page.evaluate(() => appInstance.sortedData.map((r) => r.step)), { timeout: 6000 }).toEqual(PIPE);
@@ -1639,6 +1644,23 @@ test.describe('A column backed by a lookup sorts in catalogue order', () => {
                list: appInstance.getListOptions('kind').map((o) => o.value) };
     });
     expect(r).toEqual({ kind: PIPE, picker: PIPE, list: PIPE });
+  });
+
+  test('an embedded table sorts by header click, in the same catalogue order', async ({ page }) => {
+    // embed-view's headers were static <th>: a reader got the schema's defaultSort, permanently.
+    await seed(page);
+    await page.evaluate(() => appInstance.selectTab('task_page'));
+    const titles = () => page.locator('.v-main tbody tr').evaluateAll((trs) => trs.map((tr) => tr.querySelector('td').textContent.trim()));
+    await expect.poll(titles, { timeout: 6000 }).toEqual(['t3', 't2', 't1']);   // defaultSort: step (catalogue)
+    await page.getByTestId('embed-sort-title').click();
+    await expect.poll(titles).toEqual(['t1', 't2', 't3']);
+    await expect(page.getByTestId('embed-sort-title')).toContainText('▲');
+    await page.getByTestId('embed-sort-title').click();
+    await expect.poll(titles).toEqual(['t3', 't2', 't1']);                   // second click reverses
+    await page.getByTestId('embed-sort-step').click();
+    await expect.poll(titles).toEqual(['t3', 't2', 't1']);                   // todo, doing, done -- not by key
+    await page.getByTestId('embed-sort-step').click();
+    await expect.poll(titles).toEqual(['t1', 't2', 't3']);
   });
 });
 
