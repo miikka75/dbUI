@@ -2,9 +2,9 @@ const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const Rows = require('../../rows');
 
-// rows.js resolves the named-list cache and the column->list resolver through the global scope at call
-// time (browser: window._listsCache / window.getColumnList). Node tests set them on globalThis.
-beforeEach(() => { delete globalThis._listsCache; delete globalThis.getColumnList; });
+// rows.js resolves the named-list cache and the column->value-order resolver through the global scope at
+// call time (browser: window._listsCache / window.getColumnOrder). Node tests set them on globalThis.
+beforeEach(() => { delete globalThis._listsCache; delete globalThis.getColumnOrder; });
 
 describe('rows.js — condMatches (the unified filter/when matcher)', () => {
   it('scalar equality, $or / $and groups, ne / empty / notEmpty operators', () => {
@@ -237,11 +237,24 @@ describe('rows.js — sortByCol', () => {
     assert.deepEqual(Rows.sortByCol(rows, 'n').map(r => r.n), ['a', 'b', '']);
   });
 
-  it('list-backed column follows the authored list order (via getColumnList + _listsCache)', () => {
-    globalThis.getColumnList = (t, col) => (col === 'status' ? 'statuses' : null);
-    globalThis._listsCache = { statuses: ['open', 'in_progress', 'done'] };
+  it('a column with a value order follows it (via getColumnOrder), not the values', () => {
+    globalThis.getColumnOrder = (col) => (col === 'status' ? ['open', 'in_progress', 'done'] : null);
     const rows = [{ status: 'done' }, { status: 'open' }, { status: 'in_progress' }];
     assert.deepEqual(Rows.sortByCol(rows, 'status').map(r => r.status), ['open', 'in_progress', 'done']);
+    assert.deepEqual(Rows.sortByCol(rows, 'status', null, false).map(r => r.status), ['done', 'in_progress', 'open']);
+  });
+
+  it('a value listed twice (one calling under two organizations) keeps its first slot', () => {
+    globalThis.getColumnOrder = () => ['clerk', 'president', 'clerk'];
+    const rows = [{ c: 'president' }, { c: 'clerk' }];
+    assert.deepEqual(Rows.sortByCol(rows, 'c').map(r => r.c), ['clerk', 'president']);
+  });
+
+  it("an aggregate's groupBy column inherits its source column's order", () => {
+    globalThis.getColumnOrder = (col) => (col === 'status' ? ['open', 'done'] : null);
+    const view = { groupBy: { column: 'key', from: ['status'] } };
+    const rows = [{ key: 'done' }, { key: 'open' }];
+    assert.deepEqual(Rows.sortByCol(rows, 'key', view).map(r => r.key), ['open', 'done']);
   });
 });
 
