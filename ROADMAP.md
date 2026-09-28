@@ -1979,7 +1979,7 @@ The header landed with it, as proposed: `embed-view` mixes in `SORT_UI`, keeps `
 instance, and renders a `shown` computed that is `rows` untouched until a header is clicked, then
 `Rows.sortByCol` over them — so an embedded `ref` column sorts in the same catalogue order as the grid.
 All three table bodies an embed can draw (the editable table, the read-only spec table, and an inline
-`{{self}}` table) have it. The card, list and chip layouts have no header row and keep `defaultSort`.
+`{{self}}` table) have it, with no arrow (the primary grid shows none either; `aria-sort` carries the direction). The card, list and chip layouts have no header row and keep `defaultSort`.
 ### Narrowing a lookup-backed picker — which rows are OFFERED
 
 A `select` whose `list:` names a lookup offers every row of it. `lookupListValues` sweeps

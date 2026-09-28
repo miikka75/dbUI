@@ -1654,7 +1654,9 @@ test.describe('A column backed by a lookup sorts in catalogue order', () => {
     await expect.poll(titles, { timeout: 6000 }).toEqual(['t3', 't2', 't1']);   // defaultSort: step (catalogue)
     await page.getByTestId('embed-sort-title').click();
     await expect.poll(titles).toEqual(['t1', 't2', 't3']);
-    await expect(page.getByTestId('embed-sort-title')).toContainText('▲');
+    // No arrow (the primary grid shows none either); the direction is still exposed to assistive tech.
+    await expect(page.getByTestId('embed-sort-title')).not.toContainText(/[▲▼]/);
+    await expect(page.getByTestId('embed-sort-title')).toHaveAttribute('aria-sort', 'ascending');
     await page.getByTestId('embed-sort-title').click();
     await expect.poll(titles).toEqual(['t3', 't2', 't1']);                   // second click reverses
     await page.getByTestId('embed-sort-step').click();
