@@ -3730,7 +3730,7 @@ test.describe('v3 @both partition toggle in an embed', () => {
       // A per-person feed also needs somewhere to read subscribers from, and that table has to be able
       // to hold a secret: the subscriber writes their language, the publisher writes their URL.
       window.SCHEMA.feed_subs = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
-                                  ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } };
+                                  ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
       const SUBS = { table: 'feed_subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' };
       window.VIEWS.fd_pp_ok = { name: 'fd_pp_ok', feed: 'per-person', feedSubscribers: SUBS,
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
@@ -3740,7 +3740,7 @@ test.describe('v3 @both partition toggle in an embed', () => {
       // The one that cannot be recovered from: a subscriber who may write their own url column can
       // point it somewhere revocation never blanks.
       window.SCHEMA.feed_subs_open = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
-                                       ownerWritable: ['lang', 'active', 'url'], ownerWritableWhile: { active: 'yes' } };
+                                       ownerWritable: ['lang', 'active', 'url'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
       window.VIEWS.fd_pp_open = { name: 'fd_pp_open', feed: 'per-person',
         feedSubscribers: { table: 'feed_subs_open', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
@@ -3789,7 +3789,7 @@ test.describe('v3 @both partition toggle in an embed', () => {
       });
       app.listUserLinks = { assigned_to: { Anna: 'anna@x.test', Ben: 'ben@x.test' } };
       window.SCHEMA.pp_subs = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
-                                ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } };
+                                ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
       window.VIEWS.pp_pub = { name: 'pp_pub', feed: 'per-person',
         feedSubscribers: { table: 'pp_subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'], filter: { assigned_to: '@me' } }] } };
@@ -3856,7 +3856,7 @@ test.describe('v3 @both partition toggle in an embed', () => {
       app.userList = []; app.usersLoaded = true; app.userAllowedTables = null;
       app.appConfig = Object.assign({}, app.appConfig || {}, { feedLimits: { subscribers: 2 } });
       window.SCHEMA.cap_subs = { columns: { owner: { type: 'owner' }, url: 'text', fid: 'text', active: 'text' },
-                                 ownerWritable: ['active'], ownerWritableWhile: { active: 'yes' } };
+                                 ownerWritable: ['active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
       window.VIEWS.cap_feed = { name: 'cap_feed', feed: 'per-person',
         feedSubscribers: { table: 'cap_subs', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
@@ -3893,7 +3893,7 @@ test.describe('v3 @both partition toggle in an embed', () => {
       const app = window.appInstance;
       app.userList = []; app.usersLoaded = true;
       window.SCHEMA.ppui_subs = { columns: { owner: { type: 'owner' }, feed: 'text', lang: 'text', url: 'text', fid: 'text', active: 'text' },
-                                  ownerWritable: ['feed', 'lang', 'active'], ownerWritableWhile: { active: 'yes' } };
+                                  ownerWritable: ['feed', 'lang', 'active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
       window.VIEWS.ppui = { name: 'ppui', feed: 'per-person',
         feedSubscribers: { table: 'ppui_subs', viewColumn: 'feed', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'], filter: { assigned_to: '@me' } }] } };

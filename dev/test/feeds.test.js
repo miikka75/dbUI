@@ -206,7 +206,7 @@ describe('feeds.js — a PER-PERSON feed requires @me on every source', () => {
   // A per-person feed also needs somewhere to read subscribers from; that half is its own suite
   // below, so these views carry a valid one and vary only the filtering.
   const SCHEMA = { subs: { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
-                           ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } },
+                           ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true },
                    a: { columns: {} }, b: { columns: {} }, events: { columns: {} }, trips: { columns: {} }, salaries: { columns: {} } };
   const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' };
   const errs = (views, name) => Feeds.configErrors(views, name, views[name], SCHEMA);
@@ -280,7 +280,7 @@ describe('feeds.js — a PER-PERSON feed requires @me on every source', () => {
 describe('feeds.js — the subscriber list', () => {
   const SCHEMA = {
     subs: { columns: { owner: { type: 'owner' }, feed: 'text', lang: 'text', url: 'text', fid: 'text', active: 'text' },
-            ownerWritable: ['lang', 'feed', 'active'], ownerWritableWhile: { active: 'yes' } },
+            ownerWritable: ['lang', 'feed', 'active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true },
     events: { columns: {} }
   };
   const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' };
@@ -337,7 +337,7 @@ describe('feeds.js — the subscriber list', () => {
 
 describe('feeds.js — the subscriber table has to be able to hold a secret', () => {
   const base = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
-                 ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } };
+                 ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
   const view = { calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
                  feed: 'per-person', feedSubscribers: { table: 'subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' } };
   const errs = (schema, v) => Feeds.configErrors({ x: v || view }, 'x', v || view, schema);
@@ -451,7 +451,7 @@ describe('feeds.js — the schema must freeze a row that unsubscribed', () => {
   const errs = (tbl, subs) => Feeds.configErrors({ x: view(subs || SUBS) }, 'x', view(subs || SUBS),
                                                  { events: { columns: {} }, subs: tbl });
 
-  const good = { columns: cols, ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } };
+  const good = { columns: cols, ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
 
   it('accepts a table that freezes on the active column', () => {
     assert.deepEqual(errs(good), []);
@@ -475,7 +475,7 @@ describe('feeds.js — the schema must freeze a row that unsubscribed', () => {
   });
 
   it('refuses an active column the subscriber may not write', () => {
-    const t = { columns: cols, ownerWritable: ['lang'], ownerWritableWhile: { active: 'yes' } };
+    const t = { columns: cols, ownerWritable: ['lang'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
     assert.match(errs(t).join('\n'), /should include "active"/);
   });
 
@@ -494,7 +494,7 @@ describe('feeds.js — subscribing, and subscribing again', () => {
   const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' };
   const view = { calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
                  feed: 'per-person', feedSubscribers: SUBS };
-  const TABLE = { ownerWritableWhile: { active: 'yes' } };
+  const TABLE = { ownerWritableWhile: { active: 'yes' }, privateRoster: true };
 
   it('a new active row wins over an earlier tombstone, and the tombstone still owes a blank', () => {
     const rows = [{ owner: 'a@x.test', active: 'no', url: 'https://s/old.ics', fid: 'old' },
@@ -545,7 +545,32 @@ describe('feeds.js — subscribing, and subscribing again', () => {
     const subs = Object.assign({ viewColumn: 'feed' }, SUBS);
     const v = Object.assign({}, view, { feedSubscribers: subs });
     const schema = { events: { columns: {} }, subs: { columns: { owner: { type: 'owner' }, feed: 'text', lang: 'text', url: 'text', fid: 'text', active: 'text' },
-                                                     ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' } } };
+                                                     ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true } };
     assert.match(Feeds.configErrors({ x: v }, 'x', v, schema).join('\n'), /should include "feed"/);
+  });
+});
+
+// The link is a bearer credential for one person's calendar, and what keeps it one person's is the
+// row's rosterPublic flag, which both rule layers read. It is stamped from the table's privateRoster,
+// so a subscriber table without it publishes every member's link to every member.
+describe('feeds.js — a subscriber table must keep each row to its owner', () => {
+  const SUBS = { table: 'subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' };
+  const view = { calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] },
+                 feed: 'per-person', feedSubscribers: SUBS };
+  const table = (extra) => Object.assign({
+    columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
+    ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' }
+  }, extra);
+  const errs = (t) => Feeds.configErrors({ x: view }, 'x', view, { events: { columns: {} }, subs: t });
+
+  it('refuses a table without privateRoster', () => {
+    assert.match(errs(table()).join('\n'), /privateRoster/);
+  });
+
+  it('reads columns written as an array, which is how a shipped schema writes them', () => {
+    const t = table({ privateRoster: true, columns: [
+      { name: 'owner', type: 'owner' }, { name: 'lang', type: 'text' }, { name: 'url', type: 'url' },
+      { name: 'fid', type: 'text' }, { name: 'active', type: 'text' }] });
+    assert.deepEqual(errs(t), []);
   });
 });
