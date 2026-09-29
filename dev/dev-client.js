@@ -57,7 +57,11 @@ function _devUploadFile(file, opts) {
     reader.onerror = function() { reject(new Error('Could not read file')); };
     reader.onload = function() {
       var b64 = String(reader.result || '').split(',')[1] || '';
-      _post('uploadFile', { name: file.name, contentType: file.type, base64: b64 })
+      // `path` is passed through when the caller names one (a calendar feed's stable location); an
+      // image upload names none and gets a fresh file.
+      var req = { name: file.name, contentType: file.type, base64: b64 };
+      if (opts && opts.path) req.path = opts.path;
+      _post('uploadFile', req)
         .then(function(r) { r && r.url ? resolve(r.url) : reject(new Error((r && r.error) || 'Upload failed')); })
         .catch(function(e) { reject(new Error((e && e.error) || (e && e.message) || 'Upload failed')); });
     };

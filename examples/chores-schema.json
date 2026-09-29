@@ -201,6 +201,40 @@
         "claim_status": "requested"
       }
     },
+    "calendar_subs": {
+      "privateRoster": true,
+      "columns": [
+        {
+          "name": "owner",
+          "type": "owner"
+        },
+        {
+          "name": "lang",
+          "type": "text"
+        },
+        {
+          "name": "subscribed",
+          "type": "text",
+          "default": "yes"
+        },
+        {
+          "name": "feed_id",
+          "type": "text",
+          "hidden": true
+        },
+        {
+          "name": "feed_url",
+          "type": "url"
+        }
+      ],
+      "ownerWritable": [
+        "lang",
+        "subscribed"
+      ],
+      "ownerWritableWhile": {
+        "subscribed": "yes"
+      }
+    },
     "home_shopping": {
       "archivable": true,
       "columns": [
@@ -677,6 +711,42 @@
       "kind": "calendar"
     },
     {
+      "name": "my_calendar",
+      "icon": "mdi-calendar-account",
+      "kind": "calendar",
+      "feed": "per-person",
+      "feedSubscribers": {
+        "table": "calendar_subs",
+        "langColumn": "lang",
+        "activeColumn": "subscribed",
+        "idColumn": "feed_id",
+        "urlColumn": "feed_url"
+      },
+      "calendar": {
+        "sources": [
+          {
+            "table": "chore_log",
+            "dateColumn": "done_on",
+            "titleColumns": [
+              "chore"
+            ],
+            "label": "Chore",
+            "filter": {
+              "person": "@me"
+            }
+          }
+        ],
+        "rotationSources": [
+          {
+            "view": "duty_matrix",
+            "label": "Tasks"
+          }
+        ],
+        "defaultView": "list",
+        "weekStart": 1
+      }
+    },
+    {
       "name": "duty_matrix",
       "layout": "table",
       "mineOnly": {
@@ -867,6 +937,9 @@
       },
       {
         "view": "home_calendar"
+      },
+      {
+        "view": "my_calendar"
       },
       {
         "group": "Household",

@@ -62,25 +62,25 @@
       "title": "Our Home",
       "description": "A household chore tracker — points, approvals, rewards, a weekly rota and a shopping list.",
       "icon": "./examples/chores-favicon.svg",
-      "revision": 17,
-      "tables": 6,
-      "views": 19,
+      "revision": 18,
+      "tables": 7,
+      "views": 20,
       "schema": {
         "file": "chores-schema.json",
-        "hash": "7560665d05bcaf93"
+        "hash": "476a0f2baeb3284d"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "chores-lang-en.json",
-          "hash": "22c0b525a79f5ac7"
+          "hash": "b8da78bf2ebba23d"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "chores-lang-fi.json",
-          "hash": "6904d0ad315969ff"
+          "hash": "1be05858e8219632"
         }
       ],
       "data": {
@@ -89,7 +89,10 @@
       },
       "about": {
         "file": "chores-about.json",
-        "hash": "ba3f0f56f3ee2150"
+        "hash": "94312ccf5fa286d9"
+      },
+      "notes": {
+        "18": "Adds My calendar: your own chores and weekly tasks, and a Subscribe button that puts them in your phone or computer calendar. Each person gets their own private link, in the language they pick; unsubscribing empties it. Links are only issued where the deployment has file storage."
       }
     },
     {

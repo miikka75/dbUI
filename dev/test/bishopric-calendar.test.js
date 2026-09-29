@@ -42,13 +42,25 @@ describe('bishopric example — ships no calendar, and no feed', () => {
     assert.deepEqual(inNav.filter((n) => VIEWS[n] && VIEWS[n].calendar), []);
   });
 
+  // A SHARED feed publishes the moment a full-access client boots, so shipping one would mint a
+  // world-readable URL on install. A per-person feed publishes only for people who subscribed, so it
+  // mints nothing until someone opts in — which holds only while the example's sample data carries no
+  // subscription rows, and that is asserted too.
   it('publishes nothing — no shipped example mints a world-readable URL on install', () => {
     assert.deepEqual(Feeds.names(VIEWS), []);
     ['chores', 'demo'].forEach((name) => {
       const f = path.join(__dirname, '..', '..', 'examples', name + '-schema.json');
       if (!fs.existsSync(f)) return;
       const d = JSON.parse(fs.readFileSync(f, 'utf8'));
-      assert.deepEqual(Feeds.names(SchemaNormalize.flattenViews((d.schema || d).views)), [], name);
+      const views = SchemaNormalize.flattenViews((d.schema || d).views);
+      const feeds = Feeds.names(views);
+      assert.deepEqual(feeds.filter((n) => !Feeds.isPerPerson(views[n])), [], name + ': a shared feed');
+      const dataFile = path.join(__dirname, '..', '..', 'examples', name + '-data.json');
+      const data = fs.existsSync(dataFile) ? JSON.parse(fs.readFileSync(dataFile, 'utf8')).tables || {} : {};
+      feeds.forEach((n) => {
+        const t = Feeds.subscriberTableOf(views[n]);
+        assert.deepEqual(data[t] || [], [], name + ': sample subscriptions to ' + n);
+      });
     });
   });
 });

@@ -1368,6 +1368,13 @@ in the UI. Recorded here rather than left to be discovered, because "the engine 
   different path to blank. `Feeds.subscriptionOf` (the state the menu shows) reads through the same
   function, so the menu and the pass cannot disagree. Also new: `configErrors` requires a `viewColumn`
   to be owner-writable, because the subscriber's own create is what sets it.
+
+  The chores example now ships one — `my_calendar`, the member's own chores and duty weeks — which is
+  what made two more gaps visible. `configErrors` never required `privateRoster`, and without it every
+  subscription row, link included, is stamped readable by every member; it is required now. And the dev
+  server's file store ignored the requested path, so on a local install every republish minted a new
+  link and revocation blanked a file that was never written. It now keeps `feeds/<id>.ics` at its path
+  and serves it as `text/calendar`.
 - **The orphan sweep** (above): `listFiles(prefix)` plus blanking what nothing accounts for.
 
 Nothing here is blocked. Each is ordinary UI work over an engine that already holds its invariants,

@@ -1,4 +1,6 @@
 {
   "description": "A household chore tracker — points, approvals, rewards, a weekly rota and a shopping list.",
-  "notes": {}
+  "notes": {
+    "18": "Adds My calendar: your own chores and weekly tasks, and a Subscribe button that puts them in your phone or computer calendar. Each person gets their own private link, in the language they pick; unsubscribing empties it. Links are only issued where the deployment has file storage."
+  }
 }
