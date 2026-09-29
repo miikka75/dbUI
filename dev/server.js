@@ -567,8 +567,19 @@ const server = http.createServer(async (req, res) => {
         const b64 = String(body.base64 || '');
         if (!b64) { res.writeHead(400); return res.end(JSON.stringify({ error: 'no file data' })); }
         const upDir = path.join(__dirname, 'uploads');
-        if (!fs.existsSync(upDir)) fs.mkdirSync(upDir, { recursive: true });
-        const fname = Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '_' + uName;
+        // A caller-chosen PATH is a published calendar feed (Feeds.pathFor): it has to be written at the
+        // same place every time, because that path is the subscription and revoking it is overwriting
+        // it with an empty calendar. A fresh name per upload -- right for an image -- would hand out a
+        // new link on every republish and leave each old one serving its last snapshot for ever. Only
+        // that one shape is accepted, so a caller cannot write anywhere else under uploads/.
+        let fname;
+        if (body.path !== undefined) {
+          if (!/^feeds\/[A-Za-z0-9_-]{1,64}\.ics$/.test(String(body.path))) { res.writeHead(400); return res.end(JSON.stringify({ error: 'unsupported upload path' })); }
+          fname = String(body.path);
+        } else {
+          fname = Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '_' + uName;
+        }
+        fs.mkdirSync(path.dirname(path.join(upDir, fname)), { recursive: true });
         fs.writeFileSync(path.join(upDir, fname), Buffer.from(b64, 'base64'));
         const host = req.headers.host || (HOST + ':' + PORT);
         return json(res, { url: 'http://' + host + '/uploads/' + fname });
@@ -748,7 +759,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (!fs.existsSync(filePath)) { res.writeHead(404); return res.end('Not found'); }
   const ext = path.extname(filePath);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.wasm': 'application/wasm', '.data': 'application/octet-stream' };
+  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.wasm': 'application/wasm', '.data': 'application/octet-stream', '.ics': 'text/calendar; charset=utf-8' };
   const hdrs = { 'Content-Type': types[ext] || 'text/plain' };
   // CSP=1: serve HTML with the app's Content-Security-Policy ENFORCED (see /csp.js). The Playwright
   // suite runs with this on (playwright.config.js webServer env), so every E2E run proves the policy
