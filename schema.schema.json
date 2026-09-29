@@ -223,7 +223,7 @@
         "defaultSort": { "type": "string", "description": "Default sort column." },
         "feedSubscribers": {
           "type": "object",
-          "description": "Where a `feed: \"per-person\"` calendar reads its subscribers. Subscribing is a row the person creates for themselves in an owner-stamped table, so the list is opt-in; unsubscribing sets `activeColumn`, which freezes the row until a publisher blanks the file. The row has two writers by design: the subscriber owns the request (that they subscribe, and in which language), the publisher owns the grant (the minted URL). The table must therefore declare `ownerWritable` INCLUDING the language, active and view columns and EXCLUDING the owner, id and url columns — a subscriber who can write their own url could point it at a path revocation never blanks.",
+          "description": "Where a `feed: \"per-person\"` calendar reads its subscribers. Subscribing is a row the person creates for themselves in an owner-stamped table, so the list is opt-in; unsubscribing sets `activeColumn`, which freezes the row until a publisher blanks the file. The row has two writers by design: the subscriber owns the request (that they subscribe, and in which language), the publisher owns the grant (the minted URL). The table must declare `privateRoster: true` (otherwise every row, and so every link, is readable by every member), and `ownerWritable` INCLUDING the language, active and view columns and EXCLUDING the owner, id and url columns — a subscriber who can write their own url could point it at a path revocation never blanks.",
           "required": ["table", "urlColumn"],
           "properties": {
             "table": { "type": "string", "description": "The owner-stamped table people subscribe in." },

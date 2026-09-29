@@ -16,6 +16,7 @@
   var Calendar = isNode ? require('./calendar') : root.Calendar;
   var AccessFeatures = isNode ? require('./access-features') : root.AccessFeatures;
   var Rows = isNode ? require('./rows') : root.Rows;
+  var Columns = isNode ? require('./columns') : root.Columns;
 
   // Which KIND of feed a view declares. `true` and "shared" are one file every subscriber fetches;
   // "per-person" is one file each, filtered to that subscriber.
@@ -156,7 +157,9 @@
     if (!cfg.table) { errors.push(at + '`feedSubscribers` needs a `table`'); return errors; }
     var t = (schema || {})[cfg.table];
     if (!t) { errors.push(at + '`feedSubscribers.table` "' + cfg.table + '" is not a table'); return errors; }
-    var defs = t.columns || {};
+    // columnDefs, not `t.columns`: a shipped schema writes columns as an ARRAY of {name, type}, and
+    // indexing that by name finds nothing, so every column would read as missing.
+    var defs = Columns.columnDefs(t);
     var typeOf = function(c) { var d = defs[c]; return (d && typeof d === 'object') ? d.type : d; };
 
     // The owner column is the whole access story: it is what stamps a row with its creator and what
@@ -164,6 +167,13 @@
     var ownerCol = cfg.ownerColumn || 'owner';
     if (!defs[ownerCol]) errors.push(at + '`feedSubscribers` table "' + cfg.table + '" has no "' + ownerCol + '" column — a subscription has to be owner-stamped to be the subscriber\'s own');
     else if (typeOf(ownerCol) !== 'owner') errors.push(at + '`feedSubscribers` column "' + ownerCol + '" must be an `owner` column (it is "' + (typeOf(ownerCol) || 'text') + '") — nothing else stamps the caller or restricts the row to them');
+
+    // The read side of the same story, and the half the owner column does NOT hold on its own. An
+    // owner-stamped row carries `rosterPublic` = !privateRoster (app-core _createBlankRow), and both rule
+    // layers read that flag, not the table's policy -- so on a table without `privateRoster` every
+    // subscription row is readable by every member, and with it every member's link. The url is a bearer
+    // credential for one person's calendar; this is the check that keeps it one person's.
+    if (!t.privateRoster) errors.push(at + '`feedSubscribers` table "' + cfg.table + '" must declare `privateRoster: true` — without it each subscription row is readable by every member, and with it every link');
 
     ['langColumn', 'viewColumn', 'urlColumn', 'activeColumn', 'idColumn'].forEach(function(k) {
       if (cfg[k] && !defs[cfg[k]]) errors.push(at + '`feedSubscribers.' + k + '` "' + cfg[k] + '" is not a column of "' + cfg.table + '"');

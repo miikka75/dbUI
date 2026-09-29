@@ -1873,7 +1873,8 @@ Subscribing is a row the person creates for themselves in an owner-stamped table
   "cal_subs": {
     "columns": { "owner": { "type": "owner" }, "lang": "text", "active": "text", "fid": "text", "url": "text" },
     "ownerWritable": ["lang", "active"],
-    "ownerWritableWhile": { "active": "yes" }
+    "ownerWritableWhile": { "active": "yes" },
+    "privateRoster": true
   }
 },
 "views": {
@@ -1888,6 +1889,9 @@ The row has two writers. The subscriber owns the request — `langColumn`, `acti
 `viewColumn` if one table serves several calendars — so those must be in `ownerWritable`. The publisher
 owns the grant — `idColumn` (the file's path) and `urlColumn` (their link) — so those must NOT be: a
 subscriber who could write their own url could point it at a file revocation never reaches.
+
+**`privateRoster: true` is required.** Each link is a bearer credential for one person's calendar, and
+without it every subscription row — link included — is readable by every member.
 
 **Unsubscribing is a state, not a deletion.** The row is the only record of where the file lives, and
 the subscriber cannot blank it themselves. So `ownerWritableWhile` must gate on the active column: once
