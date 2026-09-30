@@ -1,4 +1,4 @@
-// bishopric-calendar.test.js — the bishopric example ships ONE calendar: each person's own.
+// bishopric-calendar.test.js — the bishopric example ships ONE calendar, as a personal feed with no screen.
 //
 // It used to ship two shared ones. They were removed once a calendar could be defined in the database
 // instead: a calendar every member sees alike is a saved question over tables that already exist, so
@@ -8,9 +8,10 @@
 // A PER-PERSON calendar is different, and is why one is back. It cannot be built in Settings — it needs a
 // subscriber table with owner gating and privateRoster, which only a schema can declare — and it is the
 // one calendar a bishopric member wants from this data: the interviews, callings, reminders and talks
-// that are theirs, in their own phone calendar. So this checks:
+// that are theirs, in their own phone calendar. It is a DECLARATION, not a screen: out of the nav, and
+// subscribed to under Settings -> My calendar feeds. So this checks:
 //
-//   1. the only calendar is that per-person one, and it passes the feed guards;
+//   1. the only calendar is that per-person one, it passes the feed guards, and nothing navigates to it;
 //   2. no shipped example mints a world-readable URL on install;
 //   3. its dated tables are still EXPORTABLE as a database-defined calendar, driven through the real
 //      modules (SchemaNormalize -> Events.build -> Ics.build).
@@ -34,23 +35,24 @@ const colsOf = (t) => (schema.tables[t].columns || []).reduce((m, c) => (m[c.nam
 const dateColsOf = (t) => (schema.tables[t].columns || []).filter((c) => c.type === 'date').map((c) => c.name);
 
 describe('bishopric example — one calendar, and it is per-person', () => {
-  it('declares exactly one calendar view: my_calendar, published per person', () => {
+  it('declares exactly one calendar view: personal_calendar, published per person', () => {
     const cals = Object.keys(VIEWS).filter((n) => VIEWS[n].calendar);
-    assert.deepEqual(cals, ['my_calendar']);
-    assert.equal(Feeds.isPerPerson(VIEWS.my_calendar), true);
+    assert.deepEqual(cals, ['personal_calendar']);
+    assert.equal(Feeds.isPerPerson(VIEWS.personal_calendar), true);
   });
 
   // The guards that stop one member's file carrying another's rows: @me on every source, a private,
   // owner-gated subscriber table. Asserted against the shipped schema rather than a fixture.
   it('passes every per-person feed guard', () => {
-    assert.deepEqual(Feeds.configErrors(VIEWS, 'my_calendar', VIEWS.my_calendar, schema.tables), []);
+    assert.deepEqual(Feeds.configErrors(VIEWS, 'personal_calendar', VIEWS.personal_calendar, schema.tables), []);
   });
 
-  it('is in the nav, because the Subscribe control lives on its toolbar', () => {
+  // A feed, not a screen: members subscribe in Settings, so the calendar has no nav entry of its own.
+  it('and nothing in the nav points at a calendar', () => {
     const inNav = [];
     (function walk(items) { (items || []).forEach((i) => { if (i.view) inNav.push(i.view); walk(i.items); }); })(schema.nav.items);
     assert.deepEqual(inNav.filter((n) => !VIEWS[n]), [], 'every nav entry names a view that exists');
-    assert.ok(inNav.includes('my_calendar'));
+    assert.deepEqual(inNav.filter((n) => VIEWS[n] && VIEWS[n].calendar), []);
   });
 
   // A SHARED feed publishes the moment a full-access client boots, so shipping one would mint a

@@ -1030,7 +1030,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'feed.subscribe_title', 'feed.subscribe_intro', 'feed.subscribe', 'feed.language', 'feed.lang_default', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_confirm', 'feed.unsubscribe_note', 'feed.revoking', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'settings.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'feed.subscribe_title', 'feed.subscribe_intro', 'feed.subscribe', 'feed.language', 'feed.lang_default', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_confirm', 'feed.unsubscribe_note', 'feed.revoking', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.my_feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'settings.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -2286,6 +2286,14 @@ function createVueApp() {
       canSubscribeFeed: function(name) {
         var t = Feeds.subscriberTableOf(VIEWS[name]);
         return !!t && !!this.currentUserEmail && this.canReachTable(t);
+      },
+      // Every per-person feed this person could subscribe to, for Settings. Settings rather than only the
+      // calendar's toolbar, because a per-person calendar may exist purely as the feed's declaration and
+      // be in nobody's nav — its Subscribe control would otherwise be reachable from nowhere.
+      myFeeds: function() {
+        var self = this;
+        return Feeds.names(VIEWS).filter(function(n) { return Feeds.isPerPerson(VIEWS[n]) && self.canSubscribeFeed(n); })
+          .map(function(n) { return { name: n, title: VIEWS[n].title || self.tOr('view.' + n, self.tOr('tab.' + n, n)) }; });
       },
       mySubscriptionFor: function(name) {
         var v = VIEWS[name], t = Feeds.subscriberTableOf(v);
@@ -7952,6 +7960,55 @@ function createVueApp() {
       + '</v-list-item></v-list>'
   });
 
+  // The subscriber's side of ONE per-person feed: subscribe (with a file language), their link, change the
+  // language, unsubscribe. One component for both places it appears -- the calendar's toolbar menu and
+  // Settings, where a feed whose calendar is not in the nav is reachable from -- so the two cannot drift.
+  // It loads the subscriber table itself on mount: that table is not a source of any calendar, so
+  // nothing else loads it, and mounting is exactly "somebody is looking at their subscription".
+  app.component('feed-subscription', {
+    props: { name: { type: String, required: true } },
+    data: function() { return { subLang: (appInstance && appInstance.currentLang) || '', unsubArmed: false }; },
+    mounted: function() { appInstance.loadMySubscription(this.name); },
+    computed: {
+      sub: function() { return appInstance.mySubscriptionFor(this.name); },
+      hasSubLang: function() { var c = (window.VIEWS[this.name] || {}).feedSubscribers; return !!(c && c.langColumn); },
+      // Blank is not "whatever I am reading in" here: a feed has no reader, so it falls back to the
+      // calendar's own file language, and the label says that.
+      subLangItems: function() {
+        return [{ title: appInstance.t('feed.lang_default'), value: '' }].concat(
+          (appInstance.languages || []).map(function(l) { return { title: l.name || l.code, value: l.code }; }));
+      }
+    },
+    methods: Object.assign({}, ROOT_PROXY, {
+      subscribe: function() { appInstance.subscribeFeed(this.name, this.subLang); },
+      setSubLang: function(l) { appInstance.setFeedLanguage(this.name, l); },
+      // Two presses, because the second one is not reversible: the row freezes, and subscribing again
+      // mints a different link, so whatever calendar app held the old one has to be told the new one.
+      unsubscribe: function() {
+        if (!this.unsubArmed) { this.unsubArmed = true; return; }
+        this.unsubArmed = false;
+        appInstance.unsubscribeFeed(this.name);
+      },
+      copySubUrl: function() { appInstance.copyText(this.sub.sub.url); }
+    }),
+    template: '<div>'
+      + '<template v-if="sub.state === \'active\'">'
+      + '<template v-if="sub.sub.url"><div class="d-flex align-center" style="gap:4px">'
+      + '<v-text-field :model-value="sub.sub.url" readonly density="compact" variant="outlined" hide-details style="font-size:0.78rem" data-testid="cal-sub-url"></v-text-field>'
+      + '<v-btn icon="mdi-content-copy" size="small" variant="text" @click="copySubUrl()" :title="t(\'btn.copy\')" data-testid="cal-sub-copy"></v-btn></div>'
+      + '<p class="mt-1 mb-2" style="font-size:0.75rem;opacity:0.75">{{ t(\'feed.link_private\') }}</p></template>'
+      + '<p v-else class="mb-2" style="font-size:0.8rem;opacity:0.8" data-testid="cal-sub-pending">{{ t(\'feed.link_pending\') }}</p>'
+      + '<v-select v-if="hasSubLang" :model-value="sub.sub.lang" :items="subLangItems" :label="t(\'feed.language\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang" @update:model-value="setSubLang($event)"></v-select>'
+      + '<v-btn :variant="unsubArmed ? \'flat\' : \'text\'" color="error" size="small" @click="unsubscribe()" data-testid="cal-unsubscribe">{{ unsubArmed ? t(\'feed.unsubscribe_confirm\') : t(\'feed.unsubscribe\') }}</v-btn>'
+      + '<p class="mt-1" style="font-size:0.72rem;opacity:0.7">{{ t(\'feed.unsubscribe_note\') }}</p></template>'
+      + '<template v-else>'
+      + '<p v-if="sub.state === \'revoking\'" class="mb-2" style="font-size:0.8rem;opacity:0.8" data-testid="cal-sub-revoking">{{ t(\'feed.revoking\') }}</p>'
+      + '<p class="mb-2" style="font-size:0.8rem;opacity:0.8">{{ t(\'feed.subscribe_intro\') }}</p>'
+      + '<v-select v-if="hasSubLang" v-model="subLang" :items="subLangItems" :label="t(\'feed.language\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang"></v-select>'
+      + '<v-btn color="primary" variant="flat" size="small" @click="subscribe()" data-testid="cal-subscribe-go">{{ t(\'feed.subscribe\') }}</v-btn></template>'
+      + '</div>'
+  });
+
   // Calendar view: ONE component for both the top-level screen and the {{view:cal}} embed. Holds its
   // own month/anchor/selected-day state — `name` defaults to the current view (top-level); embeds pass
   // an explicit name. Composes the shared cal-* parts + calendar model helpers (calEventsFor, cell
@@ -7962,14 +8019,7 @@ function createVueApp() {
       var nm = this.name || (appInstance && appInstance.currentTable);
       var cfg = (window.VIEWS[nm] && window.VIEWS[nm].calendar) || {};
       var today = appInstance ? appInstance._calToday() : '';
-      var lang = appInstance ? appInstance.currentLang : '';
-      return { mode: cfg.defaultView || 'month', anchor: today, sel: today,
-               subOpen: false, subLang: lang || '', unsubArmed: false };
-    },
-    watch: {
-      // Load the subscriber table only when someone opens the control: it is not a source of the
-      // calendar, and most visits never ask about a subscription.
-      subOpen: function(open) { this.unsubArmed = false; if (open) appInstance.loadMySubscription(this.viewName); }
+      return { mode: cfg.defaultView || 'month', anchor: today, sel: today };
     },
     computed: {
       viewName: function() { return this.name || appInstance.currentTable; },
@@ -7991,14 +8041,6 @@ function createVueApp() {
       // Per-person feeds only: a shared feed's link is one bearer credential for everybody, handed out
       // by whoever publishes it, while a per-person link belongs to the one person it was minted for.
       canSubscribe: function() { return this.perPerson && appInstance.canSubscribeFeed(this.viewName); },
-      sub: function() { return appInstance.mySubscriptionFor(this.viewName); },
-      hasSubLang: function() { var c = (window.VIEWS[this.viewName] || {}).feedSubscribers; return !!(c && c.langColumn); },
-      // Blank is not "whatever I am reading in" here: a feed has no reader, so it falls back to the
-      // calendar's own file language, and the label says that.
-      subLangItems: function() {
-        return [{ title: appInstance.t('feed.lang_default'), value: '' }].concat(
-          (appInstance.languages || []).map(function(l) { return { title: l.name || l.code, value: l.code }; }));
-      },
       a: function() { return appInstance; },
       win: function() { return appInstance.calendarIcsFor(this.viewName); },
       // Blank first: the default is not a language but a RULE ("whichever the reader is using", and for
@@ -8021,16 +8063,6 @@ function createVueApp() {
       publish: function() { appInstance.publishFeed(this.viewName); },
       setWindow: function(patch) { appInstance.saveCalendarWindow(this.viewName, patch); },
       copyFeed: function() { appInstance.copyText(this.feedUrl); },
-      subscribe: function() { appInstance.subscribeFeed(this.viewName, this.subLang); },
-      setSubLang: function(l) { appInstance.setFeedLanguage(this.viewName, l); },
-      // Two presses, because the second one is not reversible: the row freezes, and subscribing again
-      // mints a different link, so whatever calendar app held the old one has to be told the new one.
-      unsubscribe: function() {
-        if (!this.unsubArmed) { this.unsubArmed = true; return; }
-        this.unsubArmed = false;
-        appInstance.unsubscribeFeed(this.viewName);
-      },
-      copySubUrl: function() { appInstance.copyText(this.sub.sub.url); },
       selectDay: function(d) { this.sel = d; }
     }),
     template: ''
@@ -8056,24 +8088,11 @@ function createVueApp() {
       // The subscriber's own control, for a per-person feed: subscribe, their link, its language, and
       // unsubscribe. The link is theirs alone -- it lives in their owner-stamped row, which nobody else
       // reads -- so unlike the publish button above this is offered to every member.
-      + '<v-menu v-if="!embed && canSubscribe" v-model="subOpen" :close-on-content-click="false" location="bottom end">'
+      + '<v-menu v-if="!embed && canSubscribe" :close-on-content-click="false" location="bottom end">'
       + '<template v-slot:activator="{ props }"><v-btn v-bind="props" icon="mdi-calendar-account" size="small" variant="text" :title="t(\'feed.subscribe_title\')" data-testid="cal-subscribe-btn"></v-btn></template>'
       + '<v-card max-width="380" class="pa-3" data-testid="cal-subscribe">'
       + '<div class="text-subtitle-2 mb-1">{{ t(\'feed.subscribe_title\') }}</div>'
-      + '<template v-if="sub.state === \'active\'">'
-      + '<template v-if="sub.sub.url"><div class="d-flex align-center" style="gap:4px">'
-      + '<v-text-field :model-value="sub.sub.url" readonly density="compact" variant="outlined" hide-details style="font-size:0.78rem" data-testid="cal-sub-url"></v-text-field>'
-      + '<v-btn icon="mdi-content-copy" size="small" variant="text" @click="copySubUrl()" :title="t(\'btn.copy\')" data-testid="cal-sub-copy"></v-btn></div>'
-      + '<p class="mt-1 mb-2" style="font-size:0.75rem;opacity:0.75">{{ t(\'feed.link_private\') }}</p></template>'
-      + '<p v-else class="mb-2" style="font-size:0.8rem;opacity:0.8" data-testid="cal-sub-pending">{{ t(\'feed.link_pending\') }}</p>'
-      + '<v-select v-if="hasSubLang" :model-value="sub.sub.lang" :items="subLangItems" :label="t(\'feed.language\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang" @update:model-value="setSubLang($event)"></v-select>'
-      + '<v-btn :variant="unsubArmed ? \'flat\' : \'text\'" color="error" size="small" @click="unsubscribe()" data-testid="cal-unsubscribe">{{ unsubArmed ? t(\'feed.unsubscribe_confirm\') : t(\'feed.unsubscribe\') }}</v-btn>'
-      + '<p class="mt-1" style="font-size:0.72rem;opacity:0.7">{{ t(\'feed.unsubscribe_note\') }}</p></template>'
-      + '<template v-else>'
-      + '<p v-if="sub.state === \'revoking\'" class="mb-2" style="font-size:0.8rem;opacity:0.8" data-testid="cal-sub-revoking">{{ t(\'feed.revoking\') }}</p>'
-      + '<p class="mb-2" style="font-size:0.8rem;opacity:0.8">{{ t(\'feed.subscribe_intro\') }}</p>'
-      + '<v-select v-if="hasSubLang" v-model="subLang" :items="subLangItems" :label="t(\'feed.language\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang"></v-select>'
-      + '<v-btn color="primary" variant="flat" size="small" @click="subscribe()" data-testid="cal-subscribe-go">{{ t(\'feed.subscribe\') }}</v-btn></template>'
+      + '<feed-subscription :name="viewName"></feed-subscription>'
       + '</v-card></v-menu></div>'
       // Export/publish range, on top-level calendars only. Mirrors the rotation toolbar: everyone with
       // view access may change it, only an admin writes it through. Sits beside the buttons it governs

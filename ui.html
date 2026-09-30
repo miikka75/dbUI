@@ -766,6 +766,17 @@
               <v-btn value="list" class="text-none" data-testid="nav-layout-list" :title="a.t('settings.nav_list')" :aria-label="a.t('settings.nav_list')"><v-icon icon="mdi-format-list-bulleted"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('settings.nav_list') }}</span></v-btn>
               <v-btn value="tiles" class="text-none" data-testid="nav-layout-tiles" :title="a.t('settings.nav_tiles')" :aria-label="a.t('settings.nav_tiles')"><v-icon icon="mdi-apps"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('settings.nav_tiles') }}</span></v-btn>
             </v-btn-toggle>
+            <!-- The member's own calendar feeds: every per-person feed they can subscribe to, whether or not
+                 its calendar is in the nav. Shown to everyone, not only admins -- the link is the member's
+                 own, and lives in their own row. -->
+            <template v-if="a.myFeeds().length">
+              <v-divider class="my-4"></v-divider>
+              <p class="text-subtitle-2 mb-1">{{ a.t('settings.my_feeds') }}</p>
+              <div v-for="f in a.myFeeds()" :key="f.name" class="mb-3" style="max-width:480px" data-testid="settings-my-feed">
+                <strong style="font-size:0.9rem">{{ f.title }}</strong>
+                <feed-subscription :name="f.name" class="mt-1"></feed-subscription>
+              </div>
+            </template>
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.data') }}</p>
             <v-btn variant="outlined" prepend-icon="mdi-refresh" :loading="a.syncing" data-testid="settings-refresh" @click="a.refreshData" class="mr-2 mb-2">{{ a.t('settings.refresh') }}</v-btn>

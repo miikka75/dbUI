@@ -3951,6 +3951,37 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(after.owed).toEqual(['mine']);
   });
 
+  // A per-person calendar need not be a screen: the bishopric example declares one purely as a feed,
+  // in nobody's nav. Settings is then the only way in, so it lists every per-person feed the member can
+  // subscribe to, with the same control the calendar's toolbar has.
+  test('Settings lists a per-person feed that is in no nav, and subscribes from there', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      window.SCHEMA.pps_subs = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
+                                 ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
+      window.VIEWS.pps_hidden = { name: 'pps_hidden', title: 'Hidden personal calendar', feed: 'per-person',
+        feedSubscribers: { table: 'pps_subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'], filter: { assigned_to: '@me' } }] } };
+      app.dataCache['pps_subs'] = [];
+      window.__realPut = window.Writes.putRow;
+      window.Writes.putRow = (t, row) => Promise.resolve(row);
+      app.selectTab('__settings');
+    });
+    const entry = page.locator('[data-testid="settings-my-feed"]', { hasText: 'Hidden personal calendar' });
+    await expect(entry).toBeVisible();
+    await entry.locator('[data-testid="cal-subscribe-go"]').click();
+    await expect(entry.locator('[data-testid="cal-sub-pending"]')).toBeVisible();
+    const row = await page.evaluate(() => {
+      window.Writes.putRow = window.__realPut;
+      const app = window.appInstance;
+      return app.dataCache['pps_subs'].find((r) => r.owner === app.currentUserEmail);
+    });
+    expect(row.active).toBe('yes');
+    expect(row.rosterPublic).toBe(false);          // privateRoster: nobody else reads this row, or its link
+  });
+
   // Rendering a calendar AS somebody else — the per-person feed's rendering path. The failure this
   // guards is not a broken calendar but a plausible one containing the wrong person's rows, so every
   // assertion here is about narrowing: does an identity that cannot be resolved come back EMPTY, and

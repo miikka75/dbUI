@@ -12,10 +12,6 @@
           "icon": "mdi-information-variant-circle-outline"
         },
         {
-          "view": "my_calendar",
-          "icon": "mdi-calendar-account"
-        },
-        {
           "icon": "mdi-progress-clock",
           "view": "meeting_program"
         },
@@ -1352,9 +1348,8 @@
         "kind": "data"
       },
       {
-        "name": "my_calendar",
+        "name": "personal_calendar",
         "kind": "calendar",
-        "icon": "mdi-calendar-account",
         "feed": "per-person",
         "feedSubscribers": {
           "table": "calendar_subs",
