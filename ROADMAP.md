@@ -1408,6 +1408,16 @@ Declined for now on that basis rather than on cost. Worth revisiting only if som
 calendar ever needs publishing, at which point the question is not "decouple the feed" but "what is the
 second thing, and does it share a shape with the first".
 
+**The bishopric example now ships that calendar** — `my_calendar`, per person: the agenda roles, interviews,
+calling steps and reminders whose person or calling column resolves to the subscriber. It is in the nav
+rather than publish-only, for a reason this section did not have when it was written: the Subscribe
+control lives on the calendar's toolbar, so a per-person calendar nobody can open is one nobody can
+subscribe to. A "My calendar feeds" section in Settings would lift that, and is the next step if a
+publish-only per-person calendar is ever wanted. The example's earlier rule — no calendar in the schema,
+because a database-defined one is the installer's choice — still holds for SHARED calendars; a
+per-person one cannot be defined in the database, since it needs an owner-gated, privateRoster
+subscriber table that only a schema declares.
+
 **Who regenerates matters, and this is the remaining trap.** The rendering client must be able to see
 everything the feed contains. A restricted member's write regenerating from their own `dataCache`
 would overwrite the complete calendar with a truncated one — silent loss for every subscriber, caused
