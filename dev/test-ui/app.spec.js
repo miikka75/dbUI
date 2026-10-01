@@ -3963,6 +3963,9 @@ test.describe('v3 @both partition toggle in an embed', () => {
       app.userList = []; app.usersLoaded = true;
       window.SCHEMA.pps_subs = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
                                  ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
+      // The picker offers the database's languages only, so give it some.
+      window.__realLangs = app.languages;
+      app.languages = [{ code: 'en', name: 'English' }, { code: 'fi', name: 'Suomi' }];
       window.VIEWS.pps_hidden = { name: 'pps_hidden', title: 'Hidden personal calendar', feed: 'per-person',
         feedSubscribers: { table: 'pps_subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'], filter: { assigned_to: '@me' } }] } };
@@ -3979,6 +3982,10 @@ test.describe('v3 @both partition toggle in an embed', () => {
     await expect(entry).toHaveCount(1);
     await expect(entry.locator('[data-testid="feed-download-pps_hidden"]')).toBeVisible();
     await expect(entry.locator('[data-testid="cal-sub-lang"]')).toBeVisible();
+    // No "calendar's own language" entry: just the declared languages, starting on one of them.
+    await entry.locator('[data-testid="cal-sub-lang"]').click();
+    await expect(page.locator('.v-overlay--active .v-list-item')).toHaveCount(2);
+    await page.keyboard.press('Escape');
     await entry.locator('[data-testid="cal-subscribe-go"]').click();
     await expect(entry.locator('[data-testid="cal-sub-pending"]')).toBeVisible();
     const row = await page.evaluate(() => {
@@ -4002,7 +4009,7 @@ test.describe('v3 @both partition toggle in an embed', () => {
     await expect(memberEntry).toBeVisible();
     await expect(memberEntry.locator('[data-testid="cal-subscribe-go"]')).toBeVisible();   // the admin's row is not theirs
     await expect(page.locator('[data-testid="user-cal-new"]')).toHaveCount(0);
-    await page.evaluate(() => { const app = window.appInstance; app.userList = []; app.currentUserEmail = window.__adminEmail; });
+    await page.evaluate(() => { const app = window.appInstance; app.userList = []; app.currentUserEmail = window.__adminEmail; app.languages = window.__realLangs; });
   });
 
   // Rendering a calendar AS somebody else — the per-person feed's rendering path. The failure this

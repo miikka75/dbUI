@@ -857,9 +857,11 @@
                           data-testid="feed-stale">{{ a.t('settings.feed_not_republishing') }}</v-chip>
                   <v-spacer></v-spacer>
                   <feed-subscription v-if="f.subscribe" :name="f.name" inline></feed-subscription>
-                  <v-btn v-if="f.download" size="small" variant="text" prepend-icon="mdi-download"
+                  <!-- The calendar toolbar's export icon; icon only on a phone, like the subscribe buttons beside it. -->
+                  <v-btn v-if="f.download" size="small" variant="text" class="text-none"
+                         :title="a.t('btn.export_ics')" :aria-label="a.t('btn.export_ics')"
                          :data-testid="'feed-download-' + f.name"
-                         @click="a.downloadIcs(f.name)">{{ a.t('btn.export_ics') }}</v-btn>
+                         @click="a.downloadIcs(f.name)"><v-icon icon="mdi-calendar-export"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('btn.export_ics') }}</span></v-btn>
                   <!-- Only a calendar defined HERE can be changed here. A schema one is still listed --
                        it is a file you can download -- but the app is not where it is edited. -->
                   <v-btn v-if="a.isAdmin && f.userDefined" icon="mdi-pencil" size="x-small" variant="text" :title="a.t('btn.edit')" :data-testid="'user-cal-edit-' + f.name" @click="a.editCalendarById(f.name)"></v-btn>
