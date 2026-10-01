@@ -3930,10 +3930,12 @@ test.describe('v3 @both partition toggle in an embed', () => {
     await expect(menu.locator('[data-testid="cal-sub-url"] input')).toHaveValue('https://s/feeds/mine.ics');
 
     // Unsubscribe takes two presses, and writes only the active column.
+    // The first press only arms it: the note says to press again, and nothing is written yet.
     await menu.locator('[data-testid="cal-unsubscribe"]').click();
-    await expect(menu.locator('[data-testid="cal-sub-revoking"]')).toHaveCount(0);
+    await expect(menu.locator('[data-testid="cal-sub-caption"]')).toBeVisible();
+    await expect(menu.locator('[data-testid="cal-subscribe-go"]')).toHaveCount(0);
     await menu.locator('[data-testid="cal-unsubscribe"]').click();
-    await expect(menu.locator('[data-testid="cal-sub-revoking"]')).toBeVisible();
+    await expect(menu.locator('[data-testid="cal-subscribe-go"]')).toBeVisible();
     const unsub = await page.evaluate(() => window.__ppWrites.filter((w) => w.table === 'ppui_subs').pop().row);
     expect(Object.keys(unsub).sort()).toEqual(['active', 'id', 'updated_at']);
     expect(unsub.active).toBe('no');

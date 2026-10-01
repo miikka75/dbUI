@@ -1028,7 +1028,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'feed.subscribe_title', 'feed.subscribe_intro', 'feed.subscribe', 'feed.language', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_confirm', 'feed.unsubscribe_note', 'feed.revoking', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'settings.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_note', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.cal_new', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'settings.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -8007,17 +8007,17 @@ function createVueApp() {
       subLangItems: function() {
         return (appInstance.languages || []).map(function(l) { return { title: l.name || l.code, value: l.code }; });
       },
-      // The inline layout's single caption: the sentence this state cannot do without. The bearer-link
-      // warning beside a link, why there is no link yet, and what unsubscribing does once it is armed.
+      // The single caption under a subscription: the sentence this state cannot do without. The
+      // bearer-link warning beside a link, why there is no link yet, and -- once Unsubscribe is armed --
+      // that a second press confirms and what it does.
       caption: function() {
         var st = this.sub.state;
-        if (st === 'revoking') return 'feed.revoking';
         if (st !== 'active') return '';
         if (this.unsubArmed) return 'feed.unsubscribe_note';
         return this.sub.sub.url ? 'feed.link_private' : 'feed.link_pending';
       },
       captionId: function() {
-        return { 'feed.revoking': 'cal-sub-revoking', 'feed.link_pending': 'cal-sub-pending' }[this.caption] || 'cal-sub-caption';
+        return this.caption === 'feed.link_pending' ? 'cal-sub-pending' : 'cal-sub-caption';
       }
     },
     methods: Object.assign({}, ROOT_PROXY, {
@@ -8040,14 +8040,14 @@ function createVueApp() {
       + '<template v-if="sub.sub.url">'
       + '<v-text-field :model-value="sub.sub.url" readonly density="compact" variant="outlined" hide-details style="font-size:0.78rem;min-width:220px;max-width:360px" data-testid="cal-sub-url"></v-text-field>'
       + '<v-btn icon="mdi-content-copy" size="small" variant="text" @click="copySubUrl()" :title="t(\'btn.copy\')" data-testid="cal-sub-copy"></v-btn></template>'
-      + '<v-select v-if="hasSubLang" :model-value="sub.sub.lang" :items="subLangItems" :label="t(\'feed.language\')" density="compact" variant="outlined" hide-details style="max-width:190px;min-width:150px" data-testid="cal-sub-lang" @update:model-value="setSubLang($event)"></v-select>'
+      + '<v-select v-if="hasSubLang" :model-value="sub.sub.lang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" variant="outlined" hide-details style="max-width:190px;min-width:150px" data-testid="cal-sub-lang" @update:model-value="setSubLang($event)"></v-select>'
       // Text buttons like every other row action in Settings, with the calendar toolbar's icons. On a
       // phone only the icon shows (the label stays the title and accessible name), as the navigation
-      // layout buttons do -- except an ARMED unsubscribe, whose "press again" has to be read.
-      + '<v-btn :variant="unsubArmed ? \'flat\' : \'text\'" color="error" size="small" class="text-none" @click="unsubscribe()" :title="t(\'feed.unsubscribe\')" :aria-label="unsubArmed ? t(\'feed.unsubscribe_confirm\') : t(\'feed.unsubscribe\')" data-testid="cal-unsubscribe"><v-icon icon="mdi-calendar-remove"></v-icon><span :class="unsubArmed ? \'ml-2\' : \'d-none d-sm-inline ml-2\'">{{ unsubArmed ? t(\'feed.unsubscribe_confirm\') : t(\'feed.unsubscribe\') }}</span></v-btn></template>'
+      // layout buttons do. An armed unsubscribe turns solid red, and the caption says to press again.
+      + '<v-btn :variant="unsubArmed ? \'flat\' : \'text\'" color="error" size="small" class="text-none" @click="unsubscribe()" :title="t(\'feed.unsubscribe\')" :aria-label="t(\'feed.unsubscribe\')" data-testid="cal-unsubscribe"><v-icon icon="mdi-calendar-remove"></v-icon><span class="d-none d-sm-inline ml-2">{{ t(\'feed.unsubscribe\') }}</span></v-btn></template>'
       + '<template v-else>'
-      + '<v-select v-if="hasSubLang" v-model="subLang" :items="subLangItems" :label="t(\'feed.language\')" density="compact" variant="outlined" hide-details style="max-width:190px;min-width:150px" data-testid="cal-sub-lang"></v-select>'
-      + '<v-btn variant="text" size="small" class="text-none" @click="subscribe()" :title="t(\'feed.subscribe_intro\')" :aria-label="t(\'feed.subscribe\')" data-testid="cal-subscribe-go"><v-icon icon="mdi-calendar-sync"></v-icon><span class="d-none d-sm-inline ml-2">{{ t(\'feed.subscribe\') }}</span></v-btn></template>'
+      + '<v-select v-if="hasSubLang" v-model="subLang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" variant="outlined" hide-details style="max-width:190px;min-width:150px" data-testid="cal-sub-lang"></v-select>'
+      + '<v-btn variant="text" size="small" class="text-none" @click="subscribe()" :title="t(\'feed.subscribe\')" :aria-label="t(\'feed.subscribe\')" data-testid="cal-subscribe-go"><v-icon icon="mdi-calendar-sync"></v-icon><span class="d-none d-sm-inline ml-2">{{ t(\'feed.subscribe\') }}</span></v-btn></template>'
       + '<div v-if="caption" style="order:99;flex-basis:100%;font-size:0.75rem;opacity:0.75" :data-testid="captionId">{{ t(caption) }}</div>'
       + '</div>'
       + '<div v-else>'
@@ -8057,13 +8057,11 @@ function createVueApp() {
       + '<v-btn icon="mdi-content-copy" size="small" variant="text" @click="copySubUrl()" :title="t(\'btn.copy\')" data-testid="cal-sub-copy"></v-btn></div>'
       + '<p class="mt-1 mb-2" style="font-size:0.75rem;opacity:0.75">{{ t(\'feed.link_private\') }}</p></template>'
       + '<p v-else class="mb-2" style="font-size:0.8rem;opacity:0.8" data-testid="cal-sub-pending">{{ t(\'feed.link_pending\') }}</p>'
-      + '<v-select v-if="hasSubLang" :model-value="sub.sub.lang" :items="subLangItems" :label="t(\'feed.language\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang" @update:model-value="setSubLang($event)"></v-select>'
-      + '<v-btn :variant="unsubArmed ? \'flat\' : \'text\'" color="error" size="small" prepend-icon="mdi-calendar-remove" @click="unsubscribe()" data-testid="cal-unsubscribe">{{ unsubArmed ? t(\'feed.unsubscribe_confirm\') : t(\'feed.unsubscribe\') }}</v-btn>'
-      + '<p class="mt-1" style="font-size:0.72rem;opacity:0.7">{{ t(\'feed.unsubscribe_note\') }}</p></template>'
+      + '<v-select v-if="hasSubLang" :model-value="sub.sub.lang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang" @update:model-value="setSubLang($event)"></v-select>'
+      + '<v-btn :variant="unsubArmed ? \'flat\' : \'text\'" color="error" size="small" prepend-icon="mdi-calendar-remove" @click="unsubscribe()" data-testid="cal-unsubscribe">{{ t(\'feed.unsubscribe\') }}</v-btn>'
+      + '<p v-if="unsubArmed" class="mt-1" style="font-size:0.72rem;opacity:0.7" data-testid="cal-sub-caption">{{ t(\'feed.unsubscribe_note\') }}</p></template>'
       + '<template v-else>'
-      + '<p v-if="sub.state === \'revoking\'" class="mb-2" style="font-size:0.8rem;opacity:0.8" data-testid="cal-sub-revoking">{{ t(\'feed.revoking\') }}</p>'
-      + '<p class="mb-2" style="font-size:0.8rem;opacity:0.8">{{ t(\'feed.subscribe_intro\') }}</p>'
-      + '<v-select v-if="hasSubLang" v-model="subLang" :items="subLangItems" :label="t(\'feed.language\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang"></v-select>'
+      + '<v-select v-if="hasSubLang" v-model="subLang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang"></v-select>'
       + '<v-btn color="primary" variant="flat" size="small" prepend-icon="mdi-calendar-sync" @click="subscribe()" data-testid="cal-subscribe-go">{{ t(\'feed.subscribe\') }}</v-btn></template>'
       + '</div>'
   });
@@ -8148,9 +8146,8 @@ function createVueApp() {
       // unsubscribe. The link is theirs alone -- it lives in their owner-stamped row, which nobody else
       // reads -- so unlike the publish button above this is offered to every member.
       + '<v-menu v-if="!embed && canSubscribe" :close-on-content-click="false" location="bottom end">'
-      + '<template v-slot:activator="{ props }"><v-btn v-bind="props" icon="mdi-calendar-sync" size="small" variant="text" :title="t(\'feed.subscribe_title\')" data-testid="cal-subscribe-btn"></v-btn></template>'
+      + '<template v-slot:activator="{ props }"><v-btn v-bind="props" icon="mdi-calendar-sync" size="small" variant="text" :title="t(\'feed.subscribe\')" :aria-label="t(\'feed.subscribe\')" data-testid="cal-subscribe-btn"></v-btn></template>'
       + '<v-card max-width="380" class="pa-3" data-testid="cal-subscribe">'
-      + '<div class="text-subtitle-2 mb-1">{{ t(\'feed.subscribe_title\') }}</div>'
       + '<feed-subscription :name="viewName"></feed-subscription>'
       + '</v-card></v-menu></div>'
       // Export/publish range, on top-level calendars only. Mirrors the rotation toolbar: everyone with
