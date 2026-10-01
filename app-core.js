@@ -375,8 +375,9 @@ function createVueApp() {
       // _collapseAppearance starts COLLAPSED (unlike the others): the section is one row per navigable
       // screen, so expanded by default it pushes everything below it off-screen — which also stops
       // Vuetify's v-img from ever rendering the profile avatar, since v-img loads on intersection.
-      // _collapseCalendars likewise, as its look-alike: a member opens it to reach their personal feeds.
-      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false, _collapseAppearance: true, _collapseCalendars: true },
+      // _collapseCalendars, _collapseImport and _collapseUsers likewise: long or rarely used. What must
+      // not wait -- an example update, a pending access request -- is drawn outside their folds.
+      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false, _collapseAppearance: true, _collapseCalendars: true, _collapseImport: true, _collapseUsers: true },
       appConfig: null,
       saveTimers: {},
       // Live sync (see the _live* methods). _liveSubs maps a store name -> its unsubscribe function, so

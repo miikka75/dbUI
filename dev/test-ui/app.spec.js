@@ -850,6 +850,8 @@ test.describe('Import/Export', () => {
   test('export button downloads JSON', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
+    // Import / export is folded by default: open it the way a person would.
+    await page.locator('[data-testid="import-section-toggle"]').click();
     await page.waitForTimeout(200);
     const [download] = await Promise.all([
       page.waitForEvent('download'),
@@ -949,6 +951,8 @@ test.describe('Setup UI', () => {
   test('snackbar shows notification on export', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
+    // Import / export is folded by default: open it the way a person would.
+    await page.locator('[data-testid="import-section-toggle"]').click();
     await page.waitForTimeout(200);
     const [download] = await Promise.all([
       page.waitForEvent('download'),
@@ -4496,10 +4500,31 @@ test.describe('access control: user matching + fail-closed', () => {
     expect(r.onReject).toEqual(['Curated', 'Ann']);            // rejection != "nobody opted in"
   });
 
+  // Settings order: the person's own details first, the destructive Reset last. Users is folded, but a
+  // pending access request is drawn outside the fold — it is the one thing there that cannot wait.
+  test('Settings: Your details first, Reset last, and a pending request shows while Users is folded', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => { appInstance.setUserRole('bob@x.com', 'editor', 'bob@x.com', ['tasks']); });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
+    await page.evaluate(() => { appInstance.accessRequests = [{ email: 'new@x.com', name: 'New Person', note: '' }]; });
+    await expect(page.locator('td', { hasText: 'new@x.com' })).toBeVisible();
+    await expect(page.locator('[data-testid="users-body"]')).toBeHidden();
+    const order = await page.evaluate(() => {
+      const text = document.querySelector('[data-testid="nav-layout-toggle"]').closest('.v-card-text').innerText;
+      return { profile: text.indexOf('profile.title'), nav: text.indexOf('settings.nav_layout'), reset: text.indexOf('settings.reset') };
+    });
+    expect(order.profile).toBeGreaterThanOrEqual(0);
+    expect(order.profile).toBeLessThan(order.nav);
+    expect(order.reset).toBeGreaterThan(order.nav);
+    await page.evaluate(() => { appInstance.accessRequests = []; });
+  });
+
   test('admin can view and rename another user\'s profile name from the Users table', async ({ page }) => {
     await ensureAppReady(page);
     await page.evaluate(() => { appInstance.setUserRole('bob@x.com', 'editor', 'bob@x.com', ['tasks']); });
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
+    // Users is folded by default: open it the way a person would.
+    await page.locator('[data-testid="users-section-toggle"]').click();
     const row = page.locator('.v-table tbody tr', { hasText: 'bob@x.com' });
     await expect(row).toHaveCount(1);   // retries -- this IS the wait for loadUsers()/loadAllProfiles()
     const nameCell = row.locator('.editable-cell').nth(1);   // [0] = email/id, [1] = name
@@ -6834,6 +6859,8 @@ test.describe('Filter array-IN -> $or on export', () => {
     await page.goto('/');
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
     await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
+    // Import / export is folded by default: open it the way a person would.
+    await page.locator('[data-testid="import-section-toggle"]').click();
     await page.waitForTimeout(200);
     const [download] = await Promise.all([
       page.waitForEvent('download'),
