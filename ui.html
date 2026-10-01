@@ -755,6 +755,13 @@
   <v-card variant="outlined">
           <v-card-title>{{ a.t('tab.settings') }}</v-card-title>
           <v-card-text>
+            <!-- BUTTONS in Settings have four roles, each with one look, and one text size (small) except Commit:
+                   Section action -- stands on its own:      variant="outlined" size="small", icon + text
+                   Row action     -- inside a list row:      variant="text"     size="small", icon + text
+                   Icon-only      -- edit / delete / close:  variant="text"     size="small", with title + aria-label
+                   Commit         -- a form's or dialog's:   variant="flat" color="primary", normal size (Cancel beside it matches)
+                 Destructive ones keep their role's look and only change colour (error / warning). Segmented
+                 choices (v-btn-toggle) are controls, not buttons, and keep their own size. -->
             <div class="mb-4">
             <!-- ORDER: what is the person's own first, the everyday shared things next, admin and rarely used
                  tools after them, and the one destructive action last. A section collapses when it is long
@@ -770,7 +777,7 @@
               <div class="d-flex flex-column align-start" style="gap:4px">
                 <input ref="profilePicInput" type="file" accept="image/*" hidden @change="a.onProfilePictureFile($event)">
                 <v-btn size="small" variant="outlined" prepend-icon="mdi-camera" @click="$refs.profilePicInput.click()">{{ a.myProfile.picture ? a.t('img.replace') : a.t('img.upload') }}</v-btn>
-                <v-btn v-if="a.myProfile.picture" size="x-small" variant="text" color="error" prepend-icon="mdi-delete" @click="a.removeMyPicture()">{{ a.t('img.remove') }}</v-btn>
+                <v-btn v-if="a.myProfile.picture" size="small" variant="text" color="error" prepend-icon="mdi-delete" @click="a.removeMyPicture()">{{ a.t('img.remove') }}</v-btn>
               </div>
             </div>
             <div class="d-flex align-center flex-wrap" style="gap:12px">
@@ -831,8 +838,8 @@
                          @click="a.downloadIcs(f.name)"><v-icon icon="mdi-calendar-export"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('btn.export_ics') }}</span></v-btn>
                   <!-- Only a calendar defined HERE can be changed here. A schema one is still listed --
                        it is a file you can download -- but the app is not where it is edited. -->
-                  <v-btn v-if="a.isAdmin && f.userDefined" icon="mdi-pencil" size="x-small" variant="text" :title="a.t('btn.edit')" :data-testid="'user-cal-edit-' + f.name" @click="a.editCalendarById(f.name)"></v-btn>
-                  <v-btn v-if="a.isAdmin && f.userDefined" :icon="a.isArmed('ucal:' + f.name) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text"
+                  <v-btn v-if="a.isAdmin && f.userDefined" icon="mdi-pencil" size="small" variant="text" :title="a.t('btn.edit')" :data-testid="'user-cal-edit-' + f.name" @click="a.editCalendarById(f.name)"></v-btn>
+                  <v-btn v-if="a.isAdmin && f.userDefined" :icon="a.isArmed('ucal:' + f.name) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text"
                          :color="a.isArmed('ucal:' + f.name) ? 'error' : ''"
                          :title="a.isArmed('ucal:' + f.name) ? a.t('settings.confirm_delete') : a.t('settings.cal_delete')"
                          :data-testid="'user-cal-del-' + f.name"
@@ -841,17 +848,17 @@
                 <div v-if="a.isAdmin && f.published" class="d-flex align-center flex-wrap mt-1" style="gap:8px">
                   <v-text-field :model-value="f.url" readonly density="compact" variant="outlined"
                                 hide-details style="font-size:0.78rem;min-width:260px" :data-testid="'feed-url-' + f.name"></v-text-field>
-                  <v-btn size="small" variant="text" @click="a.copyText(f.url)">{{ a.t('btn.copy') }}</v-btn>
-                  <v-btn size="small" variant="text" color="warning" :disabled="!a.canPublishFeeds"
+                  <v-btn size="small" variant="text" prepend-icon="mdi-content-copy" @click="a.copyText(f.url)">{{ a.t('btn.copy') }}</v-btn>
+                  <v-btn size="small" variant="text" color="warning" prepend-icon="mdi-autorenew" :disabled="!a.canPublishFeeds"
                          :data-testid="'feed-regen-' + f.name"
                          @click="a.regenerateFeed(f.name)">{{ a.t('settings.feed_regenerate') }}</v-btn>
-                  <v-btn size="small" variant="text" color="error"
+                  <v-btn size="small" variant="text" color="error" prepend-icon="mdi-link-off"
                          :data-testid="'feed-stop-' + f.name"
                          @click="a.unpublishFeed(f.name)">{{ a.t('settings.feed_unpublish') }}</v-btn>
                 </div>
               </div>
             <template v-if="a.isAdmin">
-            <v-btn v-if="!a.calDraft" variant="text" prepend-icon="mdi-plus"
+            <v-btn v-if="!a.calDraft" variant="outlined" size="small" prepend-icon="mdi-plus"
                    data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('btn.add') }} {{ a.t('settings.cal_new') }}</v-btn>
             <v-card v-if="a.calDraft" variant="tonal" class="pa-3 mt-2" data-testid="user-cal-form">
               <!-- A real table, like Users: headers, `plain` controls, one row, destructive control
@@ -890,7 +897,7 @@
                          than promising a switch that would fail on save. -->
                     <td v-if="a.canPublishFeeds"><v-switch v-if="i === 0" v-model="a.calDraft.feed" color="primary" density="compact" hide-details
                                   data-testid="user-cal-feed"></v-switch></td>
-                    <td><v-btn icon="mdi-close" size="x-small" variant="text" :data-testid="'user-cal-rmsrc-' + i" @click="a.removeCalDraftSource(i)"></v-btn></td>
+                    <td><v-btn icon="mdi-close" size="small" variant="text" :data-testid="'user-cal-rmsrc-' + i" @click="a.removeCalDraftSource(i)"></v-btn></td>
                   </tr>
                 </tbody>
                 </template>
@@ -898,8 +905,8 @@
               <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="a.addCalDraftSource()">{{ a.t('settings.cal_add_source') }}</v-btn>
               <p v-if="a.calDraft.feed" style="font-size:0.75rem;opacity:0.75" class="mt-1">{{ a.t('settings.cal_publish_warn') }}</p>
               <div class="mt-2 d-flex" style="gap:8px">
-                <v-btn size="small" color="primary" data-testid="user-cal-save" @click="a.saveCalDraft()">{{ a.t('btn.save') }}</v-btn>
-                <v-btn size="small" variant="text" @click="a.cancelCalDraft()">{{ a.t('btn.cancel') }}</v-btn>
+                <v-btn variant="flat" color="primary" data-testid="user-cal-save" @click="a.saveCalDraft()">{{ a.t('btn.save') }}</v-btn>
+                <v-btn variant="text" @click="a.cancelCalDraft()">{{ a.t('btn.cancel') }}</v-btn>
               </div>
             </v-card>
             </template>
@@ -936,7 +943,7 @@
                  other which of its parts an import will APPLY. Wrapping rows, so the chooser drops under
                  its button on a phone rather than squeezing beside it. -->
             <div class="mb-2" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px">
-              <v-btn variant="outlined" prepend-icon="mdi-download" data-testid="settings-export-json" @click="a.exportData">{{ a.t('settings.export') }}</v-btn>
+              <v-btn variant="outlined" size="small" prepend-icon="mdi-download" data-testid="settings-export-json" @click="a.exportData">{{ a.t('settings.export') }}</v-btn>
               <v-select :model-value="a.exportParts" @update:model-value="v => a.setParts('exportParts', v)" :items="a.partOptions('exportParts')" item-title="title" item-value="value"
                         :item-props="(i) => ({ disabled: i.disabled, appendIcon: i.disabled ? 'mdi-check' : undefined })"
                         multiple chips density="compact" variant="outlined" hide-details
@@ -944,7 +951,7 @@
                         :label="a.t('settings.export_parts')"></v-select>
             </div>
             <div class="mb-1" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px">
-              <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()">{{ a.t('settings.import') }}</v-btn>
+              <v-btn variant="outlined" size="small" prepend-icon="mdi-upload" @click="$refs.importFile.click()">{{ a.t('settings.import') }}</v-btn>
               <v-select :model-value="a.importParts" @update:model-value="v => a.setParts('importParts', v)" :items="a.partOptions('importParts')" item-title="title" item-value="value"
                         :item-props="(i) => ({ disabled: i.disabled, appendIcon: i.disabled ? 'mdi-check' : undefined })"
                         multiple chips density="compact" variant="outlined" hide-details
@@ -952,7 +959,7 @@
                         :label="a.t('settings.import_parts')"></v-select>
               <input ref="importFile" type="file" multiple accept=".json" hidden @change="a.importData($event)">
             </div>
-            <v-btn variant="outlined" prepend-icon="mdi-shape-outline" class="mb-2"
+            <v-btn variant="outlined" size="small" prepend-icon="mdi-shape-outline" class="mb-2"
                    data-testid="settings-examples" @click="a.openExamples()">{{ a.t('settings.examples') }}</v-btn>
             </div>
             <!-- Outside the fold: an available update is news, and a collapsed section would hide it. -->
@@ -1144,8 +1151,8 @@
                     <td>{{ req.name }}</td>
                     <td class="text-medium-emphasis">{{ req.note }}</td>
                     <td style="white-space:nowrap">
-                      <v-btn size="x-small" color="success" variant="text" prepend-icon="mdi-check" @click="a.approveRequest(req)">{{ a.t('access.approve') }}</v-btn>
-                      <v-btn size="x-small" color="error" variant="text" prepend-icon="mdi-close" @click="a.denyRequest(req)">{{ a.t('access.deny') }}</v-btn>
+                      <v-btn size="small" color="success" variant="text" prepend-icon="mdi-check" @click="a.approveRequest(req)">{{ a.t('access.approve') }}</v-btn>
+                      <v-btn size="small" color="error" variant="text" prepend-icon="mdi-close" @click="a.denyRequest(req)">{{ a.t('access.deny') }}</v-btn>
                     </td>
                   </tr>
                 </tbody>
@@ -1177,7 +1184,7 @@
               </tbody>
               </template>
             </v-table>
-            <v-btn variant="text" prepend-icon="mdi-plus" @click="a.addUser()" class="ma-2">{{ a.t('settings.add_user') }}</v-btn>
+            <v-btn variant="outlined" size="small" prepend-icon="mdi-plus" @click="a.addUser()" class="mt-2">{{ a.t('settings.add_user') }}</v-btn>
             </div>
             </template>
             <template v-if="a.isAdmin">
@@ -1207,7 +1214,7 @@
             </template>
             </template>
             <v-divider class="my-4"></v-divider>
-            <v-btn variant="outlined" :color="a.isArmed('reset') ? 'error' : 'warning'" :prepend-icon="a.isArmed('reset') ? 'mdi-check-circle' : 'mdi-refresh'" @click="a.isArmed('reset') ? a.resetApp() : a.armConfirm('reset')">{{ a.isArmed('reset') ? a.t('settings.confirm_reset') : a.t('settings.reset') }}</v-btn>
+            <v-btn variant="outlined" size="small" :color="a.isArmed('reset') ? 'error' : 'warning'" :prepend-icon="a.isArmed('reset') ? 'mdi-check-circle' : 'mdi-refresh'" @click="a.isArmed('reset') ? a.resetApp() : a.armConfirm('reset')">{{ a.isArmed('reset') ? a.t('settings.confirm_reset') : a.t('settings.reset') }}</v-btn>
             </div>
           </v-card-text>
         </v-card>
