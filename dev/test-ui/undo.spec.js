@@ -127,22 +127,6 @@ test.describe('Undo / redo', () => {
     await expect(redoBtn(page)).toBeEnabled();
   });
 
-  test('refresh moved to Settings and clears the stack', async ({ page }) => {
-    await appReady(page);
-    await page.locator('button:has(.mdi-plus)').click();
-    await expect(page.locator('.v-table tbody tr')).toHaveCount(1);
-    await typeInFirstCell(page, 'Before refresh');
-    await expect(undoBtn(page)).toBeEnabled();
-
-    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
-    const refresh = page.locator('[data-testid="settings-refresh"]');
-    await expect(refresh).toBeVisible();
-    await refresh.click();
-
-    // refreshData replaces the cache wholesale, so the inverses no longer invert anything.
-    await expect(undoBtn(page)).toBeDisabled();
-  });
-
   test('adding a row and undoing removes it, from the table and the server', async ({ page }) => {
     await appReady(page);
     const rows = page.locator('.v-table tbody tr');

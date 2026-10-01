@@ -365,7 +365,6 @@ function createVueApp() {
       mobile: window.innerWidth < 768,
       windowWidth: window.innerWidth,
       theme: localStorage.getItem('app_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
-      syncing: false,
       // Mirrors of undo.js's stack depths, kept current by the onChange it is configured with in
       // mounted(). A plain module is not reactive, so the buttons cannot read Undo.canUndo() directly.
       undoDepth: 0,
@@ -1034,9 +1033,9 @@ function createVueApp() {
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
          'bg.fit', 'bg.fit_cover', 'bg.fit_contain', 'bg.fit_tile', 'bg.fit_width',
-         'btn.undo', 'btn.redo', 'msg.undone', 'msg.redone', 'settings.data', 'settings.refresh',
+         'btn.undo', 'btn.redo', 'msg.undone', 'msg.redone',
          'msg.saved', 'msg.save_failed', 'msg.upload_failed', 'msg.choose_image', 'msg.image_too_large', 'msg.image_read_failed', 'msg.image_invalid', 'msg.image_process_failed',
-         'msg.row_added', 'msg.no_identity', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.export_incomplete', 'msg.form_submitted', 'msg.form_incomplete', 'msg.form_required', 'msg.synced', 'msg.sync_failed',
+         'msg.row_added', 'msg.no_identity', 'msg.deleted', 'msg.restored', 'msg.renamed', 'msg.archived', 'msg.copied', 'msg.exported', 'msg.export_incomplete', 'msg.form_submitted', 'msg.form_incomplete', 'msg.form_required',
          'msg.load_failed', 'msg.request_failed', 'msg.approve_failed', 'msg.import_complete',
          'msg.group_added', 'msg.item_added', 'msg.translation_saved', 'msg.language_added', 'msg.language_renamed', 'msg.language_exists',
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
@@ -6809,31 +6808,6 @@ function createVueApp() {
       },
 
       // Sync
-      refreshData: function() {
-        var self = this;
-        self.syncing = true;
-        // Re-fetch the current view's source tables from the backend and rebuild the view.
-        var view = VIEWS[self.currentTable];
-        // Source tables to refresh: a data view's sources, else the current table itself.
-        // Doc-views (markdown, no sources) and "no table open" yield [] — refresh is a safe no-op + rebuild.
-        var sources = (view && Array.isArray(view.sources)) ? view.sources
-          : (SCHEMA[self.currentTable] ? [self.currentTable] : []);
-        var chain = Promise.resolve();
-        sources.forEach(function(src) {
-          chain = chain.then(function() {
-            return backend.getTableData(src, 'active').then(function(r) {
-              self.dataCache[src] = (r && r.rows) ? r.rows : [];
-            });
-          });
-        });
-        // The stack's inverses were derived against rows this is about to replace wholesale, so they
-        // are no longer inverses of anything.
-        chain.then(function() { Undo.clear(); self.loadTableData(); self.syncing = false; self.notify(self.t('msg.synced')); }).catch(function(err) {
-          self.syncing = false;
-          self.notify(err && err.message ? err.message : self.t('msg.sync_failed'));
-        });
-      },
-
       generateId: function() { return Date.now().toString(36) + Math.random().toString(36).substr(2, 5); },
 
       focusLastEditable: function(selector) {

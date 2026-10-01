@@ -264,9 +264,10 @@
       <v-spacer v-else></v-spacer>
       <v-select v-if="languages.length > 1" v-model="currentLang" name="current-lang" :items="langItems" density="compact" variant="plain" hide-details style="max-width:120px" class="mr-2" @update:model-value="switchLanguage"></v-select>
       <user-avatar v-if="usersLoaded && !isUnregisteredUser" :email="currentUserEmail" :name="myProfile.name" :size="32" :title="myProfile.name || currentUserEmail" class="mr-2"></user-avatar>
-      <!-- Undo/redo hold the slot refresh used to. Refresh moved to Settings: every backend subscribes
-           to its tables, so it is the escape hatch for a dropped subscription rather than a daily
-           action, and a browser reload already refetches strictly more than it does. -->
+      <!-- Undo/redo hold the slot refresh used to. There is no refresh button any more: every backend
+           subscribes to its tables, and for a dropped subscription a browser reload refetches strictly
+           more than the button did. (It had moved to Settings, where the open screen has no tables, so
+           it fetched nothing there.) -->
       <v-btn icon="mdi-undo" :disabled="!undoDepth" :title="t('btn.undo')" :aria-label="t('btn.undo')" data-testid="undo" @click="undoLast"></v-btn>
       <v-btn icon="mdi-redo" :disabled="!redoDepth" :title="t('btn.redo')" :aria-label="t('btn.redo')" data-testid="redo" @click="redoLast"></v-btn>
       <v-btn :icon="theme === 'dark' ? 'mdi-weather-sunny' : 'mdi-weather-night'" @click="toggleTheme"></v-btn>
@@ -925,10 +926,8 @@
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.share') }}</p>
             <v-text-field :model-value="a.shareLink" name="share-link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="a.copyText(a.shareLink)"></v-text-field>
             </template>
-            <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2">{{ a.t('settings.data') }}</p>
-            <v-btn variant="outlined" prepend-icon="mdi-refresh" :loading="a.syncing" data-testid="settings-refresh" @click="a.refreshData" class="mr-2 mb-2">{{ a.t('settings.refresh') }}</v-btn>
             <template v-if="a.isAdmin">
+            <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2" style="cursor:pointer" role="button" tabindex="0" data-testid="import-section-toggle"
                :aria-expanded="String(!a.settings._collapseImport)"
                @click="a.settings._collapseImport = !a.settings._collapseImport" @keydown.enter.prevent="a.settings._collapseImport = !a.settings._collapseImport">
