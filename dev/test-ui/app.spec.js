@@ -4509,6 +4509,8 @@ test.describe('access control: user matching + fail-closed', () => {
     await page.evaluate(() => { appInstance.accessRequests = [{ email: 'new@x.com', name: 'New Person', note: '' }]; });
     await expect(page.locator('td', { hasText: 'new@x.com' })).toBeVisible();
     await expect(page.locator('[data-testid="users-body"]')).toBeHidden();
+    // Sharing the address is onboarding, so it lives with Users -- inside the fold.
+    await expect(page.locator('[data-testid="users-body"] input[name="share-link"]')).toHaveCount(1);
     const order = await page.evaluate(() => {
       const text = document.querySelector('[data-testid="nav-layout-toggle"]').closest('.v-card-text').innerText;
       return { profile: text.indexOf('profile.title'), nav: text.indexOf('settings.nav_layout'), reset: text.indexOf('settings.reset') };

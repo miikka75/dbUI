@@ -922,9 +922,6 @@
                 </v-list-item>
               </v-list>
             </template>
-            <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2">{{ a.t('settings.share') }}</p>
-            <v-text-field :model-value="a.shareLink" name="share-link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="a.copyText(a.shareLink)"></v-text-field>
             </template>
             <template v-if="a.isAdmin">
             <v-divider class="my-4"></v-divider>
@@ -1156,6 +1153,12 @@
               </v-table>
             </template>
             <div v-show="!a.settings._collapseUsers" class="ml-5" data-testid="users-body">
+            <!-- The address to send someone you are letting in. On Firebase / Supabase it carries this
+                 database's connection, so opening it connects their browser here -- onboarding, which is
+                 what this section is for. It also only exists once a user is registered: before that
+                 everyone is admin, and a link handed out then would hand out full access with it. -->
+            <p class="text-body-2 font-weight-medium mb-2">{{ a.t('settings.share') }}</p>
+            <v-text-field class="mb-4" :model-value="a.shareLink" name="share-link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="a.copyText(a.shareLink)"></v-text-field>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.user_access') }}</p>
             <v-table v-if="a.userList.length" density="compact">
               <template v-slot:default>
