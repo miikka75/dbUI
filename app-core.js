@@ -1028,7 +1028,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_note', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'settings.cal_delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'settings.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_note', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1041,12 +1041,11 @@ function createVueApp() {
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
          'msg.ref_has_children',
-         'pivot.total', 'pivot.empty',
-         'stats.empty',
+         'pivot.total', 'stats.empty',
          'scan.code', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
          'scan.print_codes', 'scan.print_code', 'scan.no_barcode',
          'scan.camera', 'scan.no_code_found', 'scan.several_codes', 'scan.camera_failed',
-         'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.edit', 'board.archive', 'board.confirm_archive', 'board.delete', 'board.confirm_delete',
+         'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.archive', 'board.confirm_archive',
          'tab.languages', 'tab.lookup', 'tab.settings', 'tab.ref_data', 'tab.lists',
          'field.key', 'field.translation',
          'settings.import_export', 'settings.share', 'settings.export', 'settings.import',
@@ -1054,20 +1053,20 @@ function createVueApp() {
          'part.backup', 'part.schema', 'part.languages', 'part.reference', 'part.data', 'part.users',
          'msg.nothing_to_export', 
          'settings.examples', 'settings.examples_update', 'settings.examples_reinstall', 'settings.examples_notes_more',
-         'settings.reset', 'settings.confirm_reset', 'settings.nav_layout', 'settings.nav_drawer', 'settings.tabs_nav', 'settings.nav_list', 'settings.nav_tiles', 'settings.appearance',
+         'settings.reset', 'settings.nav_layout', 'settings.nav_drawer', 'settings.tabs_nav', 'settings.nav_list', 'settings.nav_tiles', 'settings.appearance',
          'appearance.menu', 'appearance.background', 'appearance.icon', 'appearance.image', 'appearance.none', 'appearance.search',
          'appearance.same_as_menu', 'appearance.other_icon', 'appearance.focus',
          'appearance.focus_top', 'appearance.focus_center', 'appearance.focus_bottom', 'theme.primary', 'theme.secondary', 'theme.surface', 'theme.background', 'theme.text', 'theme.error', 'theme.success', 'local.title', 'local.used', 'local.quota', 'local.persistent', 'local.best_effort_title', 'local.best_effort', 'local.keep', 'local.install_hint', 'examples.title', 'examples.intro', 'examples.tables', 'examples.views', 'examples.sample_rows', 'examples.languages', 'examples.app_text', 'examples.with_data', 'examples.data_warning', 'examples.replace_warning', 'examples.export_first', 'examples.install',
-         'appearance.schema_default', 'appearance.need_image', 'appearance.entries', 'settings.user_access', 'settings.user_access_title',
+         'appearance.schema_default', 'appearance.need_image', 'appearance.entries', 'settings.user_access_title',
          'settings.theme', 'settings.theme_palette', 'settings.theme_reset',   // ui.html calls t() for these; leaving them out hid the Theme labels from the Languages editor, so no language could translate them
          'settings.databases', 'settings.databases_hint', 'settings.switch', 'settings.forget',
          'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.tables_view', 'settings.add_user', 'settings.all',
          'role.admin', 'role.editor', 'role.viewer',
-         'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'btn.today', 'btn.reset',
-         'cal.today', 'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
+         'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'cal.today', 'btn.reset',
+         'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
          'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
-         'profile.title', 'profile.email', 'profile.your_name', 'profile.share_name', 'profile.picture',
+         'profile.title', 'profile.email', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
          'list.link_user', 'list.unlink_user', 'list.locked_value', 'list.locked_group',
          'lang.app', 'lang.schema', 'lang.lists'].sort();
@@ -8173,7 +8172,7 @@ function createVueApp() {
       + '<v-text-field :model-value="a.rotationAnchorForView" name="rotation-anchor" type="date" :label="a.t(\'settings.rotation_anchor\')" density="compact" variant="outlined" hide-details style="max-width:175px" :disabled="!a.canMutateCurrent" @update:model-value="a.saveRotationAnchor(a.currentTable, $event)" data-testid="rotation-anchor"></v-text-field>'
       + '<div class="d-flex align-center" style="gap:2px">'
       + '<v-text-field :model-value="(a.rotationRangeForView.from && a.rotationRangeForView.from !== \'today\') ? a.rotationRangeForView.from : \'\'" name="rotation-from" type="date" :label="a.t(\'settings.rotation_from\')" density="compact" variant="outlined" hide-details style="max-width:165px" :disabled="!a.canMutateCurrent" @update:model-value="a.saveRotationRange(a.currentTable, { from: $event || \'today\' })" data-testid="rotation-from"></v-text-field>'
-      + '<v-btn icon="mdi-calendar-today" size="small" variant="text" :disabled="!a.canMutateCurrent" @click="a.saveRotationRange(a.currentTable, { from: \'today\' })" :title="a.t(\'btn.today\')"></v-btn></div>'
+      + '<v-btn icon="mdi-calendar-today" size="small" variant="text" :disabled="!a.canMutateCurrent" @click="a.saveRotationRange(a.currentTable, { from: \'today\' })" :title="a.t(\'cal.today\')"></v-btn></div>'
       + '<v-text-field :model-value="a.rotationRangeForView.periods" name="rotation-periods" type="number" :label="a.t(\'settings.rotation_periods\')" density="compact" variant="outlined" hide-details style="max-width:115px" :disabled="!a.canMutateCurrent" @update:model-value="a.saveRotationRange(a.currentTable, { periods: $event === \'\' ? \'\' : Number($event) })" data-testid="rotation-periods"></v-text-field>'
       + '<v-text-field :model-value="a.rotationEveryForView" name="rotation-every" type="number" min="0" :label="a.t(\'settings.rotation_every\')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!a.canMutateCurrent" @update:model-value="a.saveRotationRotateEvery(a.currentTable, { every: $event === \'\' ? 0 : Number($event), cycle: a.rotationCycleForView })" data-testid="rotation-every"></v-text-field>'
       + '<v-switch :model-value="a.rotationCycleForView" @update:model-value="v => a.saveRotationRotateEvery(a.currentTable, { every: a.rotationEveryForView, cycle: v })" color="primary" density="compact" hide-details :label="a.t(\'settings.rotation_cycle\')" :disabled="!a.canMutateCurrent" data-testid="rotation-cycle"></v-switch>'
@@ -8233,7 +8232,7 @@ function createVueApp() {
       + '<td v-for="(v, ci) in r.cells" :key="ci" style="text-align:center">{{ cellFmt(v) }}</td>'
       + '<td v-if="hasTotals" style="text-align:center;font-weight:700">{{ r.total }}</td>'
       + '</tr>'
-      + '<tr v-if="!rows.length"><td :colspan="(grid.columns.length || 1) + 1" style="opacity:0.6;padding:12px">{{ a.t(\'pivot.empty\') }}</td></tr>'
+      + '<tr v-if="!rows.length"><td :colspan="(grid.columns.length || 1) + 1" style="opacity:0.6;padding:12px">{{ a.t(\'stats.empty\') }}</td></tr>'
       + '</tbody>'
       + '<tfoot v-if="hasTotals"><tr>'
       + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:700">{{ a.t(\'pivot.total\') }}</th>'
@@ -9044,9 +9043,9 @@ function createVueApp() {
       + '           :data-testid="\'board-card-\'+item.id">'
       + '        <div style="display:flex;align-items:flex-start;gap:4px">'
       + '          <div style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
-      + '          <v-btn v-if="canEditCard(item)" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="t(\'board.edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
+      + '          <v-btn v-if="canEditCard(item)" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="t(\'btn.edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
       + '          <v-btn v-if="canEditCard(item) && hasArchive" :icon="isArchArmed(item) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" density="comfortable" :color="isArchArmed(item) ? \'warning\' : undefined" :title="isArchArmed(item) ? t(\'board.confirm_archive\') : t(\'board.archive\')" @click="archItem(item)" :data-testid="\'board-arch-\'+item.id"></v-btn>'
-      + '          <v-btn v-if="canEditCard(item)" :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" density="comfortable" :color="isDelArmed(item) ? \'error\' : undefined" :title="isDelArmed(item) ? t(\'board.confirm_delete\') : t(\'board.delete\')" @click="delItem(item)" :data-testid="\'board-del-\'+item.id"></v-btn>'
+      + '          <v-btn v-if="canEditCard(item)" :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" density="comfortable" :color="isDelArmed(item) ? \'error\' : undefined" :title="isDelArmed(item) ? t(\'btn.confirm_delete\') : t(\'btn.delete\')" @click="delItem(item)" :data-testid="\'board-del-\'+item.id"></v-btn>'
       + '          <v-menu v-if="canEditCard(item) && canMoveCards" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
       + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :title="t(\'board.move_to\')" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
       // No heading over the lane list: the menu opens from a button that already carries "move to" as its
