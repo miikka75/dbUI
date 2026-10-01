@@ -4734,6 +4734,44 @@ test.describe('access control: user matching + fail-closed', () => {
     expect(r.leaks).toEqual([]);   // no data-backed tabs leak through to an unmatched user
   });
 
+  // Add user writes NOTHING until the row has an email: a placeholder record is a grant nobody can sign
+  // in as, left behind by every abandoned row. And it starts as a viewer, so access is granted on
+  // purpose. Typing an email that already belongs to someone must not overwrite their record.
+  test('Add user is a draft until it has an email, starts as a viewer, and cannot overwrite a user', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => { appInstance.setUserRole('bob@x.com', 'editor', 'bob@x.com', ['tasks']); });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
+    await expect(page.locator('tr', { hasText: 'bob@x.com' })).toHaveCount(1);
+    await page.evaluate(() => {
+      window.__userWrites = [];
+      const real = window.backend_users.setUserRole;
+      window.backend_users.setUserRole = function (uid, role, user, tables) {
+        window.__userWrites.push({ uid, role, user, tables });
+        return real.apply(this, arguments);
+      };
+    });
+    const emailCells = page.locator('[data-testid="user-email-cell"]');
+    const before = await emailCells.count();
+
+    await page.getByRole('button', { name: 'settings.add_user' }).click();
+    await expect(emailCells).toHaveCount(before + 1);
+    expect(await page.evaluate(() => window.__userWrites.length)).toBe(0);      // nothing written yet
+
+    // An email that is already a user's: refused, nothing written, the draft stays to be corrected.
+    await emailCells.last().fill('bob@x.com');
+    await emailCells.last().blur();
+    await expect(emailCells).toHaveCount(before + 1);
+    expect(await page.evaluate(() => window.__userWrites.length)).toBe(0);
+
+    await emailCells.last().fill('New@X.com');
+    await emailCells.last().blur();
+    await expect.poll(() => page.evaluate(() => window.__userWrites.length)).toBe(1);
+    const w = await page.evaluate(() => window.__userWrites[0]);
+    expect(w).toEqual({ uid: 'new@x.com', role: 'viewer', user: 'new@x.com', tables: 'all' });
+    await expect(page.locator('tr', { hasText: 'new@x.com' })).toHaveCount(1);
+    expect(await page.evaluate(() => window.appInstance.userDrafts.length)).toBe(0);
+  });
+
   test('renameUser lowercases + trims the email key at write time', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(async () => {

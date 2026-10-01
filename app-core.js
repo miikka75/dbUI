@@ -262,6 +262,9 @@ function createVueApp() {
       hasLocalServer: false,
       currentUserEmail: null,
       userList: [],
+      // Rows added with "Add user" that have no email yet. They live only here: a user record keyed by a
+      // placeholder would be a grant nobody can sign in as, left behind whenever a row is abandoned.
+      userDrafts: [],
       usersLoaded: false,
       // True when users exist but the signed-in user is not one of them (self-scoped getMyAccess said
       // registered:false). Distinguishes "unregistered" from "bootstrap" (both have an empty userList
@@ -663,7 +666,7 @@ function createVueApp() {
       sortedUserList: function() {
         return this.userList.slice().sort(function(a, b) {
           return (a.key || '').toLowerCase().localeCompare((b.key || '').toLowerCase());
-        });
+        }).concat(this.userDrafts);   // drafts last, in the order they were added
       },
       userCalendars: function() {
         var defs = (this.appConfig && this.appConfig.calendars) || {};
@@ -5351,7 +5354,12 @@ function createVueApp() {
       },
       setUserRole: function(uid, role, user, tables) {
         var self = this;
+        var draft = this._userDraft(uid);
+        if (draft) { draft.role = role; return; }   // written with the row, once it has an email
         backend_users.setUserRole(uid, role, user, tables).then(function() { self.loadUsers(); });
+      },
+      _userDraft: function(key) {
+        return this.userDrafts.filter(function(d) { return d.key === key; })[0] || null;
       },
       // --- Membership requests ---
       // Unregistered user submits a request; only they can write their own request doc (rules-enforced).
@@ -5874,6 +5882,8 @@ function createVueApp() {
       // an empty grant would otherwise lock the user out of an app they were just given access to.
       _saveGrants: function(u, tables) {
         if (tables !== 'all' && !Object.keys(tables).length) tables = 'all';
+        var draft = this._userDraft(u.key);
+        if (draft) { draft.tables = tables; return Promise.resolve(); }
         return backend_users.setUserRole(u.key, u.role, u.addr, tables).then(this.loadUsers.bind(this));
       },
       userFeatures: function(u) {
@@ -5897,13 +5907,19 @@ function createVueApp() {
       },
       removeUser: function(uid) {
         var self = this;
+        if (this._userDraft(uid)) { this.userDrafts = this.userDrafts.filter(function(d) { return d.key !== uid; }); return; }
         backend_users.removeUser(uid).then(function() { self.loadUsers(); });
       },
+      // A draft row, written nowhere until it has an email (renameUser). It starts as a VIEWER: access
+      // is granted on purpose, not taken back afterwards. Its tables are 'all' because the grant model
+      // has no "nothing" -- an empty grant means unrestricted (_saveGrants) -- so least privilege here is
+      // the role, not the table list.
       addUser: function() {
         var self = this;
-        var key = '_new_' + Date.now();
-        backend_users.setUserRole(key, 'editor', '', 'all').then(function() {
-          self.loadUsers();
+        this.userDrafts = this.userDrafts.concat([{ key: '_new_' + Date.now(), addr: '', role: 'viewer', tables: 'all', draft: true }]);
+        this.$nextTick(function() {
+          var cells = document.querySelectorAll('[data-testid="user-email-cell"]');
+          if (cells.length) cells[cells.length - 1].focus();
         });
       },
       renameUser: function(u, newAddr) {
@@ -5912,6 +5928,19 @@ function createVueApp() {
         newAddr = (newAddr || '').trim().toLowerCase();
         if (!newAddr || newAddr === u.key) return;   // key IS the identity Firestore rules match on
         var self = this;
+        // Writing to a key that already exists would replace that user's role and grants with this
+        // row's -- silently, since the write is the same call either way.
+        if (this.userList.some(function(x) { return (x.key || '').toLowerCase() === newAddr; })) {
+          this.notify(this.t('msg.name_taken'));
+          return;
+        }
+        var draft = this._userDraft(u.key);
+        if (draft) {
+          return backend_users.setUserRole(newAddr, draft.role, newAddr, draft.tables).then(function() {
+            self.userDrafts = self.userDrafts.filter(function(d) { return d !== draft; });
+            self.loadUsers();
+          });
+        }
         backend_users.removeUser(u.key).then(function() {
           return backend_users.setUserRole(newAddr, u.role, newAddr, u.tables);  // re-key doc: key = email
         }).then(function() { self.loadUsers(); });
