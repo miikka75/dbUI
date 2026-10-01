@@ -4741,6 +4741,8 @@ test.describe('access control: user matching + fail-closed', () => {
     await ensureAppReady(page);
     await page.evaluate(() => { appInstance.setUserRole('bob@x.com', 'editor', 'bob@x.com', ['tasks']); });
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
+    // Users is folded by default: open it the way a person would.
+    await page.locator('[data-testid="users-section-toggle"]').click();
     await expect(page.locator('tr', { hasText: 'bob@x.com' })).toHaveCount(1);
     await page.evaluate(() => {
       window.__userWrites = [];
