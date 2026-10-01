@@ -3596,6 +3596,8 @@ test.describe('v3 @both partition toggle in an embed', () => {
       window.VIEWS.hidden_cal = { name: 'hidden_cal', calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] } };
       app.selectTab('__settings');
     });
+    // Calendars is collapsed by default, like Appearance: open it the way a person would.
+    await page.locator('[data-testid="calendars-section-toggle"]').click();
     const btn = page.locator('[data-testid="feed-download-hidden_cal"]');
     await expect(btn).toBeVisible();
     const [download] = await Promise.all([page.waitForEvent('download'), btn.click()]);
@@ -3969,6 +3971,8 @@ test.describe('v3 @both partition toggle in an embed', () => {
       window.Writes.putRow = (t, row) => Promise.resolve(row);
       app.selectTab('__settings');
     });
+    // Calendars is collapsed by default, like Appearance: open it the way a person would.
+    await page.locator('[data-testid="calendars-section-toggle"]').click();
     const entry = page.locator('[data-testid="settings-my-feed"]', { hasText: 'Hidden personal calendar' });
     await expect(entry).toBeVisible();
     await entry.locator('[data-testid="cal-subscribe-go"]').click();
@@ -3980,6 +3984,21 @@ test.describe('v3 @both partition toggle in an embed', () => {
     });
     expect(row.active).toBe('yes');
     expect(row.rosterPublic).toBe(false);          // privateRoster: nobody else reads this row, or its link
+
+    // A MEMBER sees Calendars too — for their own feed only. Building calendars and the published links
+    // stay admin-only inside the same section. userAllowedTables is computed, so the member is made the
+    // way the app makes one: a user list holding this account with a table grant rather than 'all'.
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      window.__adminEmail = app.currentUserEmail;
+      app.userList = [{ key: 'm@x.com', addr: 'm@x.com', role: 'editor', tables: ['tasks'] }];
+      app.currentUserEmail = 'm@x.com';
+    });
+    const memberEntry = page.locator('[data-testid="settings-my-feed"]', { hasText: 'Hidden personal calendar' });
+    await expect(memberEntry).toBeVisible();
+    await expect(memberEntry.locator('[data-testid="cal-subscribe-go"]')).toBeVisible();   // the admin's row is not theirs
+    await expect(page.locator('[data-testid="user-cal-new"]')).toHaveCount(0);
+    await page.evaluate(() => { const app = window.appInstance; app.userList = []; app.currentUserEmail = window.__adminEmail; });
   });
 
   // Rendering a calendar AS somebody else — the per-person feed's rendering path. The failure this
@@ -5199,6 +5218,8 @@ test.describe('calendar view', () => {
       await app.saveUserCalendar('cal_edit', { title: 'Cleaning', rotationViews: ['rot_e'], sources: [] });
       app.selectTab('__settings');
     });
+    // Calendars is collapsed by default, like Appearance: open it the way a person would.
+    await page.locator('[data-testid="calendars-section-toggle"]').click();
     await page.locator('[data-testid="user-cal-edit-cal_edit"]').click();
 
     // The form renders a row PER SOURCE and puts name/rotations/publish in the FIRST one. With no

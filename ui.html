@@ -766,17 +766,6 @@
               <v-btn value="list" class="text-none" data-testid="nav-layout-list" :title="a.t('settings.nav_list')" :aria-label="a.t('settings.nav_list')"><v-icon icon="mdi-format-list-bulleted"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('settings.nav_list') }}</span></v-btn>
               <v-btn value="tiles" class="text-none" data-testid="nav-layout-tiles" :title="a.t('settings.nav_tiles')" :aria-label="a.t('settings.nav_tiles')"><v-icon icon="mdi-apps"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('settings.nav_tiles') }}</span></v-btn>
             </v-btn-toggle>
-            <!-- The member's own calendar feeds: every per-person feed they can subscribe to, whether or not
-                 its calendar is in the nav. Shown to everyone, not only admins -- the link is the member's
-                 own, and lives in their own row. -->
-            <template v-if="a.myFeeds().length">
-              <v-divider class="my-4"></v-divider>
-              <p class="text-subtitle-2 mb-1">{{ a.t('settings.my_feeds') }}</p>
-              <div v-for="f in a.myFeeds()" :key="f.name" class="mb-3" style="max-width:480px" data-testid="settings-my-feed">
-                <strong style="font-size:0.9rem">{{ f.title }}</strong>
-                <feed-subscription :name="f.name" class="mt-1"></feed-subscription>
-              </div>
-            </template>
             <v-divider class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.data') }}</p>
             <v-btn variant="outlined" prepend-icon="mdi-refresh" :loading="a.syncing" data-testid="settings-refresh" @click="a.refreshData" class="mr-2 mb-2">{{ a.t('settings.refresh') }}</v-btn>
@@ -835,18 +824,38 @@
               <v-btn size="small" variant="outlined" class="mt-2" prepend-icon="mdi-download"
                      data-testid="example-update-apply" @click="a.reinstallExample()">{{ a.t('settings.examples_reinstall') }}</v-btn>
             </v-alert>
+            </template>
+            <!-- Calendars: collapsible like Appearance. Outside the admin block because one part of it is every
+                 member's own -- the personal feeds they can subscribe to -- while the rest (downloads, the
+                 published links, building a calendar) stays admin-only inside it. -->
+            <template v-if="a.isAdmin || a.myFeeds().length">
+            <v-divider class="my-4"></v-divider>
+            <p class="text-subtitle-2 mb-2" style="cursor:pointer" data-testid="calendars-section-toggle"
+               @click="a.settings._collapseCalendars = !a.settings._collapseCalendars">
+              <v-icon size="small">{{ a.settings._collapseCalendars ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
+              {{ a.t('settings.feeds') }}
+            </p>
+            <div v-show="!a.settings._collapseCalendars" class="ml-5" data-testid="calendars-body">
+            <!-- The member's own calendar feeds: every per-person feed they can subscribe to, whether or not
+                 its calendar is in the nav. The link is the member's own and lives in their own row, which is
+                 why this half is not admin-only. -->
+            <template v-if="a.myFeeds().length">
+              <p class="text-body-2 font-weight-medium mb-2">{{ a.t('settings.my_feeds') }}</p>
+              <div v-for="f in a.myFeeds()" :key="f.name" class="mb-3" style="max-width:480px" data-testid="settings-my-feed">
+                <strong style="font-size:0.9rem">{{ f.title }}</strong>
+                <feed-subscription :name="f.name" class="mt-1"></feed-subscription>
+              </div>
+            </template>
+            <template v-if="a.isAdmin">
             <!-- Calendars an admin builds here rather than in the schema document. Stored in the folder
                  config beside the other per-view settings, merged into VIEWS at load. Creating one
                  reveals nothing: every source is gated by canReachTable when the events are built, so a
                  calendar cannot show anyone rows they could not already open. -->
-            <v-divider class="my-4"></v-divider>
             <!-- Calendars, as files. Here rather than only on each calendar's toolbar because a
                  publish-only calendar need not be in the nav at all, so its download and its URL would
                  otherwise be reachable from nowhere. Also the only screen that answers "what is this
                  deployment serving to anyone with a link?" -- which is why a published file whose view
                  was removed or switched off still appears, flagged, instead of quietly dropping out. -->
-            <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-1">{{ a.t('settings.feeds') }}</p>
             <p style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.feeds_note') }}</p>
             <template v-if="a.calendarFiles.length">
               <div v-for="f in a.calendarFiles" :key="f.name" class="mb-3" data-testid="settings-feed">
@@ -931,6 +940,10 @@
                 <v-btn size="small" variant="text" @click="a.cancelCalDraft()">{{ a.t('btn.cancel') }}</v-btn>
               </div>
             </v-card>
+            </template>
+            </div>
+            </template>
+            <template v-if="a.isAdmin">
             <!-- Browser-local Postgres only. Deliberately next to Export, because the honest answer to
                  "can I lose this?" is a backup, and the second-best answer is the persistence request
                  below. Translated like the rest of Settings: it was literal English once, on the grounds
