@@ -3973,8 +3973,12 @@ test.describe('v3 @both partition toggle in an embed', () => {
     });
     // Calendars is collapsed by default, like Appearance: open it the way a person would.
     await page.locator('[data-testid="calendars-section-toggle"]').click();
-    const entry = page.locator('[data-testid="settings-my-feed"]', { hasText: 'Hidden personal calendar' });
+    const entry = page.locator('[data-testid="settings-feed"]', { hasText: 'Hidden personal calendar' });
     await expect(entry).toBeVisible();
+    // ONE row: listed once, its subscribe controls and its download side by side.
+    await expect(entry).toHaveCount(1);
+    await expect(entry.locator('[data-testid="feed-download-pps_hidden"]')).toBeVisible();
+    await expect(entry.locator('[data-testid="cal-sub-lang"]')).toBeVisible();
     await entry.locator('[data-testid="cal-subscribe-go"]').click();
     await expect(entry.locator('[data-testid="cal-sub-pending"]')).toBeVisible();
     const row = await page.evaluate(() => {
@@ -3994,7 +3998,7 @@ test.describe('v3 @both partition toggle in an embed', () => {
       app.userList = [{ key: 'm@x.com', addr: 'm@x.com', role: 'editor', tables: ['tasks'] }];
       app.currentUserEmail = 'm@x.com';
     });
-    const memberEntry = page.locator('[data-testid="settings-my-feed"]', { hasText: 'Hidden personal calendar' });
+    const memberEntry = page.locator('[data-testid="settings-feed"]', { hasText: 'Hidden personal calendar' });
     await expect(memberEntry).toBeVisible();
     await expect(memberEntry.locator('[data-testid="cal-subscribe-go"]')).toBeVisible();   // the admin's row is not theirs
     await expect(page.locator('[data-testid="user-cal-new"]')).toHaveCount(0);

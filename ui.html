@@ -836,17 +836,6 @@
               {{ a.t('settings.feeds') }}
             </p>
             <div v-show="!a.settings._collapseCalendars" class="ml-5" data-testid="calendars-body">
-            <!-- The member's own calendar feeds: every per-person feed they can subscribe to, whether or not
-                 its calendar is in the nav. The link is the member's own and lives in their own row, which is
-                 why this half is not admin-only. -->
-            <template v-if="a.myFeeds().length">
-              <p class="text-body-2 font-weight-medium mb-2">{{ a.t('settings.my_feeds') }}</p>
-              <div v-for="f in a.myFeeds()" :key="f.name" class="mb-3" style="max-width:480px" data-testid="settings-my-feed">
-                <strong style="font-size:0.9rem">{{ f.title }}</strong>
-                <feed-subscription :name="f.name" class="mt-1"></feed-subscription>
-              </div>
-            </template>
-            <template v-if="a.isAdmin">
             <!-- Calendars an admin builds here rather than in the schema document. Stored in the folder
                  config beside the other per-view settings, merged into VIEWS at load. Creating one
                  reveals nothing: every source is gated by canReachTable when the events are built, so a
@@ -856,27 +845,31 @@
                  otherwise be reachable from nowhere. Also the only screen that answers "what is this
                  deployment serving to anyone with a link?" -- which is why a published file whose view
                  was removed or switched off still appears, flagged, instead of quietly dropping out. -->
-            <p style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.feeds_note') }}</p>
-            <template v-if="a.calendarFiles.length">
-              <div v-for="f in a.calendarFiles" :key="f.name" class="mb-3" data-testid="settings-feed">
+            <!-- ONE row per calendar, the way the calendar toolbar lines its buttons up: title, then -- for a
+                 personal feed this member can subscribe to -- its language and Subscribe (or their link),
+                 then the download. A member sees only their personal feeds; an admin sees every calendar,
+                 plus the published links and the editor. -->
+            <p v-if="a.isAdmin" style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.feeds_note') }}</p>
+              <div v-for="f in a.calendarRows()" :key="f.name" class="mb-3" data-testid="settings-feed">
                 <div class="d-flex align-center flex-wrap" style="gap:8px">
                   <strong style="font-size:0.9rem">{{ f.title }}</strong>
-                  <v-chip v-if="f.published && !f.live" size="x-small" color="warning" variant="tonal"
+                  <v-chip v-if="a.isAdmin && f.published && !f.live" size="x-small" color="warning" variant="tonal"
                           data-testid="feed-stale">{{ a.t('settings.feed_not_republishing') }}</v-chip>
                   <v-spacer></v-spacer>
-                  <v-btn size="small" variant="text" prepend-icon="mdi-download"
+                  <feed-subscription v-if="f.subscribe" :name="f.name" inline></feed-subscription>
+                  <v-btn v-if="f.download" size="small" variant="text" prepend-icon="mdi-download"
                          :data-testid="'feed-download-' + f.name"
                          @click="a.downloadIcs(f.name)">{{ a.t('btn.export_ics') }}</v-btn>
                   <!-- Only a calendar defined HERE can be changed here. A schema one is still listed --
                        it is a file you can download -- but the app is not where it is edited. -->
-                  <v-btn v-if="f.userDefined" icon="mdi-pencil" size="x-small" variant="text" :title="a.t('btn.edit')" :data-testid="'user-cal-edit-' + f.name" @click="a.editCalendarById(f.name)"></v-btn>
-                  <v-btn v-if="f.userDefined" :icon="a.isArmed('ucal:' + f.name) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text"
+                  <v-btn v-if="a.isAdmin && f.userDefined" icon="mdi-pencil" size="x-small" variant="text" :title="a.t('btn.edit')" :data-testid="'user-cal-edit-' + f.name" @click="a.editCalendarById(f.name)"></v-btn>
+                  <v-btn v-if="a.isAdmin && f.userDefined" :icon="a.isArmed('ucal:' + f.name) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text"
                          :color="a.isArmed('ucal:' + f.name) ? 'error' : ''"
                          :title="a.isArmed('ucal:' + f.name) ? a.t('settings.confirm_delete') : a.t('settings.cal_delete')"
                          :data-testid="'user-cal-del-' + f.name"
                          @click="a.isArmed('ucal:' + f.name) ? a.deleteUserCalendar(f.name) : a.armConfirm('ucal:' + f.name)"></v-btn>
                 </div>
-                <div v-if="f.published" class="d-flex align-center flex-wrap mt-1" style="gap:8px">
+                <div v-if="a.isAdmin && f.published" class="d-flex align-center flex-wrap mt-1" style="gap:8px">
                   <v-text-field :model-value="f.url" readonly density="compact" variant="outlined"
                                 hide-details style="font-size:0.78rem;min-width:260px" :data-testid="'feed-url-' + f.name"></v-text-field>
                   <v-btn size="small" variant="text" @click="a.copyText(f.url)">{{ a.t('btn.copy') }}</v-btn>
@@ -888,7 +881,7 @@
                          @click="a.unpublishFeed(f.name)">{{ a.t('settings.feed_unpublish') }}</v-btn>
                 </div>
               </div>
-            </template>
+            <template v-if="a.isAdmin">
             <v-btn v-if="!a.calDraft" variant="text" prepend-icon="mdi-plus"
                    data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('btn.add') }} {{ a.t('settings.cal_new') }}</v-btn>
             <v-card v-if="a.calDraft" variant="tonal" class="pa-3 mt-2" data-testid="user-cal-form">
