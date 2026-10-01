@@ -4595,7 +4595,7 @@ test.describe('access control: user matching + fail-closed', () => {
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
     // No translations loaded in the fixture -> labels render as their raw keys (no English fallback).
     await expect(page.locator('.v-main')).toContainText('profile.title');
-    const nameField = page.locator('label:has-text("profile.your_name")').locator('..').locator('input');
+    const nameField = page.locator('label:has-text("settings.name")').locator('..').locator('input');
     await nameField.fill('No Access Person');
     await nameField.blur();   // no Save button -> the name auto-saves on blur
     await expect.poll(async () => page.evaluate(async () =>
