@@ -859,7 +859,7 @@
               </div>
             <template v-if="a.isAdmin">
             <v-btn v-if="!a.calDraft" variant="outlined" size="small" prepend-icon="mdi-plus"
-                   data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('btn.add') }} {{ a.t('settings.cal_new') }}</v-btn>
+                   data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('settings.add_calendar') }}</v-btn>
             <v-card v-if="a.calDraft" variant="tonal" class="pa-3 mt-2" data-testid="user-cal-form">
               <!-- A real table, like Users: headers, `plain` controls, one row, destructive control
                    last. A calendar has a VARIABLE number of sources, which a table handles the way a
