@@ -850,6 +850,8 @@ test.describe('Import/Export', () => {
   test('export button downloads JSON', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
+    // Import / export is folded by default: open it the way a person would.
+    await page.locator('[data-testid="import-section-toggle"]').click();
     await page.waitForTimeout(200);
     const [download] = await Promise.all([
       page.waitForEvent('download'),
@@ -949,6 +951,8 @@ test.describe('Setup UI', () => {
   test('snackbar shows notification on export', async ({ page }) => {
     await ensureAppReady(page);
     await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
+    // Import / export is folded by default: open it the way a person would.
+    await page.locator('[data-testid="import-section-toggle"]').click();
     await page.waitForTimeout(200);
     const [download] = await Promise.all([
       page.waitForEvent('download'),
@@ -3596,6 +3600,8 @@ test.describe('v3 @both partition toggle in an embed', () => {
       window.VIEWS.hidden_cal = { name: 'hidden_cal', calendar: { source: 'tasks', dateColumn: 'date', titleColumns: ['title'] } };
       app.selectTab('__settings');
     });
+    // Calendars is collapsed by default, like Appearance: open it the way a person would.
+    await page.locator('[data-testid="calendars-section-toggle"]').click();
     const btn = page.locator('[data-testid="feed-download-hidden_cal"]');
     await expect(btn).toBeVisible();
     const [download] = await Promise.all([page.waitForEvent('download'), btn.click()]);
@@ -3928,10 +3934,12 @@ test.describe('v3 @both partition toggle in an embed', () => {
     await expect(menu.locator('[data-testid="cal-sub-url"] input')).toHaveValue('https://s/feeds/mine.ics');
 
     // Unsubscribe takes two presses, and writes only the active column.
+    // The first press only arms it: the note says to press again, and nothing is written yet.
     await menu.locator('[data-testid="cal-unsubscribe"]').click();
-    await expect(menu.locator('[data-testid="cal-sub-revoking"]')).toHaveCount(0);
+    await expect(menu.locator('[data-testid="cal-sub-caption"]')).toBeVisible();
+    await expect(menu.locator('[data-testid="cal-subscribe-go"]')).toHaveCount(0);
     await menu.locator('[data-testid="cal-unsubscribe"]').click();
-    await expect(menu.locator('[data-testid="cal-sub-revoking"]')).toBeVisible();
+    await expect(menu.locator('[data-testid="cal-subscribe-go"]')).toBeVisible();
     const unsub = await page.evaluate(() => window.__ppWrites.filter((w) => w.table === 'ppui_subs').pop().row);
     expect(Object.keys(unsub).sort()).toEqual(['active', 'id', 'updated_at']);
     expect(unsub.active).toBe('no');
@@ -3949,6 +3957,65 @@ test.describe('v3 @both partition toggle in an embed', () => {
     });
     expect(after.mine).toEqual(['no', 'yes']);
     expect(after.owed).toEqual(['mine']);
+  });
+
+  // A per-person calendar need not be a screen: the bishopric example declares one purely as a feed,
+  // in nobody's nav. Settings is then the only way in, so it lists every per-person feed the member can
+  // subscribe to, with the same control the calendar's toolbar has.
+  test('Settings lists a per-person feed that is in no nav, and subscribes from there', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      window.SCHEMA.pps_subs = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
+                                 ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
+      // The picker offers the database's languages only, so give it some.
+      window.__realLangs = app.languages;
+      app.languages = [{ code: 'en', name: 'English' }, { code: 'fi', name: 'Suomi' }];
+      window.VIEWS.pps_hidden = { name: 'pps_hidden', title: 'Hidden personal calendar', feed: 'per-person',
+        feedSubscribers: { table: 'pps_subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'], filter: { assigned_to: '@me' } }] } };
+      app.dataCache['pps_subs'] = [];
+      window.__realPut = window.Writes.putRow;
+      window.Writes.putRow = (t, row) => Promise.resolve(row);
+      app.selectTab('__settings');
+    });
+    // Calendars is collapsed by default, like Appearance: open it the way a person would.
+    await page.locator('[data-testid="calendars-section-toggle"]').click();
+    const entry = page.locator('[data-testid="settings-feed"]', { hasText: 'Hidden personal calendar' });
+    await expect(entry).toBeVisible();
+    // ONE row: listed once, its subscribe controls and its download side by side.
+    await expect(entry).toHaveCount(1);
+    await expect(entry.locator('[data-testid="feed-download-pps_hidden"]')).toBeVisible();
+    await expect(entry.locator('[data-testid="cal-sub-lang"]')).toBeVisible();
+    // No "calendar's own language" entry: just the declared languages, starting on one of them.
+    await entry.locator('[data-testid="cal-sub-lang"]').click();
+    await expect(page.locator('.v-overlay--active .v-list-item')).toHaveCount(2);
+    await page.keyboard.press('Escape');
+    await entry.locator('[data-testid="cal-subscribe-go"]').click();
+    await expect(entry.locator('[data-testid="cal-sub-pending"]')).toBeVisible();
+    const row = await page.evaluate(() => {
+      window.Writes.putRow = window.__realPut;
+      const app = window.appInstance;
+      return app.dataCache['pps_subs'].find((r) => r.owner === app.currentUserEmail);
+    });
+    expect(row.active).toBe('yes');
+    expect(row.rosterPublic).toBe(false);          // privateRoster: nobody else reads this row, or its link
+
+    // A MEMBER sees Calendars too — for their own feed only. Building calendars and the published links
+    // stay admin-only inside the same section. userAllowedTables is computed, so the member is made the
+    // way the app makes one: a user list holding this account with a table grant rather than 'all'.
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      window.__adminEmail = app.currentUserEmail;
+      app.userList = [{ key: 'm@x.com', addr: 'm@x.com', role: 'editor', tables: ['tasks'] }];
+      app.currentUserEmail = 'm@x.com';
+    });
+    const memberEntry = page.locator('[data-testid="settings-feed"]', { hasText: 'Hidden personal calendar' });
+    await expect(memberEntry).toBeVisible();
+    await expect(memberEntry.locator('[data-testid="cal-subscribe-go"]')).toBeVisible();   // the admin's row is not theirs
+    await expect(page.locator('[data-testid="user-cal-new"]')).toHaveCount(0);
+    await page.evaluate(() => { const app = window.appInstance; app.userList = []; app.currentUserEmail = window.__adminEmail; app.languages = window.__realLangs; });
   });
 
   // Rendering a calendar AS somebody else — the per-person feed's rendering path. The failure this
@@ -4433,10 +4500,33 @@ test.describe('access control: user matching + fail-closed', () => {
     expect(r.onReject).toEqual(['Curated', 'Ann']);            // rejection != "nobody opted in"
   });
 
+  // Settings order: the person's own details first, the destructive Reset last. Users is folded, but a
+  // pending access request is drawn outside the fold — it is the one thing there that cannot wait.
+  test('Settings: Your details first, Reset last, and a pending request shows while Users is folded', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => { appInstance.setUserRole('bob@x.com', 'editor', 'bob@x.com', ['tasks']); });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
+    await page.evaluate(() => { appInstance.accessRequests = [{ email: 'new@x.com', name: 'New Person', note: '' }]; });
+    await expect(page.locator('td', { hasText: 'new@x.com' })).toBeVisible();
+    await expect(page.locator('[data-testid="users-body"]')).toBeHidden();
+    // Sharing the address is onboarding, so it lives with Users -- inside the fold.
+    await expect(page.locator('[data-testid="users-body"] input[name="share-link"]')).toHaveCount(1);
+    const order = await page.evaluate(() => {
+      const text = document.querySelector('[data-testid="nav-layout-toggle"]').closest('.v-card-text').innerText;
+      return { profile: text.indexOf('profile.title'), nav: text.indexOf('settings.nav_layout'), reset: text.indexOf('settings.reset') };
+    });
+    expect(order.profile).toBeGreaterThanOrEqual(0);
+    expect(order.profile).toBeLessThan(order.nav);
+    expect(order.reset).toBeGreaterThan(order.nav);
+    await page.evaluate(() => { appInstance.accessRequests = []; });
+  });
+
   test('admin can view and rename another user\'s profile name from the Users table', async ({ page }) => {
     await ensureAppReady(page);
     await page.evaluate(() => { appInstance.setUserRole('bob@x.com', 'editor', 'bob@x.com', ['tasks']); });
     await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
+    // Users is folded by default: open it the way a person would.
+    await page.locator('[data-testid="users-section-toggle"]').click();
     const row = page.locator('.v-table tbody tr', { hasText: 'bob@x.com' });
     await expect(row).toHaveCount(1);   // retries -- this IS the wait for loadUsers()/loadAllProfiles()
     const nameCell = row.locator('.editable-cell').nth(1);   // [0] = email/id, [1] = name
@@ -5168,6 +5258,8 @@ test.describe('calendar view', () => {
       await app.saveUserCalendar('cal_edit', { title: 'Cleaning', rotationViews: ['rot_e'], sources: [] });
       app.selectTab('__settings');
     });
+    // Calendars is collapsed by default, like Appearance: open it the way a person would.
+    await page.locator('[data-testid="calendars-section-toggle"]').click();
     await page.locator('[data-testid="user-cal-edit-cal_edit"]').click();
 
     // The form renders a row PER SOURCE and puts name/rotations/publish in the FIRST one. With no
@@ -6769,6 +6861,8 @@ test.describe('Filter array-IN -> $or on export', () => {
     await page.goto('/');
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
     await page.locator('.v-navigation-drawer .v-list-item:has(.mdi-cog-outline)').click();
+    // Import / export is folded by default: open it the way a person would.
+    await page.locator('[data-testid="import-section-toggle"]').click();
     await page.waitForTimeout(200);
     const [download] = await Promise.all([
       page.waitForEvent('download'),

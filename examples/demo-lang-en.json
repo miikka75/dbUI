@@ -103,8 +103,6 @@
       "msg.form_incomplete": "Please fill in the required fields",
       "msg.form_required": "Required",
       "msg.export_incomplete": "Export cancelled – could not read:",
-      "msg.synced": "Synced",
-      "msg.sync_failed": "Sync failed",
       "msg.load_failed": "Failed to load app",
       "msg.request_failed": "Request failed",
       "msg.approve_failed": "Approve failed",

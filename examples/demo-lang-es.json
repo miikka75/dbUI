@@ -103,8 +103,6 @@
       "msg.form_incomplete": "Rellena los campos obligatorios",
       "msg.form_required": "Obligatorio",
       "msg.export_incomplete": "Exportación cancelada – no se pudo leer:",
-      "msg.synced": "Sincronizado",
-      "msg.sync_failed": "Error de sincronización",
       "msg.load_failed": "Error al cargar la aplicación",
       "msg.request_failed": "La solicitud falló",
       "msg.approve_failed": "Error al aprobar",

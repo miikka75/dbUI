@@ -18,9 +18,12 @@
       "field.closing_prayer": "Closing prayer",
       "field.date": "Date",
       "field.expires": "Expires",
+      "field.feed_id": "Feed id",
+      "field.feed_url": "Calendar link",
       "field.intermediate_hymn": "Intermediate hymn",
       "field.interpreter": "Interpreter",
       "field.item": "Item",
+      "field.lang": "Language",
       "field.meeting": "Meeting",
       "field.musical_number": "Musical number",
       "field.notes": "Notes",
@@ -40,6 +43,7 @@
       "field.speaker": "Speaker",
       "field.stake_business": "Stake business",
       "field.status": "Status",
+      "field.subscribed": "Subscribed",
       "field.talk1": "Talk",
       "field.talk2": "Talk",
       "field.talk3": "Talk",
@@ -166,6 +170,7 @@
       "tab.admin_interviews": "Interviews",
       "tab.admin_reminders": "Reminders",
       "tab.admin_responsibilities": "Responsibilities",
+      "tab.calendar_subs": "Calendar subscriptions",
       "tab.duty_cleaning_a": "Cleaning area A",
       "tab.duty_cleaning_b": "Cleaning area B",
       "tab.duty_interpreters": "Interpreters",
@@ -213,7 +218,8 @@
       "view.meeting_agenda": "Meeting",
       "view.meeting_music": "Music",
       "view.meeting_program": "Programs",
-      "view.meeting_speakers": "Talks"
+      "view.meeting_speakers": "Talks",
+      "view.personal_calendar": "Personal calendar"
     }
   }
 }

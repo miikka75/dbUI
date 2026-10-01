@@ -264,9 +264,10 @@
       <v-spacer v-else></v-spacer>
       <v-select v-if="languages.length > 1" v-model="currentLang" name="current-lang" :items="langItems" density="compact" variant="plain" hide-details style="max-width:120px" class="mr-2" @update:model-value="switchLanguage"></v-select>
       <user-avatar v-if="usersLoaded && !isUnregisteredUser" :email="currentUserEmail" :name="myProfile.name" :size="32" :title="myProfile.name || currentUserEmail" class="mr-2"></user-avatar>
-      <!-- Undo/redo hold the slot refresh used to. Refresh moved to Settings: every backend subscribes
-           to its tables, so it is the escape hatch for a dropped subscription rather than a daily
-           action, and a browser reload already refetches strictly more than it does. -->
+      <!-- Undo/redo hold the slot refresh used to. There is no refresh button any more: every backend
+           subscribes to its tables, and for a dropped subscription a browser reload refetches strictly
+           more than the button did. (It had moved to Settings, where the open screen has no tables, so
+           it fetched nothing there.) -->
       <v-btn icon="mdi-undo" :disabled="!undoDepth" :title="t('btn.undo')" :aria-label="t('btn.undo')" data-testid="undo" @click="undoLast"></v-btn>
       <v-btn icon="mdi-redo" :disabled="!redoDepth" :title="t('btn.redo')" :aria-label="t('btn.redo')" data-testid="redo" @click="redoLast"></v-btn>
       <v-btn :icon="theme === 'dark' ? 'mdi-weather-sunny' : 'mdi-weather-night'" @click="toggleTheme"></v-btn>
@@ -754,7 +755,38 @@
   <v-card variant="outlined">
           <v-card-title>{{ a.t('tab.settings') }}</v-card-title>
           <v-card-text>
+            <!-- BUTTONS in Settings have four roles, each with one look, and one text size (small) except Commit:
+                   Section action -- stands on its own:      variant="outlined" size="small", icon + text
+                   Row action     -- inside a list row:      variant="text"     size="small", icon + text
+                   Icon-only      -- edit / delete / close:  variant="text"     size="small", with title + aria-label
+                   Commit         -- a form's or dialog's:   variant="flat" color="primary", normal size (Cancel beside it matches)
+                 Destructive ones keep their role's look and only change colour (error / warning). Segmented
+                 choices (v-btn-toggle) are controls, not buttons, and keep their own size. -->
             <div class="mb-4">
+            <!-- ORDER: what is the person's own first, the everyday shared things next, admin and rarely used
+                 tools after them, and the one destructive action last. A section collapses when it is long
+                 (Calendars, Appearance, Users) or rarely used (Import / export); a short everyday one stays
+                 open, since collapsing a single row only adds a click. One heading style throughout. -->
+            <template v-if="a.usersLoaded && !a.isUnregisteredUser">
+            <p class="text-subtitle-2 mb-2">{{ a.t('profile.title') }}</p>
+            <div class="d-flex align-center flex-wrap mb-3" style="gap:12px">
+              <v-avatar size="72" color="surface-variant">
+                <v-img v-if="a.myProfile.picture" :src="a.myProfile.picture" :alt="a.t('profile.picture')" cover></v-img>
+                <v-icon v-else size="44" icon="mdi-account"></v-icon>
+              </v-avatar>
+              <div class="d-flex flex-column align-start" style="gap:4px">
+                <input ref="profilePicInput" type="file" accept="image/*" hidden @change="a.onProfilePictureFile($event)">
+                <v-btn size="small" variant="outlined" prepend-icon="mdi-camera" @click="$refs.profilePicInput.click()">{{ a.myProfile.picture ? a.t('img.replace') : a.t('img.upload') }}</v-btn>
+                <v-btn v-if="a.myProfile.picture" size="small" variant="text" color="error" prepend-icon="mdi-delete" @click="a.removeMyPicture()">{{ a.t('img.remove') }}</v-btn>
+              </div>
+            </div>
+            <div class="d-flex align-center flex-wrap" style="gap:12px">
+              <v-text-field :model-value="a.currentUserEmail" :label="a.t('profile.email')" density="compact" hide-details variant="outlined" readonly style="max-width:240px"></v-text-field>
+              <v-text-field v-model="a.myProfile.name" :label="a.t('profile.your_name')" density="compact" hide-details variant="outlined" style="max-width:240px" @blur="a.saveMyProfile" @keydown.enter="$event.target.blur()" @keydown.home.stop @keydown.end.stop></v-text-field>
+              <v-switch v-if="a.sharingMatters()" data-testid="profile-share-name" :model-value="a.myProfile.shared" :disabled="!(a.myProfile.name || '').trim()" @update:model-value="v => { a.myProfile.shared = v; a.saveMyProfile(); }" :label="a.t('profile.share_name')" density="compact" hide-details color="primary"></v-switch>
+            </div>
+            </template>
+            <v-divider v-if="a.usersLoaded && !a.isUnregisteredUser" class="my-4"></v-divider>
             <p class="text-subtitle-2 mb-2">{{ a.t('settings.nav_layout') }}</p>
             <!-- ONE choice: the drawer, the top tabs, or browse drawn as a list or as tiles. List and Tiles are
                  browse's two faces rather than a second switch, which would sit "selected" in the layouts it
@@ -766,111 +798,68 @@
               <v-btn value="list" class="text-none" data-testid="nav-layout-list" :title="a.t('settings.nav_list')" :aria-label="a.t('settings.nav_list')"><v-icon icon="mdi-format-list-bulleted"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('settings.nav_list') }}</span></v-btn>
               <v-btn value="tiles" class="text-none" data-testid="nav-layout-tiles" :title="a.t('settings.nav_tiles')" :aria-label="a.t('settings.nav_tiles')"><v-icon icon="mdi-apps"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('settings.nav_tiles') }}</span></v-btn>
             </v-btn-toggle>
+            <!-- Calendars: collapsible like Appearance. Outside the admin block because one part of it is every
+                 member's own -- the personal feeds they can subscribe to -- while the rest (downloads, the
+                 published links, building a calendar) stays admin-only inside it. -->
+            <template v-if="a.isAdmin || a.myFeeds().length">
             <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2">{{ a.t('settings.data') }}</p>
-            <v-btn variant="outlined" prepend-icon="mdi-refresh" :loading="a.syncing" data-testid="settings-refresh" @click="a.refreshData" class="mr-2 mb-2">{{ a.t('settings.refresh') }}</v-btn>
-            <template v-if="a.isAdmin">
-            <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2">{{ a.t('settings.import_export') }}</p>
-            <!-- Each chooser sits with the button it governs: one says what the file will CARRY, the
-                 other which of its parts an import will APPLY. Wrapping rows, so the chooser drops under
-                 its button on a phone rather than squeezing beside it. -->
-            <div class="mb-2" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px">
-              <v-btn variant="outlined" prepend-icon="mdi-download" data-testid="settings-export-json" @click="a.exportData">{{ a.t('settings.export') }}</v-btn>
-              <v-select :model-value="a.exportParts" @update:model-value="v => a.setParts('exportParts', v)" :items="a.partOptions('exportParts')" item-title="title" item-value="value"
-                        :item-props="(i) => ({ disabled: i.disabled, appendIcon: i.disabled ? 'mdi-check' : undefined })"
-                        multiple chips density="compact" variant="outlined" hide-details
-                        style="flex:1 1 220px;max-width:340px" data-testid="export-parts"
-                        :label="a.t('settings.export_parts')"></v-select>
-            </div>
-            <div class="mb-1" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px">
-              <v-btn variant="outlined" prepend-icon="mdi-upload" @click="$refs.importFile.click()">{{ a.t('settings.import') }}</v-btn>
-              <v-select :model-value="a.importParts" @update:model-value="v => a.setParts('importParts', v)" :items="a.partOptions('importParts')" item-title="title" item-value="value"
-                        :item-props="(i) => ({ disabled: i.disabled, appendIcon: i.disabled ? 'mdi-check' : undefined })"
-                        multiple chips density="compact" variant="outlined" hide-details
-                        style="flex:1 1 220px;max-width:340px" data-testid="import-parts"
-                        :label="a.t('settings.import_parts')"></v-select>
-              <input ref="importFile" type="file" multiple accept=".json" hidden @change="a.importData($event)">
-            </div>
-            <v-btn variant="outlined" prepend-icon="mdi-shape-outline" class="mb-2"
-                   data-testid="settings-examples" @click="a.openExamples()">{{ a.t('settings.examples') }}</v-btn>
-            <!-- Checked on the way into Settings (selectTab), once per session, admin only: this is the
-                 screen that answers "is anything out of date?", and putting the request here keeps it
-                 off every visitor's boot. -->
-            <v-alert v-if="a.exampleUpdate" type="info" variant="tonal" density="compact" class="mb-2"
-                     icon="mdi-package-up" data-testid="example-update">
-              <div style="font-size:0.85rem">
-                <strong>{{ a.exampleUpdate.title }}</strong> —
-                {{ a.t('settings.examples_update') }}
-                <span class="font-monospace" style="opacity:0.7">
-                  r{{ a.exampleUpdate.installedRevision }} → r{{ a.exampleUpdate.revision }}
-                </span>
-              </div>
-              <!-- What the changed filenames below actually MEAN, when the bundle author wrote it down.
-                   Capped here rather than in compare(): that reports what is pending, this decides how
-                   much of it fits in an alert. Untranslated, like the bundle description it sits under --
-                   these are the author's words, shipped in <id>-about.json, not app chrome. -->
-              <ul v-if="a.exampleUpdate.notes.length" class="mt-1 mb-0" style="font-size:0.8rem">
-                <li v-for="n in a.exampleUpdate.notes.slice(0, 5)" :key="n.revision" data-testid="example-update-note">
-                  {{ n.text }}
-                </li>
-              </ul>
-              <div v-if="a.exampleUpdate.notes.length > 5" class="mt-1" style="font-size:0.78rem;opacity:0.8">
-                {{ a.t('settings.examples_notes_more') }} ({{ a.exampleUpdate.notes.length - 5 }})
-              </div>
-              <div class="font-monospace mt-1" style="font-size:0.72rem;opacity:0.7">
-                {{ a.exampleUpdate.changed.join(', ') }}
-              </div>
-              <v-btn size="small" variant="outlined" class="mt-2" prepend-icon="mdi-download"
-                     data-testid="example-update-apply" @click="a.reinstallExample()">{{ a.t('settings.examples_reinstall') }}</v-btn>
-            </v-alert>
+            <p class="text-subtitle-2 mb-2" style="cursor:pointer" role="button" tabindex="0" data-testid="calendars-section-toggle"
+               :aria-expanded="String(!a.settings._collapseCalendars)"
+               @click="a.settings._collapseCalendars = !a.settings._collapseCalendars" @keydown.enter.prevent="a.settings._collapseCalendars = !a.settings._collapseCalendars">
+              <v-icon size="small">{{ a.settings._collapseCalendars ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
+              {{ a.t('settings.feeds') }}
+            </p>
+            <div v-show="!a.settings._collapseCalendars" class="ml-5" data-testid="calendars-body">
             <!-- Calendars an admin builds here rather than in the schema document. Stored in the folder
                  config beside the other per-view settings, merged into VIEWS at load. Creating one
                  reveals nothing: every source is gated by canReachTable when the events are built, so a
                  calendar cannot show anyone rows they could not already open. -->
-            <v-divider class="my-4"></v-divider>
             <!-- Calendars, as files. Here rather than only on each calendar's toolbar because a
                  publish-only calendar need not be in the nav at all, so its download and its URL would
                  otherwise be reachable from nowhere. Also the only screen that answers "what is this
                  deployment serving to anyone with a link?" -- which is why a published file whose view
                  was removed or switched off still appears, flagged, instead of quietly dropping out. -->
-            <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-1">{{ a.t('settings.feeds') }}</p>
-            <p style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.feeds_note') }}</p>
-            <template v-if="a.calendarFiles.length">
-              <div v-for="f in a.calendarFiles" :key="f.name" class="mb-3" data-testid="settings-feed">
+            <!-- ONE row per calendar, the way the calendar toolbar lines its buttons up: title, then -- for a
+                 personal feed this member can subscribe to -- its language and Subscribe (or their link),
+                 then the download. A member sees only their personal feeds; an admin sees every calendar,
+                 plus the published links and the editor. -->
+            <p v-if="a.isAdmin" style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.feeds_note') }}</p>
+              <div v-for="f in a.calendarRows()" :key="f.name" class="mb-3" data-testid="settings-feed">
                 <div class="d-flex align-center flex-wrap" style="gap:8px">
                   <strong style="font-size:0.9rem">{{ f.title }}</strong>
-                  <v-chip v-if="f.published && !f.live" size="x-small" color="warning" variant="tonal"
+                  <v-chip v-if="a.isAdmin && f.published && !f.live" size="x-small" color="warning" variant="tonal"
                           data-testid="feed-stale">{{ a.t('settings.feed_not_republishing') }}</v-chip>
                   <v-spacer></v-spacer>
-                  <v-btn size="small" variant="text" prepend-icon="mdi-download"
+                  <feed-subscription v-if="f.subscribe" :name="f.name" inline></feed-subscription>
+                  <!-- The calendar toolbar's export icon; icon only on a phone, like the subscribe buttons beside it. -->
+                  <v-btn v-if="f.download" size="small" variant="text" class="text-none"
+                         :title="a.t('btn.export_ics')" :aria-label="a.t('btn.export_ics')"
                          :data-testid="'feed-download-' + f.name"
-                         @click="a.downloadIcs(f.name)">{{ a.t('btn.export_ics') }}</v-btn>
+                         @click="a.downloadIcs(f.name)"><v-icon icon="mdi-calendar-export"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('btn.export_ics') }}</span></v-btn>
                   <!-- Only a calendar defined HERE can be changed here. A schema one is still listed --
                        it is a file you can download -- but the app is not where it is edited. -->
-                  <v-btn v-if="f.userDefined" icon="mdi-pencil" size="x-small" variant="text" :title="a.t('btn.edit')" :data-testid="'user-cal-edit-' + f.name" @click="a.editCalendarById(f.name)"></v-btn>
-                  <v-btn v-if="f.userDefined" :icon="a.isArmed('ucal:' + f.name) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text"
+                  <v-btn v-if="a.isAdmin && f.userDefined" icon="mdi-pencil" size="small" variant="text" :title="a.t('btn.edit')" :data-testid="'user-cal-edit-' + f.name" @click="a.editCalendarById(f.name)"></v-btn>
+                  <v-btn v-if="a.isAdmin && f.userDefined" :icon="a.isArmed('ucal:' + f.name) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text"
                          :color="a.isArmed('ucal:' + f.name) ? 'error' : ''"
                          :title="a.isArmed('ucal:' + f.name) ? a.t('settings.confirm_delete') : a.t('settings.cal_delete')"
                          :data-testid="'user-cal-del-' + f.name"
                          @click="a.isArmed('ucal:' + f.name) ? a.deleteUserCalendar(f.name) : a.armConfirm('ucal:' + f.name)"></v-btn>
                 </div>
-                <div v-if="f.published" class="d-flex align-center flex-wrap mt-1" style="gap:8px">
+                <div v-if="a.isAdmin && f.published" class="d-flex align-center flex-wrap mt-1" style="gap:8px">
                   <v-text-field :model-value="f.url" readonly density="compact" variant="outlined"
                                 hide-details style="font-size:0.78rem;min-width:260px" :data-testid="'feed-url-' + f.name"></v-text-field>
-                  <v-btn size="small" variant="text" @click="a.copyText(f.url)">{{ a.t('btn.copy') }}</v-btn>
-                  <v-btn size="small" variant="text" color="warning" :disabled="!a.canPublishFeeds"
+                  <v-btn size="small" variant="text" prepend-icon="mdi-content-copy" @click="a.copyText(f.url)">{{ a.t('btn.copy') }}</v-btn>
+                  <v-btn size="small" variant="text" color="warning" prepend-icon="mdi-autorenew" :disabled="!a.canPublishFeeds"
                          :data-testid="'feed-regen-' + f.name"
                          @click="a.regenerateFeed(f.name)">{{ a.t('settings.feed_regenerate') }}</v-btn>
-                  <v-btn size="small" variant="text" color="error"
+                  <v-btn size="small" variant="text" color="error" prepend-icon="mdi-link-off"
                          :data-testid="'feed-stop-' + f.name"
                          @click="a.unpublishFeed(f.name)">{{ a.t('settings.feed_unpublish') }}</v-btn>
                 </div>
               </div>
-            </template>
-            <v-btn v-if="!a.calDraft" variant="text" prepend-icon="mdi-plus"
-                   data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('btn.add') }} {{ a.t('settings.cal_new') }}</v-btn>
+            <template v-if="a.isAdmin">
+            <v-btn v-if="!a.calDraft" variant="outlined" size="small" prepend-icon="mdi-plus"
+                   data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('settings.add_calendar') }}</v-btn>
             <v-card v-if="a.calDraft" variant="tonal" class="pa-3 mt-2" data-testid="user-cal-form">
               <!-- A real table, like Users: headers, `plain` controls, one row, destructive control
                    last. A calendar has a VARIABLE number of sources, which a table handles the way a
@@ -908,7 +897,7 @@
                          than promising a switch that would fail on save. -->
                     <td v-if="a.canPublishFeeds"><v-switch v-if="i === 0" v-model="a.calDraft.feed" color="primary" density="compact" hide-details
                                   data-testid="user-cal-feed"></v-switch></td>
-                    <td><v-btn icon="mdi-close" size="x-small" variant="text" :data-testid="'user-cal-rmsrc-' + i" @click="a.removeCalDraftSource(i)"></v-btn></td>
+                    <td><v-btn icon="mdi-close" size="small" variant="text" :data-testid="'user-cal-rmsrc-' + i" @click="a.removeCalDraftSource(i)"></v-btn></td>
                   </tr>
                 </tbody>
                 </template>
@@ -916,34 +905,96 @@
               <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="a.addCalDraftSource()">{{ a.t('settings.cal_add_source') }}</v-btn>
               <p v-if="a.calDraft.feed" style="font-size:0.75rem;opacity:0.75" class="mt-1">{{ a.t('settings.cal_publish_warn') }}</p>
               <div class="mt-2 d-flex" style="gap:8px">
-                <v-btn size="small" color="primary" data-testid="user-cal-save" @click="a.saveCalDraft()">{{ a.t('btn.save') }}</v-btn>
-                <v-btn size="small" variant="text" @click="a.cancelCalDraft()">{{ a.t('btn.cancel') }}</v-btn>
+                <v-btn variant="flat" color="primary" data-testid="user-cal-save" @click="a.saveCalDraft()">{{ a.t('btn.save') }}</v-btn>
+                <v-btn variant="text" @click="a.cancelCalDraft()">{{ a.t('btn.cancel') }}</v-btn>
               </div>
             </v-card>
-            <!-- Browser-local Postgres only. Deliberately next to Export, because the honest answer to
-                 "can I lose this?" is a backup, and the second-best answer is the persistence request
-                 below. Translated like the rest of Settings: it was literal English once, on the grounds
-                 that it describes one backend, but it is read inside a loaded database, where the
-                 labels are there to use. -->
-            <template v-if="a.mode === 'pglite'">
-              <v-divider class="my-4"></v-divider>
-              <p class="text-subtitle-2 mb-2">{{ a.t('local.title') }}</p>
-              <div style="font-size:0.85rem" data-testid="local-store">
-                <div>{{ a.t('local.used') }} <strong>{{ a.fmtBytes(a.localStore.usage) }}</strong><span v-if="a.localStore.quota"> · {{ a.t('local.quota') }} {{ a.fmtBytes(a.localStore.quota) }}</span></div>
-                <div v-if="a.localStore.persisted === true" class="mt-1" data-testid="local-store-persisted">
-                  <v-icon size="small" color="success">mdi-shield-check</v-icon>
-                  {{ a.t('local.persistent') }}
-                </div>
-                <div v-else-if="a.localStore.persisted === false" class="mt-1" data-testid="local-store-besteffort">
-                  <v-icon size="small" color="warning">mdi-alert</v-icon>
-                  <strong>{{ a.t('local.best_effort_title') }}</strong> {{ a.t('local.best_effort') }}
-                  <div class="mt-2">
-                    <v-btn size="small" variant="outlined" prepend-icon="mdi-shield-lock" data-testid="local-store-persist" @click="a.requestLocalPersistence()">{{ a.t('local.keep') }}</v-btn>
-                    <span class="ml-2" style="opacity:0.7">{{ a.t('local.install_hint') }}</span>
-                  </div>
-                </div>
-              </div>
             </template>
+            </div>
+            </template>
+            <template v-if="a.isAdmin">
+            <v-divider v-if="a.knownDatabases.length > 1" class="my-4"></v-divider>
+            <template v-if="a.knownDatabases.length > 1">
+              <p class="text-subtitle-2 mb-1">{{ a.t('settings.databases') }}</p>
+              <p class="text-caption text-medium-emphasis mb-2">{{ a.t('settings.databases_hint') }}</p>
+              <v-list density="compact" class="mb-2" data-testid="database-list">
+                <v-list-item v-for="db in a.knownDatabases" :key="db.key" :title="db.label" :subtitle="db.mode">
+                  <template #prepend>
+                    <v-icon :icon="db.active ? 'mdi-check-circle' : 'mdi-database-outline'" :color="db.active ? 'primary' : undefined"></v-icon>
+                  </template>
+                  <template #append>
+                    <v-btn v-if="!db.active" size="small" variant="text" @click="a.switchDatabase(db.key)">{{ a.t('settings.switch') }}</v-btn>
+                    <v-btn size="small" variant="text" color="error" @click="a.forgetDatabase(db.key)">{{ a.t('settings.forget') }}</v-btn>
+                  </template>
+                </v-list-item>
+              </v-list>
+            </template>
+            </template>
+            <template v-if="a.isAdmin">
+            <v-divider class="my-4"></v-divider>
+            <p class="text-subtitle-2 mb-2" style="cursor:pointer" role="button" tabindex="0" data-testid="import-section-toggle"
+               :aria-expanded="String(!a.settings._collapseImport)"
+               @click="a.settings._collapseImport = !a.settings._collapseImport" @keydown.enter.prevent="a.settings._collapseImport = !a.settings._collapseImport">
+              <v-icon size="small">{{ a.settings._collapseImport ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
+              {{ a.t('settings.import_export') }}
+            </p>
+            <div v-show="!a.settings._collapseImport" class="ml-5" data-testid="import-body">
+            <!-- Each chooser sits with the button it governs: one says what the file will CARRY, the
+                 other which of its parts an import will APPLY. Wrapping rows, so the chooser drops under
+                 its button on a phone rather than squeezing beside it. -->
+            <div class="mb-2" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px">
+              <v-btn variant="outlined" size="small" prepend-icon="mdi-download" data-testid="settings-export-json" @click="a.exportData">{{ a.t('settings.export') }}</v-btn>
+              <v-select :model-value="a.exportParts" @update:model-value="v => a.setParts('exportParts', v)" :items="a.partOptions('exportParts')" item-title="title" item-value="value"
+                        :item-props="(i) => ({ disabled: i.disabled, appendIcon: i.disabled ? 'mdi-check' : undefined })"
+                        multiple chips density="compact" variant="outlined" hide-details
+                        style="flex:1 1 220px;max-width:340px" data-testid="export-parts"
+                        :label="a.t('settings.export_parts')"></v-select>
+            </div>
+            <div class="mb-1" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px">
+              <v-btn variant="outlined" size="small" prepend-icon="mdi-upload" @click="$refs.importFile.click()">{{ a.t('settings.import') }}</v-btn>
+              <v-select :model-value="a.importParts" @update:model-value="v => a.setParts('importParts', v)" :items="a.partOptions('importParts')" item-title="title" item-value="value"
+                        :item-props="(i) => ({ disabled: i.disabled, appendIcon: i.disabled ? 'mdi-check' : undefined })"
+                        multiple chips density="compact" variant="outlined" hide-details
+                        style="flex:1 1 220px;max-width:340px" data-testid="import-parts"
+                        :label="a.t('settings.import_parts')"></v-select>
+              <input ref="importFile" type="file" multiple accept=".json" hidden @change="a.importData($event)">
+            </div>
+            <v-btn variant="outlined" size="small" prepend-icon="mdi-shape-outline" class="mb-2"
+                   data-testid="settings-examples" @click="a.openExamples()">{{ a.t('settings.examples') }}</v-btn>
+            </div>
+            <!-- Outside the fold: an available update is news, and a collapsed section would hide it. -->
+            <!-- Checked on the way into Settings (selectTab), once per session, admin only: this is the
+                 screen that answers "is anything out of date?", and putting the request here keeps it
+                 off every visitor's boot. -->
+            <v-alert v-if="a.exampleUpdate" type="info" variant="tonal" density="compact" class="mb-2"
+                     icon="mdi-package-up" data-testid="example-update">
+              <div style="font-size:0.85rem">
+                <strong>{{ a.exampleUpdate.title }}</strong> —
+                {{ a.t('settings.examples_update') }}
+                <span class="font-monospace" style="opacity:0.7">
+                  r{{ a.exampleUpdate.installedRevision }} → r{{ a.exampleUpdate.revision }}
+                </span>
+              </div>
+              <!-- What the changed filenames below actually MEAN, when the bundle author wrote it down.
+                   Capped here rather than in compare(): that reports what is pending, this decides how
+                   much of it fits in an alert. Untranslated, like the bundle description it sits under --
+                   these are the author's words, shipped in <id>-about.json, not app chrome. -->
+              <ul v-if="a.exampleUpdate.notes.length" class="mt-1 mb-0" style="font-size:0.8rem">
+                <li v-for="n in a.exampleUpdate.notes.slice(0, 5)" :key="n.revision" data-testid="example-update-note">
+                  {{ n.text }}
+                </li>
+              </ul>
+              <div v-if="a.exampleUpdate.notes.length > 5" class="mt-1" style="font-size:0.78rem;opacity:0.8">
+                {{ a.t('settings.examples_notes_more') }} ({{ a.exampleUpdate.notes.length - 5 }})
+              </div>
+              <div class="font-monospace mt-1" style="font-size:0.72rem;opacity:0.7">
+                {{ a.exampleUpdate.changed.join(', ') }}
+              </div>
+              <v-btn size="small" variant="outlined" class="mt-2" prepend-icon="mdi-download"
+                     data-testid="example-update-apply" @click="a.reinstallExample()">{{ a.t('settings.examples_reinstall') }}</v-btn>
+            </v-alert>
+            </template>
+            <template v-if="a.isAdmin">
             <v-divider class="my-4"></v-divider>
             <!-- Appearance: the theme palette, then one row per nav entry (a tree, groups included), each opening one
                  dialog for how the
@@ -953,8 +1004,9 @@
                  `views[x].background` stay the shipped defaults these override. Uploaded bytes go to _assets.
                  Collapsed by default: one row per entry is tall, and expanded it would push the sections below
                  out of view (which also stops v-img, an intersection-loaded component, rendering the avatar). -->
-            <p class="text-subtitle-2 mb-2" style="cursor:pointer" data-testid="appearance-section-toggle"
-               @click="a.settings._collapseAppearance = !a.settings._collapseAppearance">
+            <p class="text-subtitle-2 mb-2" style="cursor:pointer" role="button" tabindex="0" data-testid="appearance-section-toggle"
+               :aria-expanded="String(!a.settings._collapseAppearance)"
+               @click="a.settings._collapseAppearance = !a.settings._collapseAppearance" @keydown.enter.prevent="a.settings._collapseAppearance = !a.settings._collapseAppearance">
               <v-icon size="small">{{ a.settings._collapseAppearance ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
               {{ a.t('settings.appearance') }}
             </p>
@@ -1079,52 +1131,16 @@
                 </v-card-actions>
               </v-card>
             </v-dialog>
-            <v-divider v-if="a.knownDatabases.length > 1" class="my-4"></v-divider>
-            <template v-if="a.knownDatabases.length > 1">
-              <p class="text-subtitle-2 mb-1">{{ a.t('settings.databases') }}</p>
-              <p class="text-caption text-medium-emphasis mb-2">{{ a.t('settings.databases_hint') }}</p>
-              <v-list density="compact" class="mb-2" data-testid="database-list">
-                <v-list-item v-for="db in a.knownDatabases" :key="db.key" :title="db.label" :subtitle="db.mode">
-                  <template #prepend>
-                    <v-icon :icon="db.active ? 'mdi-check-circle' : 'mdi-database-outline'" :color="db.active ? 'primary' : undefined"></v-icon>
-                  </template>
-                  <template #append>
-                    <v-btn v-if="!db.active" size="small" variant="text" @click="a.switchDatabase(db.key)">{{ a.t('settings.switch') }}</v-btn>
-                    <v-btn size="small" variant="text" color="error" @click="a.forgetDatabase(db.key)">{{ a.t('settings.forget') }}</v-btn>
-                  </template>
-                </v-list-item>
-              </v-list>
-            </template>
-            <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2">{{ a.t('settings.share') }}</p>
-            <v-text-field :model-value="a.shareLink" name="share-link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="a.copyText(a.shareLink)"></v-text-field>
-            </template>
-            <v-divider class="my-4"></v-divider>
-            <v-btn variant="outlined" :color="a.isArmed('reset') ? 'error' : 'warning'" :prepend-icon="a.isArmed('reset') ? 'mdi-check-circle' : 'mdi-refresh'" @click="a.isArmed('reset') ? a.resetApp() : a.armConfirm('reset')">{{ a.isArmed('reset') ? a.t('settings.confirm_reset') : a.t('settings.reset') }}</v-btn>
-            <template v-if="a.usersLoaded && !a.isUnregisteredUser">
-            <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-1 font-weight-bold mb-2">{{ a.t('profile.title') }}</p>
-            <div class="d-flex align-center flex-wrap mb-3" style="gap:12px">
-              <v-avatar size="72" color="surface-variant">
-                <v-img v-if="a.myProfile.picture" :src="a.myProfile.picture" :alt="a.t('profile.picture')" cover></v-img>
-                <v-icon v-else size="44" icon="mdi-account"></v-icon>
-              </v-avatar>
-              <div class="d-flex flex-column align-start" style="gap:4px">
-                <input ref="profilePicInput" type="file" accept="image/*" hidden @change="a.onProfilePictureFile($event)">
-                <v-btn size="small" variant="outlined" prepend-icon="mdi-camera" @click="$refs.profilePicInput.click()">{{ a.myProfile.picture ? a.t('img.replace') : a.t('img.upload') }}</v-btn>
-                <v-btn v-if="a.myProfile.picture" size="x-small" variant="text" color="error" prepend-icon="mdi-delete" @click="a.removeMyPicture()">{{ a.t('img.remove') }}</v-btn>
-              </div>
-            </div>
-            <div class="d-flex align-center flex-wrap" style="gap:12px">
-              <v-text-field :model-value="a.currentUserEmail" :label="a.t('profile.email')" density="compact" hide-details variant="outlined" readonly style="max-width:240px"></v-text-field>
-              <v-text-field v-model="a.myProfile.name" :label="a.t('profile.your_name')" density="compact" hide-details variant="outlined" style="max-width:240px" @blur="a.saveMyProfile" @keydown.enter="$event.target.blur()" @keydown.home.stop @keydown.end.stop></v-text-field>
-              <v-switch v-if="a.sharingMatters()" data-testid="profile-share-name" :model-value="a.myProfile.shared" :disabled="!(a.myProfile.name || '').trim()" @update:model-value="v => { a.myProfile.shared = v; a.saveMyProfile(); }" :label="a.t('profile.share_name')" density="compact" hide-details color="primary"></v-switch>
-            </div>
             </template>
             <template v-if="a.usersLoaded && a.userList.length && a.isAdmin">
             <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-1 font-weight-bold mb-2">{{ a.t('settings.user_access_title') }}</p>
-            <p class="text-subtitle-2 mb-2">{{ a.t('settings.user_access') }}</p>
+            <p class="text-subtitle-2 mb-2" style="cursor:pointer" role="button" tabindex="0" data-testid="users-section-toggle"
+               :aria-expanded="String(!a.settings._collapseUsers)"
+               @click="a.settings._collapseUsers = !a.settings._collapseUsers" @keydown.enter.prevent="a.settings._collapseUsers = !a.settings._collapseUsers">
+              <v-icon size="small">{{ a.settings._collapseUsers ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
+              {{ a.t('settings.user_access_title') }}
+            </p>
+            <!-- Outside the fold: someone waiting for access is the one thing here that cannot wait. -->
             <template v-if="a.accessRequests.length">
               <p class="text-subtitle-2 mb-1">{{ a.t('access.pending_requests') }}</p>
               <v-table density="compact" class="mb-3">
@@ -1135,14 +1151,22 @@
                     <td>{{ req.name }}</td>
                     <td class="text-medium-emphasis">{{ req.note }}</td>
                     <td style="white-space:nowrap">
-                      <v-btn size="x-small" color="success" variant="text" prepend-icon="mdi-check" @click="a.approveRequest(req)">{{ a.t('access.approve') }}</v-btn>
-                      <v-btn size="x-small" color="error" variant="text" prepend-icon="mdi-close" @click="a.denyRequest(req)">{{ a.t('access.deny') }}</v-btn>
+                      <v-btn size="small" color="success" variant="text" prepend-icon="mdi-check" @click="a.approveRequest(req)">{{ a.t('access.approve') }}</v-btn>
+                      <v-btn size="small" color="error" variant="text" prepend-icon="mdi-close" @click="a.denyRequest(req)">{{ a.t('access.deny') }}</v-btn>
                     </td>
                   </tr>
                 </tbody>
                 </template>
               </v-table>
             </template>
+            <div v-show="!a.settings._collapseUsers" class="ml-5" data-testid="users-body">
+            <!-- The address to send someone you are letting in. On Firebase / Supabase it carries this
+                 database's connection, so opening it connects their browser here -- onboarding, which is
+                 what this section is for. It also only exists once a user is registered: before that
+                 everyone is admin, and a link handed out then would hand out full access with it. -->
+            <p class="text-body-2 font-weight-medium mb-2">{{ a.t('settings.share') }}</p>
+            <v-text-field class="mb-4" :model-value="a.shareLink" name="share-link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="a.copyText(a.shareLink)"></v-text-field>
+            <p class="text-subtitle-2 mb-2">{{ a.t('settings.user_access') }}</p>
             <v-table v-if="a.userList.length" density="compact">
               <template v-slot:default>
               <thead><tr><th>{{ a.t('settings.user_id') }}</th><th>{{ a.t('settings.name') }}</th><th>{{ a.t('settings.role') }}</th><th>{{ a.t('settings.tables') }}</th><th>{{ a.t('settings.tables_view') }}</th><th></th></tr></thead>
@@ -1160,8 +1184,37 @@
               </tbody>
               </template>
             </v-table>
-            <v-btn variant="text" prepend-icon="mdi-plus" @click="a.addUser()" class="ma-2">{{ a.t('settings.add_user') }}</v-btn>
+            <v-btn variant="outlined" size="small" prepend-icon="mdi-plus" @click="a.addUser()" class="mt-2">{{ a.t('settings.add_user') }}</v-btn>
+            </div>
             </template>
+            <template v-if="a.isAdmin">
+            <!-- Browser-local Postgres only. Deliberately next to Export, because the honest answer to
+                 "can I lose this?" is a backup, and the second-best answer is the persistence request
+                 below. Translated like the rest of Settings: it was literal English once, on the grounds
+                 that it describes one backend, but it is read inside a loaded database, where the
+                 labels are there to use. -->
+            <template v-if="a.mode === 'pglite'">
+              <v-divider class="my-4"></v-divider>
+              <p class="text-subtitle-2 mb-2">{{ a.t('local.title') }}</p>
+              <div style="font-size:0.85rem" data-testid="local-store">
+                <div>{{ a.t('local.used') }} <strong>{{ a.fmtBytes(a.localStore.usage) }}</strong><span v-if="a.localStore.quota"> · {{ a.t('local.quota') }} {{ a.fmtBytes(a.localStore.quota) }}</span></div>
+                <div v-if="a.localStore.persisted === true" class="mt-1" data-testid="local-store-persisted">
+                  <v-icon size="small" color="success">mdi-shield-check</v-icon>
+                  {{ a.t('local.persistent') }}
+                </div>
+                <div v-else-if="a.localStore.persisted === false" class="mt-1" data-testid="local-store-besteffort">
+                  <v-icon size="small" color="warning">mdi-alert</v-icon>
+                  <strong>{{ a.t('local.best_effort_title') }}</strong> {{ a.t('local.best_effort') }}
+                  <div class="mt-2">
+                    <v-btn size="small" variant="outlined" prepend-icon="mdi-shield-lock" data-testid="local-store-persist" @click="a.requestLocalPersistence()">{{ a.t('local.keep') }}</v-btn>
+                    <span class="ml-2" style="opacity:0.7">{{ a.t('local.install_hint') }}</span>
+                  </div>
+                </div>
+              </div>
+            </template>
+            </template>
+            <v-divider class="my-4"></v-divider>
+            <v-btn variant="outlined" size="small" :color="a.isArmed('reset') ? 'error' : 'warning'" :prepend-icon="a.isArmed('reset') ? 'mdi-check-circle' : 'mdi-refresh'" @click="a.isArmed('reset') ? a.resetApp() : a.armConfirm('reset')">{{ a.isArmed('reset') ? a.t('settings.confirm_reset') : a.t('settings.reset') }}</v-btn>
             </div>
           </v-card-text>
         </v-card>

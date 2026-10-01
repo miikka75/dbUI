@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "d2a9b58d77a22107"
+      "hash": "492b9689abf57607"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "16a586313961a94f"
+      "hash": "437f202ee693c430"
     }
   ],
   "bundles": [
@@ -20,30 +20,30 @@
       "title": "Bishopric Tool",
       "description": "A ward bishopric’s working tool — meeting programs, assignments, interviews and a members roster.",
       "icon": "./examples/bishopric-favicon.svg",
-      "revision": 38,
-      "tables": 13,
-      "views": 18,
+      "revision": 39,
+      "tables": 14,
+      "views": 19,
       "schema": {
         "file": "bishopric-schema.json",
-        "hash": "b394dad4358d9492"
+        "hash": "cd6efc613200e267"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "bishopric-lang-en.json",
-          "hash": "da6235be52761514"
+          "hash": "13d55e4ca315a226"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "bishopric-lang-fi.json",
-          "hash": "4ac424dbed1d8731"
+          "hash": "5ef75e1530ae0b2f"
         }
       ],
       "about": {
         "file": "bishopric-about.json",
-        "hash": "5ab68ea0b71f7d7a"
+        "hash": "7714b00812fcf0be"
       },
       "notes": {
         "29": "Welcome the newly baptized and those who moved in; releases now come before sustainings.",
@@ -54,7 +54,8 @@
         "34": "A position is now named by its own organization and calling, so nothing has to be typed for it and a calling you add in Lookup can be linked to an account straight away. UPDATING AN EXISTING DATABASE: the bishopric's three names change — bishop, counselor1 and counselor2 become bishopric_bishop, bishopric_first_counselor and bishopric_second_counselor. They cannot be renamed in Lists, because the old programme view pins them, so migrate through a file: Settings → export; in the file replace those three names wherever they appear, and add three rows to ref_callings with organization bishopric and callings bishop, first_counselor and second_counselor; then Settings → import that file. Your lists, rows and languages all travel in that file, so nothing else moves. Afterwards, in Lookup, link each position to its account again — the links were keyed to the old list and do not follow. SKIPPING IT IS SAFE: nothing is deleted, every card still appears, and the only loss is that those three show their bare name and cannot be linked until you do it.",
         "36": "Ward business follows the General Handbook for priesthood quorum callings. Aaronic Priesthood quorum callings are announced in sacrament meeting without a vote, in a block of their own; they are sustained in the quorum meeting. Elders quorum callings leave the program: the stake presidency presents the presidency, and the quorum sustains the secretary and teachers. The deacons, teachers and priests quorums are now named under the Aaronic Priesthood (for example “Aaronic Priesthood – Priests Quorum – First Assistant”). The bishop is the priests quorum president, so the priests have no youth president, and their first and second counselors become the first and second assistants. UPDATING AN EXISTING DATABASE: an update does not change catalogue rows, so in Lookup, under young_men_priests, rename first_counselor to first_assistant and second_counselor to second_assistant, and delete president.",
         "37": "Ward business adds naming and blessing, and confirmation for those baptized but not yet confirmed; quorum callings are announced last. Finnish uses “apulainen” for the priests’ assistants. EXISTING DATABASE: in Lookup, add Welcome statuses child_blessing and confirmed.",
-        "38": "Aaronic Priesthood quorum callings are announced once set apart (they are sustained and set apart in the quorum), not once accepted."
+        "38": "Aaronic Priesthood quorum callings are announced once set apart (they are sustained and set apart in the quorum), not once accepted.",
+        "39": "Adds a personal calendar feed: the interviews, calling steps, reminders and sacrament meeting assignments that are yours, in your phone or computer calendar. Subscribe under Settings -> My calendar feeds; each person gets a private link, in the language they pick. What counts as yours comes from the member name and calling linked to your account in Lists. There is no new screen. Links are only issued where the deployment has file storage."
       }
     },
     {
@@ -100,7 +101,7 @@
       "title": "Team Demo",
       "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
       "icon": null,
-      "revision": 8,
+      "revision": 9,
       "tables": 11,
       "views": 26,
       "schema": {
@@ -112,19 +113,19 @@
           "code": "en",
           "name": "English",
           "file": "demo-lang-en.json",
-          "hash": "f6f2b39433f8391a"
+          "hash": "af1fa14f40336929"
         },
         {
           "code": "es",
           "name": "Español",
           "file": "demo-lang-es.json",
-          "hash": "9f60f10d629705f3"
+          "hash": "52cd2d4bd2bff831"
         },
         {
           "code": "sv",
           "name": "Svenska",
           "file": "demo-lang-sv.json",
-          "hash": "084d723b79d49fcd"
+          "hash": "6ec931d0b111d776"
         }
       ],
       "data": {
@@ -133,13 +134,14 @@
       },
       "about": {
         "file": "demo-about.json",
-        "hash": "6f05f524dc4e4132"
+        "hash": "ade99d546f058222"
       },
       "notes": {
         "5": "Adds `teams`, a catalogue whose parent column holds another ROW's id (`hierarchy.by: \"id\"`) instead of a group's value — so the Lookup tab shows it three levels deep (Acme > Engineering > Backend) rather than the two every other lookup has. Nothing existing changes: `cities` still groups by value, side by side with it, which is the point of shipping both.",
         "6": "The navigation is now a set of pages instead of a 22-entry drawer (`nav.layout: \"browse\"`): the home screen shows tiles for six sections, each section opens as a page of its own entries, and a breadcrumb leads back up. Every screen the old menu had is still there, grouped. Each person can switch back to the side menu under Settings -> Navigation.",
         "7": "Settings gains an Appearance section — the theme, plus an icon, image and background for every menu entry — and a single Navigation choice (Side menu, Top navigation, List, Tiles). Their labels now come in Spanish and Swedish as well as English, and the old Background images labels are gone.",
-        "8": "The rest of Settings now speaks Spanish and Swedish too: the theme colour names, the local-database storage notice, and the Examples dialog."
+        "8": "The rest of Settings now speaks Spanish and Swedish too: the theme colour names, the local-database storage notice, and the Examples dialog.",
+        "9": "Settings no longer has a Refresh data button (changes from others already arrive on their own), so its labels are gone from the language packs."
       }
     }
   ]

@@ -18,9 +18,12 @@
       "field.closing_prayer": "Loppurukous",
       "field.date": "Päivä",
       "field.expires": "Voimassaolo päättyy",
+      "field.feed_id": "Syötteen tunnus",
+      "field.feed_url": "Kalenterilinkki",
       "field.intermediate_hymn": "Välilaulu",
       "field.interpreter": "Tulkki",
       "field.item": "Asia",
+      "field.lang": "Kieli",
       "field.meeting": "Tapaaminen",
       "field.musical_number": "Musiikkiesitys",
       "field.notes": "Huomioitavaa",
@@ -40,6 +43,7 @@
       "field.speaker": "Puhuja",
       "field.stake_business": "Vaarnan viralliset asiat",
       "field.status": "Tila",
+      "field.subscribed": "Tilattu",
       "field.talk1": "Puhe",
       "field.talk2": "Puhe",
       "field.talk3": "Puhe",
@@ -166,6 +170,7 @@
       "tab.admin_interviews": "Keskustelut",
       "tab.admin_reminders": "Muistettavat",
       "tab.admin_responsibilities": "Vastuut",
+      "tab.calendar_subs": "Kalenteritilaukset",
       "tab.duty_cleaning_a": "Siivousalue A",
       "tab.duty_cleaning_b": "Siivousalue B",
       "tab.duty_interpreters": "Tulkit",
@@ -213,7 +218,8 @@
       "view.meeting_agenda": "Kokous",
       "view.meeting_music": "Musiikki",
       "view.meeting_program": "Ohjelmat",
-      "view.meeting_speakers": "Puheet"
+      "view.meeting_speakers": "Puheet",
+      "view.personal_calendar": "Henkilökohtainen kalenteri"
     }
   }
 }

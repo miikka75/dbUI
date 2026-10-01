@@ -551,6 +551,40 @@
         ],
         "reorderable": true,
         "defaultSort": "position"
+      },
+      "calendar_subs": {
+        "privateRoster": true,
+        "columns": [
+          {
+            "name": "owner",
+            "type": "owner"
+          },
+          {
+            "name": "lang",
+            "type": "text"
+          },
+          {
+            "name": "subscribed",
+            "type": "text",
+            "default": "yes"
+          },
+          {
+            "name": "feed_id",
+            "type": "text",
+            "hidden": true
+          },
+          {
+            "name": "feed_url",
+            "type": "url"
+          }
+        ],
+        "ownerWritable": [
+          "lang",
+          "subscribed"
+        ],
+        "ownerWritableWhile": {
+          "subscribed": "yes"
+        }
       }
     },
     "views": [
@@ -1312,6 +1346,108 @@
         "defaultSort": "date",
         "name": "duty_interpreters",
         "kind": "data"
+      },
+      {
+        "name": "personal_calendar",
+        "kind": "calendar",
+        "feed": "per-person",
+        "feedSubscribers": {
+          "table": "calendar_subs",
+          "langColumn": "lang",
+          "activeColumn": "subscribed",
+          "idColumn": "feed_id",
+          "urlColumn": "feed_url"
+        },
+        "calendar": {
+          "defaultView": "list",
+          "weekStart": 1,
+          "sources": [
+            {
+              "table": "meeting_agenda",
+              "dateColumn": "date",
+              "titleColumns": [
+                "theme"
+              ],
+              "filter": {
+                "$or": [
+                  {
+                    "presiding": "@me"
+                  },
+                  {
+                    "responsible": "@me"
+                  },
+                  {
+                    "opening_prayer": "@me"
+                  },
+                  {
+                    "testimony1": "@me"
+                  },
+                  {
+                    "testimony2": "@me"
+                  },
+                  {
+                    "talk1": "@me"
+                  },
+                  {
+                    "talk2": "@me"
+                  },
+                  {
+                    "talk3": "@me"
+                  },
+                  {
+                    "closing_prayer": "@me"
+                  }
+                ]
+              }
+            },
+            {
+              "table": "admin_interviews",
+              "dateColumn": "meeting",
+              "titleColumns": [
+                "person",
+                "topic"
+              ],
+              "filter": {
+                "$or": [
+                  {
+                    "responsible": "@me"
+                  },
+                  {
+                    "person": "@me"
+                  }
+                ]
+              }
+            },
+            {
+              "table": "admin_callings",
+              "dateColumn": "date",
+              "titleColumns": [
+                "person",
+                "calling"
+              ],
+              "filter": {
+                "responsible": "@me"
+              }
+            },
+            {
+              "table": "admin_reminders",
+              "dateColumn": "date",
+              "titleColumns": [
+                "item"
+              ],
+              "filter": {
+                "$or": [
+                  {
+                    "responsible": "@me"
+                  },
+                  {
+                    "person": "@me"
+                  }
+                ]
+              }
+            }
+          ]
+        }
       }
     ],
     "listSources": {

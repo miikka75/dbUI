@@ -1,18 +1,23 @@
-// bishopric-calendar.test.js — the bishopric example ships NO calendar view, and does not need one.
+// bishopric-calendar.test.js — the bishopric example ships ONE calendar, as a personal feed with no screen.
 //
-// It used to ship two. They were removed once a calendar could be defined in the database instead: a
-// calendar is a saved question over tables that already exist, so putting one in the schema document
-// makes the example carry a decision that belongs to whoever installs it.
+// It used to ship two shared ones. They were removed once a calendar could be defined in the database
+// instead: a calendar every member sees alike is a saved question over tables that already exist, so
+// putting one in the schema document makes the example carry a decision that belongs to whoever
+// installs it.
 //
-// What has to stay true is that removing them cost nothing, so this checks both halves:
+// A PER-PERSON calendar is different, and is why one is back. It cannot be built in Settings — it needs a
+// subscriber table with owner gating and privateRoster, which only a schema can declare — and it is the
+// one calendar a bishopric member wants from this data: the interviews, callings, reminders and talks
+// that are theirs, in their own phone calendar. It is a DECLARATION, not a screen: out of the nav, and
+// subscribed to under Settings -> My calendar feeds. So this checks:
 //
-//   1. the schema really is minimal — no calendar view, nothing in the nav pointing at one;
-//   2. its dated tables are still EXPORTABLE, by building a calendar the way Settings does and driving
-//      it through the real modules (SchemaNormalize -> Events.build -> Ics.build).
+//   1. the only calendar is that per-person one, it passes the feed guards, and nothing navigates to it;
+//   2. no shipped example mints a world-readable URL on install;
+//   3. its dated tables are still EXPORTABLE as a database-defined calendar, driven through the real
+//      modules (SchemaNormalize -> Events.build -> Ics.build).
 //
-// (2) is the half worth having. "No calendar in the schema" stays true by accident; "you can still get
-// an .ics out of this data" is the property actually being relied on, and it breaks silently — a
-// renamed column leaves the runtime path valid and permanently empty.
+// (3) matters because it breaks silently — a renamed column leaves the runtime path valid and
+// permanently empty.
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -29,13 +34,21 @@ const VIEWS = SchemaNormalize.flattenViews(schema.views);
 const colsOf = (t) => (schema.tables[t].columns || []).reduce((m, c) => (m[c.name] = c, m), {});
 const dateColsOf = (t) => (schema.tables[t].columns || []).filter((c) => c.type === 'date').map((c) => c.name);
 
-describe('bishopric example — ships no calendar, and no feed', () => {
-  it('declares no calendar view', () => {
+describe('bishopric example — one calendar, and it is per-person', () => {
+  it('declares exactly one calendar view: personal_calendar, published per person', () => {
     const cals = Object.keys(VIEWS).filter((n) => VIEWS[n].calendar);
-    assert.deepEqual(cals, [], 'a calendar in the schema is a decision the installer should make');
+    assert.deepEqual(cals, ['personal_calendar']);
+    assert.equal(Feeds.isPerPerson(VIEWS.personal_calendar), true);
   });
 
-  it('and nothing in the nav points at one', () => {
+  // The guards that stop one member's file carrying another's rows: @me on every source, a private,
+  // owner-gated subscriber table. Asserted against the shipped schema rather than a fixture.
+  it('passes every per-person feed guard', () => {
+    assert.deepEqual(Feeds.configErrors(VIEWS, 'personal_calendar', VIEWS.personal_calendar, schema.tables), []);
+  });
+
+  // A feed, not a screen: members subscribe in Settings, so the calendar has no nav entry of its own.
+  it('and nothing in the nav points at a calendar', () => {
     const inNav = [];
     (function walk(items) { (items || []).forEach((i) => { if (i.view) inNav.push(i.view); walk(i.items); }); })(schema.nav.items);
     assert.deepEqual(inNav.filter((n) => !VIEWS[n]), [], 'every nav entry names a view that exists');
@@ -47,8 +60,7 @@ describe('bishopric example — ships no calendar, and no feed', () => {
   // mints nothing until someone opts in — which holds only while the example's sample data carries no
   // subscription rows, and that is asserted too.
   it('publishes nothing — no shipped example mints a world-readable URL on install', () => {
-    assert.deepEqual(Feeds.names(VIEWS), []);
-    ['chores', 'demo'].forEach((name) => {
+    ['bishopric', 'chores', 'demo'].forEach((name) => {
       const f = path.join(__dirname, '..', '..', 'examples', name + '-schema.json');
       if (!fs.existsSync(f)) return;
       const d = JSON.parse(fs.readFileSync(f, 'utf8'));

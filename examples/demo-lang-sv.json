@@ -103,8 +103,6 @@
       "msg.form_incomplete": "Fyll i de obligatoriska fälten",
       "msg.form_required": "Obligatoriskt",
       "msg.export_incomplete": "Exporten avbröts – kunde inte läsa:",
-      "msg.synced": "Synkad",
-      "msg.sync_failed": "Synkningen misslyckades",
       "msg.load_failed": "Kunde inte ladda appen",
       "msg.request_failed": "Begäran misslyckades",
       "msg.approve_failed": "Godkännandet misslyckades",
