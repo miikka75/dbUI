@@ -1036,7 +1036,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_note', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_note', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -7745,20 +7745,20 @@ function createVueApp() {
       + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
       + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
       + '<template v-slot:default><span v-for="(col, i) in colsFor(item)" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]" :view-cfg="obscureCfg"></list-value><span v-if="i < colsFor(item).length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
-      + '<template v-slot:append><template v-if="canMutateRow(item)"><v-btn v-if="hasArchive" :icon="isArchArmed(item) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" :color="isArchArmed(item) ? \'warning\' : \'\'" @click="archRow(item)"></v-btn><v-btn :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isDelArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></template></template>'
+      + '<template v-slot:append><template v-if="canMutateRow(item)"><confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x><confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x></template></template>'
       + '</v-list-item></v-list>'
       + '<div v-else-if="layout===\'card\'" class="my-2">'
       + '<v-card v-for="(item, ri) in rows" :key="item.id || ri" variant="flat" class="ma-2 pa-2" style="border-bottom:1px solid rgb(var(--v-theme-outline),0.2)">'
       + '<div v-for="col in colsFor(item)" :key="col" class="d-flex align-center mb-1"><span style="min-width:120px;flex-shrink:0;font-size:0.75rem;opacity:0.6;padding-right:8px">{{ t(\'field.\' + col) || col }}</span><span style="opacity:0.8"><list-value :col="col" :value="item[col]" :view-cfg="obscureCfg"></list-value></span></div>'
-      + '<div v-if="canMutateRow(item)" style="text-align:right"><v-btn v-if="hasArchive" :icon="isArchArmed(item) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" :color="isArchArmed(item) ? \'warning\' : \'\'" @click="archRow(item)"></v-btn><v-btn :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isDelArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn></div>'
+      + '<div v-if="canMutateRow(item)" style="text-align:right"><confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x><confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x></div>'
       + '</v-card></div>'
       + '<v-table v-else density="compact" class="my-2"><template v-slot:default>'
       + '<thead><tr><th v-for="c in cols" :key="c" style="cursor:pointer" @click="toggleSort(c)" :aria-sort="ariaSort(c)" :data-testid="\'embed-sort-\' + c">{{ t(\'field.\' + c) || c }}</th><th v-if="canMutate"></th></tr></thead>'
       + '<tbody><tr v-for="(item, ri) in shown" :key="item.id || ri"><td v-for="col in cols" :key="col">'
       + '<data-cell v-if="!colHidden(col, item)" :item="item" :col="col" :owner="name" :readonly="!!effPart" :embed="true"></data-cell>'
       + '</td><td v-if="canMutate" style="white-space:nowrap"><template v-if="canMutateRow(item)">'
-      + '<v-btn v-if="hasArchive" :icon="isArchArmed(item) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" :color="isArchArmed(item) ? \'warning\' : \'\'" @click="archRow(item)"></v-btn>'
-      + '<v-btn :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isDelArmed(item) ? \'error\' : \'\'" @click="delRow(item)"></v-btn>'
+      + '<confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x>'
+      + '<confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x>'
       + '</template></td></tr></tbody>'
       + '</template></v-table>'
       + '<v-btn v-if="canMutate" variant="text" size="small" prepend-icon="mdi-plus" @click="addRow">{{ t(\'btn.add\') || \'Add\' }}</v-btn>'
@@ -8050,11 +8050,54 @@ function createVueApp() {
       + '<template v-slot:append>'
       + '<v-btn v-if="canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="printCard(item)"></v-btn>'
       + '<template v-if="canMutateRows">'
-      + '<v-btn v-if="hasArchive" :icon="isArmed(\'arch:\'+item.id) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" :color="isArmed(\'arch:\'+item.id) ? \'warning\' : \'\'" @click="archiveRow(item)"></v-btn>'
-      + '<v-btn :icon="isArmed(\'row:\'+item.id) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" :color="isArmed(\'row:\'+item.id) ? \'error\' : \'\'" @click="deleteRow(item)"></v-btn>'
+      + '<confirm-x v-if="hasArchive" :armed="isArmed(\'arch:\'+item.id)" action="archive" dense @click="archiveRow(item)"></confirm-x>'
+      + '<confirm-x :armed="isArmed(\'row:\'+item.id)" dense @click="deleteRow(item)"></confirm-x>'
       + '</template>'
       + '</template>'
       + '</v-list-item></v-list>'
+  });
+
+  // ---- Shared UI elements. One definition each, used everywhere the element appears; CLAUDE.md
+  // ("UI conventions") lists them, and dev/test/ui-conventions.test.js fails on a hand-made copy. ----
+
+  // A one-line value to copy: a read-only field with the copy icon INSIDE it, the way "Share the tool's
+  // address" has always worked. style / class / name / data-testid fall through to the field.
+  app.component('copy-field', {
+    props: { value: { type: String, default: '' }, label: { type: String, default: undefined } },
+    methods: { copy: function() { appInstance.copyText(this.value); } },
+    template: '<v-text-field :model-value="value" :label="label" readonly density="compact" variant="outlined" hide-details'
+      + ' append-inner-icon="mdi-content-copy" @click:append-inner="copy()"></v-text-field>'
+  });
+
+  // The two-press icon on a row: delete (the default) or archive. It only DRAWS the state -- the caller's
+  // handler arms and acts, as each one already did -- so the icons, the warning colour once armed and the
+  // accessible name ("Delete", then "Click again to delete") are the same on every row. `dense` is the
+  // extra-small size of the data grids' row controls; everywhere else it is the icon-only small size.
+  app.component('confirm-x', {
+    props: { armed: Boolean, action: { type: String, default: 'delete' }, dense: Boolean },
+    emits: ['click'],
+    computed: {
+      spec: function() {
+        return this.action === 'archive' ? { icon: 'mdi-archive-outline', color: 'warning' } : { icon: 'mdi-close', color: 'error' };
+      },
+      // Literal keys, so the translation-key check sees each one asked for.
+      text: function() {
+        if (this.action === 'archive') return this.armed ? appInstance.t('board.confirm_archive') : appInstance.t('board.archive');
+        return this.armed ? appInstance.t('btn.confirm_delete') : appInstance.t('btn.delete');
+      }
+    },
+    template: '<v-btn :icon="armed ? \'mdi-check-circle\' : spec.icon" :size="dense ? \'x-small\' : \'small\'" variant="text"'
+      + ' :color="armed ? spec.color : undefined" :title="text" :aria-label="text" @click="$emit(\'click\', $event)"></v-btn>'
+  });
+
+  // A collapsible Settings section's heading. `flag` names the a.settings key holding "collapsed".
+  app.component('section-toggle', {
+    props: { flag: { type: String, required: true }, title: { type: String, default: '' } },
+    computed: { open: function() { return !appInstance.settings[this.flag]; } },
+    methods: { toggle: function() { appInstance.settings[this.flag] = !appInstance.settings[this.flag]; } },
+    template: '<p class="text-subtitle-2 mb-2" style="cursor:pointer" role="button" tabindex="0" :aria-expanded="String(open)"'
+      + ' @click="toggle()" @keydown.enter.prevent="toggle()">'
+      + '<v-icon size="small">{{ open ? \'mdi-chevron-down\' : \'mdi-chevron-right\' }}</v-icon> {{ title }}</p>'
   });
 
   // The subscriber's side of ONE per-person feed: subscribe (with a file language), their link, change the
@@ -8107,7 +8150,6 @@ function createVueApp() {
         this.unsubArmed = false;
         appInstance.unsubscribeFeed(this.name);
       },
-      copySubUrl: function() { appInstance.copyText(this.sub.sub.url); }
     }),
     // display:contents makes the inline root's children items of the caller's flex row; the caption's
     // order and full basis send it to a line of its own at the END of that row, after whatever buttons
@@ -8115,7 +8157,7 @@ function createVueApp() {
     template: '<div v-if="inline" style="display:contents">'
       + '<template v-if="sub.state === \'active\'">'
       + '<template v-if="sub.sub.url">'
-      + '<v-text-field :model-value="sub.sub.url" readonly density="compact" variant="outlined" hide-details style="font-size:0.78rem;min-width:220px;max-width:360px" data-testid="cal-sub-url" append-inner-icon="mdi-content-copy" @click:append-inner="copySubUrl()"></v-text-field></template>'
+      + '<copy-field :value="sub.sub.url" style="font-size:0.78rem;min-width:220px;max-width:360px" data-testid="cal-sub-url"></copy-field></template>'
       + '<v-select v-if="hasSubLang" :model-value="sub.sub.lang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" variant="outlined" hide-details style="max-width:190px;min-width:150px" data-testid="cal-sub-lang" @update:model-value="setSubLang($event)"></v-select>'
       // Text buttons like every other row action in Settings, with the calendar toolbar's icons. On a
       // phone only the icon shows (the label stays the title and accessible name), as the navigation
@@ -8129,7 +8171,7 @@ function createVueApp() {
       + '<div v-else>'
       + '<template v-if="sub.state === \'active\'">'
       + '<template v-if="sub.sub.url">'
-      + '<v-text-field :model-value="sub.sub.url" readonly density="compact" variant="outlined" hide-details style="font-size:0.78rem" data-testid="cal-sub-url" append-inner-icon="mdi-content-copy" @click:append-inner="copySubUrl()"></v-text-field>'
+      + '<copy-field :value="sub.sub.url" style="font-size:0.78rem" data-testid="cal-sub-url"></copy-field>'
       + '<p class="mt-1 mb-2" style="font-size:0.75rem;opacity:0.75">{{ t(\'feed.link_private\') }}</p></template>'
       + '<p v-else class="mb-2" style="font-size:0.8rem;opacity:0.8" data-testid="cal-sub-pending">{{ t(\'feed.link_pending\') }}</p>'
       + '<v-select v-if="hasSubLang" :model-value="sub.sub.lang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang" @update:model-value="setSubLang($event)"></v-select>'
@@ -8194,7 +8236,6 @@ function createVueApp() {
       exportIcs: function() { appInstance.downloadIcs(this.viewName); },
       publish: function() { appInstance.publishFeed(this.viewName); },
       setWindow: function(patch) { appInstance.saveCalendarWindow(this.viewName, patch); },
-      copyFeed: function() { appInstance.copyText(this.feedUrl); },
       selectDay: function(d) { this.sel = d; }
     }),
     template: ''
@@ -8238,7 +8279,7 @@ function createVueApp() {
       + '<v-select :model-value="win.lang" :items="langItems" item-title="title" item-value="value" name="cal-window-lang" :label="t(\'cal.window_lang\')" density="compact" variant="outlined" hide-details style="max-width:170px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ lang: $event })" data-testid="cal-window-lang"></v-select>'
       + '<span style="font-size:0.75rem;opacity:0.6">{{ coverLabel }}</span></div>'
       + '<div v-if="!embed && canPublish && feedUrl" class="px-2 pb-2 d-flex align-center" style="gap:8px" data-testid="cal-feed-url">'
-      + '<v-text-field :model-value="feedUrl" readonly density="compact" variant="outlined" hide-details :label="t(\'cal.feed_url\')" style="font-size:0.8rem" append-inner-icon="mdi-content-copy" @click:append-inner="copyFeed()"></v-text-field></div>'
+      + '<copy-field :value="feedUrl" :label="t(\'cal.feed_url\')" style="font-size:0.8rem"></copy-field></div>'
       + '<v-divider></v-divider>'
       + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
       + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents" :can-add="canAdd" @add="addOnDay"></cal-day-panel>'
@@ -9144,8 +9185,8 @@ function createVueApp() {
       + '        <div style="display:flex;align-items:flex-start;gap:4px">'
       + '          <div style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
       + '          <v-btn v-if="canEditCard(item)" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="t(\'btn.edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
-      + '          <v-btn v-if="canEditCard(item) && hasArchive" :icon="isArchArmed(item) ? \'mdi-check-circle\' : \'mdi-archive-outline\'" size="x-small" variant="text" density="comfortable" :color="isArchArmed(item) ? \'warning\' : undefined" :title="isArchArmed(item) ? t(\'board.confirm_archive\') : t(\'board.archive\')" @click="archItem(item)" :data-testid="\'board-arch-\'+item.id"></v-btn>'
-      + '          <v-btn v-if="canEditCard(item)" :icon="isDelArmed(item) ? \'mdi-check-circle\' : \'mdi-close\'" size="x-small" variant="text" density="comfortable" :color="isDelArmed(item) ? \'error\' : undefined" :title="isDelArmed(item) ? t(\'btn.confirm_delete\') : t(\'btn.delete\')" @click="delItem(item)" :data-testid="\'board-del-\'+item.id"></v-btn>'
+      + '          <confirm-x v-if="canEditCard(item) && hasArchive" :armed="isArchArmed(item)" action="archive" dense density="comfortable" :data-testid="\'board-arch-\'+item.id" @click="archItem(item)"></confirm-x>'
+      + '          <confirm-x v-if="canEditCard(item)" :armed="isDelArmed(item)" dense density="comfortable" :data-testid="\'board-del-\'+item.id" @click="delItem(item)"></confirm-x>'
       + '          <v-menu v-if="canEditCard(item) && canMoveCards" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
       + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :title="t(\'board.move_to\')" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
       // No heading over the lane list: the menu opens from a button that already carries "move to" as its
