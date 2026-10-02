@@ -5378,18 +5378,29 @@ test.describe('calendar view', () => {
                                               url: ((window.appInstance.appConfig.feeds || {}).cal_team_days || {}).url || '' }));
     await page.locator('[data-testid="feed-publish-cal_team_days"]').click();
     await expect(page.locator('[data-testid="feed-url-cal_team_days"] input')).toHaveValue(/store\.example/);
+    // Copied from the icon inside the field, like the share address; there is no separate Copy button.
+    await expect(page.locator('[data-testid="feed-url-cal_team_days"] .mdi-content-copy')).toBeVisible();
     expect(await def()).toEqual({ feed: true, url: expect.stringContaining('store.example') });
     await page.locator('[data-testid="feed-stop-cal_team_days"]').click();
     await expect(page.locator('[data-testid="feed-publish-cal_team_days"]')).toBeVisible();
     expect(await def()).toEqual({ feed: false, url: '' });
     await page.evaluate(() => { window.backend.uploadFile = window.__realUpload; });
 
-    // Clicking the calendar's name opens its editor in place, under its own row; delete lives there.
+    // Clicking the calendar's name opens its editor in place, under its own row. The x at the end of its
+    // only row deletes it -- two presses, like every row delete; the first press only arms it.
     const row = page.locator('[data-testid="settings-feed"]', { hasText: 'Team days and trips' });
     await row.locator('[data-testid="user-cal-edit-cal_team_days"]').click();
     await expect(row.locator('[data-testid="user-cal-form"]')).toBeVisible();
-    await row.locator('[data-testid="user-cal-del-cal_team_days"]').click();
-    await row.locator('[data-testid="user-cal-del-cal_team_days"]').click();
+    // With two rows, the x removes only that source row and the calendar stays.
+    await row.getByRole('button', { name: /settings\.cal_add_source|Add source table/ }).click();
+    await expect(row.locator('[data-testid="user-cal-rmsrc-1"]')).toBeVisible();
+    await row.locator('[data-testid="user-cal-rmsrc-1"]').click();
+    await row.locator('[data-testid="user-cal-rmsrc-1"]').click();
+    await expect(row.locator('[data-testid="user-cal-rmsrc-1"]')).toHaveCount(0);
+    expect(await stored()).toContain('cal_team_days');
+    await row.locator('[data-testid="user-cal-rmsrc-0"]').click();
+    expect(await stored()).toContain('cal_team_days');
+    await row.locator('[data-testid="user-cal-rmsrc-0"]').click();
     await expect.poll(stored).not.toContain('cal_team_days');
     await expect(page.locator('[data-testid="user-cal-form"]')).toHaveCount(0);
   });
