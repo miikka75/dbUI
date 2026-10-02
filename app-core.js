@@ -1036,7 +1036,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_note', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -8126,18 +8126,6 @@ function createVueApp() {
       // file is rendered (_publishOneSubscriber) -- it is simply not offered as a choice.
       subLangItems: function() {
         return (appInstance.languages || []).map(function(l) { return { title: l.name || l.code, value: l.code }; });
-      },
-      // The single caption under a subscription: the sentence this state cannot do without. The
-      // bearer-link warning beside a link, why there is no link yet, and -- once Unsubscribe is armed --
-      // that a second press confirms and what it does.
-      caption: function() {
-        var st = this.sub.state;
-        if (st !== 'active') return '';
-        if (this.unsubArmed) return 'feed.unsubscribe_note';
-        return this.sub.sub.url ? 'feed.link_private' : 'feed.link_pending';
-      },
-      captionId: function() {
-        return this.caption === 'feed.link_pending' ? 'cal-sub-pending' : 'cal-sub-caption';
       }
     },
     methods: Object.assign({}, ROOT_PROXY, {
@@ -8151,9 +8139,8 @@ function createVueApp() {
         appInstance.unsubscribeFeed(this.name);
       },
     }),
-    // display:contents makes the inline root's children items of the caller's flex row; the caption's
-    // order and full basis send it to a line of its own at the END of that row, after whatever buttons
-    // the caller placed after this component.
+    // display:contents makes the inline root's children items of the caller's flex row; the one caption
+    // (why there is no link yet) gets its own line at the END of that row through its order and full basis.
     template: '<div v-if="inline" style="display:contents">'
       + '<template v-if="sub.state === \'active\'">'
       + '<template v-if="sub.sub.url">'
@@ -8161,22 +8148,20 @@ function createVueApp() {
       + '<v-select v-if="hasSubLang" :model-value="sub.sub.lang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" variant="outlined" hide-details style="max-width:190px;min-width:150px" data-testid="cal-sub-lang" @update:model-value="setSubLang($event)"></v-select>'
       // Text buttons like every other row action in Settings, with the calendar toolbar's icons. On a
       // phone only the icon shows (the label stays the title and accessible name), as the navigation
-      // layout buttons do. An armed unsubscribe turns solid red, and the caption says to press again.
-      + '<v-btn :variant="unsubArmed ? \'flat\' : \'text\'" color="error" size="small" class="text-none" @click="unsubscribe()" :title="t(\'feed.unsubscribe\')" :aria-label="t(\'feed.unsubscribe\')" data-testid="cal-unsubscribe"><v-icon icon="mdi-calendar-remove"></v-icon><span class="d-none d-sm-inline ml-2">{{ t(\'feed.unsubscribe\') }}</span></v-btn></template>'
+      // layout buttons do. Armed, unsubscribe turns solid red with the check mark every two-press button shows.
+      + '<v-btn :variant="unsubArmed ? \'flat\' : \'text\'" color="error" size="small" class="text-none" @click="unsubscribe()" :title="t(\'feed.unsubscribe\')" :aria-label="t(\'feed.unsubscribe\')" data-testid="cal-unsubscribe"><v-icon :icon="unsubArmed ? \'mdi-check-circle\' : \'mdi-calendar-remove\'"></v-icon><span class="d-none d-sm-inline ml-2">{{ t(\'feed.unsubscribe\') }}</span></v-btn></template>'
       + '<template v-else>'
       + '<v-select v-if="hasSubLang" v-model="subLang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" variant="outlined" hide-details style="max-width:190px;min-width:150px" data-testid="cal-sub-lang"></v-select>'
       + '<v-btn variant="text" size="small" class="text-none" @click="subscribe()" :title="t(\'feed.subscribe\')" :aria-label="t(\'feed.subscribe\')" data-testid="cal-subscribe-go"><v-icon icon="mdi-calendar-sync"></v-icon><span class="d-none d-sm-inline ml-2">{{ t(\'feed.subscribe\') }}</span></v-btn></template>'
-      + '<div v-if="caption" style="order:99;flex-basis:100%;font-size:0.75rem;opacity:0.75" :data-testid="captionId">{{ t(caption) }}</div>'
+      + '<div v-if="sub.state === \'active\' && !sub.sub.url" style="order:99;flex-basis:100%;font-size:0.75rem;opacity:0.75" data-testid="cal-sub-pending">{{ t(\'feed.link_pending\') }}</div>'
       + '</div>'
       + '<div v-else>'
       + '<template v-if="sub.state === \'active\'">'
       + '<template v-if="sub.sub.url">'
-      + '<copy-field :value="sub.sub.url" style="font-size:0.78rem" data-testid="cal-sub-url"></copy-field>'
-      + '<p class="mt-1 mb-2" style="font-size:0.75rem;opacity:0.75">{{ t(\'feed.link_private\') }}</p></template>'
+      + '<copy-field :value="sub.sub.url" class="mb-2" style="font-size:0.78rem" data-testid="cal-sub-url"></copy-field></template>'
       + '<p v-else class="mb-2" style="font-size:0.8rem;opacity:0.8" data-testid="cal-sub-pending">{{ t(\'feed.link_pending\') }}</p>'
       + '<v-select v-if="hasSubLang" :model-value="sub.sub.lang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang" @update:model-value="setSubLang($event)"></v-select>'
-      + '<v-btn :variant="unsubArmed ? \'flat\' : \'text\'" color="error" size="small" prepend-icon="mdi-calendar-remove" @click="unsubscribe()" data-testid="cal-unsubscribe">{{ t(\'feed.unsubscribe\') }}</v-btn>'
-      + '<p v-if="unsubArmed" class="mt-1" style="font-size:0.72rem;opacity:0.7" data-testid="cal-sub-caption">{{ t(\'feed.unsubscribe_note\') }}</p></template>'
+      + '<v-btn :variant="unsubArmed ? \'flat\' : \'text\'" color="error" size="small" :prepend-icon="unsubArmed ? \'mdi-check-circle\' : \'mdi-calendar-remove\'" @click="unsubscribe()" data-testid="cal-unsubscribe">{{ t(\'feed.unsubscribe\') }}</v-btn></template>'
       + '<template v-else>'
       + '<v-select v-if="hasSubLang" v-model="subLang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang"></v-select>'
       + '<v-btn color="primary" variant="flat" size="small" prepend-icon="mdi-calendar-sync" @click="subscribe()" data-testid="cal-subscribe-go">{{ t(\'feed.subscribe\') }}</v-btn></template>'
