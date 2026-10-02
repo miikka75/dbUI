@@ -35,6 +35,12 @@ test('chores: subscribe to My calendar, fetch the link, unsubscribe and watch it
   await expect(cal).toBeVisible();
   await cal.locator('[data-testid="cal-subscribe-btn"]').click();
   const menu = page.locator('[data-testid="cal-subscribe"]');
+  // Off until the admin publishes it: Subscribe is greyed out. The toolbar's RSS button switches it on.
+  await expect(menu.locator('[data-testid="cal-subscribe-go"]')).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await cal.locator('[data-testid="cal-publish-feed"]').click();
+  await expect.poll(() => page.evaluate(() => window.appInstance.feedPublishing('my_calendar'))).toBe(true);
+  await cal.locator('[data-testid="cal-subscribe-btn"]').click();
   await menu.locator('[data-testid="cal-subscribe-go"]').click();
 
   // The admin's own write to the subscriber table re-arms the publish pass (2s debounce), which mints

@@ -3796,6 +3796,7 @@ test.describe('v3 @both partition toggle in an embed', () => {
       app.listUserLinks = { assigned_to: { Anna: 'anna@x.test', Ben: 'ben@x.test' } };
       window.SCHEMA.pp_subs = { columns: { owner: { type: 'owner' }, lang: 'text', url: 'text', fid: 'text', active: 'text' },
                                 ownerWritable: ['lang', 'active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
+      app.appConfig = Object.assign({}, app.appConfig || {}, { feeds: { pp_pub: { publishing: true } } });
       window.VIEWS.pp_pub = { name: 'pp_pub', feed: 'per-person',
         feedSubscribers: { table: 'pp_subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'], filter: { assigned_to: '@me' } }] } };
@@ -3860,7 +3861,7 @@ test.describe('v3 @both partition toggle in an embed', () => {
     const r = await page.evaluate(async () => {
       const app = window.appInstance;
       app.userList = []; app.usersLoaded = true; app.userAllowedTables = null;
-      app.appConfig = Object.assign({}, app.appConfig || {}, { feedLimits: { subscribers: 2 } });
+      app.appConfig = Object.assign({}, app.appConfig || {}, { feedLimits: { subscribers: 2 }, feeds: { cap_feed: { publishing: true } } });
       window.SCHEMA.cap_subs = { columns: { owner: { type: 'owner' }, url: 'text', fid: 'text', active: 'text' },
                                  ownerWritable: ['active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
       window.VIEWS.cap_feed = { name: 'cap_feed', feed: 'per-person',
@@ -3919,6 +3920,13 @@ test.describe('v3 @both partition toggle in an embed', () => {
     const menu = page.locator('[data-testid="cal-subscribe"]');
     await expect(menu.locator('[data-testid="cal-subscribe-go"]')).toBeVisible();
     await expect(menu.locator('[data-testid="cal-sub-url"]')).toHaveCount(0);
+    // Greyed out until an admin publishes the feed: there would be nobody to mint the link.
+    await expect(menu.locator('[data-testid="cal-subscribe-go"]')).toBeDisabled();
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      app.appConfig = Object.assign({}, app.appConfig || {}, { feeds: { ppui: { publishing: true } } });
+    });
+    await expect(menu.locator('[data-testid="cal-subscribe-go"]')).toBeEnabled();
 
     await menu.locator('[data-testid="cal-subscribe-go"]').click();
     await expect(menu.locator('[data-testid="cal-sub-pending"]')).toBeVisible();
@@ -3972,6 +3980,7 @@ test.describe('v3 @both partition toggle in an embed', () => {
       // The picker offers the database's languages only, so give it some.
       window.__realLangs = app.languages;
       app.languages = [{ code: 'en', name: 'English' }, { code: 'fi', name: 'Suomi' }];
+      app.appConfig = Object.assign({}, app.appConfig || {}, { feeds: { pps_hidden: { publishing: true } } });
       window.VIEWS.pps_hidden = { name: 'pps_hidden', title: 'Hidden personal calendar', feed: 'per-person',
         feedSubscribers: { table: 'pps_subs', langColumn: 'lang', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
         calendar: { sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'], filter: { assigned_to: '@me' } }] } };
@@ -4019,6 +4028,229 @@ test.describe('v3 @both partition toggle in an embed', () => {
     await expect(memberEntry.locator('[data-testid="cal-subscribe-go"]')).toBeVisible();   // the admin's row is not theirs
     await expect(page.locator('[data-testid="user-cal-new"]')).toHaveCount(0);
     await page.evaluate(() => { const app = window.appInstance; app.userList = []; app.currentUserEmail = window.__adminEmail; app.languages = window.__realLangs; });
+  });
+
+  // The admin's side of the same row. The row itself is the admin's OWN calendar — Subscribe and Export
+  // ics, like anybody's. Everybody's calendars at once are a line of their own beneath it, where a shared
+  // feed has its link: how many subscribe, whose file is still owed a blank, and Publish / Stop.
+  test('Settings shows an admin a per-person feed\'s subscribers on a line of its own, and publishes it', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      window.SCHEMA.ppa_subs = { columns: { owner: { type: 'owner' }, url: 'text', fid: 'text', active: 'text' },
+                                 ownerWritable: ['active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
+      window.VIEWS.ppa_cal = { name: 'ppa_cal', title: 'Admin personal calendar', feed: 'per-person',
+        feedSubscribers: { table: 'ppa_subs', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'], filter: { assigned_to: '@me' } }] } };
+      // Each subscriber has a task of their own, so a real file has an event and a blanked one has none.
+      app.schemaData = Object.assign({}, app.schemaData || {}, {
+        listSources: Object.assign({}, (app.schemaData || {}).listSources || {}, { assigned_to: 'userlink' })
+      });
+      app.listUserLinks = { assigned_to: { Anna: 'a@x.test', Ben: 'b@x.test' } };
+      const today = new Date().toISOString().slice(0, 10);
+      app.dataCache['tasks'] = [
+        { id: 'ta', date: today, title: 'Anna task', assigned_to: 'Anna' },
+        { id: 'tb', date: today, title: 'Ben task', assigned_to: 'Ben' }
+      ];
+      app.dataCache['ppa_subs'] = [
+        { id: 'p1', owner: 'a@x.test', active: 'yes' },
+        { id: 'p2', owner: 'b@x.test', active: 'yes' },
+        { id: 'p3', owner: 'gone@x.test', active: 'no', url: 'https://s/old.ics', fid: 'oldid' }
+      ];
+      window.__realUp = window.backend.uploadFile;
+      window.__uploads = [];
+      window.backend.uploadFile = (blob, opts) => blob.text().then((text) => {
+        window.__uploads.push({ path: opts.path, text });
+        return 'https://store.example/' + opts.path;
+      });
+      // The pass writes ids and urls back into the rows; apply them to the cache, as a real write would.
+      window.__realPut = window.Writes.putRow;
+      window.Writes.putRow = (t, row) => {
+        const rows = app.dataCache[t], i = rows.findIndex((r) => r.id === row.id);
+        rows.splice(i, 1, Object.assign({}, row));
+        return Promise.resolve(row);
+      };
+      app.selectTab('__settings');
+    });
+    await page.locator('[data-testid="calendars-section-toggle"]').click();
+    const entry = page.locator('[data-testid="settings-feed"]', { hasText: 'Admin personal calendar' });
+    // Everybody's personal calendars are a line of their own at the END of the section, after every
+    // calendar row and Add calendar.
+    const pub = page.locator('[data-testid="feed-all"]');
+    const status = pub.locator('[data-testid="feed-status"]');
+    await expect(pub).toContainText(/All personal calendars|settings\.feed_all_personal/);
+    await expect(pub.locator('[data-testid="feed-publish-ppa_cal"]')).toBeVisible();
+    expect(await page.evaluate(() => {
+      const body = document.querySelector('[data-testid="calendars-body"]');
+      const add = body.querySelector('[data-testid="user-cal-new"]');
+      const line = body.querySelector('[data-testid="feed-all"]');
+      return !!(add.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING);
+    })).toBe(true);
+    // The admin's own calendar row: Subscribe and Export ics, and nothing about publishing.
+    await expect(entry.locator('[data-testid="feed-publish-ppa_cal"], [data-testid="feed-status"]')).toHaveCount(0);
+    await expect(entry.locator('[data-testid="cal-subscribe-go"]')).toBeVisible();
+    await expect(entry.locator('[data-testid="cal-subscribe-go"]')).toBeDisabled();   // not published yet
+    await expect(entry.locator('[data-testid="feed-download-ppa_cal"]')).toBeVisible();
+    await expect(pub.locator('[data-testid="cal-subscribe-go"], [data-testid="feed-download-ppa_cal"]')).toHaveCount(0);
+    await expect(status.locator('[data-testid="feed-subscribers"]')).toContainText('2');
+    await expect(status.locator('[data-testid="feed-revoking"]')).toContainText('1');
+    await expect(status.locator('[data-testid="feed-over-cap"]')).toHaveCount(0);
+    expect(await page.evaluate(() => !!window.appInstance.feedInfoFor('ppa_cal'))).toBe(false);
+    // No address to copy, and nobody's link shown.
+    await expect(pub.locator('copy-field, [data-testid^="feed-url-"]')).toHaveCount(0);
+    await expect(pub).not.toContainText('store.example');
+
+    await pub.locator('[data-testid="feed-publish-ppa_cal"]').click();
+    // The departed subscriber's file is blanked, and the pass is recorded — with no url, so the row is
+    // not mistaken for a published shared feed.
+    await expect(status.locator('[data-testid="feed-revoking"]')).toHaveCount(0);
+    expect(await page.evaluate(() => window.appInstance.feedInfoFor('ppa_cal'))).toEqual({ publishing: true });
+    await expect(entry.locator('[data-testid="cal-subscribe-go"]')).toBeEnabled();
+    await expect(pub).not.toContainText('store.example');
+
+    // Running now, so Publish has become Stop publishing.
+    await expect(pub.locator('[data-testid="feed-publish-ppa_cal"]')).toHaveCount(0);
+    const firstIds = await page.evaluate(() => window.appInstance.dataCache['ppa_subs'].filter((r) => r.fid).map((r) => r.fid).sort());
+    expect(firstIds.length).toBe(2);
+    const live = await page.evaluate((ids) => ids.map((id) =>
+      window.__uploads.filter((u) => u.path === 'feeds/' + id + '.ics').pop().text.includes('VEVENT')), firstIds);
+    expect(live).toEqual([true, true]);
+    // Two presses: the first only arms it, and nothing has been blanked yet.
+    await pub.locator('[data-testid="feed-stop-ppa_cal"]').click();
+    await expect(pub.locator('[data-testid="feed-stop-ppa_cal"] .mdi-check-circle')).toBeVisible();
+    expect(await page.evaluate(() => window.appInstance.feedPublishing('ppa_cal'))).toBe(true);
+    await pub.locator('[data-testid="feed-stop-ppa_cal"]').click();
+    await expect(pub.locator('[data-testid="feed-publish-ppa_cal"]')).toBeVisible();
+    await expect(pub.locator('[data-testid="feed-stop-ppa_cal"]')).toHaveCount(0);
+    const stopped = await page.evaluate((ids) => {
+      const app = window.appInstance;
+      const last = (id) => window.__uploads.filter((u) => u.path === 'feeds/' + id + '.ics').pop().text;
+      return {
+        info: app.feedInfoFor('ppa_cal'),
+        // Every subscriber's file now serves an empty calendar, and no row names it any more.
+        blank: ids.map((id) => last(id).includes('BEGIN:VCALENDAR') && !last(id).includes('VEVENT')),
+        rowsWithFiles: app.dataCache['ppa_subs'].filter((r) => r.fid || r.url).length
+      };
+    }, firstIds);
+    expect(stopped.info).toEqual({ publishing: false });
+
+    // Stopped, Subscribe is greyed out again; and somebody already subscribed is not promised a link
+    // "next time", since there is no next time until an admin publishes again.
+    await expect(entry.locator('[data-testid="cal-subscribe-go"]')).toBeDisabled();
+    await page.evaluate(() => { window.appInstance.dataCache['ppa_subs'].push({ id: 'me1', owner: window.appInstance.currentUserEmail, active: 'yes' }); });
+    await expect(entry.locator('[data-testid="cal-unsubscribe"]')).toBeVisible();
+    await expect(entry.locator('[data-testid="cal-sub-pending"]')).toHaveCount(0);
+    await page.evaluate(() => { const rows = window.appInstance.dataCache['ppa_subs']; rows.splice(rows.findIndex((r) => r.id === 'me1'), 1); });
+    expect(stopped.blank).toEqual([true, true]);
+    expect(stopped.rowsWithFiles).toBe(0);
+
+    // The schema still declares the feed, so a write or a boot sweep still runs a pass — and a stopped
+    // feed's pass publishes nobody.
+    const quiet = await page.evaluate(async () => {
+      const before = window.__uploads.length;
+      const r = await window.appInstance.publishPerPersonFeed('ppa_cal');
+      return { r, uploads: window.__uploads.length - before };
+    });
+    expect(quiet).toEqual({ r: { published: 0, revoked: 0, skipped: 0 }, uploads: 0 });
+
+    // Publishing again lifts the stop and mints NEW links; the old ones stay dead.
+    await pub.locator('[data-testid="feed-publish-ppa_cal"]').click();
+    await expect(pub.locator('[data-testid="feed-stop-ppa_cal"]')).toBeVisible();
+    const againIds = await page.evaluate(() => window.appInstance.dataCache['ppa_subs'].filter((r) => r.fid).map((r) => r.fid));
+    expect(againIds.length).toBe(2);
+    expect(againIds.some((id) => firstIds.includes(id))).toBe(false);
+
+    // Stop pressed while a pass is still uploading: the passes queue, so the stop's blanking lands
+    // last instead of being overwritten by the pass it interrupted.
+    const raced = await page.evaluate(async () => {
+      const app = window.appInstance, fast = window.backend.uploadFile;
+      let uploading;
+      const started = new Promise((res) => { uploading = res; });
+      // Only a real file is slow, so an unqueued blank would land first and be overwritten.
+      window.backend.uploadFile = (blob, opts) => blob.text().then((text) => {
+        if (!text.includes('VEVENT')) return fast(blob, opts);
+        uploading();
+        return new Promise((res) => setTimeout(res, 100)).then(() => fast(blob, opts));
+      });
+      const pass = app.publishPerPersonFeed('ppa_cal');
+      await started;                     // the pass has read "not stopped" and is mid-upload
+      const stop = app.stopPerPersonFeed('ppa_cal');
+      await Promise.all([pass, stop]);
+      window.backend.uploadFile = fast;
+      const paths = [...new Set(window.__uploads.map((u) => u.path))];
+      return paths.filter((p) => window.__uploads.filter((u) => u.path === p).pop().text.includes('VEVENT')).length;
+    });
+    expect(raced).toBe(0);
+    await page.evaluate(() => { window.backend.uploadFile = window.__realUp; window.Writes.putRow = window.__realPut; });
+  });
+
+  // A feed that was live before Publish was a switch has no choice recorded. Read as off, the next boot
+  // sweep would blank every calendar it found running; its subscribers holding files is what says it was
+  // on, so the pass adopts it. One with no files yet stays off and waits for an admin.
+  test('a per-person feed already live before the Publish switch is adopted, not blanked', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      window.SCHEMA.ppl_subs = { columns: { owner: { type: 'owner' }, url: 'text', fid: 'text', active: 'text' },
+                                 ownerWritable: ['active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
+      const view = (subs) => ({ feed: 'per-person',
+        feedSubscribers: { table: subs, urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } });
+      window.SCHEMA.ppn_subs = window.SCHEMA.ppl_subs;
+      window.VIEWS.ppl_cal = Object.assign({ name: 'ppl_cal' }, view('ppl_subs'));
+      window.VIEWS.ppn_cal = Object.assign({ name: 'ppn_cal' }, view('ppn_subs'));
+      app.dataCache['ppl_subs'] = [{ id: 'l1', owner: 'a@x.test', active: 'yes', url: 'https://s/a.ics', fid: 'aid' }];
+      app.dataCache['ppn_subs'] = [{ id: 'n1', owner: 'b@x.test', active: 'yes' }];
+      const realUp = window.backend.uploadFile, realPut = window.Writes.putRow, uploads = [];
+      window.backend.uploadFile = (blob, opts) => { uploads.push(opts.path); return Promise.resolve('https://s/' + opts.path); };
+      window.Writes.putRow = (t, row) => Promise.resolve(row);
+      const legacy = await app.publishPerPersonFeed('ppl_cal');
+      const fresh = await app.publishPerPersonFeed('ppn_cal');
+      window.backend.uploadFile = realUp; window.Writes.putRow = realPut;
+      return { legacy, fresh, uploads, legacyOn: app.feedPublishing('ppl_cal'), freshOn: app.feedPublishing('ppn_cal') };
+    });
+    expect(r.legacy).toEqual({ published: 1, revoked: 0, skipped: 0 });
+    expect(r.legacyOn).toBe(true);
+    expect(r.uploads).toEqual(['feeds/aid.ics']);           // republished at the same path, not blanked
+    expect(r.fresh).toEqual({ published: 0, revoked: 0, skipped: 0 });
+    expect(r.freshOn).toBe(false);
+  });
+
+  // A blank that does not land must leave the row naming its file: cleared anyway, the file would stay
+  // live with nothing left that could find it — the orphan the revocation pass exists to prevent.
+  test('a stopped per-person feed keeps a row whose blank failed, and the next pass retries it', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      window.SCHEMA.ppf_subs = { columns: { owner: { type: 'owner' }, url: 'text', fid: 'text', active: 'text' },
+                                 ownerWritable: ['active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
+      window.VIEWS.ppf_cal = { name: 'ppf_cal', feed: 'per-person',
+        feedSubscribers: { table: 'ppf_subs', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', filter: { assigned_to: '@me' } }] } };
+      app.dataCache['ppf_subs'] = [{ id: 'f1', owner: 'a@x.test', active: 'yes', url: 'https://s/a.ics', fid: 'aid' }];
+      const realUp = window.backend.uploadFile, realPut = window.Writes.putRow;
+      window.Writes.putRow = (t, row) => {
+        const rows = app.dataCache[t], i = rows.findIndex((x) => x.id === row.id);
+        rows.splice(i, 1, Object.assign({}, row));
+        return Promise.resolve(row);
+      };
+      window.backend.uploadFile = () => Promise.reject(new Error('store down'));
+      await app.stopPerPersonFeed('ppf_cal');
+      const kept = app.dataCache['ppf_subs'][0].fid;
+      const owed = app.feedStatusFor('ppf_cal').revoking;
+      const blanked = [];
+      window.backend.uploadFile = (blob, opts) => { blanked.push(opts.path); return Promise.resolve('https://s/' + opts.path); };
+      await app.publishPerPersonFeed('ppf_cal');
+      window.backend.uploadFile = realUp; window.Writes.putRow = realPut;
+      return { kept, owed, blanked, after: app.dataCache['ppf_subs'][0].fid };
+    });
+    expect(r.kept).toBe('aid');
+    expect(r.owed).toBe(1);
+    expect(r.blanked).toEqual(['feeds/aid.ics']);
+    expect(r.after).toBe('');
   });
 
   // Rendering a calendar AS somebody else — the per-person feed's rendering path. The failure this
@@ -5381,6 +5613,10 @@ test.describe('calendar view', () => {
     // Copied from the icon inside the field, like the share address; there is no separate Copy button.
     await expect(page.locator('[data-testid="feed-url-cal_team_days"] .mdi-content-copy')).toBeVisible();
     expect(await def()).toEqual({ feed: true, url: expect.stringContaining('store.example') });
+    // Two presses: the first only arms it.
+    await page.locator('[data-testid="feed-stop-cal_team_days"]').click();
+    await expect(page.locator('[data-testid="feed-stop-cal_team_days"] .mdi-check-circle')).toBeVisible();
+    expect((await def()).url).toContain('store.example');
     await page.locator('[data-testid="feed-stop-cal_team_days"]').click();
     await expect(page.locator('[data-testid="feed-publish-cal_team_days"]')).toBeVisible();
     expect(await def()).toEqual({ feed: false, url: '' });

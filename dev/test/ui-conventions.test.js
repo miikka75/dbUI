@@ -43,9 +43,10 @@ describe('UI conventions', () => {
     });
   });
 
-  it('a two-press row delete / archive is a <confirm-x>, not a hand-made icon swap', () => {
-    // The tell-tale of the hand-made version: the idle icon spelled out beside the armed check mark.
-    const handMade = /mdi-check-circle\\?' : \\?'mdi-(?:close|archive-outline)/g;
+  it('a two-press button is a <confirm-x> or <confirm-btn>, not a hand-made icon swap', () => {
+    // The tell-tale of the hand-made version: an ARMED test choosing between the check mark and an idle
+    // icon spelled out beside it. (A check mark that marks a state, like the active database, is not one.)
+    const handMade = /[Aa]rmed\b[^?\n]*\?\s*\\?'mdi-check-circle\\?' : \\?'mdi-/g;
     assert.equal(count(ui, handMade), 0, 'ui.html has a hand-made two-press icon' + SEE);
     assert.equal(count(core, handMade), 0, 'app-core.js has a hand-made two-press icon' + SEE);
   });
