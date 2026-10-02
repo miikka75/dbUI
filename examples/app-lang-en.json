@@ -62,6 +62,7 @@
       "btn.undo": "Undo",
       "cal.add_on_day": "Add on this day",
       "cal.err_date_col": "Pick the column holding the date",
+      "cal.err_name": "Give the calendar a name",
       "cal.err_no_source": "A calendar needs at least one source table",
       "cal.err_not_date": "That column is not a date column",
       "cal.err_not_rotation": "That is not a rotation view",

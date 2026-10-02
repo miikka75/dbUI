@@ -62,6 +62,7 @@
       "btn.undo": "Kumoa",
       "cal.add_on_day": "Lisää päivälle",
       "cal.err_date_col": "Valitse paivamaaran sisaltava sarake",
+      "cal.err_name": "Anna kalenterille nimi",
       "cal.err_no_source": "Kalenteri tarvitsee vahintaan yhden lahdetaulun",
       "cal.err_not_date": "Sarake ei ole paivamaarasarake",
       "cal.err_not_rotation": "Kyseessa ei ole kiertoluettelo",

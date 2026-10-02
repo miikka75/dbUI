@@ -398,6 +398,8 @@ function createVueApp() {
       // invalid states it exists to catch.
       calDraft: null,
       calDraftId: '',
+      // What stops the open calendar form from being written, or '' when it is (see autosaveCalDraft).
+      calDraftStatus: '',
       // Names VIEWS currently holds from folder-config calendar definitions, so a deleted one can be
       // removed rather than lingering until reload.
       _userCalNames: [],
@@ -1031,7 +1033,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_note', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_note', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1840,7 +1842,12 @@ function createVueApp() {
       // does not reshuffle when one is renamed.
       newUserCalendar: function() {
         this.calDraftId = '';
+        this.calDraftStatus = '';
         this.calDraft = { title: '', feed: false, rotationViews: [], sources: [{ table: '', dateColumn: '', titleColumns: [] }] };
+        this.$nextTick(function() {
+          var el = document.querySelector('[data-testid="user-cal-title"] input');
+          if (el) el.focus();
+        });
       },
       editCalendarById: function(id) {
         var c = this.userCalendars.filter(function(x) { return x.id === id; })[0];
@@ -1848,6 +1855,7 @@ function createVueApp() {
       },
       editUserCalendar: function(c) {
         this.calDraftId = c.id;
+        this.calDraftStatus = '';
         this.calDraft = JSON.parse(JSON.stringify({ title: c.title || '', feed: !!c.feed, rotationViews: c.rotationViews || [], sources: c.sources || [] }));
         // One blank row minimum, the same rule newUserCalendar and removeCalDraftSource follow. The
         // form renders a row PER SOURCE and puts the calendar-level fields (name, rotations, publish)
@@ -1862,21 +1870,36 @@ function createVueApp() {
       removeCalDraftSource: function(i) {
         this.calDraft.sources.splice(i, 1);
         if (!this.calDraft.sources.length) this.calDraft.sources.push({ table: '', dateColumn: '', titleColumns: [] });
+        this.autosaveCalDraft();
       },
       // Changing the table invalidates the columns picked under it -- they belong to the old one.
       calDraftTableChanged: function(src) { src.dateColumn = ''; src.titleColumns = []; },
-      saveCalDraft: function() {
-        var self = this;
-        // The id is derived from the name ONCE, on create, and then never moves: it is what VIEWS is
-        // keyed on and what the folder config stores, so renaming to a new id would orphan the old
-        // definition and any per-view settings hanging off it.
-        var id = this.calDraftId || ('cal_' + String(this.calDraft.title || 'calendar').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')).slice(0, 40);
-        if (!this.calDraftId && VIEWS[id]) { this.notify(this.t('msg.name_taken')); return; }
-        return this.saveUserCalendar(id, JSON.parse(JSON.stringify(this.calDraft))).then(function(errs) {
-          if (!errs.length) { self.calDraft = null; self.calDraftId = ''; }
-        });
+      // No Save button: the form writes itself whenever it holds a COMPLETE calendar, the way a user row
+      // is written once it has an email. Called when a field is left or a picker changes, never per
+      // keystroke: a new calendar's id is minted from its name at the first write and never moves, and
+      // minting it from "C" while "Cleaning" is being typed would fix it at cal_c for good.
+      //
+      // An incomplete state is not written. The stored calendar stays as it was and the form says what is
+      // missing, so switching a source's table (which clears its date column) cannot leave behind a
+      // calendar that renders nothing. Required: a name, and something to show -- a source table with
+      // its date column, or a duty rotation.
+      autosaveCalDraft: function() {
+        var d = this.calDraft;
+        if (!d) return Promise.resolve([]);
+        var errs = (String(d.title || '').trim() ? [] : [this.t('cal.err_name')]).concat(this.userCalendarErrors(d));
+        if (errs.length) { this.calDraftStatus = errs[0]; return Promise.resolve(errs); }
+        var id = this.calDraftId || ('cal_' + String(d.title).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')).slice(0, 40);
+        if (!this.calDraftId && this._keyTaken(id, Object.keys(VIEWS))) {
+          this.calDraftStatus = this.t('msg.name_taken');
+          return Promise.resolve([this.calDraftStatus]);
+        }
+        // Claimed before the write resolves, so a second change arriving meanwhile updates this calendar
+        // rather than minting another id from the same name.
+        this.calDraftId = id;
+        this.calDraftStatus = '';
+        return this.saveUserCalendar(id, JSON.parse(JSON.stringify(d)));
       },
-      cancelCalDraft: function() { this.calDraft = null; this.calDraftId = ''; },
+      closeCalDraft: function() { this.calDraft = null; this.calDraftId = ''; this.calDraftStatus = ''; },
       // Tables this user could put on a calendar: ones they can reach that declare a date column.
       // Save one definition. Validated here rather than only in the form, because the folder config is
       // also reachable by IMPORT -- and every one of these mistakes fails the same silent way, as a
@@ -5358,6 +5381,13 @@ function createVueApp() {
         if (draft) { draft.role = role; return; }   // written with the row, once it has an email
         backend_users.setUserRole(uid, role, user, tables).then(function() { self.loadUsers(); });
       },
+      // A NEW row may not take a key that already exists: for users and calendars alike the write is the
+      // same call whether the key is new or not, so taking one silently replaces that record. Compared
+      // case-blind, as both keys are (user keys are lowercased emails; calendar ids are lowercased).
+      _keyTaken: function(key, keys) {
+        var k = String(key || '').toLowerCase();
+        return (keys || []).some(function(x) { return String(x || '').toLowerCase() === k; });
+      },
       _userDraft: function(key) {
         return this.userDrafts.filter(function(d) { return d.key === key; })[0] || null;
       },
@@ -5930,7 +5960,7 @@ function createVueApp() {
         var self = this;
         // Writing to a key that already exists would replace that user's role and grants with this
         // row's -- silently, since the write is the same call either way.
-        if (this.userList.some(function(x) { return (x.key || '').toLowerCase() === newAddr; })) {
+        if (this._keyTaken(newAddr, this.userList.map(function(x) { return x.key; }))) {
           this.notify(this.t('msg.name_taken'));
           return;
         }

@@ -860,7 +860,9 @@
             <template v-if="a.isAdmin">
             <v-btn v-if="!a.calDraft" variant="outlined" size="small" prepend-icon="mdi-plus"
                    data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('settings.add_calendar') }}</v-btn>
-            <v-card v-if="a.calDraft" variant="tonal" class="pa-3 mt-2" data-testid="user-cal-form">
+            <v-card v-if="a.calDraft" variant="tonal" class="pa-3 mt-2" style="position:relative" data-testid="user-cal-form">
+              <v-btn icon="mdi-close" size="small" variant="text" style="position:absolute;top:4px;right:4px"
+                     :title="a.t('btn.cancel')" :aria-label="a.t('btn.cancel')" data-testid="user-cal-close" @click="a.closeCalDraft()"></v-btn>
               <!-- A real table, like Users: headers, `plain` controls, one row, destructive control
                    last. A calendar has a VARIABLE number of sources, which a table handles the way a
                    table does -- one row per source, with the calendar-level fields (name, rotations,
@@ -879,24 +881,24 @@
                 </tr></thead>
                 <tbody>
                   <tr v-for="(src, i) in a.calDraft.sources" :key="i">
-                    <td><v-text-field v-if="i === 0" v-model="a.calDraft.title" density="compact" variant="outlined" hide-details style="min-width:120px" data-testid="user-cal-title"></v-text-field></td>
+                    <td><v-text-field v-if="i === 0" v-model="a.calDraft.title" density="compact" variant="outlined" hide-details style="min-width:120px" data-testid="user-cal-title" @blur="a.autosaveCalDraft()" @keydown.enter="$event.target.blur()"></v-text-field></td>
                     <!-- Duty rotations drawn on the same grid. Their duties are GENERATED, not stored,
                          so they are overlays rather than sources -- and they render through the
                          rotation's own resolvers, which carries its obscureNames across. -->
                     <td v-if="a.rotationViewItems.length"><v-select v-if="i === 0" v-model="a.calDraft.rotationViews" :items="a.rotationViewItems"
                                   multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:150px"
-                                  data-testid="user-cal-rotations"></v-select></td>
+                                  data-testid="user-cal-rotations" @update:model-value="a.autosaveCalDraft()"></v-select></td>
                     <td><v-select v-model="src.table" :items="a.calendarTableItems" density="compact" variant="plain" hide-details style="min-width:130px"
-                                  @update:model-value="a.calDraftTableChanged(src)" :data-testid="'user-cal-table-' + i"></v-select></td>
+                                  @update:model-value="a.calDraftTableChanged(src); a.autosaveCalDraft()" :data-testid="'user-cal-table-' + i"></v-select></td>
                     <td><v-select v-model="src.dateColumn" :items="a.dateColumnItems(src.table)" density="compact" variant="plain" hide-details style="min-width:120px"
-                                  :data-testid="'user-cal-datecol-' + i"></v-select></td>
+                                  :data-testid="'user-cal-datecol-' + i" @update:model-value="a.autosaveCalDraft()"></v-select></td>
                     <td><v-select v-model="src.titleColumns" :items="a.columnItems(src.table)" multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:150px"
-                                  :data-testid="'user-cal-titlecols-' + i"></v-select></td>
+                                  :data-testid="'user-cal-titlecols-' + i" @update:model-value="a.autosaveCalDraft()"></v-select></td>
                     <!-- Publishing, offered only where it can actually happen: a blob store is a
                          CAPABILITY the app learns by trying, so this mirrors the export button rather
                          than promising a switch that would fail on save. -->
                     <td v-if="a.canPublishFeeds"><v-switch v-if="i === 0" v-model="a.calDraft.feed" color="primary" density="compact" hide-details
-                                  data-testid="user-cal-feed"></v-switch></td>
+                                  data-testid="user-cal-feed" @update:model-value="a.autosaveCalDraft()"></v-switch></td>
                     <td><v-btn icon="mdi-close" size="small" variant="text" :data-testid="'user-cal-rmsrc-' + i" @click="a.removeCalDraftSource(i)"></v-btn></td>
                   </tr>
                 </tbody>
@@ -904,10 +906,9 @@
               </v-table>
               <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="a.addCalDraftSource()">{{ a.t('settings.cal_add_source') }}</v-btn>
               <p v-if="a.calDraft.feed" style="font-size:0.75rem;opacity:0.75" class="mt-1">{{ a.t('settings.cal_publish_warn') }}</p>
-              <div class="mt-2 d-flex" style="gap:8px">
-                <v-btn variant="flat" color="primary" data-testid="user-cal-save" @click="a.saveCalDraft()">{{ a.t('btn.save') }}</v-btn>
-                <v-btn variant="text" @click="a.cancelCalDraft()">{{ a.t('btn.cancel') }}</v-btn>
-              </div>
+              <!-- No Save: the form writes itself whenever it holds a complete calendar (autosaveCalDraft).
+                   This line says what is still missing; while it shows, the stored calendar is unchanged. -->
+              <p v-if="a.calDraftStatus" class="mt-1 mb-0" style="font-size:0.78rem;opacity:0.8" data-testid="user-cal-status">{{ a.calDraftStatus }}</p>
             </v-card>
             </template>
             </div>
