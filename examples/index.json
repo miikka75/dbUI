@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "d49e9b9beda25bd1"
+      "hash": "813e5a07ebab1f91"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "345ed682948d50d0"
+      "hash": "cb582d62d1ec58e0"
     }
   ],
   "bundles": [

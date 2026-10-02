@@ -39,6 +39,10 @@ subscribe `mdi-calendar-sync`, unsubscribe `mdi-calendar-remove`, publish `mdi-r
 ("Add" + "calendar"); word order belongs to the translator. A tooltip that only repeats the button's
 label is the label, not a second key.
 
+**No explanatory sentences by default.** A control's label and its state carry the meaning (an armed
+two-press button shows the check mark). Add a sentence only where the screen would otherwise mislead,
+e.g. why a link is not there yet.
+
 ## Workflow
 
 - Proposals go into `ROADMAP.md` before they are implemented.

@@ -3934,9 +3934,9 @@ test.describe('v3 @both partition toggle in an embed', () => {
     await expect(menu.locator('[data-testid="cal-sub-url"] input')).toHaveValue('https://s/feeds/mine.ics');
 
     // Unsubscribe takes two presses, and writes only the active column.
-    // The first press only arms it: the note says to press again, and nothing is written yet.
+    // The first press only arms it -- the check mark every two-press button shows -- and writes nothing.
     await menu.locator('[data-testid="cal-unsubscribe"]').click();
-    await expect(menu.locator('[data-testid="cal-sub-caption"]')).toBeVisible();
+    await expect(menu.locator('[data-testid="cal-unsubscribe"] .mdi-check-circle')).toBeVisible();
     await expect(menu.locator('[data-testid="cal-subscribe-go"]')).toHaveCount(0);
     await menu.locator('[data-testid="cal-unsubscribe"]').click();
     await expect(menu.locator('[data-testid="cal-subscribe-go"]')).toBeVisible();
