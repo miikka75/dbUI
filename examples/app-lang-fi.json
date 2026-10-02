@@ -211,8 +211,6 @@
       "settings.appearance": "Ulkoasu",
       "settings.cal_add_source": "Lisää lähdetaulu",
       "settings.cal_date_col": "Paivamaarasarake",
-      "settings.cal_publish": "Julkaise",
-      "settings.cal_publish_warn": "Kuka tahansa linkin haltija voi lukea kalenterin ilman kirjautumista. Linkki nakyy Kalenterit-kohdassa tallennuksen jalkeen.",
       "settings.cal_rotations": "Vuorolistat",
       "settings.cal_table": "Taulu",
       "settings.cal_title": "Nimi",

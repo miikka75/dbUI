@@ -211,8 +211,6 @@
       "settings.appearance": "Appearance",
       "settings.cal_add_source": "Add source table",
       "settings.cal_date_col": "Date column",
-      "settings.cal_publish": "Publish",
-      "settings.cal_publish_warn": "Anyone with the link can read this calendar, without signing in. The link appears under Calendars once it is saved.",
       "settings.cal_rotations": "Duty rotations",
       "settings.cal_table": "Table",
       "settings.cal_title": "Name",
