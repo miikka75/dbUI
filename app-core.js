@@ -1036,7 +1036,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_note', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_note', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1909,14 +1909,17 @@ function createVueApp() {
         if (this.calDraftAt === id) this.closeCalDraft();
         else this.editCalendarById(id);
       },
-      // Two presses, like every delete here. Deleting a published calendar retires its link first
-      // (deleteUserCalendar), so nothing is left serving at an address the app no longer lists.
-      deleteCalDraft: function() {
+      // The editor row's x, after its second press: one source row goes, or -- on the calendar's ONLY row --
+      // the calendar does, the way a user row's x deletes the user. Deleting a published calendar retires
+      // its link first (deleteUserCalendar), so nothing is left serving at an address no longer listed.
+      removeCalDraftRow: function(i) {
         var self = this, id = this.calDraftId;
-        if (!id) return Promise.resolve();
-        if (!this.isArmed('ucal:' + id)) { this.armConfirm('ucal:' + id); return Promise.resolve(); }
+        if (this.calDraft.sources.length > 1) return this.removeCalDraftSource(i);
+        if (!id) { this.closeCalDraft(); return Promise.resolve(); }
         return this.deleteUserCalendar(id).then(function() { self.closeCalDraft(); });
       },
+      // Armed per calendar AND row, so an arm left on one calendar's row cannot fire on another's.
+      calRowArmKey: function(i) { return 'calrow:' + (this.calDraftId || 'new') + ':' + i; },
       // Publishing lives on the calendar's row, not in its definition: it is the one thing about a calendar
       // that reaches outside the app, so it is a deliberate press rather than a field that saves as it
       // changes. A calendar built here records it in its definition (`feed`) -- that is what keeps it
@@ -8112,8 +8115,7 @@ function createVueApp() {
     template: '<div v-if="inline" style="display:contents">'
       + '<template v-if="sub.state === \'active\'">'
       + '<template v-if="sub.sub.url">'
-      + '<v-text-field :model-value="sub.sub.url" readonly density="compact" variant="outlined" hide-details style="font-size:0.78rem;min-width:220px;max-width:360px" data-testid="cal-sub-url"></v-text-field>'
-      + '<v-btn icon="mdi-content-copy" size="small" variant="text" @click="copySubUrl()" :title="t(\'btn.copy\')" data-testid="cal-sub-copy"></v-btn></template>'
+      + '<v-text-field :model-value="sub.sub.url" readonly density="compact" variant="outlined" hide-details style="font-size:0.78rem;min-width:220px;max-width:360px" data-testid="cal-sub-url" append-inner-icon="mdi-content-copy" @click:append-inner="copySubUrl()"></v-text-field></template>'
       + '<v-select v-if="hasSubLang" :model-value="sub.sub.lang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" variant="outlined" hide-details style="max-width:190px;min-width:150px" data-testid="cal-sub-lang" @update:model-value="setSubLang($event)"></v-select>'
       // Text buttons like every other row action in Settings, with the calendar toolbar's icons. On a
       // phone only the icon shows (the label stays the title and accessible name), as the navigation
@@ -8126,9 +8128,8 @@ function createVueApp() {
       + '</div>'
       + '<div v-else>'
       + '<template v-if="sub.state === \'active\'">'
-      + '<template v-if="sub.sub.url"><div class="d-flex align-center" style="gap:4px">'
-      + '<v-text-field :model-value="sub.sub.url" readonly density="compact" variant="outlined" hide-details style="font-size:0.78rem" data-testid="cal-sub-url"></v-text-field>'
-      + '<v-btn icon="mdi-content-copy" size="small" variant="text" @click="copySubUrl()" :title="t(\'btn.copy\')" data-testid="cal-sub-copy"></v-btn></div>'
+      + '<template v-if="sub.sub.url">'
+      + '<v-text-field :model-value="sub.sub.url" readonly density="compact" variant="outlined" hide-details style="font-size:0.78rem" data-testid="cal-sub-url" append-inner-icon="mdi-content-copy" @click:append-inner="copySubUrl()"></v-text-field>'
       + '<p class="mt-1 mb-2" style="font-size:0.75rem;opacity:0.75">{{ t(\'feed.link_private\') }}</p></template>'
       + '<p v-else class="mb-2" style="font-size:0.8rem;opacity:0.8" data-testid="cal-sub-pending">{{ t(\'feed.link_pending\') }}</p>'
       + '<v-select v-if="hasSubLang" :model-value="sub.sub.lang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang" @update:model-value="setSubLang($event)"></v-select>'
@@ -8237,8 +8238,7 @@ function createVueApp() {
       + '<v-select :model-value="win.lang" :items="langItems" item-title="title" item-value="value" name="cal-window-lang" :label="t(\'cal.window_lang\')" density="compact" variant="outlined" hide-details style="max-width:170px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ lang: $event })" data-testid="cal-window-lang"></v-select>'
       + '<span style="font-size:0.75rem;opacity:0.6">{{ coverLabel }}</span></div>'
       + '<div v-if="!embed && canPublish && feedUrl" class="px-2 pb-2 d-flex align-center" style="gap:8px" data-testid="cal-feed-url">'
-      + '<v-text-field :model-value="feedUrl" readonly density="compact" variant="outlined" hide-details :label="t(\'cal.feed_url\')" style="font-size:0.8rem"></v-text-field>'
-      + '<v-btn size="small" variant="text" @click="copyFeed()">{{ t(\'btn.copy\') }}</v-btn></div>'
+      + '<v-text-field :model-value="feedUrl" readonly density="compact" variant="outlined" hide-details :label="t(\'cal.feed_url\')" style="font-size:0.8rem" append-inner-icon="mdi-content-copy" @click:append-inner="copyFeed()"></v-text-field></div>'
       + '<v-divider></v-divider>'
       + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
       + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents" :can-add="canAdd" @add="addOnDay"></cal-day-panel>'

@@ -852,8 +852,8 @@
                 </div>
                 <div v-if="a.isAdmin && f.published" class="d-flex align-center flex-wrap mt-1" style="gap:8px">
                   <v-text-field :model-value="f.url" readonly density="compact" variant="outlined"
-                                hide-details style="font-size:0.78rem;min-width:260px" :data-testid="'feed-url-' + f.name"></v-text-field>
-                  <v-btn size="small" variant="text" prepend-icon="mdi-content-copy" @click="a.copyText(f.url)">{{ a.t('btn.copy') }}</v-btn>
+                                hide-details style="font-size:0.78rem;min-width:260px" :data-testid="'feed-url-' + f.name"
+                                append-inner-icon="mdi-content-copy" @click:append-inner="a.copyText(f.url)"></v-text-field>
                   <v-btn size="small" variant="text" color="warning" prepend-icon="mdi-autorenew" :disabled="!a.canPublishFeeds"
                          :data-testid="'feed-regen-' + f.name"
                          @click="a.regenerateFeed(f.name)">{{ a.t('settings.feed_regenerate') }}</v-btn>
@@ -1212,7 +1212,7 @@
                       :data-testid="'user-cal-datecol-' + i" @update:model-value="a.autosaveCalDraft()"></v-select></td>
         <td><v-select v-model="src.titleColumns" :items="a.columnItems(src.table)" multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:150px"
                       :data-testid="'user-cal-titlecols-' + i" @update:model-value="a.autosaveCalDraft()"></v-select></td>
-        <td><v-btn icon="mdi-close" size="small" variant="text" :data-testid="'user-cal-rmsrc-' + i" @click="a.removeCalDraftSource(i)"></v-btn></td>
+        <td><v-btn :icon="a.isArmed(a.calRowArmKey(i)) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed(a.calRowArmKey(i)) ? 'error' : ''" :title="a.isArmed(a.calRowArmKey(i)) ? a.t('btn.confirm_delete') : a.t('btn.delete')" :aria-label="a.isArmed(a.calRowArmKey(i)) ? a.t('btn.confirm_delete') : a.t('btn.delete')" :data-testid="'user-cal-rmsrc-' + i" @click="a.isArmed(a.calRowArmKey(i)) ? a.removeCalDraftRow(i) : a.armConfirm(a.calRowArmKey(i))"></v-btn></td>
       </tr>
     </tbody>
     </template>
@@ -1220,13 +1220,6 @@
   <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="a.addCalDraftSource()">{{ a.t('settings.cal_add_source') }}</v-btn>
   <!-- No Save: the form writes itself whenever it holds a complete calendar (autosaveCalDraft).
        This line says what is still missing; while it shows, the stored calendar is unchanged. -->
-  <div class="d-flex align-center flex-wrap mt-1" style="gap:8px">
-    <p v-if="a.calDraftStatus" class="mb-0" style="font-size:0.78rem;opacity:0.8" data-testid="user-cal-status">{{ a.calDraftStatus }}</p>
-    <v-spacer></v-spacer>
-    <!-- Delete lives in the open editor, last, the way a user row ends in its delete: two presses. -->
-    <v-btn v-if="a.calDraftId" size="small" variant="text" color="error"
-           :prepend-icon="a.isArmed('ucal:' + a.calDraftId) ? 'mdi-check-circle' : 'mdi-delete'"
-           :data-testid="'user-cal-del-' + a.calDraftId" @click="a.deleteCalDraft()">{{ a.isArmed('ucal:' + a.calDraftId) ? a.t('btn.confirm_delete') : a.t('btn.delete') }}</v-btn>
-  </div>
+  <p v-if="a.calDraftStatus" class="mb-0" style="font-size:0.78rem;opacity:0.8" data-testid="user-cal-status">{{ a.calDraftStatus }}</p>
 </v-card>
 </template>
