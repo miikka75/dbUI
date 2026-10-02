@@ -400,6 +400,9 @@ function createVueApp() {
       calDraftId: '',
       // What stops the open calendar form from being written, or '' when it is (see autosaveCalDraft).
       calDraftStatus: '',
+      // Where the open editor sits: a calendar's id (under its own row) or 'new' (below the list). Kept
+      // apart from calDraftId so a new calendar's editor does not jump to its row at its first save.
+      calDraftAt: '',
       // Names VIEWS currently holds from folder-config calendar definitions, so a deleted one can be
       // removed rather than lingering until reload.
       _userCalNames: [],
@@ -1033,7 +1036,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_note', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'settings.cal_publish', 'settings.cal_publish_warn', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'btn.copy', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.link_private', 'feed.unsubscribe', 'feed.unsubscribe_note', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1843,6 +1846,7 @@ function createVueApp() {
       newUserCalendar: function() {
         this.calDraftId = '';
         this.calDraftStatus = '';
+        this.calDraftAt = 'new';
         this.calDraft = { title: '', feed: false, rotationViews: [], sources: [{ table: '', dateColumn: '', titleColumns: [] }] };
         this.$nextTick(function() {
           var el = document.querySelector('[data-testid="user-cal-title"] input');
@@ -1856,6 +1860,7 @@ function createVueApp() {
       editUserCalendar: function(c) {
         this.calDraftId = c.id;
         this.calDraftStatus = '';
+        this.calDraftAt = c.id;
         this.calDraft = JSON.parse(JSON.stringify({ title: c.title || '', feed: !!c.feed, rotationViews: c.rotationViews || [], sources: c.sources || [] }));
         // One blank row minimum, the same rule newUserCalendar and removeCalDraftSource follow. The
         // form renders a row PER SOURCE and puts the calendar-level fields (name, rotations, publish)
@@ -1899,7 +1904,33 @@ function createVueApp() {
         this.calDraftStatus = '';
         return this.saveUserCalendar(id, JSON.parse(JSON.stringify(d)));
       },
-      closeCalDraft: function() { this.calDraft = null; this.calDraftId = ''; this.calDraftStatus = ''; },
+      closeCalDraft: function() { this.calDraft = null; this.calDraftId = ''; this.calDraftStatus = ''; this.calDraftAt = ''; },
+      toggleCalendarEditor: function(id) {
+        if (this.calDraftAt === id) this.closeCalDraft();
+        else this.editCalendarById(id);
+      },
+      // Two presses, like every delete here. Deleting a published calendar retires its link first
+      // (deleteUserCalendar), so nothing is left serving at an address the app no longer lists.
+      deleteCalDraft: function() {
+        var self = this, id = this.calDraftId;
+        if (!id) return Promise.resolve();
+        if (!this.isArmed('ucal:' + id)) { this.armConfirm('ucal:' + id); return Promise.resolve(); }
+        return this.deleteUserCalendar(id).then(function() { self.closeCalDraft(); });
+      },
+      // Publishing lives on the calendar's row, not in its definition: it is the one thing about a calendar
+      // that reaches outside the app, so it is a deliberate press rather than a field that saves as it
+      // changes. A calendar built here records it in its definition (`feed`) -- that is what keeps it
+      // republishing on writes -- so the open editor's copy is kept in step, or its next save would undo it.
+      publishCalendar: function(name) { return this._setCalendarFeed(name, true); },
+      // And stopping has to clear that flag too: blanking the file alone leaves the calendar declaring
+      // itself a feed, so the next write to a source table would publish it again at a new address.
+      stopPublishingCalendar: function(name) { return this._setCalendarFeed(name, false); },
+      _setCalendarFeed: function(name, on) {
+        var def = ((this.appConfig && this.appConfig.calendars) || {})[name];
+        if (this.calDraft && this.calDraftId === name) this.calDraft.feed = on;
+        if (def) return this.saveUserCalendar(name, Object.assign({}, def, { feed: on }));
+        return on ? this.publishFeed(name) : this.unpublishFeed(name);   // a schema calendar: its `feed` is the schema's
+      },
       // Tables this user could put on a calendar: ones they can reach that declare a date column.
       // Save one definition. Validated here rather than only in the form, because the folder config is
       // also reachable by IMPORT -- and every one of these mistakes fails the same silent way, as a
@@ -2332,13 +2363,23 @@ function createVueApp() {
       calendarRows: function() {
         var self = this, mine = {}, rows = [];
         this.myFeeds().forEach(function(f) { mine[f.name] = f; });
+        var publishable = this.isAdmin && this.canPublishFeeds();
         this.calendarFiles.forEach(function(f) {
-          if (self.isAdmin || mine[f.name]) rows.push(Object.assign({ subscribe: !!mine[f.name], download: true }, f));
+          if (!(self.isAdmin || mine[f.name])) return;
+          var v = VIEWS[f.name];
+          rows.push(Object.assign({
+            subscribe: !!mine[f.name], download: true,
+            // Not yet published, and publishable from here: one built here, or a schema calendar that
+            // declares a SHARED feed. A per-person feed publishes one file per subscriber and has no
+            // single link to hand out; a schema calendar without `feed` is the schema's call.
+            canPublish: publishable && !f.published && (f.userDefined || (Feeds.isFeed(v) && !Feeds.isPerPerson(v)))
+          }, f));
         });
         Object.keys(mine).forEach(function(n) {
           if (!rows.some(function(r) { return r.name === n; })) rows.push({ name: n, title: mine[n].title, subscribe: true, download: false });
         });
-        return rows;
+        // The person's own calendars first, then the rest in their usual order (sort is stable).
+        return rows.sort(function(a, b) { return (b.subscribe ? 1 : 0) - (a.subscribe ? 1 : 0); });
       },
       mySubscriptionFor: function(name) {
         var v = VIEWS[name], t = Feeds.subscriberTableOf(v);
@@ -9160,6 +9201,7 @@ function createVueApp() {
   app.component('languages-view', { computed: { a: function() { return appInstance; } }, template: '#languages-view-tpl' });
   app.component('lookup-view', { computed: { a: function() { return appInstance; } }, template: '#lookup-view-tpl' });
   app.component('settings-view', { computed: { a: function() { return appInstance; } }, template: '#settings-view-tpl' });
+  app.component('calendar-editor', { computed: { a: function() { return appInstance; } }, template: '#calendar-editor-tpl' });
   // Settings -> Appearance: search the icon font and pick one. v-model is the mdi class name.
   app.component('icon-picker', {
     props: { modelValue: String, testid: { type: String, default: 'icon' } },

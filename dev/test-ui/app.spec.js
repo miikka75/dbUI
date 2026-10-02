@@ -3986,6 +3986,9 @@ test.describe('v3 @both partition toggle in an embed', () => {
     await expect(entry).toBeVisible();
     // ONE row: listed once, its subscribe controls and its download side by side.
     await expect(entry).toHaveCount(1);
+    // The person's own calendars come first, ahead of the other calendars an admin also sees.
+    expect(await page.locator('[data-testid="settings-feed"]').count()).toBeGreaterThan(1);
+    await expect(page.locator('[data-testid="settings-feed"]').first()).toContainText('Hidden personal calendar');
     await expect(entry.locator('[data-testid="feed-download-pps_hidden"]')).toBeVisible();
     await expect(entry.locator('[data-testid="cal-sub-lang"]')).toBeVisible();
     // No "calendar's own language" entry: just the declared languages, starting on one of them.
@@ -5364,7 +5367,31 @@ test.describe('calendar view', () => {
 
     await page.locator('[data-testid="user-cal-close"]').click();
     await expect(page.locator('[data-testid="user-cal-form"]')).toHaveCount(0);
-    await page.evaluate(() => window.appInstance.deleteUserCalendar('cal_team_days'));
+
+    // Publishing is a row action, and the definition follows it: stopping clears `feed` too, or the
+    // next write to a source table would publish the calendar again at a new address.
+    await page.evaluate(() => {
+      window.__realUpload = window.backend.uploadFile;
+      window.backend.uploadFile = (blob, opts) => Promise.resolve('https://store.example/' + opts.path);
+    });
+    const def = () => page.evaluate(() => ({ feed: !!(window.appInstance.appConfig.calendars.cal_team_days || {}).feed,
+                                              url: ((window.appInstance.appConfig.feeds || {}).cal_team_days || {}).url || '' }));
+    await page.locator('[data-testid="feed-publish-cal_team_days"]').click();
+    await expect(page.locator('[data-testid="feed-url-cal_team_days"] input')).toHaveValue(/store\.example/);
+    expect(await def()).toEqual({ feed: true, url: expect.stringContaining('store.example') });
+    await page.locator('[data-testid="feed-stop-cal_team_days"]').click();
+    await expect(page.locator('[data-testid="feed-publish-cal_team_days"]')).toBeVisible();
+    expect(await def()).toEqual({ feed: false, url: '' });
+    await page.evaluate(() => { window.backend.uploadFile = window.__realUpload; });
+
+    // Clicking the calendar's name opens its editor in place, under its own row; delete lives there.
+    const row = page.locator('[data-testid="settings-feed"]', { hasText: 'Team days and trips' });
+    await row.locator('[data-testid="user-cal-edit-cal_team_days"]').click();
+    await expect(row.locator('[data-testid="user-cal-form"]')).toBeVisible();
+    await row.locator('[data-testid="user-cal-del-cal_team_days"]').click();
+    await row.locator('[data-testid="user-cal-del-cal_team_days"]').click();
+    await expect.poll(stored).not.toContain('cal_team_days');
+    await expect(page.locator('[data-testid="user-cal-form"]')).toHaveCount(0);
   });
 
   test('the lookup reorder arrows work on rows that have no position yet', async ({ page }) => {
