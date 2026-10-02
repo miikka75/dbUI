@@ -5310,9 +5310,10 @@ test.describe('calendar view', () => {
     expect(loaded.id).toBe('cal_edit');
     expect(loaded.rots).toEqual(['rot_e']);
 
-    // Saving keeps the same id and does not resurrect the blank row it was opened with.
-    await page.evaluate(() => { window.appInstance.calDraft.title = 'Cleaning rota'; });
-    await page.locator('[data-testid="user-cal-save"]').click();
+    // Leaving the name field saves (there is no Save button): same id, no resurrected blank row.
+    await page.locator('[data-testid="user-cal-title"] input').fill('Cleaning rota');
+    await page.locator('[data-testid="user-cal-title"] input').blur();
+    await expect.poll(() => page.evaluate(() => ((window.appInstance.appConfig.calendars || {})['cal_edit'] || {}).title)).toBe('Cleaning rota');
     const after = await page.evaluate(() => {
       const d = (window.appInstance.appConfig.calendars || {})['cal_edit'];
       return { ids: Object.keys(window.appInstance.appConfig.calendars || {}), title: d && d.title, sources: d && d.sources };
@@ -5321,6 +5322,49 @@ test.describe('calendar view', () => {
     expect(after.title).toBe('Cleaning rota');
     expect(after.sources).toEqual([]);
     await page.evaluate(() => window.appInstance.deleteUserCalendar('cal_edit'));
+  });
+
+  // No Save button: a new calendar is written the first time it is COMPLETE (a name, plus a table with
+  // its date column), like a user row once it has an email. Until then nothing is stored and the form
+  // says what is missing. The id comes from the whole name, never from a half-typed one.
+  test('a new calendar saves itself once complete, with its id from the whole name', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true;
+      app.selectTab('__settings');
+    });
+    await page.locator('[data-testid="calendars-section-toggle"]').click();
+    await page.locator('[data-testid="user-cal-new"]').click();
+    const stored = () => page.evaluate(() => Object.keys(window.appInstance.appConfig.calendars || {}));
+    const before = await stored();
+
+    const name = page.locator('[data-testid="user-cal-title"] input');
+    await expect(name).toBeFocused();
+    await name.fill('Team days');
+    await name.blur();
+    await expect(page.locator('[data-testid="user-cal-status"]')).toBeVisible();   // nothing to show yet
+    expect(await stored()).toEqual(before);
+
+    await page.locator('[data-testid="user-cal-table-0"]').click();
+    await page.locator('.v-overlay--active .v-list-item', { hasText: /^(tab\.tasks|tasks|Tasks)$/ }).first().click();
+    await expect(page.locator('[data-testid="user-cal-status"]')).toBeVisible();   // table without its date column
+    expect(await stored()).toEqual(before);
+
+    await page.locator('[data-testid="user-cal-datecol-0"]').click();
+    await page.locator('.v-overlay--active .v-list-item').first().click();
+    await expect.poll(stored).toContain('cal_team_days');
+    await expect(page.locator('[data-testid="user-cal-status"]')).toHaveCount(0);
+
+    // Renaming keeps the id: it was minted once, at the first write.
+    await name.fill('Team days and trips');
+    await name.blur();
+    await expect.poll(() => page.evaluate(() => (window.appInstance.appConfig.calendars || {}).cal_team_days.title)).toBe('Team days and trips');
+    expect((await stored()).filter((k) => !before.includes(k))).toEqual(['cal_team_days']);
+
+    await page.locator('[data-testid="user-cal-close"]').click();
+    await expect(page.locator('[data-testid="user-cal-form"]')).toHaveCount(0);
+    await page.evaluate(() => window.appInstance.deleteUserCalendar('cal_team_days'));
   });
 
   test('the lookup reorder arrows work on rows that have no position yet', async ({ page }) => {
