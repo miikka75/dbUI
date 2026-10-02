@@ -464,8 +464,8 @@
               <div class="mt-2">
                 <v-btn v-if="a.canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="a.printCard(item)"></v-btn>
                 <template v-if="a.canMutateRows && a.canMutateRow(item)">
-                <v-btn v-if="a.hasArchive" :icon="a.isArmed('arch:'+item.id) ? 'mdi-check-circle' : 'mdi-archive-outline'" size="x-small" variant="text" :color="a.isArmed('arch:'+item.id) ? 'warning' : ''" @click="a.archiveRow(item)"></v-btn>
-                <v-btn :icon="a.isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed('row:'+item.id) ? 'error' : ''" @click="a.deleteRow(item)"></v-btn>
+                <confirm-x v-if="a.hasArchive" :armed="a.isArmed('arch:'+item.id)" action="archive" dense @click="a.archiveRow(item)"></confirm-x>
+                <confirm-x :armed="a.isArmed('row:'+item.id)" dense @click="a.deleteRow(item)"></confirm-x>
                 </template>
               </div>
               </div>
@@ -485,9 +485,9 @@
                 <td class="col-actions" style="white-space:nowrap">
                   <v-btn v-if="a.isReorderable" icon="mdi-arrow-up" size="small" variant="text" :disabled="a.sortedData.indexOf(item) === 0" @click="a.moveRowPosition(item, -1)"></v-btn>
                   <v-btn v-if="a.isReorderable" icon="mdi-arrow-down" size="small" variant="text" :disabled="a.sortedData.indexOf(item) === a.sortedData.length - 1" @click="a.moveRowPosition(item, 1)"></v-btn>
-                  <v-btn v-if="!a.viewingArchive && a.hasArchive && a.canMutateRows && a.canMutateRow(item)" :icon="a.isArmed('arch:'+item.id) ? 'mdi-check-circle' : 'mdi-archive-outline'" size="small" variant="text" :color="a.isArmed('arch:'+item.id) ? 'warning' : ''" class="mr-2" @click="a.archiveRow(item)"></v-btn>
+                  <confirm-x v-if="!a.viewingArchive && a.hasArchive && a.canMutateRows && a.canMutateRow(item)" :armed="a.isArmed('arch:'+item.id)" action="archive" class="mr-2" @click="a.archiveRow(item)"></confirm-x>
                   <v-btn v-if="a.viewingArchive && a.canMutateRows && a.canMutateRow(item)" icon="mdi-archive-arrow-up-outline" size="small" variant="text" class="mr-2" @click="a.restoreRow(item)"></v-btn>
-                  <v-btn v-if="a.canMutateRows && a.canMutateRow(item)" :icon="a.isArmed('row:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('row:'+item.id) ? 'error' : ''" @click="a.deleteRow(item)"></v-btn>
+                  <confirm-x v-if="a.canMutateRows && a.canMutateRow(item)" :armed="a.isArmed('row:'+item.id)" @click="a.deleteRow(item)"></confirm-x>
                 </td>
               </tr>
               <template v-if="a.sortedData.indexOf(item) === a.sortedData.length - 1" v-for="(ei, eidx) in a.embedItems" :key="'temb'+eidx">
@@ -559,7 +559,7 @@
                     density="compact" variant="outlined" hide-details style="max-width:260px"
                     @click.stop @change="a.renameLang(lang, $event.target.value)"></v-text-field>
                   <template v-slot:append>
-                    <v-btn :icon="a.isArmed('lang:'+lang.code) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed('lang:'+lang.code) ? 'error' : ''" @click.stop="a.deleteLang(lang)" class="mr-2"></v-btn>
+                    <confirm-x :armed="a.isArmed('lang:'+lang.code)" dense class="mr-2" @click.stop="a.deleteLang(lang)"></confirm-x>
                     <v-icon>mdi-chevron-down</v-icon>
                   </template>
                 </v-list-item>
@@ -588,7 +588,7 @@
           </v-list>
           <v-autocomplete :items="a.bcp47Options()" item-title="title" return-object :model-value="null"
             density="compact" variant="outlined" hide-details style="max-width:320px" class="ma-2"
-            prepend-inner-icon="mdi-plus" :label="a.t('btn.add') + ' ' + a.t('tab.languages')"
+            prepend-inner-icon="mdi-plus" :label="a.t('lang.add_language')"
             @update:model-value="v => v && a.addLanguage(v.code, v.name)" data-testid="add-language"></v-autocomplete>
         </v-card>
 </template>
@@ -615,7 +615,7 @@
                     <list-user-picker v-if="a.isAdmin && a.isUserLinkList(name)" :list="name" :value="val"></list-user-picker>
                     <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="i === 0" @click="a.moveListItem(name, i, -1)"></v-btn>
                     <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="i === items.length - 1" @click="a.moveListItem(name, i, 1)"></v-btn>
-                    <v-btn v-if="!a.isLockedValue(name, val)" :icon="a.isArmed('list_' + name + '_' + i) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('list_' + name + '_' + i) ? 'error' : ''" @click="a.removeListItem2(name, i)"></v-btn>
+                    <confirm-x v-if="!a.isLockedValue(name, val)" :armed="a.isArmed('list_' + name + '_' + i)" @click="a.removeListItem2(name, i)"></confirm-x>
                     <div v-else style="width:36px"></div>
                   </template>
                 </template>
@@ -679,7 +679,7 @@
                     </td>
                     <td><v-icon v-if="a.isTranslatableRefTable()" size="x-small" style="opacity:0.35">mdi-translate</v-icon><!--
                       --><v-btn v-if="a.scanViewForCatalog(rt)" icon="mdi-printer" size="x-small" variant="text" :title="a.t('scan.print_code')" :data-testid="'ref-print-row-' + item.id" @click="a.printScanLabels(a.scanViewForCatalog(rt), item.id)"></v-btn><!--
-                      --><v-icon v-if="a.isLockedRefRow(item)" size="x-small" style="opacity:0.4" :title="a.t('list.locked_value')">mdi-lock-outline</v-icon><v-btn v-else-if="a.canEditCurrentRef" :icon="a.isArmed('ref:'+item.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+item.id) ? 'error' : ''" @click="a.deleteRefRow(item)"></v-btn></td>
+                      --><v-icon v-if="a.isLockedRefRow(item)" size="x-small" style="opacity:0.4" :title="a.t('list.locked_value')">mdi-lock-outline</v-icon><confirm-x v-else-if="a.canEditCurrentRef" :armed="a.isArmed('ref:'+item.id)" @click="a.deleteRefRow(item)"></confirm-x></td>
                   </tr>
                 </tbody>
                 </template>
@@ -719,7 +719,7 @@
             <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="a.refGroupAtEdge(node.value,-1)" @click.stop="a.moveRefGroup(node.value,-1)"></v-btn>
             <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="a.refGroupAtEdge(node.value,1)" @click.stop="a.moveRefGroup(node.value,1)"></v-btn>
           </template>
-          <v-btn v-if="a.canEditCurrentRef && !locked" :icon="a.isArmed(armKey) ? 'mdi-check-circle' : 'mdi-close'" size="x-small" variant="text" :color="a.isArmed(armKey) ? 'error' : ''" @click.stop="remove()" class="mr-2"></v-btn>
+          <confirm-x v-if="a.canEditCurrentRef && !locked" :armed="a.isArmed(armKey)" dense class="mr-2" @click.stop="remove()"></confirm-x>
           <v-icon>mdi-chevron-down</v-icon>
         </template>
       </v-list-item>
@@ -747,7 +747,7 @@
         <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="a.refChildAtEdge(node.row,1)" @click="a.moveRefChild(node.row,1)"></v-btn>
       </template>
       <v-btn v-if="a.scanViewForCatalog(table)" icon="mdi-printer" size="x-small" variant="text" :title="a.t('scan.print_code')" :data-testid="'ref-print-row-' + node.row.id" @click="a.printScanLabels(a.scanViewForCatalog(table), node.row.id)"></v-btn>
-      <v-btn v-if="a.canEditCurrentRef && !a.isLockedRefRow(node.row)" :icon="a.isArmed('ref:'+node.row.id) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('ref:'+node.row.id) ? 'error' : ''" @click="a.deleteRefRow(node.row)"></v-btn>
+      <confirm-x v-if="a.canEditCurrentRef && !a.isLockedRefRow(node.row)" :armed="a.isArmed('ref:'+node.row.id)" @click="a.deleteRefRow(node.row)"></confirm-x>
     </template>
   </v-list-item>
 </template>
@@ -803,12 +803,7 @@
                  published links, building a calendar) stays admin-only inside it. -->
             <template v-if="a.isAdmin || a.myFeeds().length">
             <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2" style="cursor:pointer" role="button" tabindex="0" data-testid="calendars-section-toggle"
-               :aria-expanded="String(!a.settings._collapseCalendars)"
-               @click="a.settings._collapseCalendars = !a.settings._collapseCalendars" @keydown.enter.prevent="a.settings._collapseCalendars = !a.settings._collapseCalendars">
-              <v-icon size="small">{{ a.settings._collapseCalendars ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
-              {{ a.t('settings.feeds') }}
-            </p>
+            <section-toggle flag="_collapseCalendars" :title="a.t('settings.feeds')" data-testid="calendars-section-toggle"></section-toggle>
             <div v-show="!a.settings._collapseCalendars" class="ml-5" data-testid="calendars-body">
             <!-- Calendars an admin builds here rather than in the schema document. Stored in the folder
                  config beside the other per-view settings, merged into VIEWS at load. Creating one
@@ -851,9 +846,7 @@
                          @click="a.downloadIcs(f.name)"><v-icon icon="mdi-calendar-export"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('btn.export_ics') }}</span></v-btn>
                 </div>
                 <div v-if="a.isAdmin && f.published" class="d-flex align-center flex-wrap mt-1" style="gap:8px">
-                  <v-text-field :model-value="f.url" readonly density="compact" variant="outlined"
-                                hide-details style="font-size:0.78rem;min-width:260px" :data-testid="'feed-url-' + f.name"
-                                append-inner-icon="mdi-content-copy" @click:append-inner="a.copyText(f.url)"></v-text-field>
+                  <copy-field :value="f.url" style="font-size:0.78rem;min-width:260px" :data-testid="'feed-url-' + f.name"></copy-field>
                   <v-btn size="small" variant="text" color="warning" prepend-icon="mdi-autorenew" :disabled="!a.canPublishFeeds"
                          :data-testid="'feed-regen-' + f.name"
                          @click="a.regenerateFeed(f.name)">{{ a.t('settings.feed_regenerate') }}</v-btn>
@@ -890,12 +883,7 @@
             </template>
             <template v-if="a.isAdmin">
             <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2" style="cursor:pointer" role="button" tabindex="0" data-testid="import-section-toggle"
-               :aria-expanded="String(!a.settings._collapseImport)"
-               @click="a.settings._collapseImport = !a.settings._collapseImport" @keydown.enter.prevent="a.settings._collapseImport = !a.settings._collapseImport">
-              <v-icon size="small">{{ a.settings._collapseImport ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
-              {{ a.t('settings.import_export') }}
-            </p>
+            <section-toggle flag="_collapseImport" :title="a.t('settings.import_export')" data-testid="import-section-toggle"></section-toggle>
             <div v-show="!a.settings._collapseImport" class="ml-5" data-testid="import-body">
             <!-- Each chooser sits with the button it governs: one says what the file will CARRY, the
                  other which of its parts an import will APPLY. Wrapping rows, so the chooser drops under
@@ -962,12 +950,7 @@
                  `views[x].background` stay the shipped defaults these override. Uploaded bytes go to _assets.
                  Collapsed by default: one row per entry is tall, and expanded it would push the sections below
                  out of view (which also stops v-img, an intersection-loaded component, rendering the avatar). -->
-            <p class="text-subtitle-2 mb-2" style="cursor:pointer" role="button" tabindex="0" data-testid="appearance-section-toggle"
-               :aria-expanded="String(!a.settings._collapseAppearance)"
-               @click="a.settings._collapseAppearance = !a.settings._collapseAppearance" @keydown.enter.prevent="a.settings._collapseAppearance = !a.settings._collapseAppearance">
-              <v-icon size="small">{{ a.settings._collapseAppearance ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
-              {{ a.t('settings.appearance') }}
-            </p>
+            <section-toggle flag="_collapseAppearance" :title="a.t('settings.appearance')" data-testid="appearance-section-toggle"></section-toggle>
             <!-- Theme (the deployment's palette) and the per-entry looks below it: everything about how the app
                  LOOKS, in one section. -->
             <div v-show="!a.settings._collapseAppearance" class="ml-5" data-testid="appearance-body">
@@ -1092,12 +1075,7 @@
             </template>
             <template v-if="a.usersLoaded && a.userList.length && a.isAdmin">
             <v-divider class="my-4"></v-divider>
-            <p class="text-subtitle-2 mb-2" style="cursor:pointer" role="button" tabindex="0" data-testid="users-section-toggle"
-               :aria-expanded="String(!a.settings._collapseUsers)"
-               @click="a.settings._collapseUsers = !a.settings._collapseUsers" @keydown.enter.prevent="a.settings._collapseUsers = !a.settings._collapseUsers">
-              <v-icon size="small">{{ a.settings._collapseUsers ? 'mdi-chevron-right' : 'mdi-chevron-down' }}</v-icon>
-              {{ a.t('settings.user_access_title') }}
-            </p>
+            <section-toggle flag="_collapseUsers" :title="a.t('settings.user_access_title')" data-testid="users-section-toggle"></section-toggle>
             <!-- Outside the fold: someone waiting for access is the one thing here that cannot wait. -->
             <template v-if="a.accessRequests.length">
               <p class="text-subtitle-2 mb-1">{{ a.t('access.pending_requests') }}</p>
@@ -1123,7 +1101,7 @@
                  what this section is for. It also only exists once a user is registered: before that
                  everyone is admin, and a link handed out then would hand out full access with it. -->
             <p class="text-body-2 font-weight-medium mb-2">{{ a.t('settings.share') }}</p>
-            <v-text-field class="mb-4" :model-value="a.shareLink" name="share-link" variant="outlined" density="compact" readonly hide-details append-inner-icon="mdi-content-copy" @click:append-inner="a.copyText(a.shareLink)"></v-text-field>
+            <copy-field class="mb-4" :value="a.shareLink" name="share-link"></copy-field>
             <v-table v-if="a.userList.length" density="compact">
               <template v-slot:default>
               <thead><tr><th>{{ a.t('settings.user_id') }}</th><th>{{ a.t('settings.name') }}</th><th>{{ a.t('settings.role') }}</th><th>{{ a.t('settings.tables') }}</th><th>{{ a.t('settings.tables_view') }}</th><th></th></tr></thead>
@@ -1136,7 +1114,7 @@
                   <!-- View-only grants: readable, never writable. Disabled while the user has full access,
                        which already implies sight of every table. -->
                   <td><v-select :model-value="a.userViewFeatures(u)" :items="a.viewGrantChips" item-title="label" item-value="id" multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:180px;max-width:320px" @update:model-value="a.updateUserViewTables(u, $event)"></v-select></td>
-                  <td><v-btn :icon="a.isArmed('user:'+u.key) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed('user:'+u.key) ? 'error' : ''" @click="a.isArmed('user:'+u.key) ? a.removeUser(u.key) : a.armConfirm('user:'+u.key)"></v-btn></td>
+                  <td><confirm-x :armed="a.isArmed('user:'+u.key)" @click="a.isArmed('user:'+u.key) ? a.removeUser(u.key) : a.armConfirm('user:'+u.key)"></confirm-x></td>
                 </tr>
               </tbody>
               </template>
@@ -1212,7 +1190,7 @@
                       :data-testid="'user-cal-datecol-' + i" @update:model-value="a.autosaveCalDraft()"></v-select></td>
         <td><v-select v-model="src.titleColumns" :items="a.columnItems(src.table)" multiple chips closable-chips density="compact" variant="plain" hide-details style="min-width:150px"
                       :data-testid="'user-cal-titlecols-' + i" @update:model-value="a.autosaveCalDraft()"></v-select></td>
-        <td><v-btn :icon="a.isArmed(a.calRowArmKey(i)) ? 'mdi-check-circle' : 'mdi-close'" size="small" variant="text" :color="a.isArmed(a.calRowArmKey(i)) ? 'error' : ''" :title="a.isArmed(a.calRowArmKey(i)) ? a.t('btn.confirm_delete') : a.t('btn.delete')" :aria-label="a.isArmed(a.calRowArmKey(i)) ? a.t('btn.confirm_delete') : a.t('btn.delete')" :data-testid="'user-cal-rmsrc-' + i" @click="a.isArmed(a.calRowArmKey(i)) ? a.removeCalDraftRow(i) : a.armConfirm(a.calRowArmKey(i))"></v-btn></td>
+        <td><confirm-x :armed="a.isArmed(a.calRowArmKey(i))" :data-testid="'user-cal-rmsrc-' + i" @click="a.isArmed(a.calRowArmKey(i)) ? a.removeCalDraftRow(i) : a.armConfirm(a.calRowArmKey(i))"></confirm-x></td>
       </tr>
     </tbody>
     </template>
