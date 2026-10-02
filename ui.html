@@ -819,7 +819,6 @@
                  then Publish (admin) and the download. Personal feeds come first, then the other calendars.
                  A member sees only their personal feeds; an admin sees every calendar, plus the published
                  links, and opens one built here by clicking its name. -->
-            <p v-if="a.isAdmin" style="font-size:0.78rem;opacity:0.7" class="mb-2">{{ a.t('settings.feeds_note') }}</p>
               <div v-for="f in a.calendarRows()" :key="f.name" class="mb-3" data-testid="settings-feed">
                 <div class="d-flex align-center flex-wrap" style="gap:8px">
                   <!-- A calendar built here opens its editor in place, under its own row; a schema one is
@@ -834,8 +833,9 @@
                   <feed-subscription v-if="f.subscribe" :name="f.name" inline></feed-subscription>
                   <!-- Publishing is a row action, not a field of the definition: it is the one thing about a
                        calendar that reaches outside the app, so it is a deliberate press. The calendar
-                       toolbar's publish icon. -->
-                  <v-btn v-if="f.canPublish" size="small" variant="text" class="text-none"
+                       toolbar's publish icon. A personal feed's is on its own line at the end of the section:
+                       this row is the admin's OWN calendar, which they subscribe to and export like anybody. -->
+                  <v-btn v-if="f.canPublish && !f.perPerson" size="small" variant="text" class="text-none"
                          :title="a.t('btn.publish_feed')" :aria-label="a.t('btn.publish_feed')"
                          :data-testid="'feed-publish-' + f.name"
                          @click="a.publishCalendar(f.name)"><v-icon icon="mdi-rss"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('btn.publish_feed') }}</span></v-btn>
@@ -850,9 +850,10 @@
                   <v-btn size="small" variant="text" color="warning" prepend-icon="mdi-autorenew" :disabled="!a.canPublishFeeds"
                          :data-testid="'feed-regen-' + f.name"
                          @click="a.regenerateFeed(f.name)">{{ a.t('settings.feed_regenerate') }}</v-btn>
-                  <v-btn size="small" variant="text" color="error" prepend-icon="mdi-link-off"
-                         :data-testid="'feed-stop-' + f.name"
-                         @click="a.stopPublishingCalendar(f.name)">{{ a.t('settings.feed_unpublish') }}</v-btn>
+                  <!-- Two presses, like the personal feed's: every subscriber's calendar stops updating. -->
+                  <confirm-btn :armed="a.isArmed('feedstop:' + f.name)" icon="mdi-link-off" :label="a.t('settings.feed_unpublish')"
+                               :data-testid="'feed-stop-' + f.name"
+                               @click="a.isArmed('feedstop:' + f.name) ? a.stopPublishingCalendar(f.name) : a.armConfirm('feedstop:' + f.name)"></confirm-btn>
                 </div>
                 <calendar-editor v-if="a.calDraft && a.calDraftAt === f.name"></calendar-editor>
               </div>
@@ -860,6 +861,22 @@
             <v-btn v-if="a.calDraftAt !== 'new'" variant="outlined" size="small" prepend-icon="mdi-plus"
                    data-testid="user-cal-new" @click="a.newUserCalendar()">{{ a.t('settings.add_calendar') }}</v-btn>
             <calendar-editor v-if="a.calDraft && a.calDraftAt === 'new'"></calendar-editor>
+            <!-- Last in the section, admin only: a personal feed as everybody's calendars at once. The rows
+                 above are each reader's own use of a calendar; this is what is served to all of them. How
+                 many subscribe, and Publish -- which becomes Stop once it runs. -->
+            <template v-for="f in a.calendarRows()" :key="'all-' + f.name">
+              <div v-if="f.perPerson" class="d-flex align-center flex-wrap mt-3" style="gap:8px" data-testid="feed-all">
+                <feed-status :name="f.name"></feed-status>
+                <v-btn v-if="f.canPublish" size="small" variant="text" class="text-none"
+                       :title="a.t('btn.publish_feed')" :aria-label="a.t('btn.publish_feed')"
+                       :data-testid="'feed-publish-' + f.name"
+                       @click="a.publishCalendar(f.name)"><v-icon icon="mdi-rss"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t('btn.publish_feed') }}</span></v-btn>
+                <!-- Two presses: every subscriber's calendar stops updating. -->
+                <confirm-btn v-if="f.canStop" :armed="a.isArmed('feedstop:' + f.name)" icon="mdi-link-off" :label="a.t('settings.feed_unpublish')"
+                             :data-testid="'feed-stop-' + f.name"
+                             @click="a.isArmed('feedstop:' + f.name) ? a.stopPublishingCalendar(f.name) : a.armConfirm('feedstop:' + f.name)"></confirm-btn>
+              </div>
+            </template>
             </template>
             </div>
             </template>
@@ -1149,7 +1166,7 @@
             </template>
             </template>
             <v-divider class="my-4"></v-divider>
-            <v-btn variant="outlined" size="small" :color="a.isArmed('reset') ? 'error' : 'warning'" :prepend-icon="a.isArmed('reset') ? 'mdi-check-circle' : 'mdi-refresh'" @click="a.isArmed('reset') ? a.resetApp() : a.armConfirm('reset')">{{ a.t('settings.reset') }}</v-btn>
+            <confirm-btn section color="warning" :armed="a.isArmed('reset')" icon="mdi-refresh" :label="a.t('settings.reset')" @click="a.isArmed('reset') ? a.resetApp() : a.armConfirm('reset')"></confirm-btn>
             </div>
           </v-card-text>
         </v-card>

@@ -352,8 +352,21 @@
 
   // Subscribers whose file is still live but who have unsubscribed — the publisher's to-do list, and
   // the only thing standing between "I unsubscribed" and a public file nobody can reach any more.
-  function pendingRevocation(view, rows, name) {
-    return subscribersOf(view, rows, name).filter(function(s) { return !s.active && (s.id || s.url); });
+  // A STOPPED feed owes a blank to everybody who holds a file, subscribed or not.
+  function pendingRevocation(view, rows, name, stopped) {
+    return subscribersOf(view, rows, name).filter(function(s) { return (stopped || !s.active) && (s.id || s.url); });
+  }
+
+  // What Settings tells an admin about a per-person feed: how many people it publishes for, how many who
+  // left still have a live file, and how many the cap leaves out of a pass. Read through subscribersOf,
+  // like subscriptionOf, so the panel and the pass cannot count different people.
+  function statusOf(view, rows, name, cap, stopped) {
+    var active = subscribersOf(view, rows, name).filter(function(s) { return s.active; }).length;
+    return {
+      subscribers: active,
+      revoking: pendingRevocation(view, rows, name, stopped).length,
+      overCap: (cap > 0 && !stopped) ? Math.max(0, active - cap) : 0
+    };
   }
 
   function subscriberTableOf(view) {
@@ -394,7 +407,7 @@
   }
 
   var M = { isFeed: isFeed, isPerPerson: isPerPerson, modeOf: modeOf, hasMe: hasMe, configErrors: configErrors,
-            subscribersOf: subscribersOf, subscriptionOf: subscriptionOf, activeValues: activeValues, subscribeRow: subscribeRow, pendingRevocation: pendingRevocation, isActive: isActive,
+            subscribersOf: subscribersOf, subscriptionOf: subscriptionOf, activeValues: activeValues, subscribeRow: subscribeRow, pendingRevocation: pendingRevocation, statusOf: statusOf, isActive: isActive,
             subscriberTableOf: subscriberTableOf, forSubscriberTable: forSubscriberTable,
             names: names, tablesOf: tablesOf, forTable: forTable, pathFor: pathFor, newId: newId };
   if (isNode) module.exports = M;

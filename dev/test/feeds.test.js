@@ -422,6 +422,33 @@ describe('feeds.js — unsubscribing is a state, not a deletion', () => {
     assert.deepEqual(Feeds.pendingRevocation(view, rows, 'x').map((s) => s.owner), ['a@x.test']);
   });
 
+  // What Settings shows the admin. Counted through the same list the pass walks, so a person who
+  // re-subscribed beside their own tombstone is one subscriber AND one link to revoke.
+  it('statusOf counts subscribers, links awaiting revocation, and how far over the cap', () => {
+    const rows = [
+      { owner: 'a@x.test', url: 'https://s/a.ics', fid: 'a1', active: 'no' },
+      { owner: 'a@x.test', active: 'yes' },
+      { owner: 'b@x.test', active: 'yes' },
+      { owner: 'c@x.test', url: '', active: 'no' }
+    ];
+    assert.deepEqual(Feeds.statusOf(view, rows, 'x', 100), { subscribers: 2, revoking: 1, overCap: 0 });
+    assert.deepEqual(Feeds.statusOf(view, rows, 'x', 1), { subscribers: 2, revoking: 1, overCap: 1 });
+    assert.deepEqual(Feeds.statusOf(Object.assign({}, view, { feed: true }), rows, 'x', 100),
+                     { subscribers: 0, revoking: 0, overCap: 0 });
+  });
+
+  // Stopped: everybody holding a file is owed a blank, subscribed or not, and nobody is over a cap that
+  // no pass is spending.
+  it('a stopped feed owes a blank to every file, and counts nobody over the cap', () => {
+    const rows = [
+      { owner: 'a@x.test', url: 'https://s/a.ics', fid: 'a1', active: 'yes' },
+      { owner: 'b@x.test', url: 'https://s/b.ics', fid: 'b1', active: 'no' },
+      { owner: 'c@x.test', active: 'yes' }
+    ];
+    assert.deepEqual(Feeds.pendingRevocation(view, rows, 'x', true).map((s) => s.owner), ['a@x.test', 'b@x.test']);
+    assert.deepEqual(Feeds.statusOf(view, rows, 'x', 1, true), { subscribers: 2, revoking: 2, overCap: 0 });
+  });
+
   // Absent/blank means subscribed: reading a yes as no stops a calendar updating for a reason nobody
   // can see, while reading a no as yes leaves one file the next revocation pass blanks anyway.
   it('an absent or blank flag counts as subscribed', () => {

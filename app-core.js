@@ -717,7 +717,9 @@ function createVueApp() {
         var names = Object.keys(VIEWS).filter(function(n) {
           return self.isCalendarName(n) && self.canAccessNavId(n);
         });
-        Object.keys(feeds).forEach(function(n) { if (names.indexOf(n) < 0) names.push(n); });
+        // Only entries holding a URL: a per-person feed records its last pass here with no `url`, and
+        // that is no file anybody is being served.
+        Object.keys(feeds).forEach(function(n) { if (feeds[n] && feeds[n].url && names.indexOf(n) < 0) names.push(n); });
         return names.sort().map(function(n) {
           var f = feeds[n] || {};
           return {
@@ -1036,7 +1038,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feeds_note', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -1932,7 +1934,9 @@ function createVueApp() {
         var def = ((this.appConfig && this.appConfig.calendars) || {})[name];
         if (this.calDraft && this.calDraftId === name) this.calDraft.feed = on;
         if (def) return this.saveUserCalendar(name, Object.assign({}, def, { feed: on }));
-        return on ? this.publishFeed(name) : this.unpublishFeed(name);   // a schema calendar: its `feed` is the schema's
+        // A schema calendar: its `feed` is the schema's, so a per-person one is stopped by a flag.
+        if (Feeds.isPerPerson(VIEWS[name])) return on ? this.startPerPersonFeed(name) : this.stopPerPersonFeed(name);
+        return on ? this.publishFeed(name) : this.unpublishFeed(name);
       },
       // Tables this user could put on a calendar: ones they can reach that declare a date column.
       // Save one definition. Validated here rather than only in the form, because the folder config is
@@ -2334,6 +2338,40 @@ function createVueApp() {
         var v = VIEWS[name], t = Feeds.subscriberTableOf(v);
         return t ? Feeds.subscribersOf(v, this.dataCache[t] || [], name) : [];
       },
+      // What Settings shows an admin on a per-person feed's line: the counts.
+      feedStatusFor: function(name) {
+        var v = VIEWS[name], t = Feeds.subscriberTableOf(v);
+        return Feeds.statusOf(v, t ? (this.dataCache[t] || []) : [], name, this.feedSubscriberCap(), !this.feedPublishing(name));
+      },
+      _setFeedInfo: function(name, info) {
+        var cfg = Object.assign({}, this.appConfig || {});
+        cfg.feeds = Object.assign({}, cfg.feeds || {});
+        if (info) cfg.feeds[name] = info; else delete cfg.feeds[name];
+        this._saveFolderConfig(cfg, null);
+      },
+      // A per-person feed is OFF until an admin presses Publish, and again after Stop: members cannot
+      // subscribe, and a pass publishes nobody. The schema declaring the feed is not enough on its own,
+      // so the admin's choice is kept in the folder config -- `appConfig.feeds[name].publishing`, readable
+      // by every member, which is what greys their Subscribe out. An off feed's pass still runs: it
+      // blanks every file and publishes none, so a blank that failed is retried by the next pass like any
+      // other revocation.
+      feedPublishing: function(name) { return (this.feedInfoFor(name) || {}).publishing === true; },
+      stopPerPersonFeed: function(name) {
+        var self = this;
+        if (!this.canPublishFeeds()) return Promise.resolve(null);
+        this._setFeedInfo(name, { publishing: false });
+        return this.publishPerPersonFeed(name).then(function(r) {
+          self.notify(self.t('settings.feed_unpublished'));
+          return r;
+        });
+      },
+      // Publish pressed: switch it on and run a pass now. After a Stop, subscribers get NEW links -- the
+      // old ones stay dead, as a shared feed's address does after Stop.
+      startPerPersonFeed: function(name) {
+        if (!this.canPublishFeeds()) return Promise.resolve(null);
+        this._setFeedInfo(name, { publishing: true });
+        return this.publishPerPersonFeed(name);
+      },
 
       // --- The subscriber's side of a per-person feed ------------------------------------------
       // Everything here is the SUBSCRIBER's half of the row (that they subscribe, in which language);
@@ -2369,13 +2407,16 @@ function createVueApp() {
         var publishable = this.isAdmin && this.canPublishFeeds();
         this.calendarFiles.forEach(function(f) {
           if (!(self.isAdmin || mine[f.name])) return;
-          var v = VIEWS[f.name];
+          var v = VIEWS[f.name], perPerson = Feeds.isPerPerson(v);
+          // A per-person feed has no single link, so "running" is the admin's switch (feedPublishing).
+          // Publish and Stop share one slot on its line.
+          var running = perPerson && self.feedPublishing(f.name);
           rows.push(Object.assign({
-            subscribe: !!mine[f.name], download: true,
-            // Not yet published, and publishable from here: one built here, or a schema calendar that
-            // declares a SHARED feed. A per-person feed publishes one file per subscriber and has no
-            // single link to hand out; a schema calendar without `feed` is the schema's call.
-            canPublish: publishable && !f.published && (f.userDefined || (Feeds.isFeed(v) && !Feeds.isPerPerson(v)))
+            subscribe: !!mine[f.name], download: true, perPerson: perPerson,
+            canStop: publishable && running,
+            // Not yet published (or stopped), and publishable from here: one built here, or a schema
+            // calendar that declares a feed. A schema calendar without `feed` is the schema's call.
+            canPublish: publishable && (perPerson ? !running : (!f.published && (f.userDefined || Feeds.isFeed(v))))
           }, f));
         });
         Object.keys(mine).forEach(function(n) {
@@ -2389,7 +2430,8 @@ function createVueApp() {
         return Feeds.subscriptionOf(v, t ? (this.dataCache[t] || []) : [], name, this.currentUserEmail);
       },
       // The subscriber table is not a SOURCE of the calendar, so opening the view does not load it.
-      loadMySubscription: function(name) {
+      // Loaded by whatever reads it: the member's Subscribe control, and the admin's counts in Settings.
+      loadFeedSubscribers: function(name) {
         var t = Feeds.subscriberTableOf(VIEWS[name]);
         return t ? Promise.resolve(this._ensureCached([t])) : Promise.resolve();
       },
@@ -2397,7 +2439,7 @@ function createVueApp() {
       // ownerWritableWhile gate, which is what keeps it around for the publisher to blank.
       subscribeFeed: function(name, lang) {
         var v = VIEWS[name], cfg = (v && v.feedSubscribers) || {};
-        if (!this.canSubscribeFeed(name)) return null;
+        if (!this.canSubscribeFeed(name) || !this.feedPublishing(name)) return null;
         if (this.mySubscriptionFor(name).state === 'active') return null;
         return this._createBlankRow(cfg.table, { prefill: Feeds.subscribeRow(v, SCHEMA[cfg.table], name, lang) });
       },
@@ -2422,13 +2464,23 @@ function createVueApp() {
         patch[col] = value;
         Writes.putRow(cfg.table, patch, 'active');
       },
-      // One pass of a per-person feed: blank whatever unsubscribed, then render and upload one file per
-      // remaining subscriber.
+      // One pass of a per-person feed. Passes for one feed run one after another: a pass still uploading
+      // when Stop is pressed would otherwise finish AFTER the stop's blanking and put the files back.
+      publishPerPersonFeed: function(name) {
+        var self = this, queue = this._feedPasses || (this._feedPasses = {});
+        var run = Promise.resolve(queue[name]).catch(function() {}).then(function() { return self._perPersonPass(name); });
+        queue[name] = run;
+        return run;
+      },
+      // Blank whatever is owed a blank, then render and upload one file per remaining subscriber. Owed
+      // is whoever unsubscribed -- or, once the feed is stopped, everybody, and nobody is published.
       //
       // Revocation runs FIRST and unconditionally. If the cap or a render error stops the pass half way
       // through, the files that should stop serving have already stopped -- the opposite order would
-      // make a busy pass the reason somebody's calendar stayed online after they left.
-      publishPerPersonFeed: function(name) {
+      // make a busy pass the reason somebody's calendar stayed online after they left. And a row keeps
+      // its id until its blank has actually landed: cleared regardless, a failed blank would leave a
+      // live file that no row names, which no later pass could find again.
+      _perPersonPass: function(name) {
         var self = this, v = VIEWS[name], subTable = Feeds.subscriberTableOf(v);
         if (!subTable || !this.canPublishFeeds()) return Promise.resolve(null);
         var cfg = v.feedSubscribers || {};
@@ -2439,15 +2491,26 @@ function createVueApp() {
         return Promise.resolve(this._ensureCached([subTable]))
           .then(function() { return self._awaitViewData(name); })
           .then(function() {
-            var all = self.feedSubscribersFor(name);
-            var revoke = all.filter(function(s) { return !s.active && (s.id || s.url); });
-            var live = all.filter(function(s) { return s.active; });
+            var rows = self.dataCache[subTable] || [];
+            // A feed with no choice recorded predates the Publish switch: it published from the moment
+            // the schema declared it. If its subscribers already hold files it was live, so it is adopted
+            // as on -- read as off, this pass would blank every calendar an upgrade found running.
+            if (!self.feedInfoFor(name) && Feeds.subscribersOf(v, rows, name).some(function(s) { return s.active && (s.id || s.url); })) {
+              self._setFeedInfo(name, { publishing: true });
+            }
+            var stopped = !self.feedPublishing(name);
+            var revoke = Feeds.pendingRevocation(v, rows, name, stopped);
+            var live = stopped ? [] : self.feedSubscribersFor(name).filter(function(s) { return s.active; });
             var capped = live.slice(0, self.feedSubscriberCap());
-            var skipped = live.length - capped.length;
+            var skipped = live.length - capped.length, revoked = 0;
 
             var chain = revoke.reduce(function(p, s) {
               return p.then(function() {
-                return self._blankFeedAt(s.id).then(function() { return self._clearSubscriberRow(cfg, s); });
+                return self._blankFeedAt(s.id).then(function(ok) {
+                  if (!ok) return null;
+                  revoked++;
+                  return self._clearSubscriberRow(cfg, s);
+                });
               });
             }, Promise.resolve());
 
@@ -2455,7 +2518,8 @@ function createVueApp() {
               return p.then(function() { return self._publishOneSubscriber(name, cfg, s, win, viewLang, declared); });
             }, chain).then(function() {
               if (skipped > 0) self.notify(self.t('msg.feed_cap_reached') + ' (' + skipped + ')');
-              return { published: capped.length, revoked: revoke.length, skipped: skipped };
+              if (revoked < revoke.length) self.notify(self.t('msg.no_blob_store'));
+              return { published: capped.length, revoked: revoked, skipped: skipped };
             });
           })
           .catch(function(e) { self._blobStoreDown = true; self.notify(self.t('msg.no_blob_store')); throw e; })
@@ -8090,6 +8154,22 @@ function createVueApp() {
       + ' :color="armed ? spec.color : undefined" :title="text" :aria-label="text" @click="$emit(\'click\', $event)"></v-btn>'
   });
 
+  // A LABELLED two-press button: the first press arms it (the check mark, in red), the second acts.
+  // confirm-x is the icon-only row delete / archive; this is the same two presses for an action that
+  // needs its words -- unsubscribe, stop publishing, reset. Arming is the caller's (armConfirm /
+  // isArmed), so an armed button disarms itself after three seconds like every other.
+  // Default is the row-action role: text, label hidden on a phone. `section`: the section-action role
+  // (outlined). `full`: the label stays on a phone, for a button in a narrow card rather than a row.
+  app.component('confirm-btn', {
+    props: { armed: Boolean, icon: { type: String, required: true }, label: { type: String, required: true },
+             color: { type: String, default: 'error' }, section: Boolean, full: Boolean },
+    emits: ['click'],
+    template: '<v-btn :variant="section ? \'outlined\' : (armed ? \'flat\' : \'text\')" :color="armed ? \'error\' : color" size="small"'
+      + ' :class="(section || full) ? \'\' : \'text-none\'" :title="label" :aria-label="label" @click="$emit(\'click\', $event)">'
+      + '<v-icon :icon="armed ? \'mdi-check-circle\' : icon"></v-icon>'
+      + '<span :class="(section || full) ? \'ml-2\' : \'d-none d-sm-inline ml-2\'">{{ label }}</span></v-btn>'
+  });
+
   // A collapsible Settings section's heading. `flag` names the a.settings key holding "collapsed".
   app.component('section-toggle', {
     props: { flag: { type: String, required: true }, title: { type: String, default: '' } },
@@ -8114,11 +8194,14 @@ function createVueApp() {
     data: function() {
       var codes = ((appInstance && appInstance.languages) || []).map(function(l) { return l.code; });
       var cur = appInstance && appInstance.currentLang;
-      return { subLang: codes.indexOf(cur) >= 0 ? cur : (codes[0] || ''), unsubArmed: false };
+      return { subLang: codes.indexOf(cur) >= 0 ? cur : (codes[0] || '') };
     },
-    mounted: function() { appInstance.loadMySubscription(this.name); },
+    mounted: function() { appInstance.loadFeedSubscribers(this.name); },
     computed: {
       sub: function() { return appInstance.mySubscriptionFor(this.name); },
+      unsubArmed: function() { return appInstance.isArmed('unsub:' + this.name); },
+      // Off until an admin publishes: Subscribe is greyed out, and no link is promised "next time".
+      publishing: function() { return appInstance.feedPublishing(this.name); },
       hasSubLang: function() { var c = (window.VIEWS[this.name] || {}).feedSubscribers; return !!(c && c.langColumn) && this.subLangItems.length > 0; },
       // The database's languages and nothing else. There is no "calendar's own language" entry: for a
       // calendar with no screen nobody can set one, so it only ever meant the deployment default under a
@@ -8134,8 +8217,8 @@ function createVueApp() {
       // Two presses, because the second one is not reversible: the row freezes, and subscribing again
       // mints a different link, so whatever calendar app held the old one has to be told the new one.
       unsubscribe: function() {
-        if (!this.unsubArmed) { this.unsubArmed = true; return; }
-        this.unsubArmed = false;
+        if (!this.unsubArmed) { appInstance.armConfirm('unsub:' + this.name); return; }
+        appInstance.pendingConfirm = null;
         appInstance.unsubscribeFeed(this.name);
       },
     }),
@@ -8149,22 +8232,42 @@ function createVueApp() {
       // Text buttons like every other row action in Settings, with the calendar toolbar's icons. On a
       // phone only the icon shows (the label stays the title and accessible name), as the navigation
       // layout buttons do. Armed, unsubscribe turns solid red with the check mark every two-press button shows.
-      + '<v-btn :variant="unsubArmed ? \'flat\' : \'text\'" color="error" size="small" class="text-none" @click="unsubscribe()" :title="t(\'feed.unsubscribe\')" :aria-label="t(\'feed.unsubscribe\')" data-testid="cal-unsubscribe"><v-icon :icon="unsubArmed ? \'mdi-check-circle\' : \'mdi-calendar-remove\'"></v-icon><span class="d-none d-sm-inline ml-2">{{ t(\'feed.unsubscribe\') }}</span></v-btn></template>'
+      + '<confirm-btn :armed="unsubArmed" icon="mdi-calendar-remove" :label="t(\'feed.unsubscribe\')" @click="unsubscribe()" data-testid="cal-unsubscribe"></confirm-btn></template>'
       + '<template v-else>'
       + '<v-select v-if="hasSubLang" v-model="subLang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" variant="outlined" hide-details style="max-width:190px;min-width:150px" data-testid="cal-sub-lang"></v-select>'
-      + '<v-btn variant="text" size="small" class="text-none" @click="subscribe()" :title="t(\'feed.subscribe\')" :aria-label="t(\'feed.subscribe\')" data-testid="cal-subscribe-go"><v-icon icon="mdi-calendar-sync"></v-icon><span class="d-none d-sm-inline ml-2">{{ t(\'feed.subscribe\') }}</span></v-btn></template>'
-      + '<div v-if="sub.state === \'active\' && !sub.sub.url" style="order:99;flex-basis:100%;font-size:0.75rem;opacity:0.75" data-testid="cal-sub-pending">{{ t(\'feed.link_pending\') }}</div>'
+      + '<v-btn variant="text" size="small" class="text-none" :disabled="!publishing" @click="subscribe()" :title="t(\'feed.subscribe\')" :aria-label="t(\'feed.subscribe\')" data-testid="cal-subscribe-go"><v-icon icon="mdi-calendar-sync"></v-icon><span class="d-none d-sm-inline ml-2">{{ t(\'feed.subscribe\') }}</span></v-btn></template>'
+      + '<div v-if="sub.state === \'active\' && !sub.sub.url && publishing" style="order:99;flex-basis:100%;font-size:0.75rem;opacity:0.75" data-testid="cal-sub-pending">{{ t(\'feed.link_pending\') }}</div>'
       + '</div>'
       + '<div v-else>'
       + '<template v-if="sub.state === \'active\'">'
       + '<template v-if="sub.sub.url">'
       + '<copy-field :value="sub.sub.url" class="mb-2" style="font-size:0.78rem" data-testid="cal-sub-url"></copy-field></template>'
-      + '<p v-else class="mb-2" style="font-size:0.8rem;opacity:0.8" data-testid="cal-sub-pending">{{ t(\'feed.link_pending\') }}</p>'
+      + '<p v-else-if="publishing" class="mb-2" style="font-size:0.8rem;opacity:0.8" data-testid="cal-sub-pending">{{ t(\'feed.link_pending\') }}</p>'
       + '<v-select v-if="hasSubLang" :model-value="sub.sub.lang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang" @update:model-value="setSubLang($event)"></v-select>'
-      + '<v-btn :variant="unsubArmed ? \'flat\' : \'text\'" color="error" size="small" :prepend-icon="unsubArmed ? \'mdi-check-circle\' : \'mdi-calendar-remove\'" @click="unsubscribe()" data-testid="cal-unsubscribe">{{ t(\'feed.unsubscribe\') }}</v-btn></template>'
+      + '<confirm-btn full :armed="unsubArmed" icon="mdi-calendar-remove" :label="t(\'feed.unsubscribe\')" @click="unsubscribe()" data-testid="cal-unsubscribe"></confirm-btn></template>'
       + '<template v-else>'
       + '<v-select v-if="hasSubLang" v-model="subLang" :items="subLangItems" :label="t(\'cal.window_lang\')" density="compact" hide-details class="mb-2" data-testid="cal-sub-lang"></v-select>'
-      + '<v-btn color="primary" variant="flat" size="small" prepend-icon="mdi-calendar-sync" @click="subscribe()" data-testid="cal-subscribe-go">{{ t(\'feed.subscribe\') }}</v-btn></template>'
+      + '<v-btn color="primary" variant="flat" size="small" prepend-icon="mdi-calendar-sync" :disabled="!publishing" @click="subscribe()" data-testid="cal-subscribe-go">{{ t(\'feed.subscribe\') }}</v-btn></template>'
+      + '</div>'
+  });
+
+  // The start of a personal feed's line at the end of Settings -> Calendars: what the line is about, and
+  // how many subscribe. The two warnings show only when something is owed. Never anybody's link, which an admin could read but has no reason to be
+  // shown. A component so it can load the subscriber table on mount, as the Subscribe control does: it
+  // is no source of the calendar, so nothing else would, and every count would read 0.
+  app.component('feed-status', {
+    props: { name: { type: String, required: true } },
+    mounted: function() { appInstance.loadFeedSubscribers(this.name); },
+    computed: { st: function() { return appInstance.feedStatusFor(this.name); } },
+    methods: Object.assign({}, ROOT_PROXY),
+    // display:contents: the spans join the caller's row, beside its Publish / Stop button.
+    template: '<div style="display:contents" data-testid="feed-status">'
+      // Set like the calendar titles above; the count and the buttons go right, as theirs do.
+      + '<strong style="font-size:0.9rem">{{ t(\'settings.feed_all_personal\') }}</strong><v-spacer></v-spacer>'
+      + '<span style="font-size:0.78rem;opacity:0.75" data-testid="feed-subscribers">{{ t(\'settings.feed_subscribers\') }}: {{ st.subscribers }}</span>'
+      // Unsubscribed, file still live until the next pass: the number that matters for privacy.
+      + '<span v-if="st.revoking" class="text-warning" style="font-size:0.78rem" data-testid="feed-revoking">{{ t(\'settings.feed_revoking\') }}: {{ st.revoking }}</span>'
+      + '<span v-if="st.overCap" class="text-warning" style="font-size:0.78rem" data-testid="feed-over-cap">{{ t(\'settings.feed_over_cap\') }}: {{ st.overCap }}</span>'
       + '</div>'
   });
 
@@ -8197,6 +8300,7 @@ function createVueApp() {
       canPublish: function() { return Feeds.isFeed(window.VIEWS[this.viewName]) && appInstance.canPublishFeeds(); },
       feedUrl: function() { return appInstance.feedUrlFor(this.viewName); },
       perPerson: function() { return Feeds.isPerPerson(window.VIEWS[this.viewName]); },
+      feedPublishing: function() { return appInstance.feedPublishing(this.viewName); },
       // Per-person feeds only: a shared feed's link is one bearer credential for everybody, handed out
       // by whoever publishes it, while a per-person link belongs to the one person it was minted for.
       canSubscribe: function() { return this.perPerson && appInstance.canSubscribeFeed(this.viewName); },
@@ -8219,7 +8323,8 @@ function createVueApp() {
       setMode: function(m) { this.mode = m; },
       addOnDay: function() { appInstance.calendarAddOnDay(this.viewName, this.sel); },
       exportIcs: function() { appInstance.downloadIcs(this.viewName); },
-      publish: function() { appInstance.publishFeed(this.viewName); },
+      // On a per-person feed this switches it on, as Settings' Publish does.
+      publish: function() { return this.perPerson ? appInstance.startPerPersonFeed(this.viewName) : appInstance.publishFeed(this.viewName); },
       setWindow: function(patch) { appInstance.saveCalendarWindow(this.viewName, patch); },
       selectDay: function(d) { this.sel = d; }
     }),
@@ -8242,7 +8347,7 @@ function createVueApp() {
       // who have no reason to be handing it out.
       // A per-person feed has no single URL, so its icon cannot say "published" by holding one; pressing
       // it runs a pass over every subscriber.
-      + '<v-btn v-if="!embed && canPublish" :icon="(feedUrl || perPerson) ? \'mdi-rss\' : \'mdi-rss-off\'" size="small" variant="text" @click="publish()" :title="t(\'btn.publish_feed\')" data-testid="cal-publish-feed"></v-btn>'
+      + '<v-btn v-if="!embed && canPublish" :icon="(feedUrl || (perPerson && feedPublishing)) ? \'mdi-rss\' : \'mdi-rss-off\'" size="small" variant="text" @click="publish()" :title="t(\'btn.publish_feed\')" data-testid="cal-publish-feed"></v-btn>'
       // The subscriber's own control, for a per-person feed: subscribe, their link, its language, and
       // unsubscribe. The link is theirs alone -- it lives in their owner-stamped row, which nobody else
       // reads -- so unlike the publish button above this is offered to every member.

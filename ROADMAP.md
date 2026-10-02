@@ -1071,7 +1071,7 @@ Cost: a pure function (schema + what the database holds -> an inventory), Node-t
 deletes reuse writes that already exist. No engine module, no view kind. The same panel is the natural
 home for the example-drift notice Settings already shows.
 
-### A subscribable calendar feed *(shared feeds landed in #174; the per-person engine and the subscriber's own UI have since landed — the admin UI and the orphan sweep are what remain)*
+### A subscribable calendar feed *(shared feeds landed in #174; the per-person engine, the subscriber's own UI and the admin's Settings row have since landed — the orphan sweep is what remains)*
 
 A URL a calendar client can subscribe to, so an edit reaches a phone without anyone re-exporting. The
 `.ics` export shipped first; the shared-content feed shipped after it, in #174.
@@ -1082,8 +1082,9 @@ render-as-somebody-else path, its subscriber list and its publish loop, each rec
 below beside the reasoning that produced it. `validateSchema` no longer refuses `@me` outright: it
 refuses it on a SHARED feed and requires it on every source of a per-person one.
 
-What remains is **the UI and the orphan sweep**, and the UI gap is the one that decides whether anybody
-can use this yet — see *What is not built* at the end of this entry. The four-way delivery table is
+What remains is **the orphan sweep**; the UI gaps that decided whether anybody could use this have
+landed, and the one left (a calendar built in Settings cannot be per-person) is recorded as not worth
+building yet — see *What is not built* at the end of this entry. The four-way delivery table is
 kept because it records what was considered, but it no longer describes a choice anyone has to make.
 
 The earlier version of this entry priced the feed as the expensive half of a pair. Most of that price
@@ -1345,15 +1346,42 @@ The engine is complete and tested; the feature is not usable as a product yet, a
 in the UI. Recorded here rather than left to be discovered, because "the engine is done" reads as
 "finished" to anybody who did not build it.
 
-- **Nothing in Settings knows about per-person.** The feeds panel reads `feedUrlFor`, which is
-  `appConfig.feeds[name].url` — the SHARED feed's single URL. A per-person feed never writes that, so it
-  shows an empty link beside a publish button that does work. The panel needs a per-person branch:
-  subscriber count, what the last pass did, and the fact that there is no one URL to show.
-- **A database-defined calendar cannot be made per-person.** `calDraft.feed` is a `v-switch`, so the
-  editor can only say published-or-not. Turning it into a three-way choice also means the editor must
-  then ask for the subscriber table, which is the first place that UI would have to name a table and a
-  column — the same problem the Lookup editor already solved, and worth borrowing from rather than
-  inventing.
+- ~~**Nothing in Settings knows about per-person.**~~ **Landed**, slimmer than planned below. The
+  calendar's row is the admin's OWN calendar — Subscribe and Export ics, like anybody's — and a line at
+  the END of the Calendars section, "All personal calendars", carries the subscriber count and
+  Publish (Stop once running). Shared feeds keep Publish and their link line on their own rows: the whole
+  section beyond a member's personal calendars is admin-only anyway, so a separate publishing block (tried,
+  and reverted) only moved controls away from what they act on. The explanatory text and the last-pass
+  time were dropped as noise: the button already says whether it is running. The two warnings (links awaiting revocation, over the cap) appear only when non-zero. One consequence
+  the plan had not named: `calendarFiles` listed every
+  `appConfig.feeds` key as a served file, so it now lists only entries holding a `url` — otherwise a
+  removed per-person calendar would leave a row behind for a file that never existed.
+  *(Corrected 2026-10-02: it no longer shows an empty
+  link — `calendarRows` leaves a per-person feed out of `canPublish`, and the URL line needs
+  `appConfig.feeds[name].url`, which a per-person feed never writes. So the row is not wrong, it is
+  SILENT: a title and a download, nothing saying it is a feed, who subscribes, or whether a pass ran.)*
+  The plan, for the admin's row only:
+  - say what it is — one link per subscriber, so there is no address to copy;
+  - **subscribers** (active) and **links awaiting revocation** (`pendingRevocation`: unsubscribed, file
+    still live — the number that matters for privacy), and how far the active count is over
+    `feedSubscriberCap`. Counted by a `Feeds.statusOf` that reads through `subscribersOf`, so the panel
+    and the pass cannot count different people;
+  - **when the last pass ran**, recorded by `publishPerPersonFeed` as `appConfig.feeds[name] = {at}`
+    with no `url`, so nothing reads it as published. Folder config is readable by every member, which
+    is fine for a timestamp and is exactly why the links stay in the owner-stamped rows;
+  - **Publish** as a row action, the shared feed's button and icon, running a pass now;
+  - the subscriber table loaded by the row itself — it is no source of the calendar, so under a lazy
+    boot nothing else would, and the counts would read 0.
+
+  Deliberately not shown: anybody's link. An admin can read them; the panel has no reason to.
+- **A database-defined calendar cannot be made per-person.** *(Corrected 2026-10-02: the `v-switch`
+  this bullet named is gone — publishing became a row action — and the switch was never the obstacle.)*
+  The calendar editor has no source FILTER at all, only table, date and title columns, while
+  `configErrors` requires `@me` on every source and `mineOnly` on every overlay; so a calendar built here
+  cannot pass as per-person whatever the publish control offers. And the subscriber table cannot be made
+  from the UI (`owner` column, `privateRoster`, `ownerWritable`, the `ownerWritableWhile` freeze), so a
+  picker could offer only tables that already pass `subscriberErrors` — in most deployments, none. Not
+  worth building until somebody wants a per-person calendar they cannot write into the schema.
 - ~~There is no subscribe button, language picker, or "your link" anywhere.~~ **Landed:** a
   per-person calendar's toolbar carries a Subscribe menu for every member who can reach the subscriber
   table — subscribe, the file's language (a picker over the languages this database declares, blank
@@ -1376,6 +1404,36 @@ in the UI. Recorded here rather than left to be discovered, because "the engine 
   link and revocation blanked a file that was never written. It now keeps `feeds/<id>.ics` at its path
   and serves it as `text/calendar`.
 - **The orphan sweep** (above): `listFiles(prefix)` plus blanking what nothing accounts for.
+- ~~**A per-person feed cannot be stopped.**~~ **Landed** as planned below, plus two things the build found. A blank that
+  failed used to clear its row anyway, stranding a live file nothing named; a row now keeps its id until its
+  blank lands, which is what lets the next pass retry it. And the queue alone was not enough: the pass Stop
+  interrupted recorded its `{at}` over `{stopped: true}` when it finished, lifting the stop for the pass
+  queued behind it — it re-read the flag before recording. Stop takes two presses (as the shared
+  feed's now does too, through a shared labelled `confirm-btn`).
+
+  **Then the switch was made to start OFF.** A per-person feed publishes nobody until an admin presses
+  Publish, and members' Subscribe is greyed out until then (and again after Stop) — the schema declaring
+  the feed is no longer enough on its own. The flag became `appConfig.feeds[name].publishing`
+  (true / false), which also removed the recorded `{at}` and with it the race above. The trap was the
+  upgrade: a feed already live under the old rule has no choice recorded, and read as off, the next boot
+  sweep would have blanked every subscriber's calendar. So a feed with no choice recorded whose active
+  subscribers already hold files is adopted as on by its first pass. A shared feed has Stop publishing; a per-person one has no
+  equivalent, and the only lever — deleting `feed` from the schema — is the worst one: no pass runs for
+  a calendar that is not a feed, so nothing blanks the subscribers' files and every link serves its
+  last snapshot for good. The plan:
+  - **Stopped is a flag, not an absence.** `appConfig.feeds[name] = {stopped: true}`. The schema still
+    declares the feed, so without a flag the next boot sweep or write would publish it again — at new
+    addresses, since stopping clears the rows.
+  - **A stopped feed's pass blanks everything and publishes nothing**, rather than not running.
+    `pendingRevocation(…, stopped)` widens from "unsubscribed with a file" to "anyone with a file". So a
+    blank that fails (no blob store, a network blip) is retried by the next pass like any revocation,
+    and the status line's "links awaiting revocation" counts what a stop still owes.
+  - **Passes for one feed run one after another.** A pass already uploading when Stop is pressed would
+    otherwise finish AFTER the blanking and put the files back; queued, the stop's pass runs last and
+    blanks what the earlier one wrote.
+  - **Publish and Stop are one slot on the row**: Publish while never run or stopped, Stop publishing
+    once it is running. Publish clears the flag and runs a pass, minting new links — the old ones stay
+    dead, as a shared feed's do after Stop.
 
 Nothing here is blocked. Each is ordinary UI work over an engine that already holds its invariants,
 which is the right order for a feature whose failures are silent.
