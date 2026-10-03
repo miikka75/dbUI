@@ -4385,22 +4385,13 @@ function createVueApp() {
         if (this.refParentLocked(parent)) { this.notify(this.t('msg.locked')); return; }
         var key = 'refp:' + parent;
         if (this.pendingConfirm !== key) { this.armConfirm(key); return; }
-        var self = this;
-        var table = self.currentRefTable;
-        var parentCol = self.refParentCol;
-        var toDelete = (self.dataCache[table] || []).filter(function(r) { return r[parentCol] === parent; });
-        self.dataCache[table] = (self.dataCache[table] || []).filter(function(r) { return r[parentCol] !== parent; });
-        // One action: deleting a group is one gesture, however many children it took with it.
-        Undo.action('delete group', function() {
-          toDelete.forEach(function(row) {
-            Undo.record({ table: table, part: 'active',
-              forward: { type: 'delete', id: row.id, row: null },
-              inverse: { type: 'put', id: row.id, row: Object.assign({}, row) } });
-            Writes.deleteRow(table, row.id, 'active');
-          });
-        });
-        self.pendingConfirm = null;
-        self.notify(self.t('msg.deleted'));
+        var table = this.currentRefTable, parentCol = this.refParentCol;
+        var ids = (this.dataCache[table] || []).filter(function(r) { return r[parentCol] === parent; }).map(function(r) { return r.id; });
+        this.pendingConfirm = null;
+        // The grid's delete, so a group goes everywhere its rows were written: _createBlankRow added each
+        // child to the whole mirror cluster, and the archive partition can hold a copy too. One call is
+        // one undo entry, however many children it took with it.
+        this._deleteFromSources(withMirrors([table]), ids);
       },
       // Deleting one node of an id-keyed tree. A parent IS a row here, so "delete" has to answer what
       // becomes of its descendants -- cascade, or re-parent them to its parent -- and that question is
@@ -4558,14 +4549,7 @@ function createVueApp() {
         if (this.isLockedRefRow(item)) { this.notify(this.t('msg.locked')); return; }
         var key = 'ref:' + item.id;
         if (this.pendingConfirm !== key) { this.armConfirm(key); return; }
-        var table = this.currentRefTable;
-        var gone = (this.dataCache[table] || []).find(function(r) { return r.id === item.id; });
-        this.dataCache[table] = (this.dataCache[table] || []).filter(function(r) { return r.id !== item.id; });
-        if (gone) Undo.record({ table: table, part: 'active', label: 'delete',
-          forward: { type: 'delete', id: item.id, row: null },
-          inverse: { type: 'put', id: item.id, row: Object.assign({}, gone) } });
-        Writes.deleteRow(table, item.id, 'active');
-        this.notify(this.t('msg.deleted'));
+        this._deleteFromSources(withMirrors([this.currentRefTable]), item.id);   // as deleteRefParent
       },
 
       // Languages
@@ -7054,9 +7038,11 @@ function createVueApp() {
       // screen implies. A row's store is a property of the row now (Rows.storeOf), and a deployment
       // mid-migration can hold the same id in both -- deleting only the visible copy left the other to
       // resurface in the archive tab. Deleting a row that isn't there is a no-op on every backend.
-      _deleteFromSources: function(sources, itemId) {
-        var self = this;
+      // `itemIds` is one id or several: a lookup group goes in one call, so it is one entry and one notice.
+      _deleteFromSources: function(sources, itemIds) {
+        var self = this, ids = [].concat(itemIds);
         Undo.action('delete', function() {
+        ids.forEach(function(itemId) {
         sources.forEach(function(src) {
           var stores = [['active', src]];
           if (SCHEMA[src] && SCHEMA[src].archivable) stores.push(['archive', aKey(src)]);
@@ -7082,7 +7068,8 @@ function createVueApp() {
           });
         });
         });
-        this.currentData = this.currentData.filter(function(r) { return r.id !== itemId; });
+        });
+        this.currentData = this.currentData.filter(function(r) { return ids.indexOf(r.id) < 0; });
         this.notify(this.t('msg.deleted'));
       },
       // Apply every table's `archiveAfter` policy once the cache is loaded: rows that have sat in a

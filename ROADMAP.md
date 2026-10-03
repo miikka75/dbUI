@@ -194,7 +194,7 @@ Two guards now cover the class rather than the instance: no root member may retu
 predicate with a hardcoded answer is either dead or a flag in disguise), and no offered translation key
 may go unasked-for. Both catch an injected violation.
 
-#### 6. `app-core.js` is a monolith *(series started: `brand.js`, then `reorder.js`)*
+#### 6. `app-core.js` is a monolith *(series started: `brand.js`, `reorder.js`, then the ref editor's deletes)*
 
 8,669 lines, 600 KB, and essentially one function: `createVueApp()` spans 194–8631, whose `methods`
 object alone is ~5,700 lines. That object is where finding 1 hid — a duplicate key in a literal too
@@ -263,6 +263,19 @@ rows get written would not have shown up until somebody's roster came back in a 
 So the rule gains a second half: **prefer a seam where the duplication is already costing something.**
 A pure move buys tests; removing a triplicated rule buys tests *and* deletes the next bug. Remaining:
 the ref editor's own writes, profiles + assets, export/import, feeds.
+
+**The third cut found a bug, not a module.** The ref editor's writes held one asymmetry worth more than
+any extraction. Adding a lookup row goes through `_createBlankRow`, which writes every table in the
+mirror cluster. Deleting one (`deleteRefRow`, `deleteRefParent`) removed only the lookup's own active
+row, so every mirror row was left behind with nothing to mirror, and an archive copy could resurface.
+The grid's delete (`_deleteFromSources`) has always covered both. Each ref delete had also grown its own
+copy of the cache filter and the undo before-image. Both now call `_deleteFromSources(withMirrors([table]),
+ids)`, which takes one id or a group's worth, so a group is still one undo entry and one notice. The
+failing test came first: *Deleting in the lookup editor reaches the mirror cluster*.
+
+What is left in the ref editor is not duplication worth a module. Its renames record a translation move
+the same way the list editor does (three copies of two lines), and its partial-put ops are built inline;
+neither has drifted. Remaining: profiles + assets, export/import, feeds.
 
 #### 7. CSP reporting is active nowhere *(landed: the mechanism, off by default until a collector URL is set)*
 
@@ -365,7 +378,7 @@ seven entries to find out what is left.
 | **Set `Csp.REPORT_ENDPOINT` and deploy the collector** | 7 | one line + `npm run csp:sync` | The mechanism landed; only the URL is missing, and it cannot be guessed — it belongs to the deployment. Deploy `supabase/functions/csp-report/` (free), then set the constant. |
 | **`board` / `form` / `timeline` have no embed branch** | 4 | small code, large question | Three product questions wearing one costume: does a board keep drag-between-lanes inside a document? Does a `form` in a page mean a second submit target, or the same one twice? Does a timeline embed want its own date window or the page's? The dispatch set is asserted, so this is a recorded answer rather than an accident. |
 | **`access:` on a `markdown` + `sources` view is half-honoured** | 4 | small | Honoured at nav and in the doc-embed branch, ignored when such a view is embedded elsewhere (it renders its grid, and the body — the protected part — is not rendered on that path at all, so nothing leaks). Either honour it on both paths or reject the combination at load. |
-| **The extraction series** — the ref editor's own writes, then profiles + assets, then export/import, then feeds | 6 | ongoing | Two cuts made (`brand.js`, `reorder.js`). Ranked by how much of each seam is pure and how much duplication it already costs, which is how feeds went from first to last. |
+| **The extraction series** — profiles + assets, then export/import, then feeds | 6 | ongoing | Three cuts made (`brand.js`, `reorder.js`, the ref editor's deletes). Ranked by how much of each seam is pure and how much duplication it already costs, which is how feeds went from first to last. |
 
 One thing deliberately **not** on this list: promoting `firebase.json` from `Report-Only` to enforcing.
 It is not a task until somebody deploys to Firebase Hosting, and a CSP on a host nothing serves from is
