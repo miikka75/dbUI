@@ -877,6 +877,12 @@
                              @click="a.isArmed('feedstop:' + f.name) ? a.stopPublishingCalendar(f.name) : a.armConfirm('feedstop:' + f.name)"></confirm-btn>
               </div>
             </template>
+            <!-- The orphan sweep: empties every feed file the store holds that no calendar or subscriber
+                 row records. Only where the store can be listed. -->
+            <div v-if="a.canSweepFeeds()" class="mt-3">
+              <v-btn variant="outlined" size="small" prepend-icon="mdi-broom" data-testid="feed-sweep"
+                     @click="a.sweepFeedFiles()">{{ a.t('settings.feed_sweep') }}</v-btn>
+            </div>
             </template>
             </div>
             </template>

@@ -3,14 +3,14 @@
 Firebase (Firestore) is one of the two hosted backends, alongside [Supabase](SUPABASE.md) and the local
 dev server. It is the only backend with an offline cache and the only one whose access rules are
 enforced by a rules language rather than by SQL — `firestore.rules` is the authority on who may read
-and write what, and `storage.rules` does the same for uploaded images.
+and write what, and `storage.rules` does the same for uploaded images and published calendar feeds.
 
 | File | Role |
 |------|------|
 | `backend-firebase.js` | Backend + `backend_users` + Google auth. Classic script (globals `backend` / `backend_users`). |
 | `storage-firestore.js` | Storage adapter over Firestore collections. |
 | `firestore.rules` | Who may read and write each collection. The production access model. |
-| `storage.rules` | Image uploads: registration gate, per-user path scoping, size and content-type caps. |
+| `storage.rules` | Image uploads: registration gate, per-user path scoping, size and content-type caps. Calendar feeds (`feeds/<id>.ics`): written and listed by full-access members only (an admin, or a grant of every table). |
 | `firebase.json` | Hosting config (what is published, the CSP header) + emulator ports. |
 | `dev/test-emulator/firestore-rules.mjs` | The rules, executed against the Firestore emulator. |
 | `dev/test-ui/firebase-emulator.spec.js` | The whole app against the auth/firestore/storage emulators. |

@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { ref, uploadBytes, getBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getBytes, getDownloadURL, listAll } from 'firebase/storage';
 import { doc, setDoc } from 'firebase/firestore';
 
 const rulesPath = fileURLToPath(new URL('../../storage.rules', import.meta.url));
@@ -31,7 +31,11 @@ const testEnv = await initializeTestEnvironment({
 // legacy _meta/users map fallback. bob is signed in but UNREGISTERED.
 await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(ctx.firestore(), '_users/alice@example.com'), { role: 'editor', user: 'alice@example.com', tables: 'all' });
-  await setDoc(doc(ctx.firestore(), '_meta/users'), { 'carol@example.com': { role: 'viewer', tables: [] } });
+  await setDoc(doc(ctx.firestore(), '_meta/users'), {
+    'carol@example.com': { role: 'viewer', tables: [] },
+    'frank@example.com': { role: 'admin', tables: [] }        // a legacy-map ADMIN: full access by role
+  });
+  await setDoc(doc(ctx.firestore(), '_users/erin@example.com'), { role: 'editor', user: 'erin@example.com', tables: { tasks: 'rw' } });
 });
 
 // Signed-in users (note mixed-case email -> the rule lowercases it) + an anonymous visitor.
@@ -73,6 +77,29 @@ await ok('non-image upload is denied', assertFails(
 // 4. Reads: any signed-in user may read; an unauthenticated visitor may not.
 await ok('signed-in user can read', assertSucceeds(getBytes(ref(bob.storage(), alicePath))));
 await ok('unauthenticated read is denied', assertFails(getBytes(ref(anon.storage(), alicePath))));
+
+// 5. Calendar feeds: feeds/<id>.ics, written and listed only by a FULL-access member (admin, or a grant
+// of every table) -- the client's canPublishFeeds. Subscribers read through the download URL's token.
+const erin = testEnv.authenticatedContext('erin-uid', { email: 'erin@example.com' });
+const frank = testEnv.authenticatedContext('frank-uid', { email: 'frank@example.com' });
+const ics = new TextEncoder().encode('BEGIN:VCALENDAR' + String.fromCharCode(13, 10) + 'END:VCALENDAR' + String.fromCharCode(13, 10));
+const icsMeta = { contentType: 'text/calendar' };
+const feedPath = 'feeds/0123456789abcdef0123456789abcdef.ics';
+await ok('full-access member publishes a feed', assertSucceeds(uploadBytes(ref(alice.storage(), feedPath), ics, icsMeta)));
+await ok('and overwrites it in place (republish, or blank to revoke)', assertSucceeds(uploadBytes(ref(alice.storage(), feedPath), ics, icsMeta)));
+await ok('and reads its download URL back', assertSucceeds(getDownloadURL(ref(alice.storage(), feedPath))));
+await ok('legacy-map admin publishes too', assertSucceeds(uploadBytes(ref(frank.storage(), 'feeds/frank1.ics'), ics, icsMeta)));
+const listed = await listAll(ref(alice.storage(), 'feeds'));
+assert.deepEqual(listed.items.map((r) => r.fullPath).sort(), [feedPath, 'feeds/frank1.ics'].sort());
+console.log('  ✓', 'full-access member lists feeds/ (the orphan sweep)'); passed++;
+await ok('a narrower grant may not publish', assertFails(uploadBytes(ref(erin.storage(), 'feeds/erin1.ics'), ics, icsMeta)));
+await ok('a narrower grant may not list', assertFails(listAll(ref(erin.storage(), 'feeds'))));
+await ok('a viewer may not overwrite a live feed', assertFails(uploadBytes(ref(carol.storage(), feedPath), ics, icsMeta)));
+await ok('an unregistered account may not publish', assertFails(uploadBytes(ref(bob.storage(), 'feeds/bob1.ics'), ics, icsMeta)));
+await ok('a feed must be a calendar', assertFails(uploadBytes(ref(alice.storage(), 'feeds/x1.ics'), gif, imageMeta)));
+await ok('a feed path must be <id>.ics', assertFails(uploadBytes(ref(alice.storage(), 'feeds/x1.html'), ics, icsMeta)));
+await ok('nothing nests under feeds/', assertFails(uploadBytes(ref(alice.storage(), 'feeds/a/b.ics'), ics, icsMeta)));
+await ok('unauthenticated read of feeds/ is denied', assertFails(getBytes(ref(anon.storage(), feedPath))));
 
 await testEnv.cleanup();
 console.log(`\nSTORAGE RULES OK — ${passed} checks passed`);

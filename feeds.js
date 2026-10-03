@@ -393,6 +393,47 @@
   // is predictable and the path is therefore the only thing standing between the calendar and anyone
   // who tries. `id` is minted once per feed and kept in the folder config.
   function pathFor(id) { return 'feeds/' + String(id) + '.ics'; }
+  // The inverse, for a path the blob store LISTS. Anything not shaped like a feed file is not one, and
+  // answers '' so the sweep leaves it alone.
+  function idOfPath(p) {
+    var m = /^feeds\/([A-Za-z0-9_-]+)\.ics$/.exec(String(p || ''));
+    return m ? m[1] : '';
+  }
+
+  // The orphan sweep's whole decision: which listed feed files nothing accounts for. The blob store is
+  // the truth about what EXISTS; the folder config and the subscriber rows are only a record of it, and
+  // every orphan is a partial failure of that record -- an upload whose row write failed, an admin
+  // deleting a subscriber row, a feed switched off with rows still holding ids. So this reconciles
+  // rather than trusting the record to be complete.
+  //
+  // Accounted for:
+  //   - every `id` in the folder config's `feeds` (`feedConfigs`, a list so a freshly fetched copy can
+  //     be passed beside the in-memory one -- the union only ever accounts for MORE, so a stale copy
+  //     cannot cause a blank);
+  //   - every id in the id column of the subscriber table of every per-person feed, ACTIVE OR NOT: an
+  //     unsubscribed row still holding an id is the publish pass's to blank and clear, not the sweep's.
+  // A config entry whose view has gone is still accounted: Settings lists it with its Stop button, so it
+  // is a file somebody can see and act on, not an orphan.
+  //
+  // Erring towards a blank is safe in the one direction that matters: a wrongly blanked LIVE file is
+  // rewritten by the next pass, while an orphan left alone serves its last snapshot for ever.
+  function strayIds(paths, views, feedConfigs, rowsOf) {
+    var known = {};
+    (feedConfigs || []).forEach(function(feeds) {
+      Object.keys(feeds || {}).forEach(function(n) { var f = feeds[n]; if (f && f.id) known[String(f.id)] = 1; });
+    });
+    Object.keys(views || {}).forEach(function(n) {
+      var v = views[n], cfg = v && v.feedSubscribers;
+      if (!isPerPerson(v) || !cfg || !cfg.table || !cfg.idColumn) return;
+      (rowsOf(cfg.table) || []).forEach(function(r) { if (r && r[cfg.idColumn]) known[String(r[cfg.idColumn])] = 1; });
+    });
+    var out = [];
+    (paths || []).forEach(function(p) {
+      var id = idOfPath(p);
+      if (id && !known[id] && out.indexOf(id) < 0) out.push(id);
+    });
+    return out;
+  }
 
   // A url-safe random id, long enough that guessing is not a strategy. Uses the platform CSPRNG; there
   // is no Math.random fallback, because a predictable id here is a readable calendar and failing loudly
@@ -409,7 +450,7 @@
   var M = { isFeed: isFeed, isPerPerson: isPerPerson, modeOf: modeOf, hasMe: hasMe, configErrors: configErrors,
             subscribersOf: subscribersOf, subscriptionOf: subscriptionOf, activeValues: activeValues, subscribeRow: subscribeRow, pendingRevocation: pendingRevocation, statusOf: statusOf, isActive: isActive,
             subscriberTableOf: subscriberTableOf, forSubscriberTable: forSubscriberTable,
-            names: names, tablesOf: tablesOf, forTable: forTable, pathFor: pathFor, newId: newId };
+            names: names, tablesOf: tablesOf, forTable: forTable, pathFor: pathFor, idOfPath: idOfPath, strayIds: strayIds, newId: newId };
   if (isNode) module.exports = M;
   else root.Feeds = M;
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));

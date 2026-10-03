@@ -1,6 +1,7 @@
 rules_version = '2';
 
-// Firebase Storage rules for the image column uploader (backend-firebase uploadFile).
+// Firebase Storage rules for the image column uploader (backend-firebase uploadFile), and for the
+// calendar feeds published to feeds/<id>.ics (see the second match block).
 // Files live under uploads/<lowercased-user-email>/<ts>_<name>. A user may write only their OWN
 // folder (image/* under 10 MB); any signed-in user may read. Note: the download URL the app stores
 // carries an access token that lets <img> load the file even independent of these read rules.
@@ -19,6 +20,17 @@ service firebase.storage {
           || (firestore.exists(/databases/(default)/documents/_meta/users)
               && email in firestore.get(/databases/(default)/documents/_meta/users).data);
     }
+    // FULL access: an admin, or a grant of every table. The client's canPublishFeeds asks the same
+    // question (userAllowedTables === null), and only such a member renders a feed: anyone narrower
+    // would publish the subset they can see over everybody's calendar. Same two sources as isRegistered.
+    function hasFullAccess(email) {
+      let u = firestore.exists(/databases/(default)/documents/_users/$(email))
+        ? firestore.get(/databases/(default)/documents/_users/$(email)).data
+        : (firestore.exists(/databases/(default)/documents/_meta/users)
+            ? firestore.get(/databases/(default)/documents/_meta/users).data.get(email, null)
+            : null);
+      return u != null && (u.get('role', '') == 'admin' || u.get('tables', '') == 'all');
+    }
     match /uploads/{userEmail}/{allPaths=**} {
       allow read: if request.auth != null;
       allow write: if request.auth != null
@@ -29,6 +41,19 @@ service firebase.storage {
       allow delete: if request.auth != null
                     && request.auth.token.email.lower() == userEmail
                     && isRegistered(userEmail);
+    }
+    // Calendar feeds. The unguessable id IS the access control for subscribers: they fetch the
+    // download URL, whose token serves the file whatever these rules say, so `read` here is only the
+    // publisher's own -- getDownloadURL after an upload, and `list` for the orphan sweep. Writes are an
+    // overwrite at a stable path (a subscription must not move), a calendar and nothing else. No
+    // delete: revoking a feed is blanking it, which is an update.
+    match /feeds/{file} {
+      allow read: if request.auth != null && hasFullAccess(request.auth.token.email.lower());
+      allow create, update: if request.auth != null
+                   && hasFullAccess(request.auth.token.email.lower())
+                   && file.matches('^[A-Za-z0-9_-]{1,64}[.]ics$')
+                   && request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType.matches('text/calendar.*');
     }
   }
 }

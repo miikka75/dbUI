@@ -1038,7 +1038,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
@@ -2573,6 +2573,50 @@ function createVueApp() {
         return due.reduce(function(p, n) {
           return p.then(function() { return self.publishPerPersonFeed(n).catch(function() { return null; }); });
         }, Promise.resolve());
+      },
+
+      // The orphan sweep: blank every feed file the store holds that nothing accounts for (Feeds.strayIds
+      // decides which). An admin's button rather than part of the boot pass, because it re-blanks files an
+      // earlier sweep already emptied -- harmless, blanking is idempotent, but a cost that grows with every
+      // link ever revoked, so it runs when somebody asks.
+      //
+      // The record is read FRESH before anything is blanked: what this client cached at boot is not the
+      // record, since another admin may have published or regenerated since, and a file minted after our
+      // copy would read as stray. So the folder config and every subscriber table are fetched again (and
+      // unioned with what is cached -- the union only ever accounts for more), and a read that fails stops
+      // the sweep: a missing record makes every live file look stray. This client's own queued passes are
+      // waited for for the same reason. The one race left is another client's pass between its upload and
+      // its row write; that file is blanked, and that feed's next pass writes it again.
+      canSweepFeeds: function() { return this.canPublishFeeds() && !!backend.listFiles; },
+      sweepFeedFiles: function() {
+        var self = this;
+        if (!this.canSweepFeeds()) return Promise.resolve(null);
+        var queued = this._feedPasses || {};
+        var tables = [], fresh = {}, freshFeeds = {};
+        Feeds.names(VIEWS).forEach(function(n) { var t = Feeds.subscriberTableOf(VIEWS[n]); if (t && tables.indexOf(t) < 0) tables.push(t); });
+        var read = function(t, tab) {
+          return Promise.resolve(backend.getTableData(t, tab)).then(function(res) { fresh[t] = (fresh[t] || []).concat(parseTableResult(res).rows || []); });
+        };
+        return Promise.all(Object.keys(queued).map(function(n) { return Promise.resolve(queued[n]).catch(function() {}); }))
+          .then(function() { return backend.getFolderConfig ? backend.getFolderConfig() : null; })
+          .then(function(cfg) {
+            freshFeeds = (cfg && cfg.feeds) || {};
+            return Promise.all(tables.map(function(t) {
+              return Promise.all([read(t, 'active')].concat(SCHEMA[t] && SCHEMA[t].archivable ? [read(t, 'archive')] : []));
+            }));
+          })
+          .then(function() { return backend.listFiles('feeds/'); })
+          .then(function(paths) {
+            var rowsOf = function(t) { return (fresh[t] || []).concat(self.dataCache[t] || [], self.dataCache[aKey(t)] || []); };
+            var stray = Feeds.strayIds(paths, VIEWS, [freshFeeds, (self.appConfig || {}).feeds], rowsOf);
+            var blanked = 0;
+            return stray.reduce(function(p, id) {
+              return p.then(function() { return self._blankFeedAt(id).then(function(url) { if (url) blanked++; }); });
+            }, Promise.resolve()).then(function() {
+              self.notify(blanked < stray.length ? self.t('msg.upload_failed') : self.t('msg.feed_swept') + ' (' + blanked + ')');
+              return { stray: stray.length, blanked: blanked };
+            });
+          }, function() { self.notify(self.t('msg.request_failed')); return null; });
       },
 
       // Republish whatever a write invalidated, coalesced. A bulk import writes hundreds of rows and

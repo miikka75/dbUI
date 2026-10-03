@@ -108,6 +108,23 @@ function _sbUpload(file, opts) {
   });
 }
 
+// Every stored path under `prefix`, for the feed sweep. Paged, because `list` returns at most `limit`
+// entries and a short read here would make the sweep miss files rather than fail. Folder entries carry
+// no id and are skipped: the sweep asks for files.
+function _sbList(prefix) {
+  if (!_sb) return Promise.reject(new Error('Supabase not initialized'));
+  var dir = String(prefix || '').replace(/\/+$/, ''), out = [], PAGE = 1000;
+  function page(offset) {
+    return _sb.storage.from(SUPABASE_BUCKET).list(dir, { limit: PAGE, offset: offset }).then(function(res) {
+      if (res && res.error) throw res.error;
+      var items = (res && res.data) || [];
+      items.forEach(function(it) { if (it && it.id) out.push((dir ? dir + '/' : '') + it.name); });
+      return items.length === PAGE ? page(offset + PAGE) : out;
+    });
+  }
+  return page(0);
+}
+
 function initSupabase() {
   // The ACTIVE database's config — see the same note in backend-firebase.js.
   var config = Databases.config('supabase') || window.SUPABASE_CONFIG || {};
@@ -132,7 +149,8 @@ function _startSupabase(config) {
     myEmail: _myEmail,
     noUsers: _noUsers,
     subscribeTable: _sbSubscribe,
-    uploadFile: _sbUpload
+    uploadFile: _sbUpload,
+    listFiles: _sbList
   });
   backend = kv.backend;
   backend_users = kv.users;

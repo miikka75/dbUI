@@ -81,6 +81,15 @@ function sidecarPath(name) {
   return path.join(__dirname, name + '.json');
 }
 
+// Uploaded files belong to ONE database, like the sidecars above. The feed sweep blanks every file under
+// feeds/ that its database does not account for, so a store shared between databases would have one
+// database's sweep empty another's live calendars -- and a test's sweep, the developer's own. The
+// default database keeps dev/uploads; a file uploaded before this split is still served from there.
+const LEGACY_UPLOAD_DIR = path.join(__dirname, 'uploads');
+const UPLOAD_DIR = APP_DB === ':memory:' ? path.join(os.tmpdir(), 'dbui-test-' + _RUN_ID + '-uploads')
+  : DB_PATH ? DB_PATH.replace(/\.db$/i, '') + '.uploads'
+  : LEGACY_UPLOAD_DIR;
+
 // Persist users to file. In isolated (in-memory test) mode use a throwaway path so resetData/test
 // runs never overwrite the real dev users.json.
 const USERS_PATH = sidecarPath('users');
@@ -558,7 +567,7 @@ const server = http.createServer(async (req, res) => {
       }
       case 'uploadFile': {
         // Dev-only file store for the image column (the local counterpart of Firebase Storage): write the
-        // base64 body to dev/uploads/ and return a same-origin URL. The row stores only that URL, not bytes.
+        // base64 body to this database's UPLOAD_DIR and return a same-origin URL. The row stores only that URL, not bytes.
         // The extension is preserved, so an uploaded `evil.html` is served as text/html from this
         // origin. Accepted rather than fixed: this server binds to loopback and authenticates nobody,
         // so a caller able to upload here can already do anything else it offers. Do not copy this
@@ -566,7 +575,7 @@ const server = http.createServer(async (req, res) => {
         const uName = String(body.name || 'file').replace(/[^\w.\-]+/g, '_');
         const b64 = String(body.base64 || '');
         if (!b64) { res.writeHead(400); return res.end(JSON.stringify({ error: 'no file data' })); }
-        const upDir = path.join(__dirname, 'uploads');
+        const upDir = UPLOAD_DIR;
         // A caller-chosen PATH is a published calendar feed (Feeds.pathFor): it has to be written at the
         // same place every time, because that path is the subscription and revoking it is overwriting
         // it with an empty calendar. A fresh name per upload -- right for an image -- would hand out a
@@ -583,6 +592,14 @@ const server = http.createServer(async (req, res) => {
         fs.writeFileSync(path.join(upDir, fname), Buffer.from(b64, 'base64'));
         const host = req.headers.host || (HOST + ':' + PORT);
         return json(res, { url: 'http://' + host + '/uploads/' + fname });
+      }
+      case 'listFiles': {
+        // The feed sweep's view of the store: every file under feeds/, as the paths uploadFile was given.
+        // Only that prefix, for the same reason uploadFile accepts only that shape of path.
+        if (String(body.prefix || '').replace(/\/+$/, '') !== 'feeds') { res.writeHead(400); return res.end(JSON.stringify({ error: 'unsupported prefix' })); }
+        const dir = path.join(UPLOAD_DIR, 'feeds');
+        const paths = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /\.ics$/.test(f)).map((f) => 'feeds/' + f) : [];
+        return json(res, { paths });
       }
       case 'deleteRow': {
         // The row is read BEFORE the delete in every branch — broadcast needs it to decide who was
@@ -751,10 +768,13 @@ const server = http.createServer(async (req, res) => {
   // Serve static files from project root (fallback to dev/ for local backend)
   let rel = url.pathname === '/' ? '/index.html' : url.pathname;
   let filePath = path.join(STATIC_DIR, rel);
-  if (!fs.existsSync(filePath)) filePath = path.join(__dirname, rel);
-  // Path-traversal guard: resolved file must stay under STATIC_DIR or dev/
+  // This database's own uploads first; the shared dev/uploads (reached by the dev/ fallback) holds files
+  // uploaded before each database had its own.
+  if (rel.startsWith('/uploads/') && fs.existsSync(path.join(UPLOAD_DIR, rel.slice('/uploads/'.length)))) filePath = path.join(UPLOAD_DIR, rel.slice('/uploads/'.length));
+  else if (!fs.existsSync(filePath)) filePath = path.join(__dirname, rel);
+  // Path-traversal guard: resolved file must stay under STATIC_DIR, dev/ or this database's uploads
   const rp = path.resolve(filePath);
-  if (!rp.startsWith(path.resolve(STATIC_DIR) + path.sep) && !rp.startsWith(path.resolve(__dirname) + path.sep)) {
+  if (!rp.startsWith(path.resolve(STATIC_DIR) + path.sep) && !rp.startsWith(path.resolve(__dirname) + path.sep) && !rp.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) {
     res.writeHead(403); return res.end('Forbidden');
   }
   if (!fs.existsSync(filePath)) { res.writeHead(404); return res.end('Not found'); }
