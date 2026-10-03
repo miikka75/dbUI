@@ -194,7 +194,7 @@ Two guards now cover the class rather than the instance: no root member may retu
 predicate with a hardcoded answer is either dead or a flag in disguise), and no offered translation key
 may go unasked-for. Both catch an injected violation.
 
-#### 6. `app-core.js` is a monolith *(series started: `brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`)*
+#### 6. `app-core.js` is a monolith *(series started: `brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`, `bundle.js`)*
 
 8,669 lines, 600 KB, and essentially one function: `createVueApp()` spans 194–8631, whose `methods`
 object alone is ~5,700 lines. That object is where finding 1 hid — a duplicate key in a literal too
@@ -287,6 +287,18 @@ encoder rule. The avatar had its own copy of the ladder: it resized once and gav
 It now walks `Images.AVATAR_STEPS` under `Profiles.PICTURE_CAP`, the number both rule layers enforce. The
 avatar's file path had no UI test, so it gained one. Loading, saving and the canvas stay in the root.
 Remaining: export/import, feeds.
+
+**The fifth cut: export/import as `bundle.js`.** The planning moved; the reads, writes and progress dialog
+did not. "Is this key reference data?" had three copies and "are these lists only declarations?" two;
+each is one function now. `fileSet` is the file split (its parity case lifts the shipped
+`_downloadFileSet` and compared before the switch), `memberRecord` the roster an export carries, and
+`importPlan` everything `applyBundle` used to work out inline before its first write: the row jobs (an
+archive key becomes a `_status` stamp), pages and assets, the roster, the declined parts, the step count.
+Two things it found. The export's fallback branch, taken when assembling the file threw, downloaded a
+second file built from a raw schema copy with no pages, assets or members: exactly the partial backup the
+rest of the method refuses to write. It now says the export is incomplete and writes nothing. And the
+progress total counted a lists step that a schema-only import never runs, so that dialog finished one
+short. Remaining: feeds.
 
 #### 7. CSP reporting is active nowhere *(landed: the mechanism, off by default until a collector URL is set)*
 
@@ -389,7 +401,7 @@ seven entries to find out what is left.
 | **Set `Csp.REPORT_ENDPOINT` and deploy the collector** | 7 | one line + `npm run csp:sync` | The mechanism landed; only the URL is missing, and it cannot be guessed — it belongs to the deployment. Deploy `supabase/functions/csp-report/` (free), then set the constant. |
 | **`board` / `form` / `timeline` have no embed branch** | 4 | small code, large question | Three product questions wearing one costume: does a board keep drag-between-lanes inside a document? Does a `form` in a page mean a second submit target, or the same one twice? Does a timeline embed want its own date window or the page's? The dispatch set is asserted, so this is a recorded answer rather than an accident. |
 | **`access:` on a `markdown` + `sources` view is half-honoured** | 4 | small | Honoured at nav and in the doc-embed branch, ignored when such a view is embedded elsewhere (it renders its grid, and the body — the protected part — is not rendered on that path at all, so nothing leaks). Either honour it on both paths or reject the combination at load. |
-| **The extraction series** — export/import, then feeds | 6 | ongoing | Four cuts made (`brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`). Ranked by how much of each seam is pure and how much duplication it already costs, which is how feeds went from first to last. |
+| **The extraction series** — feeds | 6 | ongoing | Five cuts made (`brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`, `bundle.js`). Ranked by how much of each seam is pure and how much duplication it already costs, which is how feeds went from first to last. |
 
 One thing deliberately **not** on this list: promoting `firebase.json` from `Report-Only` to enforcing.
 It is not a task until somebody deploys to Firebase Hosting, and a CSP on a host nothing serves from is

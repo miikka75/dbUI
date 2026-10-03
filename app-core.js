@@ -6156,7 +6156,7 @@ function createVueApp() {
         // A lookup is reference data and every other table is somebody's work, so the two parts read
         // different tables rather than one part reading all of them and the other filtering after.
         Object.keys(SCHEMA).forEach(function(table) {
-          if (SCHEMA[table].isLookup ? !wantRef : !wantData) return;
+          if (Bundle.isReference(SCHEMA, table) ? !wantRef : !wantData) return;
           // Omit what this user cannot read rather than asserting it is empty. Import is additive
           // (delete+put per row), so an omitted table is left untouched on restore exactly as an empty
           // one would be -- but the file no longer says something false about it.
@@ -6237,11 +6237,12 @@ function createVueApp() {
             if (wantData && pages.length) extras.pages = pages;
             if (wantData && assets.length) extras.assets = assets;
             if (members) extras.members = members;
-            download(schema, extras);
-          }).catch(function() {
-            var schema = JSON.parse(JSON.stringify(self.schemaData));
-            if (schema.tables) Object.keys(schema.tables).forEach(function(t) { var c = schema.tables[t].columns; if (c) { delete c.id; } delete schema.tables[t].partition; delete schema.tables[t].archivePartition; });
-            download(schema, {});
+            return download(schema, extras);
+          }).catch(function(e) {
+            // No second attempt. This used to download a raw copy of the schema with no pages, assets or
+            // members -- a file missing exactly what the guard above refuses to leave out, and a schema
+            // _exportableSchema had not normalized. Same rule: no file rather than a partial one.
+            self.notify(self.t('msg.export_incomplete') + ' ' + ((e && e.message) || ''));
           });
         });
       },
@@ -6266,15 +6267,8 @@ function createVueApp() {
           (typeof backend_users !== 'undefined' && backend_users.getProfiles) ? Promise.resolve(backend_users.getProfiles()).catch(none) : null,
           backend.getListUserLinks ? Promise.resolve(backend.getListUserLinks()).catch(none) : null
         ]).then(function(r) {
-          // A refused read must not become an empty roster: the same rule the table gather follows, and
-          // for the same reason — a backup that silently drops people is the one that gets trusted.
-          if (r[0] == null) return null;
-          var profiles = {};
-          Object.keys(r[1] || {}).forEach(function(e) {
-            var p = r[1][e] || {};
-            if (p.name || p.shared) profiles[e] = { name: p.name || '', shared: !!p.shared };
-          });
-          return { users: r[0], profiles: profiles, listUsers: r[2] || {} };
+          // A refused registry read is no roster at all, never an empty one (Bundle.memberRecord).
+          return Bundle.memberRecord(r[0], r[1], r[2]);
         });
       },
       // Restore the roster. Every write goes through the method that already owns it rather than
@@ -6394,50 +6388,13 @@ function createVueApp() {
         convertViewFilters(schema.views);   // forward-deprecation: array-IN becomes explicit $or
         return schema;
       },
-      // One payload out as the SET of files examples/ is read as, rather than as one document. The
-      // split is by what each file is for, not by part: `<id>-schema.json` carries the structure with
-      // its reference data (that is how a shipped bundle is shaped -- the catalogues live in the schema
-      // file), each language is its own file because the manifest reads one per language, and the rows
-      // a ward typed are the separate `<id>-data.json` the installer offers as a choice.
+      // One payload out as the SET of files examples/ is read as, rather than as one document. Which
+      // files, and what goes in each, is Bundle.fileSet: split by what each file is for, not by part.
       //
       // Sequentially with a gap: a browser that is asked for several downloads at once prompts or drops
       // the later ones, and this is the one place in the app that asks for more than one.
       _downloadFileSet: function(payload) {
-        var self = this, id = this._exampleId(), files = [];
-        var schemaFile = {}, dataFile = {};
-        if (payload.schema) schemaFile.schema = payload.schema;
-        if (payload.config) schemaFile.config = payload.config;
-        // `lists` follows its meaning, the same way it did on the way out: names the schema declares
-        // belong with the structure, values a ward typed belong with that ward's data.
-        if (payload.lists) {
-          var declarations = Object.keys(payload.lists).every(function(n) { return !(payload.lists[n] || []).length; });
-          (declarations ? schemaFile : dataFile).lists = payload.lists;
-        }
-        if (payload.tables && Object.keys(payload.tables).length) {
-          var ref = {}, own = {};
-          Object.keys(payload.tables).forEach(function(k) {
-            var t = k.split('__')[0];
-            if (SCHEMA[t] && SCHEMA[t].isLookup) ref[k] = payload.tables[k]; else own[k] = payload.tables[k];
-          });
-          if (Object.keys(ref).length) schemaFile.tables = ref;
-          if (Object.keys(own).length) dataFile.tables = own;
-        }
-        if (Object.keys(dataFile).length) files.push([id + '-data.json', dataFile]);
-        if (Object.keys(schemaFile).length) files.unshift([id + '-schema.json', schemaFile]);
-        (payload.languages || []).forEach(function(l) {
-          var t = (payload.translations || {})[l.code];
-          if (!t) return;
-          var one = { languages: [{ code: l.code, name: l.name || l.code }], translations: {} };
-          one.translations[l.code] = t;
-          files.push([id + '-lang-' + l.code + '.json', one]);
-        });
-        if (payload.members) files.push([id + '-users.json', { members: payload.members }]);
-        if (payload.pages || payload.assets) {
-          var content = {};
-          if (payload.pages) content.pages = payload.pages;
-          if (payload.assets) content.assets = payload.assets;
-          files.push([id + '-pages.json', content]);
-        }
+        var self = this, files = Bundle.fileSet(payload, SCHEMA, this._exampleId());
         if (!files.length) { self.notify(self.t('msg.nothing_to_export')); return Promise.resolve(); }
         return files.reduce(function(chain, f, i) {
           return chain.then(function() {
@@ -6657,85 +6614,19 @@ function createVueApp() {
             if (refErrs.length) { self.notify(self.t('msg.import_blocked') + ' ' + refErrs[0] + (refErrs.length > 1 ? ' (+' + (refErrs.length - 1) + ' more)' : '')); return; }
           }
 
-          // Flatten the row work up front: it dominates the run (two round-trips per row) and so defines
-          // both the ordering and the progress total.
-          // The same three parts on the way in. A part the file does not carry is simply absent; a part it
-          // carries that was not asked for is left on the floor, which is the whole point of choosing.
-          var wantSchema = self.wantsPart('importParts', 'schema');
-          var wantData = self.wantsPart('importParts', 'data');
-          var wantRef = self.wantsPart('importParts', 'reference');
-          // Split the same way the export gathers it: a lookup's rows are reference data, everything
-          // else is somebody's work. A table the SCHEMA does not know is treated as ordinary — a
-          // catalogue this deployment has never heard of cannot be claimed as its reference data.
-          var tables = {};
-          Object.keys(imported.tables || {}).forEach(function(k) {
-            var t = k.split('__')[0];
-            var isRef = !!(SCHEMA[t] && SCHEMA[t].isLookup);
-            if (isRef ? wantRef : wantData) tables[k] = imported.tables[k];
-          });
-          var rowJobs = [];
-          // This is also the MIGRATION route from partition-as-store to partition-as-field, which is
-          // why every row now imports into the active store whatever key it arrived under. A suffixed
-          // key -- `tasks__archive` -- becomes a `_status` stamp instead of a second collection, so
-          // exporting a deployment and importing the bundle back is what moves it over. Deliberately
-          // through the bundle rather than in place: an in-place sweep would have to rewrite live rows
-          // across two backends with no transaction, which is the thing this change exists to stop
-          // doing.
-          //
-          // `_status` on the row wins if the bundle already carries one, so re-importing an
-          // already-migrated bundle changes nothing.
-          Object.keys(tables).forEach(function(key) {
-            var rows = Array.isArray(tables[key]) ? tables[key] : (tables[key].rows || []);
-            var parts = key.split('__');
-            var archived = parts.length > 1;
-            rows.forEach(function(row) {
-              rowJobs.push({
-                table: parts[0],
-                tab: 'active',
-                // The old collection has to be cleared as the row lands in the new one, or the id
-                // exists in both and the archive partition shows it twice.
-                clearArchive: archived,
-                row: archived ? Object.assign({}, row, { _status: row._status || 'archive' }) : row
-              });
-            });
-          });
-          // Page bodies and image assets are content, so they follow the data.
-          var langCodes = (self.wantsPart('importParts', 'languages') && imported.translations) ? Object.keys(imported.translations) : [];
-          var pages = (wantData && imported.pages && Array.isArray(imported.pages))
-            ? imported.pages.filter(function(p) { return p.id && p.markdown; }) : [];
-          // Stored image assets (view backgrounds / image-cell bytes as data URIs). Over-cap entries are
-          // dropped here rather than attempted: both production rule layers reject them, so importing one
-          // would only produce a failure row in the progress report.
-          var assets = (wantData && imported.assets && Array.isArray(imported.assets))
-            ? imported.assets.filter(function(a) { return a && a.id && typeof a.src === 'string' && a.src.length <= ASSET_CAP; }) : [];
-          // The roster travels only when the file carries one AND this admin asked for it in the same
-          // gesture as choosing the file. A bundle with members in it is otherwise imported as data,
-          // which is what makes it safe to hand somebody an export to look at.
-          var members = (self.wantsPart('importParts', 'users') && self.isAdmin && imported.members && typeof imported.members === 'object')
-            ? imported.members : null;
-          // What the file OFFERED that this import will not apply. Declining is correct -- it is the
-          // choice the selection makes -- but declining in SILENCE is not: a roster that quietly does
-          // nothing looks exactly like one that failed, and only the person who ticked the box knows
-          // which they were expecting. Named per part, in the part's own words.
-          var declined = [];
-          [['schema', !!imported.schema], ['languages', !!imported.translations],
-           ['data', !!(imported.tables && Object.keys(imported.tables).length)],
-           ['users', !!(imported.members && typeof imported.members === 'object')]
-          ].forEach(function(p) {
-            if (p[1] && !self.wantsPart('importParts', p[0])) declined.push(p[0]);
-          });
+          // The plan: which rows land where (an archive key becomes a `_status` stamp), what the file offered
+          // and this import declines, and how many steps the progress dialog counts. Bundle.importPlan.
+          var want = function(part) { return self.wantsPart('importParts', part); };
+          var plan = Bundle.importPlan(imported, want, SCHEMA, { isAdmin: self.isAdmin, assetCap: ASSET_CAP, provenance: opts && opts.provenance });
+          var rowJobs = plan.rowJobs, langCodes = plan.langCodes, pages = plan.pages, assets = plan.assets;
+          var members = plan.members, declined = plan.declined;
 
           // Progress + failure state. Two things were wrong before: the run gave no sign of life for the
           // ~minute it takes on a real database, and — worse — the whole thing was ONE serial promise
           // chain with no .catch(), so a single rejected write silently abandoned every step after it.
           // That is how an import could land schema + rows and then no translations at all, with no
           // error shown. (The old try/catch only ever caught synchronous errors while BUILDING the chain.)
-          var prog = {
-            active: true, done: 0, icon: 'mdi-timer-sand', detail: '', errors: [], finished: false,
-            total: ((imported.schema && self.wantsPart('importParts', 'schema')) ? 1 : 0) + rowJobs.length + (imported.lists ? 1 : 0)
-                 + langCodes.length + pages.length + assets.length + (declined.length ? 1 : 0) + ((imported.config && wantSchema) ? 1 : 0) + (members ? 1 : 0)
-                 + ((opts && opts.provenance) ? 1 : 0) + 1
-          };
+          var prog = { active: true, done: 0, icon: 'mdi-timer-sand', detail: '', errors: [], finished: false, total: plan.total };
           self.importProgress = prog;
           prog = self.importProgress;   // Vue hands back a reactive proxy; mutate THAT or the UI never updates
 
@@ -6755,7 +6646,7 @@ function createVueApp() {
 
           var chain = Promise.resolve();
           // Import schema if present (initializes empty databases)
-          if (imported.schema && backend.saveSchema && self.wantsPart('importParts', 'schema')) {
+          if (plan.applySchema && backend.saveSchema) {
             chain = chain.then(step('mdi-table-cog', '', function() {
               // Rebuild VIEWS from new schema so lockedListValues works
               if (Array.isArray(imported.schema.views)) {
@@ -6784,7 +6675,7 @@ function createVueApp() {
                 .then(function() { return Writes.putRow(target, job.row, job.tab); });
             }));
           });
-          if (imported.lists && (wantData || wantRef)) {
+          if (plan.applyLists) {
             chain = chain.then(step('mdi-format-list-bulleted', '', function() {
               // An EXAMPLE fills the vocabularies this database has not started and leaves the rest
               // alone; a hand-picked file replaces them (and prunes what it omits), because that is a
@@ -6795,8 +6686,7 @@ function createVueApp() {
               // restore, because there is nothing in it to restore — so replacing with it could only
               // destroy, and it fills gaps whatever its provenance. Omission still prunes, which is how
               // a file taken before a list was retired removes it again.
-              var declarationsOnly = Object.keys(imported.lists).every(function(n) { return !(imported.lists[n] || []).length; });
-              var next = ((opts && opts.provenance) || declarationsOnly)
+              var next = ((opts && opts.provenance) || Bundle.declaresOnly(imported.lists))
                 ? Examples.listsForInstall(self.listsCache, imported.lists) : imported.lists;
               self.listsCache = next;
               return backend.saveLists(next);
@@ -6833,7 +6723,7 @@ function createVueApp() {
           });
           // Restore portable folder config (rotationAnchors, rotationRanges, any future portable key),
           // preserving this environment's `mode`. Excluded keys never cross the import boundary.
-          if (imported.config && wantSchema && backend.setFolderConfig) {
+          if (plan.applyConfig && backend.setFolderConfig) {
             chain = chain.then(step('mdi-cog', '', function() {
               var merged = mergeImportedConfig(self.appConfig, imported.config, self.mode);
               self.appConfig = merged;
