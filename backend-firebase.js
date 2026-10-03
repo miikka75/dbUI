@@ -482,6 +482,12 @@ backend = {
     }
     var meta = o.contentType ? { contentType: o.contentType } : undefined;
     return _storage.ref().child(path).put(file, meta).then(function(snap) { return snap.ref.getDownloadURL(); });
+  },
+  // Every stored path under `prefix`, for the feed sweep. listAll pages internally; files only.
+  listFiles: function(prefix) {
+    if (!_storage) return Promise.reject(new Error('Firebase Storage not initialized'));
+    return _storage.ref().child(String(prefix || '').replace(/\/+$/, '')).listAll()
+      .then(function(res) { return res.items.map(function(r) { return r.fullPath; }); });
   }
 };
 

@@ -61,6 +61,7 @@ than a whole-table scan.
 | `getPage(name)` | Doc-view bodies | `{markdown} \| null`. Missing or denied must resolve `null`, never reject. |
 | `getAsset(id)` | View backgrounds, image cells | `{src} \| null` — a data URI. Same rule: `null`, never reject. |
 | `uploadFile(file, opts)` | `image` / `url` column uploads, and calendar feeds | Resolves the **URL to store in the row**; the bytes go to the host's object store. Absent = the app falls back to pasting a URL by hand. `opts.path` asks for a STABLE path overwritten in place (a feed's URL is a subscription and must not move); without it the impl picks a unique one, so an image never collides. `opts.contentType` is stored on the object and is what the public URL serves. |
+| `listFiles(prefix)` | The feed orphan sweep (Settings → Calendars) | Resolves **every stored path** under `prefix` (`'feeds/'`), spelled as `uploadFile`'s `opts.path` was. Must page to the end: a short list makes the sweep miss files. Reject on failure rather than resolving `[]`. Absent = no sweep button. |
 
 ### Identity, access and profiles
 

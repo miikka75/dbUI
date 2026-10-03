@@ -3856,6 +3856,52 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.reentered).toBe(false);
   });
 
+  // The orphan sweep: every stored feed file nothing records is blanked, and nothing that IS recorded
+  // is touched. The record is read FRESH -- a file another admin published after this client booted is
+  // in the fetched config and rows, not in the cached ones, and blanking it would empty a live calendar.
+  test('the orphan sweep blanks only feed files nothing records, reading the record fresh', async ({ page }) => {
+    await ensureAppReady(page);
+    const r = await page.evaluate(async () => {
+      const app = window.appInstance;
+      app.userList = []; app.usersLoaded = true; app.userAllowedTables = null;
+      window.SCHEMA.sw_subs = { columns: { owner: { type: 'owner' }, url: 'text', fid: 'text', active: 'text' },
+                                ownerWritable: ['active'], ownerWritableWhile: { active: 'yes' }, privateRoster: true };
+      window.VIEWS.sw_pp = { name: 'sw_pp', feed: 'per-person',
+        feedSubscribers: { table: 'sw_subs', urlColumn: 'url', idColumn: 'fid', activeColumn: 'active' },
+        calendar: { sources: [{ table: 'tasks', dateColumn: 'date', titleColumns: ['title'], filter: { assigned_to: '@me' } }] } };
+      app.appConfig = Object.assign({}, app.appConfig || {}, { feeds: { sw_shared: { id: 'sharedid', url: 'u' } } });
+      app.dataCache['sw_subs'] = [{ id: 's1', owner: 'a@x.test', active: 'yes', fid: 'cachedsub', url: 'u' }];
+
+      const real = { list: window.backend.listFiles, up: window.backend.uploadFile, cfg: window.backend.getFolderConfig, data: window.backend.getTableData };
+      window.backend.listFiles = () => Promise.resolve(['feeds/sharedid.ics', 'feeds/cachedsub.ics', 'feeds/freshsub.ics',
+        'feeds/freshshared.ics', 'feeds/strayid.ics', 'feeds/notes.txt']);
+      // Published by somebody else since this client booted: only the fetched copies know them.
+      window.backend.getFolderConfig = () => Promise.resolve({ feeds: { other: { id: 'freshshared', url: 'u2' } } });
+      window.backend.getTableData = (t, tab) => Promise.resolve(t === 'sw_subs'
+        ? { headers: [], rows: [{ id: 's2', owner: 'b@x.test', active: 'yes', fid: 'freshsub', url: 'u3' }] } : real.data(t, tab));
+      const uploads = [];
+      window.backend.uploadFile = (blob, opts) => blob.text().then((text) => { uploads.push({ path: opts.path, text }); return 'https://store.example/' + opts.path; });
+      const shown = app.canSweepFeeds();
+      const res = await app.sweepFeedFiles();
+      const blanked = uploads.slice();
+
+      // A record that cannot be read stops the sweep: an unread subscriber table makes every live file look stray.
+      uploads.length = 0;
+      window.backend.getTableData = () => Promise.reject(new Error('down'));
+      const failed = await app.sweepFeedFiles();
+      const afterFailure = uploads.length;
+      Object.assign(window.backend, { listFiles: real.list, uploadFile: real.up, getFolderConfig: real.cfg, getTableData: real.data });
+      return { shown, res, failed, afterFailure, blanked };
+    });
+    expect(r.shown).toBe(true);
+    expect(r.res).toEqual({ stray: 1, blanked: 1 });
+    expect(r.blanked.map((u) => u.path)).toEqual(['feeds/strayid.ics']);
+    expect(r.blanked[0].text).toContain('BEGIN:VCALENDAR');
+    expect(r.blanked[0].text).not.toContain('VEVENT');
+    expect(r.failed).toBe(null);
+    expect(r.afterFailure).toBe(0);
+  });
+
   test('the subscriber cap bounds one pass, and revocation happens before it bites', async ({ page }) => {
     await ensureAppReady(page);
     const r = await page.evaluate(async () => {

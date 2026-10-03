@@ -13,7 +13,10 @@ const { startDevServer, stopDevServer } = require('./dev-server');
 const DEV_DIR = path.join(__dirname, '..');
 const DB_REL = path.join('test', '.feedup-' + process.pid + '.db');
 const ID = 'test' + process.pid;
-const FEED = path.join(DEV_DIR, 'uploads', 'feeds', ID + '.ics');
+// Each database keeps its own uploads beside it (.feedup-<pid>.db -> .feedup-<pid>.uploads), so the
+// after() hook's sweep of `.feedup-<pid>*` removes them with the database.
+const UPLOADS = path.join(DEV_DIR, DB_REL.replace(/\.db$/, '.uploads'));
+const FEED = path.join(UPLOADS, 'feeds', ID + '.ics');
 let child, BASE;
 const made = [];
 
@@ -61,6 +64,21 @@ describe('dev server — a feed upload lands at its own path', () => {
     const a = await (await upload({ name: 'pic.png', base64: b64('a') })).json();
     const b = await (await upload({ name: 'pic.png', base64: b64('b') })).json();
     assert.notEqual(a.url, b.url);
-    made.push(...[a, b].map((r) => path.join(DEV_DIR, 'uploads', decodeURIComponent(r.url.split('/uploads/')[1]))));
+    made.push(...[a, b].map((r) => path.join(UPLOADS, decodeURIComponent(r.url.split('/uploads/')[1]))));
+  });
+
+  it("writes into this database's own store, not the one every dev database shares", () => {
+    assert.ok(fs.existsSync(FEED));
+    assert.ok(!fs.existsSync(path.join(DEV_DIR, 'uploads', 'feeds', ID + '.ics')));
+  });
+
+  // The orphan sweep's view of the store: exactly the feed paths, as uploadFile was given them.
+  it('listFiles lists the feed files under feeds/ and refuses any other prefix', async () => {
+    const list = (prefix) => fetch(BASE + '/api/listFiles', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User': 'boss@x.com' }, body: JSON.stringify({ prefix })
+    });
+    const r = await (await list('feeds/')).json();
+    assert.deepEqual(r.paths, ['feeds/' + ID + '.ics']);
+    for (const p of ['', '..', 'uploads', 'feeds/../..']) assert.equal((await list(p)).status, 400, p);
   });
 });
