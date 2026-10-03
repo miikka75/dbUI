@@ -4930,6 +4930,19 @@ test.describe('access control: user matching + fail-closed', () => {
     expect(cleared.picture).toBe('');
   });
 
+  test('a picked picture file is downscaled and saved as the avatar', async ({ page }) => {
+    // The file path, which the test above steps around: onProfilePictureFile walks Images.AVATAR_STEPS
+    // under the rules' picture cap (Profiles.PICTURE_CAP), and an opaque source comes back as JPEG.
+    await ensureAppReady(page);
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.settings' }).first().click();
+    await expect(page.locator('.v-main')).toContainText('profile.title');
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    await page.getByTestId('profile-pic-file').setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+    await expect.poll(() => page.evaluate(async () => (await backend_users.getMyProfile()).picture || ''))
+      .toMatch(/^data:image\/jpeg;base64,/);
+    await page.evaluate(() => appInstance.removeMyPicture());   // cleanup: the profile outlives the test
+  });
+
   test('a registered user with no table access still sees and can edit their own profile name (not gated by user-backed lists)', async ({ page }) => {
     await ensureAppReady(page);
     await page.evaluate(() => { appInstance.setUserRole('noaccess@x.com', 'editor', 'noaccess@x.com', []); });

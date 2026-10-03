@@ -5610,37 +5610,32 @@ function createVueApp() {
         var self = this;
         if (typeof backend_users === 'undefined' || !backend_users.getMyProfile) return;
         backend_users.getMyProfile().then(function(p) {
-          self.myProfile = { name: (p && p.name) || '', shared: !!(p && p.shared), picture: (p && p.picture) || '' };
-          self.profileSaved = { name: self.myProfile.name, shared: self.myProfile.shared, picture: self.myProfile.picture };
+          self.myProfile = Profiles.normalize(p);
+          self.profileSaved = Profiles.normalize(p);
         }).catch(function() {});
       },
-      // Auto-saves on blur (name) / toggle (shared) / picture change -- no explicit Save button. Skips the
-      // write when nothing changed since the last save so a plain focus-out doesn't churn the backend + lists.
+      // Auto-saves on blur (name) / toggle (shared) / picture change -- no explicit Save button. What gets
+      // written, and whether anything changed at all, is Profiles.toSave (sharing needs a name); `shared`
+      // is mirrored back so the toggle shows the real state.
       saveMyProfile: function() {
         var self = this;
         if (typeof backend_users === 'undefined' || !backend_users.setMyProfile) return;
-        var name = (this.myProfile.name || '').trim(), picture = this.myProfile.picture || '';
-        // Sharing requires a name: an unnamed profile can't be shared (it would surface as a nameless entry
-        // in member lists / the roster). Enforce here so clearing the name also drops the opt-in, and mirror
-        // it back into the model so the toggle reflects the real state.
-        var shared = !!this.myProfile.shared && !!name;
-        this.myProfile.shared = shared;
-        if (this.profileSaved && this.profileSaved.name === name && this.profileSaved.shared === shared && this.profileSaved.picture === picture) return;
-        backend_users.setMyProfile(name, shared, picture).then(function() {
-          self.profileSaved = { name: name, shared: shared, picture: picture };
+        var s = Profiles.toSave(this.myProfile, this.profileSaved);
+        this.myProfile.shared = s.shared;
+        if (!s.changed) return;
+        backend_users.setMyProfile(s.name, s.shared, s.picture).then(function() {
+          self.profileSaved = { name: s.name, shared: s.shared, picture: s.picture };
           self._overlayUserLists();   // reflect the added/removed shared name in user-backed lists immediately
         }).catch(function(e) { self.notify((e && e.message) || self.t('msg.save_failed')); });
       },
-      // Profile picture upload: read the chosen file, downscale it to a small square-ish avatar (max 256px,
-      // JPEG) via a canvas so the stored data-URL stays small (well under the backend's ~350KB cap), then
-      // save. Keeping it a data-URL means no separate storage bucket / URL lifecycle to manage.
+      // Profile picture upload: downscale the chosen file to a small avatar (Images.AVATAR_STEPS) under the
+      // rules' picture cap, then save. Keeping it a data-URL means no storage bucket or URL lifecycle.
       onProfilePictureFile: function(e) {
         var self = this, input = e && e.target, file = input && input.files && input.files[0];
         if (input) input.value = '';   // reset so re-picking the same file still fires @change
         if (!file) return;
         if (!/^image\//.test(file.type || '')) { this.notify(this.t('msg.choose_image')); return; }
-        this._resizeImageFile(file, 256).then(function(dataUrl) {
-          if (dataUrl.length > 350000) { self.notify(self.t('msg.image_too_large')); return; }
+        this._fitImageToCap(file, Profiles.PICTURE_CAP, Images.AVATAR_STEPS).then(function(dataUrl) {
           self.myProfile.picture = dataUrl;
           self.saveMyProfile();
         }).catch(function(err) { self.notify((err && err.message) || self.t('msg.image_read_failed')); });
@@ -5650,27 +5645,16 @@ function createVueApp() {
         this.myProfile.picture = '';
         this.saveMyProfile();
       },
-      // Does anything on this canvas carry partial or full transparency? Decides the encoder below.
-      // Breaks on the first non-opaque pixel, so an opaque photo is the only case that scans in full.
-      // If the pixels can't be read at all (a tainted canvas — not reachable from a FileReader data URL,
-      // but cheap to be safe about) assume alpha: the alpha-capable encoder is the lossless choice.
+      // Does anything on this canvas carry transparency? Decides the encoder (Images.encoderFor). If the
+      // pixels can't be read at all (a tainted canvas — not reachable from a FileReader data URL, but cheap
+      // to be safe about) assume alpha: the alpha-capable encoder is the lossless choice.
       _canvasHasAlpha: function(ctx, w, h) {
-        try {
-          var d = ctx.getImageData(0, 0, w, h).data;
-          for (var i = 3; i < d.length; i += 4) { if (d[i] < 255) return true; }
-          return false;
-        } catch (e) { return true; }
+        try { return Images.hasAlpha(ctx.getImageData(0, 0, w, h).data); } catch (e) { return true; }
       },
-      // Downscale an image File to a data-URL whose longest side is <= max, preserving aspect ratio.
-      // `quality` is the encoder quality (default 0.85 — the avatar setting); _fitImageToCap steps it
-      // down to land a larger image (a view background) under ASSET_CAP.
-      //
-      // The output format FOLLOWS THE SOURCE. JPEG has no alpha channel, and a canvas starts as
-      // transparent BLACK — so re-encoding a transparent PNG as JPEG turned every transparent pixel
-      // opaque black, which is how a logo watermark became a black slab. Transparency therefore switches
-      // the encoder to WebP, which carries alpha and is typically smaller than JPEG for graphic-style
-      // images; a browser that won't encode WebP returns PNG instead, which also keeps alpha. Opaque
-      // photos still take JPEG, where it is the better trade. safeImgSrc already admits all three.
+      // Downscale an image File to a data-URL whose longest side is <= max, preserving aspect ratio, at
+      // encoder quality `quality` (default 0.85). The format follows the source (Images.encoderFor):
+      // JPEG for an opaque photo, WebP where there is transparency. safeImgSrc admits both, and the PNG a
+      // browser returns when it cannot encode WebP.
       _resizeImageFile: function(file, max, quality) {
         var self = this;
         var q = (typeof quality === 'number') ? quality : 0.85;
@@ -5688,7 +5672,7 @@ function createVueApp() {
               try {
                 var ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, cw, ch);
-                var type = self._canvasHasAlpha(ctx, cw, ch) ? 'image/webp' : 'image/jpeg';
+                var type = Images.encoderFor(self._canvasHasAlpha(ctx, cw, ch));
                 resolve(canvas.toDataURL(type, q));
               } catch (err) { reject(new Error(self.t('msg.image_process_failed'))); }
             };
@@ -5702,20 +5686,16 @@ function createVueApp() {
       // store (Firebase Spark, where Storage needs the Blaze plan). Same trade the profile avatar makes.
       // Rows live in _assets__active as { id, src }; a referring value is the string 'asset:<id>'.
 
-      // Downscale `file` until its data URI fits ASSET_CAP, trading resolution then quality. Rejects with
-      // msg.image_too_large when even the smallest step is too big (a pathological source, since 900px at
-      // q0.6 is tens of KB for any real photo). Note the quality steps do nothing on a browser that falls
-      // back to PNG for a transparent source (PNG is lossless) — there the resolution steps do the work.
-      _fitImageToCap: function(file, cap) {
-        var self = this, limit = cap || ASSET_CAP;
-        var steps = [{ max: 1600, q: 0.8 }, { max: 1600, q: 0.65 }, { max: 1200, q: 0.65 }, { max: 900, q: 0.6 }];
-        var attempt = function(i) {
-          if (i >= steps.length) return Promise.reject(new Error(self.t('msg.image_too_large')));
-          return self._resizeImageFile(file, steps[i].max, steps[i].q).then(function(dataUrl) {
-            return dataUrl.length <= limit ? dataUrl : attempt(i + 1);
-          });
-        };
-        return attempt(0);
+      // Downscale `file` until its data URI fits `cap` (ASSET_CAP by default), walking `steps` (the asset
+      // ladder by default: resolution, then quality). Rejects with msg.image_too_large when even the last
+      // step is too big. The quality steps do nothing on a browser that falls back to PNG for a transparent
+      // source (PNG is lossless); there the resolution steps do the work.
+      _fitImageToCap: function(file, cap, steps) {
+        var self = this;
+        var resize = function(max, q) { return self._resizeImageFile(file, max, q); };
+        return Images.fit(resize, cap || ASSET_CAP, steps || Images.ASSET_STEPS).catch(function(e) {
+          throw (e && e.tooLarge) ? new Error(self.t('msg.image_too_large')) : e;
+        });
       },
       // Store a picked file as the asset `id`, resolving to the reference to save on the row / in config.
       // Deterministic ids (bg_<view>) overwrite in place, so replacing a background leaves no orphan.
@@ -5816,20 +5796,17 @@ function createVueApp() {
       // Opted-in display name for an email, or '' if none. The single lookup into profilesByEmail;
       // callers pick their own fallback (the Users table wants a blank cell, the rsvp roster wants the
       // email so the row still reads as someone).
-      profileName: function(email) { return (this.profilesByEmail[(email || '').toLowerCase()] || {}).name || ''; },
+      profileName: function(email) { return Profiles.name(this.profilesByEmail, email); },
       // Avatar data-URL for an email, or '' if none. Own email short-circuits to myProfile.picture so your
       // face renders everywhere immediately — even before (or without) opting into sharing, and fresher than
       // any cached copy in profilesByEmail.
       profilePicture: function(email) {
-        var e = (email || '').toLowerCase();
-        if (e && e === (this.currentUserEmail || '').toLowerCase()) return this.myProfile.picture || '';
-        return (this.profilesByEmail[e] || {}).picture || '';
+        return Profiles.picture(this.profilesByEmail, email, { email: this.currentUserEmail, picture: this.myProfile.picture });
       },
-      // The DISPLAY label for a user identified by email, honoring the profile-privacy rule: their shared
-      // name, else the raw email ONLY for an admin (sensitive), else '' — so a non-admin surface hides an
-      // unshared user entirely rather than leaking their address. The single source of this rule, shared by
-      // user-avatar, user-ref, and the rsvp roster.
-      userLabel: function(email) { return this.profileName(email) || (this.isAdmin ? (email || '') : ''); },
+      // The DISPLAY label for a user identified by email, honoring the profile-privacy rule (Profiles.label):
+      // their shared name, else the raw email ONLY for an admin, else ''. The single source of this rule,
+      // shared by user-avatar, user-ref, and the rsvp roster.
+      userLabel: function(email) { return Profiles.label(this.profilesByEmail, email, this.isAdmin); },
       // User-linked lists (Option C): load the viewer-safe { list: { value: picture } } projection the
       // server computed for us (non-admins already stripped of unshared users + all emails). Backends
       // without the feature (legacy) just leave it empty.
