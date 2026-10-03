@@ -138,7 +138,8 @@ One real gap falls out: `access:` is validated for **any** markdown view and hon
 doc-embed branch, but a `markdown`+`sources` view embedded elsewhere renders its grid without consulting
 it. Severity is low — Firestore rules govern the rows, and the *body* is not rendered on that path at
 all, so nothing leaks — but an author cannot see that their `access:` is partly inert. Either honour it
-on both paths or reject it on that shape at load.
+on both paths or reject it on that shape at load. *(Honoured on both paths: `embed-view` gates every branch on
+`canAccessPage`.)*
 
 Also: `schema-normalize.js`'s header lists **nine** kinds; there are twelve.
 
@@ -400,7 +401,7 @@ seven entries to find out what is left.
 |---|---|---|---|
 | **Set `Csp.REPORT_ENDPOINT` and deploy the collector** | 7 | one line + `npm run csp:sync` | The mechanism landed; only the URL is missing, and it cannot be guessed — it belongs to the deployment. Deploy `supabase/functions/csp-report/` (free), then set the constant. |
 | **`board` / `form` / `timeline` have no embed branch** | 4 | small code, large question | Three product questions wearing one costume: does a board keep drag-between-lanes inside a document? Does a `form` in a page mean a second submit target, or the same one twice? Does a timeline embed want its own date window or the page's? The dispatch set is asserted, so this is a recorded answer rather than an accident. |
-| **`access:` on a `markdown` + `sources` view is half-honoured** | 4 | small | Honoured at nav and in the doc-embed branch, ignored when such a view is embedded elsewhere (it renders its grid, and the body — the protected part — is not rendered on that path at all, so nothing leaks). Either honour it on both paths or reject the combination at load. |
+| ~~**`access:` on a `markdown` + `sources` view is half-honoured**~~ *(landed)* | 4 | small | Honoured on both paths now: `embed-view` asks `canAccessPage` before any branch draws, so a sourced page embedded elsewhere renders nothing for a member without the grant, as it already did at nav and in the doc branch. Pinned by *access: on a sourced page holds where it is embedded*. |
 | **The extraction series** — feeds | 6 | ongoing | Five cuts made (`brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`, `bundle.js`). Ranked by how much of each seam is pure and how much duplication it already costs, which is how feeds went from first to last. |
 
 One thing deliberately **not** on this list: promoting `firebase.json` from `Report-Only` to enforcing.
