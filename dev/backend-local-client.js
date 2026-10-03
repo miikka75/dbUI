@@ -27,6 +27,7 @@ backend = {
   moveRow: (tableId, rowData, fromTab, toTab) => _post('moveRow', { tableId, rowData, fromTab, toTab }),
 };
 if (typeof _devUploadFile === 'function') backend.uploadFile = _devUploadFile; // image-column upload (dev store)
+if (typeof _devListFiles === 'function') backend.listFiles = _devListFiles;     // feed sweep (dev store)
 if (typeof _devSubscribeTable === 'function') backend.subscribeTable = _devSubscribeTable; // live sync (SSE)
 
 init();

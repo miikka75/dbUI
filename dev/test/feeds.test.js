@@ -601,3 +601,36 @@ describe('feeds.js — a subscriber table must keep each row to its owner', () =
     assert.deepEqual(errs(t), []);
   });
 });
+
+// The orphan sweep's decision. Its failure in one direction blanks a LIVE calendar (healed by the next
+// pass); in the other it leaves a stray file serving its last snapshot for ever. So what counts as
+// accounted for is asserted case by case rather than left to the e2e test.
+describe('feeds.js — strayIds: which stored feed files nothing records', () => {
+  const PP = {
+    pp: { feed: 'per-person', feedSubscribers: { table: 'subs', idColumn: 'fid', urlColumn: 'url', activeColumn: 'active' },
+          calendar: { sources: [{ table: 'events', dateColumn: 'on', filter: { who: '@me' } }] } },
+    // Switched off: its subscriber rows no longer account for anything.
+    gone: { calendar: { sources: [{ table: 'events', dateColumn: 'on' }] }, feedSubscribers: { table: 'old_subs', idColumn: 'fid' } }
+  };
+  const rows = { subs: [{ fid: 'live1', active: 'yes' }, { fid: 'left1', active: 'no' }, { fid: '' }], old_subs: [{ fid: 'old1' }] };
+  const rowsOf = (t) => rows[t] || [];
+  const paths = ['feeds/shared1.ics', 'feeds/live1.ics', 'feeds/left1.ics', 'feeds/old1.ics', 'feeds/lost1.ics'];
+
+  it('a shared feed in the folder config, and every subscriber id active or not, is accounted for', () => {
+    assert.deepEqual(Feeds.strayIds(paths, PP, [{ shared: { id: 'shared1', url: 'u' }, pp: { publishing: true } }], rowsOf), ['old1', 'lost1']);
+  });
+
+  it('the union of config copies accounts for an id either one knows', () => {
+    assert.deepEqual(Feeds.strayIds(['feeds/a.ics', 'feeds/b.ics'], {}, [{ x: { id: 'a' } }, { y: { id: 'b' } }], rowsOf), []);
+    assert.deepEqual(Feeds.strayIds(['feeds/a.ics'], {}, [null, undefined], rowsOf), ['a']);
+  });
+
+  it('a path not shaped like a feed file is never a candidate', () => {
+    assert.deepEqual(Feeds.strayIds(['feeds/sub/x.ics', 'feeds/x.txt', 'anna@x/1_pic.png', 'feeds/../x.ics'], {}, [], rowsOf), []);
+  });
+
+  it('idOfPath inverts pathFor', () => {
+    assert.equal(Feeds.idOfPath(Feeds.pathFor('abc_9-Z')), 'abc_9-Z');
+    assert.equal(Feeds.idOfPath('feeds/.ics'), '');
+  });
+});

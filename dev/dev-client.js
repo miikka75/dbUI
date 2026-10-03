@@ -68,6 +68,13 @@ function _devUploadFile(file, opts) {
     reader.readAsDataURL(file);
   });
 }
+// The stored paths under a prefix, for the feed sweep — the dev store's counterpart of listAll.
+function _devListFiles(prefix) {
+  return _post('listFiles', { prefix: prefix }).then(function(r) {
+    if (!r || !Array.isArray(r.paths)) throw new Error((r && r.error) || 'List failed');
+    return r.paths;
+  });
+}
 
 var backend_users = {
   getUsers: function() { return _post('getUsers', {}); },
