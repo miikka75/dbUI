@@ -7647,6 +7647,11 @@ function createVueApp() {
           events: function(name, win) { return vm.calEventsFor(name, win); },
           canAdd: function(name) { return vm.canCalendarAdd(name); },
           addOnDay: function(name, date) { vm.calendarAddOnDay(name, date); }
+        },
+        // The shared UI elements (CLAUDE.md "UI conventions"): words, and the clipboard with its notice.
+        uiHost: {
+          t: function(k) { return vm.t(k); },
+          copy: function(text) { return vm.copyText(text); }
         }
       };
     }
@@ -8197,7 +8202,8 @@ function createVueApp() {
   // address" has always worked. style / class / name / data-testid fall through to the field.
   app.component('copy-field', {
     props: { value: { type: String, default: '' }, label: { type: String, default: undefined } },
-    methods: { copy: function() { appInstance.copyText(this.value); } },
+    inject: ['uiHost'],
+    methods: { copy: function() { this.uiHost.copy(this.value); } },
     template: '<v-text-field :model-value="value" :label="label" readonly density="compact" variant="outlined" hide-details'
       + ' append-inner-icon="mdi-content-copy" @click:append-inner="copy()"></v-text-field>'
   });
@@ -8209,14 +8215,16 @@ function createVueApp() {
   app.component('confirm-x', {
     props: { armed: Boolean, action: { type: String, default: 'delete' }, dense: Boolean },
     emits: ['click'],
+    inject: ['uiHost'],
     computed: {
       spec: function() {
         return this.action === 'archive' ? { icon: 'mdi-archive-outline', color: 'warning' } : { icon: 'mdi-close', color: 'error' };
       },
       // Literal keys, so the translation-key check sees each one asked for.
       text: function() {
-        if (this.action === 'archive') return this.armed ? appInstance.t('board.confirm_archive') : appInstance.t('board.archive');
-        return this.armed ? appInstance.t('btn.confirm_delete') : appInstance.t('btn.delete');
+        var t = this.uiHost.t;
+        if (this.action === 'archive') return this.armed ? t('board.confirm_archive') : t('board.archive');
+        return this.armed ? t('btn.confirm_delete') : t('btn.delete');
       }
     },
     template: '<v-btn :icon="armed ? \'mdi-check-circle\' : spec.icon" :size="dense ? \'x-small\' : \'small\'" variant="text"'
@@ -8239,11 +8247,13 @@ function createVueApp() {
       + '<span :class="(section || full) ? \'ml-2\' : \'d-none d-sm-inline ml-2\'">{{ label }}</span></v-btn>'
   });
 
-  // A collapsible Settings section's heading. `flag` names the a.settings key holding "collapsed".
+  // A collapsible Settings section's heading, bound to the caller's flag:
+  // <section-toggle v-model:collapsed="a.settings._collapseX">. The caller owns where "collapsed" lives.
   app.component('section-toggle', {
-    props: { flag: { type: String, required: true }, title: { type: String, default: '' } },
-    computed: { open: function() { return !appInstance.settings[this.flag]; } },
-    methods: { toggle: function() { appInstance.settings[this.flag] = !appInstance.settings[this.flag]; } },
+    props: { collapsed: { type: Boolean, default: false }, title: { type: String, default: '' } },
+    emits: ['update:collapsed'],
+    computed: { open: function() { return !this.collapsed; } },
+    methods: { toggle: function() { this.$emit('update:collapsed', !this.collapsed); } },
     template: '<p class="text-subtitle-2 mb-2" style="cursor:pointer" role="button" tabindex="0" :aria-expanded="String(open)"'
       + ' @click="toggle()" @keydown.enter.prevent="toggle()">'
       + '<v-icon size="small">{{ open ? \'mdi-chevron-down\' : \'mdi-chevron-right\' }}</v-icon> {{ title }}</p>'
