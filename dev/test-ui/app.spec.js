@@ -1909,6 +1909,58 @@ test.describe('Renaming in a two-column lookup', () => {
   });
 });
 
+test.describe('Deleting in the lookup editor reaches the mirror cluster', () => {
+  // Adding a lookup row writes every table that mirrors it (_createBlankRow walks withMirrors), so
+  // deleting one has to as well. The editor deleted only the lookup's own active row, which left each
+  // mirror row behind with no row it mirrors -- the asymmetry the grid's delete never had.
+  const SCH = {
+    defaultLanguage: 'en',
+    tables: {
+      ref_teams: { isLookup: true, columns: [{ name: 'club', type: 'text' }, { name: 'team', type: 'text' }] },
+      team_cards: { columns: [{ name: 'team', type: 'text', syncFrom: 'ref_teams' }, { name: 'note', type: 'text' }] }
+    },
+    views: [{ name: 'cards', sources: ['team_cards'], mode: 'union', columns: ['team', 'note'] }],
+    nav: { items: [{ view: 'cards' }] }
+  };
+  const ids = (page, tableId) => page.request.post('/api/getTableData', { data: { tableId } })
+    .then((r) => r.json()).then((d) => (d.rows || []).map((r) => r.id).sort());
+
+  async function openTeams(page) {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    for (const [id, club, team] of [['t1', 'north', 'u10'], ['t2', 'north', 'u12'], ['t3', 'south', 'u10']]) {
+      await page.request.post('/api/putRow', { data: { tableId: 'ref_teams', data: { id, club, team }, tab: 'active' } });
+      await page.request.post('/api/putRow', { data: { tableId: 'team_cards', data: { id, team, note: '' }, tab: 'active' } });
+    }
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => appInstance.selectRefTable('ref_teams'));
+    await expect.poll(() => page.evaluate(() => appInstance.refTableData.length), { timeout: 6000 }).toBe(3);
+  }
+
+  test('deleting one row deletes its mirror row too', async ({ page }) => {
+    await openTeams(page);
+    await page.evaluate(() => {
+      const row = appInstance.dataCache.ref_teams.find((r) => r.id === 't2');
+      appInstance.deleteRefRow(row);   // arms
+      appInstance.deleteRefRow(row);   // acts
+    });
+    await expect.poll(() => ids(page, 'ref_teams')).toEqual(['t1', 't3']);
+    await expect.poll(() => ids(page, 'team_cards')).toEqual(['t1', 't3']);
+  });
+
+  test('deleting a group deletes every child\'s mirror row, and one undo brings them all back', async ({ page }) => {
+    await openTeams(page);
+    await page.evaluate(() => { appInstance.deleteRefParent('north'); appInstance.deleteRefParent('north'); });
+    await expect.poll(() => ids(page, 'ref_teams')).toEqual(['t3']);
+    await expect.poll(() => ids(page, 'team_cards')).toEqual(['t3']);
+    await page.evaluate(() => Undo.undo());
+    await expect.poll(() => ids(page, 'ref_teams')).toEqual(['t1', 't2', 't3']);
+    await expect.poll(() => ids(page, 'team_cards')).toEqual(['t1', 't2', 't3']);
+  });
+});
+
 test.describe('Translatable lists', () => {
   // A lookup TABLE may be named in `translatableLists`, and then its values become list.<table>.<value>
   // keys. Two things went wrong with that, both of which look like the feature working.
