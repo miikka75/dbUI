@@ -820,3 +820,30 @@ describe('supabase RLS — _status is a vocabulary, not a prohibition', () => {
       { id: 'st8', owner: 'viewer@x.com', s: 'coming', _status: 'active' }), 'ok');
   });
 });
+
+// ==================================================================================================
+// The feeds_* storage policies are stripped with the rest of the storage section, so their gate is
+// asserted here as a function: who may publish a calendar feed. It must answer as the client's
+// canPublishFeeds does (userAllowedTables === null) -- narrower and an editor's republish is refused,
+// wider and a narrow grant could overwrite everybody's calendar with the subset it sees.
+describe('supabase RLS — app_has_full_access, the feed publishing gate', () => {
+  before(async () => {
+    await seed('_users', 'fa-admin@x.com', { role: 'admin', user: 'fa-admin@x.com', tables: [] });
+    await seed('_users', 'fa-all@x.com', { role: 'editor', user: 'fa-all@x.com', tables: 'all' });
+    await seed('_users', 'fa-map@x.com', { role: 'editor', user: 'fa-map@x.com', tables: { tasks: 'rw' }, rwTables: ['tasks'] });
+    await seed('_users', 'fa-list@x.com', { role: 'viewer', user: 'fa-list@x.com', tables: ['tasks'] });
+  });
+  const full = async (email) => { await as(email); return (await q('select public.app_has_full_access() as b')).rows[0].b; };
+
+  it('an admin, and a grant of every table, have full access', async () => {
+    assert.equal(await full('fa-admin@x.com'), true);
+    assert.equal(await full('fa-all@x.com'), true);
+  });
+
+  it('a grant of some tables, an unregistered account and no email do not', async () => {
+    assert.equal(await full('fa-map@x.com'), false);
+    assert.equal(await full('fa-list@x.com'), false);
+    assert.equal(await full('stranger@x.com'), false);
+    assert.equal(await full(null), false);
+  });
+});

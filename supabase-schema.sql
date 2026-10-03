@@ -74,6 +74,13 @@ returns boolean language sql stable security definer set search_path = public as
   select public.app_no_users() or public.app_role() = 'admin'
 $$;
 
+-- FULL access: an admin, or a grant of every table -- the client's userAllowedTables === null, which is
+-- what may publish a calendar feed (the feeds_* storage policies below).
+create or replace function public.app_has_full_access()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(public.app_is_admin() or public.app_user_data() -> 'tables' = '"all"'::jsonb, false)
+$$;
+
 -- Table access for a store name like 'tasks__active' -> table 'tasks'. tables == 'all' or membership.
 create or replace function public.app_has_table_access(coll text)
 returns boolean language sql stable security definer set search_path = public as $$
@@ -648,7 +655,7 @@ end $$;
 
 grant execute on function public.app_kv_merge(text, text, jsonb) to authenticated;
 
--- ---------- Storage bucket for image uploads (optional; needed only if you use image columns) --------
+-- ---------- Storage bucket for uploads (optional; needed for image columns and calendar feeds) ---------
 -- Mirrors storage.rules (the Firebase Storage gate) condition for condition. Uploads land at
 -- `<lowercased-user-email>/<ts>_<name>` (backend-supabase uploadFile), so the first path segment IS the
 -- owner, exactly as it is on Firebase.
@@ -670,7 +677,7 @@ grant execute on function public.app_kv_merge(text, text, jsonb) to authenticate
 -- earlier version -- which is exactly the deployment that has none.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('uploads', 'uploads', true, 10485760,
-        array['image/png','image/jpeg','image/gif','image/webp','image/avif','image/bmp'])
+        array['image/png','image/jpeg','image/gif','image/webp','image/avif','image/bmp','text/calendar'])
 on conflict (id) do update
   set public             = excluded.public,
       file_size_limit    = excluded.file_size_limit,
@@ -713,6 +720,38 @@ create policy uploads_delete on storage.objects
     bucket_id = 'uploads'
     and public.app_is_registered()
     and (storage.foldername(name))[1] = public.app_email()
+  );
+
+-- Calendar feeds: feeds/<id>.ics, published by a FULL-access member only -- an admin, or a grant of every
+-- table. That is the client's canPublishFeeds (userAllowedTables === null): anyone narrower would publish
+-- the subset they can see over everybody's calendar. Mirrors storage.rules' `match /feeds/{file}`.
+-- Subscribers read through the public URL, and the sweep lists through uploads_read; both are already
+-- covered by the bucket being public. No delete: revoking a feed is overwriting it with an empty calendar.
+-- 'feeds' is never an email, so these cannot overlap the per-member folders above. The MIME list is the
+-- bucket's, not per folder, so text/calendar is accepted in a member's own folder too -- a calendar file
+-- in their own space, under the same registration and size gates as an image.
+drop policy if exists feeds_insert on storage.objects;
+drop policy if exists feeds_update on storage.objects;
+
+create policy feeds_insert on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'uploads'
+    and name ~ '^feeds/[A-Za-z0-9_-]{1,64}\.ics$'
+    and public.app_has_full_access()
+  );
+
+-- Republishing and blanking are an upsert at the same path, which is an UPDATE of the existing object.
+create policy feeds_update on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'uploads'
+    and name ~ '^feeds/[A-Za-z0-9_-]{1,64}\.ics$'
+    and public.app_has_full_access()
+  )
+  with check (
+    bucket_id = 'uploads'
+    and name ~ '^feeds/[A-Za-z0-9_-]{1,64}\.ics$'
   );
 
 -- =====================================================================================================
