@@ -34,6 +34,7 @@
   //    subscribeTable(store, fn)     optional; returns an unsubscribe. Omit when there are no other
   //                                  clients to hear from (a browser-local database).
   //    uploadFile(file, opts)        optional; resolves to a URL. Its presence enables the image uploader.
+  //    listFiles(prefix)             optional; resolves to the stored paths under a prefix (feed sweep).
   //    subscribeLoads                optional flag, see app-core's _liveWatch.
   function createKvBackend(S, P) {
     function storeName(table, tab) { return H.storeName(table, tab); }
@@ -433,6 +434,9 @@
     // stub that resolves to nothing would light up UI for something the host cannot do.
     if (typeof P.uploadFile === 'function') {
       backend.uploadFile = function (file, opts) { return P.uploadFile(file, opts); };
+    }
+    if (typeof P.listFiles === 'function') {
+      backend.listFiles = function (prefix) { return P.listFiles(prefix); };
     }
     if (typeof P.subscribeTable === 'function') {
       backend.subscribeTable = function (tableId, tab, onChange) {

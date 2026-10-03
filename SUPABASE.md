@@ -330,6 +330,7 @@ function's absolute URL and paying for Blaze to receive reports the Edge Functio
 | `noUsers()` bootstrap = admin | `app_no_users()` (+ the `app_no_users` RPC for the client) |
 | Firebase Storage download URL | Public `uploads` bucket public URL |
 | `storage.rules` (registration + own-email folder + 10 MB + `image/*`) | `uploads_insert/update/delete` policies + bucket `file_size_limit` / `allowed_mime_types` |
+| `storage.rules` `match /feeds/{file}` (full access, `<id>.ics`, `text/calendar`) | `feeds_insert/update` policies gated on `app_has_full_access()`; `text/calendar` in the bucket's MIME list |
 | `validProfile` / `validLink` / `validRequest` | `app_valid_shape(store, key, value)` |
 
 **Testing the RLS**
