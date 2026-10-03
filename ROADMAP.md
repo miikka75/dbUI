@@ -1071,7 +1071,7 @@ Cost: a pure function (schema + what the database holds -> an inventory), Node-t
 deletes reuse writes that already exist. No engine module, no view kind. The same panel is the natural
 home for the example-drift notice Settings already shows.
 
-### A subscribable calendar feed *(shared feeds landed in #174; the per-person engine, the subscriber's own UI and the admin's Settings row have since landed — the orphan sweep is what remains)*
+### A subscribable calendar feed *(shared feeds landed in #174; the per-person engine, the subscriber's own UI and the admin's Settings row and the orphan sweep have since landed — what remains is storage rules that let a real backend accept the files)*
 
 A URL a calendar client can subscribe to, so an edit reaches a phone without anyone re-exporting. The
 `.ics` export shipped first; the shared-content feed shipped after it, in #174.
@@ -1082,8 +1082,9 @@ render-as-somebody-else path, its subscriber list and its publish loop, each rec
 below beside the reasoning that produced it. `validateSchema` no longer refuses `@me` outright: it
 refuses it on a SHARED feed and requires it on every source of a per-person one.
 
-What remains is **the orphan sweep**; the UI gaps that decided whether anybody could use this have
-landed, and the one left (a calendar built in Settings cannot be per-person) is recorded as not worth
+The orphan sweep has landed too (see *Orphans* below). What remains is **the storage rules**: neither
+shipped rule set lets an admin write `feeds/` — see *The storage rules do not admit a feed* at the end of
+this entry. The UI gaps that decided whether anybody could use this have landed, and the one left (a calendar built in Settings cannot be per-person) is recorded as not worth
 building yet — see *What is not built* at the end of this entry. The four-way delivery table is
 kept because it records what was considered, but it no longer describes a choice anyone has to make.
 
@@ -1302,9 +1303,28 @@ orphan that has been blanked is an empty calendar, which is harmless, and blanki
 sweep may run over the same file repeatedly without needing to be sure. That is what makes the sweep
 safe to write before it is possible to be certain which files are live.
 
-Not built. It is the right shape for a periodic admin action rather than a write-triggered one, and it
-should be entered with step 4 rather than before it, since the loop is what starts producing files in
-quantity.
+**Landed** as an admin's button, Settings → Calendars → *Empty stray links* (`sweepFeedFiles`, deciding
+through the pure `Feeds.strayIds`). What the build settled:
+
+- **A button, not a boot pass.** A blanked orphan is still listed next time, so every sweep re-blanks
+  every link ever revoked. Harmless, since blanking is idempotent, but a cost that grows for ever is not
+  one to pay on every admin's boot.
+- **The record is read fresh, and a failed read stops the sweep.** This client's config and rows are
+  from boot; another admin may have published since, and a file minted after our copy reads as stray.
+  So the folder config and every subscriber table are fetched again and UNIONED with the cache — the
+  union only ever accounts for more. A failed read cannot be treated as empty (`_fetchTable` does exactly
+  that, which is why the sweep reads through `getTableData` itself): an unread subscriber table makes
+  every live per-person file look stray.
+- **Accounted for:** every `id` in `appConfig.feeds`, including entries whose view has gone (Settings
+  lists those with their Stop, so they are seen, not stray); and every id in a per-person feed's
+  subscriber table, active or not — an unsubscribed row's file is the publish pass's to blank and clear.
+  A feed switched off falls out of both, which is the fourth orphan above.
+- **One race stays open:** another client's pass between its upload and its row write. That file is
+  blanked, and that feed's next pass writes it again — the safe direction.
+- **The dev store had to split per database first.** Every dev server wrote `dev/uploads/feeds/`, so one
+  database's sweep would have emptied another's calendars, and a test's sweep the developer's own. Each
+  database now keeps `<db>.uploads/` beside it (`:memory:` a temp dir); files uploaded before the split
+  are still served from `dev/uploads`.
 
 #### Step 4 landed: the pass, its order, and when it runs
 
@@ -1403,7 +1423,16 @@ in the UI. Recorded here rather than left to be discovered, because "the engine 
   server's file store ignored the requested path, so on a local install every republish minted a new
   link and revocation blanked a file that was never written. It now keeps `feeds/<id>.ics` at its path
   and serves it as `text/calendar`.
-- **The orphan sweep** (above): `listFiles(prefix)` plus blanking what nothing accounts for.
+- ~~**The orphan sweep**~~ **Landed** (see *Orphans* above): `listFiles(prefix)` on Firebase, Supabase and
+  the dev store, plus blanking what nothing accounts for.
+- **The storage rules do not admit a feed.** Found while building the sweep. `storage.rules` and
+  `supabase-schema.sql` allow writes only under `<caller's email>/`, and the Supabase bucket allows only
+  `image/*` — so `feeds/<id>.ics` as `text/calendar` is refused on both, and publishing works only on the
+  dev store or a deployment that added its own policy. The fix is a `feeds/` rule: writes by a
+  full-access member only (the same `canPublishFeeds` gate, in rules), `text/calendar` added to the
+  bucket's MIME list, reads public like the bucket's. Listing (the sweep) needs `list` on Firebase; the
+  Supabase select policy already covers it. Not done here, because it widens who may write to the
+  bucket and deserves its own review.
 - ~~**A per-person feed cannot be stopped.**~~ **Landed** as planned below, plus two things the build found. A blank that
   failed used to clear its row anyway, stranding a live file nothing named; a row now keeps its id until its
   blank lands, which is what lets the next pass retry it. And the queue alone was not enough: the pass Stop
@@ -2757,10 +2786,9 @@ section is the one failure mode it has: a stale proposal reads exactly like a li
 convention at the top of this file exists for precisely that, and is now applied to the feed.
 
 **The per-person feed's ENGINE has since been built** — guard, render-as, subscriber list, publish
-loop — so what was "genuinely unbuilt" when this paragraph was first written is now the UI and the
-orphan sweep. Both are ranked inside the feed's own entry rather than here, because neither is a
-feature anyone would choose between: one finishes something half-delivered, the other cleans up after
-it.
+loop — and since then the UI and the orphan sweep. What is left is the storage rules that let a real
+backend accept a feed file at all, recorded in the feed's own entry. It comes before anything ranked
+here: it is the difference between a shipped feature and one that only works on the dev server.
 
 The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
 schema today.

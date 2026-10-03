@@ -22,6 +22,9 @@ dev/list-users.json
 dev/*.list-users.json
 dev/data/
 dev/uploads/
+# Each named database's own upload store (feeds-try.db -> feeds-try.uploads/), tests' included.
+dev/*.uploads/
+dev/**/*.uploads/
 
 # The same sidecars written by tests, which run with APP_DB=:memory: (dev/test-ui/.test-<name>.json) or
 # spawn a server per test file (dev/test/.<prefix>-<pid>.<name>.json). Both were committed by accident
