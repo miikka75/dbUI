@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-AVSdx90AAaaay3LyFG6mmKvAAFJJSQS7qCSLkmMSjbA=' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-0r6fCqTWEGbH3GRc900gWv6Z79e+dHBbf3344upBJQk=' https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-AVSdx90AAaaay3LyFG6mmKvAAFJJSQS7qCSLkmMSjbA=' 'sha256-5nBeOlPWd4ATLDIX4ueiL6iNOTwpoRJ4rA1hCykUmvA=' 'sha256-aUSP3iHXn+wbx/QtlsxTn1zM6vC/TZa5knqKKxj8sM8=' https://www.gstatic.com https://apis.google.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' https: data: blob: http://127.0.0.1:* http://localhost:*; connect-src 'self' blob: https://cdn.jsdelivr.net https://*.googleapis.com https://*.supabase.co wss://*.supabase.co http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; frame-src https://*.firebaseapp.com https://accounts.google.com; manifest-src 'self' blob:; worker-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'">
   <!-- CSP violation reporting, installed BEFORE the first fetch below.
        `report-uri` is header-only and a <meta> CSP ignores it, so on GitHub Pages -- which cannot send
        a header at all -- the policy has no way to ask for reports. The page reports for itself
@@ -247,7 +247,7 @@
       var appModulesReady = loadScriptsOrdered([
         '/columns.js', '/access-features.js', '/list-access.js', '/list-users.js', '/calendar.js',
         '/rotation.js', '/rows.js', '/events.js', '/ics.js', '/feeds.js', '/timeline.js', '/embeds.js', '/print.js', '/pivot.js', '/rsvp.js', '/form.js', '/board.js', '/stats.js', '/scan.js',
-        '/brand.js', '/reorder.js', '/nav.js', '/csp-client.js', '/writes.js', '/undo.js', '/migrations.js', '/schema-normalize.js', '/examples.js', '/query.js',
+        '/brand.js', '/reorder.js', '/profiles.js', '/images.js', '/nav.js', '/csp-client.js', '/writes.js', '/undo.js', '/migrations.js', '/schema-normalize.js', '/examples.js', '/query.js',
         '/live-sync.js'
       ]);
 
