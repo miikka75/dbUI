@@ -2281,6 +2281,47 @@ test.describe('v3 embed row controls', () => {
   });
 });
 
+test.describe('access: on a sourced page holds where it is embedded', () => {
+  // `access:` is validated for any markdown view and honoured at nav and in the doc-embed branch. A page
+  // that also has `sources` embeds as its GRID, and that branch never asked: a member without the grant
+  // saw the rows of a page the sidebar hid from them. The rows themselves are still the policy's to
+  // guard (Firestore rules / RLS); this is the app not drawing what the schema author restricted.
+  const SCH = {
+    defaultLanguage: 'en',
+    tables: { notes: { columns: [{ name: 'text', type: 'text' }] }, hr: { columns: [{ name: 'x', type: 'text' }] } },
+    views: [
+      { name: 'staff', kind: 'page', markdown: 'Staff only', sources: ['notes'], mode: 'union', columns: ['text'], access: ['hr'] },
+      { name: 'home', kind: 'page', markdown: 'Home\n\n{{view:staff}}' }
+    ],
+    nav: { items: [{ view: 'home' }, { view: 'staff' }] }
+  };
+
+  test('a member without the grant sees nothing of the embedded page; with it, its rows', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    await page.request.post('/api/putRow', { data: { tableId: 'notes', data: { id: 'n1', text: 'SECRET-ROW' }, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => appInstance.selectTab('home'));
+    await expect(page.locator('.v-main')).toContainText('SECRET-ROW');          // unrestricted: the grid is there
+    // A member granted the page's source but not its access table. userAllowedTables is computed, so the
+    // member is made the way the app makes one.
+    await page.evaluate(() => {
+      const app = appInstance;
+      app.usersLoaded = true;
+      app.userList = [{ key: 'm@x.com', addr: 'm@x.com', role: 'editor', tables: ['notes'] }];
+      app.currentUserEmail = 'm@x.com';
+    });
+    await expect(page.locator('.v-main')).toContainText('Home');
+    await expect(page.locator('.v-main')).not.toContainText('SECRET-ROW');
+    // ...and with the access table granted too, it comes back.
+    await page.evaluate(() => { appInstance.userList = [{ key: 'm@x.com', addr: 'm@x.com', role: 'editor', tables: ['notes', 'hr'] }]; });
+    await expect(page.locator('.v-main')).toContainText('SECRET-ROW');
+  });
+});
+
 test.describe('v3 hide-empty embed', () => {
   const V3 = {
     defaultLanguage: 'en',

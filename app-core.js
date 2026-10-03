@@ -7609,6 +7609,15 @@ function createVueApp() {
         if (this.spec) return this.spec.config || null;
         return (this.type === 'view' ? VIEWS[this.name] : SCHEMA[this.name]) || null;
       },
+      // A view whose `access:` this viewer lacks draws nothing here, whichever branch would have drawn it.
+      // The doc branch always asked (blocks / canEditDoc); a page with `sources` embeds as its GRID, and
+      // that branch did not, so a member saw the rows of a page the sidebar hid from them. canAccessPage
+      // is true for anything that is not a restricted page, so every other embed is untouched.
+      denied: function() {
+        if (!appInstance) return false;
+        var v = this.spec ? this.spec.config : (this.type === 'view' ? VIEWS[this.name] : null);
+        return !appInstance.canAccessPage(v);
+      },
       isCal: function() { return this.type === 'view' && !!(appInstance && appInstance.isCalendarName(this.name)); },
       isRot: function() { return this.type === 'view' && !!(appInstance && appInstance.isRotationName(this.name)); },
       isPiv: function() { return this.type === 'view' && !!(appInstance && appInstance.isPivotName(this.name)); },
@@ -7720,7 +7729,8 @@ function createVueApp() {
       }
     }),
     template: ''
-      + '<calendar-view v-if="kind===\'calendar\'" :name="calName" :embed="true"></calendar-view>'
+      + '<template v-if="denied"></template>'
+      + '<calendar-view v-else-if="kind===\'calendar\'" :name="calName" :embed="true"></calendar-view>'
       + '<rotation-view v-else-if="kind===\'rotation\'" :name="calName" :embed="true"></rotation-view>'
       + '<pivot-view v-else-if="kind===\'pivot\'" :name="calName" :embed="true"></pivot-view>'
       + '<rsvp-view v-else-if="kind===\'rsvp\'" :name="calName" :embed="true"></rsvp-view>'
