@@ -78,10 +78,11 @@ describe('UI conventions', () => {
 describe('views that declare what they need', () => {
   // ROADMAP "View components that declare what they need": a converted component reaches the app only
   // through what it injects, so another host can mount it by providing the same object. The calendar
-  // family and the shared UI elements are converted; calendar-screen, the app's own top-level screen,
+  // family, the shared UI elements and the read-only views are converted; calendar-screen, the app's own top-level screen,
   // deliberately is not.
   const DECLARED = ['cal-event-row', 'cal-month', 'cal-week', 'cal-agenda', 'cal-day-panel', 'calendar-view',
-    'copy-field', 'confirm-x', 'confirm-btn', 'section-toggle'];
+    'copy-field', 'confirm-x', 'confirm-btn', 'section-toggle',
+    'list-value', 'user-avatar', 'user-ref', 'pivot-view', 'timeline-view', 'stats-view'];
   function ownSource(name) {
     const at = core.indexOf("app.component('" + name + "'");
     assert.ok(at >= 0, 'component ' + name + ' is registered');

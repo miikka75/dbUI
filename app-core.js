@@ -7651,7 +7651,27 @@ function createVueApp() {
         // The shared UI elements (CLAUDE.md "UI conventions"): words, and the clipboard with its notice.
         uiHost: {
           t: function(k) { return vm.t(k); },
+          tOr: function(k, fallback) { return vm.tOr(k, fallback); },
           copy: function(text) { return vm.copyText(text); }
+        },
+        // How one stored value reads on screen: its label, a date, the linked person's face.
+        valueHost: {
+          displayValue: function(col, val, ns, viewCfg) { return vm.displayValue(col, val, ns, viewCfg); },
+          colIsDate: function(col) { return vm.colIsDate(col); },
+          dateLabel: function(v) { return vm.dateLabel(v); },
+          listValuePicture: function(col, val, ns) { return vm.listValuePicture(col, val, ns); },
+          profilePicture: function(email) { return vm.profilePicture(email); },
+          userLabel: function(email) { return vm.userLabel(email); }
+        },
+        // The read-only views drawn from a view's rows: which view, its config, and the built result.
+        viewHost: {
+          current: function() { return vm.currentTable; },
+          view: function(name) { return VIEWS[name] || null; },
+          locale: function() { return vm.calLocale(); },
+          color: function(key) { return vm.hashColor(key); },
+          pivot: function(name) { return vm.pivotFor(name); },
+          timeline: function(name) { return vm.timelineFor(name); },
+          stats: function(name) { return vm.statsFor(name); }
         }
       };
     }
@@ -8520,12 +8540,12 @@ function createVueApp() {
     // addresses values positionally (r.cells[i]), which is why the shared unit is compareValues rather
     // than sortByCol (that one takes a column name off a row object).
     data: function() { return { sortCol: null, sortAsc: true }; },
+    inject: ['uiHost', 'valueHost', 'viewHost'],
     computed: {
-      a: function() { return appInstance; },
-      viewName: function() { return this.name || appInstance.currentTable; },
-      cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].pivot) || {}; },
-      viewCfg: function() { return VIEWS[this.viewName] || null; },   // whose obscureNames applies to the axes
-      grid: function() { return appInstance.pivotFor(this.viewName); },
+      viewName: function() { return this.name || this.viewHost.current(); },
+      cfg: function() { return (this.viewCfg && this.viewCfg.pivot) || {}; },
+      viewCfg: function() { return this.viewHost.view(this.viewName); },   // whose obscureNames applies to the axes
+      grid: function() { return this.viewHost.pivot(this.viewName); },
       hasTotals: function() { return !!this.grid.columnTotals; },
       // Row order: the grid's own key order until a header is clicked. Cells are counts/sums (real
       // numbers), which compareValues orders numerically; blanks (an empty cell) sort last either way.
@@ -8538,10 +8558,12 @@ function createVueApp() {
       }
     },
     methods: Object.assign({}, SORT_UI, {
-      head: function(col) { return appInstance.tOr('field.' + col, col); },
-      colLabel: function(k) { return appInstance.displayValue(this.cfg.column, k, '', this.viewCfg); },
-      rowLabel: function(k) { return appInstance.displayValue(this.cfg.row, k, '', this.viewCfg); },
-      cellFmt: function(v) { return (v === '' || v == null) ? '' : (this.cfg.cell ? appInstance.displayValue(this.cfg.cell, v, '', this.viewCfg) : v); }
+      t: function(k) { return this.uiHost.t(k); },
+      tOr: function(k, fallback) { return this.uiHost.tOr(k, fallback); },
+      head: function(col) { return this.tOr('field.' + col, col); },
+      colLabel: function(k) { return this.valueHost.displayValue(this.cfg.column, k, '', this.viewCfg); },
+      rowLabel: function(k) { return this.valueHost.displayValue(this.cfg.row, k, '', this.viewCfg); },
+      cellFmt: function(v) { return (v === '' || v == null) ? '' : (this.cfg.cell ? this.valueHost.displayValue(this.cfg.cell, v, '', this.viewCfg) : v); }
     }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="pivot-view">'
@@ -8549,7 +8571,7 @@ function createVueApp() {
       + '<thead><tr>'
       + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));cursor:pointer" @click="toggleSort(\'__row__\')" :aria-sort="ariaSort(\'__row__\')" data-testid="pivot-sort-row">{{ head(cfg.row) }}</th>'
       + '<th v-for="(c, ci) in grid.columns" :key="c" style="text-align:center;cursor:pointer" @click="toggleSort(ci)" :aria-sort="ariaSort(ci)"><list-value :col="cfg.column" :value="c" :view-cfg="viewCfg"></list-value></th>'
-      + '<th v-if="hasTotals" style="text-align:center;font-weight:700;cursor:pointer" @click="toggleSort(\'__total__\')" :aria-sort="ariaSort(\'__total__\')">{{ a.t(\'pivot.total\') }}</th>'
+      + '<th v-if="hasTotals" style="text-align:center;font-weight:700;cursor:pointer" @click="toggleSort(\'__total__\')" :aria-sort="ariaSort(\'__total__\')">{{ t(\'pivot.total\') }}</th>'
       + '</tr></thead>'
       + '<tbody>'
       + '<tr v-for="r in rows" :key="r.key">'
@@ -8557,10 +8579,10 @@ function createVueApp() {
       + '<td v-for="(v, ci) in r.cells" :key="ci" style="text-align:center">{{ cellFmt(v) }}</td>'
       + '<td v-if="hasTotals" style="text-align:center;font-weight:700">{{ r.total }}</td>'
       + '</tr>'
-      + '<tr v-if="!rows.length"><td :colspan="(grid.columns.length || 1) + 1" style="opacity:0.6;padding:12px">{{ a.t(\'stats.empty\') }}</td></tr>'
+      + '<tr v-if="!rows.length"><td :colspan="(grid.columns.length || 1) + 1" style="opacity:0.6;padding:12px">{{ t(\'stats.empty\') }}</td></tr>'
       + '</tbody>'
       + '<tfoot v-if="hasTotals"><tr>'
-      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:700">{{ a.t(\'pivot.total\') }}</th>'
+      + '<th style="position:sticky;left:0;z-index:1;background:rgb(var(--v-theme-surface));font-weight:700">{{ t(\'pivot.total\') }}</th>'
       + '<td v-for="(t, ci) in grid.columnTotals" :key="ci" style="text-align:center;font-weight:700">{{ t }}</td>'
       + '<td style="text-align:center;font-weight:800">{{ grid.grandTotal }}</td>'
       + '</tr></tfoot>'
@@ -8577,35 +8599,37 @@ function createVueApp() {
   // against — which is the failure percentage math produces at exactly the sizes nobody tests at.
   app.component('timeline-view', {
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    inject: ['uiHost', 'valueHost', 'viewHost'],
     computed: {
-      a: function() { return appInstance; },
-      viewName: function() { return this.name || appInstance.currentTable; },
-      cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].timeline) || {}; },
-      viewCfg: function() { return VIEWS[this.viewName] || null; },   // whose obscureNames applies to the labels
-      chart: function() { return appInstance.timelineFor(this.viewName); },
+      viewName: function() { return this.name || this.viewHost.current(); },
+      cfg: function() { return (this.viewCfg && this.viewCfg.timeline) || {}; },
+      viewCfg: function() { return this.viewHost.view(this.viewName); },   // whose obscureNames applies to the labels
+      chart: function() { return this.viewHost.timeline(this.viewName); },
       cols: function() { return 'minmax(120px,1.4fr) repeat(' + (this.chart.periods.length || 1) + ', minmax(28px,1fr))'; }
     },
     methods: {
+      t: function(k) { return this.uiHost.t(k); },
+      tOr: function(k, fallback) { return this.uiHost.tOr(k, fallback); },
       // The bar's caption, through displayValue so a list value renders as its label and an obscured
       // column stays obscured — the same resolver the grid uses, never String(row[col]).
       label: function(row) {
         var cols = this.cfg.label || [];
         var self = this;
         var out = (Array.isArray(cols) ? cols : [cols]).map(function(c) {
-          return appInstance.displayValue(c, row[c], '', self.viewCfg);
+          return self.valueHost.displayValue(c, row[c], '', self.viewCfg);
         }).filter(Boolean).join(' — ');
-        return out || appInstance.tOr('view.' + this.viewName, this.viewName);
+        return out || this.tOr('view.' + this.viewName, this.viewName);
       },
       periodLabel: function(d) {
         var p = String(d).split('-');
-        return new Intl.DateTimeFormat(appInstance.calLocale(), { day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2]));
+        return new Intl.DateTimeFormat(this.viewHost.locale(), { day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2]));
       },
       // A clipped bar loses its rounded end on that side, so "continues past here" is visible in the
       // shape and not only in the tooltip.
       barStyle: function(b) {
         return {
           gridColumn: (b.offset + 2) + ' / span ' + b.span,
-          background: appInstance.hashColor(this.label(b.row)),
+          background: this.viewHost.color(this.label(b.row)),
           borderTopLeftRadius: b.clippedStart ? '0' : '4px', borderBottomLeftRadius: b.clippedStart ? '0' : '4px',
           borderTopRightRadius: b.clippedEnd ? '0' : '4px', borderBottomRightRadius: b.clippedEnd ? '0' : '4px'
         };
@@ -8625,7 +8649,7 @@ function createVueApp() {
       + '<div :style="barStyle(b)" style="height:16px;grid-row:auto" :title="barTitle(b)" data-testid="timeline-bar"></div>'
       + '</template>'
       + '</div></div>'
-      + '<div v-if="!chart.bars.length" style="opacity:0.6;padding:12px">{{ a.t(\'timeline.empty\') }}</div>'
+      + '<div v-if="!chart.bars.length" style="opacity:0.6;padding:12px">{{ t(\'timeline.empty\') }}</div>'
       + '</component>'
   });
 
@@ -8635,35 +8659,37 @@ function createVueApp() {
   // row to edit, only a number derived from rows that are edited somewhere else.
   app.component('stats-view', {
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    inject: ['uiHost', 'valueHost', 'viewHost'],
     computed: {
-      a: function() { return appInstance; },
-      viewName: function() { return this.name || appInstance.currentTable; },
-      viewCfg: function() { return VIEWS[this.viewName] || null; },   // whose obscureNames applies to rowTiles captions
-      tiles: function() { return appInstance.statsFor(this.viewName).tiles || []; },
+      viewName: function() { return this.name || this.viewHost.current(); },
+      viewCfg: function() { return this.viewHost.view(this.viewName); },   // whose obscureNames applies to rowTiles captions
+      tiles: function() { return this.viewHost.stats(this.viewName).tiles || []; },
       // `rowTiles` are a leaderboard: one per row, so they stack full-width and stay readable at any
       // count. Explicit `tiles` are a scorecard: a handful of them, side by side. Same component, and
       // the difference is a single grid-template rather than two templates to keep in step. Named for
       // the layout rather than the key, so it does not read as a second list beside the `tiles` array.
-      stacked: function() { return !!((VIEWS[this.viewName] || {}).stats || {}).rowTiles; },
+      stacked: function() { return !!((this.viewCfg || {}).stats || {}).rowTiles; },
       gridStyle: function() {
         return this.stacked
           ? 'display:grid;grid-template-columns:1fr;gap:10px'
           : 'display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px';
       }
     },
-    methods: Object.assign({}, ROOT_PROXY, {
+    methods: {
+      t: function(k) { return this.uiHost.t(k); },
+      tOr: function(k, fallback) { return this.uiHost.tOr(k, fallback); },
       // A tile's number, formatted the way the same value would render in a cell: a `latest` tile over a
       // date column should read like that date, not like an ISO string, and a list-backed column should
       // show its label. Numbers with no column behind them (count, or a rowTiles total) pass through.
       fmt: function(t) {
         if (t.value == null) return '—';
-        if (t.column && typeof t.value !== 'number') return appInstance.displayValue(t.column, t.value, '', this.viewCfg);
+        if (t.column && typeof t.value !== 'number') return this.valueHost.displayValue(t.column, t.value, '', this.viewCfg);
         return t.value;
       },
       // A rung's name, translatable like a tile label. A ladder authored as bare numbers has no name,
       // so it shows the threshold reached — which still says which rung is held.
-      tierLabel: function(tier) { return tier.label ? appInstance.tOr(tier.label, tier.label) : tier.at; }
-    }),
+      tierLabel: function(tier) { return tier.label ? this.tOr(tier.label, tier.label) : tier.at; }
+    },
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'pa-4\'" data-testid="stats-view">'
       + '<div :style="gridStyle">'
@@ -8685,7 +8711,7 @@ function createVueApp() {
       // pct is already clamped, so a 138%-of-goal tile shows a full bar plus its real number above it.
       +   '<v-progress-linear v-if="t.display === \'bar\' && t.pct !== null" :model-value="t.pct" :color="t.over ? \'success\' : \'primary\'" height="6" rounded class="mt-2" data-testid="stat-bar"></v-progress-linear>'
       + '</div>'
-      + '<div v-if="!tiles.length" style="opacity:0.6;font-size:0.85rem;padding:8px">{{ a.t(\'stats.empty\') }}</div>'
+      + '<div v-if="!tiles.length" style="opacity:0.6;font-size:0.85rem;padding:8px">{{ t(\'stats.empty\') }}</div>'
       + '</div>'
       + '</component>'
   });
@@ -8865,9 +8891,10 @@ function createVueApp() {
     props: { col: { type: String, required: true }, value: {}, size: { type: [Number, String], default: 18 },
              nsCol: { type: String, default: '' },     // resolve labels/avatars from THIS column's list instead
              viewCfg: { type: Object, default: null } },  // the view whose obscureNames applies (null = the current one)
+    inject: ['valueHost'],
     computed: {
       items: function() {
-        var col = this.col, v = this.value, a = appInstance, cfg = this.viewCfg;
+        var col = this.col, v = this.value, a = this.valueHost, cfg = this.viewCfg;
         if (col === '_period' || a.colIsDate(col)) return (v == null || v === '') ? [] : [{ text: a.dateLabel(v), pic: '' }];
         var arr = Array.isArray(v) ? v : ((v == null || v === '') ? [] : [v]);
         var ns = this.nsCol || '';
@@ -8891,13 +8918,14 @@ function createVueApp() {
   // don't force a second profilesByEmail lookup. `title` falls through onto the avatar for a hover tooltip.
   app.component('user-avatar', {
     props: { email: { type: String, default: '' }, name: { type: String, default: '' }, size: { type: [Number, String], default: 28 }, picture: { type: String, default: '' } },
+    inject: ['valueHost'],
     computed: {
       // A directly-supplied picture (e.g. a list-value's server-projected avatar, where the caller has no
       // email to resolve) wins; otherwise resolve from the email's profile.
-      pic: function() { return window.safeAvatarSrc(this.picture || appInstance.profilePicture(this.email)); },
+      pic: function() { return window.safeAvatarSrc(this.picture || this.valueHost.profilePicture(this.email)); },
       // Given name wins; otherwise the shared email->display-name rule (admins may fall back to the raw
       // email, non-admins get '' -> the generic account icon). Named/pictured users are unaffected.
-      label: function() { return this.name || appInstance.userLabel(this.email); },
+      label: function() { return this.name || this.valueHost.userLabel(this.email); },
       initial: function() { var s = (this.label || '').trim(); return s ? s.charAt(0).toUpperCase() : ''; },
       iconSize: function() { return Math.round(Number(this.size) * 0.6) || 16; }
     },
@@ -8915,7 +8943,8 @@ function createVueApp() {
   // renders a curated list value + its LINKED avatar; here the email IS the identity.
   app.component('user-ref', {
     props: { email: { type: String, default: '' }, name: { type: String, default: '' }, size: { type: [Number, String], default: 20 } },
-    computed: { label: function() { return this.name || appInstance.userLabel(this.email); } },
+    inject: ['valueHost'],
+    computed: { label: function() { return this.name || this.valueHost.userLabel(this.email); } },
     template: ''
       + '<span class="user-ref">'
       + '<user-avatar :email="email" :name="label" :size="size"></user-avatar>'
