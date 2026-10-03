@@ -742,6 +742,9 @@ create policy feeds_insert on storage.objects
   );
 
 -- Republishing and blanking are an upsert at the same path, which is an UPDATE of the existing object.
+-- The gate is in WITH CHECK too, not only USING: permissive policies are OR-ed in each phase, so a row a
+-- member may update under uploads_update (their own folder) could otherwise be RENAMED into feeds/ (a
+-- storage move) and pass here on the path alone.
 create policy feeds_update on storage.objects
   for update to authenticated
   using (
@@ -752,6 +755,7 @@ create policy feeds_update on storage.objects
   with check (
     bucket_id = 'uploads'
     and name ~ '^feeds/[A-Za-z0-9_-]{1,64}\.ics$'
+    and public.app_has_full_access()
   );
 
 -- =====================================================================================================

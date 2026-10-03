@@ -337,7 +337,11 @@ describe('rules parity — a calendar feed is published by full access only, on 
       assert.ok(i > 0, `policy ${p} is missing`);
       const body = SQL.slice(i, i + 400);
       assert.match(body, /name ~ '\^feeds\/\[A-Za-z0-9_-\]\{1,64\}\\.ics\$'/, `${p} does not pin the feed path`);
-      assert.match(body, /app_has_full_access\(\)/, `${p} does not require full access`);
+      // In EVERY phase: permissive policies are OR-ed per phase, so an update's WITH CHECK without the
+      // gate lets a member's own object (passing uploads_update's USING) be renamed into feeds/.
+      const phases = p === 'feeds_update' ? 2 : 1;
+      assert.equal((body.slice(0, body.indexOf(');') + 2).match(/app_has_full_access\(\)/g) || []).length, phases,
+        `${p} does not require full access in every phase`);
     }
     assert.ok(!/create policy feeds_delete/.test(SQL), 'a feed is revoked by blanking, never deleted');
     const b = SQL.slice(SQL.indexOf('insert into storage.buckets'), SQL.indexOf('insert into storage.buckets') + 400);
