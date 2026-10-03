@@ -315,6 +315,36 @@ describe('rules parity — the upload bucket is gated the same way on both backe
   });
 });
 
+describe('rules parity — a calendar feed is published by full access only, on both backends', () => {
+  // The client's canPublishFeeds is userAllowedTables === null: an admin, or a grant of every table.
+  // Both storage layers must answer the same, admit only feeds/<id>.ics, and offer no delete (revoking
+  // a feed is overwriting it with an empty calendar).
+  it('Firebase Storage gates feeds/ on full access, the <id>.ics shape and text/calendar', () => {
+    const i = STORAGE_RULES.indexOf('match /feeds/{file}');
+    assert.ok(i > 0, 'storage.rules has no feeds/ block');
+    const body = STORAGE_RULES.slice(i, STORAGE_RULES.indexOf('allow create', i) + 400);
+    assert.match(STORAGE_RULES, /u\.get\('role', ''\) == 'admin' \|\| u\.get\('tables', ''\) == 'all'/);
+    assert.match(body, /allow create, update: if request\.auth != null\s+&& hasFullAccess\(/);
+    assert.match(body, /file\.matches\('\^\[A-Za-z0-9_-\]\{1,64\}\[\.\]ics\$'\)/);
+    assert.match(body, /contentType\.matches\('text\/calendar\.\*'\)/);
+    assert.doesNotMatch(body, /delete/);
+  });
+
+  it('Supabase gates feeds/ on app_has_full_access and the same path, and the bucket admits text/calendar', () => {
+    assert.match(SQL, /app_has_full_access\(\)[\s\S]{0,200}?app_is_admin\(\) or public\.app_user_data\(\) -> 'tables' = '"all"'::jsonb/);
+    for (const p of ['feeds_insert', 'feeds_update']) {
+      const i = SQL.indexOf('create policy ' + p);
+      assert.ok(i > 0, `policy ${p} is missing`);
+      const body = SQL.slice(i, i + 400);
+      assert.match(body, /name ~ '\^feeds\/\[A-Za-z0-9_-\]\{1,64\}\\.ics\$'/, `${p} does not pin the feed path`);
+      assert.match(body, /app_has_full_access\(\)/, `${p} does not require full access`);
+    }
+    assert.ok(!/create policy feeds_delete/.test(SQL), 'a feed is revoked by blanking, never deleted');
+    const b = SQL.slice(SQL.indexOf('insert into storage.buckets'), SQL.indexOf('insert into storage.buckets') + 400);
+    assert.match(b, /'text\/calendar'/, 'the bucket refuses a calendar file');
+  });
+});
+
 describe('rules parity — a partial write is judged on the MERGED row, on every layer', () => {
   // A cell edit sends only the column it changed (app-core saveField), so the owner column a
   // self-service write is judged by lives on the STORED row, not in the payload. Firestore has this for

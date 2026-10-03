@@ -1071,7 +1071,7 @@ Cost: a pure function (schema + what the database holds -> an inventory), Node-t
 deletes reuse writes that already exist. No engine module, no view kind. The same panel is the natural
 home for the example-drift notice Settings already shows.
 
-### A subscribable calendar feed *(shared feeds landed in #174; the per-person engine, the subscriber's own UI and the admin's Settings row and the orphan sweep have since landed — what remains is storage rules that let a real backend accept the files)*
+### A subscribable calendar feed *(shared feeds landed in #174; the per-person engine, the subscriber's own UI and the admin's Settings row the orphan sweep and the storage rules for `feeds/` have since landed)*
 
 A URL a calendar client can subscribe to, so an edit reaches a phone without anyone re-exporting. The
 `.ics` export shipped first; the shared-content feed shipped after it, in #174.
@@ -1082,9 +1082,8 @@ render-as-somebody-else path, its subscriber list and its publish loop, each rec
 below beside the reasoning that produced it. `validateSchema` no longer refuses `@me` outright: it
 refuses it on a SHARED feed and requires it on every source of a per-person one.
 
-The orphan sweep has landed too (see *Orphans* below). What remains is **the storage rules**: neither
-shipped rule set lets an admin write `feeds/` — see *The storage rules do not admit a feed* at the end of
-this entry. The UI gaps that decided whether anybody could use this have landed, and the one left (a calendar built in Settings cannot be per-person) is recorded as not worth
+The orphan sweep has landed too (see *Orphans* below), and so have the storage rules that let a real
+backend accept a feed file at all. The UI gaps that decided whether anybody could use this have landed, and the one left (a calendar built in Settings cannot be per-person) is recorded as not worth
 building yet — see *What is not built* at the end of this entry. The four-way delivery table is
 kept because it records what was considered, but it no longer describes a choice anyone has to make.
 
@@ -1425,14 +1424,19 @@ in the UI. Recorded here rather than left to be discovered, because "the engine 
   and serves it as `text/calendar`.
 - ~~**The orphan sweep**~~ **Landed** (see *Orphans* above): `listFiles(prefix)` on Firebase, Supabase and
   the dev store, plus blanking what nothing accounts for.
-- **The storage rules do not admit a feed.** Found while building the sweep. `storage.rules` and
-  `supabase-schema.sql` allow writes only under `<caller's email>/`, and the Supabase bucket allows only
-  `image/*` — so `feeds/<id>.ics` as `text/calendar` is refused on both, and publishing works only on the
-  dev store or a deployment that added its own policy. The fix is a `feeds/` rule: writes by a
-  full-access member only (the same `canPublishFeeds` gate, in rules), `text/calendar` added to the
-  bucket's MIME list, reads public like the bucket's. Listing (the sweep) needs `list` on Firebase; the
-  Supabase select policy already covers it. Not done here, because it widens who may write to the
-  bucket and deserves its own review.
+- ~~**The storage rules do not admit a feed.**~~ **Landed.** Found while building the sweep: both shipped
+  rule sets allowed writes only under `<caller's email>/`, and the Supabase bucket only `image/*`, so
+  `feeds/<id>.ics` was refused everywhere but the dev store. Now `storage.rules` has a `match
+  /feeds/{file}` block and `supabase-schema.sql` has `feeds_insert` / `feeds_update` plus `text/calendar`
+  in the bucket. The gate is FULL access on both — an admin, or a grant of every table — because that is
+  the client's `canPublishFeeds`, and the two must agree: narrower and an editor's write-triggered
+  republish is refused (and the client then marks the blob store down); wider and a narrow grant could
+  overwrite everybody's calendar with the subset it sees. No delete rule: revoking is blanking. On
+  Firebase, `read` (get + list) is the publisher's own — subscribers fetch through the download URL's
+  token, which the rules do not see. On Supabase the bucket MIME list is per bucket, not per folder, so
+  a member may now also put a `.ics` in their own folder, under the same registration and size gates.
+  Proven by the storage emulator suite (`npm run test:storage-rules`) and, for the SQL gate, by
+  `app_has_full_access` in the PGlite RLS suite; `rules-parity.test.js` holds the two in step.
 - ~~**A per-person feed cannot be stopped.**~~ **Landed** as planned below, plus two things the build found. A blank that
   failed used to clear its row anyway, stranding a live file nothing named; a row now keeps its id until its
   blank lands, which is what lets the next pass retry it. And the queue alone was not enough: the pass Stop
@@ -2786,9 +2790,8 @@ section is the one failure mode it has: a stale proposal reads exactly like a li
 convention at the top of this file exists for precisely that, and is now applied to the feed.
 
 **The per-person feed's ENGINE has since been built** — guard, render-as, subscriber list, publish
-loop — and since then the UI and the orphan sweep. What is left is the storage rules that let a real
-backend accept a feed file at all, recorded in the feed's own entry. It comes before anything ranked
-here: it is the difference between a shipped feature and one that only works on the dev server.
+loop — and since then the UI, the orphan sweep, and the storage rules without which a real backend
+refused every feed file. Nothing of the feed is ranked here any more.
 
 The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
 schema today.
