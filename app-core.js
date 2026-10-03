@@ -7585,6 +7585,26 @@ function createVueApp() {
           .then(function(r) { if (r.ok) self.hasLocalServer = true; })
           .catch(function() {});
       }
+    },
+    // What a reusable view needs from the app, declared once per view family and injected by name
+    // (`inject: ['calendarHost']`), instead of every component reaching for the global appInstance. Each
+    // member is a function so a computed that calls it tracks whatever root state it reads. Another host
+    // -- a test page, another app -- provides the same object and the component does not change. See
+    // ROADMAP "View components that declare what they need".
+    provide: function() {
+      var vm = this;
+      return {
+        calendarHost: {
+          t: function(k) { return vm.t(k); },
+          locale: function() { return vm.calLocale(); },
+          isMobile: function() { return vm.mobile; },
+          today: function() { return vm._calToday(); },
+          config: function(name) { return (VIEWS[name] && VIEWS[name].calendar) || {}; },
+          events: function(name, win) { return vm.calEventsFor(name, win); },
+          canAdd: function(name) { return vm.canCalendarAdd(name); },
+          addOnDay: function(name, date) { vm.calendarAddOnDay(name, date); }
+        }
+      };
     }
   });
 
@@ -7969,7 +7989,7 @@ function createVueApp() {
   // Top-level view-kind registry: kind -> the component that renders that whole view. Every kind is
   // componentized; the top-level dispatch is a single <component :is="viewComponent"> lookup in ui.html.
   window.VIEW_KINDS = {
-    calendar: 'calendar-view', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', form: 'form-view', stats: 'stats-view', timeline: 'timeline-view', scan: 'scan-view', page: 'page-view', data: 'data-view',
+    calendar: 'calendar-screen', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', form: 'form-view', stats: 'stats-view', timeline: 'timeline-view', scan: 'scan-view', page: 'page-view', data: 'data-view',
     languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view',  // system screens
     level: 'nav-level'                                                                // a nav group's page
   };
@@ -7986,6 +8006,9 @@ function createVueApp() {
 
   // Shared prop contract for the swappable calendar body parts.
   var CAL_BODY_PROPS = { cells: Array, dowNames: Array, days: Array, undated: Array, selected: String };
+  // The calendar parts reach the app only through the injected calendarHost (the root's provide()), so
+  // the whole family -- these parts and calendar-view -- can be mounted by another host.
+  var CAL_T = { t: function(k) { return this.calendarHost.t(k); } };
 
   app.component('cal-month', {
     props: CAL_BODY_PROPS, emits: ['select'],
@@ -8012,7 +8035,8 @@ function createVueApp() {
 
   app.component('cal-agenda', {
     props: CAL_BODY_PROPS,
-    methods: ROOT_PROXY,
+    inject: ['calendarHost'],
+    methods: CAL_T,
     template: ''
       + '<div><template v-for="d in days" :key="d.date">'
       + '<div style="background:rgb(var(--v-theme-on-surface),0.06);padding:4px 12px;font-size:0.72rem;font-weight:600;opacity:0.85">{{ d.label }} · {{ d.events.length }}</div>'
@@ -8027,7 +8051,8 @@ function createVueApp() {
   app.component('cal-day-panel', {
     props: { label: String, events: { type: Array, default: function() { return []; } }, canAdd: { type: Boolean, default: false } },
     emits: ['add'],
-    methods: ROOT_PROXY,
+    inject: ['calendarHost'],
+    methods: CAL_T,
     template: ''
       + '<div><v-divider></v-divider><div style="padding:10px 12px">'
       + '<div style="font-weight:600;margin-bottom:6px">{{ label }} <span style="opacity:0.5;font-weight:400">· {{ events.length }} {{ t(\'cal.items\') }}</span></div>'
@@ -8272,60 +8297,38 @@ function createVueApp() {
   });
 
   // Calendar view: ONE component for both the top-level screen and the {{view:cal}} embed. Holds its
-  // own month/anchor/selected-day state — `name` defaults to the current view (top-level); embeds pass
-  // an explicit name. Composes the shared cal-* parts + calendar model helpers (calEventsFor, cell
-  // builders, i18n). The `embed` flag swaps the outlined-card chrome for a lighter bordered box.
+  // own month/anchor/selected-day state and composes the shared cal-* parts. It reads the app only
+  // through the injected calendarHost and knows nothing of exporting or publishing: the top-level
+  // screen (calendar-screen) puts those controls in the `actions` slot (the toolbar row) and the
+  // `tools` slot (beneath it). The `embed` flag swaps the outlined-card chrome for a lighter bordered box.
   app.component('calendar-view', {
-    props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    props: { name: { type: String, required: true }, embed: { type: Boolean, default: false } },
+    inject: ['calendarHost'],
     data: function() {
-      var nm = this.name || (appInstance && appInstance.currentTable);
-      var cfg = (window.VIEWS[nm] && window.VIEWS[nm].calendar) || {};
-      var today = appInstance ? appInstance._calToday() : '';
-      return { mode: cfg.defaultView || 'month', anchor: today, sel: today };
+      var today = this.calendarHost.today();
+      return { mode: this.calendarHost.config(this.name).defaultView || 'month', anchor: today, sel: today };
     },
     computed: {
-      viewName: function() { return this.name || appInstance.currentTable; },
-      weekStart: function() { var v = window.VIEWS[this.viewName]; return (v && v.calendar && v.calendar.weekStart != null) ? Number(v.calendar.weekStart) : 1; },
-      events: function() { return appInstance ? appInstance.calEventsFor(this.viewName, appInstance._calWindowFor(this.anchor, this.mode, this.weekStart)) : {}; },
-      displayMode: function() { return (appInstance && appInstance.mobile && this.mode === 'month') ? 'list' : (this.mode || 'month'); },
-      monthCells: function() { var ev = this.events; return appInstance._calCellsMonth(this.anchor, this.weekStart).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
-      weekCells: function() { var ev = this.events; return appInstance._calCellsWeek(this.anchor, this.weekStart).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
-      dowNames: function() { var loc = appInstance.calLocale(), ws = this.weekStart, fmt = new Intl.DateTimeFormat(loc, { weekday: 'short' }), out = []; for (var i = 0; i < 7; i++) out.push(fmt.format(new Date(2023, 0, 1 + ((ws + i) % 7)))); return out; },
-      title: function() { var loc = appInstance.calLocale(); if (this.mode === 'week') { var cs = appInstance._calCellsWeek(this.anchor, this.weekStart), f = cs[0].date.split('-'), l = cs[6].date.split('-'); return new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' }).format(new Date(+f[0], +f[1] - 1, +f[2])) + ' – ' + new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(+l[0], +l[1] - 1, +l[2])); } var p = this.anchor.split('-'); return new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, 1)); },
+      weekStart: function() { var c = this.calendarHost.config(this.name); return c.weekStart != null ? Number(c.weekStart) : 1; },
+      events: function() { return this.calendarHost.events(this.name, Calendar.windowFor(this.anchor, this.mode, this.weekStart, this.calendarHost.today())); },
+      displayMode: function() { return (this.calendarHost.isMobile() && this.mode === 'month') ? 'list' : (this.mode || 'month'); },
+      monthCells: function() { var ev = this.events; return Calendar.cellsMonth(this.anchor, this.weekStart, this.calendarHost.today()).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
+      weekCells: function() { var ev = this.events; return Calendar.cellsWeek(this.anchor, this.weekStart, this.calendarHost.today()).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
+      dowNames: function() { var loc = this.calendarHost.locale(), ws = this.weekStart, fmt = new Intl.DateTimeFormat(loc, { weekday: 'short' }), out = []; for (var i = 0; i < 7; i++) out.push(fmt.format(new Date(2023, 0, 1 + ((ws + i) % 7)))); return out; },
+      title: function() { var loc = this.calendarHost.locale(); if (this.mode === 'week') { var cs = this.weekCells, f = cs[0].date.split('-'), l = cs[6].date.split('-'); return new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' }).format(new Date(+f[0], +f[1] - 1, +f[2])) + ' – ' + new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(+l[0], +l[1] - 1, +l[2])); } var p = this.anchor.split('-'); return new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, 1)); },
       selEvents: function() { return this.events[this.sel] || []; },
-      selLabel: function() { if (!this.sel) return ''; var p = this.sel.split('-'); return new Intl.DateTimeFormat(appInstance.calLocale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, +p[2])); },
-      listDays: function() { var ev = this.events; return Object.keys(ev).filter(function(k) { return k !== '__undated__'; }).sort().map(function(k) { var p = k.split('-'); return { date: k, label: new Intl.DateTimeFormat(appInstance.calLocale(), { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: ev[k] }; }); },
+      selLabel: function() { if (!this.sel) return ''; var p = this.sel.split('-'); return new Intl.DateTimeFormat(this.calendarHost.locale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, +p[2])); },
+      listDays: function() { var ev = this.events, loc = this.calendarHost.locale(); return Object.keys(ev).filter(function(k) { return k !== '__undated__'; }).sort().map(function(k) { var p = k.split('-'); return { date: k, label: new Intl.DateTimeFormat(loc, { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: ev[k] }; }); },
       undated: function() { return this.events['__undated__'] || []; },
-      canAdd: function() { return appInstance.canCalendarAdd(this.viewName); },
-      canPublish: function() { return Feeds.isFeed(window.VIEWS[this.viewName]) && appInstance.canPublishFeeds(); },
-      feedUrl: function() { return appInstance.feedUrlFor(this.viewName); },
-      perPerson: function() { return Feeds.isPerPerson(window.VIEWS[this.viewName]); },
-      feedPublishing: function() { return appInstance.feedPublishing(this.viewName); },
-      // Per-person feeds only: a shared feed's link is one bearer credential for everybody, handed out
-      // by whoever publishes it, while a per-person link belongs to the one person it was minted for.
-      canSubscribe: function() { return this.perPerson && appInstance.canSubscribeFeed(this.viewName); },
-      a: function() { return appInstance; },
-      win: function() { return appInstance.calendarIcsFor(this.viewName); },
-      // Blank first: the default is not a language but a RULE ("whichever the reader is using", and for
-      // a feed the deployment default), so it is named rather than left as an empty row.
-      langItems: function() {
-        return [{ title: appInstance.t('cal.lang_auto'), value: '' }].concat(
-          (appInstance.languages || []).map(function(l) { return { title: l.name || l.code, value: l.code }; }));
-      },
-      // The resolved dates, so the effect of '3m' is visible without exporting to find out.
-      coverLabel: function() { var c = appInstance.calendarCoverFor(this.viewName); return c.from + ' – ' + c.toExclusive; },
+      canAdd: function() { return this.calendarHost.canAdd(this.name); },
       body: function() { return window.viewPartFor('calendar', this.displayMode) || 'cal-agenda'; }
     },
-    methods: Object.assign({}, ROOT_PROXY, {
+    methods: Object.assign({}, CAL_T, {
       prev: function() { this.anchor = addIntervals(this.anchor, -1, this.mode === 'week' ? 'weekly' : 'monthly'); },
       next: function() { this.anchor = addIntervals(this.anchor, 1, this.mode === 'week' ? 'weekly' : 'monthly'); },
-      goToday: function() { this.anchor = this.sel = appInstance._calToday(); },
+      goToday: function() { this.anchor = this.sel = this.calendarHost.today(); },
       setMode: function(m) { this.mode = m; },
-      addOnDay: function() { appInstance.calendarAddOnDay(this.viewName, this.sel); },
-      exportIcs: function() { appInstance.downloadIcs(this.viewName); },
-      // On a per-person feed this switches it on, as Settings' Publish does.
-      publish: function() { return this.perPerson ? appInstance.startPerPersonFeed(this.viewName) : appInstance.publishFeed(this.viewName); },
-      setWindow: function(patch) { appInstance.saveCalendarWindow(this.viewName, patch); },
+      addOnDay: function() { this.calendarHost.addOnDay(this.name, this.sel); },
       selectDay: function(d) { this.sel = d; }
     }),
     template: ''
@@ -8339,28 +8342,68 @@ function createVueApp() {
       + '<v-btn value="month" size="small">{{ t(\'cal.month\') }}</v-btn>'
       + '<v-btn value="week" size="small">{{ t(\'cal.week\') }}</v-btn>'
       + '<v-btn value="list" size="small">{{ t(\'cal.list\') }}</v-btn></v-btn-toggle>'
-      // Top-level only: an embedded calendar sits inside someone else's page, where a download button
-      // for just this block is noise -- the same reason the embed has no mode toggle chrome of its own.
-      + '<v-btn v-if="!embed" icon="mdi-calendar-export" size="small" variant="text" @click="exportIcs()" :title="t(\'btn.export_ics\')" data-testid="cal-export-ics"></v-btn>'
+      + '<slot name="actions"></slot></div>'
+      + '<slot name="tools"></slot>'
+      + '<v-divider></v-divider>'
+      + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
+      + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents" :can-add="canAdd" @add="addOnDay"></cal-day-panel>'
+      + '</component>'
+  });
+
+  // The top-level calendar screen: calendar-view plus what only this app's own screen offers -- the .ics
+  // download, publishing a feed, a member's own subscription, and the range and language of the file.
+  // Those are this app's feeds, backend and admin rules rather than part of a calendar, so they live
+  // here and not in the reusable view, and read the root through `a` as the other app screens do.
+  // An embedded calendar sits inside someone else's page, where these controls for one block are noise.
+  app.component('calendar-screen', {
+    computed: {
+      a: function() { return appInstance; },
+      viewName: function() { return appInstance.currentTable; },
+      canPublish: function() { return Feeds.isFeed(window.VIEWS[this.viewName]) && appInstance.canPublishFeeds(); },
+      feedUrl: function() { return appInstance.feedUrlFor(this.viewName); },
+      perPerson: function() { return Feeds.isPerPerson(window.VIEWS[this.viewName]); },
+      feedPublishing: function() { return appInstance.feedPublishing(this.viewName); },
+      // Per-person feeds only: a shared feed's link is one bearer credential for everybody, handed out
+      // by whoever publishes it, while a per-person link belongs to the one person it was minted for.
+      canSubscribe: function() { return this.perPerson && appInstance.canSubscribeFeed(this.viewName); },
+      win: function() { return appInstance.calendarIcsFor(this.viewName); },
+      // Blank first: the default is not a language but a RULE ("whichever the reader is using", and for
+      // a feed the deployment default), so it is named rather than left as an empty row.
+      langItems: function() {
+        return [{ title: appInstance.t('cal.lang_auto'), value: '' }].concat(
+          (appInstance.languages || []).map(function(l) { return { title: l.name || l.code, value: l.code }; }));
+      },
+      // The resolved dates, so the effect of '3m' is visible without exporting to find out.
+      coverLabel: function() { var c = appInstance.calendarCoverFor(this.viewName); return c.from + ' – ' + c.toExclusive; }
+    },
+    methods: Object.assign({}, ROOT_PROXY, {
+      exportIcs: function() { appInstance.downloadIcs(this.viewName); },
+      // On a per-person feed this switches it on, as Settings' Publish does.
+      publish: function() { return this.perPerson ? appInstance.startPerPersonFeed(this.viewName) : appInstance.publishFeed(this.viewName); },
+      setWindow: function(patch) { appInstance.saveCalendarWindow(this.viewName, patch); }
+    }),
+    template: ''
+      + '<calendar-view :name="viewName"><template v-slot:actions>'
+      + '<v-btn icon="mdi-calendar-export" size="small" variant="text" @click="exportIcs()" :title="t(\'btn.export_ics\')" data-testid="cal-export-ics"></v-btn>'
       // The subscription. Offered only to someone who could publish it, because the URL is a bearer
       // credential -- anyone holding the link reads this calendar -- so it is not put in front of people
       // who have no reason to be handing it out.
       // A per-person feed has no single URL, so its icon cannot say "published" by holding one; pressing
       // it runs a pass over every subscriber.
-      + '<v-btn v-if="!embed && canPublish" :icon="(feedUrl || (perPerson && feedPublishing)) ? \'mdi-rss\' : \'mdi-rss-off\'" size="small" variant="text" @click="publish()" :title="t(\'btn.publish_feed\')" data-testid="cal-publish-feed"></v-btn>'
+      + '<v-btn v-if="canPublish" :icon="(feedUrl || (perPerson && feedPublishing)) ? \'mdi-rss\' : \'mdi-rss-off\'" size="small" variant="text" @click="publish()" :title="t(\'btn.publish_feed\')" data-testid="cal-publish-feed"></v-btn>'
       // The subscriber's own control, for a per-person feed: subscribe, their link, its language, and
       // unsubscribe. The link is theirs alone -- it lives in their owner-stamped row, which nobody else
       // reads -- so unlike the publish button above this is offered to every member.
-      + '<v-menu v-if="!embed && canSubscribe" :close-on-content-click="false" location="bottom end">'
+      + '<v-menu v-if="canSubscribe" :close-on-content-click="false" location="bottom end">'
       + '<template v-slot:activator="{ props }"><v-btn v-bind="props" icon="mdi-calendar-sync" size="small" variant="text" :title="t(\'feed.subscribe\')" :aria-label="t(\'feed.subscribe\')" data-testid="cal-subscribe-btn"></v-btn></template>'
       + '<v-card max-width="380" class="pa-3" data-testid="cal-subscribe">'
       + '<feed-subscription :name="viewName"></feed-subscription>'
-      + '</v-card></v-menu></div>'
-      // Export/publish range, on top-level calendars only. Mirrors the rotation toolbar: everyone with
-      // view access may change it, only an admin writes it through. Sits beside the buttons it governs
-      // so "how far does this file reach" is answered where the file is produced, rather than in a
-      // settings screen away from it.
-      + '<div v-if="!embed" class="px-2 pb-2 d-flex align-center flex-wrap" style="gap:8px" data-testid="cal-window">'
+      + '</v-card></v-menu></template>'
+      + '<template v-slot:tools>'
+      // Export/publish range. Mirrors the rotation toolbar: everyone with view access may change it, only
+      // an admin writes it through. Sits beside the buttons it governs so "how far does this file reach"
+      // is answered where the file is produced, rather than in a settings screen away from it.
+      + '<div class="px-2 pb-2 d-flex align-center flex-wrap" style="gap:8px" data-testid="cal-window">'
       + '<v-text-field :model-value="win.back" name="cal-window-back" :label="t(\'cal.window_back\')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ back: $event })" data-testid="cal-window-back"></v-text-field>'
       + '<v-text-field :model-value="win.forward" name="cal-window-forward" :label="t(\'cal.window_forward\')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ forward: $event })" data-testid="cal-window-forward"></v-text-field>'
       // Language of the generated file. Blank means "as I see it" for a download and the deployment
@@ -8368,12 +8411,9 @@ function createVueApp() {
       // cannot guess (a feed has no viewer to inherit from).
       + '<v-select :model-value="win.lang" :items="langItems" item-title="title" item-value="value" name="cal-window-lang" :label="t(\'cal.window_lang\')" density="compact" variant="outlined" hide-details style="max-width:170px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ lang: $event })" data-testid="cal-window-lang"></v-select>'
       + '<span style="font-size:0.75rem;opacity:0.6">{{ coverLabel }}</span></div>'
-      + '<div v-if="!embed && canPublish && feedUrl" class="px-2 pb-2 d-flex align-center" style="gap:8px" data-testid="cal-feed-url">'
+      + '<div v-if="canPublish && feedUrl" class="px-2 pb-2 d-flex align-center" style="gap:8px" data-testid="cal-feed-url">'
       + '<copy-field :value="feedUrl" :label="t(\'cal.feed_url\')" style="font-size:0.8rem"></copy-field></div>'
-      + '<v-divider></v-divider>'
-      + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
-      + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents" :can-add="canAdd" @add="addOnDay"></cal-day-panel>'
-      + '</component>'
+      + '</template></calendar-view>'
   });
 
   // --- Top-level view-kind components (registry-dispatched) --------------------------------------

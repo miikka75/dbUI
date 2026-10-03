@@ -371,6 +371,94 @@ One thing deliberately **not** on this list: promoting `firebase.json` from `Rep
 It is not a task until somebody deploys to Firebase Hosting, and a CSP on a host nothing serves from is
 what finding 3 was about in the first place.
 
+### View components that declare what they need — the other half of finding 6 *(step 1 landed: the calendar)*
+
+Finding 6 extracts logic out of the root's `methods`. This is the other side of the same monolith, the
+components, and it is what actually stops a feature leaving the app. The calendar's engines
+(`calendar.js`, `events.js`, `ics.js`) could be copied into another project today. Its screen could not:
+`calendar-view` makes 28 calls through `appInstance.*` and reads `window.VIEWS` 5 more times
+(`calEventsFor`, `calLocale`, `_calCellsMonth`, `canCalendarAdd`, `publishFeed`, `downloadIcs`, …).
+Across the registered components the count is about 210, led by `embed-view` (36), `board-view` (35),
+`calendar-view` (33) and `data-cell` (24).
+
+**What that costs today, without anyone wanting a library.**
+
+- `appInstance` is a module variable assigned only after `app.mount` returns, so every reach-through
+  either guards (`appInstance ? appInstance.t(k) : k`, the whole of `ROOT_PROXY`) or assumes. A
+  component's `data()` runs during mount, before the assignment. `calendar-view` guards its `data()` and
+  its `events` computed, but not `monthCells` or `title`, which happen to run late enough to work.
+- A component's dependencies cannot be read off it. What `calendar-view` needs is spread through a
+  110-line object, so the only way to find it out is to grep. The only test tier for any view's UI is
+  Playwright against the whole app.
+- The part that already works shows the shape: `cal-month` and `cal-week` take `CAL_BODY_PROPS` and
+  emit `select`, and touch nothing else. They are the only calendar pieces that could move today.
+
+**The shape: props for data the parent has, `inject` for services the app has.** Vue's own
+`provide`/`inject` is the mechanism, so nothing new is built. The root's `provide()` option, where
+`this` already exists, returns one small service per view FAMILY (`calendarHost`, …), and that removes
+the not-yet-mounted window. Components declare `inject: ['calendarHost']` and call
+`this.calendarHost.t(…)` instead of reaching for a global. `ROOT_PROXY` shrinks as families move off it,
+and goes once nothing reusable spreads it. A parent that knows something (an embed
+knows its view name and that it is embedded) still passes it as a prop. A user's action (add on a day,
+publish, download) goes up as an emit or through a named service method. It never changes root state
+directly.
+
+This does **not** remove the dependency: `calendar-view` still needs the app's events, permissions and
+locale. What changes is that it declares them, so another host, or a test, can provide them.
+
+**Order: rank by how small the service each view needs turns out to be**, which is finding 6's "how much
+is pure" rule seen from the component side.
+
+1. *(landed)* `calendar-view` and its `cal-*` parts. Its body parts were already done, its events
+   already built behind `Events.build`'s ctx, and it is the case that prompted this.
+2. `confirm-x`, `confirm-btn`, `section-toggle`, `copy-field`: the CLAUDE.md shared elements. They
+   reach the root only for `t` and arming, and they are the ones meant to be reused.
+3. `pivot-view`, `timeline-view`, `stats-view`, `rotation-view`: 4–6 calls each.
+4. `board-view`, `embed-view`, `data-cell` last. They carry the most calls because they edit rows, and
+   the write path is still the root's (finding 6's remaining seams come first there).
+
+**Out of scope:** the `a: appInstance` templates (`data-view`, `settings-view`, `calendar-editor`,
+`languages-view`, `lookup-view`). They are the app's own screens, not reusable views, and exposing the
+root to them is honest. Also out of scope: publishing any of this as packages. That is worth doing only
+when a second project actually consumes something, and until then copying one file is cheaper than
+versioning it.
+
+**What would tell us it is wrong:** an injected service that mirrors the root one method per call site.
+That moves the coupling without reducing it. If a view needs more than about ten service members, its
+boundary is in the wrong place. Fix that boundary before converting the next component.
+
+**Proof per step:** the view's existing Playwright specs pass unchanged, and the component holds no
+`appInstance` or `window.VIEWS` reference. Each converted component joins the list that
+`ui-conventions.test.js` holds to the second check.
+
+Cost: one small PR per group.
+
+#### Step 1 landed: what the calendar settled
+
+**The feed controls were the boundary, and they left the view.** Counted, `calendar-view` needed about
+twenty members from the root, past this entry's own limit. Twelve of them were never the calendar's: the
+`.ics` download, Publish, a member's own subscription, and the file's range and language are this app's
+feeds, backend and admin rules. They now live in `calendar-screen`, the top-level screen
+(`VIEW_KINDS.calendar`), which fills two slots of `calendar-view`: `actions` (the toolbar row) and
+`tools` (beneath it). An embed fills neither, which is what its `!embed` guards used to say one by one.
+`calendar-screen` reads the root through `a` like the other app screens, and that is honest for the
+same reason. `feed-subscription` and `feed-status` therefore stay app screens too, and are off the list:
+a feed cannot leave the app without its backend, so injecting them would buy nothing.
+
+**What is left is eight members:** `t`, `locale`, `isMobile`, `today`, `config(name)`,
+`events(name, window)`, `canAdd(name)`, `addOnDay(name, date)`. The grid math goes straight to
+`calendar.js` (`Calendar.cellsMonth` / `cellsWeek` / `windowFor` with `today()`), not through the root's
+`_cal*` wrappers, which stay for the specs that call them. `name` is now required: the screen passes
+`currentTable` rather than the view guessing it.
+
+**To mount the calendar elsewhere** you need `calendar.js`, `rotation.js` (for `addIntervals`), the
+`cal-*` components, `calendar-view`, `VIEW_PARTS.calendar`, and a provider for `calendarHost`.
+`events.js` is the natural `events()` for a dbUI-shaped schema; another host returns its own
+`{ 'YYYY-MM-DD': [{ id, label, title, color }] }`.
+
+**The guard is in place:** `ui-conventions.test.js` fails if any calendar component names
+`appInstance`, `ROOT_PROXY`, `VIEWS` or `SCHEMA`.
+
 ### Supabase setup — what a fresh project still costs, and what is worth automating
 
 Prompted by a direct question after the CSP collector went in: does `SUPABASE.md` carry every step, and
@@ -2764,6 +2852,11 @@ it.
 
 The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
 schema today.
+
+*View components that declare what they need* sits beside finding 6's extraction series, not ahead
+of it. Neither fixes anything that is wrong on screen; both pay back in tests and in what can be moved
+out later. Its first step (`calendar-view`) is cheap enough to do whenever the calendar is next open
+for another reason.
 
 `groupBy.having` (recorded inside *Empty groups*, in Shipped) is unranked on purpose. It is a genuine
 gap — there is no predicate over an aggregated row — but it was named there to stop it being built as
