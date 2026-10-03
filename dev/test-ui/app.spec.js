@@ -2077,6 +2077,25 @@ test.describe('Rotation rosters from a 2-D lookup', () => {
     await expect(page.locator('table tbody')).not.toContainText('Wash up');
   });
 
+  test('the top-level screen carries the range toolbar, and changing it regenerates the matrix', async ({ page }) => {
+    // The toolbar lives in rotation-screen and reaches rotation-view through a slot; the rows it
+    // regenerates come back in as the view's `rows` prop. Both halves of that seam are checked here.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: DUTY } });
+    await page.request.post('/api/putRow', { data: { tableId: 'ref_duties', tab: 'active',
+      data: { id: 'd1', position: 1, person: 'Ann', task: 'Wash up' } } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => appInstance.selectTab('rota'));
+    const periods = page.getByTestId('rotation-periods').locator('input');
+    await expect(periods).toHaveValue('3');
+    await expect(page.locator('table tbody tr')).toHaveCount(3);
+    await periods.fill('5');
+    await expect(page.locator('table tbody tr')).toHaveCount(5);
+  });
+
   test('a calendar overlaying the same rotation reads it the same way', async ({ page }) => {
     // The overlay builds its own event titles rather than rendering the matrix's cells, so it had its
     // own copy of the resolution -- `field.<slot>` for the heading and displayValue with no namespace

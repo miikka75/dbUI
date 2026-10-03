@@ -7663,6 +7663,16 @@ function createVueApp() {
           profilePicture: function(email) { return vm.profilePicture(email); },
           userLabel: function(email) { return vm.userLabel(email); }
         },
+        // A rotation's generated periods, and how one of its slots is named and labelled.
+        rotationHost: {
+          t: function(k) { return vm.t(k); },
+          isMobile: function() { return vm.mobile; },
+          view: function(name) { return VIEWS[name] || null; },
+          rows: function(name) { return vm.rotationRowsFor(name); },
+          cols: function(name, rows) { return vm.rotationColsFor(name, rows); },
+          slotLabel: function(name, slot) { return vm.rotationSlotLabel(name, slot); },
+          valueColFor: function(name, slot) { return vm.rotationValueColFor(name, slot); }
+        },
         // The read-only views drawn from a view's rows: which view, its config, and the built result.
         viewHost: {
           current: function() { return vm.currentTable; },
@@ -8058,7 +8068,7 @@ function createVueApp() {
   // Top-level view-kind registry: kind -> the component that renders that whole view. Every kind is
   // componentized; the top-level dispatch is a single <component :is="viewComponent"> lookup in ui.html.
   window.VIEW_KINDS = {
-    calendar: 'calendar-screen', rotation: 'rotation-view', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', form: 'form-view', stats: 'stats-view', timeline: 'timeline-view', scan: 'scan-view', page: 'page-view', data: 'data-view',
+    calendar: 'calendar-screen', rotation: 'rotation-screen', pivot: 'pivot-view', rsvp: 'rsvp-view', board: 'board-view', form: 'form-view', stats: 'stats-view', timeline: 'timeline-view', scan: 'scan-view', page: 'page-view', data: 'data-view',
     languages: 'languages-view', lookup: 'lookup-view', settings: 'settings-view',  // system screens
     level: 'nav-level'                                                                // a nav group's page
   };
@@ -8138,19 +8148,22 @@ function createVueApp() {
   // Shared by all three bodies: `_period` is a generated column, everything else is a slot, and a slot's
   // label depends on which SHAPE the rotation is (schema-named -> field.<slot>; rosterRef -> the
   // lookup's own list.<table>.<value>, the same keys its task values use).
+  var ROT_INJECT = ['rotationHost', 'valueHost'];
   var ROT_LABEL = {
-    slotHead: function(col) { return appInstance.rotationSlotLabel(this.view, col); },
+    t: function(k) { return this.rotationHost.t(k); },
+    dateLabel: function(v) { return this.valueHost.dateLabel(v); },
+    slotHead: function(col) { return this.rotationHost.slotLabel(this.view, col); },
     // The column whose list labels THIS slot's cells (see rotationValueColFor). '' for `_period`,
     // which is a generated date and has no list behind it.
-    valueNs: function(col) { return col === '_period' ? '' : (appInstance.rotationValueColFor(this.view, col) || ''); },
+    valueNs: function(col) { return col === '_period' ? '' : (this.rotationHost.valueColFor(this.view, col) || ''); },
     // The rotation view being rendered, for obscureNames -- which is this view's own setting whether it
     // is the whole screen or one block on somebody else's page.
-    viewCfg: function() { return VIEWS[this.view] || null; }
+    viewCfg: function() { return this.rotationHost.view(this.view); }
   };
 
   app.component('rotation-table', {
-    props: ROT_BODY_PROPS,
-    methods: Object.assign({ head: function(col) { return col === '_period' ? this.t('field.period') : this.slotHead(col); } }, ROT_LABEL, ROOT_PROXY),
+    props: ROT_BODY_PROPS, inject: ROT_INJECT,
+    methods: Object.assign({ head: function(col) { return col === '_period' ? this.t('field.period') : this.slotHead(col); } }, ROT_LABEL),
     template: ''
       + '<v-table density="compact"><template v-slot:default>'
       + '<thead><tr><th v-for="col in cols" :key="col">{{ head(col) }}</th></tr></thead>'
@@ -8159,7 +8172,7 @@ function createVueApp() {
   });
 
   app.component('rotation-cards', {
-    props: ROT_BODY_PROPS, methods: Object.assign({}, ROT_LABEL, ROOT_PROXY),
+    props: ROT_BODY_PROPS, inject: ROT_INJECT, methods: ROT_LABEL,
     template: ''
       + '<div style="display:grid; gap:8px; padding:8px">'
       + '<div v-for="row in rows" :key="row.id" style="padding:8px 12px; border:1px solid rgb(var(--v-theme-outline),0.15); border-radius:8px">'
@@ -8169,7 +8182,7 @@ function createVueApp() {
   });
 
   app.component('rotation-list', {
-    props: ROT_BODY_PROPS, methods: Object.assign({}, ROT_LABEL, ROOT_PROXY),
+    props: ROT_BODY_PROPS, inject: ROT_INJECT, methods: ROT_LABEL,
     template: ''
       + '<div style="padding:4px 0">'
       + '<div v-for="row in rows" :key="row.id" style="padding:4px 12px; border-bottom:1px solid rgb(var(--v-theme-outline),0.08); font-size:0.9rem">'
@@ -8494,25 +8507,36 @@ function createVueApp() {
   // Each whole-view card as a component so the top-level render is a registry lookup (VIEW_KINDS via
   // viewComponent) instead of a v-if chain. They read the root model through one `a` (appInstance)
   // proxy — state stays on the root (tests + toolbars unchanged), the template just relocates here.
-  // Rotation view — name/embed parameterized like calendar-view. Top-level (embed=false) shows the
-  // anchor/range/rotateEvery config toolbar and reads the already-generated currentData; an embed
-  // (embed=true, from a page/markdown) is toolbar-less and generates its rows via rotationRowsFor, so
-  // a rotation renders identically inline and top-level (the old empty embed-view path is retired).
+  // Rotation view: ONE component for both the top-level screen and the {{view:x}} embed, like
+  // calendar-view. It reads the app only through rotationHost. `rows` is passed by a parent that already
+  // has them (the top-level screen's generated currentData); an embed omits it and the view generates
+  // its own, so a rotation renders identically inline and top-level. The per-person settings toolbar is
+  // the screen's (rotation-screen), put in the `toolbar` slot.
   app.component('rotation-view', {
-    props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
+    props: { name: { type: String, required: true }, embed: { type: Boolean, default: false }, rows: { type: Array, default: null } },
+    inject: ['rotationHost'],
     computed: {
-      a: function() { return appInstance; },
-      viewName: function() { return this.name || appInstance.currentTable; },
-      rows: function() { return this.embed ? appInstance.rotationRowsFor(this.viewName) : (appInstance.isRotationView ? appInstance.currentData : []); },
-      cols: function() { return appInstance.rotationColsFor(this.viewName, this.rows); },
+      shownRows: function() { return this.rows || this.rotationHost.rows(this.name); },
+      cols: function() { return this.rotationHost.cols(this.name, this.shownRows); },
       slotCols: function() { return this.cols.filter(function(c) { return c !== '_period'; }); },
-      layout: function() { var v = VIEWS[this.viewName]; return (v && (v.layout || (v.rotation && v.rotation.layout))) || 'table'; },
-      displayLayout: function() { return (appInstance.mobile && this.layout === 'table') ? 'card' : this.layout; },
+      layout: function() { var v = this.rotationHost.view(this.name); return (v && (v.layout || (v.rotation && v.rotation.layout))) || 'table'; },
+      displayLayout: function() { return (this.rotationHost.isMobile() && this.layout === 'table') ? 'card' : this.layout; },
       bodyComponent: function() { return (window.viewPartFor && window.viewPartFor('rotation', this.displayLayout)) || 'rotation-list'; }
     },
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'">'
-      + '<template v-if="!embed">'
+      + '<template v-if="$slots.toolbar"><slot name="toolbar"></slot><v-divider></v-divider></template>'
+      + '<component :is="bodyComponent" :cols="cols" :slot-cols="slotCols" :rows="shownRows" :view="name"></component>'
+      + '</component>'
+  });
+
+  // The top-level rotation screen: rotation-view plus this app's per-person settings for it -- the
+  // anchor, the range, how often slots rotate -- and Print. Like calendar-screen it is the app's own
+  // screen and reads the root through `a`; an embed shows the rotation without them.
+  app.component('rotation-screen', {
+    computed: { a: function() { return appInstance; } },
+    template: ''
+      + '<rotation-view :name="a.currentTable" :rows="a.isRotationView ? a.currentData : []"><template v-slot:toolbar>'
       + '<div class="d-flex align-center flex-wrap pa-2" style="gap:10px 12px">'
       + '<v-text-field :model-value="a.rotationAnchorForView" name="rotation-anchor" type="date" :label="a.t(\'settings.rotation_anchor\')" density="compact" variant="outlined" hide-details style="max-width:175px" :disabled="!a.canMutateCurrent" @update:model-value="a.saveRotationAnchor(a.currentTable, $event)" data-testid="rotation-anchor"></v-text-field>'
       + '<div class="d-flex align-center" style="gap:2px">'
@@ -8524,10 +8548,7 @@ function createVueApp() {
       + '<v-btn v-if="a.rotationRotateEveryOverridden" icon="mdi-restore" size="small" variant="text" :disabled="!a.canMutateCurrent" @click="a.saveRotationRotateEvery(a.currentTable, null)" :title="a.t(\'btn.reset\')" data-testid="rotation-every-reset"></v-btn>'
       + '<v-spacer></v-spacer>'
       + '<v-btn v-if="a.canPrintView" icon="mdi-printer" size="small" variant="text" @click="a.printView()"></v-btn></div>'
-      + '<v-divider></v-divider>'
-      + '</template>'
-      + '<component :is="bodyComponent" :cols="cols" :slot-cols="slotCols" :rows="rows" :view="viewName"></component>'
-      + '</component>'
+      + '</template></rotation-view>'
   });
 
   // Pivot (cross-tab) view — name/embed parameterized like calendar/rotation. Reads the pure Pivot.build
