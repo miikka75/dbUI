@@ -371,7 +371,7 @@ One thing deliberately **not** on this list: promoting `firebase.json` from `Rep
 It is not a task until somebody deploys to Firebase Hosting, and a CSP on a host nothing serves from is
 what finding 3 was about in the first place.
 
-### View components that declare what they need — the other half of finding 6 *(steps 1–2 landed: the calendar, the shared elements)*
+### View components that declare what they need — the other half of finding 6 *(steps 1–3 landed except `rotation-view`)*
 
 Finding 6 extracts logic out of the root's `methods`. This is the other side of the same monolith, the
 components, and it is what actually stops a feature leaving the app. The calendar's engines
@@ -416,7 +416,13 @@ is pure" rule seen from the component side.
    needed no service at all: the flag is the caller's data, so it became
    `v-model:collapsed="a.settings._collapseX"` instead of a `flag` name the component looked up on the
    root.
-3. `pivot-view`, `timeline-view`, `stats-view`, `rotation-view`: 4–6 calls each.
+3. *(landed except `rotation-view`)* `pivot-view`, `timeline-view`, `stats-view`. They share
+   `viewHost` (seven members: `current`, `view`, `locale`, `color`, and one builder each: `pivot`,
+   `timeline`, `stats`). Drawing a value turned out to be its own service: `list-value`, `user-avatar`
+   and `user-ref` inject `valueHost` (`displayValue`, `colIsDate`, `dateLabel`, `listValuePicture`,
+   `profilePicture`, `userLabel`), and every view that prints a cell uses it. `uiHost` gained `tOr`.
+   `rotation-view` is the calendar's case again: its anchor/range/rotate-every toolbar and Print are this
+   app's per-user settings, so it splits into a screen and a view the same way, as its own step.
 4. `board-view`, `embed-view`, `data-cell` last. They carry the most calls because they edit rows, and
    the write path is still the root's (finding 6's remaining seams come first there).
 
