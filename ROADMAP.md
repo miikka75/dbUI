@@ -371,7 +371,7 @@ One thing deliberately **not** on this list: promoting `firebase.json` from `Rep
 It is not a task until somebody deploys to Firebase Hosting, and a CSP on a host nothing serves from is
 what finding 3 was about in the first place.
 
-### View components that declare what they need — the other half of finding 6 *(step 1 landed: the calendar)*
+### View components that declare what they need — the other half of finding 6 *(steps 1–2 landed: the calendar, the shared elements)*
 
 Finding 6 extracts logic out of the root's `methods`. This is the other side of the same monolith, the
 components, and it is what actually stops a feature leaving the app. The calendar's engines
@@ -411,8 +411,11 @@ is pure" rule seen from the component side.
 
 1. *(landed)* `calendar-view` and its `cal-*` parts. Its body parts were already done, its events
    already built behind `Events.build`'s ctx, and it is the case that prompted this.
-2. `confirm-x`, `confirm-btn`, `section-toggle`, `copy-field`: the CLAUDE.md shared elements. They
-   reach the root only for `t` and arming, and they are the ones meant to be reused.
+2. *(landed)* `confirm-x`, `confirm-btn`, `section-toggle`, `copy-field`: the CLAUDE.md shared
+   elements. `uiHost` is two members, `t` and `copy`. `confirm-btn` needed nothing. `section-toggle`
+   needed no service at all: the flag is the caller's data, so it became
+   `v-model:collapsed="a.settings._collapseX"` instead of a `flag` name the component looked up on the
+   root.
 3. `pivot-view`, `timeline-view`, `stats-view`, `rotation-view`: 4–6 calls each.
 4. `board-view`, `embed-view`, `data-cell` last. They carry the most calls because they edit rows, and
    the write path is still the root's (finding 6's remaining seams come first there).

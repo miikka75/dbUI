@@ -803,7 +803,7 @@
                  published links, building a calendar) stays admin-only inside it. -->
             <template v-if="a.isAdmin || a.myFeeds().length">
             <v-divider class="my-4"></v-divider>
-            <section-toggle flag="_collapseCalendars" :title="a.t('settings.feeds')" data-testid="calendars-section-toggle"></section-toggle>
+            <section-toggle v-model:collapsed="a.settings._collapseCalendars" :title="a.t('settings.feeds')" data-testid="calendars-section-toggle"></section-toggle>
             <div v-show="!a.settings._collapseCalendars" class="ml-5" data-testid="calendars-body">
             <!-- Calendars an admin builds here rather than in the schema document. Stored in the folder
                  config beside the other per-view settings, merged into VIEWS at load. Creating one
@@ -906,7 +906,7 @@
             </template>
             <template v-if="a.isAdmin">
             <v-divider class="my-4"></v-divider>
-            <section-toggle flag="_collapseImport" :title="a.t('settings.import_export')" data-testid="import-section-toggle"></section-toggle>
+            <section-toggle v-model:collapsed="a.settings._collapseImport" :title="a.t('settings.import_export')" data-testid="import-section-toggle"></section-toggle>
             <div v-show="!a.settings._collapseImport" class="ml-5" data-testid="import-body">
             <!-- Each chooser sits with the button it governs: one says what the file will CARRY, the
                  other which of its parts an import will APPLY. Wrapping rows, so the chooser drops under
@@ -973,7 +973,7 @@
                  `views[x].background` stay the shipped defaults these override. Uploaded bytes go to _assets.
                  Collapsed by default: one row per entry is tall, and expanded it would push the sections below
                  out of view (which also stops v-img, an intersection-loaded component, rendering the avatar). -->
-            <section-toggle flag="_collapseAppearance" :title="a.t('settings.appearance')" data-testid="appearance-section-toggle"></section-toggle>
+            <section-toggle v-model:collapsed="a.settings._collapseAppearance" :title="a.t('settings.appearance')" data-testid="appearance-section-toggle"></section-toggle>
             <!-- Theme (the deployment's palette) and the per-entry looks below it: everything about how the app
                  LOOKS, in one section. -->
             <div v-show="!a.settings._collapseAppearance" class="ml-5" data-testid="appearance-body">
@@ -1098,7 +1098,7 @@
             </template>
             <template v-if="a.usersLoaded && a.userList.length && a.isAdmin">
             <v-divider class="my-4"></v-divider>
-            <section-toggle flag="_collapseUsers" :title="a.t('settings.user_access_title')" data-testid="users-section-toggle"></section-toggle>
+            <section-toggle v-model:collapsed="a.settings._collapseUsers" :title="a.t('settings.user_access_title')" data-testid="users-section-toggle"></section-toggle>
             <!-- Outside the fold: someone waiting for access is the one thing here that cannot wait. -->
             <template v-if="a.accessRequests.length">
               <p class="text-subtitle-2 mb-1">{{ a.t('access.pending_requests') }}</p>

@@ -78,17 +78,19 @@ describe('UI conventions', () => {
 describe('views that declare what they need', () => {
   // ROADMAP "View components that declare what they need": a converted component reaches the app only
   // through what it injects, so another host can mount it by providing the same object. The calendar
-  // family is converted; calendar-screen, the app's own top-level screen, deliberately is not.
-  const DECLARED = ['cal-event-row', 'cal-month', 'cal-week', 'cal-agenda', 'cal-day-panel', 'calendar-view'];
+  // family and the shared UI elements are converted; calendar-screen, the app's own top-level screen,
+  // deliberately is not.
+  const DECLARED = ['cal-event-row', 'cal-month', 'cal-week', 'cal-agenda', 'cal-day-panel', 'calendar-view',
+    'copy-field', 'confirm-x', 'confirm-btn', 'section-toggle'];
   function ownSource(name) {
     const at = core.indexOf("app.component('" + name + "'");
     assert.ok(at >= 0, 'component ' + name + ' is registered');
     return core.slice(at, core.indexOf('\n  });', at));
   }
-  it('the calendar components never reach the root or the schema globals directly', () => {
+  it('converted components never reach the root or the schema globals directly', () => {
     for (const name of DECLARED) {
       const reach = ownSource(name).match(/appInstance|ROOT_PROXY|\bVIEWS\b|\bSCHEMA\b/g) || [];
-      assert.deepEqual(reach, [], name + ' reaches past its injected calendarHost');
+      assert.deepEqual(reach, [], name + ' reaches past what it injects');
     }
   });
 });
