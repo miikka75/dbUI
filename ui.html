@@ -533,19 +533,18 @@
       <v-icon :icon="node.icon" color="primary"></v-icon>
       <h2 class="text-h6" style="margin:0">{{ node.title }}</h2>
     </div>
-    <v-row v-if="a.levelDisplay(node) === 'tiles'" dense data-testid="nav-level-tiles">
-      <v-col v-for="c in node.children" :key="c.id" cols="12" sm="6" md="4" lg="3">
-        <v-card variant="outlined" class="h-100" :data-testid="'nav-level-item-' + c.id" @click="a.selectTab(c.id)">
-          <!-- An entry's image is the tile's cover, cropped to 16:9 around its focus; without one, the icon. -->
-          <img v-if="c.image && a.assetSrc(c.image)" :src="a.assetSrc(c.image)" class="nav-tile-img" :style="{ objectPosition: 'center ' + (c.focus || 'center') }" loading="lazy" alt="" :data-testid="'nav-tile-img-' + c.id">
-          <v-card-item>
-            <template v-if="!(c.image && a.assetSrc(c.image))" v-slot:prepend><v-icon :icon="c.icon" color="primary" size="32"></v-icon></template>
-            <v-card-title class="text-wrap">{{ c.title }}</v-card-title>
-          </v-card-item>
-          <v-card-text v-if="c.description" style="opacity:0.75">{{ c.description }}</v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
+    <!-- The shared tile (image-tile, as the gallery layout uses): an entry's image is the cover, cropped to
+         16:9 around its focus; without one the tile has no picture and the entry's icon sits by the title. -->
+    <tile-grid v-if="a.levelDisplay(node) === 'tiles'" min="280px" data-testid="nav-level-tiles">
+      <image-tile v-for="c in node.children" :key="c.id" :src="c.image ? a.assetSrc(c.image) : ''" :focus="c.focus || 'center'"
+                  :img-testid="'nav-tile-img-' + c.id" :data-testid="'nav-level-item-' + c.id" @click="a.selectTab(c.id)" v-slot="{ bare }">
+        <v-card-item>
+          <template v-if="bare" v-slot:prepend><v-icon :icon="c.icon" color="primary" size="32"></v-icon></template>
+          <v-card-title class="text-wrap">{{ c.title }}</v-card-title>
+        </v-card-item>
+        <v-card-text v-if="c.description" style="opacity:0.75">{{ c.description }}</v-card-text>
+      </image-tile>
+    </tile-grid>
     <v-list v-else border rounded :lines="node.children.some(function(c) { return c.description; }) ? 'two' : 'one'">
       <v-list-item v-for="c in node.children" :key="c.id" :title="c.title" :subtitle="c.description" append-icon="mdi-chevron-right" :data-testid="'nav-level-item-' + c.id" @click="a.selectTab(c.id)">
         <template #prepend>
