@@ -530,6 +530,21 @@
       ]
     },
     {
+      "name": "notes_gallery",
+      "kind": "data",
+      "sources": [
+        "notes"
+      ],
+      "mode": "union",
+      "layout": "gallery",
+      "columns": [
+        "photo",
+        "title",
+        "author",
+        "date"
+      ]
+    },
+    {
       "name": "combined_page",
       "kind": "page",
       "markdown": "{{t:view.combined.header}}\n\n{{view:combined}}\n\n## Attendance\n\n{{view:attendance}}\n\n## Archived tasks\n\n{{table:tasks@archive?}}\n\n## Notes\n\n{{table:notes}}\n\n{{t:view.combined.footer}}"
@@ -1040,6 +1055,11 @@
           },
           {
             "table": "notes"
+          },
+          {
+            "view": "notes_gallery",
+            "icon": "mdi-image-multiple-outline",
+            "description": "The notes as pictures"
           }
         ]
       }
