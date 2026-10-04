@@ -142,6 +142,10 @@ function mergeImportedConfig(currentConfig, importedConfig, mode) {
 // side only fails there rather than in production on one backend). _fitImageToCap re-encodes until an
 // image fits, so this bound is what decides achievable background quality (~1600px JPEG).
 var ASSET_CAP = 900000;
+// The blob-store tier's cap, in BYTES of the re-encoded file. Firebase's storage.rules and the Supabase
+// bucket both refuse 10 MB and over; 2 MB at most 2560px is lightbox quality with room to spare, and keeps
+// a gallery of fifty pictures from being a hundred megabytes to scroll through.
+var UPLOAD_CAP = 2 * 1024 * 1024;
 
 // --- View background rendering modes ---
 // `fit` names an intent instead of exposing raw CSS: an enum keeps validateSchema able to reject a
@@ -5699,6 +5703,29 @@ function createVueApp() {
           throw (e && e.tooLarge) ? new Error(self.t('msg.image_too_large')) : e;
         });
       },
+      // An image cell's picked file, stored where this deployment can: the blob store when there is one
+      // (re-encoded to at most 2560px, under UPLOAD_CAP), else the _assets table (saveAsset: 1600px, under
+      // ASSET_CAP). Both re-encode, which also drops the photo's metadata, GPS position included, before it
+      // reaches a store anyone can read. Resolves to the value the cell saves: a URL or 'asset:<id>'.
+      //
+      // `uploadFile` is a CAPABILITY, not proof the store works: on a Spark project Storage needs Blaze,
+      // so the put fails at runtime. The first failure falls back and is remembered for the session, so
+      // the next upload goes straight to the database tier instead of failing first every time.
+      storeImage: function(file, opts) {
+        var self = this;
+        if (!/^image\//.test((file && file.type) || '')) return Promise.reject(new Error(this.t('msg.choose_image')));
+        var toAsset = function() { return self.saveAsset('img_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8), file); };
+        if (!this.canUploadFiles() || this._imageStoreDown) return toAsset();
+        return this._fitImageToCap(file, Images.capChars(UPLOAD_CAP), Images.STORE_STEPS).then(function(dataUrl) {
+          var b = Images.dataUrlBytes(dataUrl);
+          var ext = { 'image/webp': '.webp', 'image/png': '.png' }[b.type] || '.jpg';
+          var name = String(file.name || 'image').replace(/\.[^.]*$/, '') + ext;
+          return self.uploadFile(new File([b.bytes], name, { type: b.type }), opts || {}).catch(function() {
+            self._imageStoreDown = true;
+            return toAsset();
+          });
+        });
+      },
       // Store a picked file as the asset `id`, resolving to the reference to save on the row / in config.
       // Deterministic ids (bg_<view>) overwrite in place, so replacing a background leaves no orphan.
       saveAsset: function(id, file) {
@@ -7856,27 +7883,14 @@ function createVueApp() {
       // address than an asset: reference, so the paste-a-URL field is not offered over its bytes.
       isInline: function(v) { return String(v || '').indexOf('data:') === 0; },
       // image column: store the picked file and save a REFERENCE onto the row (never the bytes inline).
-      // Two sinks, tried in order:
-      //   1. the backend blob store (Firebase/Supabase Storage, the dev file store) -> row holds a URL;
-      //   2. the _assets table -> row holds 'asset:<id>', a data URI kept in the database.
-      // The fallback fires on absence AND on rejection, and the rejection half is the load-bearing one:
-      // canUploadFiles() is a CAPABILITY check, not an availability one — backend-firebase exposes
-      // uploadFile whenever Storage initialized, so on a Spark project (Storage needs Blaze) the presence
-      // test passes and the put() fails at runtime. Without the catch, that user could never attach a file.
+      // Where it is stored, and how large, is the root's storeImage: the blob store's URL, or 'asset:<id>'.
       uploadImage: function(item, col, ev) {
         var self = this, file = ev.target.files && ev.target.files[0];
         ev.target.value = '';                 // reset so re-picking the same file fires change again
         if (!file) return;
         this.uploadErr = ''; this.uploading = true;
         var table = this.owner || appInstance.currentTable;
-        var toAsset = function() {
-          var id = 'img_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-          return appInstance.saveAsset(id, file);
-        };
-        var stored = appInstance.canUploadFiles()
-          ? appInstance.uploadFile(file, { table: table, col: col, rowId: item.id }).catch(toAsset)
-          : toAsset();
-        stored.then(function(ref) {
+        appInstance.storeImage(file, { table: table, col: col, rowId: item.id }).then(function(ref) {
           self.uploading = false; self.save(item, col, ref);
         }).catch(function(e) {
           self.uploading = false; self.uploadErr = (e && e.message) || self.t('msg.upload_failed');

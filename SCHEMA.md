@@ -238,7 +238,7 @@ hand. Reversible from the archive tab like any other archived row.
 | `multiselect` | **Legacy spelling of `select` + `multiple: true`.** Still read, and migrated to that form on load (schema v3). |
 | `ref` | Reference to a lookup-table column |
 | `url` | A link — stored as a URL **string**; the cell shows an editable field + an open-in-new-tab icon, and a clickable link in read-only views |
-| `image` | An image — stored as a URL **string** (never the bytes). On a backend with file storage (**Firebase Storage** in prod, or the **local dev server** in development) the cell is an **upload** button that stores the file and saves the returned URL; backends without an uploader degrade to a paste-a-URL field. Read-only views show a thumbnail linking to the full image |
+| `image` | An image — the row stores a **reference** (never the bytes in the row): a URL, or `asset:<id>`. The cell's upload button re-encodes the picked file in the browser, which also drops its metadata (a photo's GPS position included), and stores it where the deployment can: with a **blob store** (Firebase Storage, Supabase Storage) at most 2560px on the long side and under 2 MB, saving the file's URL; without one, or once the store has refused an upload this session, in the database's `_assets` table at most 1600px and under 900 KB, saving `asset:<id>`. A paste-a-URL field sits beside the button for an external picture. Removing a picture takes two presses |
 | `owner` | Per-row access primitive — **auto-stamped** with the current user's email on create, **read-only** thereafter. Backs the `rsvp` view and owner-scoped Firestore rules (a member may write only their own owner-stamped rows). See `## rsvp` and **Self-service tables** below. |
 
 ### column properties

@@ -394,6 +394,40 @@ test.describe('gallery layout', () => {
     await expect.poll(() => page.evaluate(() => appInstance.myProfile.picture)).toBe('');
   });
 
+  test('a picture for the blob store is re-encoded under its cap; a store that refuses is skipped after once', async ({ page }) => {
+    test.setTimeout(20000);
+    await open(page);
+    const r = await page.evaluate(async () => {
+      // A 3200x2400 photo of noise: the worst case for JPEG, so the cap has to do work.
+      const c = document.createElement('canvas'); c.width = 3200; c.height = 2400;
+      const ctx = c.getContext('2d'), img = ctx.createImageData(3200, 2400);
+      for (let i = 0; i < img.data.length; i += 4) { img.data[i] = Math.random() * 255; img.data[i + 1] = Math.random() * 255; img.data[i + 2] = Math.random() * 255; img.data[i + 3] = 255; }
+      ctx.putImageData(img, 0, 0);
+      const big = new File([await new Promise((res) => c.toBlob(res, 'image/png'))], 'holiday.png', { type: 'image/png' });
+      const app = window.appInstance, real = window.backend.uploadFile, sent = [];
+      app._imageStoreDown = false;
+      window.backend.uploadFile = (f) => { sent.push(f); return Promise.resolve('https://store.example/' + f.name); };
+      const url = await app.storeImage(big, { table: 'photos', col: 'photo', rowId: 'p1' });
+      const f = sent[0], bmp = await createImageBitmap(f);
+      const stored = { url, name: f.name, type: f.type, bytes: f.size, w: bmp.width, h: bmp.height, original: big.size };
+      // A store that refuses: the first picture falls back to the database, and the next one never tries.
+      let tries = 0;
+      window.backend.uploadFile = () => { tries++; return Promise.reject(new Error('Storage needs Blaze')); };
+      const small = new File([await new Promise((res) => { const s = document.createElement('canvas'); s.width = s.height = 64; s.toBlob(res, 'image/png'); })], 's.png', { type: 'image/png' });
+      const first = await app.storeImage(small, {}), second = await app.storeImage(small, {});
+      window.backend.uploadFile = real; app._imageStoreDown = false;
+      return { stored, first, second, tries };
+    });
+    expect(r.stored.url).toBe('https://store.example/holiday.jpg');
+    expect(r.stored.type).toBe('image/jpeg');                      // re-encoded, which also drops any EXIF
+    expect(Math.max(r.stored.w, r.stored.h)).toBeLessThanOrEqual(2560);
+    expect(r.stored.bytes).toBeLessThanOrEqual(2 * 1024 * 1024);
+    expect(r.stored.original).toBeGreaterThan(r.stored.bytes);
+    expect(r.first).toMatch(/^asset:img_/);
+    expect(r.second).toMatch(/^asset:img_/);
+    expect(r.tries).toBe(1);
+  });
+
   test('the picture button opens the file picker inside a field box: a gallery tile, and a card', async ({ page }) => {
     // The tests above hand the file straight to the hidden input. This one presses the BUTTON, which is
     // what a person does, and which did nothing in a tile or a card: the input's click bubbled to the
@@ -507,12 +541,14 @@ test.describe('image/url column types', () => {
     const thumb = page.locator('img.cell-thumb');
     await expect(thumb).toBeVisible({ timeout: 5000 });
     const src = await thumb.getAttribute('src');
-    expect(src).toMatch(/\/uploads\/.+\.png$/);
+    // Re-encoded before upload (storeImage: at most 2560px, under 2 MB, metadata dropped), so an opaque
+    // PNG arrives as a JPEG.
+    expect(src).toMatch(/\/uploads\/.+\.jpg$/);
 
     // The dev server actually serves the stored file (200 + image content-type).
     const resp = await page.request.get(src);
     expect(resp.status()).toBe(200);
-    expect(resp.headers()['content-type']).toContain('image/png');
+    expect(resp.headers()['content-type']).toContain('image/jpeg');
 
     // The URL (not the bytes) is persisted on the row (server round-trip; putRow is fire-and-forget).
     await expect.poll(async () => {
