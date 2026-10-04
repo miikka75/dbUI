@@ -7922,7 +7922,10 @@ function createVueApp() {
       +   '<img v-else-if="item[col] && isAsset(item[col])" :src="imgSrc(item[col])" class="cell-thumb" alt="">'
       +   '<a v-else-if="item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="imgSrc(item[col])" class="cell-thumb" alt=""></a>'
       +   '<template v-if="canUpload">'
-      +     '<input type="file" accept="image/*" ref="imgInput" style="display:none" @change="uploadImage(item, col, $event)">'
+      // @click.stop: the button's imgInput.click() dispatches a click on this input, and inside an outlined
+      // field box (cards, gallery tiles) it bubbled to v-field, whose handler cancels the default action --
+      // which for a file input IS opening the file picker. The table has no field box, so it always worked.
+      +     '<input type="file" accept="image/*" ref="imgInput" style="display:none" @click.stop @change="uploadImage(item, col, $event)">'
       +     '<v-btn size="x-small" variant="text" :loading="uploading" :icon="item[col] ? \'mdi-image-edit\' : \'mdi-camera-plus\'" :title="item[col] ? t(\'img.replace\') : t(\'img.upload\')" @click="$refs.imgInput.click()"></v-btn>'
       +     '<confirm-x v-if="item[col]" action="image" dense :armed="imageArmed(item, col)" @click="removeImage(item, col)"></confirm-x>'
       +   '</template>'
