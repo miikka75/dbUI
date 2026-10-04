@@ -2539,6 +2539,14 @@ archive and delete paths differ (self-service gating, `@part`), and that differe
 to the tile. The list layout has two copies of its markup, one per caller, and this one does not start
 that way.
 
+**What the build changed: the tile is the nav's tile.** The first cut drew its own card grid, and it was the
+same element as the nav's Tiles (a level page's entries): a card, a cropped picture, a fallback, a grid.
+Two grids, two crops, two fallbacks, and only the nav's loaded its pictures lazily. Both now use
+`<tile-grid>` and `<image-tile>`, which differ only by their arguments: a 16:9 cover around the entry's
+`focus` with its icon beside the title (nav), or a square photo with a placeholder (gallery). What a tile
+says and what a click does stay with the caller. CLAUDE.md lists the element, and `ui-conventions.test.js`
+fails on a hand-made tile grid.
+
 Cost: a component, a `VIEW_PARTS.data` entry, the schema enum, two template branches, and a UI test for each
 caller. What would show it is wrong: a gallery that wants editing in place, which is `card` with a bigger
 picture, a different request.

@@ -8094,12 +8094,12 @@ function createVueApp() {
   });
 
   // --- Data view: read-only gallery layout part ------------------------------------------------
-  // layout: "gallery" -- a READING layout, like `list` (ROADMAP `gallery`). One tile per row: the first
-  // image column the view shows is the picture, at a fixed square crop so the grid lines up, and the other
-  // columns are the caption. A row with no picture still gets a tile and a placeholder, because a gallery
-  // that drops rows reads as data loss. A URL picture opens full size like an image cell; an `asset:` one
-  // has no address to open, so it is not a link. The row controls are the caller's, through the `actions`
-  // slot: the top-level grid and embed-view archive and delete by different paths.
+  // layout: "gallery" -- a READING layout, like `list` (ROADMAP `gallery`). One <image-tile> per row: the
+  // first image column the view shows is the picture, square, and the other columns are the caption. A row
+  // with no picture still gets a tile and a placeholder, because a gallery that drops rows reads as data
+  // loss. A URL picture opens full size like an image cell; an `asset:` one has no address to open, so it
+  // is not a link. The row controls are the caller's, through the `actions` slot: the top-level grid and
+  // embed-view archive and delete by different paths.
   app.component('data-gallery', {
     props: { rows: Array, cols: Array, viewCfg: { type: Object, default: null } },
     inject: ['valueHost'],
@@ -8108,25 +8108,49 @@ function createVueApp() {
       captionCols: function() { var img = this.imageCol; return (this.cols || []).filter(function(c) { return c !== img; }); }
     },
     methods: {
-      src: function(v) { return this.valueHost.imgSrc(v); },
-      href: function(v) { return isAssetRef(v) ? '' : safeUrl(v); }
+      src: function(v) { return v ? this.valueHost.imgSrc(v) : ''; },
+      href: function(v) { return (!v || isAssetRef(v)) ? '' : safeUrl(v); }
     },
     template: ''
-      + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;padding:8px" data-testid="data-gallery">'
-      + '<v-card v-for="item in rows" :key="item.id" variant="outlined" data-testid="gallery-tile">'
-      +   '<a v-if="item[imageCol] && href(item[imageCol])" :href="href(item[imageCol])" target="_blank" @click.stop style="display:block">'
-      +     '<img :src="src(item[imageCol])" alt="" style="display:block;width:100%;aspect-ratio:1/1;object-fit:cover"></a>'
-      +   '<img v-else-if="item[imageCol]" :src="src(item[imageCol])" alt="" style="display:block;width:100%;aspect-ratio:1/1;object-fit:cover">'
-      +   '<div v-else style="width:100%;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;background:rgb(var(--v-theme-on-surface),0.05)">'
-      +     '<v-icon size="40" icon="mdi-image-off-outline" style="opacity:0.35"></v-icon></div>'
+      + '<tile-grid class="pa-2" data-testid="data-gallery">'
+      + '<image-tile v-for="item in rows" :key="item.id" :src="src(item[imageCol])" :href="href(item[imageCol])" aspect="1 / 1" icon="mdi-image-off-outline" placeholder data-testid="gallery-tile">'
       +   '<div class="d-flex align-start pa-2" style="gap:4px">'
       +     '<div style="flex:1;min-width:0;font-size:0.85rem">'
       +       '<div v-for="col in captionCols" :key="col" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><list-value :col="col" :value="item[col]" :view-cfg="viewCfg"></list-value></div>'
       +     '</div>'
       +     '<slot name="actions" :item="item"></slot>'
       +   '</div>'
+      + '</image-tile>'
+      + '</tile-grid>'
+  });
+
+  // --- A tile with a picture, and the grid tiles sit in. One element, two uses: the nav's Tiles (a level
+  // page's entries) and the gallery layout (a view's rows). They differ in what a tile SAYS and what a click
+  // does, and those stay with the caller; the card, the cropped picture, the fallback and the grid are here.
+  //   src         resolved <img src>; '' = no picture
+  //   href        the picture links out here when given (a URL picture; never an asset)
+  //   aspect      the crop: '16 / 9' for a cover (the nav), '1 / 1' for a photo (the gallery)
+  //   focus       object-position along the crop: which part of a photo survives it (an entry's `focus`)
+  //   placeholder with no picture, draw the empty square with `icon` in it (a gallery row must not vanish);
+  //               without it the tile has no picture area, and the default slot's `bare` says so, which is
+  //               the nav's cue to put its entry icon beside the title instead
+  // Pictures load lazily: a gallery can hold hundreds of rows, and a level page only a handful on screen.
+  app.component('tile-grid', {
+    props: { min: { type: String, default: '160px' } },
+    template: '<div :style="{ display: \'grid\', gridTemplateColumns: \'repeat(auto-fill, minmax(\' + min + \', 1fr))\', gap: \'12px\' }"><slot></slot></div>'
+  });
+  app.component('image-tile', {
+    props: { src: { type: String, default: '' }, href: { type: String, default: '' }, aspect: { type: String, default: '16 / 9' },
+             focus: { type: String, default: 'center' }, icon: { type: String, default: '' }, placeholder: Boolean,
+             imgTestid: { type: String, default: undefined } },
+    computed: { imgStyle: function() { return { aspectRatio: this.aspect, objectPosition: 'center ' + this.focus }; } },
+    template: ''
+      + '<v-card variant="outlined" class="h-100">'
+      + '<a v-if="src && href" :href="href" target="_blank" @click.stop style="display:block"><img :src="src" class="tile-img" :style="imgStyle" loading="lazy" alt="" :data-testid="imgTestid"></a>'
+      + '<img v-else-if="src" :src="src" class="tile-img" :style="imgStyle" loading="lazy" alt="" :data-testid="imgTestid">'
+      + '<div v-else-if="placeholder" class="tile-img" :style="{ aspectRatio: aspect, display: \'flex\', alignItems: \'center\', justifyContent: \'center\', background: \'rgb(var(--v-theme-on-surface), 0.05)\' }"><v-icon size="40" :icon="icon" style="opacity:0.35"></v-icon></div>'
+      + '<slot :bare="!src && !placeholder"></slot>'
       + '</v-card>'
-      + '</div>'
   });
 
   // ---- Shared UI elements. One definition each, used everywhere the element appears; CLAUDE.md

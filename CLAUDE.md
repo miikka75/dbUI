@@ -14,6 +14,7 @@ versions of the elements below.
 | Two-press action that needs its words (unsubscribe, stop publishing, reset) | `<confirm-btn :armed="isArmed(key)" icon="…" :label="…" @click="handler">`, armed the same way. Row role by default; `section` for a section action, `full` to keep the label on a phone |
 | Collapsible Settings section | `<section-toggle v-model:collapsed="a.settings._collapseX" :title="…">`. Collapse when long or rarely used; keep anything urgent (a pending request, an update notice) outside the fold |
 | Expanding a row in place | The row's name as a chevron toggle (Settings → Calendars) |
+| A grid of tiles with pictures (the nav's Tiles, the gallery layout) | `<tile-grid :min="…">` of `<image-tile :src :aspect :focus>`; the tile's words go in its slot, a click is the caller's |
 
 **Buttons** take one of four roles, documented at the top of `settings-view-tpl` in `ui.html`:
 
