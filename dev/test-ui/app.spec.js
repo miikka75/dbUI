@@ -394,6 +394,25 @@ test.describe('gallery layout', () => {
     await expect.poll(() => page.evaluate(() => appInstance.myProfile.picture)).toBe('');
   });
 
+  test('the picture button opens the file picker inside a field box: a gallery tile, and a card', async ({ page }) => {
+    // The tests above hand the file straight to the hidden input. This one presses the BUTTON, which is
+    // what a person does, and which did nothing in a tile or a card: the input's click bubbled to the
+    // surrounding v-field, whose handler cancelled the default action, i.e. the picker.
+    test.setTimeout(20000);
+    await open(page);
+    const picker = () => page.waitForEvent('filechooser', { timeout: 3000 }).then(() => true).catch(() => false);
+    await page.evaluate(() => appInstance.selectTab('pics'));
+    let opened = picker();
+    await tile(page.getByTestId('data-gallery'), 'Alpha').locator('button:has(.mdi-image-edit)').click();
+    expect(await opened).toBe(true);
+    await page.setViewportSize({ width: 500, height: 900 });               // the card layout
+    await page.evaluate(() => { window.VIEWS.pics.layout = 'card'; appInstance.selectTab('home'); appInstance.selectTab('pics'); });
+    await expect(page.locator('.v-main button:has(.mdi-image-edit)').first()).toBeVisible();
+    opened = picker();
+    await page.locator('.v-main button:has(.mdi-image-edit)').first().click();
+    expect(await opened).toBe(true);
+  });
+
   test('removing a picture takes two presses, with its own icon, not the row delete x', async ({ page }) => {
     await open(page);
     await page.evaluate(() => appInstance.selectTab('pics'));
