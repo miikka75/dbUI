@@ -2547,6 +2547,17 @@ Two grids, two crops, two fallbacks, and only the nav's loaded its pictures lazi
 says and what a click does stay with the caller. CLAUDE.md lists the element, and `ui-conventions.test.js`
 fails on a hand-made tile grid.
 
+**Then it stopped being a reading layout.** The first cut copied `list`: values read-only, editing in
+`table` and `card`. In use that was wrong. A gallery is another way of showing the same table, so it gets
+the same edit options as the table's other layouts. Under its picture a tile carries the card's fields
+(an outlined field box with a `data-cell` in it, per column, honouring the same per-row hiding), and the
+picture is edited through the image cell itself: upload, remove, or paste an address. Its own thumbnail
+is suppressed (`no-thumb`) because the tile already shows the picture. A row added from the gallery is
+therefore filled in from the gallery. The cost line above ("a gallery that wants editing in place … is a
+different request") was the mistake: the request was the gallery working on the table it shows. The
+row controls also gained the per-row `canMutateRow` gate the card layout always had, which the first cut
+missed, so a member was offered delete on a self-service row that was not theirs.
+
 Cost: a component, a `VIEW_PARTS.data` entry, the schema enum, two template branches, and a UI test for each
 caller. What would show it is wrong: a gallery that wants editing in place, which is `card` with a bigger
 picture, a different request.

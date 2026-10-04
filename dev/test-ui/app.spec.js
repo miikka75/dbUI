@@ -256,18 +256,19 @@ test.describe('Secondary-colored chips', () => {
 });
 
 test.describe('gallery layout', () => {
-  // layout: "gallery" is a reading layout of a data view (ROADMAP `gallery`): one tile per row, the first
-  // image column as the picture, the rest as the caption. One component serves the top-level grid and
-  // embeds, each supplying its own row controls.
+  // layout: "gallery" is the card layout as tiles (ROADMAP `gallery`): one tile per row, the first image
+  // column as the picture, and every field editable under it, the picture's included. One component serves
+  // the top-level grid and embeds, each supplying its own row controls.
   const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
   const SCH = {
     defaultLanguage: 'en',
     tables: { photos: { columns: [{ name: 'title', type: 'text' }, { name: 'photo', type: 'image' }] } },
     views: [
       { name: 'pics', sources: ['photos'], mode: 'union', columns: ['photo', 'title'], layout: 'gallery' },
+      { name: 'wall', sources: ['photos'], mode: 'union', columns: ['photo'], layout: 'gallery', readonly: true },
       { name: 'home', kind: 'page', markdown: 'Pictures\n\n{{view:pics}}' }
     ],
-    nav: { items: [{ view: 'pics' }, { view: 'home' }] }
+    nav: { items: [{ view: 'pics' }, { view: 'wall' }, { view: 'home' }] }
   };
   async function open(page) {
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -295,9 +296,9 @@ test.describe('gallery layout', () => {
     await expect(tile(g, 'Gamma').locator('img')).toHaveAttribute('src', /^data:image\/png/);
     await expect(tile(g, 'Gamma').locator('a')).toHaveCount(0);
     await expect(tile(g, 'Beta').locator('.mdi-image-off-outline')).toHaveCount(1);
-    // The picture column is not repeated as caption text; the row controls are the grid's.
-    await expect(tile(g, 'Alpha')).not.toContainText('img.example');
-    await expect(tile(g, 'Alpha').locator('.mdi-close')).toHaveCount(1);
+    // The tile is the picture: its image field shows the controls, not a second thumbnail.
+    await expect(tile(g, 'Gamma').locator('img')).toHaveCount(1);
+    await expect(tile(g, 'Alpha').locator('[aria-label="btn.delete"]')).toHaveCount(1);   // the grid's row control
   });
 
   test('embedded in a page, the same tiles with the embed\'s own row controls', async ({ page }) => {
@@ -306,7 +307,41 @@ test.describe('gallery layout', () => {
     const g = page.locator('.v-main').getByTestId('data-gallery');
     await expect(g.getByTestId('gallery-tile')).toHaveCount(3);
     await expect(tile(g, 'Gamma').locator('img')).toHaveAttribute('src', /^data:image\/png/);
-    await expect(tile(g, 'Beta').locator('.mdi-close')).toHaveCount(1);
+    await expect(tile(g, 'Beta').locator('[aria-label="btn.delete"]')).toHaveCount(1);
+  });
+
+  test('a read-only view of the picture column alone is a plain picture wall', async ({ page }) => {
+    await open(page);
+    await page.evaluate(() => appInstance.selectTab('wall'));
+    const g = page.getByTestId('data-gallery');
+    await expect(g.getByTestId('gallery-tile')).toHaveCount(3);
+    // No picture field (the tile is the picture), no row controls, and so no strip under the picture.
+    await expect(g.locator('.field-box')).toHaveCount(0);
+    await expect(g.locator('button')).toHaveCount(0);
+    await expect(g.locator('.pa-2 .pa-2')).toHaveCount(0);
+    await expect(g.locator('img')).toHaveCount(2);                    // Alpha's URL and Gamma's asset
+    await expect(g.locator('.mdi-image-off-outline')).toHaveCount(1);  // Beta: still a tile
+  });
+
+  test('a tile edits what a card edits: a field, and its picture', async ({ page }) => {
+    test.setTimeout(20000);
+    await open(page);
+    await page.evaluate(() => appInstance.selectTab('pics'));
+    const g = page.getByTestId('data-gallery');
+    const row = (id) => page.request.post('/api/getTableData', { data: { tableId: 'photos', tab: 'active' } })
+      .then((r) => r.json()).then((d) => (d.rows || []).find((r) => r.id === id) || {});
+    // A text field, through the same contenteditable cell a card has.
+    const title = tile(g, 'Beta').locator('.editable-cell').first();
+    await title.click();
+    await title.fill('Beta renamed');
+    await title.blur();
+    await expect.poll(() => row('p2').then((r) => r.title)).toBe('Beta renamed');
+    // The placeholder tile's picture field uploads: with no blob store the file lands in _assets.
+    await page.evaluate(() => { delete window.backend.uploadFile; });
+    await tile(g, 'Beta renamed').locator('input[type=file]').setInputFiles({ name: 'b.png', mimeType: 'image/png', buffer: Buffer.from(PNG, 'base64') });
+    await expect.poll(() => row('p2').then((r) => r.photo || ''), { timeout: 6000 }).toMatch(/^asset:img_/);
+    await expect(tile(g, 'Beta renamed').locator('img')).toHaveCount(1);
+    await expect(tile(g, 'Beta renamed').locator('.mdi-image-off-outline')).toHaveCount(0);
   });
 });
 

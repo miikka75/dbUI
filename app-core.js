@@ -7767,7 +7767,7 @@ function createVueApp() {
       + '<v-tab :value="false" size="small">{{ partLabel(false) }}</v-tab>'
       + '<v-tab :value="true" size="small">{{ partLabel(true) }}</v-tab>'
       + '</v-tabs>'
-      + '<data-gallery v-if="layout===\'gallery\'" :rows="shown" :cols="cols" :view-cfg="obscureCfg">'
+      + '<data-gallery v-if="layout===\'gallery\'" :rows="shown" :cols="cols" :view-cfg="obscureCfg" :owner="name" :readonly="!!effPart" embed :hide-col="colHidden">'
       +   '<template v-slot:actions="{ item }"><template v-if="canMutateRow(item)"><confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x><confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x></template></template>'
       + '</data-gallery>'
       + '<v-list v-else-if="layout===\'list\'" density="compact" class="my-2">'
@@ -7808,7 +7808,9 @@ function createVueApp() {
       col: { type: String, required: true },
       owner: { type: String, default: undefined },
       readonly: { type: Boolean, default: false },
-      embed: { type: Boolean, default: false }
+      embed: { type: Boolean, default: false },
+      // An image cell whose picture is already on screen (a gallery tile): its controls without the thumbnail.
+      noThumb: { type: Boolean, default: false }
     },
     methods: Object.assign({}, ROOT_PROXY, {
       cellRO: function(item, col) { return this.readonly || appInstance.cellReadonly(item, col, this.owner); },
@@ -7832,6 +7834,9 @@ function createVueApp() {
       toggleListSwitch: function(col, item) { return appInstance.toggleListSwitch(col, item); },
       save: function(item, col, val) { return appInstance.saveField(item, col, val, this.owner); },
       addToListOnBlur: function(item, col) { return appInstance.addToListOnBlur(item, col); },
+      // A picture stored inline as a data: URI (the examples ship theirs that way) is no more an editable
+      // address than an asset: reference, so the paste-a-URL field is not offered over its bytes.
+      isInline: function(v) { return String(v || '').indexOf('data:') === 0; },
       // image column: store the picked file and save a REFERENCE onto the row (never the bytes inline).
       // Two sinks, tried in order:
       //   1. the backend blob store (Firebase/Supabase Storage, the dev file store) -> row holds a URL;
@@ -7872,7 +7877,8 @@ function createVueApp() {
     },
     template: ''
       + '<span v-if="cellRO(item, col)" :style="{ opacity: embed ? 0.4 : 0.75 }">'
-      +   '<img v-if="colIsImage(col) && item[col] && isAsset(item[col])" :src="imgSrc(item[col])" class="cell-thumb" alt="">'
+      +   '<template v-if="colIsImage(col) && noThumb"></template>'
+      +   '<img v-else-if="colIsImage(col) && item[col] && isAsset(item[col])" :src="imgSrc(item[col])" class="cell-thumb" alt="">'
       +   '<a v-else-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="imgSrc(item[col])" class="cell-thumb" alt=""></a>'
       +   '<a v-else-if="colIsUrl(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop>{{ item[col] }}</a>'
       +   '<template v-else><list-value :col="col" :value="item[col]" :view-cfg="ownerCfg"></list-value></template>'
@@ -7894,7 +7900,8 @@ function createVueApp() {
       + '</v-autocomplete>'
       + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
       + '<div v-else-if="colIsImage(col)" class="d-flex align-center" style="gap:6px;min-width:0">'
-      +   '<img v-if="item[col] && isAsset(item[col])" :src="imgSrc(item[col])" class="cell-thumb" alt="">'
+      +   '<template v-if="noThumb"></template>'
+      +   '<img v-else-if="item[col] && isAsset(item[col])" :src="imgSrc(item[col])" class="cell-thumb" alt="">'
       +   '<a v-else-if="item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="imgSrc(item[col])" class="cell-thumb" alt=""></a>'
       +   '<template v-if="canUpload">'
       +     '<input type="file" accept="image/*" ref="imgInput" style="display:none" @change="uploadImage(item, col, $event)">'
@@ -7905,7 +7912,7 @@ function createVueApp() {
       // URL (a CDN, a shared drive) is a legitimate third way to hold the image, and uploading is now
       // almost always possible (blob store or _assets), which would otherwise have hidden this field for
       // good. Suppressed only for an asset-backed value, where 'asset:<id>' is nothing a user can edit.
-      +   '<input v-if="!isAsset(item[col])" type="url" :value="item[col] || \'\'" @change="save(item, col, $event.target.value)" :placeholder="t(\'img.url\')" spellcheck="false" style="border:none;background:transparent;color:inherit;font:inherit;flex:1;min-width:60px">'
+      +   '<input v-if="!isAsset(item[col]) && !isInline(item[col])" type="url" :value="item[col] || \'\'" @change="save(item, col, $event.target.value)" :placeholder="t(\'img.url\')" spellcheck="false" style="border:none;background:transparent;color:inherit;font:inherit;flex:1;min-width:60px">'
       +   '<v-icon v-if="uploadErr" size="x-small" color="error" :title="uploadErr">mdi-alert-circle</v-icon>'
       + '</div>'
       + '<div v-else-if="colIsUrl(col)" class="d-flex align-center" style="gap:4px;min-width:0">'
@@ -8093,32 +8100,63 @@ function createVueApp() {
       + '</v-list-item></v-list>'
   });
 
-  // --- Data view: read-only gallery layout part ------------------------------------------------
-  // layout: "gallery" -- a READING layout, like `list` (ROADMAP `gallery`). One <image-tile> per row: the
-  // first image column the view shows is the picture, square, and the other columns are the caption. A row
-  // with no picture still gets a tile and a placeholder, because a gallery that drops rows reads as data
-  // loss. A URL picture opens full size like an image cell; an `asset:` one has no address to open, so it
-  // is not a link. The row controls are the caller's, through the `actions` slot: the top-level grid and
-  // embed-view archive and delete by different paths.
+  // --- Data view: gallery layout part ----------------------------------------------------------
+  // layout: "gallery" -- the same table as its other layouts, drawn as one <image-tile> per row (ROADMAP
+  // `gallery`). The first image column the view shows is the picture, square. Under it the tile carries the
+  // card layout's fields, each an outlined field box with a data-cell in it, so a gallery edits exactly what
+  // a card does. The picture's own field is the image cell without its thumbnail (the tile IS the
+  // thumbnail): upload, remove, or paste an address. A row with no picture still gets a tile and a
+  // placeholder, because a gallery that drops rows reads as data loss.
+  //   owner / readonly / embed  passed to every data-cell, as each caller already does for its cells
+  //   hideCol(col, item)        the caller's per-row column hiding (isColumnHidden / embed colHidden)
+  // The row controls are the caller's, through the `actions` slot: the top-level grid and embed-view
+  // archive and delete by different paths.
   app.component('data-gallery', {
-    props: { rows: Array, cols: Array, viewCfg: { type: Object, default: null } },
-    inject: ['valueHost'],
+    props: { rows: Array, cols: Array, viewCfg: { type: Object, default: null },
+             owner: { type: String, default: undefined }, readonly: Boolean, embed: Boolean,
+             hideCol: { type: Function, default: null } },
+    inject: ['uiHost', 'valueHost'],
     computed: {
       imageCol: function() { var h = this.valueHost; return (this.cols || []).filter(function(c) { return h.colIsImage(c); })[0] || ''; },
-      captionCols: function() { var img = this.imageCol; return (this.cols || []).filter(function(c) { return c !== img; }); }
+      // The picture's field last: the words a tile is recognised by come first, the picture's controls after.
+      // A read-only gallery has no picture field at all: the tile already shows the picture, and the field
+      // would be an empty labelled box. So a read-only view of an image column alone is a picture wall.
+      fieldCols: function() {
+        var img = this.imageCol, rest = (this.cols || []).filter(function(c) { return c !== img; });
+        return (img && !this.readonly) ? rest.concat([img]) : rest;
+      }
     },
     methods: {
+      t: function(k) { return this.uiHost.t(k); },
+      label: function(col) { var k = 'field.' + col, v = this.t(k); return (v && v !== k) ? v : col; },
+      shown: function(col, item) { return !(this.hideCol && this.hideCol(col, item)); },
+      // Whether the caller's row controls render anything for this row: a strip with nothing in it would
+      // still pad every tile of a read-only wall. A v-if that fails leaves a Comment vnode behind.
+      hasActions: function(item) {
+        var slot = this.$slots.actions;
+        var real = function(nodes) {
+          return (nodes || []).some(function(n) {
+            if (!n || n.type === Vue.Comment) return false;
+            return n.type === Vue.Fragment ? real(n.children) : true;
+          });
+        };
+        return !!slot && real(slot({ item: item }));
+      },
       src: function(v) { return v ? this.valueHost.imgSrc(v) : ''; },
       href: function(v) { return (!v || isAssetRef(v)) ? '' : safeUrl(v); }
     },
     template: ''
-      + '<tile-grid class="pa-2" data-testid="data-gallery">'
+      + '<tile-grid min="220px" class="pa-2" data-testid="data-gallery">'
       + '<image-tile v-for="item in rows" :key="item.id" :src="src(item[imageCol])" :href="href(item[imageCol])" aspect="1 / 1" icon="mdi-image-off-outline" placeholder data-testid="gallery-tile">'
-      +   '<div class="d-flex align-start pa-2" style="gap:4px">'
-      +     '<div style="flex:1;min-width:0;font-size:0.85rem">'
-      +       '<div v-for="col in captionCols" :key="col" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><list-value :col="col" :value="item[col]" :view-cfg="viewCfg"></list-value></div>'
-      +     '</div>'
-      +     '<slot name="actions" :item="item"></slot>'
+      +   '<div v-if="fieldCols.length || hasActions(item)" class="pa-2">'
+      +     '<template v-for="col in fieldCols" :key="col">'
+      +       '<v-field v-if="shown(col, item)" class="field-box field-box--roomy" variant="outlined" active :label="label(col)">'
+      +         '<template v-slot:default="{ props: fp }"><div v-bind="fp" class="field-box-value">'
+      +           '<data-cell :item="item" :col="col" :owner="owner" :readonly="readonly" :embed="embed" :no-thumb="col === imageCol"></data-cell>'
+      +         '</div></template>'
+      +       '</v-field>'
+      +     '</template>'
+      +     '<div v-if="hasActions(item)" class="d-flex justify-end mt-1"><slot name="actions" :item="item"></slot></div>'
       +   '</div>'
       + '</image-tile>'
       + '</tile-grid>'
