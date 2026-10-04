@@ -786,7 +786,7 @@
               <div class="d-flex flex-column align-start" style="gap:4px">
                 <input ref="profilePicInput" type="file" accept="image/*" hidden data-testid="profile-pic-file" @change="a.onProfilePictureFile($event)">
                 <v-btn size="small" variant="outlined" prepend-icon="mdi-camera" @click="$refs.profilePicInput.click()">{{ a.myProfile.picture ? a.t('img.replace') : a.t('img.upload') }}</v-btn>
-                <v-btn v-if="a.myProfile.picture" size="small" variant="text" color="error" prepend-icon="mdi-delete" @click="a.removeMyPicture()">{{ a.t('img.remove') }}</v-btn>
+                <confirm-btn v-if="a.myProfile.picture" full :armed="a.isArmed('mypic')" icon="mdi-image-remove" :label="a.t('img.remove')" @click="a.pressRemoveMyPicture()" data-testid="profile-pic-remove"></confirm-btn>
               </div>
             </div>
             <div class="d-flex align-center flex-wrap" style="gap:12px">

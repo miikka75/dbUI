@@ -1040,7 +1040,8 @@ function createVueApp() {
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
          'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
-         'img.replace', 'img.upload', 'img.remove', 'img.url',
+         'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
+         'btn.close', 'btn.previous', 'btn.next',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
          'bg.fit', 'bg.fit_cover', 'bg.fit_contain', 'bg.fit_tile', 'bg.fit_width',
@@ -5634,6 +5635,13 @@ function createVueApp() {
           self.saveMyProfile();
         }).catch(function(err) { self.notify((err && err.message) || self.t('msg.image_read_failed')); });
       },
+      // The Settings button: two presses (confirm-btn), like every other picture removal. removeMyPicture
+      // is the act itself.
+      pressRemoveMyPicture: function() {
+        if (!this.isArmed('mypic')) { this.armConfirm('mypic'); return; }
+        this.pendingConfirm = null;
+        this.removeMyPicture();
+      },
       removeMyPicture: function() {
         if (!this.myProfile.picture) return;
         this.myProfile.picture = '';
@@ -8120,13 +8128,23 @@ function createVueApp() {
   //   owner / readonly / embed  passed to every data-cell, as each caller already does for its cells
   //   hideCol(col, item)        the caller's per-row column hiding (isColumnHidden / embed colHidden)
   // The row controls are the caller's, through the `actions` slot: the top-level grid and embed-view
-  // archive and delete by different paths.
+  // archive and delete by different paths. Pressing a picture opens <image-lightbox> over the rows that
+  // have one, in the gallery's order.
   app.component('data-gallery', {
     props: { rows: Array, cols: Array, viewCfg: { type: Object, default: null },
              owner: { type: String, default: undefined }, readonly: Boolean, embed: Boolean,
              hideCol: { type: Function, default: null } },
     inject: ['uiHost', 'valueHost'],
+    data: function() { return { viewing: null }; },   // index into `pictures` while the lightbox is open
     computed: {
+      // What the lightbox steps through: the rows with a picture, each with the caption its tile leads with.
+      pictures: function() {
+        var self = this, img = this.imageCol, first = this.fieldCols.filter(function(c) { return c !== img; })[0];
+        return (this.rows || []).filter(function(r) { return r[img]; }).map(function(r) {
+          return { id: r.id, src: self.src(r[img]), href: self.href(r[img]),
+                   caption: first ? String(self.valueHost.displayValue(first, r[first], '', self.viewCfg) || '') : '' };
+        });
+      },
       // The view's `gallery` options (ROADMAP `gallery`), each with its default.
       opts: function() { return (this.viewCfg && this.viewCfg.gallery) || {}; },
       tileMin: function() { return { small: '140px', large: '320px' }[this.opts.size] || '220px'; },
@@ -8160,11 +8178,12 @@ function createVueApp() {
         return !!slot && real(slot({ item: item }));
       },
       src: function(v) { return v ? this.valueHost.imgSrc(v) : ''; },
+      view: function(item) { this.viewing = this.pictures.map(function(p) { return p.id; }).indexOf(item.id); },
       href: function(v) { return (!v || isAssetRef(v)) ? '' : safeUrl(v); }
     },
     template: ''
       + '<tile-grid :min="tileMin" class="pa-2" data-testid="data-gallery">'
-      + '<image-tile v-for="item in rows" :key="item.id" :src="src(item[imageCol])" :href="href(item[imageCol])" :aspect="aspect" :fit="opts.fit === \'contain\' ? \'contain\' : \'cover\'" icon="mdi-image-off-outline" placeholder data-testid="gallery-tile">'
+      + '<image-tile v-for="item in rows" :key="item.id" :src="src(item[imageCol])" zoom :zoom-label="t(\'img.view\')" @zoom="view(item)" :aspect="aspect" :fit="opts.fit === \'contain\' ? \'contain\' : \'cover\'" icon="mdi-image-off-outline" placeholder data-testid="gallery-tile">'
       +   '<div v-if="fieldCols.length || hasActions(item)" class="pa-2">'
       +     '<template v-for="col in fieldCols" :key="col">'
       +       '<v-field v-if="shown(col, item)" class="field-box field-box--roomy" variant="outlined" active :label="label(col)">'
@@ -8176,14 +8195,55 @@ function createVueApp() {
       +     '<div v-if="hasActions(item)" class="d-flex justify-end mt-1"><slot name="actions" :item="item"></slot></div>'
       +   '</div>'
       + '</image-tile>'
+      + '<image-lightbox v-model="viewing" :items="pictures"></image-lightbox>'
       + '</tile-grid>'
+  });
+
+  // Full-screen viewer over a set of pictures: the one shown whole, its caption, its place in the set,
+  // previous / next (buttons and the arrow keys), and "open original" for a picture that has an address.
+  // A dialog, so Esc and focus handling come with it. v-model is the index shown, null when closed.
+  //   items  [{ src, caption, href }]
+  app.component('image-lightbox', {
+    props: { modelValue: { type: Number, default: null }, items: { type: Array, default: function() { return []; } } },
+    emits: ['update:modelValue'],
+    inject: ['uiHost'],
+    watch: {
+      open: function(v) { var self = this; if (v) this.$nextTick(function() { var el = self.$el && document.querySelector('[data-testid="image-lightbox"]'); if (el) el.focus(); }); }
+    },
+    computed: {
+      open: function() { return this.modelValue !== null && !!this.items[this.modelValue]; },
+      cur: function() { return this.items[this.modelValue] || {}; }
+    },
+    methods: {
+      t: function(k) { return this.uiHost.t(k); },
+      close: function() { this.$emit('update:modelValue', null); },
+      // Wraps round: the set is small and a viewer walking it should not hit a wall at either end.
+      step: function(d) { var n = this.items.length; if (n) this.$emit('update:modelValue', (this.modelValue + d + n) % n); }
+    },
+    template: ''
+      + '<v-dialog :model-value="open" fullscreen @update:model-value="v => { if (!v) close(); }">'
+      + '<div class="image-lightbox" data-testid="image-lightbox" tabindex="0" @keydown.left.prevent="step(-1)" @keydown.right.prevent="step(1)">'
+      +   '<div class="d-flex align-center pa-2" style="gap:4px">'
+      +     '<span class="text-body-2" style="opacity:0.8" data-testid="lightbox-count">{{ modelValue + 1 }} / {{ items.length }}</span><v-spacer></v-spacer>'
+      +     '<v-btn v-if="cur.href" :href="cur.href" target="_blank" icon="mdi-open-in-new" size="small" variant="text" :title="t(\'img.open_original\')" :aria-label="t(\'img.open_original\')"></v-btn>'
+      +     '<v-btn icon="mdi-close" size="small" variant="text" :title="t(\'btn.close\')" :aria-label="t(\'btn.close\')" @click="close()" data-testid="lightbox-close"></v-btn>'
+      +   '</div>'
+      +   '<div class="d-flex align-center" style="flex:1;min-height:0;gap:4px">'
+      +     '<v-btn v-if="items.length > 1" icon="mdi-chevron-left" variant="text" :title="t(\'btn.previous\')" :aria-label="t(\'btn.previous\')" @click="step(-1)" data-testid="lightbox-prev"></v-btn>'
+      +     '<img :src="cur.src" alt="" style="flex:1;min-width:0;max-height:100%;object-fit:contain" data-testid="lightbox-img">'
+      +     '<v-btn v-if="items.length > 1" icon="mdi-chevron-right" variant="text" :title="t(\'btn.next\')" :aria-label="t(\'btn.next\')" @click="step(1)" data-testid="lightbox-next"></v-btn>'
+      +   '</div>'
+      +   '<div v-if="cur.caption" class="text-center pa-3" data-testid="lightbox-caption">{{ cur.caption }}</div>'
+      + '</div>'
+      + '</v-dialog>'
   });
 
   // --- A tile with a picture, and the grid tiles sit in. One element, two uses: the nav's Tiles (a level
   // page's entries) and the gallery layout (a view's rows). They differ in what a tile SAYS and what a click
   // does, and those stay with the caller; the card, the cropped picture, the fallback and the grid are here.
   //   src         resolved <img src>; '' = no picture
-  //   href        the picture links out here when given (a URL picture; never an asset)
+  //   zoom        the picture is a button that emits `zoom` (the gallery opens its lightbox); zoomLabel
+  //               is that button's accessible name
   //   aspect      the crop: '16 / 9' for a cover (the nav), '1 / 1' for a photo (the gallery)
   //   focus       object-position along the crop: which part of a photo survives it (an entry's `focus`)
   //   fit         'cover' fills the shape (cropping); 'contain' shows the whole picture inside it
@@ -8196,10 +8256,11 @@ function createVueApp() {
     template: '<div :style="{ display: \'grid\', gridTemplateColumns: \'repeat(auto-fill, minmax(\' + min + \', 1fr))\', gap: \'12px\' }"><slot></slot></div>'
   });
   app.component('image-tile', {
-    props: { src: { type: String, default: '' }, href: { type: String, default: '' }, aspect: { type: String, default: '16 / 9' },
+    props: { src: { type: String, default: '' }, zoom: Boolean, zoomLabel: { type: String, default: '' }, aspect: { type: String, default: '16 / 9' },
              focus: { type: String, default: 'center' }, fit: { type: String, default: 'cover' },
              icon: { type: String, default: '' }, placeholder: Boolean,
              imgTestid: { type: String, default: undefined } },
+    emits: ['zoom'],
     computed: {
       // `contain` letterboxes onto the same faint surface the placeholder uses, so a tall picture in a wide
       // shape reads as a framed picture rather than as one with a hole beside it.
@@ -8211,7 +8272,7 @@ function createVueApp() {
     },
     template: ''
       + '<v-card variant="outlined" class="h-100">'
-      + '<a v-if="src && href" :href="href" target="_blank" @click.stop style="display:block"><img :src="src" class="tile-img" :style="imgStyle" loading="lazy" alt="" :data-testid="imgTestid"></a>'
+      + '<button v-if="src && zoom" type="button" class="tile-zoom" :title="zoomLabel" :aria-label="zoomLabel" @click.stop="$emit(\'zoom\')"><img :src="src" class="tile-img" :style="imgStyle" loading="lazy" alt="" :data-testid="imgTestid"></button>'
       + '<img v-else-if="src" :src="src" class="tile-img" :style="imgStyle" loading="lazy" alt="" :data-testid="imgTestid">'
       + '<div v-else-if="placeholder" class="tile-img" :style="{ aspectRatio: aspect, display: \'flex\', alignItems: \'center\', justifyContent: \'center\', background: \'rgb(var(--v-theme-on-surface), 0.05)\' }"><v-icon size="40" :icon="icon" style="opacity:0.35"></v-icon></div>'
       + '<slot :bare="!src && !placeholder"></slot>'
