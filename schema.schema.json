@@ -219,6 +219,16 @@
         "readonly": { "type": "boolean", "description": "Disable editing (report views)." },
         "includeArchive": { "type": "boolean", "description": "Read the archive partition alongside the active one. A view sees only active rows by default, which is right for a worklist and wrong for a TOTAL: with archiveAfter in play, a sum that nets one thing against another goes wrong the moment either side ages out." },
         "layout": { "type": "string", "enum": ["table", "card", "list", "gallery"], "description": "`list` is a READING layout: values render read-only, so a row added there has no editor. Use table/card/gallery for anything people actually enter data into. `gallery` is the card layout as a grid of tiles: the first image column it shows is the picture, and every column (the picture's included) is edited under it." },
+        "gallery": {
+          "type": "object", "additionalProperties": false,
+          "description": "How a `layout: \"gallery\"` draws its tiles. Every key is optional.",
+          "properties": {
+            "image": { "type": "string", "description": "The image column that is the picture. Default: the first image column the view shows. Need not be in `columns`; then it has no field on the tile." },
+            "size": { "type": "string", "enum": ["small", "medium", "large"], "description": "Tile size, relative to the space the gallery has: the grid fits as many tiles of at least this size as it can (about 140 / 220 / 320px). Default medium." },
+            "shape": { "type": "string", "enum": ["square", "landscape", "portrait"], "description": "The picture's crop: 1:1, 16:9 or 3:4. Default square." },
+            "fit": { "type": "string", "enum": ["crop", "contain"], "description": "crop fills the shape; contain shows the whole picture inside it. Default crop." }
+          }
+        },
         "collapsed": { "type": "boolean", "description": "Cards start collapsed (accordion)." },
         "defaultSort": { "type": "string", "description": "Default sort column." },
         "feedSubscribers": {

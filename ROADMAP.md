@@ -2558,6 +2558,25 @@ different request") was the mistake: the request was the gallery working on the 
 row controls also gained the per-row `canMutateRow` gate the card layout always had, which the first cut
 missed, so a member was offered delete on a self-service row that was not theirs.
 
+**Options: `gallery: { image, size, shape, fit }`, the ones database galleries share.** The tile was a
+fixed 220px-minimum square of the first image column. The options follow what Notion's and Airtable's
+gallery views offer, rather than inventing a vocabulary:
+
+- `image`: the column that is the picture, for a view showing more than one image column. Default: the
+  first image column shown. It need not be among `columns`; then the tile shows it and has no field for it.
+- `size`: `small` | `medium` (default) | `large`. Named steps, not pixels or a column count, because the
+  steps stay relative to the space the gallery has: a tile's minimum width (140 / 220 / 320px), and the grid
+  fits as many as it can, so a large tile on a phone is one tile across rather than overflowing it.
+- `shape`: `square` (default) | `landscape` (16:9) | `portrait` (3:4), the crop of the picture area.
+- `fit`: `crop` (default, fill the shape) | `contain` (the whole picture inside the shape, letterboxed),
+  which covers what "keep the original proportions" is usually asked for, without tiles of uneven height.
+
+Considered and left: a column count (`across`), which is the WordPress control and less portable than
+named sizes; a shape that follows the window's orientation, which no gallery offers and which a tile that
+also holds fields does not need. Justified rows and masonry are layouts of their own, for photo-only
+collections, and would come as separate `layout` values if asked for. A lightbox (click to view full
+screen, next/previous) is the one near-universal thing still missing; it is the next step, not this one.
+
 Cost: a component, a `VIEW_PARTS.data` entry, the schema enum, two template branches, and a UI test for each
 caller. What would show it is wrong: a gallery that wants editing in place, which is `card` with a bigger
 picture, a different request.
