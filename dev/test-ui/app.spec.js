@@ -260,6 +260,7 @@ test.describe('gallery layout', () => {
   // column as the picture, and every field editable under it, the picture's included. One component serves
   // the top-level grid and embeds, each supplying its own row controls.
   const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
+  const THUMB = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
   const SCH = {
     defaultLanguage: 'en',
     tables: { photos: { columns: [{ name: 'title', type: 'text' }, { name: 'photo', type: 'image' }] } },
@@ -280,7 +281,9 @@ test.describe('gallery layout', () => {
     await put('_assets', { id: 'g1', src: 'data:image/png;base64,' + PNG });
     await put('photos', { id: 'p1', title: 'Alpha', photo: 'https://img.example/a.png' });
     await put('photos', { id: 'p2', title: 'Beta', photo: '' });
-    await put('photos', { id: 'p3', title: 'Gamma', photo: 'asset:g1' });
+    // Gamma carries a thumbnail (a different, smaller picture), as an upload made here would.
+    await put('_assets', { id: 'g1t', src: 'data:image/png;base64,' + THUMB });
+    await put('photos', { id: 'p3', title: 'Gamma', photo: 'asset:g1#thumb=' + encodeURIComponent('asset:g1t') });
     await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.goto('/');
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
@@ -408,8 +411,9 @@ test.describe('gallery layout', () => {
       app._imageStoreDown = false;
       window.backend.uploadFile = (f) => { sent.push(f); return Promise.resolve('https://store.example/' + f.name); };
       const url = await app.storeImage(big, { table: 'photos', col: 'photo', rowId: 'p1' });
-      const f = sent[0], bmp = await createImageBitmap(f);
-      const stored = { url, name: f.name, type: f.type, bytes: f.size, w: bmp.width, h: bmp.height, original: big.size };
+      const f = sent[0], bmp = await createImageBitmap(f), t = sent[1], tb = await createImageBitmap(t);
+      const stored = { url, parts: Images.splitRef(url), name: f.name, type: f.type, bytes: f.size, w: bmp.width, h: bmp.height, original: big.size,
+                       thumbName: t.name, thumbBytes: t.size, thumbW: tb.width, thumbH: tb.height };
       // A store that refuses: the first picture falls back to the database, and the next one never tries.
       let tries = 0;
       window.backend.uploadFile = () => { tries++; return Promise.reject(new Error('Storage needs Blaze')); };
@@ -418,7 +422,10 @@ test.describe('gallery layout', () => {
       window.backend.uploadFile = real; app._imageStoreDown = false;
       return { stored, first, second, tries };
     });
-    expect(r.stored.url).toBe('https://store.example/holiday.jpg');
+    // The picture, and its thumbnail as a second file, both referenced from the one value.
+    expect(r.stored.parts).toEqual({ full: 'https://store.example/holiday.jpg', thumb: 'https://store.example/holiday.thumb.jpg' });
+    expect(Math.max(r.stored.thumbW, r.stored.thumbH)).toBeLessThanOrEqual(480);
+    expect(r.stored.thumbBytes).toBeLessThanOrEqual(80 * 1024);
     expect(r.stored.type).toBe('image/jpeg');                      // re-encoded, which also drops any EXIF
     expect(Math.max(r.stored.w, r.stored.h)).toBeLessThanOrEqual(2560);
     expect(r.stored.bytes).toBeLessThanOrEqual(2 * 1024 * 1024);
@@ -445,6 +452,16 @@ test.describe('gallery layout', () => {
     opened = picker();
     await page.locator('.v-main button:has(.mdi-image-edit)').first().click();
     expect(await opened).toBe(true);
+  });
+
+  test('a tile draws the thumbnail; the full picture is fetched only when the lightbox shows it', async ({ page }) => {
+    await open(page);
+    await page.evaluate(() => appInstance.selectTab('pics'));
+    const g = page.getByTestId('data-gallery');
+    await expect(tile(g, 'Gamma').locator('img.tile-img')).toHaveAttribute('src', 'data:image/png;base64,' + THUMB);
+    expect(await page.evaluate(() => 'g1' in appInstance.assetCache)).toBe(false);   // not loaded for a tile
+    await tile(g, 'Gamma').locator('button.tile-zoom').click();
+    await expect(page.getByTestId('lightbox-img')).toHaveAttribute('src', 'data:image/png;base64,' + PNG);
   });
 
   test('removing a picture takes two presses, with its own icon, not the row delete x', async ({ page }) => {
@@ -553,8 +570,15 @@ test.describe('image/url column types', () => {
     // The URL (not the bytes) is persisted on the row (server round-trip; putRow is fire-and-forget).
     await expect.poll(async () => {
       const s = await (await page.request.post('/api/getTableData', { data: { tableId: 'gallery', tab: 'active' } })).json();
-      return (s.rows[0] || {}).photo;
-    }, { timeout: 4000 }).toBe(src);
+      return (s.rows[0] || {}).photo || '';
+    }, { timeout: 4000 }).toContain('#thumb=');
+    // ...the picture first, its thumbnail after: the cell draws the thumbnail, a link or lightbox the picture.
+    const value = await page.evaluate(async () => {
+      const s = await (await fetch('/api/getTableData', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tableId: 'gallery', tab: 'active' }) })).json();
+      return Images.splitRef((s.rows[0] || {}).photo);
+    });
+    expect(value.thumb).toBe(src);
+    expect(value.full).toMatch(/\/uploads\/.+_pic\.jpg$/);
   });
 
   test('compact list layout renders an image column as a thumbnail, not the raw URL', async ({ page }) => {
@@ -629,20 +653,23 @@ test.describe('image/url column types', () => {
       const s = await (await page.request.post('/api/getTableData', { data: { tableId: 'gallery', tab: 'active' } })).json();
       return (s.rows[0] || {}).photo || '';
     };
-    await expect.poll(readPhoto, { timeout: 6000 }).toMatch(/^asset:img_\d+_[a-z0-9]+$/);
+    // The picture's asset, and its thumbnail's beside it: asset:<id>#thumb=asset:<id>_t (URI-encoded).
+    await expect.poll(readPhoto, { timeout: 6000 }).toMatch(/^asset:img_\d+_[a-z0-9]+#thumb=asset%3Aimg_\d+_[a-z0-9]+_t$/);
     const stored = await readPhoto();
+    const id = stored.slice(6, stored.indexOf('#'));
 
-    // The bytes are in _assets, as a raster data URI within the cap both rule layers enforce.
+    // The bytes are in _assets, as raster data URIs within the cap both rule layers enforce.
     const assets = await (await page.request.post('/api/getTableData', { data: { tableId: '_assets', tab: 'active' } })).json();
-    const row = (assets.rows || []).find((r) => r.id === stored.slice(6));
+    const row = (assets.rows || []).find((r) => r.id === id), trow = (assets.rows || []).find((r) => r.id === id + '_t');
     expect(row, 'no _assets row for ' + stored).toBeTruthy();
+    expect(trow, 'no thumbnail row for ' + stored).toBeTruthy();
     expect(row.src).toMatch(/^data:image\/jpeg;base64,/);   // _resizeImageFile re-encodes to JPEG
     expect(row.src.length).toBeLessThanOrEqual(900000);
 
-    // The cell renders the resolved data URI — and NOT wrapped in a link, since an asset has no href.
+    // The cell renders the THUMBNAIL's data URI — and NOT wrapped in a link, since an asset has no href.
     const thumb = page.locator('img.cell-thumb');
     await expect(thumb).toBeVisible({ timeout: 5000 });
-    expect(await thumb.getAttribute('src')).toBe(row.src);
+    expect(await thumb.getAttribute('src')).toBe(trow.src);
     expect(await thumb.evaluate((el) => !!el.closest('a'))).toBe(false);
 
     // It survives a reload: the value came from the database, not from memory.
@@ -650,7 +677,7 @@ test.describe('image/url column types', () => {
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
     await page.evaluate(() => window.appInstance.selectTab('gallery'));
     await expect(page.locator('img.cell-thumb')).toBeVisible({ timeout: 6000 });
-    expect(await page.locator('img.cell-thumb').getAttribute('src')).toBe(row.src);
+    expect(await page.locator('img.cell-thumb').getAttribute('src')).toBe(trow.src);
   });
 
   test('Settings background: upload paints the view card, persists to folder config, honours fit/opacity', async ({ page }) => {

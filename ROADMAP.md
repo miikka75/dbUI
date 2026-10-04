@@ -2602,9 +2602,17 @@ long side, which is lightbox quality on a large screen, fitted under 2 MB (`UPLO
 10 MB rule. Re-encoding drops the metadata in both tiers. "Is there a store?" stays a capability test
 followed by an attempt, because a Spark project exposes `uploadFile` and then refuses every put; the
 first refusal is remembered for the session (`_imageStoreDown`, separate from the feed publisher's flag)
-so later uploads go straight to the database tier instead of failing first each time. Considered and left
-for later: a separate thumbnail per picture, so tiles load small files and only the lightbox the large one;
-two files and two references per picture, a step of its own.
+so later uploads go straight to the database tier instead of failing first each time.
+
+**Thumbnails, in the value.** Each upload also stores a thumbnail (at most 480px, under 80 KB) in the same
+tier, and the cell's value carries both: `<picture>#thumb=<thumbnail, URI-encoded>`. A fragment, so the
+whole value given to an <img> or a link still loads the picture itself. Tiles and cell thumbnails draw the
+thumbnail; the lightbox and "open original" the picture, and for a database-tier picture the full asset is
+fetched only when the lightbox shows it. `Images.splitRef` / `joinRef` are the one place the format is
+read and written, and a value without a thumbnail (pasted, or uploaded before this) is just its picture.
+Recorded in the value rather than a side table keyed by the picture, because a side table costs a read per
+picture per session, including every picture that has no thumbnail, and nothing had shipped that a format
+change could break.
 
 Cost: a component, a `VIEW_PARTS.data` entry, the schema enum, two template branches, and a UI test for each
 caller. What would show it is wrong: a gallery that wants editing in place, which is `card` with a bigger

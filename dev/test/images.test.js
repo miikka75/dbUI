@@ -68,3 +68,24 @@ describe('the blob-store tier', () => {
     assert.equal(Images.dataUrlBytes('data:text/plain,hello'), null, 'not base64: nothing an image upload makes');
   });
 });
+
+describe('a picture reference carrying its thumbnail', () => {
+  it('joins and splits back, for both tiers', () => {
+    for (const [full, thumb] of [['https://s/uploads/1_a.jpg?alt=media&token=x', 'https://s/uploads/1_a.thumb.jpg?alt=media&token=y'],
+                                 ['asset:img_1', 'asset:img_1_t']]) {
+      const v = Images.joinRef(full, thumb);
+      assert.ok(v.startsWith(full + '#thumb='), 'the full reference comes first, so the whole value still loads the picture');
+      assert.deepEqual(Images.splitRef(v), { full, thumb });
+    }
+  });
+  it('a value without a thumbnail is just its picture, and nothing is invented', () => {
+    assert.equal(Images.joinRef('asset:img_1', ''), 'asset:img_1');
+    assert.deepEqual(Images.splitRef('https://x/y.png'), { full: 'https://x/y.png', thumb: '' });
+    assert.deepEqual(Images.splitRef(''), { full: '', thumb: '' });
+    assert.deepEqual(Images.splitRef(null), { full: '', thumb: '' });
+  });
+  it('a malformed thumbnail part is dropped rather than thrown', () => {
+    assert.deepEqual(Images.splitRef('asset:a#thumb=%E0%A4%A'), { full: 'asset:a', thumb: '' });
+  });
+});
+
