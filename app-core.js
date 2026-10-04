@@ -7834,6 +7834,16 @@ function createVueApp() {
       toggleListSwitch: function(col, item) { return appInstance.toggleListSwitch(col, item); },
       save: function(item, col, val) { return appInstance.saveField(item, col, val, this.owner); },
       addToListOnBlur: function(item, col) { return appInstance.addToListOnBlur(item, col); },
+      // Removing a picture is two presses (confirm-x action="image"), armed per table, row and column so
+      // arming one cell's picture never arms another's.
+      imageKey: function(item, col) { return 'img:' + (this.owner || appInstance.currentTable) + ':' + item.id + ':' + col; },
+      imageArmed: function(item, col) { return appInstance.isArmed(this.imageKey(item, col)); },
+      removeImage: function(item, col) {
+        var key = this.imageKey(item, col);
+        if (!appInstance.isArmed(key)) { appInstance.armConfirm(key); return; }
+        appInstance.pendingConfirm = null;
+        this.save(item, col, '');
+      },
       // A picture stored inline as a data: URI (the examples ship theirs that way) is no more an editable
       // address than an asset: reference, so the paste-a-URL field is not offered over its bytes.
       isInline: function(v) { return String(v || '').indexOf('data:') === 0; },
@@ -7906,7 +7916,7 @@ function createVueApp() {
       +   '<template v-if="canUpload">'
       +     '<input type="file" accept="image/*" ref="imgInput" style="display:none" @change="uploadImage(item, col, $event)">'
       +     '<v-btn size="x-small" variant="text" :loading="uploading" :icon="item[col] ? \'mdi-image-edit\' : \'mdi-camera-plus\'" :title="item[col] ? t(\'img.replace\') : t(\'img.upload\')" @click="$refs.imgInput.click()"></v-btn>'
-      +     '<v-btn v-if="item[col]" size="x-small" variant="text" icon="mdi-close" :title="t(\'img.remove\')" @click="save(item, col, \'\')"></v-btn>'
+      +     '<confirm-x v-if="item[col]" action="image" dense :armed="imageArmed(item, col)" @click="removeImage(item, col)"></confirm-x>'
       +   '</template>'
       // The paste-a-URL field stays available ALONGSIDE the upload button, not as its fallback: an external
       // URL (a CDN, a shared drive) is a legitimate third way to hold the image, and uploading is now
@@ -8230,13 +8240,19 @@ function createVueApp() {
     emits: ['click'],
     inject: ['uiHost'],
     computed: {
+      // `image` removes a cell's picture rather than the row. It is two presses for the same reason a delete
+      // is, and has its own icon because in a gallery tile it sits just above the row's delete: two
+      // identical x's, one acting on the first press, was how a picture got removed by accident.
       spec: function() {
-        return this.action === 'archive' ? { icon: 'mdi-archive-outline', color: 'warning' } : { icon: 'mdi-close', color: 'error' };
+        if (this.action === 'archive') return { icon: 'mdi-archive-outline', color: 'warning' };
+        if (this.action === 'image') return { icon: 'mdi-image-remove', color: 'error' };
+        return { icon: 'mdi-close', color: 'error' };
       },
       // Literal keys, so the translation-key check sees each one asked for.
       text: function() {
         var t = this.uiHost.t;
         if (this.action === 'archive') return this.armed ? t('board.confirm_archive') : t('board.archive');
+        if (this.action === 'image') return this.armed ? t('btn.confirm_delete') : t('img.remove');
         return this.armed ? t('btn.confirm_delete') : t('btn.delete');
       }
     },

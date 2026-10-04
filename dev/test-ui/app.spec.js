@@ -360,6 +360,22 @@ test.describe('gallery layout', () => {
     expect(r.ok).toBe('');
   });
 
+  test('removing a picture takes two presses, with its own icon, not the row delete x', async ({ page }) => {
+    await open(page);
+    await page.evaluate(() => appInstance.selectTab('pics'));
+    const g = page.getByTestId('data-gallery');
+    const photo = () => page.request.post('/api/getTableData', { data: { tableId: 'photos', tab: 'active' } })
+      .then((r) => r.json()).then((d) => ((d.rows || []).find((r) => r.id === 'p1') || {}).photo);
+    const remove = tile(g, 'Alpha').locator('[aria-label="img.remove"], [aria-label="btn.confirm_delete"]').first();
+    await expect(remove.locator('.mdi-image-remove')).toHaveCount(1);
+    await remove.click();                                                    // arms only
+    await expect(remove.locator('.mdi-check-circle')).toHaveCount(1);
+    expect(await photo()).toBe('https://img.example/a.png');
+    await remove.click();                                                    // acts
+    await expect.poll(photo).toBe('');
+    await expect(tile(g, 'Alpha').locator('.mdi-image-off-outline')).toHaveCount(1);
+  });
+
   test('a tile edits what a card edits: a field, and its picture', async ({ page }) => {
     test.setTimeout(20000);
     await open(page);
