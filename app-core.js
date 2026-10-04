@@ -851,7 +851,7 @@ function createVueApp() {
       canPrintCard: function() { var p = this.currentConfig.printable; return this.isDataView && (p === 'cards' || (Array.isArray(p) && p.indexOf('cards') >= 0)); },
       useCardLayout: function() {
         var layout = this.currentConfig.layout;
-        if (layout === 'card' || layout === 'list') return true;
+        if (layout === 'card' || layout === 'list' || layout === 'gallery') return true;
         if (layout === 'table') return false;
         if (this.windowWidth < 600) return true;
         // declaredCols, NOT visibleCols: visibleCols applies hideEmpty only in table mode and so reads
@@ -860,6 +860,7 @@ function createVueApp() {
         return needed > (this.windowWidth - 72);
       },
       useListLayout: function() { return this.currentConfig.layout === 'list'; },
+      useGalleryLayout: function() { return this.currentConfig.layout === 'gallery'; },
       // Add is offered wherever rows may be mutated, INCLUDING the read-only `list` layout: a table can
       // declare layout:'list' as its only presentation, so gating Add on an editable layout would leave
       // such a table with no way to create a row at all. The row lands and saves; it is just not
@@ -7508,7 +7509,11 @@ function createVueApp() {
           dateLabel: function(v) { return vm.dateLabel(v); },
           listValuePicture: function(col, val, ns) { return vm.listValuePicture(col, val, ns); },
           profilePicture: function(email) { return vm.profilePicture(email); },
-          userLabel: function(email) { return vm.userLabel(email); }
+          userLabel: function(email) { return vm.userLabel(email); },
+          colIsImage: function(col) { return vm.colIsImage(col); },
+          // An image value as a usable <img src>: an `asset:` reference resolves through the asset cache,
+          // anything else is a URL through the <img> gate (assetSrc).
+          imgSrc: function(v) { return vm.assetSrc(v); }
         },
         // A rotation's generated periods, and how one of its slots is named and labelled.
         rotationHost: {
@@ -7762,7 +7767,10 @@ function createVueApp() {
       + '<v-tab :value="false" size="small">{{ partLabel(false) }}</v-tab>'
       + '<v-tab :value="true" size="small">{{ partLabel(true) }}</v-tab>'
       + '</v-tabs>'
-      + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
+      + '<data-gallery v-if="layout===\'gallery\'" :rows="shown" :cols="cols" :view-cfg="obscureCfg">'
+      +   '<template v-slot:actions="{ item }"><template v-if="canMutateRow(item)"><confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x><confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x></template></template>'
+      + '</data-gallery>'
+      + '<v-list v-else-if="layout===\'list\'" density="compact" class="my-2">'
       + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
       + '<template v-slot:default><span v-for="(col, i) in colsFor(item)" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]" :view-cfg="obscureCfg"></list-value><span v-if="i < colsFor(item).length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
       + '<template v-slot:append><template v-if="canMutateRow(item)"><confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x><confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x></template></template>'
@@ -7918,7 +7926,7 @@ function createVueApp() {
   window.VIEW_PARTS = {
     calendar: { month: 'cal-month', week: 'cal-week', list: 'cal-agenda' },
     rotation: { table: 'rotation-table', card: 'rotation-cards', list: 'rotation-list' },
-    data: { list: 'data-list' }   // read-only list layout; card/table editing grids remain inline (deeper refactor)
+    data: { list: 'data-list', gallery: 'data-gallery' }   // read-only layouts; card/table editing grids remain inline (deeper refactor)
   };
   window.viewPartFor = function(kind, mode) { return ((window.VIEW_PARTS[kind]) || {})[mode] || null; };
 
@@ -8083,6 +8091,42 @@ function createVueApp() {
       + '</template>'
       + '</template>'
       + '</v-list-item></v-list>'
+  });
+
+  // --- Data view: read-only gallery layout part ------------------------------------------------
+  // layout: "gallery" -- a READING layout, like `list` (ROADMAP `gallery`). One tile per row: the first
+  // image column the view shows is the picture, at a fixed square crop so the grid lines up, and the other
+  // columns are the caption. A row with no picture still gets a tile and a placeholder, because a gallery
+  // that drops rows reads as data loss. A URL picture opens full size like an image cell; an `asset:` one
+  // has no address to open, so it is not a link. The row controls are the caller's, through the `actions`
+  // slot: the top-level grid and embed-view archive and delete by different paths.
+  app.component('data-gallery', {
+    props: { rows: Array, cols: Array, viewCfg: { type: Object, default: null } },
+    inject: ['valueHost'],
+    computed: {
+      imageCol: function() { var h = this.valueHost; return (this.cols || []).filter(function(c) { return h.colIsImage(c); })[0] || ''; },
+      captionCols: function() { var img = this.imageCol; return (this.cols || []).filter(function(c) { return c !== img; }); }
+    },
+    methods: {
+      src: function(v) { return this.valueHost.imgSrc(v); },
+      href: function(v) { return isAssetRef(v) ? '' : safeUrl(v); }
+    },
+    template: ''
+      + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;padding:8px" data-testid="data-gallery">'
+      + '<v-card v-for="item in rows" :key="item.id" variant="outlined" data-testid="gallery-tile">'
+      +   '<a v-if="item[imageCol] && href(item[imageCol])" :href="href(item[imageCol])" target="_blank" @click.stop style="display:block">'
+      +     '<img :src="src(item[imageCol])" alt="" style="display:block;width:100%;aspect-ratio:1/1;object-fit:cover"></a>'
+      +   '<img v-else-if="item[imageCol]" :src="src(item[imageCol])" alt="" style="display:block;width:100%;aspect-ratio:1/1;object-fit:cover">'
+      +   '<div v-else style="width:100%;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;background:rgb(var(--v-theme-on-surface),0.05)">'
+      +     '<v-icon size="40" icon="mdi-image-off-outline" style="opacity:0.35"></v-icon></div>'
+      +   '<div class="d-flex align-start pa-2" style="gap:4px">'
+      +     '<div style="flex:1;min-width:0;font-size:0.85rem">'
+      +       '<div v-for="col in captionCols" :key="col" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><list-value :col="col" :value="item[col]" :view-cfg="viewCfg"></list-value></div>'
+      +     '</div>'
+      +     '<slot name="actions" :item="item"></slot>'
+      +   '</div>'
+      + '</v-card>'
+      + '</div>'
   });
 
   // ---- Shared UI elements. One definition each, used everywhere the element appears; CLAUDE.md

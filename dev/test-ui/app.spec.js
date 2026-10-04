@@ -255,6 +255,61 @@ test.describe('Secondary-colored chips', () => {
   });
 });
 
+test.describe('gallery layout', () => {
+  // layout: "gallery" is a reading layout of a data view (ROADMAP `gallery`): one tile per row, the first
+  // image column as the picture, the rest as the caption. One component serves the top-level grid and
+  // embeds, each supplying its own row controls.
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
+  const SCH = {
+    defaultLanguage: 'en',
+    tables: { photos: { columns: [{ name: 'title', type: 'text' }, { name: 'photo', type: 'image' }] } },
+    views: [
+      { name: 'pics', sources: ['photos'], mode: 'union', columns: ['photo', 'title'], layout: 'gallery' },
+      { name: 'home', kind: 'page', markdown: 'Pictures\n\n{{view:pics}}' }
+    ],
+    nav: { items: [{ view: 'pics' }, { view: 'home' }] }
+  };
+  async function open(page) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    // The URL picture is served locally rather than fetched, so the test does not depend on the network.
+    await page.route('https://img.example/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(PNG, 'base64') }));
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: SCH } });
+    const put = (tableId, data) => page.request.post('/api/putRow', { data: { tableId, data, tab: 'active' } });
+    await put('_assets', { id: 'g1', src: 'data:image/png;base64,' + PNG });
+    await put('photos', { id: 'p1', title: 'Alpha', photo: 'https://img.example/a.png' });
+    await put('photos', { id: 'p2', title: 'Beta', photo: '' });
+    await put('photos', { id: 'p3', title: 'Gamma', photo: 'asset:g1' });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+  }
+  const tile = (scope, title) => scope.getByTestId('gallery-tile').filter({ hasText: title });
+
+  test('a tile per row: a URL picture links out, an asset picture does not, a missing one is a placeholder', async ({ page }) => {
+    await open(page);
+    await page.evaluate(() => appInstance.selectTab('pics'));
+    const g = page.getByTestId('data-gallery');
+    await expect(g.getByTestId('gallery-tile')).toHaveCount(3);
+    await expect(tile(g, 'Alpha').locator('a[href="https://img.example/a.png"] img')).toHaveCount(1);
+    await expect(tile(g, 'Gamma').locator('img')).toHaveAttribute('src', /^data:image\/png/);
+    await expect(tile(g, 'Gamma').locator('a')).toHaveCount(0);
+    await expect(tile(g, 'Beta').locator('.mdi-image-off-outline')).toHaveCount(1);
+    // The picture column is not repeated as caption text; the row controls are the grid's.
+    await expect(tile(g, 'Alpha')).not.toContainText('img.example');
+    await expect(tile(g, 'Alpha').locator('.mdi-close')).toHaveCount(1);
+  });
+
+  test('embedded in a page, the same tiles with the embed\'s own row controls', async ({ page }) => {
+    await open(page);
+    await page.evaluate(() => appInstance.selectTab('home'));
+    const g = page.locator('.v-main').getByTestId('data-gallery');
+    await expect(g.getByTestId('gallery-tile')).toHaveCount(3);
+    await expect(tile(g, 'Gamma').locator('img')).toHaveAttribute('src', /^data:image\/png/);
+    await expect(tile(g, 'Beta').locator('.mdi-close')).toHaveCount(1);
+  });
+});
+
 test.describe('image/url column types', () => {
   const GALLERY = {
     defaultLanguage: 'en',
