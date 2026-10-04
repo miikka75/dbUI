@@ -29,7 +29,7 @@ Embedding is free: `embed-view` dispatches on the same classifier, so a new kind
 An entry that is PARTLY built says so in its heading and records what landed inline, rather than being
 split in two: the reasoning for what remains is the same document as the reasoning for what shipped.
 
-### Code review 2026-09-22 — seven findings, ranked *(1–5 and 7 landed; 6 is a series in progress)*
+### Code review 2026-09-22 — seven findings, ranked *(all seven landed; 6 as a series of cuts)*
 
 The previous full-repo review was #57 (2026-07-18). This pass found no rot: 1797 unit tests pass, the
 typecheck is clean, and CI runs the rules tests, the policy differential and the emulator E2E. What it
@@ -195,7 +195,7 @@ Two guards now cover the class rather than the instance: no root member may retu
 predicate with a hardcoded answer is either dead or a flag in disguise), and no offered translation key
 may go unasked-for. Both catch an injected violation.
 
-#### 6. `app-core.js` is a monolith *(series started: `brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`, `bundle.js`, the feed publisher)*
+#### 6. `app-core.js` is a monolith *(series done: `brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`, `bundle.js`, the feed publisher)*
 
 8,669 lines, 600 KB, and essentially one function: `createVueApp()` spans 194–8631, whose `methods`
 object alone is ~5,700 lines. That object is where finding 1 hid — a duplicate key in a literal too
