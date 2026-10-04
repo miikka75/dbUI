@@ -6,6 +6,7 @@
     "7": "Settings gains an Appearance section — the theme, plus an icon, image and background for every menu entry — and a single Navigation choice (Side menu, Top navigation, List, Tiles). Their labels now come in Spanish and Swedish as well as English, and the old Background images labels are gone.",
     "8": "The rest of Settings now speaks Spanish and Swedish too: the theme colour names, the local-database storage notice, and the Examples dialog.",
     "9": "Settings no longer has a Refresh data button (changes from others already arrive on their own), so its labels are gone from the language packs.",
-    "10": "Drops one of two identical app labels (\"No data\" in tables and in tiles now share one), so there is one less row to translate. Nothing on screen changes."
+    "10": "Drops one of two identical app labels (\"No data\" in tables and in tiles now share one), so there is one less row to translate. Nothing on screen changes.",
+    "11": "Adds Notes Gallery under Data: the notes as a grid of picture tiles (`layout: \"gallery\"`), the first image column as the picture and the title, author and date as the caption. Four more notes, each with a picture, so the grid has something to show. A note without a picture still gets a tile."
   }
 }

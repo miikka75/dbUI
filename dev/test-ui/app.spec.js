@@ -6311,7 +6311,7 @@ test.describe('demo schema (examples/demo-schema.json) is valid v3', () => {
     await demoReady(page);
     expect(await page.evaluate(() => appInstance.currentTable)).toBe('__home');   // browse boots to home
     const ids = await page.evaluate(() => Nav.flatten(appInstance.sidebarTabs).map(t => t.id + (t.children ? '[' + t.children.map(c => c.id).join(',') + ']' : '')));
-    expect(ids).toContain('grp:Data[tasks,notes]');                               // nav group
+    expect(ids).toContain('grp:Data[tasks,notes,notes_gallery]');                               // nav group
     expect(ids).toContain('all_items[summary_cards,quick_list,notes_list]');      // nested clickable parent, inside grp:Work
     expect(ids.some(s => s.startsWith('grp:Leaderboards['))).toBe(true);          // a group three levels down
     // The shipped demo passes its own load-time check: every error here reaches its users as a toast.
