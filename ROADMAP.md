@@ -410,7 +410,7 @@ seven entries to find out what is left.
 
 | Open | From | Size | Why it is not done |
 |---|---|---|---|
-| **Set `Csp.REPORT_ENDPOINT` and deploy the collector** | 7 | one line + `npm run csp:sync` | The mechanism landed; only the URL is missing, and it cannot be guessed — it belongs to the deployment. Deploy `supabase/functions/csp-report/` (free), then set the constant. |
+| ~~**Set `Csp.REPORT_ENDPOINT` and deploy the collector**~~ *(done)* | 7 | — | Done in `626cb93` (2026-09-23): `csp.js` points at the project's Supabase Edge Function (`…supabase.co/functions/v1/csp-report`), and the function answers. This row had not been moved. |
 | **`board` / `form` / `timeline` have no embed branch** | 4 | small code, large question | Three product questions wearing one costume: does a board keep drag-between-lanes inside a document? Does a `form` in a page mean a second submit target, or the same one twice? Does a timeline embed want its own date window or the page's? The dispatch set is asserted, so this is a recorded answer rather than an accident. |
 | ~~**`access:` on a `markdown` + `sources` view is half-honoured**~~ *(landed)* | 4 | small | Honoured on both paths now: `embed-view` asks `canAccessPage` before any branch draws, so a sourced page embedded elsewhere renders nothing for a member without the grant, as it already did at nav and in the doc branch. Pinned by *access: on a sourced page holds where it is embedded*. |
 | ~~**The extraction series**~~ *(done)* | 6 | done | Six cuts made (`brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`, `bundle.js`, the feed publisher). Ranked by how much of each seam is pure and how much duplication it already costs, which is how feeds went from first to last. |
