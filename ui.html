@@ -413,11 +413,11 @@
             <v-spacer></v-spacer>
             <v-btn v-if="a.canPrintView" icon="mdi-printer" size="small" variant="text" @click="a.printView()"></v-btn>
           </div>
-          <!-- Gallery layout: one tile per row (registry part VIEW_PARTS.data.gallery) -->
-          <data-gallery v-if="a.useGalleryLayout" :rows="a.sortedData" :cols="a.visibleCols" :view-cfg="a.currentConfig">
+          <!-- Gallery layout: one tile per row, with the card's fields (registry part VIEW_PARTS.data.gallery) -->
+          <data-gallery v-if="a.useGalleryLayout" :rows="a.sortedData" :cols="a.visibleCols" :view-cfg="a.currentConfig" :hide-col="a.isColumnHidden" :readonly="a.viewReadonly(a.currentTable)">
             <template v-slot:actions="{ item }">
               <v-btn v-if="a.canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="a.printCard(item)"></v-btn>
-              <template v-if="a.canMutateRows">
+              <template v-if="a.canMutateRows && a.canMutateRow(item)">
                 <confirm-x v-if="a.hasArchive" :armed="a.isArmed('arch:' + item.id)" action="archive" dense @click="a.archiveRow(item)"></confirm-x>
                 <confirm-x :armed="a.isArmed('row:' + item.id)" dense @click="a.deleteRow(item)"></confirm-x>
               </template>
