@@ -3937,18 +3937,22 @@ test.describe('v3 @both partition toggle in an embed', () => {
       const res = await app.publishPerPersonFeed('pp_pub');
       window.backend.uploadFile = realUp; window.Writes.putRow = realPut;
 
-      const body = (owner) => {
-        const w = writes.filter((x) => x.row.owner === owner).pop();
+      // By row id: the pass writes a PATCH (its own id and url columns), so the owner is not in it.
+      const body = (id) => {
+        const w = writes.filter((x) => x.row.id === id).pop();
         const u = uploads.filter((x) => x.path === 'feeds/' + (w && w.row.fid) + '.ics').pop();
         return u ? u.text : '';
       };
       return {
         res,
-        annaFile: body('anna@x.test'),
-        benFile: body('ben@x.test'),
+        annaFile: body('s1'),
+        benFile: body('s2'),
         // The departed subscriber: an empty calendar written over their OLD path, and the row cleared.
         blanked: uploads.filter((u) => u.path === 'feeds/oldid.ics').map((u) => u.text),
-        goneRow: writes.filter((w) => w.row.owner === 'gone@x.test').pop().row,
+        goneRow: writes.filter((w) => w.row.id === 's3').pop().row,
+        // Only the publisher's half: never a column the subscriber owns, which a whole-row write would
+        // reassert over whatever they changed while the pass was uploading.
+        writtenCols: [...new Set(writes.flatMap((w) => Object.keys(w.row)))].sort(),
         // Publishing must not re-arm the pass on its own row writes.
         reentered: app._publishingFeeds
       };
@@ -3965,6 +3969,7 @@ test.describe('v3 @both partition toggle in an embed', () => {
     expect(r.blanked[0]).not.toContain('VEVENT');
     expect(r.goneRow.url).toBe('');
     expect(r.goneRow.fid).toBe('');
+    expect(r.writtenCols).toEqual(['fid', 'id', 'url']);
     expect(r.reentered).toBe(false);
   });
 
@@ -4222,11 +4227,12 @@ test.describe('v3 @both partition toggle in an embed', () => {
         window.__uploads.push({ path: opts.path, text });
         return 'https://store.example/' + opts.path;
       });
-      // The pass writes ids and urls back into the rows; apply them to the cache, as a real write would.
+      // The pass writes ids and urls back into the rows; apply them to the cache, as a real write would --
+      // merged, since putRow merges and the pass sends only its own columns.
       window.__realPut = window.Writes.putRow;
       window.Writes.putRow = (t, row) => {
         const rows = app.dataCache[t], i = rows.findIndex((r) => r.id === row.id);
-        rows.splice(i, 1, Object.assign({}, row));
+        rows.splice(i, 1, Object.assign({}, rows[i], row));
         return Promise.resolve(row);
       };
       app.selectTab('__settings');

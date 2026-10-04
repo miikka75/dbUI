@@ -369,6 +369,13 @@
     };
   }
 
+  // The language a subscriber's file is rendered in: their choice while the database still declares it
+  // (any choice, when it declares none), else the CALENDAR's. Never the session's -- a subscriber's file
+  // must not change language according to whoever happened to publish it.
+  function languageFor(chosen, declared, calendarLang) {
+    return (chosen && (!(declared || []).length || declared.indexOf(chosen) >= 0)) ? chosen : calendarLang;
+  }
+
   function subscriberTableOf(view) {
     var cfg = (view && view.feedSubscribers) || null;
     return (cfg && isPerPerson(view) && cfg.table) ? cfg.table : '';
@@ -447,7 +454,7 @@
     return out;
   }
 
-  var M = { isFeed: isFeed, isPerPerson: isPerPerson, modeOf: modeOf, hasMe: hasMe, configErrors: configErrors,
+  var M = { languageFor: languageFor, isFeed: isFeed, isPerPerson: isPerPerson, modeOf: modeOf, hasMe: hasMe, configErrors: configErrors,
             subscribersOf: subscribersOf, subscriptionOf: subscriptionOf, activeValues: activeValues, subscribeRow: subscribeRow, pendingRevocation: pendingRevocation, statusOf: statusOf, isActive: isActive,
             subscriberTableOf: subscriberTableOf, forSubscriberTable: forSubscriberTable,
             names: names, tablesOf: tablesOf, forTable: forTable, pathFor: pathFor, idOfPath: idOfPath, strayIds: strayIds, newId: newId };

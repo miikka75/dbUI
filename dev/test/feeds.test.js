@@ -634,3 +634,46 @@ describe('feeds.js — strayIds: which stored feed files nothing records', () =>
     assert.equal(Feeds.idOfPath('feeds/.ics'), '');
   });
 });
+
+describe('the publisher writes only its own half of a subscriber row', () => {
+  // The publisher's pass reads the subscriber table, uploads one file per subscriber (slow: a render
+  // and an upload each), then writes the id and url back. It used to write back the WHOLE cached row.
+  // putRow merges on every backend, so a whole row reasserts every column the cache held -- and a
+  // subscriber who unsubscribed while the upload was in flight was quietly subscribed again, their file
+  // left live. The subscriber's own writes were already partial (_patchMySubscription) for the mirror
+  // reason; this pins the publisher's side.
+  const { appCoreFn } = require('./app-core-fn');
+  const cfg = { table: 'subs', idColumn: 'feed_id', urlColumn: 'feed_url', activeColumn: 'active', langColumn: 'lang' };
+  const cached = () => ({ id: 'r1', owner: 'a@x', active: 'yes', lang: 'en', feed_id: '', feed_url: '' });
+  const writer = () => { const w = []; return { w, Writes: { putRow: (t, row, tab) => { w.push({ t, row, tab }); return Promise.resolve(); } } }; };
+
+  it('publishing writes the id and url, and nothing the subscriber owns', async () => {
+    const { w, Writes } = writer();
+    await appCoreFn('_patchSubscriberRow', { Writes }).call({}, cfg, { row: cached() }, 'f1', 'https://x/f1.ics');
+    assert.deepEqual(w, [{ t: 'subs', tab: 'active', row: { id: 'r1', feed_id: 'f1', feed_url: 'https://x/f1.ics' } }]);
+  });
+  it('an unchanged id and url write nothing', async () => {
+    const { w, Writes } = writer();
+    const row = Object.assign(cached(), { feed_id: 'f1', feed_url: 'u' });
+    assert.equal(await appCoreFn('_patchSubscriberRow', { Writes }).call({}, cfg, { row }, 'f1', 'u'), 'u');
+    assert.deepEqual(w, []);
+  });
+  it('clearing after a blank empties the id and url, and nothing else', async () => {
+    const { w, Writes } = writer();
+    await appCoreFn('_clearSubscriberRow', { Writes }).call({}, cfg, { row: Object.assign(cached(), { active: 'no', feed_id: 'f1', feed_url: 'u' }) });
+    assert.deepEqual(w, [{ t: 'subs', tab: 'active', row: { id: 'r1', feed_id: '', feed_url: '' } }]);
+  });
+});
+
+describe('Feeds.languageFor: which language a subscriber\'s file is rendered in', () => {
+  it('their choice, while the database still declares it', () => {
+    assert.equal(Feeds.languageFor('fi', ['en', 'fi'], 'en'), 'fi');
+  });
+  it('a dropped language falls back to the calendar\'s, never to whoever is publishing', () => {
+    assert.equal(Feeds.languageFor('sv', ['en', 'fi'], 'en'), 'en');
+    assert.equal(Feeds.languageFor('', ['en', 'fi'], 'fi'), 'fi');
+  });
+  it('with no languages declared, any choice stands', () => {
+    assert.equal(Feeds.languageFor('fi', [], 'en'), 'fi');
+  });
+});
