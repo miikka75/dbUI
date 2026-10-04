@@ -48,3 +48,23 @@ describe('alpha and the encoder', () => {
     assert.equal(Images.encoderFor(Images.hasAlpha(clear)), 'image/webp');
   });
 });
+
+describe('the blob-store tier', () => {
+  it('its ladder only ever shrinks, and starts at lightbox size', () => {
+    const s = Images.STORE_STEPS;
+    assert.equal(s[0].max, 2560);
+    for (let i = 1; i < s.length; i++) assert.ok(s[i].max <= s[i - 1].max && s[i].q <= s[i - 1].q, 'step ' + i);
+  });
+  it('a byte cap becomes the data-URL length that holds it', () => {
+    assert.equal(Images.capChars(3), 4);
+    assert.equal(Images.capChars(2 * 1024 * 1024), Math.floor(2 * 1024 * 1024 * 4 / 3));
+  });
+  it('a data URL decodes to its bytes and type, for the upload', () => {
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
+    const b = Images.dataUrlBytes('data:image/png;base64,' + png);
+    assert.equal(b.type, 'image/png');
+    assert.deepEqual(Buffer.from(b.bytes), Buffer.from(png, 'base64'));
+    assert.equal(Images.dataUrlBytes('https://x/y.png'), null);
+    assert.equal(Images.dataUrlBytes('data:text/plain,hello'), null, 'not base64: nothing an image upload makes');
+  });
+});

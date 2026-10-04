@@ -2591,6 +2591,21 @@ untouched. New keys, because none of these had words before: `img.view`, `img.op
 the case the image cell had just stopped allowing. It is the shared `confirm-btn` now. The Appearance
 dialog's image removal stays one press: it edits a draft that Cancel throws away.
 
+**Two upload tiers, each with its own limit.** A gallery made the image cell's upload matter, and it had
+one tier with a limit and one without. Without a blob store the picture was fitted into the database
+(1600px, 900 KB data URI, ASSET_CAP). WITH one, the original file went up untouched: a 6 MB phone photo
+stored and loaded at full size for a 220px tile, a 12 MB one refused by the store's 10 MB rule and then
+quietly landing in the database through the asset fallback, and every photo carrying its EXIF, GPS
+position included, into a publicly readable bucket. Now `storeImage` (the root owns the strategy; the
+cell only asks) re-encodes for the store too, through the same `Images.fit` ladder: at most 2560px on the
+long side, which is lightbox quality on a large screen, fitted under 2 MB (`UPLOAD_CAP`), well inside the
+10 MB rule. Re-encoding drops the metadata in both tiers. "Is there a store?" stays a capability test
+followed by an attempt, because a Spark project exposes `uploadFile` and then refuses every put; the
+first refusal is remembered for the session (`_imageStoreDown`, separate from the feed publisher's flag)
+so later uploads go straight to the database tier instead of failing first each time. Considered and left
+for later: a separate thumbnail per picture, so tiles load small files and only the lightbox the large one;
+two files and two references per picture, a step of its own.
+
 Cost: a component, a `VIEW_PARTS.data` entry, the schema enum, two template branches, and a UI test for each
 caller. What would show it is wrong: a gallery that wants editing in place, which is `card` with a bigger
 picture, a different request.
