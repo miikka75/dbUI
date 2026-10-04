@@ -21,7 +21,7 @@ const BUDGET_MS = 2000;
 
 // Every `test(...)` in a spec, with the fixed-sleep total inside it and whether it raised its own
 // timeout. Line-based on purpose: a parser would be more precise and much more to maintain, and the
-// shape it needs to recognise is two literal call forms.
+// shape it needs to recognise is a few literal call forms.
 function testsOf(file) {
   const lines = fs.readFileSync(path.join(SPEC_DIR, file), 'utf8').split(/\r?\n/);
   const out = [];
@@ -33,6 +33,11 @@ function testsOf(file) {
     if (/test\.setTimeout\(/.test(line)) cur.ownTimeout = true;
     const s = /waitForTimeout\((\d+)\)/.exec(line);
     if (s) cur.sleep += Number(s[1]);
+    // The same sleep taken INSIDE the page, `await new Promise((r) => setTimeout(r, 2600))` in an
+    // evaluate. It costs the test's budget exactly as waitForTimeout does, and two of them (5.2s of 8s)
+    // were what left the feed-republish tests failing under load while this guard read them as clean.
+    const p = /new Promise\(\s*(?:\(\s*)?(\w+)\s*\)?\s*=>\s*setTimeout\(\s*\1\s*,\s*(\d+)\s*\)/.exec(line);
+    if (p) cur.sleep += Number(p[2]);
   });
   return out;
 }

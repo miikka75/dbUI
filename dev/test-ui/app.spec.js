@@ -3724,6 +3724,9 @@ test.describe('v3 @both partition toggle in an embed', () => {
   });
 
   test('a backend whose blob store is absent stops the BACKGROUND republish, not the button', async ({ page }) => {
+    // Slow by design: it must let the 2000ms republish debounce run out, twice, and one half proves
+    // that NOTHING is uploaded, which leaves no condition to poll for. 5.2s asleep of an 8s default.
+    test.setTimeout(20000);
     await ensureAppReady(page);
     const r = await page.evaluate(async () => {
       const app = window.appInstance;
@@ -3800,6 +3803,9 @@ test.describe('v3 @both partition toggle in an embed', () => {
   });
 
   test('a write to a feed source schedules exactly one republish, however many rows changed', async ({ page }) => {
+    // Slow by design: it must let the 2000ms republish debounce run out, twice, and one half proves
+    // that NOTHING is uploaded, which leaves no condition to poll for. 5.2s asleep of an 8s default.
+    test.setTimeout(20000);
     await ensureAppReady(page);
     const r = await page.evaluate(async () => {
       const app = window.appInstance;
@@ -5740,6 +5746,9 @@ test.describe('calendar view', () => {
   // its date column), like a user row once it has an email. Until then nothing is stored and the form
   // says what is missing. The id comes from the whole name, never from a half-typed one.
   test('a new calendar saves itself once complete, with its id from the whole name', async ({ page }) => {
+    // Three flows in one (create and save, publish and stop, edit and delete): 6.5s alone of an 8s default,
+    // so any load timed it out at its last step.
+    test.setTimeout(20000);
     await ensureAppReady(page);
     await page.evaluate(() => {
       const app = window.appInstance;
@@ -7291,7 +7300,7 @@ test.describe('Shared-link URL params', () => {
   // asserted without a real firebase boot (which can't run in the test env).
   test('firebase k/d/p link restores firebase_config and strips the URL', async ({ page }) => {
     page.on('dialog', d => d.accept());   // user confirms the projectId connect prompt (the onboarding path)
-    await page.route(/gstatic\.com|\/backend-firebase\.html|\/storage-firestore\.html/, r =>
+    await page.route(/gstatic\.com|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
       r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
     await page.goto('/?mode=firebase&k=API_KEY_1&d=app.example.com&p=proj-123');
     await page.waitForFunction(() => localStorage.getItem('app_mode') === 'firebase', { timeout: 6000 });
@@ -7307,7 +7316,7 @@ test.describe('Shared-link URL params', () => {
   // Firebase branch with d= omitted: authDomain must default to <projectId>.firebaseapp.com.
   test('firebase k/p link without d= derives authDomain from projectId', async ({ page }) => {
     page.on('dialog', d => d.accept());   // user confirms the projectId connect prompt (the onboarding path)
-    await page.route(/gstatic\.com|\/backend-firebase\.html|\/storage-firestore\.html/, r =>
+    await page.route(/gstatic\.com|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
       r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
     await page.goto('/?mode=firebase&k=API_KEY_9&p=proj-999');
     await page.waitForFunction(() => localStorage.getItem('app_mode') === 'firebase', { timeout: 6000 });
@@ -7316,7 +7325,7 @@ test.describe('Shared-link URL params', () => {
   });
   test('firebase base64 config link restores firebase_config', async ({ page }) => {
     page.on('dialog', d => d.accept());   // user confirms the projectId connect prompt (the onboarding path)
-    await page.route(/gstatic\.com|\/backend-firebase\.html|\/storage-firestore\.html/, r =>
+    await page.route(/gstatic\.com|\/backend-firebase\.js|\/storage-firestore\.js/, r =>
       r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
     const config = { apiKey: 'AK2', authDomain: 'b.example.com', projectId: 'p2' };
     const b64 = Buffer.from(JSON.stringify(config)).toString('base64');

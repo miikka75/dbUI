@@ -105,6 +105,8 @@ test.describe('Live sync between two clients', () => {
   });
 
   test('a remote change does NOT overwrite the cell the user is typing in — it lands on blur', async ({ browser }) => {
+    // Two clients, each booting its own page: ~7.5s of an 8s default in an ordinary full run.
+    test.setTimeout(20000);
     // The reason live sync needed a hold gate at all. The inline cell has no draft buffer: it renders
     // {{ item[col] }} straight off the cached row object, so an unguarded remote write would repaint
     // the text under the caret mid-word.
@@ -140,6 +142,8 @@ test.describe('Live sync between two clients', () => {
   });
 
   test('two clients editing DIFFERENT columns of one row no longer clobber each other', async ({ browser }) => {
+    // Two clients, each booting its own page: ~6s of an 8s default in an ordinary full run.
+    test.setTimeout(20000);
     // Partial writes: each client sends only the column it touched, so both survive. Before this, every
     // write carried its author's stale copy of every other column and the later write won everything.
     const ctxA = await browser.newContext();
