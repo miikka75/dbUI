@@ -2242,9 +2242,13 @@ function createVueApp() {
       _blankFeedAt: function(id) {
         if (!id || !backend.uploadFile) return Promise.resolve(null);
         var text = Ics.build({}, { name: this.t('settings.feed_revoked'), domain: (typeof Databases !== 'undefined' && Databases.activeKey()) || 'dbui.local' });
+        return this._uploadFeed(id, text).catch(function() { return null; });   // best effort: the caller must still move on to a new id
+      },
+      // Every feed file goes up the same way -- a shared feed, a subscriber's, a blank -- at the stable
+      // path its id names. Resolves to the file's public URL.
+      _uploadFeed: function(id, text) {
         var blob = new Blob([text], { type: 'text/calendar;charset=utf-8' });
-        return Promise.resolve(backend.uploadFile(blob, { path: Feeds.pathFor(id), contentType: 'text/calendar' }))
-          .catch(function() { return null; });   // best effort: the caller must still move on to a new id
+        return Promise.resolve(backend.uploadFile(blob, { path: Feeds.pathFor(id), contentType: 'text/calendar' }));
       },
 
       // Retire the current URL and publish at a fresh one. Every existing subscriber breaks, which IS
@@ -2253,10 +2257,7 @@ function createVueApp() {
         var self = this, info = this.feedInfoFor(name);
         if (!this.canPublishFeeds()) return Promise.resolve(null);
         return this._blankFeedAt(info && info.id).then(function() {
-          var cfg = Object.assign({}, self.appConfig || {});
-          cfg.feeds = Object.assign({}, cfg.feeds || {});
-          delete cfg.feeds[name];               // drop the id so publishFeed mints a new one
-          self._saveFolderConfig(cfg, null);
+          self._setFeedInfo(name, null);        // drop the id so publishFeed mints a new one
           return self.publishFeed(name);
         });
       },
@@ -2268,10 +2269,7 @@ function createVueApp() {
       unpublishFeed: function(name) {
         var self = this, info = this.feedInfoFor(name);
         return this._blankFeedAt(info && info.id).then(function() {
-          var cfg = Object.assign({}, self.appConfig || {});
-          cfg.feeds = Object.assign({}, cfg.feeds || {});
-          delete cfg.feeds[name];
-          self._saveFolderConfig(cfg, null);
+          self._setFeedInfo(name, null);
           self.notify(self.t('settings.feed_unpublished'));
         });
       },
@@ -2295,15 +2293,10 @@ function createVueApp() {
         return this._awaitViewData(name).then(function() {
           return self._icsStringsFor(self.calendarIcsFor(name).lang, false);
         }).then(function(strings) {
-          var text = self._renderIcs(name, win, strings);
-          var blob = new Blob([text], { type: 'text/calendar;charset=utf-8' });
-          return backend.uploadFile(blob, { path: Feeds.pathFor(id), contentType: 'text/calendar' });
+          return self._uploadFeed(id, self._renderIcs(name, win, strings));
         })
           .then(function(url) {
-            var cfg = Object.assign({}, self.appConfig || {});
-            cfg.feeds = Object.assign({}, cfg.feeds || {});
-            cfg.feeds[name] = { id: id, url: url, at: new Date().toISOString() };
-            self._saveFolderConfig(cfg, null);
+            self._setFeedInfo(name, { id: id, url: url, at: new Date().toISOString() });
             self._blobStoreDown = false;      // it worked, so the background path may resume
             return url;
           })
@@ -2530,35 +2523,35 @@ function createVueApp() {
       _publishOneSubscriber: function(name, cfg, sub, win, viewLang, declared) {
         var self = this;
         var id = sub.id || Feeds.newId();
-        // Their chosen language, but only one this database still declares. A dropped language falls
-        // back to the CALENDAR's, never to the session's -- a subscriber's file must not change
-        // language according to whoever happened to publish it.
-        var lang = (sub.lang && (!declared.length || declared.indexOf(sub.lang) >= 0)) ? sub.lang : viewLang;
-        return this._icsStringsFor(lang, false).then(function(strings) {
-          var text = self._renderIcs(name, win, strings, self.identityFor(sub.owner));
-          var blob = new Blob([text], { type: 'text/calendar;charset=utf-8' });
-          return backend.uploadFile(blob, { path: Feeds.pathFor(id), contentType: 'text/calendar' });
+        // Their chosen language while the database still declares it, else the calendar's (Feeds.languageFor).
+        return this._icsStringsFor(Feeds.languageFor(sub.lang, declared, viewLang), false).then(function(strings) {
+          return self._uploadFeed(id, self._renderIcs(name, win, strings, self.identityFor(sub.owner)));
         }).then(function(url) {
           return self._patchSubscriberRow(cfg, sub, id, url);
         });
       },
       // The publisher's half of the row: the minted id and the URL. Written through the ordinary funnel,
       // so it is an ordinary row update -- `_publishingFeeds` is what stops it re-arming the pass.
+      //
+      // As a PATCH, never the cached row. putRow merges, so a whole row reasserts every column the cache
+      // held when the pass started, and a pass spends seconds per subscriber uploading. Somebody who
+      // unsubscribed (or changed language) in that window was written straight back, still subscribed,
+      // with their file live. The mirror of _patchMySubscription, which never sends the publisher's half.
       _patchSubscriberRow: function(cfg, sub, id, url) {
         var patch = { id: sub.row.id };
         if (cfg.idColumn) patch[cfg.idColumn] = id;
         if (cfg.urlColumn) patch[cfg.urlColumn] = url;
         if (sub.row[cfg.idColumn] === id && sub.row[cfg.urlColumn] === url) return Promise.resolve(url);
-        return Promise.resolve(Writes.putRow(cfg.table, Object.assign({}, sub.row, patch), 'active')).then(function() { return url; });
+        return Promise.resolve(Writes.putRow(cfg.table, patch, 'active')).then(function() { return url; });
       },
       // After blanking, the row must stop claiming a live file. Leaving the url would show the departed
       // subscriber a link that now serves an empty calendar, and would make them look live to the next
-      // pass for ever.
+      // pass for ever. A patch, like the write above.
       _clearSubscriberRow: function(cfg, sub) {
-        var patch = {};
+        var patch = { id: sub.row.id };
         if (cfg.idColumn) patch[cfg.idColumn] = '';
         if (cfg.urlColumn) patch[cfg.urlColumn] = '';
-        return Promise.resolve(Writes.putRow(cfg.table, Object.assign({}, sub.row, patch), 'active'));
+        return Promise.resolve(Writes.putRow(cfg.table, patch, 'active'));
       },
 
       // One pass over every per-person feed, run once when a publisher boots. Deliberately only the

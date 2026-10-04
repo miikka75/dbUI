@@ -195,7 +195,7 @@ Two guards now cover the class rather than the instance: no root member may retu
 predicate with a hardcoded answer is either dead or a flag in disguise), and no offered translation key
 may go unasked-for. Both catch an injected violation.
 
-#### 6. `app-core.js` is a monolith *(series started: `brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`, `bundle.js`)*
+#### 6. `app-core.js` is a monolith *(series started: `brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`, `bundle.js`, the feed publisher)*
 
 8,669 lines, 600 KB, and essentially one function: `createVueApp()` spans 194–8631, whose `methods`
 object alone is ~5,700 lines. That object is where finding 1 hid — a duplicate key in a literal too
@@ -301,6 +301,17 @@ rest of the method refuses to write. It now says the export is incomplete and wr
 progress total counted a lists step that a schema-only import never runs, so that dialog finished one
 short. Remaining: feeds.
 
+**The feed publisher: not a module, a race.** Feeds already had its rules in `feeds.js`, so what was left in
+the root was orchestration, and the cut is smaller than a module. Three copies of "record the feed in the
+folder config" now go through `_setFeedInfo`, three copies of "blob and upload at the feed path" through
+`_uploadFeed`, and the subscriber-language fallback is `Feeds.languageFor`. The find was in the publisher's
+row writes. `_patchSubscriberRow` and `_clearSubscriberRow` sent the WHOLE cached row back, and putRow
+merges, so a pass (seconds per subscriber, uploading) reasserted every column it had read at the start.
+Somebody who unsubscribed in that window was written straight back as subscribed, with their file live.
+Both now send only the publisher's columns, the mirror of `_patchMySubscription`, and `feeds.test.js` pins
+it. Two UI tests had stubbed the write funnel as a replace rather than a merge, and leaned on that; they
+now merge as the real one does. That was the last item: the series is done.
+
 #### 7. CSP reporting is active nowhere *(landed: the mechanism, off by default until a collector URL is set)*
 
 Finding 3 gave the deployed site an enforcing policy. It did **not** give it violation *reporting*, and
@@ -402,7 +413,7 @@ seven entries to find out what is left.
 | **Set `Csp.REPORT_ENDPOINT` and deploy the collector** | 7 | one line + `npm run csp:sync` | The mechanism landed; only the URL is missing, and it cannot be guessed — it belongs to the deployment. Deploy `supabase/functions/csp-report/` (free), then set the constant. |
 | **`board` / `form` / `timeline` have no embed branch** | 4 | small code, large question | Three product questions wearing one costume: does a board keep drag-between-lanes inside a document? Does a `form` in a page mean a second submit target, or the same one twice? Does a timeline embed want its own date window or the page's? The dispatch set is asserted, so this is a recorded answer rather than an accident. |
 | ~~**`access:` on a `markdown` + `sources` view is half-honoured**~~ *(landed)* | 4 | small | Honoured on both paths now: `embed-view` asks `canAccessPage` before any branch draws, so a sourced page embedded elsewhere renders nothing for a member without the grant, as it already did at nav and in the doc branch. Pinned by *access: on a sourced page holds where it is embedded*. |
-| **The extraction series** — feeds | 6 | ongoing | Five cuts made (`brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`, `bundle.js`). Ranked by how much of each seam is pure and how much duplication it already costs, which is how feeds went from first to last. |
+| ~~**The extraction series**~~ *(done)* | 6 | done | Six cuts made (`brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`, `bundle.js`, the feed publisher). Ranked by how much of each seam is pure and how much duplication it already costs, which is how feeds went from first to last. |
 
 One thing deliberately **not** on this list: promoting `firebase.json` from `Report-Only` to enforcing.
 It is not a task until somebody deploys to Firebase Hosting, and a CSP on a host nothing serves from is
