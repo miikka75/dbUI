@@ -287,14 +287,15 @@ test.describe('gallery layout', () => {
   }
   const tile = (scope, title) => scope.getByTestId('gallery-tile').filter({ hasText: title });
 
-  test('a tile per row: a URL picture links out, an asset picture does not, a missing one is a placeholder', async ({ page }) => {
+  test('a tile per row: every picture opens the lightbox, a missing one is a placeholder', async ({ page }) => {
     await open(page);
     await page.evaluate(() => appInstance.selectTab('pics'));
     const g = page.getByTestId('data-gallery');
     await expect(g.getByTestId('gallery-tile')).toHaveCount(3);
-    await expect(tile(g, 'Alpha').locator('a[href="https://img.example/a.png"] img')).toHaveCount(1);
-    await expect(tile(g, 'Gamma').locator('img')).toHaveAttribute('src', /^data:image\/png/);
-    await expect(tile(g, 'Gamma').locator('a')).toHaveCount(0);
+    // A URL picture and an asset one alike: a button that views it, never a link out of the app.
+    await expect(tile(g, 'Alpha').locator('button.tile-zoom img')).toHaveAttribute('src', 'https://img.example/a.png');
+    await expect(tile(g, 'Gamma').locator('button.tile-zoom img')).toHaveAttribute('src', /^data:image\/png/);
+    await expect(g.locator('a[href^="https://img.example"]')).toHaveCount(0);
     await expect(tile(g, 'Beta').locator('.mdi-image-off-outline')).toHaveCount(1);
     // The tile is the picture: its image field shows the controls, not a second thumbnail.
     await expect(tile(g, 'Gamma').locator('img')).toHaveCount(1);
@@ -317,7 +318,7 @@ test.describe('gallery layout', () => {
     await expect(g.getByTestId('gallery-tile')).toHaveCount(3);
     // No picture field (the tile is the picture), no row controls, and so no strip under the picture.
     await expect(g.locator('.field-box')).toHaveCount(0);
-    await expect(g.locator('button')).toHaveCount(0);
+    await expect(g.locator('.v-btn')).toHaveCount(0);                     // no controls; the pictures still open the lightbox
     await expect(g.locator('.pa-2 .pa-2')).toHaveCount(0);
     await expect(g.locator('img')).toHaveCount(2);                    // Alpha's URL and Gamma's asset
     await expect(g.locator('.mdi-image-off-outline')).toHaveCount(1);  // Beta: still a tile
@@ -358,6 +359,39 @@ test.describe('gallery layout', () => {
     expect(r.nocol).toContain('`image` column "nope" not found in sources [photos]');
     expect(r.text).toContain('`image` column "title" is not an image column');
     expect(r.ok).toBe('');
+  });
+
+  test('a picture opens full screen; previous and next walk the pictures, not the placeholders', async ({ page }) => {
+    await open(page);
+    await page.evaluate(() => appInstance.selectTab('pics'));
+    const g = page.getByTestId('data-gallery');
+    const lb = page.getByTestId('image-lightbox');
+    await tile(g, 'Alpha').locator('button.tile-zoom').click();
+    await expect(lb).toBeVisible();
+    await expect(lb.getByTestId('lightbox-img')).toHaveAttribute('src', 'https://img.example/a.png');
+    await expect(lb.getByTestId('lightbox-caption')).toHaveText('Alpha');
+    // Two pictures (Beta has none), so 1 / 2, and next lands on Gamma's asset picture.
+    await expect(lb.getByTestId('lightbox-count')).toHaveText('1 / 2');
+    await expect(lb.locator('a[href="https://img.example/a.png"]')).toHaveCount(1);   // open original
+    await lb.getByTestId('lightbox-next').click();
+    await expect(lb.getByTestId('lightbox-caption')).toHaveText('Gamma');
+    await expect(lb.getByTestId('lightbox-img')).toHaveAttribute('src', /^data:image\/png/);
+    await expect(lb.locator('a[href]')).toHaveCount(0);                                // an asset has no original to open
+    await page.keyboard.press('ArrowRight');                                           // wraps round
+    await expect(lb.getByTestId('lightbox-caption')).toHaveText('Alpha');
+    await page.keyboard.press('Escape');
+    await expect(lb).toHaveCount(0);
+  });
+
+  test('the profile picture is removed on the second press, not the first', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.evaluate(() => { appInstance.myProfile.picture = 'data:image/png;base64,' + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC'; appInstance.selectTab('__settings'); });
+    const btn = page.getByTestId('profile-pic-remove');
+    await btn.click();
+    await expect(btn.locator('.mdi-check-circle')).toHaveCount(1);
+    expect(await page.evaluate(() => !!appInstance.myProfile.picture)).toBe(true);
+    await btn.click();
+    await expect.poll(() => page.evaluate(() => appInstance.myProfile.picture)).toBe('');
   });
 
   test('removing a picture takes two presses, with its own icon, not the row delete x', async ({ page }) => {

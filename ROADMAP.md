@@ -2577,6 +2577,20 @@ also holds fields does not need. Justified rows and masonry are layouts of their
 collections, and would come as separate `layout` values if asked for. A lightbox (click to view full
 screen, next/previous) is the one near-universal thing still missing; it is the next step, not this one.
 
+**The lightbox.** Pressing a tile's picture opens it full screen instead of opening a URL picture in a new
+tab, which was the old behaviour and did nothing at all for an `asset:` or inline picture. One shared
+`image-lightbox` (a dialog, so Esc and focus handling come with it) shows the picture whole (`contain`),
+the tile's first field as its caption, and its place in the set ("3 / 6"). Previous and next walk the
+rows that HAVE a picture, in the gallery's order (a placeholder tile has nothing to show), with the
+arrow keys too. For a URL picture an "open original" button keeps what the old link did. The picture is
+a real button on the tile (keyboard and screen reader reachable), so the tile's fields below it are
+untouched. New keys, because none of these had words before: `img.view`, `img.open_original`,
+`btn.close`, `btn.previous`, `btn.next`.
+
+**And the last one-press picture removal.** Settings -> Profile's "Remove" cleared your avatar on one press,
+the case the image cell had just stopped allowing. It is the shared `confirm-btn` now. The Appearance
+dialog's image removal stays one press: it edits a draft that Cancel throws away.
+
 Cost: a component, a `VIEW_PARTS.data` entry, the schema enum, two template branches, and a UI test for each
 caller. What would show it is wrong: a gallery that wants editing in place, which is `card` with a bigger
 picture, a different request.
