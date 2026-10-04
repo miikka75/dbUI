@@ -323,6 +323,43 @@ test.describe('gallery layout', () => {
     await expect(g.locator('.mdi-image-off-outline')).toHaveCount(1);  // Beta: still a tile
   });
 
+  test('gallery options reach the tile: image, size, shape and fit', async ({ page }) => {
+    await open(page);
+    const r = await page.evaluate(() => {
+      // A second image column, so `image` has something to choose between.
+      window.SCHEMA.photos.columns.cover = { type: 'image' };
+      appInstance.dataCache.photos.forEach((row) => { row.cover = row.id === 'p2' ? 'asset:g1' : ''; });
+      window.VIEWS.opt = { name: 'opt', sources: ['photos'], mode: 'union', columns: ['photo', 'title'], layout: 'gallery',
+        gallery: { image: 'cover', size: 'large', shape: 'landscape', fit: 'contain' } };
+      appInstance.selectTab('opt');
+      return true;
+    });
+    expect(r).toBe(true);
+    const g = page.getByTestId('data-gallery');
+    await expect(g.getByTestId('gallery-tile')).toHaveCount(3);
+    // `image` picks `cover`: only p2 has one, so one picture and two placeholders, while `photo` stays a field.
+    await expect(g.locator('img.tile-img')).toHaveCount(1);
+    await expect(g.locator('.mdi-image-off-outline')).toHaveCount(2);
+    const st = await g.locator('img.tile-img').evaluate((el) => ({ fit: getComputedStyle(el).objectFit, ratio: el.style.aspectRatio }));
+    expect(st.fit).toBe('contain');
+    expect(st.ratio.replace(/\s/g, '')).toBe('16/9');
+    expect(await g.evaluate((el) => el.style.gridTemplateColumns)).toContain('320px');
+  });
+
+  test('validateSchema names a gallery image that is missing or not an image', async ({ page }) => {
+    await open(page);
+    const r = await page.evaluate(() => {
+      const errs = (n) => window.validateSchema().filter((e) => e.indexOf(n) >= 0).join(' | ');
+      window.VIEWS.g_nocol = { name: 'g_nocol', sources: ['photos'], layout: 'gallery', gallery: { image: 'nope' } };
+      window.VIEWS.g_text = { name: 'g_text', sources: ['photos'], layout: 'gallery', gallery: { image: 'title' } };
+      window.VIEWS.g_ok = { name: 'g_ok', sources: ['photos'], layout: 'gallery', gallery: { image: 'photo', size: 'small' } };
+      return { nocol: errs('g_nocol'), text: errs('g_text'), ok: errs('g_ok') };
+    });
+    expect(r.nocol).toContain('`image` column "nope" not found in sources [photos]');
+    expect(r.text).toContain('`image` column "title" is not an image column');
+    expect(r.ok).toBe('');
+  });
+
   test('a tile edits what a card edits: a field, and its picture', async ({ page }) => {
     test.setTimeout(20000);
     await open(page);

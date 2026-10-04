@@ -8117,13 +8117,20 @@ function createVueApp() {
              hideCol: { type: Function, default: null } },
     inject: ['uiHost', 'valueHost'],
     computed: {
-      imageCol: function() { var h = this.valueHost; return (this.cols || []).filter(function(c) { return h.colIsImage(c); })[0] || ''; },
+      // The view's `gallery` options (ROADMAP `gallery`), each with its default.
+      opts: function() { return (this.viewCfg && this.viewCfg.gallery) || {}; },
+      tileMin: function() { return { small: '140px', large: '320px' }[this.opts.size] || '220px'; },
+      aspect: function() { return { landscape: '16 / 9', portrait: '3 / 4' }[this.opts.shape] || '1 / 1'; },
+      imageCol: function() {
+        if (this.opts.image) return this.opts.image;
+        var h = this.valueHost; return (this.cols || []).filter(function(c) { return h.colIsImage(c); })[0] || '';
+      },
       // The picture's field last: the words a tile is recognised by come first, the picture's controls after.
       // A read-only gallery has no picture field at all: the tile already shows the picture, and the field
       // would be an empty labelled box. So a read-only view of an image column alone is a picture wall.
       fieldCols: function() {
         var img = this.imageCol, rest = (this.cols || []).filter(function(c) { return c !== img; });
-        return (img && !this.readonly) ? rest.concat([img]) : rest;
+        return (img && !this.readonly && (this.cols || []).indexOf(img) >= 0) ? rest.concat([img]) : rest;
       }
     },
     methods: {
@@ -8146,8 +8153,8 @@ function createVueApp() {
       href: function(v) { return (!v || isAssetRef(v)) ? '' : safeUrl(v); }
     },
     template: ''
-      + '<tile-grid min="220px" class="pa-2" data-testid="data-gallery">'
-      + '<image-tile v-for="item in rows" :key="item.id" :src="src(item[imageCol])" :href="href(item[imageCol])" aspect="1 / 1" icon="mdi-image-off-outline" placeholder data-testid="gallery-tile">'
+      + '<tile-grid :min="tileMin" class="pa-2" data-testid="data-gallery">'
+      + '<image-tile v-for="item in rows" :key="item.id" :src="src(item[imageCol])" :href="href(item[imageCol])" :aspect="aspect" :fit="opts.fit === \'contain\' ? \'contain\' : \'cover\'" icon="mdi-image-off-outline" placeholder data-testid="gallery-tile">'
       +   '<div v-if="fieldCols.length || hasActions(item)" class="pa-2">'
       +     '<template v-for="col in fieldCols" :key="col">'
       +       '<v-field v-if="shown(col, item)" class="field-box field-box--roomy" variant="outlined" active :label="label(col)">'
@@ -8169,6 +8176,7 @@ function createVueApp() {
   //   href        the picture links out here when given (a URL picture; never an asset)
   //   aspect      the crop: '16 / 9' for a cover (the nav), '1 / 1' for a photo (the gallery)
   //   focus       object-position along the crop: which part of a photo survives it (an entry's `focus`)
+  //   fit         'cover' fills the shape (cropping); 'contain' shows the whole picture inside it
   //   placeholder with no picture, draw the empty square with `icon` in it (a gallery row must not vanish);
   //               without it the tile has no picture area, and the default slot's `bare` says so, which is
   //               the nav's cue to put its entry icon beside the title instead
@@ -8179,9 +8187,18 @@ function createVueApp() {
   });
   app.component('image-tile', {
     props: { src: { type: String, default: '' }, href: { type: String, default: '' }, aspect: { type: String, default: '16 / 9' },
-             focus: { type: String, default: 'center' }, icon: { type: String, default: '' }, placeholder: Boolean,
+             focus: { type: String, default: 'center' }, fit: { type: String, default: 'cover' },
+             icon: { type: String, default: '' }, placeholder: Boolean,
              imgTestid: { type: String, default: undefined } },
-    computed: { imgStyle: function() { return { aspectRatio: this.aspect, objectPosition: 'center ' + this.focus }; } },
+    computed: {
+      // `contain` letterboxes onto the same faint surface the placeholder uses, so a tall picture in a wide
+      // shape reads as a framed picture rather than as one with a hole beside it.
+      imgStyle: function() {
+        var st = { aspectRatio: this.aspect, objectPosition: 'center ' + this.focus, objectFit: this.fit };
+        if (this.fit === 'contain') st.background = 'rgb(var(--v-theme-on-surface), 0.05)';
+        return st;
+      }
+    },
     template: ''
       + '<v-card variant="outlined" class="h-100">'
       + '<a v-if="src && href" :href="href" target="_blank" @click.stop style="display:block"><img :src="src" class="tile-img" :style="imgStyle" loading="lazy" alt="" :data-testid="imgTestid"></a>'
