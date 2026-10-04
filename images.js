@@ -16,6 +16,22 @@
   var AVATAR_STEPS = [{ max: 256, q: 0.85 }];
   // A picture going to a blob store: room for a large screen's lightbox, stepping down to fit the upload cap.
   var STORE_STEPS = [{ max: 2560, q: 0.85 }, { max: 2560, q: 0.75 }, { max: 2048, q: 0.75 }, { max: 1600, q: 0.7 }];
+  // A picture's thumbnail: what a gallery tile or a cell draws. 480px covers a large tile on a dense screen.
+  var THUMB_STEPS = [{ max: 480, q: 0.75 }, { max: 360, q: 0.7 }];
+
+  // An image cell's value is the picture's reference -- a URL or `asset:<id>` -- optionally followed by
+  // its thumbnail's: `<full>#thumb=<thumb, URI-encoded>`. A fragment, so an <img> or a link given the whole
+  // value still loads the full picture (fragments never reach the server). Everything that READS an image
+  // value splits it here; a value with no thumbnail is just its full reference, as before.
+  var THUMB_MARK = '#thumb=';
+  function joinRef(full, thumb) { return thumb ? String(full) + THUMB_MARK + encodeURIComponent(thumb) : String(full || ''); }
+  function splitRef(v) {
+    var s = String(v || ''), i = s.indexOf(THUMB_MARK);
+    if (i < 0) return { full: s, thumb: '' };
+    var t = '';
+    try { t = decodeURIComponent(s.slice(i + THUMB_MARK.length)); } catch (e) { t = ''; }
+    return { full: s.slice(0, i), thumb: t };
+  }
 
   // Try each step in order until the result fits `cap`. `resize(max, q)` resolves to a data URL. Rejects
   // with a TooLarge error once every step has overflowed; the caller words it.
@@ -54,8 +70,9 @@
   // slab. WebP keeps alpha (a browser that cannot encode it returns PNG, which keeps it too).
   function encoderFor(alpha) { return alpha ? 'image/webp' : 'image/jpeg'; }
 
-  var M = { ASSET_STEPS: ASSET_STEPS, AVATAR_STEPS: AVATAR_STEPS, STORE_STEPS: STORE_STEPS, fit: fit, hasAlpha: hasAlpha,
-            encoderFor: encoderFor, dataUrlBytes: dataUrlBytes, capChars: capChars };
+  var M = { ASSET_STEPS: ASSET_STEPS, AVATAR_STEPS: AVATAR_STEPS, STORE_STEPS: STORE_STEPS, THUMB_STEPS: THUMB_STEPS,
+            fit: fit, hasAlpha: hasAlpha, encoderFor: encoderFor, dataUrlBytes: dataUrlBytes, capChars: capChars,
+            joinRef: joinRef, splitRef: splitRef };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else root.Images = M;
 })(typeof self !== 'undefined' ? self : this);
