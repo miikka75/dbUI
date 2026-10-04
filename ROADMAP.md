@@ -2514,9 +2514,34 @@ its page**.
 **Not included:** entries hidden from admins (`hideFromAdmin`) — the old Backgrounds list could not
 reach them either.
 
-### `gallery`
+### `gallery` — a reading LAYOUT of a data view, not a new view kind *(landed)*
 
-A media grid. Unblocked since `image`/`url` columns shipped, so this is now mostly layout.
+A media grid. Unblocked since `image`/`url` columns shipped, and smaller than this file first assumed: it
+is `layout: "gallery"` beside `table`, `card` and `list`, not a view kind. A kind costs the five steps at
+the top of this file (engine, component and `VIEW_KINDS`, classifier, schema and validation, test). A layout
+costs one component, and inherits sources, filter, search, sort, access, `@part`, print and embedding from
+the data view it lays out.
+
+`list` is the precedent, and the gallery copies its terms. It is a READING layout: values render read-only
+(through `list-value`, so a list value shows its label and an obscured column stays obscured), and editing
+stays in `table` and `card`. The row controls are the ones the list layout already shows: print, archive
+and delete, as two-press `confirm-x`.
+
+**The tile.** The first image column the view shows is the picture, at a fixed square crop so the grid
+lines up whatever the sources are. The other columns are the caption. A row without a picture still gets
+a tile, with a placeholder icon, because a gallery that silently drops rows reads as data loss. A URL
+picture opens full size in a new tab, like an image cell. An `asset:` picture has no address to open, so
+it is not a link (the cell makes the same split).
+
+**One component, two callers.** `data-gallery` takes rows, columns and the governing view config, and
+offers a slot for the row controls. The top-level grid and `embed-view` each pass their own controls: their
+archive and delete paths differ (self-service gating, `@part`), and that difference belongs to them, not
+to the tile. The list layout has two copies of its markup, one per caller, and this one does not start
+that way.
+
+Cost: a component, a `VIEW_PARTS.data` entry, the schema enum, two template branches, and a UI test for each
+caller. What would show it is wrong: a gallery that wants editing in place, which is `card` with a bigger
+picture, a different request.
 
 ### `feed`
 
@@ -2921,7 +2946,7 @@ arrangement; it is not owed to the shipped half.
 **Sorting inside an embed** sat beside it on cost, and has shipped (#233) — both the `ref` order and the
 clickable header.
 
-Then `gallery`. `tree` has since shipped in the only form that was worth building: the editor's
+`gallery` has since shipped, as a layout rather than a kind (see its entry). `tree` has since shipped in the only form that was worth building: the editor's
 recursion, and `hierarchy.by: "id"` for tables that want depth, with the value-keyed lookups left
 exactly as they were. What remains of it is two questions nothing has asked yet — what deleting a node
 with children should do, and how order works within a level — and both are recorded in its entry rather

@@ -413,8 +413,18 @@
             <v-spacer></v-spacer>
             <v-btn v-if="a.canPrintView" icon="mdi-printer" size="small" variant="text" @click="a.printView()"></v-btn>
           </div>
+          <!-- Gallery layout: one tile per row (registry part VIEW_PARTS.data.gallery) -->
+          <data-gallery v-if="a.useGalleryLayout" :rows="a.sortedData" :cols="a.visibleCols" :view-cfg="a.currentConfig">
+            <template v-slot:actions="{ item }">
+              <v-btn v-if="a.canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="a.printCard(item)"></v-btn>
+              <template v-if="a.canMutateRows">
+                <confirm-x v-if="a.hasArchive" :armed="a.isArmed('arch:' + item.id)" action="archive" dense @click="a.archiveRow(item)"></confirm-x>
+                <confirm-x :armed="a.isArmed('row:' + item.id)" dense @click="a.deleteRow(item)"></confirm-x>
+              </template>
+            </template>
+          </data-gallery>
           <!-- List layout: compact single-line items (registry part VIEW_PARTS.data.list) -->
-          <data-list v-if="a.useListLayout" :rows="a.sortedData" :cols="a.visibleCols"></data-list>
+          <data-list v-else-if="a.useListLayout" :rows="a.sortedData" :cols="a.visibleCols"></data-list>
           <!-- Mobile: card layout -->
           <div v-else-if="a.useCardLayout">
             <v-card v-for="(item, idx) in a.sortedData" :key="item.id" variant="flat" class="ma-2 pa-2" style="border-bottom: 1px solid rgb(var(--v-theme-outline), 0.2)">

@@ -83,7 +83,7 @@ describe('views that declare what they need', () => {
   const DECLARED = ['cal-event-row', 'cal-month', 'cal-week', 'cal-agenda', 'cal-day-panel', 'calendar-view',
     'copy-field', 'confirm-x', 'confirm-btn', 'section-toggle',
     'list-value', 'user-avatar', 'user-ref', 'pivot-view', 'timeline-view', 'stats-view',
-    'rotation-table', 'rotation-cards', 'rotation-list', 'rotation-view'];
+    'rotation-table', 'rotation-cards', 'rotation-list', 'rotation-view', 'data-gallery'];
   function ownSource(name) {
     const at = core.indexOf("app.component('" + name + "'");
     assert.ok(at >= 0, 'component ' + name + ' is registered');
