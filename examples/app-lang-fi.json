@@ -113,6 +113,7 @@
       "list.link_user": "Liitä käyttäjä",
       "list.locked_group": "Sisältää arvon, jota skeeman suodatin käyttää",
       "list.locked_value": "Skeeman suodattimen käytössä",
+      "list.not_referenced": "Ei käytössä",
       "list.unlink_user": "Poista liitos",
       "local.best_effort": "Selain voi poistaa tämän tietokannan itse — kun laitteen tila käy vähiin tai (Safarissa) pitkän käyttötauon jälkeen.",
       "local.best_effort_title": "Ei taattu tallennus.",

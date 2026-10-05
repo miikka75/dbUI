@@ -1169,7 +1169,7 @@ read-only data path beside the inline-`{{self}}` block, the same branch again in
 printed more often than read on screen), a `schema.schema.json` property, a `validateSchema` check that
 every `{{col}}` names a real column, and a test. Read-only by nature: a sentence has no cells to edit.
 
-### Leftovers — data the schema no longer refers to
+### Leftovers — data the schema no longer refers to *(the badge landed; the report panel is next)*
 
 A schema moves on; the database does not. When the bishopric example replaced its `callings` list with
 a catalogue, a deployment that upgraded was left holding an `organizations` list and a `callings` list
@@ -1209,6 +1209,13 @@ by a `list:` naming it, by `translatableLists`, by a board's ref lane, by a rota
 a `computed.lookup` — miss one and the badge tells someone their live catalogue is dead. So: mark only
 what can be PROVEN unreferenced, and stay silent when unsure. The badge is allowed to say nothing; it is
 not allowed to be wrong.
+
+*The badge LANDED*, and the fail-safe rule decided its shape. It does not enumerate the paths above:
+`leftovers.js` treats a name as referenced if it occurs as a whole word in ANY string, key or value, of
+the schema document (minus the `tables` map's own keys, which declare rather than refer), the loaded
+views, page bodies and folder config. Enumerating would miss the per-column-name list resolver, where a
+`select` with no `list` reads the list named after the column, and whichever path is added next. A
+substring search can only err towards silence.
 
 The badge does not subsume the report. It answers "is this one used?" for things that have a tab; the
 report answers "what is left over?" for the things that do not — orphaned page bodies, dead translation

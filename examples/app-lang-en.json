@@ -113,6 +113,7 @@
       "list.link_user": "Link user",
       "list.locked_group": "Contains a value used by a schema filter",
       "list.locked_value": "Used by a schema filter",
+      "list.not_referenced": "Not referenced",
       "list.unlink_user": "Unlink",
       "local.best_effort": "The browser may delete this database on its own — when the device runs low on space, or (on Safari) after a long spell without visits.",
       "local.best_effort_title": "Best-effort storage.",

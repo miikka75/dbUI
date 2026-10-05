@@ -181,6 +181,17 @@ test.describe('Lists management', () => {
     await lookupTab.click();
     await expect(page.locator('.v-main')).toContainText('status', { timeout: 5000 });
   });
+
+  test('a list nothing in the schema names is marked, and a live one is not', async ({ page }) => {
+    await ensureAppReady(page);
+    // A vocabulary a retired column used to read: still in the database, named by nothing.
+    await page.request.post('/api/saveLists', { data: { lists: { status: ['open', 'done'], assigned_to: ['ann'], crew: ['bob'], retired_terms: ['x'] } } });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item').filter({ hasText: /lookup|tab\.lookup/ }).click();
+    await expect(page.locator('[data-testid="leftover-list-retired_terms"]')).toBeVisible();
+    for (const live of ['status', 'assigned_to', 'crew']) await expect(page.locator('[data-testid="leftover-list-' + live + '"]')).toHaveCount(0);
+  });
 });
 
 test.describe('Theme toggle', () => {
