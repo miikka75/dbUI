@@ -529,7 +529,7 @@ a feed cannot leave the app without its backend, so injecting them would buy not
 **The guard is in place:** `ui-conventions.test.js` fails if any calendar component names
 `appInstance`, `ROOT_PROXY`, `VIEWS` or `SCHEMA`.
 
-### Supabase setup — what a fresh project still costs, and what is worth automating *(landed: `dev/check-supabase.mjs` / `npm run check:live`, and the re-run instruction now sits in setup step 4; the realtime-publication check is not in it, since a client key cannot read `pg_publication_tables`)*
+### Supabase setup — what a fresh project still costs, and what is worth automating *(landed: the check, `npm run check:live`; and since the CLI gained `db query`, the apply too, `npm run supabase:setup`)*
 
 Prompted by a direct question after the CSP collector went in: does `SUPABASE.md` carry every step, and
 is anything reducible?
@@ -550,6 +550,23 @@ goes through the Management API, needing only `supabase login`: no psql, no new 
 database password. SUPABASE.md uses it for both SQL steps. The rest of this entry is kept as the
 reasoning at the time; its table's first row (convert to migrations) is still the wrong answer, for the
 reason given there, and the CHECK below is still the part worth having.*
+
+*And so the apply was automated after all: `dev/setup-supabase.mjs` (`npm run supabase:setup -- --project-ref
+<ref>`) runs both SQL files, checks the token functions exist, deploys the collector, creates the first
+read token, and ends with `check-supabase.mjs`. Three decisions in it are worth keeping:*
+
+- *Re-running must be safe, and one step is not idempotent: the token. Replacing it locks out every
+  admin holding the old one, so it is created only when neither a stored row nor the older
+  `DBUI_CSP_REPORT_TOKEN` secret exists, and `--new-token` is the explicit way to replace a lost one.*
+- *The first token goes into `csp_report_token`, not into a secret. The CLI login authorises it either
+  way, and a row wins over the secret and is live at once, with no wait for the secret to reach the
+  running function. That makes the secret a legacy bootstrap that new projects never set.*
+- *Every query goes through a temp file and `-f`, never a command-line string: no shell quoting on
+  Windows, and the SQL carrying a token is never in a process listing. The file is deleted at once.*
+
+*The dashboard half (project, Google OAuth client, redirect URLs, keys) stays manual, as this entry
+said it would. The realtime-publication check is still not in `check:live`, since a client key cannot
+read `pg_publication_tables`.*
 
 **Automation: mostly not possible, and the possible part is not the expensive part.**
 
