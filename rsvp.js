@@ -15,6 +15,7 @@
 //   today        'YYYY-MM-DD' — events with dateColumn < today are dropped unless upcoming === false
 //   upcoming     default true (only future/today events); false = all
 //   limit        max events after sorting (optional)
+//   checkinColumn response column a member types the event's shared check-in code into (optional)
 (function(root) {
   function build(events, responses, opts) {
     events = events || []; responses = responses || [];
@@ -58,6 +59,8 @@
         title: titleCols.map(function(c) { return e[c]; }).filter(function(v) { return v != null && v !== ''; }).join(' — '),
         myStatus: mine ? mine[statusCol] : '',
         myRowId: mine ? mine.id : null,
+        myCode: mine && opts.checkinColumn ? (mine[opts.checkinColumn] || '') : '',
+        isToday: !!opts.today && String(e[dateCol] || '') === opts.today,
         tally: tally,
         total: responded.length,
         participants: participants
@@ -67,7 +70,29 @@
     return { events: out, statuses: statuses.sort() };
   }
 
-  var M = { build: build };
+  // ---- Self check-in with a shared code --------------------------------------------------------------
+  //
+  // A code shown at the event (on a slide, a poster) that attendees type on their own phones. The member
+  // writes only their CLAIM, into a column of their own row that `ownerWritable` lets them write; the
+  // VERDICT (`set`, e.g. attendance) stays out of their reach. The organizer then types the real code and
+  // stamps every row whose claim matches it, which is one press for the whole room.
+  //
+  // The real code is stored nowhere. Kept on the event row, every member could read it from home, and the
+  // only thing this arrangement buys is that being marked present takes being told the code.
+  //
+  // Returns the rows to stamp: this event's, whose claim equals `code` (case and surrounding space
+  // ignored), and which do not already carry every value of `set`.
+  function norm(v) { return String(v == null ? '' : v).trim().toLowerCase(); }
+  function checkinTargets(responses, opts) {
+    var want = norm(opts.code), set = opts.set || {}, cols = Object.keys(set);
+    if (!want || !cols.length) return [];
+    return (responses || []).filter(function(r) {
+      if (!r || r[opts.linkColumn] !== opts.eventKey || norm(r[opts.checkinColumn]) !== want) return false;
+      return !cols.every(function(c) { return String(r[c] == null ? '' : r[c]) === String(set[c]); });
+    });
+  }
+
+  var M = { build: build, checkinTargets: checkinTargets };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else root.Rsvp = M;
 })(typeof self !== 'undefined' ? self : this);
