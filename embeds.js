@@ -272,6 +272,15 @@
     if (cfg.scan) { // scanView embed -> delegate to the scan-view component (embed mode)
       return { config: cfg, kind: 'scan', name: cfg.view || cfg.name || ctx.currentTable };
     }
+    if (cfg.board) { // board embed -> the board-view component, with its own lanes and drag
+      return { config: cfg, kind: 'board', name: cfg.view || cfg.name || ctx.currentTable };
+    }
+    if (cfg.form) { // form embed -> the form-view component, submitting to its own table
+      return { config: cfg, kind: 'form', name: cfg.view || cfg.name || ctx.currentTable };
+    }
+    if (cfg.timeline) { // timeline embed -> the timeline-view component, with its own date window
+      return { config: cfg, kind: 'timeline', name: cfg.view || cfg.name || ctx.currentTable };
+    }
     if (cfg.rotation) { // rotationView embed (a {view:x} where x is a rotationView) -> generate period rows
       var anchorName = cfg.view || cfg.name || ctx.currentTable;
       var rrows = ctx.rotationRowsFor(anchorName, cfg.rotation);
