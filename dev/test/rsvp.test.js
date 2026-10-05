@@ -112,3 +112,30 @@ describe('rsvp.js — build', () => {
     assert.deepEqual(rByDate.events.find(e => e.id === 'e2').tally, { coming: 1, out: 1 });
   });
 });
+
+describe('rsvp.js — self check-in with a shared code', () => {
+  const rows = [
+    { id: 'a', owner: 'ann@x', practice: 'p1', code: ' Lion ', attendance: 'pending' },
+    { id: 'b', owner: 'bob@x', practice: 'p1', code: 'tiger', attendance: 'pending' },
+    { id: 'c', owner: 'cy@x', practice: 'p1', code: 'lion', attendance: 'attended' },
+    { id: 'd', owner: 'dan@x', practice: 'p2', code: 'lion', attendance: 'pending' },
+    { id: 'e', owner: 'eve@x', practice: 'p1', code: '', attendance: 'pending' }
+  ];
+  const opts = (code) => ({ code, linkColumn: 'practice', eventKey: 'p1', checkinColumn: 'code', set: { attendance: 'attended' } });
+
+  it('stamps this event\'s rows whose claim matches, ignoring case and space, skipping the already-marked', () => {
+    assert.deepEqual(Rsvp.checkinTargets(rows, opts('LION')).map((r) => r.id), ['a']);
+  });
+
+  it('a blank code or an empty `set` stamps nobody, so an unclaimed row never matches', () => {
+    assert.deepEqual(Rsvp.checkinTargets(rows, opts('  ')), []);
+    assert.deepEqual(Rsvp.checkinTargets(rows, Object.assign(opts('lion'), { set: {} })), []);
+  });
+
+  it('build carries my claim and whether the event is today', () => {
+    const out = Rsvp.build([{ id: 'p1', date: '2026-09-09' }, { id: 'p2', date: '2026-09-10' }], rows, {
+      me: 'ann@x', dateColumn: 'date', eventKey: 'id', linkColumn: 'practice', statusColumn: 'attendance',
+      checkinColumn: 'code', today: '2026-09-09' });
+    assert.deepEqual(out.events.map((e) => [e.key, e.isToday, e.myCode]), [['p1', true, ' Lion '], ['p2', false, '']]);
+  });
+});

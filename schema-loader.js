@@ -523,6 +523,23 @@ function validateSchema() {
         for (var rc in rcols) { var rd = rcols[rc]; if (rd && typeof rd === 'object' && rd.type === 'ref' && rd.table === rvp.events) { hasLink = true; break; } }
         if (!hasLink) errors.push('rsvp "' + v + '": responses table "' + rvp.responses + '" needs a `ref` column pointing at the events table "' + rvp.events + '" (it is the response↔event link — replaces linkColumn/eventKey)');
       }
+      // Self check-in: the member's claim must be writable by them, and the verdict must NOT be -- a
+      // verdict column in ownerWritable lets every member mark themselves present, and the arrangement
+      // is worth nothing.
+      var ci = rvp.checkin;
+      if (ci !== undefined && SCHEMA[rvp.responses]) {
+        var ccols = SCHEMA[rvp.responses].columns || {}, ow = SCHEMA[rvp.responses].ownerWritable;
+        var at = 'rsvp "' + v + '" checkin: ';
+        if (!ci || !ci.codeColumn || !ccols[ci.codeColumn]) errors.push(at + '`codeColumn` must be a column of "' + rvp.responses + '" — where a member types the code they were shown');
+        else if (Array.isArray(ow) && ow.indexOf(ci.codeColumn) < 0) errors.push(at + '"' + ci.codeColumn + '" must be in "' + rvp.responses + '".ownerWritable, or a member cannot enter a code');
+        var cset = ci && ci.set;
+        if (!cset || typeof cset !== 'object' || Array.isArray(cset) || !Object.keys(cset).length) errors.push(at + 'needs `set` — what checking in writes, e.g. { "attendance": "attended" }');
+        else Object.keys(cset).forEach(function(c) {
+          if (!ccols[c]) errors.push(at + '`set` column "' + c + '" is not a column of "' + rvp.responses + '"');
+          else if (!Array.isArray(ow)) errors.push(at + '"' + rvp.responses + '" declares no ownerWritable, so a member can write "' + c + '" themselves and mark their own attendance');
+          else if (ow.indexOf(c) >= 0) errors.push(at + '"' + c + '" is in ownerWritable, so a member can mark their own attendance without the code');
+        });
+      }
     }
     // Board (kanban) view: exactly one writable source + a select lane column (drag writes that column).
     if (view.board) {

@@ -1087,7 +1087,7 @@ function createVueApp() {
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'cal.today', 'btn.reset',
          'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
-         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none',
+         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none', 'rsvp.checkin_code', 'rsvp.checkin', 'msg.checked_in',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
@@ -2807,8 +2807,51 @@ function createVueApp() {
         var events = VIEWS[cfg.events] ? this.embedRows('view', cfg.events) : (this.dataCache[cfg.events] || []);
         var responses = this.dataCache[cfg.responses] || [];
         return Rsvp.build(events, responses, Object.assign({
-          me: this.currentUserEmail || '', ownerCol: getOwnerCol(cfg.responses) || 'owner', today: fmtDate(new Date())
+          me: this.currentUserEmail || '', ownerCol: getOwnerCol(cfg.responses) || 'owner', today: fmtDate(new Date()),
+          checkinColumn: cfg.checkin && cfg.checkin.codeColumn
         }, cfg, this.rsvpLink(cfg)));
+      },
+      // Self check-in with a shared code (`rsvp.checkin`). Two sides of one event, and the split is the
+      // point: the member writes only their CLAIM (the code they were shown), into a column their owner
+      // grant reaches; the organizer types the real code and stamps the verdict onto every matching row.
+      // The real code is never stored -- see Rsvp.checkinTargets.
+      //
+      // Whoever may write the responses table outright is an organizer here; a member's writes go
+      // through self-service and cannot reach the verdict column.
+      rsvpCanStamp: function(name) {
+        var v = VIEWS[name], t = v && v.rsvp && v.rsvp.responses;
+        if (!t || !v.rsvp.checkin || this.currentUserRole === 'viewer' || this.canSelfServe(t)) return false;
+        var w = this.userWritableTables;
+        return !w || w.indexOf(t) >= 0;
+      },
+      setRsvpCode: function(name, eventKey, code) {
+        var v = VIEWS[name], cfg = v && v.rsvp, ci = cfg && cfg.checkin;
+        if (!ci || !ci.codeColumn || this.rsvpFrozen(name, eventKey)) return;
+        var table = cfg.responses, ownerCol = getOwnerCol(table) || 'owner', me = this.currentUserEmail || '';
+        var link = this.rsvpLink(cfg).linkColumn;
+        var mine = (this.dataCache[table] || []).find(function(r) { return r[link] === eventKey && r[ownerCol] === me; });
+        if (mine) this.saveField(mine, ci.codeColumn, String(code || '').trim(), table);
+      },
+      // Returns how many rows it marked, which the button reports: "nobody" is as much an answer as "12".
+      stampRsvpCheckin: function(name, eventKey, code) {
+        var v = VIEWS[name], cfg = v && v.rsvp, ci = cfg && cfg.checkin;
+        if (!ci || !this.rsvpCanStamp(name)) return 0;
+        var table = cfg.responses, now = new Date().toISOString();
+        var rows = Rsvp.checkinTargets(Rows.partitionRows(this.dataCache, table, 'active'), {
+          code: code, linkColumn: this.rsvpLink(cfg).linkColumn, eventKey: eventKey, checkinColumn: ci.codeColumn, set: ci.set });
+        // One press, one undo entry, however many rows: written the way _writeReorder writes, partial and
+        // recorded per row, since saveField's debounced writes would each land as an entry of their own.
+        Undo.action('checkin', function() {
+          rows.forEach(function(r) {
+            var fwd = { id: r.id }, inv = { id: r.id };
+            Object.keys(ci.set).forEach(function(c) { fwd[c] = ci.set[c]; inv[c] = r[c] == null ? '' : r[c]; r[c] = ci.set[c]; });
+            r.updated_at = now;
+            Undo.record({ table: table, part: 'active', forward: { type: 'put', id: r.id, row: fwd }, inverse: { type: 'put', id: r.id, row: inv } });
+            Writes.putRow(table, Object.assign({ updated_at: now }, fwd), 'active');
+          });
+        });
+        this.notify(this.t('msg.checked_in') + ' (' + rows.length + ')');
+        return rows.length;
       },
       // The `form` view: one focused record the member fills in properly, rather than a cell edited in
       // a grid. Everything underneath is the self-service machinery rsvp already uses -- an owner-stamped
@@ -9308,12 +9351,14 @@ function createVueApp() {
     // Sort is component-local: rsvp renders its own event list (from the rsvp.js engine), not the root's
     // currentData, so the root sortCol/sortAsc the data grid uses would sort a list nobody displays.
     // null = the engine's own order (chronological, upcoming first) -- the view's natural default.
-    data: function() { return { sortCol: null, sortAsc: true }; },
+    // `codes`: what an organizer has typed per event, before pressing Check in. Not stored anywhere.
+    data: function() { return { sortCol: null, sortAsc: true, codes: {} }; },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
       cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].rsvp) || {}; },
       data: function() { return appInstance.rsvpFor(this.viewName); },
+      canStamp: function() { return appInstance.rsvpCanStamp(this.viewName); },
       // The rendered rows: engine order until a header is clicked, then Rows.compareValues -- the same
       // comparator the data grid and embeds use, so blanks-last/numeric ordering all agree.
       events: function() {
@@ -9342,6 +9387,10 @@ function createVueApp() {
     },
     methods: Object.assign({}, SORT_UI, {
       set: function(key, status) { appInstance.setRsvp(this.viewName, key, status || ''); },
+      // Check-in happens AT the event, so only today's row offers it: a member with a response types the
+      // code they were shown, an organizer types the real one and stamps the room.
+      checkinOn: function(ev) { return !!this.cfg.checkin && ev.isToday && (this.canStamp || !!ev.myRowId); },
+      stamp: function(ev) { appInstance.stampRsvpCheckin(this.viewName, ev.key, this.codes[ev.key] || ''); },
       toDateStr: toDateStr,
       // Translated label for a status VALUE, keyed by `list.<statusList||statusColumn>.<value>` (falls back
       // to the raw value). `statusList` lets the view name a translation namespace distinct from the column
@@ -9383,7 +9432,15 @@ function createVueApp() {
       + '<tr v-for="ev in events" :key="ev.id">'
       + '<td style="white-space:nowrap">{{ a.dateLabel(ev.date) }}</td>'
       + '<td>{{ ev.title }}</td>'
-      + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpFrozen(viewName, ev.key)" @set="set(ev.key, $event)"></rsvp-picker></td>'
+      + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpFrozen(viewName, ev.key)" @set="set(ev.key, $event)"></rsvp-picker>'
+      + '<div v-if="checkinOn(ev)" class="d-flex align-center flex-wrap mt-1" style="gap:8px" data-testid="rsvp-checkin">'
+      + '<template v-if="canStamp">'
+      +   '<v-text-field v-model="codes[ev.key]" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" style="max-width:200px" data-testid="rsvp-checkin-real"></v-text-field>'
+      +   '<v-btn size="small" variant="text" class="text-none" :disabled="!(codes[ev.key] || \'\').trim()" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-stamp" @click="stamp(ev)"><v-icon icon="mdi-account-check"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t(\'rsvp.checkin\') }}</span></v-btn>'
+      + '</template>'
+      + '<v-text-field v-else :model-value="ev.myCode" @change="e => a.setRsvpCode(viewName, ev.key, e.target.value)" :disabled="a.rsvpFrozen(viewName, ev.key)" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" style="max-width:200px" data-testid="rsvp-checkin-claim"></v-text-field>'
+      + '</div>'
+      + '</td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
       + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></td>'
       + '</tr>'
@@ -9395,6 +9452,13 @@ function createVueApp() {
       + '<div>{{ a.dateLabel(ev.date) }}</div>'
       + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}</div>'
       + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpFrozen(viewName, ev.key)" @set="set(ev.key, $event)"></rsvp-picker>'
+      + '<div v-if="checkinOn(ev)" class="d-flex align-center flex-wrap mt-1" style="gap:8px" data-testid="rsvp-checkin">'
+      + '<template v-if="canStamp">'
+      +   '<v-text-field v-model="codes[ev.key]" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" style="max-width:200px" data-testid="rsvp-checkin-real"></v-text-field>'
+      +   '<v-btn size="small" variant="text" class="text-none" :disabled="!(codes[ev.key] || \'\').trim()" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-stamp" @click="stamp(ev)"><v-icon icon="mdi-account-check"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t(\'rsvp.checkin\') }}</span></v-btn>'
+      + '</template>'
+      + '<v-text-field v-else :model-value="ev.myCode" @change="e => a.setRsvpCode(viewName, ev.key, e.target.value)" :disabled="a.rsvpFrozen(viewName, ev.key)" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" style="max-width:200px" data-testid="rsvp-checkin-claim"></v-text-field>'
+      + '</div>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
       + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></div>'
       + '</v-card>'

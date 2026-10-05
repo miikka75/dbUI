@@ -46,6 +46,7 @@
       "field.people": "Personas",
       "field.note": "Nota",
       "field.attendance": "Asistencia",
+      "field.checkin_code": "Código de asistencia",
       "field.total": "Total",
       "rsvp.date": "Fecha",
       "rsvp.title": "Título",

@@ -46,6 +46,7 @@
       "field.people": "Personer",
       "field.note": "Anteckning",
       "field.attendance": "Närvaro",
+      "field.checkin_code": "Incheckningskod",
       "field.total": "Totalt",
       "rsvp.date": "Datum",
       "rsvp.title": "Titel",

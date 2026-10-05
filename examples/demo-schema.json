@@ -257,12 +257,17 @@
           "list": "attendance_status",
           "picker": "toggle",
           "default": "pending"
+        },
+        {
+          "name": "checkin_code",
+          "type": "text"
         }
       ],
       "ownerWritable": [
         "practice",
         "response",
-        "note"
+        "note",
+        "checkin_code"
       ],
       "ownerWritableWhile": {
         "attendance": "pending"
@@ -718,7 +723,13 @@
         "statusColumn": "response",
         "picker": "toggle",
         "showCounts": true,
-        "rosterVisibility": "all"
+        "rosterVisibility": "all",
+        "checkin": {
+          "codeColumn": "checkin_code",
+          "set": {
+            "attendance": "attended"
+          }
+        }
       }
     },
     {

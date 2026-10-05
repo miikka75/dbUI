@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "18596e654c94ce63"
+      "hash": "8076d8c1fe4ba97f"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "c2e27e802a07f60a"
+      "hash": "95e7d29d60f502f3"
     }
   ],
   "bundles": [
@@ -101,31 +101,31 @@
       "title": "Team Demo",
       "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
       "icon": null,
-      "revision": 12,
+      "revision": 13,
       "tables": 11,
       "views": 29,
       "schema": {
         "file": "demo-schema.json",
-        "hash": "56b3a598db3b38aa"
+        "hash": "2344e19d7c54b74b"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "demo-lang-en.json",
-          "hash": "a1146e10fed91f1e"
+          "hash": "6c4aa304cd836cbe"
         },
         {
           "code": "es",
           "name": "Español",
           "file": "demo-lang-es.json",
-          "hash": "8d8209cbf9899461"
+          "hash": "5bfd08fe5f796a0c"
         },
         {
           "code": "sv",
           "name": "Svenska",
           "file": "demo-lang-sv.json",
-          "hash": "f75233b7bd2b8395"
+          "hash": "61b30bf61f9fc8b0"
         }
       ],
       "data": {
@@ -134,7 +134,7 @@
       },
       "about": {
         "file": "demo-about.json",
-        "hash": "04d885d45e176ef2"
+        "hash": "2509fe6400004272"
       },
       "notes": {
         "5": "Adds `teams`, a catalogue whose parent column holds another ROW's id (`hierarchy.by: \"id\"`) instead of a group's value — so the Lookup tab shows it three levels deep (Acme > Engineering > Backend) rather than the two every other lookup has. Nothing existing changes: `cities` still groups by value, side by side with it, which is the point of shipping both.",
@@ -144,7 +144,8 @@
         "9": "Settings no longer has a Refresh data button (changes from others already arrive on their own), so its labels are gone from the language packs.",
         "10": "Drops one of two identical app labels (\"No data\" in tables and in tiles now share one), so there is one less row to translate. Nothing on screen changes.",
         "11": "Adds Notes Gallery under Data: the notes as a grid of picture tiles (`layout: \"gallery\"`), the first image column as the picture and the title, author and date as the caption. Four more notes, each with a picture, so the grid has something to show. A note without a picture still gets a tile.",
-        "12": "Adds Take Attendance under Crew: each practice as a card listing who answered, where an organizer marks each person Attended or Absent. A member cannot mark themselves, and once they are marked their RSVP for that practice can no longer be changed. RSVPs now also keep to their own fields (practice, response, note), so a member can no longer write anything else on their response."
+        "12": "Adds Take Attendance under Crew: each practice as a card listing who answered, where an organizer marks each person Attended or Absent. A member cannot mark themselves, and once they are marked their RSVP for that practice can no longer be changed. RSVPs now also keep to their own fields (practice, response, note), so a member can no longer write anything else on their response.",
+        "13": "Check-in with a code: on the day of a practice, My RSVP shows a Check-in code box. Members type the code shown at practice; an organizer types the same code on their own screen and presses Check in, which marks everyone who entered it as Attended. The code is never saved, so it cannot be looked up from home."
       }
     }
   ]
