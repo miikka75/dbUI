@@ -1,5 +1,7 @@
 -- csp-reports.sql — storage for the Supabase Edge Function CSP collector
--- (supabase/functions/csp-report/index.ts). Apply once, in the dashboard's SQL EDITOR.
+-- (supabase/functions/csp-report/index.ts). Apply in the dashboard's SQL EDITOR, or from the repo root:
+--   npx supabase@latest db query --linked --project-ref <project-ref> -f supabase/csp-reports.sql
+-- Idempotent: re-run it after an upgrade that changes it.
 --
 -- NOT via `supabase db push`: that applies migrations from supabase/migrations/, and this file is
 -- deliberately not a migration (see below). This header used to say `db push` would do it, which

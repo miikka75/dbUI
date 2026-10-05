@@ -47,17 +47,23 @@ global `window.supabase`), exactly like the Firebase compat SDK — no ES module
    is `on conflict do update`, so it also applies limits to a bucket an earlier version created
    without them.)
 
-   Or run it from a shell with `psql`. That is handier for the re-run after each upgrade:
+   Or run it from a shell with the Supabase CLI, which needs nothing installed but Node. That is
+   handier for the re-run after each upgrade. Run it **from the repo root**, since `-f` is a path:
 
    ```bash
-   psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 --single-transaction -f supabase-schema.sql
+   npx supabase@latest db query --linked --project-ref <project-ref> -f supabase-schema.sql
    ```
 
-   The two flags make the run all or nothing, like the SQL Editor's: a plain `psql -f` carries on past
-   an error and can leave the policies half-applied. `SUPABASE_DB_URL` is the connection string from
-   the dashboard's **Connect** button. The direct connection is IPv6-only on the free plan, so from an
-   IPv4-only network use the **Session pooler** string (not the Transaction pooler). Not
-   `supabase db push`: that applies only files in `supabase/migrations/`, and this file is not one.
+   It goes through the Management API over HTTPS, so it needs `npx supabase@latest login` once and no
+   database password, and the free plan's IPv6-only direct connection does not come into it.
+   `--project-ref` only counts together with `--linked`; without it, `supabase link` the folder first.
+   Not `supabase db push`: that applies only files in `supabase/migrations/`, and this file is not one.
+
+   If a run fails partway, fix the cause and run it again: the file is idempotent, so a half-applied
+   run is finished by the next one. With `psql` installed, the equivalent that is all-or-nothing is
+   `psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 --single-transaction -f supabase-schema.sql`, with the
+   connection string from the dashboard's **Connect** button (the **Session pooler** one from an
+   IPv4-only network).
 5. **Project Settings → API Keys**: copy the **Project URL** and *one* client key — enter them in the
    app's setup screen (Setup → Supabase). Either key format works; the app passes the key straight to
    `createClient` as an opaque string and never parses it:
@@ -103,8 +109,9 @@ cp .env.example .env
 4. **Terminate TLS in front of Kong** (the whole stack enters on `:8000`) with Caddy or Traefik. Not
    optional: Google OAuth and the browser's realtime `wss://` both require https.
 5. `docker compose pull && docker compose up -d`, then run all of `supabase-schema.sql` through
-   Studio's SQL editor or `psql` (the same command as **Supabase project setup** step 4, with your
-   own Postgres connection string).
+   Studio's SQL editor, or from a shell with `npx supabase@latest db query --db-url "<your Postgres
+   connection string>" -f supabase-schema.sql` (the Management API route in **Supabase project setup**
+   step 4 is for hosted projects only).
 6. In the app's setup screen: **Project URL** is your domain, and the key is the `ANON_KEY` you
    generated — the legacy `eyJ…` shape, which is still accepted (**Supabase project setup** step 5).
 
@@ -201,20 +208,24 @@ exists. The blocker here is the delivery, not the plan.
 ### Turning it on
 
 ```bash
-# 1. Storage: create the table. From a shell (SUPABASE_DB_URL as in setup step 4):
-psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 --single-transaction -f supabase/csp-reports.sql
+# Every command here runs FROM THE REPO ROOT: -f and the function deploy both read paths under it.
+
+# 1. Storage: the table, the token table and their functions (as in setup step 4: login once).
+npx supabase@latest db query --linked --project-ref <project-ref> -f supabase/csp-reports.sql
 #    Or paste supabase/csp-reports.sql into the dashboard's SQL EDITOR and run it.
 #    NOT `supabase db push` -- that applies migrations from supabase/migrations/, and this file is
 #    deliberately not one (see its header). An earlier version of this document said otherwise; the
 #    symptom is a collector that accepts reports, answers 204 to every browser, and then returns
 #    "Storage error" on the first read, because the table was never created.
+#    Check it took -- two rows:
+npx supabase@latest db query --linked --project-ref <project-ref> "select proname from pg_proc where proname in ('csp_report_token_ok', 'csp_report_rotate')"
 
 # 2. The collector. --no-verify-jwt is REQUIRED and is not a loosening: browsers post violation
 #    reports with no credentials of any kind, so a function demanding a JWT receives nothing.
-npx supabase@latest functions deploy csp-report --no-verify-jwt
+npx supabase@latest functions deploy csp-report --no-verify-jwt --project-ref <project-ref>
 
 # 3. A token. This gates READING the log, not writing to it.
-npx supabase@latest secrets set DBUI_CSP_REPORT_TOKEN=<long random string>
+npx supabase@latest secrets set DBUI_CSP_REPORT_TOKEN=<long random string> --project-ref <project-ref>
 ```
 
 That secret is only the **first** token. After it, **Settings → Security policy reports → Rotate token**
@@ -222,7 +233,7 @@ That secret is only the **first** token. After it, **Settings → Security polic
 for handing to the other admins, and the old one, the environment secret included, stops opening the
 log at once. A rotation is authorised by the token being rotated, so it needs no Supabase login and works
 the same for a Firestore deployment. A project whose `csp-reports.sql` predates rotation answers
-**501** to the button: re-run step 1, which is idempotent. (The dev collector, `dev/csp-report-collector.js`,
+**501** to the button: re-run step 1, which is idempotent, and redeploy the function (step 2). (The dev collector, `dev/csp-report-collector.js`,
 does not rotate. Its token is `REPORT_TOKEN`.)
 
 Generate the token with something cryptographic — `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`.
@@ -275,7 +286,7 @@ The canary it posts is a **stable** URI (`healthcheck.invalid`), so repeated run
 rather than adding one per run. Remove it whenever you like:
 
 ```bash
-psql "$SUPABASE_DB_URL" -c "delete from public.csp_reports where blocked_uri = 'https://healthcheck.invalid/probe.js';"
+npx supabase@latest db query --linked --project-ref <project-ref> "delete from public.csp_reports where blocked_uri = 'https://healthcheck.invalid/probe.js'"
 ```
 
 Or run the same `delete` in the SQL Editor.
