@@ -4586,8 +4586,12 @@ test.describe('v3 @both partition toggle in an embed', () => {
     // Publishing again lifts the stop and mints NEW links; the old ones stay dead.
     await pub.locator('[data-testid="feed-publish-ppa_cal"]').click();
     await expect(pub.locator('[data-testid="feed-stop-ppa_cal"]')).toBeVisible();
-    const againIds = await page.evaluate(() => window.appInstance.dataCache['ppa_subs'].filter((r) => r.fid).map((r) => r.fid));
-    expect(againIds.length).toBe(2);
+    // Stop shows as soon as the switch is on; the pass that mints the new links finishes after it (a
+    // render and an upload per subscriber, then the row write). Read once, the ids were there on a fast
+    // machine and not yet on CI's, so wait for the pass, not for the button.
+    const ids = () => page.evaluate(() => window.appInstance.dataCache['ppa_subs'].filter((r) => r.fid).map((r) => r.fid));
+    await expect.poll(async () => (await ids()).length).toBe(2);
+    const againIds = await ids();
     expect(againIds.some((id) => firstIds.includes(id))).toBe(false);
 
     // Stop pressed while a pass is still uploading: the passes queue, so the stop's blanking lands

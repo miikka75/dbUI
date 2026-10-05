@@ -410,7 +410,7 @@ seven entries to find out what is left.
 
 | Open | From | Size | Why it is not done |
 |---|---|---|---|
-| **Set `Csp.REPORT_ENDPOINT` and deploy the collector** | 7 | one line + `npm run csp:sync` | The mechanism landed; only the URL is missing, and it cannot be guessed — it belongs to the deployment. Deploy `supabase/functions/csp-report/` (free), then set the constant. |
+| ~~**Set `Csp.REPORT_ENDPOINT` and deploy the collector**~~ *(done)* | 7 | — | Done in `626cb93` (2026-09-23): `csp.js` points at the project's Supabase Edge Function (`…supabase.co/functions/v1/csp-report`), and the function answers. This row had not been moved. |
 | **`board` / `form` / `timeline` have no embed branch** | 4 | small code, large question | Three product questions wearing one costume: does a board keep drag-between-lanes inside a document? Does a `form` in a page mean a second submit target, or the same one twice? Does a timeline embed want its own date window or the page's? The dispatch set is asserted, so this is a recorded answer rather than an accident. |
 | ~~**`access:` on a `markdown` + `sources` view is half-honoured**~~ *(landed)* | 4 | small | Honoured on both paths now: `embed-view` asks `canAccessPage` before any branch draws, so a sourced page embedded elsewhere renders nothing for a member without the grant, as it already did at nav and in the doc branch. Pinned by *access: on a sourced page holds where it is embedded*. |
 | ~~**The extraction series**~~ *(done)* | 6 | done | Six cuts made (`brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`, `bundle.js`, the feed publisher). Ranked by how much of each seam is pure and how much duplication it already costs, which is how feeds went from first to last. |
@@ -419,7 +419,7 @@ One thing deliberately **not** on this list: promoting `firebase.json` from `Rep
 It is not a task until somebody deploys to Firebase Hosting, and a CSP on a host nothing serves from is
 what finding 3 was about in the first place.
 
-### View components that declare what they need — the other half of finding 6 *(steps 1–3 landed)*
+### View components that declare what they need — the other half of finding 6 *(steps 1–3 landed; step 4 declined)*
 
 Finding 6 extracts logic out of the root's `methods`. This is the other side of the same monolith, the
 components, and it is what actually stops a feature leaving the app. The calendar's engines
@@ -474,8 +474,18 @@ is pure" rule seen from the component side.
    passes its generated `currentData` in as `rows`; an embed omits it and the view generates its own.
    `rotationHost` is seven members, and the three body parts share it with `valueHost`. That toolbar had
    no UI test, so it gained one.
-4. `board-view`, `embed-view`, `data-cell` last. They carry the most calls because they edit rows, and
-   the write path is still the root's (finding 6's remaining seams come first there).
+4. *(declined, measured)* `board-view`, `embed-view`, `data-cell`. Once finding 6's series was done
+   these were next, and counting them is what settled it: `data-cell` reads **19** distinct root members
+   (plus `ROOT_PROXY`'s dozen), `board-view` **26**, `embed-view` **28**. That is this entry's own warning
+   sign two and three times over. They are not views that happen to read the app; they are the app's
+   editing surface. A cell asks the schema ten column-type questions, resolves list, ref and switched-list
+   options, applies the read-only and mirror rules, saves through the funnel and picks an image store. The
+   board adds archive, delete and lane moves, and the embed dispatches every kind and owns `{{self}}`.
+   Injecting all of that would be the one-method-per-call-site mirror this entry warns against, the
+   coupling moved and none of it removed. They stay on the root for the same reason `calendar-screen` and
+   `settings-view` do. What would reopen this: a second host that needs to EDIT rows, which would first
+   need the write path itself (`saveField` and its cascades) behind an interface, a far larger change than
+   any component.
 
 **Out of scope:** the `a: appInstance` templates (`data-view`, `settings-view`, `calendar-editor`,
 `languages-view`, `lookup-view`). They are the app's own screens, not reusable views, and exposing the
