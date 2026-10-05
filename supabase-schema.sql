@@ -1,8 +1,9 @@
 -- =====================================================================================================
 -- supabase-schema.sql — Postgres schema + Row-Level Security for the dbUI Supabase backend.
 --
--- Run this once in your Supabase project (SQL Editor -> New query -> paste -> Run). It is idempotent:
--- re-running it is safe. It reproduces the Firestore data model on a single key-value table and mirrors
+-- Run this in your Supabase project (SQL Editor -> New query -> paste -> Run), or from the repo root with
+-- `npx supabase@latest db query --linked --project-ref <project-ref> -f supabase-schema.sql`. It is
+-- idempotent: re-running it is safe, and is how an existing project picks up new policies. It reproduces the Firestore data model on a single key-value table and mirrors
 -- firestore.rules as per-row RLS policies.
 --
 -- Model:  Firestore  _col(store).doc(key).data   <->   public.kv (store, key, value)

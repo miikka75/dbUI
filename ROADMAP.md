@@ -545,6 +545,12 @@ The placement bug: **"Re-run `supabase-schema.sql` after upgrading"** is a claus
 *How it maps to Firestore*, four sections below setup. It is not a footnote — it is how an existing
 deployment picks up new policies — and nobody upgrading reads the Firestore mapping table.
 
+*Since corrected (2026-10): the CLI CAN now run a loose file. `supabase db query --linked -f <file>`
+goes through the Management API, needing only `supabase login`: no psql, no new dependency, and no
+database password. SUPABASE.md uses it for both SQL steps. The rest of this entry is kept as the
+reasoning at the time; its table's first row (convert to migrations) is still the wrong answer, for the
+reason given there, and the CHECK below is still the part worth having.*
+
 **Automation: mostly not possible, and the possible part is not the expensive part.**
 
 The CLI has no way to run a loose `.sql` file. `supabase db push` applies migrations from
