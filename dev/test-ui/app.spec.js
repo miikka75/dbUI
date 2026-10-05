@@ -10102,3 +10102,28 @@ test.describe('A linked position shows its role on screen', () => {
     expect(tip).toBe('Bishop');
   });
 });
+
+test.describe('split layout (master-detail)', () => {
+  test('lists the rows, shows the selected record editable beside them, and keeps the selection by id', async ({ page }) => {
+    const schema = JSON.parse(JSON.stringify(SCHEMA));
+    schema.views.push({ name: 'notes_split', sources: ['notes'], mode: 'union', layout: 'split', defaultSort: 'title', columns: ['title', 'content', 'author'] });
+    schema.nav = { items: [{ view: 'notes_split' }].concat((schema.nav && schema.nav.items) || []) };
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema } });
+    for (const r of [{ id: 'n1', title: 'Alpha', content: 'first' }, { id: 'n2', title: 'Beta', content: 'second' }])
+      await page.request.post('/api/putRow', { data: { tableId: 'notes', tab: 'active', data: r } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+    await page.evaluate(() => appInstance.selectTab('notes_split'));
+
+    await expect(page.locator('[data-testid="split-row-n1"]')).toBeVisible();
+    await expect(page.locator('[data-testid="split-row-n2"]')).toBeVisible();
+    // The first row is open until another is picked.
+    await expect(page.locator('[data-testid="split-record"]')).toContainText('first');
+    await page.locator('[data-testid="split-row-n2"]').click();
+    await expect(page.locator('[data-testid="split-record"]')).toContainText('second');
+    await expect(page.locator('[data-testid="split-record"]')).not.toContainText('first');
+  });
+});

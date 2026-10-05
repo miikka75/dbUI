@@ -2702,9 +2702,17 @@ picture, a different request.
 Reverse-chronological activity stream. Pairs naturally with a changeset/audit trail if one is ever
 added.
 
-### `split`
+### `split` — a LAYOUT of a data view, like `gallery` *(landed)*
 
 Master-detail two-pane layout — a list on the left, the selected record on the right.
+
+Built as `layout: "split"`, for the reason `gallery` was: it is a way of drawing a data view's rows, and
+a new kind would have needed the whole seam to say the same thing. The right pane is the card layout's
+body, extracted as `record-fields` rather than copied, so a card and a split record edit identically,
+embeds and row actions included. The selection is the `data-split` component's own state, a row id, so a
+re-sort or a live update keeps the same record open, and it falls back to the first row when that one is
+gone. Not built: a deep link to the selected row, and selecting a row just added (Add appends to the
+list; the new row is one click away).
 
 ### New column types
 
