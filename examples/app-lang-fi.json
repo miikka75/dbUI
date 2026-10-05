@@ -162,7 +162,6 @@
       "msg.palette_applied": "Paletti otettu käyttöön",
       "msg.paste_hex": "Liitä vähintään 2 #hex-väriä",
       "msg.redone": "Tehty uudelleen",
-      "msg.ref_has_children": "Siirrä tai poista ensin sen alla olevat",
       "msg.registered_admin": "Sinut on rekisteröity ylläpitäjäksi",
       "msg.renamed": "Nimetty uudelleen",
       "msg.request_failed": "Pyyntö epäonnistui",

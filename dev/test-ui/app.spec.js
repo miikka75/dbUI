@@ -1992,15 +1992,16 @@ test.describe('A lookup that declares its hierarchy', () => {
 
   // `by: "id"`: the parent column holds another ROW's id, so a parent IS a row and the tree is as deep
   // as the data. The demo bundle ships one (`teams`); this drives the same shape through the editor.
-  test('an id-keyed lookup renders three levels, and refuses to delete a node with children', async ({ page }) => {
+  test('an id-keyed lookup renders three levels, orders within a level, and moves children up on delete', async ({ page }) => {
     const ID_KEYED = {
       defaultLanguage: 'en',
       tables: {
         ref_units: {
           isLookup: true,
           hierarchy: { parent: 'parent_id', value: 'unit', by: 'id' },
+          reorderable: true,
           // The parent column is plumbing, like `position` -- hidden, and never typed into.
-          columns: [{ name: 'unit', type: 'text' }, { name: 'parent_id', type: 'text', hidden: true }]
+          columns: [{ name: 'unit', type: 'text' }, { name: 'parent_id', type: 'text', hidden: true }, { name: 'position', type: 'text', hidden: true }]
         },
         tickets: { columns: [{ name: 'title', type: 'text' }] }
       },
@@ -2009,31 +2010,48 @@ test.describe('A lookup that declares its hierarchy', () => {
     };
     await page.request.post('/api/resetData');
     await page.request.post('/api/saveSchema', { data: { schema: ID_KEYED } });
-    for (const [id, unit, parent_id] of [['u1', 'Acme', ''], ['u2', 'Engineering', 'u1'], ['u3', 'Backend', 'u2'], ['u4', 'Support', 'u1']])
-      await page.request.post('/api/putRow', { data: { tableId: 'ref_units', data: { id, unit, parent_id }, tab: 'active' } });
+    // `position` is a place among SIBLINGS: 1..n under each parent.
+    for (const [id, unit, parent_id, position] of [['u1', 'Acme', '', '1'], ['u2', 'Engineering', 'u1', '1'], ['u3', 'Backend', 'u2', '1'], ['u5', 'Frontend', 'u2', '2'], ['u4', 'Support', 'u1', '2']])
+      await page.request.post('/api/putRow', { data: { tableId: 'ref_units', data: { id, unit, parent_id, position }, tab: 'active' } });
     await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
     await page.goto('/');
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
     await page.evaluate(() => appInstance.selectTab('__lookup'));
     await page.locator('.v-main .v-list-item', { hasText: 'ref_units' }).first().click();
-    await expect.poll(() => page.evaluate(() => appInstance.refTableData.length), { timeout: 6000 }).toBe(4);
+    await expect.poll(() => page.evaluate(() => appInstance.refTableData.length), { timeout: 6000 }).toBe(5);
 
     const shape = await page.evaluate(() => {
       const nest = (ns) => ns.map((n) => [n.value, nest(n.children)]);
       return { by: appInstance.refHierarchy.by, hasRowOnParent: !!appInstance.refTree[0].row, tree: nest(appInstance.refTree) };
     });
     expect(shape).toEqual({ by: 'id', hasRowOnParent: true,
-                            tree: [['Acme', [['Engineering', [['Backend', []]]], ['Support', []]]]] });
+                            tree: [['Acme', [['Engineering', [['Backend', []], ['Frontend', []]]], ['Support', []]]]] });
 
     // ...and on screen, level by level, the way a person opens it.
     await page.locator('.ref-hierarchy .v-list-group__header', { hasText: 'Acme' }).first().locator('.mdi-chevron-down').click();
     await page.locator('.ref-hierarchy .v-list-group__header', { hasText: 'Engineering' }).first().locator('.mdi-chevron-down').click();
     await expect(page.locator('.ref-hierarchy .v-list-group .v-list-group .v-list-group__header', { hasText: 'Backend' })).toHaveCount(1);
 
-    // A node with children refuses to go: cascade-or-re-parent is undecided, and either guess loses
-    // rows somebody can still see. Deleting a leaf is an ordinary row delete and still works.
-    await page.evaluate(() => appInstance.deleteRefNode(appInstance.refTree[0]));
-    expect(await page.evaluate(() => appInstance.refTableData.length)).toBe(4);
+    const tree = () => page.evaluate(() => { const nest = (ns) => ns.map((n) => [n.value, nest(n.children)]); return nest(appInstance.refTree); });
+    const pos = () => page.evaluate(() => Object.fromEntries(appInstance.refTableData.map((r) => [r.unit, r.position + '@' + r.parent_id])));
+
+    // Order is per level: Support moves above Engineering, and only that level is renumbered.
+    await page.locator('[data-testid="ref-up-u4"]').click();
+    await expect.poll(tree).toEqual([['Acme', [['Support', []], ['Engineering', [['Backend', []], ['Frontend', []]]]]]]);
+    expect((await pos()).Backend).toBe('1@u2');
+    await expect(page.locator('[data-testid="ref-up-u4"]')).toBeDisabled();
+
+    // Deleting a node with children moves them up into its place, in their own order.
+    await page.evaluate(() => { const n = appInstance.refTree[0].children[1]; appInstance.deleteRefNode(n); appInstance.deleteRefNode(n); });
+    await expect.poll(tree).toEqual([['Acme', [['Support', []], ['Backend', []], ['Frontend', []]]]]);
+    expect(await pos()).toEqual({ Acme: '1@', Support: '1@u1', Backend: '2@u1', Frontend: '3@u1' });
+
+    // One undo puts the node back, its children under it, and every position it shifted.
+    await page.evaluate(() => appInstance.undoLast());
+    await expect.poll(tree).toEqual([['Acme', [['Support', []], ['Engineering', [['Backend', []], ['Frontend', []]]]]]]);
+    const rows = await (await page.request.post('/api/getTableData', { data: { tableId: 'ref_units', tab: 'active' } })).json();
+    expect(Object.fromEntries(rows.rows.map((r) => [r.unit, r.position + '@' + r.parent_id])))
+      .toEqual({ Acme: '1@', Support: '1@u1', Engineering: '2@u1', Backend: '1@u2', Frontend: '2@u2' });
   });
 
   test('validateSchema names a hierarchy that groups by a column that is not there', async ({ page }) => {

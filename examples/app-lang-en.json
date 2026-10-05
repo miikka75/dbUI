@@ -162,7 +162,6 @@
       "msg.palette_applied": "Palette applied",
       "msg.paste_hex": "Paste at least 2 #hex colors",
       "msg.redone": "Redone",
-      "msg.ref_has_children": "Move or delete what is under it first",
       "msg.registered_admin": "You have been registered as an administrator",
       "msg.renamed": "Renamed",
       "msg.request_failed": "Request failed",
