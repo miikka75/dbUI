@@ -217,6 +217,14 @@ npx supabase@latest functions deploy csp-report --no-verify-jwt
 npx supabase@latest secrets set DBUI_CSP_REPORT_TOKEN=<long random string>
 ```
 
+That secret is only the **first** token. After it, **Settings → Security policy reports → Rotate token**
+(two presses) swaps it for a fresh one kept in `public.csp_report_token`. The new token is shown once,
+for handing to the other admins, and the old one, the environment secret included, stops opening the
+log at once. A rotation is authorised by the token being rotated, so it needs no Supabase login and works
+the same for a Firestore deployment. A project whose `csp-reports.sql` predates rotation answers
+**501** to the button: re-run step 1, which is idempotent. (The dev collector, `dev/csp-report-collector.js`,
+does not rotate. Its token is `REPORT_TOKEN`.)
+
 Generate the token with something cryptographic — `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`.
 `base64url` matters: the token travels in a query string, and plain base64 emits `+` and `/`.
 

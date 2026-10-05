@@ -245,6 +245,7 @@
       "settings.csp_blocked": "Estetty",
       "settings.csp_count": "Määrä",
       "settings.csp_last_seen": "Viimeksi",
+      "settings.csp_rotate": "Vaihda tunniste",
       "btn.refresh": "Päivitä",
       "settings.feed_unpublish": "Lopeta julkaisu",
       "settings.feed_unpublished": "Julkaisu lopetettu; vanha osoite palauttaa tyhjan kalenterin",

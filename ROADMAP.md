@@ -637,7 +637,7 @@ empty blocked URI into their own bucket; `readLog` is the GET, rejecting with th
 token (403) and a collector with no table (502) read differently. The panel and `dev/csp-log.mjs` are
 two shells over those two functions. The panel shows the extension reports as a count only.
 
-### Rotating the CSP token from the UI, the way a calendar feed regenerates
+### Rotating the CSP token from the UI, the way a calendar feed regenerates *(landed, as sketched)*
 
 Asked directly: can the web UI reset `DBUI_CSP_REPORT_TOKEN` the way **Regenerate** resets a published
 calendar feed? Not as the token is stored today, and the reason is worth writing down because the two
@@ -681,6 +681,13 @@ Sketch:
 **Bootstrapping still needs the CLI**, and that is fine: the *first* token has to come from somewhere
 outside the app, the same way the `uploads` bucket does. What changes is that every rotation afterwards
 is a button.
+
+**What the build settled.** The token check moved into SQL (`csp_report_token_ok`) beside the rotation
+(`csp_report_rotate`, compare-and-swap, so two racing rotations with one token cannot both win), and both
+are tested against PostgreSQL. The function falls back to the environment token on exactly ONE failure:
+a 404, meaning the SQL predates rotation and no row can exist. Falling back on any error would let a
+token rotated *because* it leaked reopen the log whenever storage hiccups. The function itself is now
+run under Node with Deno stubbed (`csp-report-function.test.js`), rather than only read as text.
 
 **Worth building only alongside the Settings panel**, not before it. Rotation from the UI is only
 useful to an admin who already holds the token there — and the panel is what makes them hold it. On its
