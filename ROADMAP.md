@@ -717,7 +717,7 @@ useful to an admin who already holds the token there — and the panel is what m
 own this is a button that solves a problem nobody has: a token is rotated when it leaks, which has
 happened exactly once, and `npx supabase secrets set` handled it in one line.
 
-### RSVP attendance verification *(schema pattern, not code)*
+### RSVP attendance verification *(landed — in the demo bundle, and it was not quite config)*
 
 "Did the people who signed up actually turn up?" — a verifier marks attendance, and only verified
 rows count toward any report.
@@ -742,6 +742,15 @@ Two traps worth writing into SCHEMA.md when this is done:
 
 Known limitation: `ownerWritableWhile` gates on a column value, not a date. "Editable until the event
 happens" is not expressible; "editable until someone marks attendance" is.
+
+**What building it found.** "Config, not code" was wrong by one function. The RSVP writer built its row
+by hand, without column defaults, so `attendance` was born blank. The write layers then refused the
+create, because a non-owner-writable column must equal its default at create, and had they accepted it,
+the row would have been frozen from birth. `setRsvp` now stamps defaults through the same
+`_seedDefaults` `_createBlankRow` uses. The picker also had no idea a verified response was frozen, and
+offered a change the server refused; `rsvpFrozen` disables it. A third trap went into SCHEMA.md beside
+the two above: adding the gate to a table that already has rows freezes those rows until their gate
+column is filled.
 
 ### QR check-in — scan a code to mark attendance *(scan phase 1.5 — the config branch of the shipped scan view)*
 
@@ -3087,8 +3096,6 @@ convention at the top of this file exists for precisely that, and is now applied
 loop — and since then the UI, the orphan sweep, and the storage rules without which a real backend
 refused every feed file. Nothing of the feed is ranked here any more.
 
-The RSVP attendance pattern is not in that order because it is not code — it can be authored into a
-schema today.
 
 *View components that declare what they need* sits beside finding 6's extraction series, not ahead
 of it. Neither fixes anything that is wrong on screen; both pay back in tests and in what can be moved

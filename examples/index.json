@@ -101,40 +101,40 @@
       "title": "Team Demo",
       "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
       "icon": null,
-      "revision": 11,
+      "revision": 12,
       "tables": 11,
-      "views": 27,
+      "views": 29,
       "schema": {
         "file": "demo-schema.json",
-        "hash": "3ad4790b1e670731"
+        "hash": "56b3a598db3b38aa"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "demo-lang-en.json",
-          "hash": "c62c801f9f772699"
+          "hash": "a1146e10fed91f1e"
         },
         {
           "code": "es",
           "name": "Español",
           "file": "demo-lang-es.json",
-          "hash": "9fe5ee1dbee213a7"
+          "hash": "8d8209cbf9899461"
         },
         {
           "code": "sv",
           "name": "Svenska",
           "file": "demo-lang-sv.json",
-          "hash": "9f51bd844e91f566"
+          "hash": "f75233b7bd2b8395"
         }
       ],
       "data": {
         "file": "demo-data.json",
-        "hash": "a85759d8739cdad2"
+        "hash": "9819c21dc1207bb7"
       },
       "about": {
         "file": "demo-about.json",
-        "hash": "f75a456659ea2f88"
+        "hash": "04d885d45e176ef2"
       },
       "notes": {
         "5": "Adds `teams`, a catalogue whose parent column holds another ROW's id (`hierarchy.by: \"id\"`) instead of a group's value — so the Lookup tab shows it three levels deep (Acme > Engineering > Backend) rather than the two every other lookup has. Nothing existing changes: `cities` still groups by value, side by side with it, which is the point of shipping both.",
@@ -143,7 +143,8 @@
         "8": "The rest of Settings now speaks Spanish and Swedish too: the theme colour names, the local-database storage notice, and the Examples dialog.",
         "9": "Settings no longer has a Refresh data button (changes from others already arrive on their own), so its labels are gone from the language packs.",
         "10": "Drops one of two identical app labels (\"No data\" in tables and in tiles now share one), so there is one less row to translate. Nothing on screen changes.",
-        "11": "Adds Notes Gallery under Data: the notes as a grid of picture tiles (`layout: \"gallery\"`), the first image column as the picture and the title, author and date as the caption. Four more notes, each with a picture, so the grid has something to show. A note without a picture still gets a tile."
+        "11": "Adds Notes Gallery under Data: the notes as a grid of picture tiles (`layout: \"gallery\"`), the first image column as the picture and the title, author and date as the caption. Four more notes, each with a picture, so the grid has something to show. A note without a picture still gets a tile.",
+        "12": "Adds Take Attendance under Crew: each practice as a card listing who answered, where an organizer marks each person Attended or Absent. A member cannot mark themselves, and once they are marked their RSVP for that practice can no longer be changed. RSVPs now also keep to their own fields (practice, response, note), so a member can no longer write anything else on their response."
       }
     }
   ]

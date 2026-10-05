@@ -2488,6 +2488,40 @@ unaffected as always.
   (`app_owner_state_ok`), `dev/server.js` (`ownerFieldsOk` + the delete gate), and the UI
   (`ownerRowWritable`, feeding `cellReadonly` / `canMutateRow`).
 
+### Verified attendance — a status the member cannot set, which then freezes their entry
+
+"Did the people who signed up actually turn up?" is `ownerWritable` and `ownerWritableWhile` together,
+and needs no further key. The demo's `rsvps` carries it:
+
+```json
+"rsvps": {
+  "columns": [ { "name": "owner", "type": "owner" }, …,
+               { "name": "attendance", "type": "select", "list": "attendance_status", "default": "pending" } ],
+  "ownerWritable": ["practice", "response", "note"],
+  "ownerWritableWhile": { "attendance": "pending" }
+}
+```
+
+The member's RSVP is born `pending`. They may change it until an organizer marks it `attended` or
+`absent`; they can never set it themselves, because `attendance` is not in `ownerWritable`. Once it is
+marked, the RSVP picker for that event is disabled and the write layers refuse a change. The organizer's
+screen is any grid over `rsvps`, for example the demo's `attendance_check`, a card per practice embedding
+its responses, and a report counts only rows whose `attendance` is `attended`.
+
+Three traps:
+
+- **A table with no `ownerWritable` is unbounded.** Omitting the list does not create a weak gate; it
+  creates no gate. The owner may write every column, the verifier's included.
+- **The gate column needs a non-empty `default`.** Reading a missing property is an evaluation *error* in
+  the Firestore rules language, not `undefined`, so a blank gate fails closed and freezes the row for its
+  owner from birth. Use `"pending"`, never `""`.
+- **Adding the gate to a table that already has rows freezes them.** Rows written before the column
+  existed have no value in it, which is not one of the listed states. Fill the column on the existing rows
+  (as an organizer, or by import) when the schema changes.
+
+`ownerWritableWhile` gates on a column value, not a date: "editable until someone marks attendance" is
+expressible, while "editable until the event happens" is not.
+
 ### `stamped` — a column the app fills in and nobody rewrites
 
 `ownerWritable` bounds the **owner** branch, and is deliberately inert for an editor holding a table

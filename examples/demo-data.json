@@ -258,6 +258,7 @@
         "practice": "seed-practices-1",
         "response": "coming",
         "note": "Bringing water",
+        "attendance": "attended",
         "rosterPublic": true
       },
       {
@@ -266,6 +267,7 @@
         "practice": "seed-practices-1",
         "response": "coming",
         "note": "",
+        "attendance": "attended",
         "rosterPublic": true
       },
       {
@@ -274,6 +276,7 @@
         "practice": "seed-practices-1",
         "response": "maybe",
         "note": "Depends on work",
+        "attendance": "absent",
         "rosterPublic": true
       },
       {
@@ -282,6 +285,7 @@
         "practice": "seed-practices-2",
         "response": "maybe",
         "note": "",
+        "attendance": "pending",
         "rosterPublic": true
       },
       {
@@ -290,6 +294,7 @@
         "practice": "seed-practices-2",
         "response": "out",
         "note": "Away",
+        "attendance": "pending",
         "rosterPublic": true
       },
       {
@@ -298,6 +303,7 @@
         "practice": "seed-practices-3",
         "response": "coming",
         "note": "",
+        "attendance": "pending",
         "rosterPublic": true
       }
     ],
@@ -403,6 +409,11 @@
       "Ann",
       "Bob",
       "Cara"
+    ],
+    "attendance_status": [
+      "pending",
+      "attended",
+      "absent"
     ],
     "rsvp_status": [
       "coming",
