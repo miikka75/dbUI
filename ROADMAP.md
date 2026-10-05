@@ -2524,9 +2524,109 @@ its page**.
 **Not included:** entries hidden from admins (`hideFromAdmin`) — the old Backgrounds list could not
 reach them either.
 
-### `gallery`
+### `gallery` — a reading LAYOUT of a data view, not a new view kind *(landed)*
 
-A media grid. Unblocked since `image`/`url` columns shipped, so this is now mostly layout.
+A media grid. Unblocked since `image`/`url` columns shipped, and smaller than this file first assumed: it
+is `layout: "gallery"` beside `table`, `card` and `list`, not a view kind. A kind costs the five steps at
+the top of this file (engine, component and `VIEW_KINDS`, classifier, schema and validation, test). A layout
+costs one component, and inherits sources, filter, search, sort, access, `@part`, print and embedding from
+the data view it lays out.
+
+`list` is the precedent, and the gallery copies its terms. It is a READING layout: values render read-only
+(through `list-value`, so a list value shows its label and an obscured column stays obscured), and editing
+stays in `table` and `card`. The row controls are the ones the list layout already shows: print, archive
+and delete, as two-press `confirm-x`.
+
+**The tile.** The first image column the view shows is the picture, at a fixed square crop so the grid
+lines up whatever the sources are. The other columns are the caption. A row without a picture still gets
+a tile, with a placeholder icon, because a gallery that silently drops rows reads as data loss. A URL
+picture opens full size in a new tab, like an image cell. An `asset:` picture has no address to open, so
+it is not a link (the cell makes the same split).
+
+**One component, two callers.** `data-gallery` takes rows, columns and the governing view config, and
+offers a slot for the row controls. The top-level grid and `embed-view` each pass their own controls: their
+archive and delete paths differ (self-service gating, `@part`), and that difference belongs to them, not
+to the tile. The list layout has two copies of its markup, one per caller, and this one does not start
+that way.
+
+**What the build changed: the tile is the nav's tile.** The first cut drew its own card grid, and it was the
+same element as the nav's Tiles (a level page's entries): a card, a cropped picture, a fallback, a grid.
+Two grids, two crops, two fallbacks, and only the nav's loaded its pictures lazily. Both now use
+`<tile-grid>` and `<image-tile>`, which differ only by their arguments: a 16:9 cover around the entry's
+`focus` with its icon beside the title (nav), or a square photo with a placeholder (gallery). What a tile
+says and what a click does stay with the caller. CLAUDE.md lists the element, and `ui-conventions.test.js`
+fails on a hand-made tile grid.
+
+**Then it stopped being a reading layout.** The first cut copied `list`: values read-only, editing in
+`table` and `card`. In use that was wrong. A gallery is another way of showing the same table, so it gets
+the same edit options as the table's other layouts. Under its picture a tile carries the card's fields
+(an outlined field box with a `data-cell` in it, per column, honouring the same per-row hiding), and the
+picture is edited through the image cell itself: upload, remove, or paste an address. Its own thumbnail
+is suppressed (`no-thumb`) because the tile already shows the picture. A row added from the gallery is
+therefore filled in from the gallery. The cost line above ("a gallery that wants editing in place … is a
+different request") was the mistake: the request was the gallery working on the table it shows. The
+row controls also gained the per-row `canMutateRow` gate the card layout always had, which the first cut
+missed, so a member was offered delete on a self-service row that was not theirs.
+
+**Options: `gallery: { image, size, shape, fit }`, the ones database galleries share.** The tile was a
+fixed 220px-minimum square of the first image column. The options follow what Notion's and Airtable's
+gallery views offer, rather than inventing a vocabulary:
+
+- `image`: the column that is the picture, for a view showing more than one image column. Default: the
+  first image column shown. It need not be among `columns`; then the tile shows it and has no field for it.
+- `size`: `small` | `medium` (default) | `large`. Named steps, not pixels or a column count, because the
+  steps stay relative to the space the gallery has: a tile's minimum width (140 / 220 / 320px), and the grid
+  fits as many as it can, so a large tile on a phone is one tile across rather than overflowing it.
+- `shape`: `square` (default) | `landscape` (16:9) | `portrait` (3:4), the crop of the picture area.
+- `fit`: `crop` (default, fill the shape) | `contain` (the whole picture inside the shape, letterboxed),
+  which covers what "keep the original proportions" is usually asked for, without tiles of uneven height.
+
+Considered and left: a column count (`across`), which is the WordPress control and less portable than
+named sizes; a shape that follows the window's orientation, which no gallery offers and which a tile that
+also holds fields does not need. Justified rows and masonry are layouts of their own, for photo-only
+collections, and would come as separate `layout` values if asked for. A lightbox (click to view full
+screen, next/previous) is the one near-universal thing still missing; it is the next step, not this one.
+
+**The lightbox.** Pressing a tile's picture opens it full screen instead of opening a URL picture in a new
+tab, which was the old behaviour and did nothing at all for an `asset:` or inline picture. One shared
+`image-lightbox` (a dialog, so Esc and focus handling come with it) shows the picture whole (`contain`),
+the tile's first field as its caption, and its place in the set ("3 / 6"). Previous and next walk the
+rows that HAVE a picture, in the gallery's order (a placeholder tile has nothing to show), with the
+arrow keys too. For a URL picture an "open original" button keeps what the old link did. The picture is
+a real button on the tile (keyboard and screen reader reachable), so the tile's fields below it are
+untouched. New keys, because none of these had words before: `img.view`, `img.open_original`,
+`btn.close`, `btn.previous`, `btn.next`.
+
+**And the last one-press picture removal.** Settings -> Profile's "Remove" cleared your avatar on one press,
+the case the image cell had just stopped allowing. It is the shared `confirm-btn` now. The Appearance
+dialog's image removal stays one press: it edits a draft that Cancel throws away.
+
+**Two upload tiers, each with its own limit.** A gallery made the image cell's upload matter, and it had
+one tier with a limit and one without. Without a blob store the picture was fitted into the database
+(1600px, 900 KB data URI, ASSET_CAP). WITH one, the original file went up untouched: a 6 MB phone photo
+stored and loaded at full size for a 220px tile, a 12 MB one refused by the store's 10 MB rule and then
+quietly landing in the database through the asset fallback, and every photo carrying its EXIF, GPS
+position included, into a publicly readable bucket. Now `storeImage` (the root owns the strategy; the
+cell only asks) re-encodes for the store too, through the same `Images.fit` ladder: at most 2560px on the
+long side, which is lightbox quality on a large screen, fitted under 2 MB (`UPLOAD_CAP`), well inside the
+10 MB rule. Re-encoding drops the metadata in both tiers. "Is there a store?" stays a capability test
+followed by an attempt, because a Spark project exposes `uploadFile` and then refuses every put; the
+first refusal is remembered for the session (`_imageStoreDown`, separate from the feed publisher's flag)
+so later uploads go straight to the database tier instead of failing first each time.
+
+**Thumbnails, in the value.** Each upload also stores a thumbnail (at most 480px, under 80 KB) in the same
+tier, and the cell's value carries both: `<picture>#thumb=<thumbnail, URI-encoded>`. A fragment, so the
+whole value given to an <img> or a link still loads the picture itself. Tiles and cell thumbnails draw the
+thumbnail; the lightbox and "open original" the picture, and for a database-tier picture the full asset is
+fetched only when the lightbox shows it. `Images.splitRef` / `joinRef` are the one place the format is
+read and written, and a value without a thumbnail (pasted, or uploaded before this) is just its picture.
+Recorded in the value rather than a side table keyed by the picture, because a side table costs a read per
+picture per session, including every picture that has no thumbnail, and nothing had shipped that a format
+change could break.
+
+Cost: a component, a `VIEW_PARTS.data` entry, the schema enum, two template branches, and a UI test for each
+caller. What would show it is wrong: a gallery that wants editing in place, which is `card` with a bigger
+picture, a different request.
 
 ### `feed`
 
@@ -2931,7 +3031,7 @@ arrangement; it is not owed to the shipped half.
 **Sorting inside an embed** sat beside it on cost, and has shipped (#233) — both the `ref` order and the
 clickable header.
 
-Then `gallery`. `tree` has since shipped in the only form that was worth building: the editor's
+`gallery` has since shipped, as a layout rather than a kind (see its entry). `tree` has since shipped in the only form that was worth building: the editor's
 recursion, and `hierarchy.by: "id"` for tables that want depth, with the value-keyed lookups left
 exactly as they were. What remains of it is two questions nothing has asked yet — what deleting a node
 with children should do, and how order works within a level — and both are recorded in its entry rather

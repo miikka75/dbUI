@@ -110,9 +110,15 @@ input[type="date"]:focus { outline: none; border-color: rgb(var(--v-theme-primar
    is what the fade layer (a surface-coloured scrim) blends into; a level page is bare, so it gets that
    surface here, and the height a corner watermark needs rather than just its tiles' height. */
 .nav-level--bg { background-color: rgb(var(--v-theme-surface)); border-radius: 4px; padding: 12px; min-height: calc(100vh - 170px); }
-/* A nav entry's image: a tile's 16:9 cover, a list row's thumbnail. object-position (from the entry's
-   `focus`) decides which part of a photo survives the crop. */
-.nav-tile-img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px 4px 0 0; }
+/* A tile's picture (image-tile: the nav's Tiles, the gallery layout). The crop's aspect and its
+   object-position (an entry's `focus`) come from the tile; a nav list row keeps its own thumbnail below. */
+.tile-img { display: block; width: 100%; object-fit: cover; border-radius: 4px 4px 0 0; }
+/* A tile picture that opens the lightbox: a real button, drawn as just the picture. */
+.tile-zoom { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.tile-zoom:focus-visible { outline: 2px solid rgb(var(--v-theme-primary)); outline-offset: -2px; }
+/* The lightbox: black whatever the theme, opaque so the page behind does not show through the picture. */
+.image-lightbox { display: flex; flex-direction: column; height: 100%; background: #000; color: #fff; outline: none; }
+.image-lightbox .v-btn { color: #fff; }
 .nav-row-img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; }
 /* Settings -> Appearance: the row thumbnails and the icon picker's grid. */
 .appearance-thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; vertical-align: middle; }

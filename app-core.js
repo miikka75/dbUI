@@ -142,6 +142,12 @@ function mergeImportedConfig(currentConfig, importedConfig, mode) {
 // side only fails there rather than in production on one backend). _fitImageToCap re-encodes until an
 // image fits, so this bound is what decides achievable background quality (~1600px JPEG).
 var ASSET_CAP = 900000;
+// The blob-store tier's cap, in BYTES of the re-encoded file. Firebase's storage.rules and the Supabase
+// bucket both refuse 10 MB and over; 2 MB at most 2560px is lightbox quality with room to spare, and keeps
+// a gallery of fifty pictures from being a hundred megabytes to scroll through.
+var UPLOAD_CAP = 2 * 1024 * 1024;
+// A thumbnail's cap, in BYTES: what a tile or a cell loads instead of the full picture.
+var THUMB_CAP = 80 * 1024;
 
 // --- View background rendering modes ---
 // `fit` names an intent instead of exposing raw CSS: an enum keeps validateSchema able to reject a
@@ -851,7 +857,7 @@ function createVueApp() {
       canPrintCard: function() { var p = this.currentConfig.printable; return this.isDataView && (p === 'cards' || (Array.isArray(p) && p.indexOf('cards') >= 0)); },
       useCardLayout: function() {
         var layout = this.currentConfig.layout;
-        if (layout === 'card' || layout === 'list') return true;
+        if (layout === 'card' || layout === 'list' || layout === 'gallery') return true;
         if (layout === 'table') return false;
         if (this.windowWidth < 600) return true;
         // declaredCols, NOT visibleCols: visibleCols applies hideEmpty only in table mode and so reads
@@ -860,6 +866,7 @@ function createVueApp() {
         return needed > (this.windowWidth - 72);
       },
       useListLayout: function() { return this.currentConfig.layout === 'list'; },
+      useGalleryLayout: function() { return this.currentConfig.layout === 'gallery'; },
       // Add is offered wherever rows may be mutated, INCLUDING the read-only `list` layout: a table can
       // declare layout:'list' as its only presentation, so gating Add on an editable layout would leave
       // such a table with no way to create a row at all. The row lands and saves; it is just not
@@ -1039,7 +1046,8 @@ function createVueApp() {
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
          'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
-         'img.replace', 'img.upload', 'img.remove', 'img.url',
+         'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
+         'btn.close', 'btn.previous', 'btn.next',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
          'bg.opacity', 'bg.position', 'bg.width', 'bg.fixed',
          'bg.fit', 'bg.fit_cover', 'bg.fit_contain', 'bg.fit_tile', 'bg.fit_width',
@@ -5633,6 +5641,13 @@ function createVueApp() {
           self.saveMyProfile();
         }).catch(function(err) { self.notify((err && err.message) || self.t('msg.image_read_failed')); });
       },
+      // The Settings button: two presses (confirm-btn), like every other picture removal. removeMyPicture
+      // is the act itself.
+      pressRemoveMyPicture: function() {
+        if (!this.isArmed('mypic')) { this.armConfirm('mypic'); return; }
+        this.pendingConfirm = null;
+        this.removeMyPicture();
+      },
       removeMyPicture: function() {
         if (!this.myProfile.picture) return;
         this.myProfile.picture = '';
@@ -5690,6 +5705,51 @@ function createVueApp() {
           throw (e && e.tooLarge) ? new Error(self.t('msg.image_too_large')) : e;
         });
       },
+      // An image cell's picked file, stored where this deployment can: the blob store when there is one
+      // (re-encoded to at most 2560px, under UPLOAD_CAP), else the _assets table (saveAsset: 1600px, under
+      // ASSET_CAP). Both re-encode, which also drops the photo's metadata, GPS position included, before it
+      // reaches a store anyone can read. Resolves to the value the cell saves: a URL or 'asset:<id>'.
+      //
+      // `uploadFile` is a CAPABILITY, not proof the store works: on a Spark project Storage needs Blaze,
+      // so the put fails at runtime. The first failure falls back and is remembered for the session, so
+      // the next upload goes straight to the database tier instead of failing first every time.
+      storeImage: function(file, opts) {
+        var self = this;
+        if (!/^image\//.test((file && file.type) || '')) return Promise.reject(new Error(this.t('msg.choose_image')));
+        var id = 'img_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        var base = String(file.name || 'image').replace(/\.[^.]*$/, '');
+        // The thumbnail goes to the same tier as its picture, and is best effort: a picture without one is
+        // drawn from the full picture, as every picture was before thumbnails.
+        var thumbData = this._fitImageToCap(file, Images.capChars(THUMB_CAP), Images.THUMB_STEPS).catch(function() { return ''; });
+        var toAsset = function() {
+          return self.saveAsset(id, file).then(function(full) {
+            return thumbData.then(function(t) {
+              if (!t) return full;
+              return Promise.resolve(Writes.putRow('_assets', { id: id + '_t', src: t }, 'active')).then(function() {
+                self.assetCache[id + '_t'] = t;
+                return Images.joinRef(full, 'asset:' + id + '_t');
+              }, function() { return full; });
+            });
+          });
+        };
+        var asFile = function(dataUrl, name) {
+          var b = Images.dataUrlBytes(dataUrl);
+          return new File([b.bytes], name + ({ 'image/webp': '.webp', 'image/png': '.png' }[b.type] || '.jpg'), { type: b.type });
+        };
+        if (!this.canUploadFiles() || this._imageStoreDown) return toAsset();
+        return this._fitImageToCap(file, Images.capChars(UPLOAD_CAP), Images.STORE_STEPS).then(function(dataUrl) {
+          return self.uploadFile(asFile(dataUrl, base), opts || {}).then(function(full) {
+            return thumbData.then(function(t) {
+              if (!t) return full;
+              return self.uploadFile(asFile(t, base + '.thumb'), opts || {})
+                .then(function(thumb) { return Images.joinRef(full, thumb); }, function() { return full; });
+            });
+          }, function() {
+            self._imageStoreDown = true;
+            return toAsset();
+          });
+        });
+      },
       // Store a picked file as the asset `id`, resolving to the reference to save on the row / in config.
       // Deterministic ids (bg_<view>) overwrite in place, so replacing a background leaves no orphan.
       saveAsset: function(id, file) {
@@ -5707,6 +5767,7 @@ function createVueApp() {
       // back '' and ensureAssets (called from loadTableData) is what fills the cache. A plain URL passes
       // through the same <img src> gate the image cells use.
       assetSrc: function(ref) {
+        ref = Images.splitRef(ref).full;
         if (!isAssetRef(ref)) return safeImgSrc(ref);
         var v = this.assetCache[Embeds.assetId(ref)];
         return v ? safeImgSrc(v) : '';
@@ -5716,7 +5777,7 @@ function createVueApp() {
       // for non-admins); otherwise one collection read fills every miss at once. Misses cache as ''.
       ensureAssets: function(refs) {
         var self = this;
-        var want = (refs || []).filter(isAssetRef).map(function(r) { return Embeds.assetId(r); })
+        var want = (refs || []).map(function(r) { return Images.splitRef(r).full; }).filter(isAssetRef).map(function(r) { return Embeds.assetId(r); })
           .filter(function(id) { return !(id in self.assetCache) && !self._assetPending[id]; });
         if (!want.length) return Promise.resolve();
         want.forEach(function(id) { self._assetPending[id] = true; });
@@ -5765,7 +5826,11 @@ function createVueApp() {
         var self = this, refs = [];
         var imgCols = (this.declaredCols || []).filter(function(c) { return self.colIsImage(c); });
         if (!imgCols.length) return;
-        (this.currentData || []).forEach(function(r) { imgCols.forEach(function(c) { if (r && r[c]) refs.push(r[c]); }); });
+        // The thumbnail where there is one: a grid or a gallery draws small, and the full picture is loaded
+        // when somebody opens it (the lightbox asks for it then).
+        (this.currentData || []).forEach(function(r) { imgCols.forEach(function(c) {
+          if (r && r[c]) { var s = Images.splitRef(r[c]); refs.push(s.thumb || s.full); }
+        }); });
         if (refs.length) this.ensureAssets(refs);
       },
       // Admin: every user's display name, for the Users management table (own name uses
@@ -7508,7 +7573,15 @@ function createVueApp() {
           dateLabel: function(v) { return vm.dateLabel(v); },
           listValuePicture: function(col, val, ns) { return vm.listValuePicture(col, val, ns); },
           profilePicture: function(email) { return vm.profilePicture(email); },
-          userLabel: function(email) { return vm.userLabel(email); }
+          userLabel: function(email) { return vm.userLabel(email); },
+          colIsImage: function(col) { return vm.colIsImage(col); },
+          // An image value as a usable <img src>: an `asset:` reference resolves through the asset cache,
+          // anything else is a URL through the <img> gate (assetSrc).
+          imgSrc: function(v) { return vm.assetSrc(v); },
+          // The small version for a tile or a cell: the thumbnail where the value carries one.
+          thumbSrc: function(v) { var s = Images.splitRef(v); return vm.assetSrc(s.thumb || s.full); },
+          // Fetch stored pictures a component is about to draw (no-op for URLs and already-cached ones).
+          ensure: function(refs) { return vm.ensureAssets(refs); }
         },
         // A rotation's generated periods, and how one of its slots is named and labelled.
         rotationHost: {
@@ -7550,7 +7623,7 @@ function createVueApp() {
     // Sanitize a user-supplied url/image cell before it goes into an attribute. safeHref (for <a href>)
     // is http(s)-only, so a stored `javascript:`/`data:` string can't execute on click. safeImg (for
     // <img src>) also allows a raster data:image. Both share embeds.js so mdToHtml and the cells agree.
-    safeHref: function(u) { return (typeof safeUrl === 'function') ? safeUrl(u) : ''; },
+    safeHref: function(u) { return (typeof safeUrl === 'function') ? safeUrl(Images.splitRef(u).full) : ''; },
     safeImg: function(u) { return (typeof safeImgSrc === 'function') ? safeImgSrc(u) : ''; },
     // Any image cell value -> a usable <img src>. An `asset:<id>` reference (a file stored IN the
     // database, for deployments with no bucket) resolves through the asset cache; anything else is a
@@ -7558,7 +7631,9 @@ function createVueApp() {
     imgSrc: function(u) { return appInstance ? appInstance.assetSrc(u) : ''; },
     // Asset-backed values have no meaningful href (safeUrl rejects data:), so the cell drops the
     // "open in a new tab" wrapper for them rather than emitting an <a> with an empty href.
-    isAsset: function(u) { return (typeof isAssetRef === 'function') ? isAssetRef(u) : false; },
+    isAsset: function(u) { return (typeof isAssetRef === 'function') ? isAssetRef(Images.splitRef(u).full) : false; },
+    // A cell's small picture: the thumbnail the value carries, else the picture itself.
+    thumbSrc: function(u) { var s = Images.splitRef(u); return appInstance ? appInstance.assetSrc(s.thumb || s.full) : ''; },
     toDateStr: toDateStr,
     dateLabel: function(v) { return appInstance ? appInstance.dateLabel(v) : toDateStr(v); }
   };
@@ -7762,7 +7837,10 @@ function createVueApp() {
       + '<v-tab :value="false" size="small">{{ partLabel(false) }}</v-tab>'
       + '<v-tab :value="true" size="small">{{ partLabel(true) }}</v-tab>'
       + '</v-tabs>'
-      + '<v-list v-if="layout===\'list\'" density="compact" class="my-2">'
+      + '<data-gallery v-if="layout===\'gallery\'" :rows="shown" :cols="cols" :view-cfg="obscureCfg" :owner="name" :readonly="!!effPart" embed :hide-col="colHidden">'
+      +   '<template v-slot:actions="{ item }"><template v-if="canMutateRow(item)"><confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x><confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x></template></template>'
+      + '</data-gallery>'
+      + '<v-list v-else-if="layout===\'list\'" density="compact" class="my-2">'
       + '<v-list-item v-for="(item, ri) in rows" :key="item.id || ri" class="px-2">'
       + '<template v-slot:default><span v-for="(col, i) in colsFor(item)" :key="col" style="font-size:0.85rem"><list-value :col="col" :value="item[col]" :view-cfg="obscureCfg"></list-value><span v-if="i < colsFor(item).length - 1" style="opacity:0.3;margin:0 6px">·</span></span></template>'
       + '<template v-slot:append><template v-if="canMutateRow(item)"><confirm-x v-if="hasArchive" :armed="isArchArmed(item)" action="archive" dense @click="archRow(item)"></confirm-x><confirm-x :armed="isDelArmed(item)" dense @click="delRow(item)"></confirm-x></template></template>'
@@ -7800,7 +7878,9 @@ function createVueApp() {
       col: { type: String, required: true },
       owner: { type: String, default: undefined },
       readonly: { type: Boolean, default: false },
-      embed: { type: Boolean, default: false }
+      embed: { type: Boolean, default: false },
+      // An image cell whose picture is already on screen (a gallery tile): its controls without the thumbnail.
+      noThumb: { type: Boolean, default: false }
     },
     methods: Object.assign({}, ROOT_PROXY, {
       cellRO: function(item, col) { return this.readonly || appInstance.cellReadonly(item, col, this.owner); },
@@ -7824,28 +7904,29 @@ function createVueApp() {
       toggleListSwitch: function(col, item) { return appInstance.toggleListSwitch(col, item); },
       save: function(item, col, val) { return appInstance.saveField(item, col, val, this.owner); },
       addToListOnBlur: function(item, col) { return appInstance.addToListOnBlur(item, col); },
+      // Removing a picture is two presses (confirm-x action="image"), armed per table, row and column so
+      // arming one cell's picture never arms another's.
+      imageKey: function(item, col) { return 'img:' + (this.owner || appInstance.currentTable) + ':' + item.id + ':' + col; },
+      imageArmed: function(item, col) { return appInstance.isArmed(this.imageKey(item, col)); },
+      removeImage: function(item, col) {
+        var key = this.imageKey(item, col);
+        if (!appInstance.isArmed(key)) { appInstance.armConfirm(key); return; }
+        appInstance.pendingConfirm = null;
+        this.save(item, col, '');
+      },
+      // A picture stored inline as a data: URI (the examples ship theirs that way) is no more an editable
+      // address than an asset: reference, so the paste-a-URL field is not offered over its bytes.
+      isInline: function(v) { return Images.splitRef(v).full.indexOf('data:') === 0; },
+      fullRef: function(v) { return Images.splitRef(v).full; },
       // image column: store the picked file and save a REFERENCE onto the row (never the bytes inline).
-      // Two sinks, tried in order:
-      //   1. the backend blob store (Firebase/Supabase Storage, the dev file store) -> row holds a URL;
-      //   2. the _assets table -> row holds 'asset:<id>', a data URI kept in the database.
-      // The fallback fires on absence AND on rejection, and the rejection half is the load-bearing one:
-      // canUploadFiles() is a CAPABILITY check, not an availability one — backend-firebase exposes
-      // uploadFile whenever Storage initialized, so on a Spark project (Storage needs Blaze) the presence
-      // test passes and the put() fails at runtime. Without the catch, that user could never attach a file.
+      // Where it is stored, and how large, is the root's storeImage: the blob store's URL, or 'asset:<id>'.
       uploadImage: function(item, col, ev) {
         var self = this, file = ev.target.files && ev.target.files[0];
         ev.target.value = '';                 // reset so re-picking the same file fires change again
         if (!file) return;
         this.uploadErr = ''; this.uploading = true;
         var table = this.owner || appInstance.currentTable;
-        var toAsset = function() {
-          var id = 'img_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-          return appInstance.saveAsset(id, file);
-        };
-        var stored = appInstance.canUploadFiles()
-          ? appInstance.uploadFile(file, { table: table, col: col, rowId: item.id }).catch(toAsset)
-          : toAsset();
-        stored.then(function(ref) {
+        appInstance.storeImage(file, { table: table, col: col, rowId: item.id }).then(function(ref) {
           self.uploading = false; self.save(item, col, ref);
         }).catch(function(e) {
           self.uploading = false; self.uploadErr = (e && e.message) || self.t('msg.upload_failed');
@@ -7864,8 +7945,9 @@ function createVueApp() {
     },
     template: ''
       + '<span v-if="cellRO(item, col)" :style="{ opacity: embed ? 0.4 : 0.75 }">'
-      +   '<img v-if="colIsImage(col) && item[col] && isAsset(item[col])" :src="imgSrc(item[col])" class="cell-thumb" alt="">'
-      +   '<a v-else-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="imgSrc(item[col])" class="cell-thumb" alt=""></a>'
+      +   '<template v-if="colIsImage(col) && noThumb"></template>'
+      +   '<img v-else-if="colIsImage(col) && item[col] && isAsset(item[col])" :src="thumbSrc(item[col])" class="cell-thumb" alt="">'
+      +   '<a v-else-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="thumbSrc(item[col])" class="cell-thumb" alt=""></a>'
       +   '<a v-else-if="colIsUrl(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop>{{ item[col] }}</a>'
       +   '<template v-else><list-value :col="col" :value="item[col]" :view-cfg="ownerCfg"></list-value></template>'
       + '</span>'
@@ -7886,18 +7968,22 @@ function createVueApp() {
       + '</v-autocomplete>'
       + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
       + '<div v-else-if="colIsImage(col)" class="d-flex align-center" style="gap:6px;min-width:0">'
-      +   '<img v-if="item[col] && isAsset(item[col])" :src="imgSrc(item[col])" class="cell-thumb" alt="">'
-      +   '<a v-else-if="item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="imgSrc(item[col])" class="cell-thumb" alt=""></a>'
+      +   '<template v-if="noThumb"></template>'
+      +   '<img v-else-if="item[col] && isAsset(item[col])" :src="thumbSrc(item[col])" class="cell-thumb" alt="">'
+      +   '<a v-else-if="item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="thumbSrc(item[col])" class="cell-thumb" alt=""></a>'
       +   '<template v-if="canUpload">'
-      +     '<input type="file" accept="image/*" ref="imgInput" style="display:none" @change="uploadImage(item, col, $event)">'
+      // @click.stop: the button's imgInput.click() dispatches a click on this input, and inside an outlined
+      // field box (cards, gallery tiles) it bubbled to v-field, whose handler cancels the default action --
+      // which for a file input IS opening the file picker. The table has no field box, so it always worked.
+      +     '<input type="file" accept="image/*" ref="imgInput" style="display:none" @click.stop @change="uploadImage(item, col, $event)">'
       +     '<v-btn size="x-small" variant="text" :loading="uploading" :icon="item[col] ? \'mdi-image-edit\' : \'mdi-camera-plus\'" :title="item[col] ? t(\'img.replace\') : t(\'img.upload\')" @click="$refs.imgInput.click()"></v-btn>'
-      +     '<v-btn v-if="item[col]" size="x-small" variant="text" icon="mdi-close" :title="t(\'img.remove\')" @click="save(item, col, \'\')"></v-btn>'
+      +     '<confirm-x v-if="item[col]" action="image" dense :armed="imageArmed(item, col)" @click="removeImage(item, col)"></confirm-x>'
       +   '</template>'
       // The paste-a-URL field stays available ALONGSIDE the upload button, not as its fallback: an external
       // URL (a CDN, a shared drive) is a legitimate third way to hold the image, and uploading is now
       // almost always possible (blob store or _assets), which would otherwise have hidden this field for
       // good. Suppressed only for an asset-backed value, where 'asset:<id>' is nothing a user can edit.
-      +   '<input v-if="!isAsset(item[col])" type="url" :value="item[col] || \'\'" @change="save(item, col, $event.target.value)" :placeholder="t(\'img.url\')" spellcheck="false" style="border:none;background:transparent;color:inherit;font:inherit;flex:1;min-width:60px">'
+      +   '<input v-if="!isAsset(item[col]) && !isInline(item[col])" type="url" :value="fullRef(item[col])" @change="save(item, col, $event.target.value)" :placeholder="t(\'img.url\')" spellcheck="false" style="border:none;background:transparent;color:inherit;font:inherit;flex:1;min-width:60px">'
       +   '<v-icon v-if="uploadErr" size="x-small" color="error" :title="uploadErr">mdi-alert-circle</v-icon>'
       + '</div>'
       + '<div v-else-if="colIsUrl(col)" class="d-flex align-center" style="gap:4px;min-width:0">'
@@ -7918,7 +8004,7 @@ function createVueApp() {
   window.VIEW_PARTS = {
     calendar: { month: 'cal-month', week: 'cal-week', list: 'cal-agenda' },
     rotation: { table: 'rotation-table', card: 'rotation-cards', list: 'rotation-list' },
-    data: { list: 'data-list' }   // read-only list layout; card/table editing grids remain inline (deeper refactor)
+    data: { list: 'data-list', gallery: 'data-gallery' }   // read-only layouts; card/table editing grids remain inline (deeper refactor)
   };
   window.viewPartFor = function(kind, mode) { return ((window.VIEW_PARTS[kind]) || {})[mode] || null; };
 
@@ -8070,8 +8156,8 @@ function createVueApp() {
       + '<v-list density="compact">'
       + '<v-list-item v-for="item in rows" :key="item.id" class="px-2">'
       + '<template v-slot:default><span v-for="(col, i) in cols" :key="col" class="d-inline-flex align-center" style="font-size:0.85rem">'
-      +   '<img v-if="colIsImage(col) && item[col] && isAsset(item[col])" :src="imgSrc(item[col])" class="cell-thumb" alt="">'
-      +   '<a v-else-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="imgSrc(item[col])" class="cell-thumb" alt=""></a>'
+      +   '<img v-if="colIsImage(col) && item[col] && isAsset(item[col])" :src="thumbSrc(item[col])" class="cell-thumb" alt="">'
+      +   '<a v-else-if="colIsImage(col) && item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><img :src="thumbSrc(item[col])" class="cell-thumb" alt=""></a>'
       +   '<list-value v-else :col="col" :value="item[col]" :view-cfg="ownerCfg"></list-value>'
       +   '<span v-if="i < cols.length - 1" style="opacity:0.3; margin:0 6px">·</span>'
       + '</span></template>'
@@ -8083,6 +8169,177 @@ function createVueApp() {
       + '</template>'
       + '</template>'
       + '</v-list-item></v-list>'
+  });
+
+  // --- Data view: gallery layout part ----------------------------------------------------------
+  // layout: "gallery" -- the same table as its other layouts, drawn as one <image-tile> per row (ROADMAP
+  // `gallery`). The first image column the view shows is the picture, square. Under it the tile carries the
+  // card layout's fields, each an outlined field box with a data-cell in it, so a gallery edits exactly what
+  // a card does. The picture's own field is the image cell without its thumbnail (the tile IS the
+  // thumbnail): upload, remove, or paste an address. A row with no picture still gets a tile and a
+  // placeholder, because a gallery that drops rows reads as data loss.
+  //   owner / readonly / embed  passed to every data-cell, as each caller already does for its cells
+  //   hideCol(col, item)        the caller's per-row column hiding (isColumnHidden / embed colHidden)
+  // The row controls are the caller's, through the `actions` slot: the top-level grid and embed-view
+  // archive and delete by different paths. Pressing a picture opens <image-lightbox> over the rows that
+  // have one, in the gallery's order.
+  app.component('data-gallery', {
+    props: { rows: Array, cols: Array, viewCfg: { type: Object, default: null },
+             owner: { type: String, default: undefined }, readonly: Boolean, embed: Boolean,
+             hideCol: { type: Function, default: null } },
+    inject: ['uiHost', 'valueHost'],
+    data: function() { return { viewing: null }; },   // index into `pictures` while the lightbox is open
+    // A gallery fetches what it draws, wherever it is drawn (top level or embedded): each row's thumbnail,
+    // and the full picture only once the lightbox shows it.
+    watch: {
+      rows: { immediate: true, handler: function(rows) {
+        var img = this.imageCol;
+        this.valueHost.ensure((rows || []).map(function(r) { var s = Images.splitRef(r[img]); return s.thumb || s.full; }).filter(Boolean));
+      } },
+      viewing: function(i) { var p = this.pictures[i]; if (p) this.valueHost.ensure([p.ref]); }
+    },
+    computed: {
+      // What the lightbox steps through: the rows with a picture, each with the caption its tile leads with.
+      pictures: function() {
+        var self = this, img = this.imageCol, first = this.fieldCols.filter(function(c) { return c !== img; })[0];
+        return (this.rows || []).filter(function(r) { return r[img]; }).map(function(r) {
+          return { id: r.id, ref: r[img], src: self.src(r[img]), href: self.href(r[img]),
+                   caption: first ? String(self.valueHost.displayValue(first, r[first], '', self.viewCfg) || '') : '' };
+        });
+      },
+      // The view's `gallery` options (ROADMAP `gallery`), each with its default.
+      opts: function() { return (this.viewCfg && this.viewCfg.gallery) || {}; },
+      tileMin: function() { return { small: '140px', large: '320px' }[this.opts.size] || '220px'; },
+      aspect: function() { return { landscape: '16 / 9', portrait: '3 / 4' }[this.opts.shape] || '1 / 1'; },
+      imageCol: function() {
+        if (this.opts.image) return this.opts.image;
+        var h = this.valueHost; return (this.cols || []).filter(function(c) { return h.colIsImage(c); })[0] || '';
+      },
+      // The picture's field last: the words a tile is recognised by come first, the picture's controls after.
+      // A read-only gallery has no picture field at all: the tile already shows the picture, and the field
+      // would be an empty labelled box. So a read-only view of an image column alone is a picture wall.
+      fieldCols: function() {
+        var img = this.imageCol, rest = (this.cols || []).filter(function(c) { return c !== img; });
+        return (img && !this.readonly && (this.cols || []).indexOf(img) >= 0) ? rest.concat([img]) : rest;
+      }
+    },
+    methods: {
+      t: function(k) { return this.uiHost.t(k); },
+      label: function(col) { var k = 'field.' + col, v = this.t(k); return (v && v !== k) ? v : col; },
+      shown: function(col, item) { return !(this.hideCol && this.hideCol(col, item)); },
+      // Whether the caller's row controls render anything for this row: a strip with nothing in it would
+      // still pad every tile of a read-only wall. A v-if that fails leaves a Comment vnode behind.
+      hasActions: function(item) {
+        var slot = this.$slots.actions;
+        var real = function(nodes) {
+          return (nodes || []).some(function(n) {
+            if (!n || n.type === Vue.Comment) return false;
+            return n.type === Vue.Fragment ? real(n.children) : true;
+          });
+        };
+        return !!slot && real(slot({ item: item }));
+      },
+      src: function(v) { return v ? this.valueHost.imgSrc(v) : ''; },
+      tileSrc: function(v) { return v ? this.valueHost.thumbSrc(v) : ''; },
+      view: function(item) { this.viewing = this.pictures.map(function(p) { return p.id; }).indexOf(item.id); },
+      href: function(v) { var f = Images.splitRef(v).full; return (!f || isAssetRef(f)) ? '' : safeUrl(f); }
+    },
+    template: ''
+      + '<tile-grid :min="tileMin" class="pa-2" data-testid="data-gallery">'
+      + '<image-tile v-for="item in rows" :key="item.id" :src="tileSrc(item[imageCol])" zoom :zoom-label="t(\'img.view\')" @zoom="view(item)" :aspect="aspect" :fit="opts.fit === \'contain\' ? \'contain\' : \'cover\'" icon="mdi-image-off-outline" placeholder data-testid="gallery-tile">'
+      +   '<div v-if="fieldCols.length || hasActions(item)" class="pa-2">'
+      +     '<template v-for="col in fieldCols" :key="col">'
+      +       '<v-field v-if="shown(col, item)" class="field-box field-box--roomy" variant="outlined" active :label="label(col)">'
+      +         '<template v-slot:default="{ props: fp }"><div v-bind="fp" class="field-box-value">'
+      +           '<data-cell :item="item" :col="col" :owner="owner" :readonly="readonly" :embed="embed" :no-thumb="col === imageCol"></data-cell>'
+      +         '</div></template>'
+      +       '</v-field>'
+      +     '</template>'
+      +     '<div v-if="hasActions(item)" class="d-flex justify-end mt-1"><slot name="actions" :item="item"></slot></div>'
+      +   '</div>'
+      + '</image-tile>'
+      + '<image-lightbox v-model="viewing" :items="pictures"></image-lightbox>'
+      + '</tile-grid>'
+  });
+
+  // Full-screen viewer over a set of pictures: the one shown whole, its caption, its place in the set,
+  // previous / next (buttons and the arrow keys), and "open original" for a picture that has an address.
+  // A dialog, so Esc and focus handling come with it. v-model is the index shown, null when closed.
+  //   items  [{ src, caption, href }]
+  app.component('image-lightbox', {
+    props: { modelValue: { type: Number, default: null }, items: { type: Array, default: function() { return []; } } },
+    emits: ['update:modelValue'],
+    inject: ['uiHost'],
+    watch: {
+      open: function(v) { var self = this; if (v) this.$nextTick(function() { var el = self.$el && document.querySelector('[data-testid="image-lightbox"]'); if (el) el.focus(); }); }
+    },
+    computed: {
+      open: function() { return this.modelValue !== null && !!this.items[this.modelValue]; },
+      cur: function() { return this.items[this.modelValue] || {}; }
+    },
+    methods: {
+      t: function(k) { return this.uiHost.t(k); },
+      close: function() { this.$emit('update:modelValue', null); },
+      // Wraps round: the set is small and a viewer walking it should not hit a wall at either end.
+      step: function(d) { var n = this.items.length; if (n) this.$emit('update:modelValue', (this.modelValue + d + n) % n); }
+    },
+    template: ''
+      + '<v-dialog :model-value="open" fullscreen @update:model-value="v => { if (!v) close(); }">'
+      + '<div class="image-lightbox" data-testid="image-lightbox" tabindex="0" @keydown.left.prevent="step(-1)" @keydown.right.prevent="step(1)">'
+      +   '<div class="d-flex align-center pa-2" style="gap:4px">'
+      +     '<span class="text-body-2" style="opacity:0.8" data-testid="lightbox-count">{{ modelValue + 1 }} / {{ items.length }}</span><v-spacer></v-spacer>'
+      +     '<v-btn v-if="cur.href" :href="cur.href" target="_blank" icon="mdi-open-in-new" size="small" variant="text" :title="t(\'img.open_original\')" :aria-label="t(\'img.open_original\')"></v-btn>'
+      +     '<v-btn icon="mdi-close" size="small" variant="text" :title="t(\'btn.close\')" :aria-label="t(\'btn.close\')" @click="close()" data-testid="lightbox-close"></v-btn>'
+      +   '</div>'
+      +   '<div class="d-flex align-center" style="flex:1;min-height:0;gap:4px">'
+      +     '<v-btn v-if="items.length > 1" icon="mdi-chevron-left" variant="text" :title="t(\'btn.previous\')" :aria-label="t(\'btn.previous\')" @click="step(-1)" data-testid="lightbox-prev"></v-btn>'
+      +     '<img :src="cur.src" alt="" style="flex:1;min-width:0;max-height:100%;object-fit:contain" data-testid="lightbox-img">'
+      +     '<v-btn v-if="items.length > 1" icon="mdi-chevron-right" variant="text" :title="t(\'btn.next\')" :aria-label="t(\'btn.next\')" @click="step(1)" data-testid="lightbox-next"></v-btn>'
+      +   '</div>'
+      +   '<div v-if="cur.caption" class="text-center pa-3" data-testid="lightbox-caption">{{ cur.caption }}</div>'
+      + '</div>'
+      + '</v-dialog>'
+  });
+
+  // --- A tile with a picture, and the grid tiles sit in. One element, two uses: the nav's Tiles (a level
+  // page's entries) and the gallery layout (a view's rows). They differ in what a tile SAYS and what a click
+  // does, and those stay with the caller; the card, the cropped picture, the fallback and the grid are here.
+  //   src         resolved <img src>; '' = no picture
+  //   zoom        the picture is a button that emits `zoom` (the gallery opens its lightbox); zoomLabel
+  //               is that button's accessible name
+  //   aspect      the crop: '16 / 9' for a cover (the nav), '1 / 1' for a photo (the gallery)
+  //   focus       object-position along the crop: which part of a photo survives it (an entry's `focus`)
+  //   fit         'cover' fills the shape (cropping); 'contain' shows the whole picture inside it
+  //   placeholder with no picture, draw the empty square with `icon` in it (a gallery row must not vanish);
+  //               without it the tile has no picture area, and the default slot's `bare` says so, which is
+  //               the nav's cue to put its entry icon beside the title instead
+  // Pictures load lazily: a gallery can hold hundreds of rows, and a level page only a handful on screen.
+  app.component('tile-grid', {
+    props: { min: { type: String, default: '160px' } },
+    template: '<div :style="{ display: \'grid\', gridTemplateColumns: \'repeat(auto-fill, minmax(\' + min + \', 1fr))\', gap: \'12px\' }"><slot></slot></div>'
+  });
+  app.component('image-tile', {
+    props: { src: { type: String, default: '' }, zoom: Boolean, zoomLabel: { type: String, default: '' }, aspect: { type: String, default: '16 / 9' },
+             focus: { type: String, default: 'center' }, fit: { type: String, default: 'cover' },
+             icon: { type: String, default: '' }, placeholder: Boolean,
+             imgTestid: { type: String, default: undefined } },
+    emits: ['zoom'],
+    computed: {
+      // `contain` letterboxes onto the same faint surface the placeholder uses, so a tall picture in a wide
+      // shape reads as a framed picture rather than as one with a hole beside it.
+      imgStyle: function() {
+        var st = { aspectRatio: this.aspect, objectPosition: 'center ' + this.focus, objectFit: this.fit };
+        if (this.fit === 'contain') st.background = 'rgb(var(--v-theme-on-surface), 0.05)';
+        return st;
+      }
+    },
+    template: ''
+      + '<v-card variant="outlined" class="h-100">'
+      + '<button v-if="src && zoom" type="button" class="tile-zoom" :title="zoomLabel" :aria-label="zoomLabel" @click.stop="$emit(\'zoom\')"><img :src="src" class="tile-img" :style="imgStyle" loading="lazy" alt="" :data-testid="imgTestid"></button>'
+      + '<img v-else-if="src" :src="src" class="tile-img" :style="imgStyle" loading="lazy" alt="" :data-testid="imgTestid">'
+      + '<div v-else-if="placeholder" class="tile-img" :style="{ aspectRatio: aspect, display: \'flex\', alignItems: \'center\', justifyContent: \'center\', background: \'rgb(var(--v-theme-on-surface), 0.05)\' }"><v-icon size="40" :icon="icon" style="opacity:0.35"></v-icon></div>'
+      + '<slot :bare="!src && !placeholder"></slot>'
+      + '</v-card>'
   });
 
   // ---- Shared UI elements. One definition each, used everywhere the element appears; CLAUDE.md
@@ -8107,13 +8364,19 @@ function createVueApp() {
     emits: ['click'],
     inject: ['uiHost'],
     computed: {
+      // `image` removes a cell's picture rather than the row. It is two presses for the same reason a delete
+      // is, and has its own icon because in a gallery tile it sits just above the row's delete: two
+      // identical x's, one acting on the first press, was how a picture got removed by accident.
       spec: function() {
-        return this.action === 'archive' ? { icon: 'mdi-archive-outline', color: 'warning' } : { icon: 'mdi-close', color: 'error' };
+        if (this.action === 'archive') return { icon: 'mdi-archive-outline', color: 'warning' };
+        if (this.action === 'image') return { icon: 'mdi-image-remove', color: 'error' };
+        return { icon: 'mdi-close', color: 'error' };
       },
       // Literal keys, so the translation-key check sees each one asked for.
       text: function() {
         var t = this.uiHost.t;
         if (this.action === 'archive') return this.armed ? t('board.confirm_archive') : t('board.archive');
+        if (this.action === 'image') return this.armed ? t('btn.confirm_delete') : t('img.remove');
         return this.armed ? t('btn.confirm_delete') : t('btn.delete');
       }
     },

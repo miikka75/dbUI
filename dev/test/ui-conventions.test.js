@@ -43,6 +43,17 @@ describe('UI conventions', () => {
     });
   });
 
+  it('a grid of picture tiles is <tile-grid> + <image-tile>, not a hand-made card grid', () => {
+    // The nav's Tiles and the gallery layout were the same element built twice: two grids, two crops, two
+    // fallbacks, and only one of them loading its pictures lazily. The tell-tales of a hand-made one: an
+    // auto-fill grid, or a cover image cropped by hand.
+    const own = componentSource('tile-grid') + componentSource('image-tile');
+    for (const re of [/repeat\(auto-fill/g, /class="tile-img/g, /object-fit:\s*cover;?[^"]*aspect-ratio|aspect-ratio:[^"]*object-fit:\s*cover/g]) {
+      assert.equal(count(ui, re), 0, 'ui.html builds a tile grid by hand: ' + re + SEE);
+      assert.equal(count(core, re) - count(own, re), 0, 'app-core.js builds a tile grid by hand: ' + re + SEE);
+    }
+  });
+
   it('a two-press button is a <confirm-x> or <confirm-btn>, not a hand-made icon swap', () => {
     // The tell-tale of the hand-made version: an ARMED test choosing between the check mark and an idle
     // icon spelled out beside it. (A check mark that marks a state, like the active database, is not one.)
@@ -83,7 +94,7 @@ describe('views that declare what they need', () => {
   const DECLARED = ['cal-event-row', 'cal-month', 'cal-week', 'cal-agenda', 'cal-day-panel', 'calendar-view',
     'copy-field', 'confirm-x', 'confirm-btn', 'section-toggle',
     'list-value', 'user-avatar', 'user-ref', 'pivot-view', 'timeline-view', 'stats-view',
-    'rotation-table', 'rotation-cards', 'rotation-list', 'rotation-view'];
+    'rotation-table', 'rotation-cards', 'rotation-list', 'rotation-view', 'data-gallery'];
   function ownSource(name) {
     const at = core.indexOf("app.component('" + name + "'");
     assert.ok(at >= 0, 'component ' + name + ' is registered');

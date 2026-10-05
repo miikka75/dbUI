@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "b747d3c5641dad3f"
+      "hash": "410c7a904fe1cfc6"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "15338ca4620084ee"
+      "hash": "4b8756ab466c4f99"
     }
   ],
   "bundles": [
@@ -101,40 +101,40 @@
       "title": "Team Demo",
       "description": "The widest tour of what the app does: rotations, RSVPs, a board, embeds, doc-views, archived rows and mirrored tables.",
       "icon": null,
-      "revision": 10,
+      "revision": 11,
       "tables": 11,
-      "views": 26,
+      "views": 27,
       "schema": {
         "file": "demo-schema.json",
-        "hash": "f4abd0b007dfffee"
+        "hash": "3ad4790b1e670731"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "demo-lang-en.json",
-          "hash": "a41ce00d0cea712f"
+          "hash": "c62c801f9f772699"
         },
         {
           "code": "es",
           "name": "Español",
           "file": "demo-lang-es.json",
-          "hash": "2ad3e8bb984a4081"
+          "hash": "9fe5ee1dbee213a7"
         },
         {
           "code": "sv",
           "name": "Svenska",
           "file": "demo-lang-sv.json",
-          "hash": "6aee9d7c79ae0ba2"
+          "hash": "9f51bd844e91f566"
         }
       ],
       "data": {
         "file": "demo-data.json",
-        "hash": "b2ea79a757c52f05"
+        "hash": "a85759d8739cdad2"
       },
       "about": {
         "file": "demo-about.json",
-        "hash": "8bef81ae5a4381d8"
+        "hash": "f75a456659ea2f88"
       },
       "notes": {
         "5": "Adds `teams`, a catalogue whose parent column holds another ROW's id (`hierarchy.by: \"id\"`) instead of a group's value — so the Lookup tab shows it three levels deep (Acme > Engineering > Backend) rather than the two every other lookup has. Nothing existing changes: `cities` still groups by value, side by side with it, which is the point of shipping both.",
@@ -142,7 +142,8 @@
         "7": "Settings gains an Appearance section — the theme, plus an icon, image and background for every menu entry — and a single Navigation choice (Side menu, Top navigation, List, Tiles). Their labels now come in Spanish and Swedish as well as English, and the old Background images labels are gone.",
         "8": "The rest of Settings now speaks Spanish and Swedish too: the theme colour names, the local-database storage notice, and the Examples dialog.",
         "9": "Settings no longer has a Refresh data button (changes from others already arrive on their own), so its labels are gone from the language packs.",
-        "10": "Drops one of two identical app labels (\"No data\" in tables and in tiles now share one), so there is one less row to translate. Nothing on screen changes."
+        "10": "Drops one of two identical app labels (\"No data\" in tables and in tiles now share one), so there is one less row to translate. Nothing on screen changes.",
+        "11": "Adds Notes Gallery under Data: the notes as a grid of picture tiles (`layout: \"gallery\"`), the first image column as the picture and the title, author and date as the caption. Four more notes, each with a picture, so the grid has something to show. A note without a picture still gets a tile."
       }
     }
   ]

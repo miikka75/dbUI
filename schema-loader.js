@@ -569,6 +569,13 @@ function validateSchema() {
     // missing column always fails in this app -- silently, as an empty chart -- because Timeline.build
     // reads `row[start]` and gets undefined, drops the row, and has no way to tell a typo from a table
     // where nobody has filled the dates in yet.
+    // A gallery's options are enums the schema file already constrains, except `image`, which names a
+    // column: pointed at nothing, or at a text column, the tile silently shows a placeholder for every row.
+    if (view.gallery && view.gallery.image) {
+      var gSrc = view.sources || [], gImg = view.gallery.image;
+      if (!colOfTables(gSrc, gImg)) errors.push('gallery "' + v + '": `image` column "' + gImg + '" not found in sources [' + gSrc.join(', ') + ']');
+      else if (!Columns.colIsImage(SCHEMA, gImg)) errors.push('gallery "' + v + '": `image` column "' + gImg + '" is not an image column');
+    }
     if (view.timeline) {
       var tl = view.timeline, tlSrc = view.sources || [];
       if (!tl.start) errors.push('timeline "' + v + '" needs `start` (the column holding each row\'s start date)');
