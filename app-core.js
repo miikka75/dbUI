@@ -4128,7 +4128,7 @@ function createVueApp() {
         if (!this.isArmed(key)) { this.armConfirm(key); return Promise.resolve(false); }
         var done;
         if (item.kind === 'list') { delete this.listsCache[item.name]; done = backend.saveLists(this.listsCache); }
-        else if (item.kind === 'page') { if (this.pageCache) delete this.pageCache[item.name]; done = backend.deleteRow('_pages', item.name, 'active'); }
+        else if (item.kind === 'page') { if (this.pageCache) delete this.pageCache[item.name]; done = Writes.deleteRow('_pages', item.name, 'active'); }
         else if (item.kind === 'link') done = this.setListUserLink(item.list, item.value, '');
         else return Promise.resolve(false);
         return Promise.resolve(done).then(function() {
