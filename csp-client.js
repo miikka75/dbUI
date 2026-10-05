@@ -164,7 +164,46 @@
       || /\.localhost$/.test(h);
   }
 
-  var M = { reporter: reporter, payload: payload, fromEvent: fromEvent, install: install, endpointFrom: endpointFrom, isLoopback: isLoopback };
+  // READING the log back, for the Settings panel and dev/csp-log.mjs. The two collectors answer in two
+  // spellings -- the Edge Function passes its columns through (`blocked_uri`, `last_seen`), the dev
+  // collector camel-cases them -- so both are folded to one row shape here, once.
+  //
+  // And the rows are SPLIT, because most real-world reports are not about the site at all: an extension
+  // injecting into the page trips the policy and is reported like anything else. Those carry an
+  // extension scheme, or no blocked URI whatever, and the page can neither allowlist them nor should.
+  // Shown in one list, the first violation that means the policy is wrong arrives buried under them.
+  var EXTENSION = /^(chrome|moz|safari-web|safari|ms-browser)-extension:/i;
+  function isExtensionNoise(uri) { return !uri || uri === '?' || EXTENSION.test(uri); }
+  function summarize(json) {
+    var site = [], extensions = [];
+    ((json && json.violations) || []).forEach(function(r) {
+      var row = {
+        directive: String(r.directive || '?'),
+        blockedURI: String(r.blocked_uri != null ? r.blocked_uri : (r.blockedURI || '')),
+        document: String(r.sample_document != null ? r.sample_document : (r.sampleDocument || '')),
+        count: Number(r.count) || 0,
+        lastSeen: String(r.last_seen || r.lastSeen || '')
+      };
+      (isExtensionNoise(row.blockedURI) ? extensions : site).push(row);
+    });
+    var byCount = function(a, b) { return b.count - a.count; };
+    return { site: site.sort(byCount), extensions: extensions.sort(byCount),
+             total: Number(json && json.total) || 0 };
+  }
+
+  // The token-gated GET both collectors answer. Rejects with the status, so a wrong token (403) and a
+  // collector whose table was never created (502 "Storage error") are told apart on screen.
+  function readLog(endpoint, token, fetchImpl) {
+    var f = fetchImpl || root.fetch;
+    var url = endpoint + (endpoint.indexOf('?') < 0 ? '?' : '&') + 'token=' + encodeURIComponent(token);
+    return f(url).then(function(res) {
+      if (!res.ok) { var e = new Error('HTTP ' + res.status); e.status = res.status; throw e; }
+      return res.json();
+    }).then(summarize);
+  }
+
+  var M = { reporter: reporter, payload: payload, fromEvent: fromEvent, install: install, endpointFrom: endpointFrom, isLoopback: isLoopback,
+            summarize: summarize, isExtensionNoise: isExtensionNoise, readLog: readLog };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else {
     root.CspClient = M;

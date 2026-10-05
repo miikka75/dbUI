@@ -232,6 +232,20 @@ cd dev && npm run csp:sync    # bakes it into index.html next to the policy
 `csp:sync` owns every static copy, so the endpoint cannot drift from the constant; `dev/test/csp.test.js`
 fails if it does.
 
+### Reading the log
+
+In the app: **Settings → Security policy reports** (admins only, shown when an endpoint is set). Paste
+the token once; it is kept in that browser's `localStorage`, never in the deployed files, where every
+visitor could read it. **Refresh** reads the log on demand. Reports from browser extensions are counted
+apart: the page can neither allowlist nor fix them.
+
+From a shell:
+
+```bash
+cd dev
+DBUI_CSP_REPORT_TOKEN=<token> npm run csp:log
+```
+
 ### Checking it end to end
 
 ```bash
