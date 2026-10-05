@@ -334,3 +334,92 @@ describe('scan.js — which catalogue is scannable', () => {
     assert.deepEqual(Scan.viewsForCatalog(schema, views, 'nope'), []);
   });
 });
+
+// ---- match: "owner" — check-in: the code names a person, and the row they own is updated ----------
+describe('scan.js — match: "owner" (check-in)', () => {
+  const practices = [{ id: 'p1', date: '2026-09-09' }, { id: 'p2', date: '2026-09-16' }];
+  const rsvps = [
+    { id: 'a1', owner: 'ann@example.com', practice: 'p1', attendance: 'pending' },
+    { id: 'a2', owner: 'ann@example.com', practice: 'p2', attendance: 'pending' },
+    { id: 'b1', owner: 'bob@example.com', practice: 'p1', attendance: 'attended' }
+  ];
+  const people = [
+    { id: 'm1', email: 'ann@example.com', badge: 'B-100' },
+    { id: 'm2', email: 'bob@example.com', badge: 'B-200' },
+    { id: 'm3', email: 'cy@example.com', badge: 'B-200' }       // a badge printed twice
+  ];
+  const opts = (extra) => Object.assign({
+    match: 'owner', rows: rsvps, set: { attendance: 'attended' }, ownerCol: 'owner',
+    eventCol: 'practice', events: practices, eventKey: 'id', eventDate: 'date', today: '2026-09-09', now: '2026-09-09T18:30:00.000Z'
+  }, extra);
+
+  it('the code is the owner value: today\'s sign-up is the row, patched with `set`', () => {
+    const p = Scan.plan(' Ann@Example.com ', opts());
+    assert.equal(p.outcome, 'updated');
+    assert.equal(p.row.id, 'a1');                       // not a2, which is next week's
+    assert.deepEqual(p.patch, { attendance: 'attended' });
+  });
+
+  it('without an event scope, two sign-ups are ambiguous rather than a guess', () => {
+    assert.equal(Scan.plan('ann@example.com', opts({ eventCol: undefined })).outcome, 'ambiguous');
+  });
+
+  it('nobody signed up for today is unknown, and writes nothing', () => {
+    assert.equal(Scan.plan('ann@example.com', opts({ today: '2026-09-10' })).outcome, 'unknown');
+    assert.equal(Scan.plan('dan@example.com', opts()).outcome, 'unknown');
+    assert.equal(Scan.plan('', opts()).outcome, 'unknown');
+  });
+
+  it('a row that already says what `set` would write is `already`, with the row', () => {
+    const p = Scan.plan('bob@example.com', opts());
+    assert.equal(p.outcome, 'already');
+    assert.equal(p.existing.id, 'b1');
+  });
+
+  it('through a people table: the badge resolves to the owner value', () => {
+    const p = Scan.plan('b-100', opts({ catalog: people, codeCol: 'badge', valueCol: 'email' }));
+    assert.equal(p.outcome, 'updated');
+    assert.equal(p.value, 'ann@example.com');
+    assert.equal(Scan.plan('B-200', opts({ catalog: people, codeCol: 'badge', valueCol: 'email' })).outcome, 'ambiguous');
+    assert.equal(Scan.plan('B-999', opts({ catalog: people, codeCol: 'badge', valueCol: 'email' })).outcome, 'unknown');
+  });
+
+  it('resolves @now in `set`', () => {
+    const p = Scan.plan('ann@example.com', opts({ set: { attendance: 'attended', arrived: '@now' } }));
+    assert.deepEqual(p.patch, { attendance: 'attended', arrived: '2026-09-09T18:30:00.000Z' });
+  });
+});
+
+describe('scan.js — configErrors for match: "owner"', () => {
+  const schema = () => ({
+    practices: { columns: { date: { type: 'date' } } },
+    members: { columns: { email: { type: 'text' }, badge: { type: 'text' } } },
+    rsvps: { columns: { owner: { type: 'owner' }, practice: { type: 'ref', table: 'practices', valueCol: 'id' }, attendance: { type: 'select' } },
+             ownerWritable: ['practice'] }
+  });
+  const errs = (scan) => Scan.configErrors(schema(), 'door', { name: 'door', sources: ['rsvps'], scan: scan });
+
+  it('a complete check-in is clean, and needs no ownerWritable listing: the scanner is an organizer', () => {
+    assert.deepEqual(errs({ match: 'owner', set: { attendance: 'attended' }, event: { column: 'practice', date: 'date' },
+                            from: 'members', valueCol: 'email', codeCol: 'badge' }), []);
+  });
+
+  it('names each mistake', () => {
+    const all = (s) => errs(s).join(' | ');
+    assert.match(all({ match: 'people', set: { attendance: 'x' } }), /the only value is "owner"/);
+    assert.match(all({ match: 'owner' }), /needs `set`/);
+    assert.match(all({ match: 'owner', set: { nope: 'x' } }), /"nope" is not a column/);
+    assert.match(all({ match: 'owner', set: { attendance: '@tomorrow' } }), /only tokens/);
+    assert.match(all({ match: 'owner', set: { attendance: 'x' }, column: 'practice' }), /`column` is for appending/);
+    assert.match(all({ match: 'owner', set: { attendance: 'x' }, once: 'day' }), /`once` is for appending/);
+    assert.match(all({ match: 'owner', set: { attendance: 'x' }, codeCol: 'badge' }), /`codeCol` needs `from`/);
+    assert.match(all({ match: 'owner', set: { attendance: 'x' }, from: 'members' }), /needs `valueCol`/);
+    assert.match(all({ match: 'owner', set: { attendance: 'x' }, event: { column: 'attendance', date: 'date' } }), /`event.column` must be a `ref`/);
+    assert.match(all({ match: 'owner', set: { attendance: 'x' }, event: { column: 'practice', date: 'when' } }), /`event.date` must be a column of "practices"/);
+  });
+
+  it('a table with no owner column has nobody for a code to name', () => {
+    const s = schema(); delete s.rsvps.columns.owner;
+    assert.match(Scan.configErrors(s, 'door', { name: 'door', sources: ['rsvps'], scan: { match: 'owner', set: { attendance: 'x' } } }).join(' '), /no `owner` column/);
+  });
+});

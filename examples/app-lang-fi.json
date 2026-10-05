@@ -205,6 +205,7 @@
       "scan.camera_failed": "Kuvaa ei voitu lukea",
       "scan.code": "Koodi",
       "scan.created": "Kirjattu",
+      "scan.updated": "Kirjattu paikalle",
       "scan.no_barcode": "Koodia ei voi tulostaa viivakoodina",
       "scan.no_code_found": "Kuvassa ei ole koodia",
       "scan.print_code": "Tulosta tämä koodi",

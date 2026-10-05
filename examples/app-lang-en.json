@@ -205,6 +205,7 @@
       "scan.camera_failed": "Could not read that picture",
       "scan.code": "Code",
       "scan.created": "Logged",
+      "scan.updated": "Checked in",
       "scan.no_barcode": "This code cannot be printed as a barcode",
       "scan.no_code_found": "No code in that picture",
       "scan.print_code": "Print this code",

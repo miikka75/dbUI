@@ -2070,6 +2070,38 @@ of the lookup, a `set` naming a column that does not exist or naming the scanned
 unknown `@token`, and an `once` that is neither `"day"` nor `"ever"`. Each otherwise fails the same
 silent way: a view that renders perfectly and refuses at the write layer with nothing to point at.
 
+### `match: "owner"` — check-in: the code names a person, and their row is marked
+
+The other branch of the same view. Instead of appending, the scan finds **the row the scanned person
+already owns** and writes `set` onto it. They signed up, and the scan records that they turned up:
+
+```json
+{ "name": "door", "kind": "scan", "sources": ["rsvps"], "columns": ["owner", "attendance"],
+  "scan": {
+    "match": "owner",
+    "set": { "attendance": "attended" },              // REQUIRED — what the scan writes onto their row
+    "event": { "column": "practice", "date": "date" }, // OPTIONAL — only the sign-up for TODAY's event
+    "from": "members", "valueCol": "email", "codeCol": "badge"   // OPTIONAL — see below
+  } }
+```
+
+- **The code is the owner value** (their email) unless `from` names a people table. Then the code is
+  matched against its `codeCol` and the row's `valueCol` is the owner value: a badge number standing for
+  an email.
+- **`event`** scopes the match to rows whose `event.column` (a `ref`) names an event whose `event.date`
+  is today. Somebody signed up for three practices owns three rows, and a scan at the door means
+  today's. Without `event`, a person with more than one row is `ambiguous`.
+- **The scanner is an organizer**, writing with their own grant on the table. The write is an ordinary
+  cell edit, with an undo entry, and the rules judge it as they would the same edit typed into the
+  grid. The self-service checks above do not apply, and `ownerWritable` need not list anything. The code
+  carries nothing secret: it picks a row, and a photographed badge does nothing unless someone at the
+  door chooses to scan it.
+- **Outcomes**: `updated` (written), `already` (the row already says what `set` would write), `unknown`
+  (nobody, or nobody signed up for today), `ambiguous` (several rows, or a badge printed twice).
+- `column` and `once` belong to the appending branch and are rejected here.
+
+Pair it with *Verified attendance* (`ownerWritableWhile`) and a check-in freezes the member's RSVP.
+
 ### Printing the codes
 
 **Print codes lives in the Lookup editor**, beside the catalogue whose rows it labels — a label belongs

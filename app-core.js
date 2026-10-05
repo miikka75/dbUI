@@ -1065,7 +1065,7 @@ function createVueApp() {
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
          'msg.ref_has_children',
          'pivot.total', 'stats.empty',
-         'scan.code', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
+         'scan.code', 'scan.created', 'scan.updated', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
          'scan.print_codes', 'scan.print_code', 'scan.no_barcode',
          'scan.camera', 'scan.no_code_found', 'scan.several_codes', 'scan.camera_failed',
          'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.archive', 'board.confirm_archive',
@@ -2737,6 +2737,7 @@ function createVueApp() {
         // guard, same message, as setRsvp and formRecord.
         if (!me) { this.notify(this.t('msg.sign_in_respond')); return null; }
         var now = new Date();
+        if (cfg.match === 'owner') return this._submitCheckin(v, cfg, table, code, now);
         var res = Scan.plan(code, {
           catalog: this.dataCache[ref.table] || [],
           rows: this.dataCache[table] || [],
@@ -2756,6 +2757,25 @@ function createVueApp() {
             if (v.mode === 'union') shown._source = table;
             this.currentData.push(shown);
           }
+        }
+        return res;
+      },
+      // `match: "owner"`: the code names a person, and the write marks the row they already own (their
+      // sign-up for today's event) rather than appending one. The organizer scanning holds a grant on the
+      // table, so this is an ordinary cell edit -- saveField, with its undo entry and its partial write --
+      // and the rules judge it exactly as they would the same edit typed into the grid.
+      _submitCheckin: function(v, cfg, table, code, now) {
+        var ev = cfg.event || null, eref = ev ? (getColumnRef(table, ev.column) || {}) : {};
+        var res = Scan.plan(code, {
+          match: 'owner', rows: this.dataCache[table] || [], set: cfg.set,
+          catalog: cfg.from ? (this.dataCache[cfg.from] || []) : null, codeCol: cfg.codeCol, valueCol: cfg.valueCol,
+          eventCol: ev && ev.column, events: eref.table ? (this.dataCache[eref.table] || []) : [],
+          eventKey: eref.valueCol || 'id', eventDate: ev && ev.date,
+          ownerCol: getOwnerCol(table) || 'owner', today: fmtDate(now), now: now.toISOString()
+        });
+        if (res.outcome === 'updated') {
+          var self = this;
+          Object.keys(res.patch).forEach(function(c) { self.saveField(res.row, c, res.patch[c], table); });
         }
         return res;
       },
@@ -2940,6 +2960,12 @@ function createVueApp() {
         if (v.scan && v.scan.column) {
           var sref = getColumnRef((v.sources || [])[0], v.scan.column);
           if (sref && sref.table) push(sref.table);
+        }
+        // A check-in reads the people its codes name and the events that make a sign-up today's.
+        if (v.scan && v.scan.match === 'owner') {
+          if (v.scan.from) push(v.scan.from);
+          var eref = v.scan.event && getColumnRef((v.sources || [])[0], v.scan.event.column);
+          if (eref && eref.table) push(eref.table);
         }
         AccessFeatures.viewTables(v).forEach(expand);
         viewImplicitTables(v).forEach(expand);
@@ -8980,7 +9006,7 @@ function createVueApp() {
       // printed twice, or a code already logged.
       tone: function() {
         var o = this.last && this.last.outcome;
-        return o === 'created' ? 'success' : o === 'already' ? 'warning' : 'error';
+        return (o === 'created' || o === 'updated') ? 'success' : o === 'already' ? 'warning' : 'error';
       },
       // Same split as statsFor, and for the same reason: top-level renders the rows loadTableData just
       // built (which carry the period offset), an embed renders its own rows, because currentData
@@ -8999,7 +9025,8 @@ function createVueApp() {
       cols: function() {
         var v = VIEWS[this.viewName] || {};
         var declared = (v.columns || []).filter(function(c) { return typeof c === 'string'; });
-        return declared.length ? declared : [this.cfg.column].concat(Object.keys(this.cfg.set || {}));
+        var lead = this.cfg.match === 'owner' ? (getOwnerCol((v.sources || [])[0]) || 'owner') : this.cfg.column;
+        return declared.length ? declared : [lead].concat(Object.keys(this.cfg.set || {}));
       }
     },
     methods: Object.assign({}, ROOT_PROXY, {
@@ -9079,7 +9106,7 @@ function createVueApp() {
       // A resolved scan names the CATALOGUE ROW it hit, through the same renderer the grid uses for that
       // column -- so a translated vocabulary reads the same here as everywhere else. A refused one can
       // only echo what was typed, since it resolved to nothing.
-      +   '<b v-if="last.value"><list-value :col="cfg.column" :value="last.value"></list-value></b>'
+      +   '<b v-if="last.value"><list-value :col="cfg.column || cols[0]" :value="last.value"></list-value></b>'
       +   '<b v-else>{{ last.code }}</b>'
       +   '<span v-if="last.at" style="opacity:0.75">&nbsp;· {{ last.at }}</span>'
       + '</v-alert>'

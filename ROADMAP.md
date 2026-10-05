@@ -743,7 +743,7 @@ Two traps worth writing into SCHEMA.md when this is done:
 Known limitation: `ownerWritableWhile` gates on a column value, not a date. "Editable until the event
 happens" is not expressible; "editable until someone marks attendance" is.
 
-### QR check-in — scan a code to mark attendance *(scan phase 1.5 — the config branch of the shipped scan view)*
+### QR check-in — scan a code to mark attendance *(the verifier-scans-attendee arrangement landed as scan phase 1.5; the shared-code arrangement is open)*
 
 The companion to *RSVP attendance verification* above: instead of the verifier hunting for each name
 in a list, they scan a code and the attendance column is written.
@@ -863,7 +863,7 @@ exists, since without that there is nothing for a scan to do. Of the two, the sh
 better first build — it needs no camera at all in its typed form, so it can ship and be used at a real
 event before any of the decoding work above is done.
 
-### Scan to log an action — the same camera, a row appended *(phases 1–4 landed; 1.5 and 5 open)*
+### Scan to log an action — the same camera, a row appended *(phases 1–4 and 1.5 landed; 5 open)*
 
 QR check-in, above, writes an *answer* onto a row that already exists: someone signed up, and the scan
 records that they turned up. This entry asks whether the same scan can create the record instead — a
@@ -1043,6 +1043,15 @@ property rather than an error string nobody executes.
 **Phase 1.5 — check-in, as config.** `match: "owner"` plus `codeCol` turns the same module into the
 entry above, still with no camera. It is listed as a half-phase because it is a resolver branch and a
 test, not a feature.
+
+*LANDED.* `planMatch` beside `plan`, behind `match: "owner"`. Building it settled one question the plan
+had not asked: **which** of a person's rows a code means. Somebody signed up for three practices owns
+three rows, so `event: { column, date }` scopes the match to the one whose event is dated today, and a
+person still matching several rows is `ambiguous`, never a guess. `codeCol` moved with it: in this branch
+it belongs to an optional people table (`from` + `valueCol`), since the code names a person rather than a
+catalogue row. Without one, the code is the owner value itself. The write is `saveField` under the
+organizer's grant, not `_createBlankRow`, so `ownerWritable` is deliberately not consulted. Issuing a
+person their code (a "My code" panel) is still the open design question this entry recorded.
 
 **Phase 2 — codes on paper. LANDED.** A printable label sheet over the scan view's catalogue, one code
 per row, through `print.js`. Code 39 is a 44-entry pattern table rendered as inline SVG — no vendored
@@ -3059,10 +3068,7 @@ has asked rather than work waiting to be done.
 shipped — see its entry above, which is kept in place rather than reduced to a Shipped bullet because
 the reasoning behind what landed is the same document as the reasoning for the rest of it.)
 
-**Scan phase 1.5** — check-in as config (`match: "owner"` + `codeCol`) — is the cheapest unbuilt thing
-now that the date label has shipped, a resolver branch and a test, and it is what turns the shipped scan view into the QR
-check-in entry above. Worth doing only when somebody actually wants the verifier-scans-attendee
-arrangement; it is not owed to the shipped half.
+**Scan phase 1.5** (check-in as config, `match: "owner"`) has shipped.
 
 **Sorting inside an embed** sat beside it on cost, and has shipped (#233) — both the `ref` order and the
 clickable header.

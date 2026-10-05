@@ -457,3 +457,46 @@ test('a lookup nothing scans offers no per-row printer', async ({ page }) => {
   // `visits` is not a lookup and nothing resolves codes against it; the button is offered per CATALOGUE.
   expect(await page.evaluate(() => appInstance.scanViewForCatalog('visits'))).toBe('');
 });
+
+// Phase 1.5: check-in. The code names a PERSON, and the scan marks the sign-up they already own for
+// today's event, instead of appending a row. An organizer is scanning, so the write is an ordinary cell
+// edit under their grant.
+test.describe('check-in: match "owner"', () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const CHECKIN = {
+    defaultLanguage: 'en',
+    tables: {
+      practices: { columns: [{ name: 'date', type: 'date' }, { name: 'title', type: 'text' }] },
+      rsvps: { columns: [
+        { name: 'owner', type: 'owner' },
+        { name: 'practice', type: 'ref', table: 'practices', valueCol: 'id' },
+        { name: 'attendance', type: 'text', default: 'pending' }
+      ] }
+    },
+    views: [{ name: 'door', kind: 'scan', sources: ['rsvps'], mode: 'union', columns: ['owner', 'attendance'],
+              scan: { match: 'owner', set: { attendance: 'attended' }, event: { column: 'practice', date: 'date' } } }],
+    nav: { items: [{ view: 'door' }] }
+  };
+
+  test('a person\'s code marks their sign-up for today, once, and an unknown code writes nothing', async ({ page }) => {
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema: CHECKIN } });
+    const put = (tableId, data) => page.request.post('/api/putRow', { data: { tableId, tab: 'active', data } });
+    await put('practices', { id: 'p1', date: today, title: 'Tonight' });
+    await put('practices', { id: 'p2', date: '2099-01-01', title: 'Later' });
+    await put('rsvps', { id: 'a1', owner: 'ann@x', practice: 'p1', attendance: 'pending', rosterPublic: true });
+    await put('rsvps', { id: 'a2', owner: 'ann@x', practice: 'p2', attendance: 'pending', rosterPublic: true });
+    await boot(page, 'org@dev');
+    await open(page, 'door');
+
+    await scan(page, 'ann@x');
+    expect(await outcome(page)).toBe('updated');
+    const rows = async () => (await (await page.request.post('/api/getTableData', { headers: { 'X-User': 'org@dev' }, data: { tableId: 'rsvps', tab: 'active' } })).json()).rows || [];
+    await expect.poll(async () => (await rows()).map((r) => r.id + ':' + r.attendance).sort()).toEqual(['a1:attended', 'a2:pending']);
+
+    await scan(page, 'ANN@x');
+    expect(await outcome(page)).toBe('already');
+    await scan(page, 'dan@x');
+    expect(await outcome(page)).toBe('unknown');
+  });
+});

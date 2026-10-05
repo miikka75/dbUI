@@ -7,8 +7,8 @@
 // WHY THIS IS NOT `checkin.js`, which the roadmap first proposed: a scan resolves a code to a WRITE.
 // Whether that write APPENDS a row (a chore logged, a checkpoint visited, a control punched) or UPDATES
 // one that already exists (an attendee marked present) is the only difference between the two
-// arrangements, and it is a difference of configuration rather than of mechanism. This module owns the
-// appending half; the updating half is a second branch over the same resolver.
+// arrangements, and it is a difference of configuration rather than of mechanism. `plan` appends;
+// `match: "owner"` takes the updating branch (planMatch) over the same matcher and the same `set`.
 //
 // It answers only what is pure over data:
 //   which catalogue row does this code name · have I logged it already · what columns does the row carry
@@ -103,6 +103,7 @@
   // indistinguishable from a scan that did not register, and that is how someone stops trusting it.
   function plan(code, opts) {
     opts = opts || {};
+    if (opts.match === 'owner') return planMatch(code, opts);
     var valueCol = opts.valueCol || 'id';
     var found = matches(opts.catalog, code, opts.codeCol || valueCol);
     var typed = String(code == null ? '' : code).trim();
@@ -116,6 +117,60 @@
     var prefill = resolveSet(opts.set, opts);
     prefill[opts.column] = value;   // last, so a `set` naming the scanned column cannot overwrite the scan
     return { outcome: 'created', code: typed, value: value, prefill: prefill };
+  }
+
+  // ---- The updating branch: `match: "owner"` -------------------------------------------------------
+  //
+  // Check-in. The code names a PERSON rather than a thing, and the row it writes already exists: they
+  // signed up, and the scan records that they turned up. So instead of resolving a catalogue value and
+  // appending it, this finds the one row that person owns and patches `set` onto it.
+  //
+  // The scanner is a signed-in organizer holding a grant on the table, writing under the ordinary rules;
+  // the code is a row-picker, not a credential. A photographed badge buys nothing without somebody
+  // standing at the door choosing to scan it, which is why the code may carry nothing secret.
+  //
+  // opts, besides `rows`, `set`, `ownerCol`, `today`, `now`:
+  //   catalog/codeCol/valueCol   OPTIONAL people table (`from`): the code is matched against its
+  //                              `codeCol` and the row's `valueCol` is the owner value -- a badge number
+  //                              naming an email. Without one, the code IS the owner value.
+  //   eventCol/events/eventKey/eventDate
+  //                              OPTIONAL: only rows whose `eventCol` references an event dated today.
+  //                              Somebody signed up for three practices owns three rows, and the one a
+  //                              scan at the door means is today's.
+  //
+  //   unknown    no row of theirs (not signed up -- or not for today)
+  //   ambiguous  several, or the badge is printed twice -- refuse; marking the wrong row is silent
+  //   already    the row already says what `set` would write
+  //   updated    patch `patch` onto `row`
+  function planMatch(code, opts) {
+    var typed = String(code == null ? '' : code).trim();
+    var who = typed;
+    if (opts.catalog) {
+      var valueCol = opts.valueCol || 'id';
+      var found = matches(opts.catalog, code, opts.codeCol || valueCol);
+      if (!found.length) return { outcome: 'unknown', code: typed };
+      if (found.length > 1) return { outcome: 'ambiguous', code: typed };
+      who = found[0][valueCol];
+    }
+    if (!norm(who)) return { outcome: 'unknown', code: typed };
+    var ownerCol = opts.ownerCol || 'owner';
+    var todays = null;
+    if (opts.eventCol) {
+      todays = {};
+      var key = opts.eventKey || 'id', dcol = opts.eventDate;
+      (opts.events || []).forEach(function (e) {
+        if (e && Calendar.toDateStr(e[dcol] || '') === (opts.today || '')) todays[String(e[key])] = 1;
+      });
+    }
+    var mine = (opts.rows || []).filter(function (r) {
+      return r && norm(r[ownerCol]) === norm(who) && (!todays || todays[String(r[opts.eventCol])]);
+    });
+    if (!mine.length) return { outcome: 'unknown', code: typed };
+    if (mine.length > 1) return { outcome: 'ambiguous', code: typed };
+    var row = mine[0], patch = resolveSet(opts.set, opts);
+    var done = Object.keys(patch).every(function (c) { return String(row[c] == null ? '' : row[c]) === String(patch[c]); });
+    if (done) return { outcome: 'already', code: typed, value: row[ownerCol], existing: row };
+    return { outcome: 'updated', code: typed, value: row[ownerCol], row: row, patch: patch };
   }
 
   // What a decoder handed back, reduced to a code. Two payload shapes reach this, and both are ours:
@@ -228,6 +283,8 @@
     var defs = (schema[table] && schema[table].columns) || {};
     if (!srcs.length) errors.push(at + 'needs `sources` naming the ONE table the scan writes to');
     else if (srcs.length > 1) errors.push(at + 'writes one table, so `sources` takes one name (got ' + srcs.length + ': ' + srcs.join(', ') + ')');
+    if (sc.match !== undefined && sc.match !== 'owner') errors.push(at + '`match` is "' + sc.match + '" — the only value is "owner" (update the row the scanned person owns); omit it to append a row');
+    if (sc.match === 'owner') return errors.concat(matchErrors(schema, at, table, defs, sc));
 
     // The scanned column has to be a `ref`: the catalogue it points at is what a code is checked
     // against, and a scan that writes unrecognised text into a free column is exactly the untrustworthy
@@ -288,7 +345,39 @@
     return errors;
   }
 
-  var M = { plan: plan, matches: matches, resolveSet: resolveSet, priorScan: priorScan, configErrors: configErrors,
+  // The updating branch's own shape. It shares `set` and its tokens with the appending one, and none of
+  // the self-service checks: the scanner is an organizer writing under their grant, not the row's owner,
+  // so `ownerWritable` (which bounds the OWNER) does not decide whether this write lands.
+  function matchErrors(schema, at, table, defs, sc) {
+    var errors = [];
+    if (schema[table] && !Cols().tableOwnerCol(schema, table)) errors.push(at + 'table "' + table + '" has no `owner` column, so there is nobody for a scanned code to name');
+    if (sc.column !== undefined) errors.push(at + '`column` is for appending a row; with `match: "owner"` the code names the row\'s owner, so drop it');
+    if (sc.once !== undefined) errors.push(at + '`once` is for appending a row; with `match: "owner"` a second scan finds the row already marked and says so');
+    var set = (sc.set && typeof sc.set === 'object' && !Array.isArray(sc.set)) ? sc.set : null;
+    if (!set || !Object.keys(set).length) errors.push(at + 'with `match: "owner"` needs `set` — what the scan writes onto the person\'s row, e.g. { "attendance": "attended" }');
+    for (var k in (set || {})) {
+      if (schema[table] && !defs[k]) errors.push(at + '`set` column "' + k + '" is not a column of "' + table + '"');
+      var val = set[k];
+      if (typeof val === 'string' && val.charAt(0) === '@' && TOKENS.indexOf(val) < 0) errors.push(at + '`set.' + k + '` is "' + val + '" — the only tokens are ' + TOKENS.join(' and ') + ' (anything else is written literally)');
+    }
+    if (sc.from !== undefined) {
+      var people = schema[sc.from] && schema[sc.from].columns;
+      if (!people) errors.push(at + '`from` "' + sc.from + '" is not a table');
+      else {
+        if (!sc.valueCol || !people[sc.valueCol]) errors.push(at + '`from` needs `valueCol` — the column of "' + sc.from + '" holding the owner value a code stands for');
+        if (sc.codeCol && !people[sc.codeCol]) errors.push(at + '`codeCol` "' + sc.codeCol + '" is not a column of "' + sc.from + '"');
+      }
+    } else if (sc.codeCol) errors.push(at + '`codeCol` needs `from` — the people table whose column a code is matched against');
+    if (sc.event !== undefined) {
+      var ev = sc.event || {}, d = defs[ev.column];
+      if (!ev.column || !d || typeof d !== 'object' || d.type !== 'ref' || !schema[d.table]) errors.push(at + '`event.column` must be a `ref` column of "' + table + '" naming the event each row belongs to');
+      else if (!ev.date || !(schema[d.table].columns || {})[ev.date]) errors.push(at + '`event.date` must be a column of "' + d.table + '" — the date that makes an event today\'s');
+    }
+    if (sc.link !== undefined && sc.link !== 'arm' && sc.link !== 'submit') errors.push(at + '`link` is "' + sc.link + '" — use "submit" or "arm"');
+    return errors;
+  }
+
+  var M = { plan: plan, planMatch: planMatch, matches: matches, resolveSet: resolveSet, priorScan: priorScan, configErrors: configErrors,
             code39: code39, C39: C39, codeFrom: codeFrom, viewsForCatalog: viewsForCatalog, TOKENS: TOKENS };
   if (isNode) module.exports = M;
   else root.Scan = M;
