@@ -2619,7 +2619,23 @@ Two consequences worth knowing:
   show whoever is linked *today*. That is also true of naming the person in the translation; the only
   way to keep the person who actually presided is to store their name in the row.
 
-**`@me` works in both**, resolving per column: on a `userlink` list it becomes the curated value linked
+#### `"userlink-both"` — the role, and who holds it
+
+`"listSources": { "callings": "userlink-both" }` labels a linked value **`Bishop – Ann Smith`**: the
+value (translated, as always) first, then the linked person. An unlinked value is the role alone. It
+answers the two gaps `userlink-name` leaves. A catalogue linked row by row ends up part linked and part
+not, and a `userlink-name` picker is then half people and half roles, with nothing separating them,
+where this one is a list of roles throughout. And a cell says in what capacity somebody is on the
+agenda, not only who.
+
+- **One rule for the cell and the dropdown**, composed in `listLabel` like the other two kinds, so the
+  two cannot disagree.
+- **`obscureNames` abbreviates the person half only**: `Bishop – Ann S.`. Run over the whole label it
+  would have printed `Bishop –. A. S.`, mangling the role and keeping the name only where it happened
+  to fall.
+- Opt in **per namespace**: a dense printed grid over another namespace keeps the short form.
+
+**`@me` works in all three**, resolving per column: on a `userlink` list it becomes the curated value linked
 to the caller's account, otherwise their profile display name. So a household can keep calling someone
 "Ann" while the account behind her is `ann@example.test`, and `{ "person": "@me" }` still finds her rows.
 A member who is linked to nothing resolves to the fail-closed sentinel and matches no rows — the same

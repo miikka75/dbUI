@@ -10002,3 +10002,31 @@ test.describe('Security policy reports in Settings', () => {
     await expect(field).toHaveAttribute('type', 'password');
   });
 });
+
+test.describe('userlink-both: the role, and who holds it', () => {
+  test('one label for cell and picker, an unlinked value is the role, and obscuring abbreviates only the person', async ({ page }) => {
+    await ensureAppReady(page, null);
+    const r = await page.evaluate(() => {
+      const a = window.appInstance;
+      a.schemaData = Object.assign({}, a.schemaData, { listSources: { assigned_to: 'userlink-both' } });
+      a.listAvatars = { assigned_to: { bishop: { name: 'Ann Smith', picture: '' } } };
+      a.strings = Object.assign({}, a.strings, { 'list.assigned_to.bishop': 'Bishop', 'list.assigned_to.clerk': 'Clerk' });
+      a.listsCache.assigned_to = ['bishop', 'clerk'];
+      const opts = a.getListOptions('assigned_to').map((o) => o.title);
+      return {
+        linked: a.listLabel('assigned_to', 'bishop'),
+        unlinked: a.listLabel('assigned_to', 'clerk'),
+        cell: a.displayValue('assigned_to', 'bishop', null, { obscureNames: false }),
+        obscured: a.displayValue('assigned_to', 'bishop', null, { obscureNames: ['assigned_to'] }),
+        obscuredUnlinked: a.displayValue('assigned_to', 'clerk', null, { obscureNames: ['assigned_to'] }),
+        opts
+      };
+    });
+    expect(r.linked).toBe('Bishop – Ann Smith');
+    expect(r.unlinked).toBe('Clerk');
+    expect(r.cell).toBe(r.linked);                       // the cell and the picker read the same
+    expect(r.opts).toEqual(['Bishop – Ann Smith', 'Clerk']);
+    expect(r.obscured).toBe('Bishop – Ann S.');
+    expect(r.obscuredUnlinked).toBe('Clerk');
+  });
+});

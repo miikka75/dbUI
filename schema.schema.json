@@ -49,8 +49,8 @@
     },
     "listSources": {
       "type": "object",
-      "description": "Where a list's values come from, and what a link to an account means. \"users\": the values ARE the opted-in display names, maintained automatically. \"userlink\": the values stay curated and an admin maps each to an account, which drives `@me` and the avatar. \"userlink-name\": the same link, but the cell displays the linked account's profile name instead of the value \u2014 for a list of roles, where the reader wants to know who holds one.",
-      "additionalProperties": { "enum": ["users", "userlink", "userlink-name"] }
+      "description": "Where a list's values come from, and what a link to an account means. \"users\": the values ARE the opted-in display names, maintained automatically. \"userlink\": the values stay curated and an admin maps each to an account, which drives `@me` and the avatar. \"userlink-name\": the same link, but the cell displays the linked account's profile name instead of the value \u2014 for a list of roles, where the reader wants to know who holds one. \"userlink-both\": the same link, and the cell displays both, the value then the person (\"Bishop – Ann Smith\"), so a part-linked picker still reads as roles and a cell still says in what capacity; `obscureNames` abbreviates only the person half.",
+      "additionalProperties": { "enum": ["users", "userlink", "userlink-name", "userlink-both"] }
     },
     "translatableLists": {
       "type": "array",

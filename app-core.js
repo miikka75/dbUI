@@ -213,6 +213,9 @@ function getSetting(key, def) {
   try { var s = JSON.parse(localStorage.getItem('app_settings') || '{}'); return s[key] !== undefined ? s[key] : def; } catch(e) { return def; }
 }
 
+// Between a role and the person holding it, in a `userlink-both` label.
+var LABEL_JOIN = ' – ';
+
 // Privacy: keep the first word, reduce every later word to an initial. "Name Surname" -> "Name S.";
 function obscureName(s) {
   if (s == null) return s;
@@ -3994,8 +3997,16 @@ function createVueApp() {
         var nsSrc = nsCol || col;
         var ns = this.listNameForCol(nsSrc);
         if (!ns && this.colIsRef(nsSrc)) { var rf = this.colRef(nsSrc); ns = rf && rf.table; }
+        var obscure = this.shouldObscure(col, viewCfg);
+        // A composed label obscures its PERSON half only. obscureName keeps the first word and initials
+        // the rest, so run over "Piispa – Miikka Tuppurainen" it printed "Piispa –. M. T." -- the role
+        // mangled and the name surviving only where it happened to fall.
+        if (ns && obscure && this.isUserBothList(ns)) {
+          var parts = this.listLabelParts(ns, val);
+          return parts.person ? parts.role + LABEL_JOIN + obscureName(parts.person) : obscureName(parts.role);
+        }
         if (ns) out = this.listLabel(ns, val);
-        return this.shouldObscure(col, viewCfg) ? obscureName(out) : out;
+        return obscure ? obscureName(out) : out;
       },
       // THE label for a list value in namespace `ns`, in precedence order:
       //
@@ -4008,14 +4019,24 @@ function createVueApp() {
       // getListOptions (for the dropdown that edits it). Two copies of a label rule is two answers the
       // moment one of them grows a case -- which is precisely what happened when the linked name was
       // added and the cell started disagreeing with its own editor.
+      //
+      // `userlink-both` composes 1 and 2: "Bishop – Ann Smith", the role first, so a picker that is half
+      // linked and half not still reads as a list of roles, and a cell still says in what capacity.
+      // Composed HERE, the one label rule for the cell and the dropdown that edits it, never in one of them.
       listLabel: function(ns, val) {
         if (!ns) return val;
-        var linked = (this.isUserNameList(ns) && window.ListUsers)
-          ? window.ListUsers.nameFor(this.listAvatars, ns, val) : '';
-        if (linked) return linked;
+        var p = this.listLabelParts(ns, val);
+        if (this.isUserBothList(ns)) return p.person ? p.role + LABEL_JOIN + p.person : p.role;
+        return p.person || p.role;
+      },
+      // { role: the translated value, person: the linked account's name, or '' }. `person` only for the
+      // two kinds that display it; a plain `userlink` shows the value and nothing else.
+      listLabelParts: function(ns, val) {
+        var person = ((this.isUserNameList(ns) || this.isUserBothList(ns)) && window.ListUsers)
+          ? (window.ListUsers.nameFor(this.listAvatars, ns, val) || '') : '';
         var key = 'list.' + ns + '.' + val;
         var translated = this.t(key);
-        return translated !== key ? translated : val;
+        return { role: translated !== key ? translated : val, person: person };
       },
       // Whether a view obscures person names in `col`. obscureNames: true = all list/multiselect
       // columns (or all area columns for a rotationView); an array = exactly those columns. Display-only.
@@ -5626,7 +5647,7 @@ function createVueApp() {
       sharingMatters: function() {
         var ls = (this.schemaData && this.schemaData.listSources) || {};
         return Object.keys(ls).some(function(n) {
-          return ls[n] === 'users' || ls[n] === 'userlink' || ls[n] === 'userlink-name';
+          return ls[n] === 'users' || ls[n] === 'userlink' || ls[n] === 'userlink-name' || ls[n] === 'userlink-both';
         });
       },
       // Merge the opted-in shared names ON TOP of the list's curated values rather than replacing them:
@@ -5933,13 +5954,15 @@ function createVueApp() {
       //   'userlink-name'  the same link, but the cell DISPLAYS the linked account's profile name.
       //                    For a list whose values are roles rather than people ("bishop"), where the
       //                    question a reader has is who currently holds it.
+      //   'userlink-both'  the same link, and the cell displays both: the role, then who holds it.
       //
-      // Both are distinct from 'users', where the list VALUES are themselves the shared display names.
+      // All are distinct from 'users', where the list VALUES are themselves the shared display names.
       isUserLinkList: function(name) {
         var src = (((this.schemaData || {}).listSources) || {})[name];
-        return src === 'userlink' || src === 'userlink-name';
+        return src === 'userlink' || src === 'userlink-name' || src === 'userlink-both';
       },
       isUserNameList: function(name) { return (((this.schemaData || {}).listSources) || {})[name] === 'userlink-name'; },
+      isUserBothList: function(name) { return (((this.schemaData || {}).listSources) || {})[name] === 'userlink-both'; },
       // Admin only: the raw value -> email links, for the editor's current-selection display. Denied for
       // non-admins by the server/rules -> caught into {} (they never need it; rendering uses listAvatars).
       // Self-scoped link lookup, loaded for EVERY member (unlike loadListUserLinks, which is admin-only):

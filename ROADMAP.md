@@ -2340,7 +2340,7 @@ Cost: a predicate and its wiring into one function (`lookupListValues`), Node-te
 bishopric catalogue; plus, for the row shape, an editor affordance — which is the larger half, and the
 reason to prefer the column shape unless the exclusion is genuinely a property of the row.
 
-### A linked position that still says which position it is
+### A linked position that still says which position it is *(landed: `listSources: "userlink-both"`)*
 
 `listLabel` puts the linked account's profile name FIRST, above the `list.<ns>.<value>` translation, for
 a `userlink-name` list. That is the whole point of the source kind: it exists to ask "who is the
@@ -2380,6 +2380,13 @@ fix the cell's missing capacity, so it is a smaller change and a smaller answer.
 
 Cost: the composition and its opt-in are small; the `obscureName` interaction is the part that needs a
 test of its own, and a print check on `meeting_agenda`, which is the densest grid the long form lands in.
+
+*LANDED as the namespace opt-in.* `listLabelParts` splits a label into role and person; `listLabel`
+composes them for `userlink-both` (`Bishop – Ann Smith`, the role alone when unlinked), so the cell and
+the picker still share one rule. `displayValue` obscures the PERSON half only (`Bishop – Ann S.`). The
+print path goes through the same `displayValue`, so it inherits both. The cheaper alternative (marking
+unlinked entries in a `userlink-name` picker) was not built: the composed form already makes a
+part-linked picker read as a list of roles.
 
 ### `nav.layout: "browse"` — drill-down navigation instead of a drawer *(phases 1–5 landed, #230; 6 not planned)*
 
