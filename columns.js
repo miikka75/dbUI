@@ -60,7 +60,7 @@
   var COLUMN_TYPES = ['text', 'number', 'date', 'select', 'multiselect', 'ref', 'url', 'image', 'owner'];
   var COLUMN_KEYS = [
     'name', 'type', 'hidden',                                   // identity + display
-    'list', 'listSwitch', 'allowNew', 'sorted', 'picker',        // list-backed columns
+    'list', 'listSwitch', 'allowNew', 'sorted', 'picker', 'offer', // list-backed columns
     'table', 'valueCol', 'filterBy',                             // ref columns
     'multiple',                                                  // cardinality (composes with select AND ref)
     'default', 'defaultFrom', 'stamped',                         // what a new row starts with, and who may rewrite it
@@ -91,9 +91,37 @@
                         '" — nothing reads it, so it does nothing (see SCHEMA.md, "column properties")');
           }
         });
+        // `offer` narrows which rows of a lookup-backed `list:` the picker offers. It means nothing on any
+        // other column, and a condition naming a column the lookup lacks would empty the picker silently.
+        if (d.offer != null) {
+          var lk = d.list && tables[d.list];
+          var at = 'table "' + t + '": column "' + c + '" `offer`';
+          if (!d.offer || typeof d.offer !== 'object' || Array.isArray(d.offer)) errors.push(at + ' must be a condition object, like { "kind": "position" }');
+          else if (!lk || !lk.isLookup) errors.push(at + ' applies only to a column whose `list` names a lookup table — it narrows which of its rows are offered');
+          else {
+            var lcols = columnDefs(lk);
+            conditionColumns(d.offer).forEach(function(k) {
+              if (!lcols[k]) errors.push(at + ' names "' + k + '", which is not a column of the lookup "' + d.list + '"');
+            });
+          }
+        }
       }
     }
     return errors;
+  }
+
+  // The columns a condition reads, through $and / $or / $not.
+  function conditionColumns(cond) {
+    var out = [];
+    (function walk(c) {
+      if (Array.isArray(c)) { c.forEach(walk); return; }
+      if (!c || typeof c !== 'object') return;
+      Object.keys(c).forEach(function(k) {
+        if (k === '$and' || k === '$or' || k === '$not') walk(c[k]);
+        else if (out.indexOf(k) < 0) out.push(k);
+      });
+    })(cond);
+    return out;
   }
 
   function columnType(schema, table, col) {
@@ -283,7 +311,7 @@
     for (var t in schema) {
       var cols = (schema[t] && schema[t].columns) || {};
       for (var c in cols) {
-        var e = info[c] || (info[c] = { list: null, listValueCol: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null });
+        var e = info[c] || (info[c] = { list: null, listValueCol: null, offer: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null });
         var typ = columnType(schema, t, c), d = cols[c];
         if (typ === 'multiselect') e.multiselect = true;
         if (typ === 'date') e.date = true;
@@ -309,6 +337,7 @@
           // already a legal key on any column -- it simply had no reader, so a select over a
           // multi-dimensional catalogue was stuck with whichever dimension lookupListValues defaults to.
           if (e.listValueCol == null && d.list && d.valueCol) e.listValueCol = d.valueCol;
+          if (e.offer == null && d.list && d.offer) e.offer = d.offer;
           if (e.listSwitch == null && d.listSwitch) e.listSwitch = d.listSwitch;
           if (d.allowNew) e.allowNew = true;
           if (d.sorted) e.sorted = true;
@@ -318,7 +347,7 @@
     }
     return info;
   }
-  var _EMPTY = { list: null, listValueCol: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null };
+  var _EMPTY = { list: null, listValueCol: null, offer: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null };
   function colInfo(schema, col) {
     var m = _scanCache && _scanCache.get(schema);
     if (!m) { m = scanSchema(schema); if (_scanCache) _scanCache.set(schema, m); }
@@ -366,6 +395,7 @@
     return cols.length === 1 ? cols[0] : null;
   }
   function colListValueCol(schema, col) { return colInfo(schema, col).listValueCol; }   // lookup dimension a `list:` column draws on
+  function colOffer(schema, col) { return colInfo(schema, col).offer; }   // which lookup rows a `list:` column's picker offers
   function colIsImage(schema, col) { return colInfo(schema, col).image; }
   function colIsUrl(schema, col) { return colInfo(schema, col).url; }
   function colPicker(schema, col) { return colInfo(schema, col).picker; }   // 'chips' | 'toggle' | null (dropdown)
@@ -475,7 +505,7 @@
     tableDefaultCols: tableDefaultCols, tableRefCol: tableRefCol,
     lookupCols: lookupCols, lookupHierarchy: lookupHierarchy, buildHierarchy: buildHierarchy,
     colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate, colIsNumber: colIsNumber,
-    colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted, colListValueCol: colListValueCol, lookupIdentityCol: lookupIdentityCol, rowHandle: rowHandle,
+    colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted, colListValueCol: colListValueCol, colOffer: colOffer, lookupIdentityCol: lookupIdentityCol, rowHandle: rowHandle,
     colIsImage: colIsImage, colIsUrl: colIsUrl, colPicker: colPicker,
     colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText,
     defTables: defTables, entryTables: entryTables, tableDeps: tableDeps, mirrorCluster: mirrorCluster

@@ -108,3 +108,21 @@ describe('Columns.vocabularyErrors — against what the repo actually ships', ()
     });
   }
 });
+
+describe('column `offer` — narrowing a lookup-backed picker', () => {
+  const Columns = require('../../columns');
+  const tables = (offer, list = 'ref_callings') => ({
+    ref_callings: { isLookup: true, columns: { org: { type: 'text' }, calling: { type: 'text' }, kind: { type: 'text' } } },
+    agenda: { columns: { presiding: { type: 'select', list, offer } } }
+  });
+  const errs = (t) => Columns.vocabularyErrors(t).filter((e) => /`offer`/.test(e));
+
+  it('a condition over the lookup\'s columns is clean, through $and/$or', () => {
+    assert.deepEqual(errs(tables({ $or: [{ kind: 'position' }, { org: 'Bishopric' }] })), []);
+  });
+  it('names a column the lookup lacks, a non-object, and a list that is not a lookup', () => {
+    assert.match(errs(tables({ kinds: 'position' })).join(' '), /"kinds", which is not a column of the lookup/);
+    assert.match(errs(tables('position')).join(' '), /must be a condition object/);
+    assert.match(errs(tables({ kind: 'x' }, 'plain_list')).join(' '), /applies only to a column whose `list` names a lookup table/);
+  });
+});
