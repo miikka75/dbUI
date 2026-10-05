@@ -192,6 +192,29 @@ test.describe('Lists management', () => {
     await expect(page.locator('[data-testid="leftover-list-retired_terms"]')).toBeVisible();
     for (const live of ['status', 'assigned_to', 'crew']) await expect(page.locator('[data-testid="leftover-list-' + live + '"]')).toHaveCount(0);
   });
+
+  test('Settings -> Leftovers reports what nothing names, and deletes one item on two presses', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.request.post('/api/saveLists', { data: { lists: { status: ['open', 'done'], assigned_to: ['ann'], crew: ['bob'], retired_terms: ['x', 'y'] } } });
+    await page.request.post('/api/putRow', { data: { tableId: '_pages', tab: 'active', data: { id: 'renamed_away', markdown: '# old' } } });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="leftovers-section-toggle"]').click();
+    await page.locator('[data-testid="leftovers-scan"]').click();
+    const list = page.locator('[data-testid="leftover-list-retired_terms"]');
+    await expect(list).toContainText('2');
+    await expect(page.locator('[data-testid="leftover-page-renamed_away"]')).toBeVisible();
+    await expect(page.locator('[data-testid="leftover-list-status"]')).toHaveCount(0);
+
+    await list.locator('button').click();          // arms
+    await expect(list).toBeVisible();
+    await list.locator('button').click();          // acts
+    await expect(list).toHaveCount(0);
+    const lists = await (await page.request.post('/api/getLists', { data: {} })).json();
+    expect(Object.keys(lists)).not.toContain('retired_terms');
+    expect(Object.keys(lists)).toContain('status');
+  });
 });
 
 test.describe('Theme toggle', () => {

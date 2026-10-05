@@ -1186,7 +1186,7 @@ read-only data path beside the inline-`{{self}}` block, the same branch again in
 printed more often than read on screen), a `schema.schema.json` property, a `validateSchema` check that
 every `{{col}}` names a real column, and a test. Read-only by nature: a sentence has no cells to edit.
 
-### Leftovers — data the schema no longer refers to *(the badge landed; the report panel is next)*
+### Leftovers — data the schema no longer refers to *(landed: the badge, and the report panel in Settings)*
 
 A schema moves on; the database does not. When the bishopric example replaced its `callings` list with
 a catalogue, a deployment that upgraded was left holding an `organizations` list and a `callings` list
@@ -1267,6 +1267,14 @@ One subtlety worth building in from the start: a list and a lookup TABLE may sha
 bishopric example has both a `ref_statuses` table and, on older deployments, a `ref_statuses` list.
 The report has to say which of the two it means, and must never offer the table when the leftover is
 the list.
+
+*The panel LANDED* (Settings → Leftovers, read on demand) as `Leftovers.inventory`, and two of its rows
+report without a delete. A **lookup table** is declared by the schema, so removing it is a schema edit,
+not a data delete. A **dead translation key** cannot be deleted at all: `updateTranslations` merges, and
+no backend in the contract can remove a key. That would be a new method on four backends, which this did
+not add. Lists, page bodies and account links delete through writes that already exist, two presses each.
+"Collections for a table the schema no longer declares" is not in it either: the contract has no way to
+enumerate collections (`getAvailableTables` answers `[]` on Firebase).
 
 Cost: a pure function (schema + what the database holds -> an inventory), Node-tested; the panel; the
 deletes reuse writes that already exist. No engine module, no view kind. The same panel is the natural

@@ -1014,6 +1014,32 @@
                      data-testid="example-update-apply" @click="a.reinstallExample()">{{ a.t('settings.examples_reinstall') }}</v-btn>
             </v-alert>
             </template>
+            <!-- Leftovers: what the database still holds that the schema no longer names. A report read on
+                 demand, one item at a time, never a sweep: a rename looks exactly like a deletion plus a
+                 creation, and the data is the only copy. Each delete takes two presses. -->
+            <template v-if="a.isAdmin">
+            <v-divider class="my-4"></v-divider>
+            <section-toggle v-model:collapsed="a.settings._collapseLeftovers" :title="a.t('settings.leftovers')" data-testid="leftovers-section-toggle"></section-toggle>
+            <div v-show="!a.settings._collapseLeftovers" class="ml-5" data-testid="leftovers-body">
+              <v-btn variant="outlined" size="small" prepend-icon="mdi-magnify" class="mb-2" :loading="a.leftovers.busy"
+                     data-testid="leftovers-scan" @click="a.scanLeftovers()">{{ a.t('settings.leftovers_scan') }}</v-btn>
+              <template v-if="a.leftovers.items">
+                <p v-if="!a.leftovers.items.length" class="text-caption text-medium-emphasis" data-testid="leftovers-none">{{ a.t('settings.leftovers_none') }}</p>
+                <v-table v-else density="compact" data-testid="leftovers-list">
+                  <template v-slot:default>
+                  <tbody>
+                    <tr v-for="it in a.leftovers.items" :key="it.kind + ':' + it.name" :data-testid="'leftover-' + it.kind + '-' + it.name">
+                      <td class="text-medium-emphasis" style="white-space:nowrap">{{ a.t('leftover.' + it.kind) }}</td>
+                      <td style="word-break:break-all">{{ it.name }}</td>
+                      <td class="text-right">{{ it.count != null ? it.count : '' }}</td>
+                      <td class="text-right" style="width:44px"><confirm-x v-if="a.canDeleteLeftover(it)" dense :armed="a.isArmed('leftover:' + it.kind + ':' + it.name)" @click="a.deleteLeftover(it)"></confirm-x></td>
+                    </tr>
+                  </tbody>
+                  </template>
+                </v-table>
+              </template>
+            </div>
+            </template>
             <template v-if="a.isAdmin">
             <v-divider class="my-4"></v-divider>
             <!-- Appearance: the theme palette, then one row per nav entry (a tree, groups included), each opening one
