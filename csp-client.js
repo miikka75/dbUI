@@ -202,8 +202,23 @@
     }).then(summarize);
   }
 
+  // Swap the read token for a new one, authorised by the current one (the Edge Function's `?rotate`).
+  // A POST with no body and no headers is a simple request, so it does not preflight. Resolves with the
+  // new token, which the collector answers exactly once.
+  function rotateToken(endpoint, token, fetchImpl) {
+    var f = fetchImpl || root.fetch;
+    var url = endpoint + (endpoint.indexOf('?') < 0 ? '?' : '&') + 'rotate&token=' + encodeURIComponent(token);
+    return f(url, { method: 'POST' }).then(function(res) {
+      if (!res.ok) { var e = new Error('HTTP ' + res.status); e.status = res.status; throw e; }
+      return res.json();
+    }).then(function(j) {
+      if (!j || typeof j.token !== 'string' || !j.token) throw new Error('no token in the answer');
+      return j.token;
+    });
+  }
+
   var M = { reporter: reporter, payload: payload, fromEvent: fromEvent, install: install, endpointFrom: endpointFrom, isLoopback: isLoopback,
-            summarize: summarize, isExtensionNoise: isExtensionNoise, readLog: readLog };
+            summarize: summarize, isExtensionNoise: isExtensionNoise, readLog: readLog, rotateToken: rotateToken };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else {
     root.CspClient = M;

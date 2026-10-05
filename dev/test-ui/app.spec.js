@@ -9962,4 +9962,23 @@ test.describe('Security policy reports in Settings', () => {
     // Kept per browser, never in the deployed files.
     expect(await page.evaluate(() => localStorage.getItem('app_csp_token'))).toBe('right');
   });
+
+  test('rotating takes two presses, keeps the new token and shows it once', async ({ page }) => {
+    const rotations = [];
+    await page.route(/\/functions\/v1\/csp-report\?rotate/, (route) => {
+      rotations.push([route.request().method(), new URL(route.request().url()).searchParams.get('token')]);
+      return route.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' },
+        body: JSON.stringify({ token: 'n'.repeat(64) }) });
+    });
+    await page.addInitScript(() => localStorage.setItem('app_csp_token', 'old'));
+    await ensureAppReady(page, null);
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="csp-section-toggle"]').click();
+    await page.locator('[data-testid="csp-rotate"]').click();
+    expect(rotations).toEqual([]);   // armed, not acted
+    await page.locator('[data-testid="csp-rotate"]').click();
+    await expect(page.locator('[data-testid="csp-rotated"] input')).toHaveValue('n'.repeat(64));
+    expect(rotations).toEqual([['POST', 'old']]);
+    expect(await page.evaluate(() => localStorage.getItem('app_csp_token'))).toBe('n'.repeat(64));
+  });
 });

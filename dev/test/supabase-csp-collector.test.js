@@ -144,3 +144,51 @@ describe('supabase CSP collector — report shapes match the other two collector
     });
   }
 });
+
+describe('supabase CSP collector — the read token, rotatable by whoever holds it', () => {
+  const ok = async (t, env) => (await q('select public.csp_report_token_ok($1, $2) as ok', [t, env])).rows[0].ok;
+  const rotate = async (cur, env, next) => (await q('select public.csp_report_rotate($1, $2, $3) as ok', [cur, env, next])).rows[0].ok;
+  const A = 'a'.repeat(64), B = 'b'.repeat(64), C = 'c'.repeat(64);
+
+  it('with no row, the environment token is the token, and an empty one is never valid', async () => {
+    await asOwner();
+    await q('delete from public.csp_report_token');
+    await asClient('service_role');
+    assert.equal(await ok('env-secret', 'env-secret'), true);
+    assert.equal(await ok('guess', 'env-secret'), false);
+    assert.equal(await ok('', ''), false, 'an unset secret publishes the log');
+    assert.equal(await ok('', 'env-secret'), false);
+  });
+
+  it('the first rotation needs the environment token, and the environment token is dead after it', async () => {
+    await asClient('service_role');
+    assert.equal(await rotate('guess', 'env-secret', A), false);
+    assert.equal(await rotate('env-secret', 'env-secret', A), true);
+    assert.equal(await ok(A, 'env-secret'), true);
+    assert.equal(await ok('env-secret', 'env-secret'), false, 'a leaked token still opens the log after rotating it');
+  });
+
+  it('a later rotation needs the stored token, and two racing with the same one cannot both win', async () => {
+    await asClient('service_role');
+    assert.equal(await rotate('env-secret', 'env-secret', B), false, 'the bootstrap secret can claim the row again');
+    const [r1, r2] = await Promise.all([rotate(A, 'env-secret', B), rotate(A, 'env-secret', C)]);
+    assert.equal([r1, r2].filter(Boolean).length, 1);
+    assert.equal(await ok(r1 ? B : C, ''), true);
+  });
+
+  it('refuses a short replacement', async () => {
+    await asClient('service_role');
+    const cur = (await q('select token from public.csp_report_token')).rows[0].token;
+    assert.equal(await rotate(cur, '', 'short'), false);
+  });
+
+  for (const role of ['anon', 'authenticated']) {
+    it(role + ' can neither read the token nor call either function', async () => {
+      await asClient(role);
+      const r = await q('select * from public.csp_report_token').catch(() => ({ rows: [] }));
+      assert.equal(r.rows.length, 0);
+      await assert.rejects(() => ok('x', 'y'));
+      await assert.rejects(() => rotate('x', 'y', 'z'.repeat(40)));
+    });
+  }
+});

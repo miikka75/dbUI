@@ -327,3 +327,18 @@ describe('readLog — the token-gated GET', () => {
     }
   });
 });
+
+describe('rotateToken — swapping the read token for a new one', () => {
+  it('POSTs ?rotate with the current token and resolves with the new one', async () => {
+    let asked;
+    const fetchImpl = async (url, init) => { asked = [url, init.method, init.headers, init.body]; return { ok: true, json: async () => ({ token: 'n'.repeat(64) }) }; };
+    assert.equal(await CspClient.rotateToken('https://c.example/csp-report', 'old', fetchImpl), 'n'.repeat(64));
+    // No body, no headers: a simple request, so the browser does not preflight it.
+    assert.deepEqual(asked, ['https://c.example/csp-report?rotate&token=old', 'POST', undefined, undefined]);
+  });
+
+  it('rejects with the status, and on an answer with no token', async () => {
+    await assert.rejects(CspClient.rotateToken('https://c/r', 't', async () => ({ ok: false, status: 403 })), (e) => e.status === 403);
+    await assert.rejects(CspClient.rotateToken('https://c/r', 't', async () => ({ ok: true, json: async () => ({}) })));
+  });
+});

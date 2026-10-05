@@ -11,6 +11,10 @@
 //   supabase functions deploy csp-report --no-verify-jwt
 //   supabase secrets set DBUI_CSP_REPORT_TOKEN=<long random string>
 //
+// That secret is only the FIRST token. `POST ?rotate&token=<current>` swaps it for a fresh one kept in
+// public.csp_report_token (Settings -> Security policy reports has the button), after which the
+// environment value opens nothing.
+//
 // `--no-verify-jwt` is REQUIRED and is not a loosening: the browser posts violation reports with no
 // credentials of any kind and ignores the response, so a function that demands a JWT receives nothing
 // and reports nothing. Writes are append-only counters keyed by the violation itself, and the only
@@ -81,10 +85,45 @@ const CORS = {
   'Access-Control-Max-Age': '86400'
 };
 
+// Is `token` the read token? The stored one once a rotation has happened, else the environment's --
+// decided in SQL (csp_report_token_ok), so the rule is in one place and tested there.
+//
+// The ONE fallback is a 404: the function does not exist, so csp-reports.sql predates rotation and no
+// row can exist either, and the environment token is still the token. Any other failure denies. Falling
+// back on a 5xx would let a token rotated BECAUSE it leaked open the log again whenever storage hiccups.
+async function tokenOk(token: string): Promise<boolean> {
+  const res = await rest('rpc/csp_report_token_ok', { method: 'POST', body: JSON.stringify({ p_token: token, p_env: TOKEN }) });
+  if (res.status === 404) return !!TOKEN && token === TOKEN;
+  if (!res.ok) return false;
+  return (await res.json()) === true;
+}
+
+function newToken(): string {
+  const b = new Uint8Array(32);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+}
+
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+
+  // Rotation, before the report branch: a report is a POST with no query at all. Authorised by the
+  // token being rotated, and the new one is answered ONCE -- nothing reads it back afterwards.
+  if (req.method === 'POST' && url.searchParams.has('rotate')) {
+    const next = newToken();
+    const res = await rest('rpc/csp_report_rotate', {
+      method: 'POST',
+      body: JSON.stringify({ p_current: url.searchParams.get('token') ?? '', p_env: TOKEN, p_new: next })
+    });
+    if (res.status === 404) return new Response('Apply supabase/csp-reports.sql again', { status: 501, headers: CORS });
+    if (!res.ok) return new Response('Storage error', { status: 502, headers: CORS });
+    if ((await res.json()) !== true) return new Response('Forbidden', { status: 403, headers: CORS });
+    return new Response(JSON.stringify({ token: next }), {
+      status: 200, headers: Object.assign({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, CORS)
+    });
+  }
 
   if (req.method === 'POST') {
     // Content-Type is application/csp-report or application/reports+json, so read the raw text
@@ -122,8 +161,9 @@ Deno.serve(async (req: Request) => {
 
   if (req.method === 'GET') {
     // Constant-time-ish equality is overkill here (the token gates a violation list, not data), but an
-    // EMPTY token must never be a valid one -- an unset secret would otherwise publish the log.
-    if (!TOKEN || url.searchParams.get('token') !== TOKEN) {
+    // EMPTY token must never be a valid one -- an unset secret would otherwise publish the log. Both are
+    // csp_report_token_ok's to decide.
+    if (!(await tokenOk(url.searchParams.get('token') ?? ''))) {
       return new Response('Forbidden', { status: 403, headers: CORS });
     }
     const res = await rest('csp_reports?select=directive,blocked_uri,sample_document,count,last_seen&order=count.desc');

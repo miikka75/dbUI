@@ -910,7 +910,12 @@
                               style="max-width:320px" data-testid="csp-token"></v-text-field>
                 <v-btn variant="outlined" size="small" prepend-icon="mdi-refresh" :loading="a.cspLog.busy" :disabled="!a.cspLog.token"
                        data-testid="csp-read" @click="a.readCspLog()">{{ a.t('btn.refresh') }}</v-btn>
+                <!-- Two presses: the old token stops opening the log, for every admin holding it. -->
+                <confirm-btn section color="warning" :armed="a.isArmed('csprotate')" icon="mdi-autorenew" :label="a.t('settings.csp_rotate')"
+                             :disabled="!a.cspLog.token || a.cspLog.busy" data-testid="csp-rotate"
+                             @click="a.isArmed('csprotate') ? a.rotateCspToken() : a.armConfirm('csprotate')"></confirm-btn>
               </div>
+              <copy-field v-if="a.cspLog.rotated" :value="a.cspLog.rotated" class="mb-2" style="font-size:0.78rem;max-width:560px" data-testid="csp-rotated"></copy-field>
               <v-alert v-if="a.cspLog.error" type="warning" variant="tonal" density="compact" class="mb-2" data-testid="csp-error">{{ a.cspLog.error }}</v-alert>
               <template v-if="a.cspLog.result">
                 <v-table v-if="a.cspLog.result.site.length" density="compact" class="mb-2" data-testid="csp-site">
