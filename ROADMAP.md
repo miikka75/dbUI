@@ -519,7 +519,7 @@ a feed cannot leave the app without its backend, so injecting them would buy not
 **The guard is in place:** `ui-conventions.test.js` fails if any calendar component names
 `appInstance`, `ROOT_PROXY`, `VIEWS` or `SCHEMA`.
 
-### Supabase setup — what a fresh project still costs, and what is worth automating
+### Supabase setup — what a fresh project still costs, and what is worth automating *(landed: `dev/check-supabase.mjs` / `npm run check:live`, and the re-run instruction now sits in setup step 4; the realtime-publication check is not in it, since a client key cannot read `pg_publication_tables`)*
 
 Prompted by a direct question after the CSP collector went in: does `SUPABASE.md` carry every step, and
 is anything reducible?
@@ -2335,7 +2335,7 @@ fix the cell's missing capacity, so it is a smaller change and a smaller answer.
 Cost: the composition and its opt-in are small; the `obscureName` interaction is the part that needs a
 test of its own, and a print check on `meeting_agenda`, which is the densest grid the long form lands in.
 
-### `nav.layout: "browse"` — drill-down navigation instead of a drawer *(phases 1–5 built on branch `nav-browse`; 6 not planned)*
+### `nav.layout: "browse"` — drill-down navigation instead of a drawer *(phases 1–5 landed, #230; 6 not planned)*
 
 Proposed 2026-09-27. Navigation as the page itself, in the manner of churchofjesuschrist.org/study: the
 home screen is a list (or grid of tiles) of the top-level nav entries; opening a group replaces it with
@@ -2464,7 +2464,7 @@ decoration, and it waits until someone asks for it.
 **Cost:** medium overall. Phase 1 is the most delicate (history against boot, the scan link and
 `?db=`); phases 2 and 3 are most of the visible work; 4 and 5 are small.
 
-### Appearance — one editor for a nav entry's icon, image and background *(built on `nav-appearance`, stacked on #230)*
+### Appearance — one editor for a nav entry's icon, image and background *(landed, #231)*
 
 Settings → Backgrounds already lists one row per nav screen with an upload, a thumbnail and the
 rendering controls, so a separate "icon/image picker" would have been a second list of the same
