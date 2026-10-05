@@ -48,7 +48,77 @@
     return !new RegExp('(^|[^A-Za-z0-9_-])' + escape(name) + '($|[^A-Za-z0-9_-])').test(text || '');
   }
 
-  var M = { corpus: corpus, unreferenced: unreferenced };
+  // The report: everything left over, as rows a person reads and decides about one at a time. A report,
+  // never a sweep -- a rename is indistinguishable from a deletion plus a creation, and the data is the
+  // only copy. Same one-sided rule as the badge: anything uncertain is left out.
+  //
+  // opts:
+  //   text          corpus() over everything that can name things
+  //   lists         { name: [values] } -- the named lists the database holds
+  //   lookups       { name: rowCount } -- the schema's lookup tables
+  //   tables        every table the schema declares (a list.<ns> key whose ns is a TABLE is a lookup
+  //                 vocabulary, whose values this cannot judge, so it is never reported)
+  //   pages         ids of the stored page bodies (_pages)
+  //   views         { name: view } -- a page body whose view is gone is left over
+  //   links         { list: { value: email } } -- account links
+  //   translations  { langCode: { key: text } }
+  //   keep          keys the app's own UI uses, never reported
+  //
+  // -> [{ kind: 'list'|'lookup'|'page'|'link'|'translation', name, count?, list?, value? }]
+  function inventory(opts) {
+    var text = opts.text || '', lists = opts.lists || {}, tables = opts.tables || [], out = [];
+    var isTable = function (n) { return tables.indexOf(n) >= 0; };
+    Object.keys(lists).sort().forEach(function (n) {
+      if (!isTable(n) && unreferenced(n, text)) out.push({ kind: 'list', name: n, count: (lists[n] || []).length });
+    });
+    Object.keys(opts.lookups || {}).sort().forEach(function (n) {
+      if (unreferenced(n, text)) out.push({ kind: 'lookup', name: n, count: opts.lookups[n] });
+    });
+    (opts.pages || []).slice().sort().forEach(function (id) {
+      if (id && !(opts.views || {})[id]) out.push({ kind: 'page', name: id });
+    });
+    // A link is to a VALUE: left over when its list is a plain list that no longer holds the value, or a
+    // name that is neither a list nor a table. A lookup's values are judged nowhere here.
+    var links = opts.links || {};
+    Object.keys(links).sort().forEach(function (l) {
+      if (isTable(l)) return;
+      Object.keys(links[l] || {}).sort().forEach(function (v) {
+        var gone = lists[l] ? lists[l].indexOf(v) < 0 : unreferenced(l, text);
+        if (gone && links[l][v]) out.push({ kind: 'link', name: l + ' / ' + v, list: l, value: v });
+      });
+    });
+    // Translation keys for things the schema no longer has. Only the schema-derived namespaces: a
+    // `text.*` key is named from prose, and the app's own keys (`keep`) are its chrome.
+    var keep = {}, count = {};
+    (opts.keep || []).forEach(function (k) { keep[k] = 1; });
+    var trs = opts.translations || {};
+    Object.keys(trs).forEach(function (code) {
+      Object.keys(trs[code] || {}).forEach(function (k) {
+        if (keep[k] || !deadKey(k, text, lists, isTable)) return;
+        count[k] = (count[k] || 0) + 1;
+      });
+    });
+    Object.keys(count).sort().forEach(function (k) { out.push({ kind: 'translation', name: k, count: count[k] }); });
+    return out;
+  }
+  function deadKey(key, text, lists, isTable) {
+    var parts = String(key).split('.');
+    if (parts.length < 2) return false;
+    var head = parts[0];
+    // A declared table is unreferenced in the corpus by construction (its declaration is skipped), and
+    // its tab label is still live while it is declared.
+    if (head === 'tab') return !isTable(parts.slice(1).join('.')) && unreferenced(parts.slice(1).join('.'), text);
+    if (head === 'field' || head === 'view') return unreferenced(parts.slice(1).join('.'), text);
+    if (head === 'list' && parts.length >= 3) {
+      var ns = parts[1], value = parts.slice(2).join('.');
+      if (isTable(ns)) return false;
+      if (lists[ns]) return lists[ns].indexOf(value) < 0;
+      return unreferenced(ns, text);
+    }
+    return false;
+  }
+
+  var M = { corpus: corpus, unreferenced: unreferenced, inventory: inventory };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else root.Leftovers = M;
 })(typeof self !== 'undefined' ? self : this);

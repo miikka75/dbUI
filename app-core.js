@@ -331,6 +331,9 @@ function createVueApp() {
       // Supabase URL and key arrive. `result` is CspClient.summarize's { site, extensions, total }.
       cspLog: { token: (function() { try { return localStorage.getItem('app_csp_token') || ''; } catch (e) { return ''; } })(),
                 result: null, busy: false, error: '', show: false },
+      // Settings -> Leftovers: the report, read on demand. `items` is Leftovers.inventory's list, or null
+      // before the first look.
+      leftovers: { items: null, busy: false },
       exampleUpdateChecked: false,
       firestoreRules: '',
       firebaseConfigInput: (function() { var c = Databases.config('firebase'); return c ? JSON.stringify(c) : ''; })(),
@@ -390,7 +393,7 @@ function createVueApp() {
       // Vuetify's v-img from ever rendering the profile avatar, since v-img loads on intersection.
       // _collapseCalendars, _collapseImport and _collapseUsers likewise: long or rarely used. What must
       // not wait -- an example update, a pending access request -- is drawn outside their folds.
-      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false, _collapseAppearance: true, _collapseCalendars: true, _collapseCsp: true, _collapseImport: true, _collapseUsers: true },
+      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false, _collapseAppearance: true, _collapseCalendars: true, _collapseCsp: true, _collapseLeftovers: true, _collapseImport: true, _collapseUsers: true },
       appConfig: null,
       saveTimers: {},
       // Live sync (see the _live* methods). _liveSubs maps a store name -> its unsubscribe function, so
@@ -1098,7 +1101,7 @@ function createVueApp() {
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
-         'list.link_user', 'list.unlink_user', 'list.not_referenced', 'list.locked_value', 'list.locked_group',
+         'list.link_user', 'list.unlink_user', 'list.not_referenced', 'settings.leftovers', 'settings.leftovers_scan', 'settings.leftovers_none', 'leftover.list', 'leftover.lookup', 'leftover.page', 'leftover.link', 'leftover.translation', 'list.locked_value', 'list.locked_group',
          'lang.app', 'lang.schema', 'lang.lists'].sort();
       },
       schemaTranslationKeys: function() {
@@ -4092,6 +4095,47 @@ function createVueApp() {
       // allowed to be silent and not allowed to be wrong; see leftovers.js for why it searches every
       // string rather than enumerating the ways a name is reached.
       isLeftover: function(name) { return Leftovers.unreferenced(name, this.leftoverCorpus); },
+      // The whole report. Reads what the badge cannot: every stored page body, every language's
+      // translations and the account links, each fetched fresh -- a stale copy would report something
+      // somebody restored a minute ago.
+      scanLeftovers: function() {
+        var self = this;
+        if (!this.isAdmin) return Promise.resolve(null);
+        this.leftovers.busy = true;
+        var lookups = {};
+        Object.keys(SCHEMA).forEach(function(t) { if (SCHEMA[t].isLookup) lookups[t] = Rows.partitionRows(self.dataCache, t, 'active').length; });
+        var translations = {};
+        return Promise.all([
+          Promise.resolve(backend.getTableData('_pages', 'active')).then(function(r) { return (parseTableResult(r).rows || []).map(function(x) { return x.id; }); }, function() { return []; }),
+          backend.getListUserLinks ? Promise.resolve(backend.getListUserLinks()).catch(function() { return {}; }) : Promise.resolve({}),
+          Promise.all((this.languages || []).map(function(l) {
+            return Promise.resolve(backend.getTranslations(l.code)).then(function(t) { translations[l.code] = t || {}; }, function() {});
+          }))
+        ]).then(function(res) {
+          self.leftovers.items = Leftovers.inventory({
+            text: self.leftoverCorpus, lists: self.listsCache || {}, lookups: lookups, tables: Object.keys(SCHEMA),
+            pages: res[0], views: VIEWS, links: res[1] || {}, translations: translations, keep: self.staticTranslationKeys
+          });
+        }).then(function() { self.leftovers.busy = false; }, function() { self.leftovers.busy = false; });
+      },
+      // One item, two presses, through the writes that already exist. A list goes the way a list is
+      // deliberately retired (saveLists without it), a page body is a _pages row, a link is unlinked. A
+      // lookup table and a translation key are reported only: the first is declared by the schema, and
+      // the backend contract has no way to delete a translation key (updateTranslations merges).
+      canDeleteLeftover: function(item) { return item.kind === 'list' || item.kind === 'page' || item.kind === 'link'; },
+      deleteLeftover: function(item) {
+        var self = this, key = 'leftover:' + item.kind + ':' + item.name;
+        if (!this.isArmed(key)) { this.armConfirm(key); return Promise.resolve(false); }
+        var done;
+        if (item.kind === 'list') { delete this.listsCache[item.name]; done = backend.saveLists(this.listsCache); }
+        else if (item.kind === 'page') { if (this.pageCache) delete this.pageCache[item.name]; done = backend.deleteRow('_pages', item.name, 'active'); }
+        else if (item.kind === 'link') done = this.setListUserLink(item.list, item.value, '');
+        else return Promise.resolve(false);
+        return Promise.resolve(done).then(function() {
+          self.leftovers.items = (self.leftovers.items || []).filter(function(x) { return x !== item; });
+          return true;
+        });
+      },
       isTranslatableList: function(name) { return (((this.schemaData && this.schemaData.translatableLists) || []).indexOf(name) >= 0); },
       colAllowNew: function(col) { return Columns.colAllowNew(SCHEMA, col); },
       colIsSorted: function(col) { return Columns.colIsSorted(SCHEMA, col); },
