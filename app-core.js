@@ -326,6 +326,11 @@ function createVueApp() {
       // boot. `update` is what Examples.compare() found, or null.
       examples: { open: false, manifest: null, busy: false, error: '', pick: null, langs: [], withData: true, english: {} },
       exampleUpdate: null,
+      // Settings -> Security policy reports. The token gates the collector's read and is not in the deployed
+      // files (anything there is every visitor's), so an admin pastes it once per browser, the way the
+      // Supabase URL and key arrive. `result` is CspClient.summarize's { site, extensions, total }.
+      cspLog: { token: (function() { try { return localStorage.getItem('app_csp_token') || ''; } catch (e) { return ''; } })(),
+                result: null, busy: false, error: '' },
       exampleUpdateChecked: false,
       firestoreRules: '',
       firebaseConfigInput: (function() { var c = Databases.config('firebase'); return c ? JSON.stringify(c) : ''; })(),
@@ -385,7 +390,7 @@ function createVueApp() {
       // Vuetify's v-img from ever rendering the profile avatar, since v-img loads on intersection.
       // _collapseCalendars, _collapseImport and _collapseUsers likewise: long or rarely used. What must
       // not wait -- an example update, a pending access request -- is drawn outside their folds.
-      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false, _collapseAppearance: true, _collapseCalendars: true, _collapseImport: true, _collapseUsers: true },
+      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false, _collapseAppearance: true, _collapseCalendars: true, _collapseCsp: true, _collapseImport: true, _collapseUsers: true },
       appConfig: null,
       saveTimers: {},
       // Live sync (see the _live* methods). _liveSubs maps a store name -> its unsubscribe function, so
@@ -1045,7 +1050,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
@@ -2588,6 +2593,24 @@ function createVueApp() {
       // the sweep: a missing record makes every live file look stray. This client's own queued passes are
       // waited for for the same reason. The one race left is another client's pass between its upload and
       // its row write; that file is blanked, and that feed's next pass writes it again.
+      // The collector this deployment reports into, as index.html carries it; '' when reporting is off.
+      cspEndpoint: function() { return CspClient.endpointFrom(document); },
+      setCspToken: function(v) {
+        this.cspLog.token = (v || '').trim();
+        this.cspLog.result = null; this.cspLog.error = '';
+        try { if (this.cspLog.token) localStorage.setItem('app_csp_token', this.cspLog.token); else localStorage.removeItem('app_csp_token'); } catch (e) {}
+      },
+      // On demand, never polled: the collector's counters aggregate, so nothing is lost by reading late.
+      readCspLog: function() {
+        var self = this, log = this.cspLog;
+        if (!this.cspEndpoint() || !log.token) return Promise.resolve(null);
+        log.busy = true; log.error = '';
+        return CspClient.readLog(this.cspEndpoint(), log.token).then(function(r) { log.result = r; return r; }, function(e) {
+          log.result = null;
+          log.error = e && e.status === 403 ? self.t('settings.csp_bad_token') : self.t('settings.csp_read_failed') + (e && e.status ? ' (' + e.status + ')' : '');
+          return null;
+        }).then(function(r) { log.busy = false; return r; });
+      },
       canSweepFeeds: function() { return this.canPublishFeeds() && !!backend.listFiles; },
       sweepFeedFiles: function() {
         var self = this;

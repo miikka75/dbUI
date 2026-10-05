@@ -281,3 +281,49 @@ describe('the endpoint is configuration, not a default', () => {
       'REPORT_ENDPOINT is still a single named constant, so a fork has one line to change');
   });
 });
+
+describe('summarize — reading the log back, split from extension noise', () => {
+  it('folds both collectors\' spellings into one row shape', () => {
+    const edge = CspClient.summarize({ total: 3, violations: [
+      { directive: 'script-src', blocked_uri: 'https://cdn.example/x.js', sample_document: 'https://app/#a', count: 3, last_seen: '2026-09-23T10:00:00Z' },
+    ] });
+    const dev = CspClient.summarize({ total: 3, violations: [
+      { directive: 'script-src', blockedURI: 'https://cdn.example/x.js', sampleDocument: 'https://app/#a', count: 3, lastSeen: '2026-09-23T10:00:00Z' },
+    ] });
+    assert.deepEqual(edge, dev);
+    assert.deepEqual(edge.site[0], { directive: 'script-src', blockedURI: 'https://cdn.example/x.js', document: 'https://app/#a', count: 3, lastSeen: '2026-09-23T10:00:00Z' });
+  });
+
+  it('puts extension schemes and an empty blocked URI apart, and keeps inline/eval with the site', () => {
+    const s = CspClient.summarize({ violations: [
+      { directive: 'script-src', blocked_uri: 'chrome-extension://abc/inject.js', count: 40 },
+      { directive: 'style-src', blocked_uri: 'moz-extension://def/x.css', count: 5 },
+      { directive: 'img-src', blocked_uri: '', count: 2 },
+      { directive: 'script-src', blocked_uri: 'inline', count: 1 },
+      { directive: 'connect-src', blocked_uri: 'https://api.example', count: 7 },
+    ] });
+    assert.deepEqual(s.site.map((r) => r.blockedURI), ['https://api.example', 'inline']);   // by count
+    assert.deepEqual(s.extensions.map((r) => r.count), [40, 5, 2]);
+  });
+
+  it('survives an empty or malformed answer', () => {
+    assert.deepEqual(CspClient.summarize(null), { site: [], extensions: [], total: 0 });
+    assert.deepEqual(CspClient.summarize({ total: 'x' }), { site: [], extensions: [], total: 0 });
+  });
+});
+
+describe('readLog — the token-gated GET', () => {
+  it('sends the token as the query parameter both collectors read, and summarizes', async () => {
+    let asked = '';
+    const fetchImpl = async (url) => { asked = url; return { ok: true, json: async () => ({ total: 1, violations: [{ directive: 'img-src', blocked_uri: 'https://x/y.png', count: 1 }] }) }; };
+    const r = await CspClient.readLog('https://c.example/csp-report', 'a b&c', fetchImpl);
+    assert.equal(asked, 'https://c.example/csp-report?token=a%20b%26c');
+    assert.equal(r.site.length, 1);
+  });
+
+  it('rejects with the status, so a refused token and a missing table read differently', async () => {
+    for (const status of [403, 502]) {
+      await assert.rejects(CspClient.readLog('https://c.example/r', 't', async () => ({ ok: false, status })), (e) => e.status === status);
+    }
+  });
+});

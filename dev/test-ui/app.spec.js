@@ -9920,3 +9920,42 @@ test.describe('form view', () => {
     }, { timeout: 8000 }).toBe('submitted');
   });
 });
+
+test.describe('Security policy reports in Settings', () => {
+  // sw.js passes every fetch through, and a request a service worker makes is invisible to page.route.
+  test.use({ serviceWorkers: 'block' });
+  test('reads the collector with the pasted token and counts extension reports apart', async ({ page }) => {
+    const asked = [];
+    // A regex, not a glob: in a glob `?` is a wildcard, and a miss here reads the REAL collector.
+    await page.route(/\/functions\/v1\/csp-report\?/, (route) => {
+      const url = new URL(route.request().url());
+      asked.push(url.searchParams.get('token'));
+      if (url.searchParams.get('token') !== 'right') return route.fulfill({ status: 403, body: 'Forbidden', headers: { 'Access-Control-Allow-Origin': '*' } });
+      return route.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' },
+        body: JSON.stringify({ total: 46, violations: [
+          { directive: 'script-src', blocked_uri: 'chrome-extension://abc/x.js', sample_document: 'https://app/', count: 40, last_seen: '2026-09-23T10:00:00Z' },
+          { directive: 'img-src', blocked_uri: 'https://pics.example/a.png', sample_document: 'https://app/#notes', count: 6, last_seen: '2026-09-23T10:00:00Z' },
+        ] }) });
+    });
+    await ensureAppReady(page, null);
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="csp-section-toggle"]').click();
+    const read = page.locator('[data-testid="csp-read"]');
+    await expect(read).toBeDisabled();   // nothing to read with until a token is pasted
+
+    await page.locator('[data-testid="csp-token"] input').fill('wrong');
+    await page.locator('[data-testid="csp-token"] input').press('Tab');
+    await read.click();
+    await expect(page.locator('[data-testid="csp-error"]')).toBeVisible();
+
+    await page.locator('[data-testid="csp-token"] input').fill('right');
+    await page.locator('[data-testid="csp-token"] input').press('Tab');
+    await read.click();
+    await expect(page.locator('[data-testid="csp-site"] tbody tr')).toHaveCount(1);
+    await expect(page.locator('[data-testid="csp-site"]')).toContainText('https://pics.example/a.png');
+    await expect(page.locator('[data-testid="csp-extensions"]')).toContainText('40');
+    expect(asked).toEqual(['wrong', 'right']);
+    // Kept per browser, never in the deployed files.
+    expect(await page.evaluate(() => localStorage.getItem('app_csp_token'))).toBe('right');
+  });
+});

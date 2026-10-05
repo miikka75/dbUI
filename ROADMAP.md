@@ -576,7 +576,7 @@ value is entirely in the first hour of a new project, and near zero afterwards.
 The cheap half is worth doing regardless of the script: **move the re-run instruction into the setup
 section**, where the person who needs it is looking.
 
-### CSP violations in Settings — and the secret a client-side app cannot keep
+### CSP violations in Settings — and the secret a client-side app cannot keep *(landed: A and C — Settings → Security policy reports, and `npm run csp:log`)*
 
 Asked directly: can the violation log show up in the Settings view? Yes, and the UI half is small — the
 panel sits beside Calendar feeds, which is already an admin-gated block that fetches and renders
@@ -620,6 +620,12 @@ empty string, and they are unactionable — the page cannot allowlist them and s
 worth building separates those from same-origin and named-CDN violations, which are the ones that mean
 the policy is actually wrong. Without that split the first real violation arrives buried in noise,
 which is how a reporting feature becomes ignored.
+
+**What landed.** `CspClient.summarize` folds both collectors' spellings (`blocked_uri` from the Edge
+Function, `blockedURI` from the dev collector) into one row shape and splits extension schemes and an
+empty blocked URI into their own bucket; `readLog` is the GET, rejecting with the status so a refused
+token (403) and a collector with no table (502) read differently. The panel and `dev/csp-log.mjs` are
+two shells over those two functions. The panel shows the extension reports as a count only.
 
 ### Rotating the CSP token from the UI, the way a calendar feed regenerates
 

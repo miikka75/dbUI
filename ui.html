@@ -895,6 +895,41 @@
             </template>
             </div>
             </template>
+            <!-- Security policy reports: what the CSP collector has counted. Admin only, and only where the
+                 deployment reports anywhere. Read on demand -- worth a look after editing csp.js or adding a
+                 third-party resource, not continuously. Extension reports are counted apart: the page can
+                 neither allowlist nor fix them, and listed with the rest they bury the ones that mean the
+                 policy is wrong. -->
+            <template v-if="a.isAdmin && a.cspEndpoint()">
+            <v-divider class="my-4"></v-divider>
+            <section-toggle v-model:collapsed="a.settings._collapseCsp" :title="a.t('settings.csp_reports')" data-testid="csp-section-toggle"></section-toggle>
+            <div v-show="!a.settings._collapseCsp" class="ml-5" data-testid="csp-body">
+              <div class="d-flex align-center flex-wrap mb-2" style="gap:8px">
+                <v-text-field :model-value="a.cspLog.token" @change="e => a.setCspToken(e.target.value)" type="password" autocomplete="off"
+                              :label="a.t('settings.csp_token')" variant="outlined" density="compact" hide-details
+                              style="max-width:320px" data-testid="csp-token"></v-text-field>
+                <v-btn variant="outlined" size="small" prepend-icon="mdi-refresh" :loading="a.cspLog.busy" :disabled="!a.cspLog.token"
+                       data-testid="csp-read" @click="a.readCspLog()">{{ a.t('btn.refresh') }}</v-btn>
+              </div>
+              <v-alert v-if="a.cspLog.error" type="warning" variant="tonal" density="compact" class="mb-2" data-testid="csp-error">{{ a.cspLog.error }}</v-alert>
+              <template v-if="a.cspLog.result">
+                <v-table v-if="a.cspLog.result.site.length" density="compact" class="mb-2" data-testid="csp-site">
+                  <template v-slot:default>
+                  <thead><tr><th>{{ a.t('settings.csp_directive') }}</th><th>{{ a.t('settings.csp_blocked') }}</th><th class="text-right">{{ a.t('settings.csp_count') }}</th><th>{{ a.t('settings.csp_last_seen') }}</th></tr></thead>
+                  <tbody>
+                    <tr v-for="r in a.cspLog.result.site" :key="r.directive + ' ' + r.blockedURI" :title="r.document">
+                      <td>{{ r.directive }}</td><td style="word-break:break-all">{{ r.blockedURI }}</td>
+                      <td class="text-right">{{ r.count }}</td><td style="white-space:nowrap">{{ a.dateLabel(r.lastSeen) }}</td>
+                    </tr>
+                  </tbody>
+                  </template>
+                </v-table>
+                <p v-else class="text-caption text-medium-emphasis mb-2" data-testid="csp-none">{{ a.t('settings.csp_none') }}</p>
+                <p v-if="a.cspLog.result.extensions.length" class="text-caption text-medium-emphasis" data-testid="csp-extensions">
+                  {{ a.t('settings.csp_extensions') }}: {{ a.cspLog.result.extensions.reduce((n, r) => n + r.count, 0) }}</p>
+              </template>
+            </div>
+            </template>
             <template v-if="a.isAdmin">
             <v-divider v-if="a.knownDatabases.length > 1" class="my-4"></v-divider>
             <template v-if="a.knownDatabases.length > 1">
