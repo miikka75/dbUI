@@ -1048,6 +1048,13 @@ function createVueApp() {
         // root proxy), so Vue tracks it as a dependency without help.
         return sortByCol(rows, this.sortCol, VIEWS[this.currentTable], this.sortAsc);
       },
+      // Everything that can name a list or a lookup table: the authored schema (minus its `tables` map's
+      // keys, which declare rather than refer), the views as loaded (user-built calendars are merged in
+      // there), page bodies edited in the app, and the folder config.
+      leftoverCorpus: function() {
+        var doc = this.schemaData || {};
+        return Leftovers.corpus([doc, VIEWS, this.pageCache, this.appConfig], [doc.tables || {}]);
+      },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
          'btn.edit', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
@@ -1091,7 +1098,7 @@ function createVueApp() {
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
-         'list.link_user', 'list.unlink_user', 'list.locked_value', 'list.locked_group',
+         'list.link_user', 'list.unlink_user', 'list.not_referenced', 'list.locked_value', 'list.locked_group',
          'lang.app', 'lang.schema', 'lang.lists'].sort();
       },
       schemaTranslationKeys: function() {
@@ -4079,6 +4086,12 @@ function createVueApp() {
       isReadonlyRefCell: function(item, col) { return !this.canEditCurrentRef || this.isLockedRefValue(item && item[col]); },
       // Whether a plain list is opted into `translatableLists` (its values have list.<list>.<value> labels).
       // Used only to show the translate badge in the Lists editor — values stay editable unless filter-pinned.
+      // A list or lookup table nothing in the schema names any more -- marked in the Lists and Lookup
+      // tabs, the negative only: on a healthy database almost everything is live, and a chip on the few
+      // leftovers is a glance where colouring the live ones is wallpaper. Leftovers.unreferenced is
+      // allowed to be silent and not allowed to be wrong; see leftovers.js for why it searches every
+      // string rather than enumerating the ways a name is reached.
+      isLeftover: function(name) { return Leftovers.unreferenced(name, this.leftoverCorpus); },
       isTranslatableList: function(name) { return (((this.schemaData && this.schemaData.translatableLists) || []).indexOf(name) >= 0); },
       colAllowNew: function(col) { return Columns.colAllowNew(SCHEMA, col); },
       colIsSorted: function(col) { return Columns.colIsSorted(SCHEMA, col); },
