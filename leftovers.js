@@ -20,23 +20,64 @@
   // whose own KEYS are declarations rather than references -- the schema's `tables` map, where a table
   // being declared is not the table being used. Their contents are still walked: a lookup that refers
   // to itself (an id-keyed hierarchy) is referenced, and silence is the safe answer there.
-  function corpus(docs, skipKeysOf) {
+  //
+  // `viewRoots` names the containers whose members are VIEWS (the schema's `views`, the loaded VIEWS map).
+  // Inside a view, a few positions hold the view's OWN column names -- `columns`, `defaultSort`,
+  // `groupBy.column` / `from`, `filterBy`, `afterColumn`, a column entry's `name` -- and those are skipped.
+  // A view reaches a list only through a TABLE's column (its `list`, or its own name under the
+  // per-column-name resolver), and that column's declaration is in the corpus already; a name a view
+  // merely groups or sorts under (the bishopric's `admin_bishopric` groups under `callings`, which no
+  // table declares) names no list at all. Skipping is the direction that can only make the answer less
+  // silent where it was wrong: a position this list misses is still counted, as before.
+  var VIEW_OWN = { defaultSort: 1, afterColumn: 1 };
+  function corpus(docs, skipKeysOf, viewRoots) {
     var out = [], seen = [];
-    var skip = skipKeysOf || [];
-    function walk(v) {
+    var skip = skipKeysOf || [], roots = viewRoots || [];
+    function walk(v, inView) {
       if (v == null) return;
       if (typeof v === 'string') { out.push(v); return; }
       if (typeof v !== 'object') return;
       if (seen.indexOf(v) >= 0) return;   // VIEWS and the schema doc share objects; walk each once
       seen.push(v);
-      if (Array.isArray(v)) { v.forEach(walk); return; }
+      var membersAreViews = roots.indexOf(v) >= 0;
+      if (Array.isArray(v)) { v.forEach(function (x) { walk(x, inView || membersAreViews); }); return; }
+      keys(v, inView, membersAreViews, false);
+    }
+    // One object's keys. In a view, the positions holding the view's own column names are skipped; a
+    // `columns` entry that is an object (a conditional column, a computed one, an inline embed) is a view
+    // context of its own, with its `name` skipped too.
+    function keys(v, inView, membersAreViews, columnEntry) {
       var declaresOnly = skip.indexOf(v) >= 0;
       Object.keys(v).forEach(function (k) {
         if (!declaresOnly) out.push(k);
-        walk(v[k]);
+        var x = v[k];
+        if (!inView) return walk(x, membersAreViews);
+        if (typeof x === 'string' && (VIEW_OWN[k] || (columnEntry && k === 'name'))) return;
+        if (k === 'columns' && Array.isArray(x)) {
+          seen.push(x);
+          return x.forEach(function (c) {
+            if (!c || typeof c !== 'object' || seen.indexOf(c) >= 0) return;   // a string is a column name of this view
+            seen.push(c);
+            keys(c, true, false, true);
+          });
+        }
+        if (k === 'groupBy' && x && typeof x === 'object' && !Array.isArray(x)) {
+          seen.push(x);
+          return Object.keys(x).forEach(function (gk) {
+            out.push(gk);
+            if (gk === 'column' && typeof x[gk] === 'string') return;
+            if (gk === 'from' && Array.isArray(x[gk])) return x[gk].forEach(function (f) { if (typeof f !== 'string') walk(f, true); });
+            walk(x[gk], true);
+          });
+        }
+        if (k === 'filterBy' && x && typeof x === 'object' && !Array.isArray(x)) {
+          seen.push(x);
+          return Object.keys(x).forEach(function (fk) { if (typeof x[fk] !== 'string') walk(x[fk], true); });   // a `matchList` value still counts
+        }
+        walk(x, true);
       });
     }
-    (docs || []).forEach(walk);
+    (docs || []).forEach(function (d) { walk(d, false); });
     return out.join('\n');
   }
 

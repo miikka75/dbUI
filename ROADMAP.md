@@ -1234,6 +1234,14 @@ views, page bodies and folder config. Enumerating would miss the per-column-name
 `select` with no `list` reads the list named after the column, and whichever path is added next. A
 substring search can only err towards silence.
 
+It erred too far once, and the case is worth keeping. The bishopric's `admin_bishopric` view groups its
+rows under a column it NAMES `callings`, so the retired `callings` list, read by no table, stayed
+unbadged. A view reaches a list only through a TABLE's column, so the positions holding a view's own
+column names (`columns`, `defaultSort`, `groupBy.column`/`from`, `filterBy`, `afterColumn`, a column
+entry's `name`) are now skipped inside views. That is an enumeration, but of positions to IGNORE, so one
+it misses still counts, and the answer stays silent rather than wrong. A `matchList` under any of them
+still counts. Checked against all three bundles: no list a table column reads is flagged.
+
 The badge does not subsume the report. It answers "is this one used?" for things that have a tab; the
 report answers "what is left over?" for the things that do not — orphaned page bodies, dead translation
 keys, links pointing at deleted values.
