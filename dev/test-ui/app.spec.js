@@ -9963,7 +9963,7 @@ test.describe('Security policy reports in Settings', () => {
     expect(await page.evaluate(() => localStorage.getItem('app_csp_token'))).toBe('right');
   });
 
-  test('rotating takes two presses, keeps the new token and shows it once', async ({ page }) => {
+  test('rotating takes two presses and puts the new token, unmasked, in the one token field', async ({ page }) => {
     const rotations = [];
     await page.route(/\/functions\/v1\/csp-report\?rotate/, (route) => {
       rotations.push([route.request().method(), new URL(route.request().url()).searchParams.get('token')]);
@@ -9980,15 +9980,25 @@ test.describe('Security policy reports in Settings', () => {
     await ensureAppReady(page, null);
     await page.evaluate(() => window.appInstance.selectTab('__settings'));
     await page.locator('[data-testid="csp-section-toggle"]').click();
+    const field = page.locator('[data-testid="csp-token"] input');
+    await expect(field).toHaveAttribute('type', 'password');          // masked until asked
     await page.locator('[data-testid="csp-rotate"]').click();
     expect(rotations).toEqual([]);   // armed, not acted
     await page.locator('[data-testid="csp-rotate"]').click();
-    await expect(page.locator('[data-testid="csp-rotated"] input')).toHaveValue('n'.repeat(64));
+    await expect(field).toHaveValue('n'.repeat(64));
+    await expect(field).toHaveAttribute('type', 'text');              // shown, so the change is visible
+    await expect(page.locator('[data-testid="csp-rotated"]')).toHaveCount(0);   // one field, not two
     expect(rotations).toEqual([['POST', 'old']]);
     expect(await page.evaluate(() => localStorage.getItem('app_csp_token'))).toBe('n'.repeat(64));
-    // The table is re-read with the new token straight away, and the one-time copy stays visible.
+    // The table is re-read with the new token straight away.
     await expect(page.locator('[data-testid="csp-none"]')).toBeVisible();
     expect(reads).toEqual(['n'.repeat(64)]);
-    await expect(page.locator('[data-testid="csp-rotated"] input')).toHaveValue('n'.repeat(64));
+
+    // The same field copies it, and the eye masks it again.
+    await page.evaluate(() => { window.__copied = null; window.appInstance.copyText = (t) => { window.__copied = t; }; });
+    await page.locator('[data-testid="csp-token"] [aria-label="btn.copy"]').click();
+    expect(await page.evaluate(() => window.__copied)).toBe('n'.repeat(64));
+    await page.locator('[data-testid="csp-token"] [aria-label="btn.hide"]').click();
+    await expect(field).toHaveAttribute('type', 'password');
   });
 });
