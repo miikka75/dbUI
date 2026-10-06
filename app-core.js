@@ -1056,7 +1056,12 @@ function createVueApp() {
       // there), page bodies edited in the app, and the folder config.
       leftoverCorpus: function() {
         var doc = this.schemaData || {};
-        return Leftovers.corpus([doc, VIEWS, this.pageCache, this.appConfig], [doc.tables || {}], [doc.views || [], VIEWS]);
+        // Minus `example`, the record of which bundle was installed ({ bundle, revision, files }): it names
+        // a bundle, not anything the schema uses, and the bishopric bundle's id is also the name of a list
+        // its catalogue retired -- so the record of having installed it kept that list looking live.
+        var cfg = this.appConfig ? Object.assign({}, this.appConfig) : null;
+        if (cfg) delete cfg.example;
+        return Leftovers.corpus([doc, VIEWS, this.pageCache, cfg], [doc.tables || {}], [doc.views || [], VIEWS]);
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
