@@ -330,7 +330,7 @@ function createVueApp() {
       // files (anything there is every visitor's), so an admin pastes it once per browser, the way the
       // Supabase URL and key arrive. `result` is CspClient.summarize's { site, extensions, total }.
       cspLog: { token: (function() { try { return localStorage.getItem('app_csp_token') || ''; } catch (e) { return ''; } })(),
-                result: null, busy: false, error: '', rotated: '' },
+                result: null, busy: false, error: '', rotated: '', show: false },
       exampleUpdateChecked: false,
       firestoreRules: '',
       firebaseConfigInput: (function() { var c = Databases.config('firebase'); return c ? JSON.stringify(c) : ''; })(),
@@ -2614,7 +2614,12 @@ function createVueApp() {
         }, function(e) {
           log.error = e && e.status === 403 ? self.t('settings.csp_bad_token') : self.t('settings.csp_read_failed') + (e && e.status ? ' (' + e.status + ')' : '');
           return null;
-        }).then(function(r) { log.busy = false; return r; });
+        }).then(function(r) {
+          log.busy = false;
+          // The new token cleared the table; read it again so the admin sees the reports without a second click.
+          if (r) self.readCspLog();
+          return r;
+        });
       },
       // On demand, never polled: the collector's counters aggregate, so nothing is lost by reading late.
       readCspLog: function() {

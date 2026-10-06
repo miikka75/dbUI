@@ -9970,6 +9970,12 @@ test.describe('Security policy reports in Settings', () => {
       return route.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' },
         body: JSON.stringify({ token: 'n'.repeat(64) }) });
     });
+    const reads = [];
+    await page.route(/\/functions\/v1\/csp-report\?token=/, (route) => {
+      reads.push(new URL(route.request().url()).searchParams.get('token'));
+      return route.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' },
+        body: JSON.stringify({ total: 0, violations: [] }) });
+    });
     await page.addInitScript(() => localStorage.setItem('app_csp_token', 'old'));
     await ensureAppReady(page, null);
     await page.evaluate(() => window.appInstance.selectTab('__settings'));
@@ -9980,5 +9986,9 @@ test.describe('Security policy reports in Settings', () => {
     await expect(page.locator('[data-testid="csp-rotated"] input')).toHaveValue('n'.repeat(64));
     expect(rotations).toEqual([['POST', 'old']]);
     expect(await page.evaluate(() => localStorage.getItem('app_csp_token'))).toBe('n'.repeat(64));
+    // The table is re-read with the new token straight away, and the one-time copy stays visible.
+    await expect(page.locator('[data-testid="csp-none"]')).toBeVisible();
+    expect(reads).toEqual(['n'.repeat(64)]);
+    await expect(page.locator('[data-testid="csp-rotated"] input')).toHaveValue('n'.repeat(64));
   });
 });
