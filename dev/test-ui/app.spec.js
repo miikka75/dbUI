@@ -193,6 +193,18 @@ test.describe('Lists management', () => {
     for (const live of ['status', 'assigned_to', 'crew']) await expect(page.locator('[data-testid="leftover-list-' + live + '"]')).toHaveCount(0);
   });
 
+  test('the record of an installed example does not keep a list of the same name alive', async ({ page }) => {
+    // The bishopric bundle's id is also the name of a list its catalogue retired; appConfig.example
+    // ({ bundle: 'bishopric', ... }) is bookkeeping, not a reference.
+    await ensureAppReady(page);
+    await page.request.post('/api/saveLists', { data: { lists: { status: ['open', 'done'], assigned_to: ['ann'], crew: ['bob'], bishopric: ['x'] } } });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => { const a = window.appInstance; a.appConfig = Object.assign({}, a.appConfig, { example: { bundle: 'bishopric', revision: 3, files: {} } }); });
+    await page.locator('.v-navigation-drawer .v-list-item').filter({ hasText: /lookup|tab\.lookup/ }).click();
+    await expect(page.locator('[data-testid="leftover-list-bishopric"]')).toBeVisible();
+  });
+
   test('Settings -> Leftovers reports what nothing names, and deletes one item on two presses', async ({ page }) => {
     await ensureAppReady(page);
     await page.request.post('/api/saveLists', { data: { lists: { status: ['open', 'done'], assigned_to: ['ann'], crew: ['bob'], retired_terms: ['x', 'y'] } } });
