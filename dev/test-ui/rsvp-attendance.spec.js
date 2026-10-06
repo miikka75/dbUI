@@ -86,3 +86,45 @@ test('a member responds, an organizer marks attendance, and the response is then
     data: { tableId: 'rsvps', tab: 'active', data: Object.assign({}, row, { attendance: 'attended', response: 'coming' }) } });
   expect(late.status()).toBe(403);
 });
+
+test('self check-in: members type the code shown at the event, the organizer stamps every match', async ({ page, browser }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns[0] = { name: 'date', type: 'date' };
+  schema.tables.rsvps.columns.push({ name: 'checkin_code', type: 'text' });
+  schema.tables.rsvps.ownerWritable.push('checkin_code');
+  schema.views[0].rsvp.checkin = { codeColumn: 'checkin_code', set: { attendance: 'attended' } };
+  const today = new Date(); const ymd = [today.getFullYear(), String(today.getMonth() + 1).padStart(2, '0'), String(today.getDate()).padStart(2, '0')].join('-');
+  await page.request.post('/api/resetData');
+  await page.request.post('/api/setUserRole', { data: { uid: 'org@x', role: 'admin', user: 'org@x', tables: 'all' } });
+  for (const u of ['ann@x', 'bob@x']) await page.request.post('/api/setUserRole', { data: { uid: u, role: 'editor', user: u, tables: { practices: 'r', rsvps: 'r' } }, headers: ADMIN });
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/saveLists', { data: { lists: { rsvp_status: ['coming', 'out'], attendance_status: ['pending', 'attended', 'absent'] } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p1', date: ymd, title: 'Tonight' } }, headers: ADMIN });
+
+  // Two members respond and claim: Ann types what was on the slide, Bob guesses.
+  for (const [user, claim] of [['ann@x', ' LION '], ['bob@x', 'tiger']]) {
+    const ctx = await browser.newContext();
+    const p = await ctx.newPage();
+    await bootAs(p, user);
+    await p.locator('[data-testid="rsvp-toggle"] button', { hasText: 'coming' }).click();
+    await expect(p.locator('[data-testid="rsvp-checkin-claim"] input')).toBeVisible();
+    await p.locator('[data-testid="rsvp-checkin-claim"] input').fill(claim);
+    await p.locator('[data-testid="rsvp-checkin-claim"] input').press('Tab');
+    await expect.poll(async () => ((await (await p.request.post('/api/getTableData', { data: { tableId: 'rsvps', tab: 'active' }, headers: ADMIN })).json()).rows || [])
+      .filter((r) => r.owner === user).map((r) => r.checkin_code)).toEqual([claim.trim()]);
+    // A member is never offered the stamping side.
+    await expect(p.locator('[data-testid="rsvp-checkin-stamp"]')).toHaveCount(0);
+    await ctx.close();
+  }
+
+  // The organizer types the real code and checks the room in.
+  await bootAs(page, 'org@x');
+  await page.locator('[data-testid="rsvp-checkin-real"] input').fill('lion');
+  await page.locator('[data-testid="rsvp-checkin-stamp"]').click();
+  const att = async () => Object.fromEntries(((await (await page.request.post('/api/getTableData', { data: { tableId: 'rsvps', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => [r.owner, r.attendance]));
+  await expect.poll(att).toEqual({ 'ann@x': 'attended', 'bob@x': 'pending' });
+
+  // One press, one undo.
+  await page.evaluate(() => appInstance.undoLast());
+  await expect.poll(att).toEqual({ 'ann@x': 'pending', 'bob@x': 'pending' });
+});

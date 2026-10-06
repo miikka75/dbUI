@@ -752,7 +752,7 @@ offered a change the server refused; `rsvpFrozen` disables it. A third trap went
 the two above: adding the gate to a table that already has rows freezes those rows until their gate
 column is filled.
 
-### QR check-in — scan a code to mark attendance *(scan phase 1.5 — the config branch of the shipped scan view)*
+### QR check-in — scan a code to mark attendance *(the shared-code arrangement's first step landed: claim + organizer stamp; scan phase 1.5 is the verifier arrangement)*
 
 The companion to *RSVP attendance verification* above: instead of the verifier hunting for each name
 in a list, they scan a code and the attendance column is written.
@@ -833,6 +833,12 @@ Worth being clear about what each step buys, because the ladder has a flat top:
 | Same, but the rule checks the code | The editor's button-press | New `_meta` mirror + a rule branch, mirrored into RLS, the dev server and `backend-helpers` — four layers, the real cost |
 | Code expires (`validUntil`) | Checking in tomorrow for yesterday | One timestamp comparison in the same rule |
 | Code rotates during the event | Narrows relaying, does not close it | An organizer device writing a heartbeat |
+
+*The first row LANDED* as `rsvp.checkin: { codeColumn, set }`, and one detail moved. The table above has
+the organizer comparing claims "against the real code", which reads as if that code were stored. It is
+not: the organizer types it on the stamping screen and it goes nowhere else, because a code kept on the
+event row is readable by every member from home, which undoes the one thing this step stops. The rows
+below it (a rule checking a stored `_checkin` code, expiry, rotation) remain unbuilt.
 
 **No step closes relaying.** Someone at the event can always text the code to someone who is not. A
 30-second window narrows it; it does not shut it. Every "type the code on the screen" system has this,

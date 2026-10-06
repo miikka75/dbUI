@@ -1373,6 +1373,27 @@ The events live in one table; responses in another that has an **`owner` column*
 - With owner-scoped reads a non-organizer receives only their own response from the backend, so the
   rendered tally/roster reflects exactly what that user is permitted to see.
 
+### `checkin` — self check-in with a shared code
+
+```json
+"rsvp": { …, "checkin": { "codeColumn": "checkin_code", "set": { "attendance": "attended" } } }
+```
+
+On the **day** of an event, the RSVP row offers a **Check-in code** box. A member who responded types the
+code shown at the event (on a slide, a poster) into `codeColumn` of their own row. An organizer (anyone
+who may write the responses table outright, rather than through self-service) sees a box of their own
+instead: they type the real code and press **Check in**, which writes `set` onto every row of that event
+whose code matches. Case and surrounding spaces are ignored, rows already marked are skipped, and the
+press is one undo.
+
+- **The real code is stored nowhere.** Kept on the event row, every member could read it from home.
+  What this buys is that being marked present takes being told the code.
+- **The claim and the verdict are separate columns.** `codeColumn` must be in `ownerWritable`, and every
+  `set` column must not be, or a member can mark themselves present without any code. `validateSchema`
+  refuses both, and a responses table with no `ownerWritable` at all.
+- **It does not stop relaying.** Someone at the event can text the code to someone who is not. Pair it
+  with *Verified attendance* (`ownerWritableWhile` on the verdict) so a marked response is frozen.
+
 ## search — a box the reader types in
 
 `filter` is **authored**: it decides what a view *is*. `search` is the other kind — what the person
