@@ -609,8 +609,11 @@
               <template v-slot:activator="{ props }">
                 <v-list-item v-bind="props" prepend-icon="mdi-format-list-bulleted">
                   <div style="display:flex;align-items:center;width:100%">
-                    <span>{{ name }}</span>
-                    <v-chip v-if="a.isLeftover(name)" size="x-small" variant="outlined" class="ml-2" :data-testid="'leftover-list-' + name">{{ a.t('list.not_referenced') }}</v-chip>
+                    <!-- Not referenced: the name in the warning colour, and an unlinked icon so colour is not the only
+                         signal. The words are the icon's tooltip and accessible name only. -->
+                    <span :class="a.isLeftover(name) ? 'text-warning' : ''">{{ name }}</span>
+                    <v-icon v-if="a.isLeftover(name)" size="x-small" color="warning" class="ml-1" icon="mdi-link-variant-off"
+                            :title="a.t('list.not_referenced')" :aria-label="a.t('list.not_referenced')" :data-testid="'leftover-list-' + name"></v-icon>
                     <v-icon v-if="a.isTranslatableList(name)" size="x-small" style="margin-left:auto;opacity:0.45">mdi-translate</v-icon>
                   </div>
                 </v-list-item>
@@ -642,8 +645,11 @@
               <template v-slot:activator="{ props }">
                 <v-list-item v-bind="props" :prepend-icon="'mdi-database-outline'" @click="a.selectRefTable(rt)">
                   <div style="display:flex;align-items:center;width:100%">
-                    <span>{{ rt }}</span>
-                    <v-chip v-if="a.isLeftover(rt)" size="x-small" variant="outlined" class="ml-2" :data-testid="'leftover-table-' + rt">{{ a.t('list.not_referenced') }}</v-chip>
+                    <!-- Not referenced: the name in the warning colour, and an unlinked icon so colour is not the only
+                         signal. The words are the icon's tooltip and accessible name only. -->
+                    <span :class="a.isLeftover(rt) ? 'text-warning' : ''">{{ rt }}</span>
+                    <v-icon v-if="a.isLeftover(rt)" size="x-small" color="warning" class="ml-1" icon="mdi-link-variant-off"
+                            :title="a.t('list.not_referenced')" :aria-label="a.t('list.not_referenced')" :data-testid="'leftover-table-' + rt"></v-icon>
                     <v-icon v-if="a.isTranslatableList(rt)" size="x-small" style="margin-left:auto;opacity:0.45">mdi-translate</v-icon>
                   </div>
                   <!-- A sheet of scannable labels for these rows, offered only where something scans
