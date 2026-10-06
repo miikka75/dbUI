@@ -1063,7 +1063,6 @@ function createVueApp() {
          'msg.group_added', 'msg.item_added', 'msg.translation_saved', 'msg.language_added', 'msg.language_renamed', 'msg.language_exists',
          'msg.sign_in_respond', 'msg.registered_admin', 'msg.invalid_json', 'msg.invalid_color', 'msg.invalid_config', 'msg.paste_hex', 'msg.schema_error',
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
-         'msg.ref_has_children',
          'pivot.total', 'stats.empty',
          'scan.code', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
          'scan.print_codes', 'scan.print_code', 'scan.no_barcode',
@@ -4440,16 +4439,68 @@ function createVueApp() {
         this._deleteFromSources(withMirrors([table]), ids);
       },
       // Deleting one node of an id-keyed tree. A parent IS a row here, so "delete" has to answer what
-      // becomes of its descendants -- cascade, or re-parent them to its parent -- and that question is
-      // genuinely open (ROADMAP `tree`). Refusing while it still has children is the one answer that
-      // cannot quietly take somebody's rows with it, and it leaves the choice to whoever empties it.
+      // becomes of its descendants. They move UP: each child takes the deleted node's place under its
+      // parent, in their own order, where the node stood among its siblings. Cascading would take rows
+      // somebody can still see; moving them up loses nothing, and whoever wanted them gone can delete
+      // them next.
+      //
+      // One gesture, one undo entry, and the inverse puts the descendants back WHERE THEY WERE: the
+      // parent writes and the renumbering are recorded inside the same action as the delete, so taking
+      // it back restores the row, its children's parent, and every position it shifted.
       deleteRefNode: function(node) {
         if (!node || !node.row) return;
-        if (node.children && node.children.length) {
-          this.notify(this.t('msg.ref_has_children'));
-          return;
-        }
-        this.deleteRefRow(node.row);
+        var kids = (node.children || []).map(function(c) { return c.row; });
+        if (!kids.length) { this.deleteRefRow(node.row); return; }
+        if (!this.canEditCurrentRef) return;
+        if (this.isLockedRefRow(node.row)) { this.notify(this.t('msg.locked')); return; }
+        var key = 'ref:' + node.row.id;
+        if (this.pendingConfirm !== key) { this.armConfirm(key); return; }
+        this.pendingConfirm = null;
+        var self = this, table = this.currentRefTable, parentCol = this.refParentCol;
+        var up = node.row[parentCol] == null ? '' : node.row[parentCol];
+        var siblings = this._refSiblings(node).map(function(n) { return n.row; });
+        var at = siblings.indexOf(node.row);
+        var order = siblings.slice(0, at).concat(kids, siblings.slice(at + 1));
+        var now = new Date().toISOString();
+        Undo.action('delete', function() {
+          kids.forEach(function(r) {
+            var fwd = { id: r.id }, inv = { id: r.id };
+            fwd[parentCol] = up; inv[parentCol] = r[parentCol];
+            Undo.record({ table: table, part: 'active', forward: { type: 'put', id: r.id, row: fwd }, inverse: { type: 'put', id: r.id, row: inv } });
+            r[parentCol] = up; r.updated_at = now;
+            Writes.putRow(table, Object.assign({ updated_at: now }, fwd), 'active');
+          });
+          if (self.refReorderable) self._writeReorder(table, Reorder.renumber(order));
+          self._deleteFromSources(withMirrors([table]), node.row.id);
+        });
+      },
+      // The nodes sharing `node`'s parent, in display order: the roots, or its parent's children. Found
+      // by walking the tree rather than by filtering rows on the parent column, so it is the same answer
+      // the editor is showing -- a row whose parent names nothing is a root there, and here.
+      _refSiblings: function(node) {
+        var found = null;
+        (function walk(list) {
+          for (var i = 0; i < list.length && !found; i++) {
+            if (list[i] === node || (node.row && list[i].row === node.row)) { found = list; return; }
+            walk(list[i].children || []);
+          }
+        })(this.refTree);
+        return found || [];
+      },
+      // Order within ONE level of an id-keyed tree. `position` here means "my place among my siblings",
+      // numbered 1..n under each parent, and only the moved level is renumbered. The global position sort
+      // every reader applies is stable, so it keeps each level's order without knowing about levels:
+      // siblings are compared only with each other once the tree is built.
+      moveRefNode: function(node, dir) {
+        if (!this.refReorderable || !this.canEditCurrentRef || !node || !node.row) return;
+        var sibs = this._refSiblings(node).map(function(n) { return n.row; });
+        var moved = Reorder.move(sibs, sibs.indexOf(node.row), dir);
+        if (moved) this._writeReorder(this.currentRefTable, Reorder.renumber(moved));
+      },
+      refNodeAtEdge: function(node, dir) {
+        var sibs = this._refSiblings(node), i = sibs.indexOf(node);
+        if (i < 0 && node.row) i = sibs.findIndex(function(n) { return n.row === node.row; });
+        return dir < 0 ? i <= 0 : i >= sibs.length - 1;
       },
       addRefParent: function() {
         var self = this;

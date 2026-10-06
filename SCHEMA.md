@@ -183,10 +183,10 @@ every level and each node takes children of its own.
 - **A parent naming no row, a row parented to itself, and a cycle** all resolve the same way: the row
   becomes a root and the bad edge is cut. A row is never dropped from the tree, and a cycle can never
   reach the renderer.
-- **Deleting a node that still has children is refused** — whether descendants should cascade or be
-  re-parented is undecided, and either guess loses rows. Empty it first.
-- Ordering arrows and `reorderable` stay on the value model: `position` is one global sequence, which
-  says nothing about a deeper tree.
+- **Deleting a node that has children moves them up**: they take its place under its parent, in their
+  own order. Nothing below it is deleted, and one undo puts the node back with its children under it.
+- **With `reorderable: true`, order is per level**: `position` is a node's place among its siblings
+  (1..n under each parent), and the arrows move a node within its own level.
 
 - `parent` and `value` must both be author-facing columns of that table and must differ —
   `validateSchema` says so at load, because a parent column that is not there groups nothing and

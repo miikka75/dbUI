@@ -722,11 +722,15 @@
         <template v-slot:append>
           <v-icon v-if="a.isTranslatableRefTable() && node.value" size="x-small" style="opacity:0.35" class="mr-1">mdi-translate</v-icon>
           <v-icon v-if="locked" size="x-small" style="opacity:0.4" class="mr-1" :title="a.t(node.row ? 'list.locked_value' : 'list.locked_group')">mdi-lock-outline</v-icon>
-          <!-- `position` is one global sequence over the table, which expresses order within ONE level;
-               it has nothing to say about a deeper tree, so the arrows stay on the value model. -->
+          <!-- Under values, a group moves as a block (one global sequence). Under ids, `position` is a
+               node's place among its siblings, so a node moves within its own level only. -->
           <template v-if="a.refReorderable && !node.row">
             <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="a.refGroupAtEdge(node.value,-1)" @click.stop="a.moveRefGroup(node.value,-1)"></v-btn>
             <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="a.refGroupAtEdge(node.value,1)" @click.stop="a.moveRefGroup(node.value,1)"></v-btn>
+          </template>
+          <template v-else-if="a.refReorderable && byId">
+            <v-btn icon="mdi-arrow-up" size="x-small" variant="text" :disabled="a.refNodeAtEdge(node,-1)" :data-testid="'ref-up-' + node.row.id" @click.stop="a.moveRefNode(node,-1)"></v-btn>
+            <v-btn icon="mdi-arrow-down" size="x-small" variant="text" :disabled="a.refNodeAtEdge(node,1)" :data-testid="'ref-down-' + node.row.id" @click.stop="a.moveRefNode(node,1)"></v-btn>
           </template>
           <confirm-x v-if="a.canEditCurrentRef && !locked" :armed="a.isArmed(armKey)" dense class="mr-2" @click.stop="remove()"></confirm-x>
           <v-icon>mdi-chevron-down</v-icon>

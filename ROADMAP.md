@@ -2075,7 +2075,7 @@ One property is worth stating because no test can hold it: a rename onto a name 
 still destroys that name's label and link in the FORWARD direction. The undo does not compound it, as
 above — but that forward clobber is real, unreported, and belongs with *Leftovers*.
 
-### `tree` — depth *(landed: the editor's recursion and an id-keyed store; delete semantics and ordering open)*
+### `tree` — depth *(landed: the editor's recursion, an id-keyed store, delete that moves children up, and per-level order)*
 
 Hierarchies of arbitrary depth. Two halves, and they are worth pricing apart, because one was nearly
 free and the other is a data migration: the screen that RENDERS depth, and the store that can HOLD it.
@@ -2218,6 +2218,16 @@ were not, because an id-keyed lookup renders no arrows to serve. 5 and 6 stay op
 6. **Ordering changes shape.** `position` is numbered globally across the table (`moveRefGroup`
    renumbers every row, which is why `moveRefChild` renumbers globally too). With depth, order is a
    per-parent fact, and a global sequence stops expressing it.
+
+*5 and 6 LANDED.* **Delete moves the children up**: they take the deleted node's place among its
+siblings, in their own order. Cascading would take rows somebody can still see, and moving them up loses
+nothing. The parent writes, the renumbering of that level and the delete are one `Undo.action`, so one
+undo restores the node, its children's parent and every position it shifted (asserted against the
+backend, not the cache). **Order is per level** under `by: "id"`: `position` means a node's place among
+its siblings, numbered 1..n under each parent, and `moveRefNode` renumbers only the level it moved in.
+The readers needed no change. `_catalogueRows` sorts by position globally, and that sort is stable,
+so once the tree is built each level keeps its own order. `_refGroupRows`/`moveRefGroup` stay on the
+value model, where a global sequence is still what a group means.
 7. **No new access primitive, and nothing in the rules layers.** A self-referencing column is a plain
    column; rows are rows. Worth stating because it is the one place this feature is cheaper than it
    looks.
