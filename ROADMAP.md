@@ -1227,7 +1227,9 @@ a `computed.lookup` — miss one and the badge tells someone their live catalogu
 what can be PROVEN unreferenced, and stay silent when unsure. The badge is allowed to say nothing; it is
 not allowed to be wrong.
 
-*The badge LANDED*, and the fail-safe rule decided its shape. It does not enumerate the paths above:
+*The badge LANDED*, and the fail-safe rule decided its shape. (Drawn since as the name in the warning colour plus an
+unlinked icon, with "not referenced" as the icon's tooltip and accessible name rather than visible text: colour
+is still not the only channel, the icon is the second one.) It does not enumerate the paths above:
 `leftovers.js` treats a name as referenced if it occurs as a whole word in ANY string, key or value, of
 the schema document (minus the `tables` map's own keys, which declare rather than refer), the loaded
 views, page bodies and folder config. Enumerating would miss the per-column-name list resolver, where a

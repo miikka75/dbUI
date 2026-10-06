@@ -189,7 +189,11 @@ test.describe('Lists management', () => {
     await page.reload();
     await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
     await page.locator('.v-navigation-drawer .v-list-item').filter({ hasText: /lookup|tab\.lookup/ }).click();
-    await expect(page.locator('[data-testid="leftover-list-retired_terms"]')).toBeVisible();
+    const mark = page.locator('[data-testid="leftover-list-retired_terms"]');
+    await expect(mark).toBeVisible();
+    // No visible words: an icon whose tooltip and accessible name carry them, beside the name in the warning colour.
+    await expect(mark).toHaveAttribute('aria-label', 'list.not_referenced');
+    await expect(mark.locator('xpath=preceding-sibling::span[1]')).toHaveClass(/text-warning/);
     for (const live of ['status', 'assigned_to', 'crew']) await expect(page.locator('[data-testid="leftover-list-' + live + '"]')).toHaveCount(0);
   });
 
