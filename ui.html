@@ -905,7 +905,10 @@
             <section-toggle v-model:collapsed="a.settings._collapseCsp" :title="a.t('settings.csp_reports')" data-testid="csp-section-toggle"></section-toggle>
             <div v-show="!a.settings._collapseCsp" class="ml-5" data-testid="csp-body">
               <div class="d-flex align-center flex-wrap mb-2" style="gap:8px">
-                <v-text-field :model-value="a.cspLog.token" @change="e => a.setCspToken(e.target.value)" type="password" autocomplete="off"
+                <v-text-field :model-value="a.cspLog.token" @change="e => a.setCspToken(e.target.value)"
+                              :type="a.cspLog.show ? 'text' : 'password'" autocomplete="off"
+                              :append-inner-icon="a.cspLog.show ? 'mdi-eye-off' : 'mdi-eye'"
+                              @click:append-inner="a.cspLog.show = !a.cspLog.show"
                               :label="a.t('settings.csp_token')" variant="outlined" density="compact" hide-details
                               style="max-width:320px" data-testid="csp-token"></v-text-field>
                 <v-btn variant="outlined" size="small" prepend-icon="mdi-refresh" :loading="a.cspLog.busy" :disabled="!a.cspLog.token"
