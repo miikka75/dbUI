@@ -1056,7 +1056,7 @@ function createVueApp() {
       // there), page bodies edited in the app, and the folder config.
       leftoverCorpus: function() {
         var doc = this.schemaData || {};
-        return Leftovers.corpus([doc, VIEWS, this.pageCache, this.appConfig], [doc.tables || {}]);
+        return Leftovers.corpus([doc, VIEWS, this.pageCache, this.appConfig], [doc.tables || {}], [doc.views || [], VIEWS]);
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',

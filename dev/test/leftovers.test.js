@@ -88,3 +88,36 @@ describe('leftovers.js — inventory', () => {
     assert.deepEqual(by('translation'), ['field.retired_col:1', 'list.dead_ns.x:1', 'list.people.carl:1', 'view.dropped:2']);
   });
 });
+
+describe('leftovers.js — a view\'s own column names are not references', () => {
+  // The bishopric's admin_bishopric groups its rows under a column it names `callings`, built from
+  // `responsible` and `presiding`; no table declares a `callings` column, so the old `callings` list is
+  // read by nothing. A whole-word search counted the view's grouping name as a reference to it.
+  const doc = {
+    tables: {
+      agenda: { columns: [{ name: 'responsible', type: 'select', list: 'ref_callings' }, { name: 'status', type: 'select' }] },
+      ref_callings: { isLookup: true, columns: [{ name: 'calling', type: 'text' }] }
+    },
+    views: [{
+      name: 'board', sources: ['agenda'], defaultSort: 'callings',
+      groupBy: { column: 'callings', from: ['responsible'], filter: { status: { matchList: 'leads' } } },
+      columns: ['callings', 'status',
+        { name: 'points', computed: { lookup: { table: 'ref_callings', match: 'responsible', field: 'calling' } } },
+        { sources: ['agenda'], filterBy: { responsible: 'callings', kind: { matchList: 'kinds' } }, afterColumn: 'callings' }]
+    }]
+  };
+  const text = Leftovers.corpus([doc], [doc.tables], [doc.views]);
+  const unref = (n) => Leftovers.unreferenced(n, text);
+
+  it('a name a view only groups, sorts, lists, filters by or places after is unreferenced', () => {
+    assert.equal(unref('callings'), true);
+    assert.equal(unref('points'), true);
+  });
+  it('what those positions point AT still counts: the table column, its list, and a matchList anywhere', () => {
+    for (const n of ['responsible', 'status', 'ref_callings', 'leads', 'kinds']) assert.equal(unref(n), false, n);
+  });
+  it('outside a view the same positions are walked as before', () => {
+    const t = Leftovers.corpus([{ x: { defaultSort: 'callings' } }], [], []);
+    assert.equal(Leftovers.unreferenced('callings', t), false);
+  });
+});
