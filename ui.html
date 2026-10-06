@@ -905,9 +905,10 @@
             <section-toggle v-model:collapsed="a.settings._collapseCsp" :title="a.t('settings.csp_reports')" data-testid="csp-section-toggle"></section-toggle>
             <div v-show="!a.settings._collapseCsp" class="ml-5" data-testid="csp-body">
               <div class="d-flex align-center flex-wrap mb-2" style="gap:8px">
-                <v-text-field :model-value="a.cspLog.token" @change="e => a.setCspToken(e.target.value)" type="password" autocomplete="off"
-                              :label="a.t('settings.csp_token')" variant="outlined" density="compact" hide-details
-                              style="max-width:320px" data-testid="csp-token"></v-text-field>
+                <!-- One field: paste the token here, copy it from here. After a rotation it holds the new token,
+                     unmasked once so the change is visible. -->
+                <copy-field editable secret v-model:reveal="a.cspLog.show" :value="a.cspLog.token" @change="v => a.setCspToken(v)"
+                            :label="a.t('settings.csp_token')" style="max-width:360px" data-testid="csp-token"></copy-field>
                 <v-btn variant="outlined" size="small" prepend-icon="mdi-refresh" :loading="a.cspLog.busy" :disabled="!a.cspLog.token"
                        data-testid="csp-read" @click="a.readCspLog()">{{ a.t('btn.refresh') }}</v-btn>
                 <!-- Two presses: the old token stops opening the log, for every admin holding it. -->
@@ -915,7 +916,6 @@
                              :disabled="!a.cspLog.token || a.cspLog.busy" data-testid="csp-rotate"
                              @click="a.isArmed('csprotate') ? a.rotateCspToken() : a.armConfirm('csprotate')"></confirm-btn>
               </div>
-              <copy-field v-if="a.cspLog.rotated" :value="a.cspLog.rotated" class="mb-2" style="font-size:0.78rem;max-width:560px" data-testid="csp-rotated"></copy-field>
               <v-alert v-if="a.cspLog.error" type="warning" variant="tonal" density="compact" class="mb-2" data-testid="csp-error">{{ a.cspLog.error }}</v-alert>
               <template v-if="a.cspLog.result">
                 <v-table v-if="a.cspLog.result.site.length" density="compact" class="mb-2" data-testid="csp-site">

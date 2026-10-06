@@ -330,7 +330,7 @@ function createVueApp() {
       // files (anything there is every visitor's), so an admin pastes it once per browser, the way the
       // Supabase URL and key arrive. `result` is CspClient.summarize's { site, extensions, total }.
       cspLog: { token: (function() { try { return localStorage.getItem('app_csp_token') || ''; } catch (e) { return ''; } })(),
-                result: null, busy: false, error: '', rotated: '' },
+                result: null, busy: false, error: '', show: false },
       exampleUpdateChecked: false,
       firestoreRules: '',
       firebaseConfigInput: (function() { var c = Databases.config('firebase'); return c ? JSON.stringify(c) : ''; })(),
@@ -1050,7 +1050,7 @@ function createVueApp() {
       },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
@@ -2597,24 +2597,30 @@ function createVueApp() {
       cspEndpoint: function() { return CspClient.endpointFrom(document); },
       setCspToken: function(v) {
         this.cspLog.token = (v || '').trim();
-        this.cspLog.result = null; this.cspLog.error = ''; this.cspLog.rotated = '';
+        this.cspLog.result = null; this.cspLog.error = '';
         try { if (this.cspLog.token) localStorage.setItem('app_csp_token', this.cspLog.token); else localStorage.removeItem('app_csp_token'); } catch (e) {}
       },
       // Rotate the read token, the way Regenerate replaces a calendar feed's link: the old one stops
-      // working at once. The new one is kept in this browser like a pasted one, and shown ONCE for
-      // handing to the other admins -- nothing can read it back from the collector afterwards.
+      // working at once. The new one replaces the old in the token field and is kept in this browser like
+      // a pasted one; the field is unmasked so the change is visible, and its copy icon is how it reaches
+      // the other admins -- nothing can read it back from the collector afterwards.
       rotateCspToken: function() {
         var self = this, log = this.cspLog;
         if (!this.cspEndpoint() || !log.token) return Promise.resolve(null);
         log.busy = true; log.error = '';
         return CspClient.rotateToken(this.cspEndpoint(), log.token).then(function(next) {
           self.setCspToken(next);
-          log.rotated = next;
+          log.show = true;
           return next;
         }, function(e) {
           log.error = e && e.status === 403 ? self.t('settings.csp_bad_token') : self.t('settings.csp_read_failed') + (e && e.status ? ' (' + e.status + ')' : '');
           return null;
-        }).then(function(r) { log.busy = false; return r; });
+        }).then(function(r) {
+          log.busy = false;
+          // The new token cleared the table; read it again so the admin sees the reports without a second click.
+          if (r) self.readCspLog();
+          return r;
+        });
       },
       // On demand, never polled: the collector's counters aggregate, so nothing is lost by reading late.
       readCspLog: function() {
@@ -8384,14 +8390,36 @@ function createVueApp() {
   // ---- Shared UI elements. One definition each, used everywhere the element appears; CLAUDE.md
   // ("UI conventions") lists them, and dev/test/ui-conventions.test.js fails on a hand-made copy. ----
 
-  // A one-line value to copy: a read-only field with the copy icon INSIDE it, the way "Share the tool's
-  // address" has always worked. style / class / name / data-testid fall through to the field.
+  // A one-line value to copy: a field with the copy icon INSIDE it, the way "Share the tool's address" has
+  // always worked. style / class / name / data-testid fall through to the field.
+  //
+  // Read-only by default. `editable` makes it a field you can also type or paste into, emitting `change`
+  // with the value when it is committed (blur / Enter), as a v-text-field's native change does. `secret`
+  // masks it and puts an eye beside the copy icon; whether it is shown is the caller's (`v-model:reveal`),
+  // so the caller can show a value it has just replaced. A token is the case: the field you paste it into
+  // is the field you copy it from, and one field is what there is to read.
   app.component('copy-field', {
-    props: { value: { type: String, default: '' }, label: { type: String, default: undefined } },
+    props: { value: { type: String, default: '' }, label: { type: String, default: undefined },
+             editable: Boolean, secret: Boolean, reveal: Boolean },
+    emits: ['change', 'update:reveal'],
     inject: ['uiHost'],
-    methods: { copy: function() { this.uiHost.copy(this.value); } },
-    template: '<v-text-field :model-value="value" :label="label" readonly density="compact" variant="outlined" hide-details'
-      + ' append-inner-icon="mdi-content-copy" @click:append-inner="copy()"></v-text-field>'
+    computed: {
+      masked: function() { return this.secret && !this.reveal; },
+      eyeLabel: function() { return this.masked ? this.t('btn.show') : this.t('btn.hide'); }
+    },
+    methods: {
+      copy: function() { this.uiHost.copy(this.value); },
+      t: function(k) { return this.uiHost.t(k); }
+    },
+    template: '<v-text-field :model-value="value" :label="label" :readonly="!editable" :type="masked ? \'password\' : \'text\'"'
+      + ' autocomplete="off" density="compact" variant="outlined" hide-details @change="e => $emit(\'change\', e.target.value)">'
+      + '<template v-slot:append-inner>'
+      +   '<v-icon v-if="secret" :icon="masked ? \'mdi-eye\' : \'mdi-eye-off\'" role="button" tabindex="0" class="mr-1"'
+      +   ' :title="eyeLabel" :aria-label="eyeLabel"'
+      +   ' @click="$emit(\'update:reveal\', masked)" @keydown.enter.prevent="$emit(\'update:reveal\', masked)"></v-icon>'
+      +   '<v-icon icon="mdi-content-copy" role="button" tabindex="0" :title="t(\'btn.copy\')" :aria-label="t(\'btn.copy\')"'
+      +   ' @click="copy()" @keydown.enter.prevent="copy()"></v-icon>'
+      + '</template></v-text-field>'
   });
 
   // The two-press icon on a row: delete (the default) or archive. It only DRAWS the state -- the caller's
