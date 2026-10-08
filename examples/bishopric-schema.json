@@ -169,13 +169,22 @@
             },
             "list": "ref_callings",
             "type": "select",
-            "valueCol": "slug"
+            "valueCol": "slug",
+            "listFilter": {
+              "organization": "bishopric"
+            }
           },
           {
             "name": "responsible",
             "type": "select",
             "list": "ref_callings",
-            "valueCol": "slug"
+            "valueCol": "slug",
+            "listFilter": {
+              "$or": [
+                { "organization": "bishopric" },
+                { "organization": "ward" }
+              ]
+            }
           },
           {
             "name": "opening_prayer",
@@ -272,7 +281,13 @@
             "name": "responsible",
             "type": "select",
             "list": "ref_callings",
-            "valueCol": "slug"
+            "valueCol": "slug",
+            "listFilter": {
+              "$or": [
+                { "organization": "bishopric" },
+                { "organization": "ward" }
+              ]
+            }
           },
           {
             "name": "item",
@@ -310,7 +325,13 @@
             "name": "responsible",
             "list": "ref_callings",
             "type": "select",
-            "valueCol": "slug"
+            "valueCol": "slug",
+            "listFilter": {
+              "$or": [
+                { "organization": "bishopric" },
+                { "organization": "ward" }
+              ]
+            }
           }
         ]
       },
@@ -377,7 +398,13 @@
             "name": "responsible",
             "list": "ref_callings",
             "type": "select",
-            "valueCol": "slug"
+            "valueCol": "slug",
+            "listFilter": {
+              "$or": [
+                { "organization": "bishopric" },
+                { "organization": "ward" }
+              ]
+            }
           },
           {
             "name": "expires",
@@ -460,7 +487,13 @@
             "name": "responsible",
             "list": "ref_callings",
             "type": "select",
-            "valueCol": "slug"
+            "valueCol": "slug",
+            "listFilter": {
+              "$or": [
+                { "organization": "bishopric" },
+                { "organization": "ward" }
+              ]
+            }
           },
           {
             "name": "notes",

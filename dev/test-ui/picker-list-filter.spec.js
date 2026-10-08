@@ -53,3 +53,32 @@ test('the picker offers only matching rows, keeps a stored value, and the sort i
   expect(r.bishopLocked).toBe(true);           // a row whose `kind` is the pinned value
   expect(r.priestLockedByValue).toBe(false);   // only the condition's values are pinned, not every option
 });
+
+// The bishopric bundle as shipped: presiding is the bishopric, responsible the bishopric and ward roles.
+test('the bishopric bundle narrows presiding and responsible, and validates clean', async ({ page }) => {
+  test.setTimeout(60000);   // fifty-odd catalogue rows seeded one request at a time, then the bundle's boot
+  const bundle = require('../../examples/bishopric-schema.json');
+  await page.request.post('/api/resetData');
+  await page.request.post('/api/saveSchema', { data: { schema: bundle.schema } });
+  for (const data of bundle.tables.ref_callings) await page.request.post('/api/putRow', { data: { tableId: 'ref_callings', tab: 'active', data } });
+  await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+  await page.goto('/');
+  await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+  // The bundle boots lazily, so ask for the catalogue the way a view that needs it would.
+  await page.evaluate(() => new Promise((done) => appInstance._ensureCached(['ref_callings'], done)));
+  await page.waitForFunction(() => Array.isArray(appInstance.dataCache.ref_callings) && appInstance.dataCache.ref_callings.length > 10, { timeout: 15000 });
+  const r = await page.evaluate(() => {
+    const a = window.appInstance, rows = a.dataCache.ref_callings;
+    const orgOf = (v) => (rows.find((x) => x.slug === v || (x.organization + '_' + x.calling) === v) || {}).organization;
+    const orgs = (col) => [...new Set(a.getListOptions(col, null, {}).map((o) => orgOf(o.value)))].sort();
+    return {
+      presiding: orgs('presiding'), responsible: orgs('responsible'),
+      all: a.getListOptions('organization', null, {}).length,
+      errors: (window.validateSchema() || []).filter((e) => /listFilter/.test(e))
+    };
+  });
+  expect(r.presiding).toEqual(['bishopric']);
+  expect(r.responsible).toEqual(['bishopric', 'ward']);
+  expect(r.all).toBeGreaterThan(10);   // the organization pickers are not narrowed
+  expect(r.errors).toEqual([]);
+});
