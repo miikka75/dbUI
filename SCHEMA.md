@@ -262,7 +262,7 @@ This list is **closed** — a property not on it is never read, and `validateSch
 | `table` | Reference table name (for `ref`) |
 | `valueCol` | Column used as value (for `ref`) |
 | `filterBy` | Filter ref options by another column (for `ref`) |
-| `offer` | For a column whose `list` names a **lookup table**: which of its rows the picker offers, as a condition over the lookup's columns (`"offer": { "kind": "position" }`, with `$and`/`$or`). Narrows the **picker only**: a value already stored keeps rendering and sorting, and stays among its own cell's options, so a historical row never blanks. A column the lookup lacks, or a `list` that is not a lookup, is a load-time error |
+| `listFilter` | For a column whose `list` names a **lookup table**: which of its rows the picker offers, as a condition over the lookup's columns (`"listFilter": { "kind": "position" }`, with `$and`/`$or`). Narrows the **picker only**: a value already stored keeps rendering and sorting, and stays among its own cell's options, so a historical row never blanks. The values it names are **pinned** like a view filter's: the lookup rows carrying them cannot be renamed or deleted in the Lookup tab, since that would silently empty the picker. A column the lookup lacks, or a `list` that is not a lookup, is a load-time error |
 
 ```json
 "tasks": {
@@ -2236,7 +2236,7 @@ price — before, a parallel free-string list held task names that nothing could
 
   Same key, same meaning as on a `ref`. A blank cell in a HANDLE dimension is derived rather than
   skipped, so blankness no longer keeps a row out of the picker. To keep a row in the catalogue without
-  offering it (an ordination in a column that wants positions), give the column an `offer` condition.
+  offering it (an ordination in a column that wants positions), give the column a `listFilter` condition.
   `valueCol` naming a column the lookup does not have, or a `list:` that
   is a plain list, is a load-time error: both would fall back silently to the group dimension, which
   looks like a working picker full of the wrong values.

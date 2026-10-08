@@ -109,13 +109,13 @@ describe('Columns.vocabularyErrors — against what the repo actually ships', ()
   }
 });
 
-describe('column `offer` — narrowing a lookup-backed picker', () => {
+describe('column `listFilter` — narrowing a lookup-backed picker', () => {
   const Columns = require('../../columns');
-  const tables = (offer, list = 'ref_callings') => ({
+  const tables = (listFilter, list = 'ref_callings') => ({
     ref_callings: { isLookup: true, columns: { org: { type: 'text' }, calling: { type: 'text' }, kind: { type: 'text' } } },
-    agenda: { columns: { presiding: { type: 'select', list, offer } } }
+    agenda: { columns: { presiding: { type: 'select', list, listFilter } } }
   });
-  const errs = (t) => Columns.vocabularyErrors(t).filter((e) => /`offer`/.test(e));
+  const errs = (t) => Columns.vocabularyErrors(t).filter((e) => /`listFilter`/.test(e));
 
   it('a condition over the lookup\'s columns is clean, through $and/$or', () => {
     assert.deepEqual(errs(tables({ $or: [{ kind: 'position' }, { org: 'Bishopric' }] })), []);

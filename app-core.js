@@ -3866,7 +3866,7 @@ function createVueApp() {
       // free-string list beside it that nothing can score. `translatableLists` already accepts a lookup
       // table name for the same reason. The option VALUE is the lookup's GROUP dimension (see below);
       // the rest of the row is reference data.
-      // `where` (a column's `offer`) narrows which ROWS contribute -- the picker's concern only; the sort
+      // `where` (a column's `listFilter`) narrows which ROWS contribute -- the picker's concern only; the sort
       // and the labels call this without it, so a value nothing offers any more still sorts and renders.
       lookupListValues: function(name, valueCol, where) {
         if (!name || !SCHEMA[name] || !SCHEMA[name].isLookup) return null;
@@ -3931,7 +3931,7 @@ function createVueApp() {
         });
         return out;
       },
-      // `item`, when given, is the row being edited: under an `offer` narrowing its CURRENT value stays
+      // `item`, when given, is the row being edited: under a `listFilter` narrowing its CURRENT value stays
       // among the options even when the narrowing excludes it. Values are stored as text, so a historical
       // agenda holds whoever actually presided, and a picker that cannot show the cell's own value is a
       // cell that silently blanks the next time someone touches it.
@@ -3940,10 +3940,10 @@ function createVueApp() {
         var listName = altList || this.colIsList(col);
         // The alternate list of a `listSwitch` is a list of its own, so it never carries the column's
         // lookup dimension -- passing it through would draw the toggle's options from the wrong table.
-        var offer = altList ? null : Columns.colOffer(SCHEMA, col);
-        var fromLookup = this.lookupListValues(listName, altList ? null : Columns.colListValueCol(SCHEMA, col), offer);
+        var narrow = altList ? null : Columns.colListFilter(SCHEMA, col);
+        var fromLookup = this.lookupListValues(listName, altList ? null : Columns.colListValueCol(SCHEMA, col), narrow);
         var items = fromLookup || (listName && this.listsCache[listName] ? this.listsCache[listName] : []);
-        if (fromLookup && offer && item) {
+        if (fromLookup && narrow && item) {
           var cur = item[col], have = {};
           items.forEach(function(v) { have[v] = 1; });
           items = items.concat((Array.isArray(cur) ? cur : [cur]).filter(function(v) { return v != null && v !== '' && !have[v]; }));

@@ -2316,7 +2316,7 @@ instance, and renders a `shown` computed that is `rows` untouched until a header
 `Rows.sortByCol` over them — so an embedded `ref` column sorts in the same catalogue order as the grid.
 All three table bodies an embed can draw (the editable table, the read-only spec table, and an inline
 `{{self}}` table) have it, with no arrow — no sortable header in the app shows one any more; `aria-sort` carries the direction on all of them. The card, list and chip layouts have no header row and keep `defaultSort`.
-### Narrowing a lookup-backed picker — which rows are OFFERED *(landed: the column shape, as `offer`)*
+### Narrowing a lookup-backed picker — which rows are OFFERED *(landed: the column shape, as `listFilter`)*
 
 A `select` whose `list:` names a lookup offers every row of it. `lookupListValues` sweeps
 `dataCache[name]`, derives each row's value in the asked-for dimension, dedupes, and returns the lot;
@@ -2365,14 +2365,16 @@ Cost: a predicate and its wiring into one function (`lookupListValues`), Node-te
 bishopric catalogue; plus, for the row shape, an editor affordance — which is the larger half, and the
 reason to prefer the column shape unless the exclusion is genuinely a property of the row.
 
-*LANDED as the column shape.* `"offer": { <condition> }` on a column whose `list:` names a lookup; the
+*LANDED as the column shape.* `"listFilter": { <condition> }` on a column whose `list:` names a lookup; the
 condition is the ordinary filter language over the lookup's rows, applied in `lookupListValues` (both
 dimension branches) only when the PICKER asks. `columnValueOrder` and the labels call it without one,
 so the invariant holds by construction: a stored value still sorts and renders. The cell's own current
-value is appended to its options when the narrowing excludes it. `Columns.vocabularyErrors` refuses an
-`offer` on a non-lookup list and a condition naming a column the lookup lacks. The bishopric example is
+value is appended to its options when the narrowing excludes it. `Columns.vocabularyErrors` refuses a
+`listFilter` on a non-lookup list and a condition naming a column the lookup lacks. The bishopric example is
 NOT changed: its catalogue has no column that says which rows are positions, and choosing which callings
-may preside is that deployment's call.
+may preside is that deployment's call. Named `listFilter` rather than the first draft's `offer`, because it pairs with the `list` it
+sits beside; and the values it names are pinned in `forEachFilterListValue` like a view filter's, so
+renaming one in the Lookup tab cannot silently empty the picker.
 
 ### A linked position that still says which position it is *(landed on screen: the role beside the name, not in it)*
 

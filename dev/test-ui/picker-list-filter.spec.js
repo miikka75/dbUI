@@ -1,4 +1,4 @@
-// picker-offer.spec.js — `offer` narrows which rows of a lookup a `list:` picker OFFERS, and nothing else.
+// picker-list-filter.spec.js — `listFilter` narrows which rows of a lookup a `list:` picker OFFERS, and nothing else.
 //
 // The invariant the narrowing must not break: a value a row already stores keeps rendering, keeps its
 // place in the sort, and stays among its own cell's options. A historical agenda holds whoever actually
@@ -11,7 +11,7 @@ const SCHEMA = {
     ref_callings: { isLookup: true, hierarchy: false, columns: [{ name: 'calling', type: 'text' }, { name: 'kind', type: 'text' }] },
     agenda: { columns: [
       { name: 'title', type: 'text' },
-      { name: 'presiding', type: 'select', list: 'ref_callings', valueCol: 'calling', offer: { kind: 'position' } },
+      { name: 'presiding', type: 'select', list: 'ref_callings', valueCol: 'calling', listFilter: { kind: 'position' } },
       { name: 'anyone', type: 'select', list: 'ref_callings', valueCol: 'calling' }
     ] }
   },
@@ -36,7 +36,12 @@ test('the picker offers only matching rows, keeps a stored value, and the sort i
       historical: vals(a.getListOptions('presiding', null, { presiding: 'Priest' })),
       unnarrowed: vals(a.getListOptions('anyone', null, { anyone: '' })),
       order: a.columnValueOrder('presiding'),
-      problems: a.validateSchema ? (a.validateSchema() || []).filter((e) => /offer/.test(e)) : []
+      problems: a.validateSchema ? (a.validateSchema() || []).filter((e) => /listFilter/.test(e)) : [],
+      // The value the condition names is pinned, exactly as a view filter's is: renaming `position` in the
+      // Lookup tab would silently empty the picker, so rows carrying it are locked against rename and delete.
+      lockedPosition: !!(a.lockedListValues.ref_callings || {}).position,
+      bishopLocked: (function () { a.currentRefTable = 'ref_callings'; return a.isLockedRefRow(a.dataCache.ref_callings.find((x) => x.id === 'c1')); })(),
+      priestLockedByValue: !!(a.lockedListValues.ref_callings || {}).Priest
     };
   });
   expect(r.fresh).toEqual(['Bishop', 'Counselor']);
@@ -44,4 +49,7 @@ test('the picker offers only matching rows, keeps a stored value, and the sort i
   expect(r.unnarrowed).toEqual(['Bishop', 'Priest', 'Counselor']);
   expect(r.order).toEqual(['Bishop', 'Priest', 'Counselor']);
   expect(r.problems).toEqual([]);
+  expect(r.lockedPosition).toBe(true);
+  expect(r.bishopLocked).toBe(true);           // a row whose `kind` is the pinned value
+  expect(r.priestLockedByValue).toBe(false);   // only the condition's values are pinned, not every option
 });
