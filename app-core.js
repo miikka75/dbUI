@@ -1756,6 +1756,10 @@ function createVueApp() {
       },
       // Board: add a blank card pre-stamped with a lane value (like addRow, but prefilling board.lane so
       // the card lands in the clicked lane). Pushes into currentData so the board re-renders immediately.
+      // An EMBEDDED board's rows: the same embedRows path every other {{view:x}} embed takes, since
+      // currentData belongs to the page hosting it. (board-view asked for this long before anything
+      // dispatched a board as an embed, so it never existed and the lanes would have stayed empty.)
+      boardRowsFor: function(name) { return this.embedRows('view', name); },
       boardAddInLane: function(name, laneKey) {
         var v = VIEWS[name]; if (!v || !v.board || !this.canMutateRows) return;
         var primary = v.sources[0], prefill = {}; prefill[v.board.lane] = laneKey;
@@ -2731,6 +2735,9 @@ function createVueApp() {
       isRsvpName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'rsvp'; },
       isStatsName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'stats'; },
       isScanName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'scan'; },
+      isBoardName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'board'; },
+      isFormName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'form'; },
+      isTimelineName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'timeline'; },
       // Resolve one scanned or typed code and, when it resolves to a row, write it. Returns the outcome
       // for the view to SHOW -- see scan.js: silence is the one answer a scanner must never get.
       //
@@ -7799,6 +7806,9 @@ function createVueApp() {
       isRsvp: function() { return this.type === 'view' && !!(appInstance && appInstance.isRsvpName(this.name)); },
       isStats: function() { return this.type === 'view' && !!(appInstance && appInstance.isStatsName(this.name)); },
       isScan: function() { return this.type === 'view' && !!(appInstance && appInstance.isScanName(this.name)); },
+      isBoard: function() { return this.type === 'view' && !!(appInstance && appInstance.isBoardName(this.name)); },
+      isForm: function() { return this.type === 'view' && !!(appInstance && appInstance.isFormName(this.name)); },
+      isTimeline: function() { return this.type === 'view' && !!(appInstance && appInstance.isTimelineName(this.name)); },
       // A doc-view embedded inside another page (only via the no-spec page path; the spec path pre-tags kind='doc').
       isDoc: function() { return !this.spec && this.type === 'view' && !!(appInstance && appInstance.rendersOwnProse(this.name)); },
       // `kind` HERE is a rendering mode -- which embed body to draw -- and is deliberately not the
@@ -7808,11 +7818,10 @@ function createVueApp() {
       // token draw the grid rather than recurse. So `doc` is not a synonym for `page` and must not be
       // renamed into one. dev/test/view-kind.test.js pins both vocabularies and the gap between them.
       //
-      // board, form and timeline have no branch in the template below, so they fall through to `data`:
-      // embedding a kanban renders a table of its rows. All three components DO accept an `embed` prop,
-      // so the gap is in the dispatch, not in them -- recorded in ROADMAP.md and pinned by that same
-      // test, so it stays a known answer rather than a surprise.
-      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : this.isRsvp ? 'rsvp' : this.isStats ? 'stats' : this.isScan ? 'scan' : this.isDoc ? 'doc' : 'data'); },
+      // board, form and timeline render as THEMSELVES, each with its own state, the way the other kinds
+      // do: an embedded board keeps drag between lanes, an embedded form submits to its own table, and
+      // an embedded timeline draws its own date window from its own config.
+      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : this.isRsvp ? 'rsvp' : this.isStats ? 'stats' : this.isScan ? 'scan' : this.isBoard ? 'board' : this.isForm ? 'form' : this.isTimeline ? 'timeline' : this.isDoc ? 'doc' : 'data'); },
       // Render blocks for a doc embed. Spec path carries its own blocks (built from the schema seed by
       // resolveEmbed); the page path builds them here from the ACCESS-GATED body: hidden entirely unless
       // canAccessPage passes, then the server-filtered pageCache body (seed only as a pre-load fallback).
@@ -7911,6 +7920,9 @@ function createVueApp() {
       + '<rsvp-view v-else-if="kind===\'rsvp\'" :name="calName" :embed="true"></rsvp-view>'
       + '<stats-view v-else-if="kind===\'stats\'" :name="calName" :embed="true"></stats-view>'
       + '<scan-view v-else-if="kind===\'scan\'" :name="calName" :embed="true"></scan-view>'
+      + '<board-view v-else-if="kind===\'board\'" :name="calName" :embed="true"></board-view>'
+      + '<form-view v-else-if="kind===\'form\'" :name="calName" :embed="true"></form-view>'
+      + '<timeline-view v-else-if="kind===\'timeline\'" :name="calName" :embed="true"></timeline-view>'
       + '<template v-else-if="kind===\'doc\'">'
       + '<div v-if="canEditDoc" class="d-flex align-center"><v-spacer></v-spacer>'
       + '<v-btn size="x-small" variant="text" density="comfortable" :icon="editing ? \'mdi-eye\' : \'mdi-pencil\'" :title="editing ? t(\'btn.preview\') : t(\'btn.edit\')" @click="toggleDocEdit()" data-testid="doc-edit"></v-btn>'
@@ -9460,14 +9472,21 @@ function createVueApp() {
       // there is one escape away from a silent parse break.
       searchLabel: function() { return appInstance.t('btn.search'); },
       laneCol: function() { return this.cfg.lane; },
-      canEdit: function() { return !this.embed && appInstance.canMutateRows; },
+      // Embedded, the board answers for ITS view, not for whatever screen hosts it: the root's
+      // canMutateRows / currentSelfService describe the host. So an embed asks the per-view questions
+      // (viewReadonly, embedSelfServeTable) that data-cell already asks for an embedded cell.
+      selfServe: function() {
+        var a = appInstance;
+        if (this.embed) return a.embedSelfServeTable('view', this.viewName) || null;
+        return a.currentSelfService ? a.selfServeTable : null;
+      },
+      canEdit: function() { return this.embed ? (!appInstance.viewReadonly(this.viewName) || !!this.selfServe) : appInstance.canMutateRows; },
       // Moving a card writes the lane column. On a self-service table that is an owner-scoped write, so
       // a card is only movable if `ownerWritable` lets its owner set the lane — otherwise the drop would
       // be refused by the rules and the card would snap back unexplained.
       canMoveCards: function() {
-        var a = appInstance;
-        if (!a.currentSelfService) return true;
-        return a.ownerCanWrite(a.selfServeTable, this.laneCol);
+        var st = this.selfServe;
+        return !st || appInstance.ownerCanWrite(st, this.laneCol);
       },
       // The lane a member who may NOT write the lane column would land in by adding — the column's own
       // `default`. On such a board the per-lane `+` is offered there and nowhere else (see canAddInLane),
@@ -9482,7 +9501,7 @@ function createVueApp() {
       // than sorting a list), so the runtime search has to be applied here too -- otherwise typing a
       // name would narrow every view kind except this one.
       rows: function() {
-        if (this.embed) return appInstance.boardRowsFor ? appInstance.boardRowsFor(this.viewName) : [];
+        if (this.embed) return appInstance.boardRowsFor(this.viewName);
         var rows = appInstance.currentData || [];
         return (appInstance.searchable && appInstance.searchTerm)
           ? Rows.searchRows(rows, appInstance.searchTerm, appInstance.searchCols, appInstance.searchLabeler)
@@ -9558,12 +9577,19 @@ function createVueApp() {
       // canMutateRow per row (see ui.html) — the board did not, so a member saw pencil/archive/delete on
       // every card in the lane, including other people's. Non-self-service boards are unaffected
       // (canMutateRow is true for every row there).
-      canEditCard: function(item) { return this.canEdit && appInstance.canMutateRow(item); },
+      canEditCard: function(item) {
+        if (!this.canEdit) return false;
+        if (!this.embed) return appInstance.canMutateRow(item);
+        var st = this.selfServe;
+        return !st || (appInstance.rowOwnedByMe(item, st) && appInstance.ownerRowWritable(item, st));
+      },
       // Adding into a lane stamps that lane value, so it asks the same question as moving a card there.
       // A member who may not write the lane column still gets the `+`, but only on the lane the column's
       // own default would put them in — the one lane value they are allowed to write.
       canAddInLane: function(laneKey) {
-        if (!this.canEdit || !this.cfg.addInLane) return false;
+        // Adding, like archiving and deleting below, stays on the board's own screen: those go through the
+        // root's CURRENT view, which embedded is the host page, not this board.
+        if (this.embed || !this.canEdit || !this.cfg.addInLane) return false;
         return this.canMoveCards || laneKey === this.defaultLane;
       },
       laneLabel: function(k) { return k === '' ? appInstance.t('board.unassigned') : appInstance.displayValue(this.laneCol, k); },
@@ -9668,8 +9694,8 @@ function createVueApp() {
       + '        <div style="display:flex;align-items:flex-start;gap:4px">'
       + '          <div style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
       + '          <v-btn v-if="canEditCard(item)" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="t(\'btn.edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
-      + '          <confirm-x v-if="canEditCard(item) && hasArchive" :armed="isArchArmed(item)" action="archive" dense density="comfortable" :data-testid="\'board-arch-\'+item.id" @click="archItem(item)"></confirm-x>'
-      + '          <confirm-x v-if="canEditCard(item)" :armed="isDelArmed(item)" dense density="comfortable" :data-testid="\'board-del-\'+item.id" @click="delItem(item)"></confirm-x>'
+      + '          <confirm-x v-if="!embed && canEditCard(item) && hasArchive" :armed="isArchArmed(item)" action="archive" dense density="comfortable" :data-testid="\'board-arch-\'+item.id" @click="archItem(item)"></confirm-x>'
+      + '          <confirm-x v-if="!embed && canEditCard(item)" :armed="isDelArmed(item)" dense density="comfortable" :data-testid="\'board-del-\'+item.id" @click="delItem(item)"></confirm-x>'
       + '          <v-menu v-if="canEditCard(item) && canMoveCards" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
       + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :title="t(\'board.move_to\')" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
       // No heading over the lane list: the menu opens from a button that already carries "move to" as its
