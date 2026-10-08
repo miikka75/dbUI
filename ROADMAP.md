@@ -2365,7 +2365,7 @@ Cost: a predicate and its wiring into one function (`lookupListValues`), Node-te
 bishopric catalogue; plus, for the row shape, an editor affordance — which is the larger half, and the
 reason to prefer the column shape unless the exclusion is genuinely a property of the row.
 
-### A linked position that still says which position it is
+### A linked position that still says which position it is *(landed on screen: the role beside the name, not in it)*
 
 `listLabel` puts the linked account's profile name FIRST, above the `list.<ns>.<value>` translation, for
 a `userlink-name` list. That is the whole point of the source kind: it exists to ask "who is the
@@ -2405,6 +2405,14 @@ fix the cell's missing capacity, so it is a smaller change and a smaller answer.
 
 Cost: the composition and its opt-in are small; the `obscureName` interaction is the part that needs a
 test of its own, and a print check on `meeting_agenda`, which is the densest grid the long form lands in.
+
+*LANDED, as neither shape above.* A third one, decided after the composed form was built (#269, closed)
+and compared: the role goes BESIDE the label rather than into it. A linked option's role is its second
+line in the dropdown (`subtitle`), and a displayed value's role is its tooltip (`list-value`'s `title`),
+both from `listRole`, for every `userlink-name` list with nothing to opt into. `listLabel` is untouched,
+so the one-label rule and `obscureNames` have nothing new to agree on. What it does not do is put the
+role on paper. That was judged unnecessary once #268's `listFilter` had already cut the presiding picker
+to the bishopric, which removed most of the people-and-roles mix the entry started from.
 
 ### `nav.layout: "browse"` — drill-down navigation instead of a drawer *(phases 1–5 landed, #230; 6 not planned)*
 

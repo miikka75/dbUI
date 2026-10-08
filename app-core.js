@@ -3933,7 +3933,11 @@ function createVueApp() {
         // lookup dimension -- passing it through would draw the toggle's options from the wrong table.
         var fromLookup = this.lookupListValues(listName, altList ? null : Columns.colListValueCol(SCHEMA, col));
         var items = fromLookup || (listName && this.listsCache[listName] ? this.listsCache[listName] : []);
-        var result = items.map(function(v) { return { title: self.listLabel(listName, v), value: v }; });
+        var result = items.map(function(v) {
+          var o = { title: self.listLabel(listName, v), value: v }, role = self.listRole(listName, v);
+          if (role) o.subtitle = role;   // a linked position: the person is the title, the role its second line
+          return o;
+        });
         if (this.colIsSorted(col)) result.sort(function(a, b) { return a.title.localeCompare(b.title); });
         return result;
       },
@@ -4034,10 +4038,27 @@ function createVueApp() {
         if (!ns) return val;
         var linked = (this.isUserNameList(ns) && window.ListUsers)
           ? window.ListUsers.nameFor(this.listAvatars, ns, val) : '';
-        if (linked) return linked;
+        return linked || this._valueLabel(ns, val);
+      },
+      _valueLabel: function(ns, val) {
         var key = 'list.' + ns + '.' + val;
         var translated = this.t(key);
         return translated !== key ? translated : val;
+      },
+      // The ROLE a `userlink-name` value names, when the label is showing the person holding it instead:
+      // what the label would have said without the link. '' wherever the label already is the value (an
+      // unlinked position, any other kind of list), so there is nothing to add. Shown BESIDE the label --
+      // a dropdown option's second line, a cell's tooltip -- never inside it: listLabel stays the one
+      // label for the cell and the dropdown, and obscureNames has only the name to abbreviate.
+      listRole: function(ns, val) {
+        if (!ns || !this.isUserNameList(ns) || !window.ListUsers) return '';
+        return window.ListUsers.nameFor(this.listAvatars, ns, val) ? this._valueLabel(ns, val) : '';
+      },
+      // The same for a rendered cell: the namespace resolved exactly as displayValue resolves it.
+      valueRole: function(col, val, nsCol) {
+        var src = nsCol || col, ns = this.listNameForCol(src);
+        if (!ns && this.colIsRef(src)) { var rf = this.colRef(src); ns = rf && rf.table; }
+        return ns ? this.listRole(ns, val) : '';
       },
       // Whether a view obscures person names in `col`. obscureNames: true = all list/multiselect
       // columns (or all area columns for a rotationView); an array = exactly those columns. Display-only.
@@ -7686,6 +7707,7 @@ function createVueApp() {
           colIsDate: function(col) { return vm.colIsDate(col); },
           dateLabel: function(v) { return vm.dateLabel(v); },
           listValuePicture: function(col, val, ns) { return vm.listValuePicture(col, val, ns); },
+          valueRole: function(col, val, ns) { return vm.valueRole(col, val, ns); },
           profilePicture: function(email) { return vm.profilePicture(email); },
           userLabel: function(email) { return vm.userLabel(email); },
           colIsImage: function(col) { return vm.colIsImage(col); },
@@ -8011,6 +8033,8 @@ function createVueApp() {
       colPicker: function(col) { return appInstance.colPicker(col); },
       colListSwitch: function(col) { return appInstance.colListSwitch(col); },
       getListOptions: function(col) { return appInstance.getListOptions(col); },
+      // A dropdown option's second line: the role under a linked person's name (listRole).
+      optionProps: function(o) { return (o && o.subtitle) ? { subtitle: o.subtitle } : {}; },
       // single-select options: the primary honors the listSwitch alt list; the embed uses the plain list.
       listItems: function(col, item) {
         if (this.embed) return appInstance.getListOptions(col);
@@ -8071,21 +8095,21 @@ function createVueApp() {
       +   '<template v-else><list-value :col="col" :value="item[col]" :view-cfg="ownerCfg"></list-value></template>'
       + '</span>'
       + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82"><list-value :col="col" :value="item[col]" :view-cfg="ownerCfg"></list-value></span>'
-      + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col) && !colIsRef(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
-      + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="cellOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
+      + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col) && !colIsRef(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
+      + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="cellOptions(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
       + '<v-btn-toggle v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'toggle\'" :name="col" :model-value="item[col] || \'\'" density="compact" variant="outlined" divided @update:model-value="save(item, col, $event || \'\')">'
       + '<v-btn v-for="o in getListOptions(col)" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
       + '</v-btn-toggle>'
       + '<v-chip-group v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'chips\'" :name="col" :model-value="item[col] || \'\'" @update:model-value="save(item, col, $event || \'\')">'
       + '<v-chip v-for="o in getListOptions(col)" :key="o.value" :value="o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
       + '</v-chip-group>'
-      + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>'
+      + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>'
       + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || t(\'col.switch_list\')">mdi-swap-horizontal</v-icon></template>'
       + '</v-combobox>'
-      + '<v-autocomplete v-else-if="colIsList(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop>'
+      + '<v-autocomplete v-else-if="colIsList(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop>'
       + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || t(\'col.switch_list\')">mdi-swap-horizontal</v-icon></template>'
       + '</v-autocomplete>'
-      + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
+      + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
       + '<div v-else-if="colIsImage(col)" class="d-flex align-center" style="gap:6px;min-width:0">'
       +   '<template v-if="noThumb"></template>'
       +   '<img v-else-if="item[col] && isAsset(item[col])" :src="thumbSrc(item[col])" class="cell-thumb" alt="">'
@@ -9181,13 +9205,13 @@ function createVueApp() {
         var arr = Array.isArray(v) ? v : ((v == null || v === '') ? [] : [v]);
         var ns = this.nsCol || '';
         return arr.filter(function(x) { return x != null && x !== ''; }).map(function(x) {
-          return { text: a.displayValue(col, x, ns, cfg), pic: a.listValuePicture(col, x, ns) };
+          return { text: a.displayValue(col, x, ns, cfg), pic: a.listValuePicture(col, x, ns), role: a.valueRole(col, x, ns) };
         });
       }
     },
     template: ''
       + '<span class="list-value">'
-      + '<span v-for="(it, i) in items" :key="i" class="list-value__item">'
+      + '<span v-for="(it, i) in items" :key="i" class="list-value__item" :title="it.role || null">'
       +   '<user-avatar v-if="it.pic" :picture="it.pic" :name="it.text" :size="size"></user-avatar>'
       +   '<span>{{ it.text }}{{ i < items.length - 1 ? \',\' : \'\' }}</span>'
       + '</span>'
