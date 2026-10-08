@@ -2606,6 +2606,11 @@ second time, and a load-time error when no column says which, since the Lookup e
 no picker to offer and every `@me` would resolve empty. The picker appears per row in the **Lookup**
 tab, where that catalogue is maintained, rather than in the Lists section.
 
+**The role stays on screen.** Where the label shows a person, the value it names is shown beside it: as
+the second line of that option in the dropdown, and as the tooltip of the value wherever it is displayed.
+An unlinked position needs neither, since its label already is the role. The label itself is not changed,
+so a printout shows the name only.
+
 Precedence for a value's label, in `listLabel`: the linked account's name, else the
 `list.<list>.<value>` translation, else the raw value. So it degrades rather than breaks — an unlinked
 value, a linked account that shares no name, and a viewer who may not see that profile all read as the

@@ -10052,3 +10052,53 @@ test.describe('Security policy reports in Settings', () => {
     await expect(field).toHaveAttribute('type', 'password');
   });
 });
+
+test.describe('A linked position shows its role on screen', () => {
+  // `userlink-name` labels a linked value with the person holding it. The role it names is shown beside
+  // that label: as the dropdown option's second line, and as the cell's tooltip -- never in the label.
+  test('the dropdown shows the role under a linked name, and a read-only value has it as its tooltip', async ({ page }) => {
+    await ensureAppReady(page);   // resets the data, so the note goes in after it
+    await page.request.post('/api/putRow', { data: { tableId: 'notes', tab: 'active', data: { id: 'nr1', title: 'Role note', author: 'bishop' } } });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.notes' }).first().click();
+    await expect(page.locator('input[name="author"]').first()).toBeVisible();
+    const r = await page.evaluate(() => {
+      const a = window.appInstance;
+      a.schemaData = Object.assign({}, a.schemaData, { listSources: { assigned_to: 'userlink-name' } });
+      a.listAvatars = { assigned_to: { bishop: { name: 'Ann Smith', picture: '' } } };
+      a.strings = Object.assign({}, a.strings, { 'list.assigned_to.bishop': 'Bishop', 'list.assigned_to.clerk': 'Clerk' });
+      a.listsCache.assigned_to = ['bishop', 'clerk'];
+      return { opts: a.getListOptions('author'), label: a.listLabel('assigned_to', 'bishop'), role: a.valueRole('author', 'bishop') };
+    });
+    // The label is unchanged: the person. The role is extra, and only where a person replaced it.
+    expect(r.label).toBe('Ann Smith');
+    expect(r.opts).toEqual([{ title: 'Ann Smith', value: 'bishop', subtitle: 'Bishop' }, { title: 'Clerk', value: 'clerk' }]);
+    expect(r.role).toBe('Bishop');
+
+    // On screen: open the author dropdown of the note, and the option carries the role as its second line.
+    const cell = page.locator('input[name="author"]').first();
+    await cell.click();
+    const opt = page.locator('.v-overlay .v-list-item', { hasText: 'Ann Smith' }).first();
+    await expect(opt).toBeVisible();
+    await expect(opt.locator('.v-list-item-subtitle')).toHaveText('Bishop');
+    await expect(page.locator('.v-overlay .v-list-item', { hasText: 'Clerk' }).first().locator('.v-list-item-subtitle')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+
+    // A read-only rendering (list-value) carries it as the tooltip.
+    const tip = await page.evaluate(() => {
+      const host = document.createElement('div'); document.body.appendChild(host);
+      const C = window.appInstance.$.appContext.components['list-value'];
+      const vm = Vue.createApp({ render: () => Vue.h(C, { col: 'author', value: 'bishop' }) });
+      vm._context.components = window.appInstance.$.appContext.components;
+      vm._context.provides = window.appInstance.$.appContext.provides;
+      Object.assign(vm._context.provides, window.appInstance.$.provides);
+      vm.mount(host);
+      const el = host.querySelector('.list-value__item');
+      const out = el && el.getAttribute('title');
+      vm.unmount(); host.remove();
+      return out;
+    });
+    expect(tip).toBe('Bishop');
+  });
+});
