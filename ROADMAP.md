@@ -2702,9 +2702,33 @@ picture, a different request.
 Reverse-chronological activity stream. Pairs naturally with a changeset/audit trail if one is ever
 added.
 
-### `split`
+### `split` — a LAYOUT of a data view, like `gallery` *(landed)*
 
 Master-detail two-pane layout — a list on the left, the selected record on the right.
+
+Built as `layout: "split"`, for the reason `gallery` was: it is a way of drawing a data view's rows, and
+a new kind would have needed the whole seam to say the same thing. The right pane is the card layout's
+body, extracted as `record-fields` rather than copied, so a card and a split record edit identically,
+embeds and row actions included. The selection is the `data-split` component's own state, a row id, so a
+re-sort or a live update keeps the same record open, and it falls back to the first row when that one is
+gone. Not built: a deep link to the selected row, and selecting a row just added (Add appends to the
+list; the new row is one click away).
+
+**Follow-up: the conventions every list-detail layout keeps** (Material 3's list-detail, Apple's split
+view, mail clients, Airtable's Record review). Rendering the bishopric `meeting_agenda` as a split showed
+three gaps against them, all now closed:
+
+- **A phone gets two screens, not a stack.** Stacked, a record sat below the whole list and a tap on row
+  50 changed something off-screen. Now a row opens its record in the list's place, with a back button
+  named after the list. The open record is a history entry (the screen's state plus `splitRow`), so the
+  browser's Back and Android's back gesture return to the list rather than leaving the view.
+- **Two-line rows.** The first column alone named a meeting "10/18/2026". The second column now sits
+  beneath it, which is how a mail client shows subject and sender; an image column is skipped, as a
+  picture is not a line of text. No schema key: the view's column order already says which two matter.
+- **Each pane scrolls on its own** on a wide screen, at most one screen tall, so the open record stays in
+  view however far down the list is read, as in a mail client.
+
+Still not built: a URL deep link to the open row, arrow keys through the list, and a draggable divider.
 
 ### New column types
 

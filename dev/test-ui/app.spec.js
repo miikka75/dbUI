@@ -10102,3 +10102,67 @@ test.describe('A linked position shows its role on screen', () => {
     expect(tip).toBe('Bishop');
   });
 });
+
+test.describe('split layout (master-detail)', () => {
+  async function openSplit(page, size, rows) {
+    const schema = JSON.parse(JSON.stringify(SCHEMA));
+    schema.views.push({ name: 'notes_split', sources: ['notes'], mode: 'union', layout: 'split', defaultSort: 'title', columns: ['title', 'content', 'author'] });
+    schema.nav = { items: [{ view: 'notes_split' }].concat((schema.nav && schema.nav.items) || []) };
+    await page.setViewportSize(size);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema } });
+    for (const r of rows || [{ id: 'n1', title: 'Alpha', content: 'first' }, { id: 'n2', title: 'Beta', content: 'second' }])
+      await page.request.post('/api/putRow', { data: { tableId: 'notes', tab: 'active', data: r } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+    await page.evaluate(() => appInstance.selectTab('notes_split'));
+  }
+
+  test('lists the rows, shows the selected record editable beside them, and keeps the selection by id', async ({ page }) => {
+    await openSplit(page, { width: 1280, height: 800 });
+    await expect(page.locator('[data-testid="split-row-n1"]')).toBeVisible();
+    await expect(page.locator('[data-testid="split-row-n2"]')).toBeVisible();
+    // Each row is named by its first column, with its second beneath.
+    await expect(page.locator('[data-testid="split-row-n1"] .v-list-item-subtitle')).toHaveText('first');
+    // The first row is open until another is picked.
+    await expect(page.locator('[data-testid="split-record"]')).toContainText('first');
+    await page.locator('[data-testid="split-row-n2"]').click();
+    await expect(page.locator('[data-testid="split-record"]')).toContainText('second');
+    await expect(page.locator('[data-testid="split-record"]')).not.toContainText('first');
+  });
+
+  test('a long list scrolls in its own pane, so the record stays on screen', async ({ page }) => {
+    const rows = Array.from({ length: 40 }, (_, i) => ({ id: 'r' + i, title: 'Note ' + String(i).padStart(2, '0'), content: 'body ' + i }));
+    await openSplit(page, { width: 1280, height: 720 }, rows);
+    const list = page.locator('[data-testid="split-list"]');
+    await list.locator('[data-testid="split-row-r39"]').scrollIntoViewIfNeeded();
+    await list.locator('[data-testid="split-row-r39"]').click();
+    await expect(page.locator('[data-testid="split-record"]')).toContainText('body 39');
+    expect(await list.evaluate((el) => el.scrollTop > 0 && el.scrollHeight > el.clientHeight)).toBe(true);
+    const box = await page.locator('[data-testid="split-record"]').boundingBox();
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeLessThan(720);
+  });
+
+  test('on a phone a row opens its record in place of the list, and Back returns to the list', async ({ page }) => {
+    await openSplit(page, { width: 390, height: 844 });
+    await expect(page.locator('[data-testid="split-row-n1"]')).toBeVisible();
+    await expect(page.locator('[data-testid="split-record"]')).toHaveCount(0);
+
+    await page.locator('[data-testid="split-row-n2"]').click();
+    await expect(page.locator('[data-testid="split-record"]')).toContainText('second');
+    await expect(page.locator('[data-testid="split-list"]')).toHaveCount(0);
+    // The app's own back button, named after the list it returns to.
+    await page.locator('[data-testid="split-back"]').click();
+    await expect(page.locator('[data-testid="split-row-n2"]')).toBeVisible();
+    await expect(page.locator('[data-testid="split-record"]')).toHaveCount(0);
+
+    // The browser's Back closes the record, not the view.
+    await page.locator('[data-testid="split-row-n1"]').click();
+    await expect(page.locator('[data-testid="split-record"]')).toContainText('first');
+    await page.goBack();
+    await expect(page.locator('[data-testid="split-row-n1"]')).toBeVisible();
+    expect(await page.evaluate(() => appInstance.currentTable)).toBe('notes_split');
+  });
+});
