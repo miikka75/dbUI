@@ -2714,6 +2714,22 @@ re-sort or a live update keeps the same record open, and it falls back to the fi
 gone. Not built: a deep link to the selected row, and selecting a row just added (Add appends to the
 list; the new row is one click away).
 
+**Follow-up: the conventions every list-detail layout keeps** (Material 3's list-detail, Apple's split
+view, mail clients, Airtable's Record review). Rendering the bishopric `meeting_agenda` as a split showed
+three gaps against them, all now closed:
+
+- **A phone gets two screens, not a stack.** Stacked, a record sat below the whole list and a tap on row
+  50 changed something off-screen. Now a row opens its record in the list's place, with a back button
+  named after the list. The open record is a history entry (the screen's state plus `splitRow`), so the
+  browser's Back and Android's back gesture return to the list rather than leaving the view.
+- **Two-line rows.** The first column alone named a meeting "10/18/2026". The second column now sits
+  beneath it, which is how a mail client shows subject and sender; an image column is skipped, as a
+  picture is not a line of text. No schema key: the view's column order already says which two matter.
+- **Each pane scrolls on its own** on a wide screen, at most one screen tall, so the open record stays in
+  view however far down the list is read, as in a mail client.
+
+Still not built: a URL deep link to the open row, arrow keys through the list, and a draggable divider.
+
 ### New column types
 
 Several proposed views are really "a layout plus a column type":

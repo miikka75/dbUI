@@ -721,20 +721,25 @@
     </template>
   </div>
 </template>
-<!-- Split layout: the rows as a list, named by their first column, beside the selected record. The
-     selection is the component's own; the first row is selected until someone picks another. On a
-     narrow screen the two panes stack, list first. -->
+<!-- Split layout: the rows as a list, each named by its first column with its second beneath, beside the
+     selected record. The selection is the component's own; the first row is selected until someone picks
+     another. On a phone the list and the record are two screens: a row opens its record in the list's
+     place, and the back button (or the browser's Back) returns to the list. -->
 <template id="data-split-tpl">
-  <v-row no-gutters data-testid="data-split">
-    <v-col cols="12" md="4" style="border-right:1px solid rgb(var(--v-theme-outline),0.15)">
+  <v-row no-gutters data-testid="data-split" :class="{ 'data-split--panes': !a.mobile }">
+    <v-col v-if="!a.mobile || !open" :cols="a.mobile ? 12 : 4" class="data-split__pane" data-testid="split-list"
+           :style="a.mobile ? '' : 'border-right:1px solid rgb(var(--v-theme-outline),0.15)'">
       <v-list density="compact" nav>
-        <v-list-item v-for="item in rows" :key="item.id" :active="selected && selected.id === item.id" color="primary"
-                     :data-testid="'split-row-' + item.id" @click="selId = item.id">
-          <list-value v-if="cols.length" :col="cols[0]" :value="item[cols[0]]"></list-value>
+        <v-list-item v-for="item in rows" :key="item.id" :active="activeId === item.id" color="primary"
+                     :data-testid="'split-row-' + item.id" @click="pick(item)">
+          <v-list-item-title><list-value v-if="cols.length" :col="cols[0]" :value="item[cols[0]]"></list-value></v-list-item-title>
+          <v-list-item-subtitle v-if="subCol && !a.isColumnHidden(subCol, item)"><list-value :col="subCol" :value="item[subCol]" :size="14"></list-value></v-list-item-subtitle>
         </v-list-item>
       </v-list>
     </v-col>
-    <v-col cols="12" md="8" class="pa-3" data-testid="split-record">
+    <v-col v-if="!a.mobile || open" :cols="a.mobile ? 12 : 8" class="data-split__pane pa-3" data-testid="split-record">
+      <v-btn v-if="a.mobile" variant="text" size="small" class="text-none mb-1" prepend-icon="mdi-chevron-left"
+             data-testid="split-back" @click="close()">{{ listTitle }}</v-btn>
       <record-fields v-if="selected" :key="selected.id" :item="selected"></record-fields>
     </v-col>
   </v-row>

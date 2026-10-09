@@ -8293,13 +8293,60 @@ function createVueApp() {
   // `layout: "split"`: master-detail. The selection is this component's own state -- a row id, so a
   // re-sort or a live update keeps the same record open -- and falls back to the first row when the
   // selected one is gone (deleted, filtered out, archived).
+  // On a phone the list and the record are two screens, as in a mail app. The open record is a history
+  // entry -- the screen's own state plus `splitRow` -- so the browser's Back returns to the list rather
+  // than leaving the view, and a reload reopens the same record.
   app.component('data-split', {
     props: { rows: { type: Array, default: function() { return []; } }, cols: { type: Array, default: function() { return []; } } },
-    data: function() { return { selId: null }; },
+    data: function() { return { selId: null, open: false, listScroll: 0 }; },
     computed: {
-      selected: function() {
+      a: function() { return appInstance; },
+      picked: function() {
         var id = this.selId;
-        return this.rows.find(function(r) { return r.id === id; }) || this.rows[0] || null;
+        return this.rows.find(function(r) { return r.id === id; }) || null;
+      },
+      selected: function() { return this.picked || this.rows[0] || null; },
+      // A phone highlights only a row someone opened; until then no row is "the open one".
+      activeId: function() { return this.a.mobile ? (this.picked && this.picked.id) : (this.selected && this.selected.id); },
+      // The line under each row's name: the view's second column. A picture is not a line of text.
+      subCol: function() { var c = this.cols[1]; return c && !this.a.colIsImage(c) ? c : null; },
+      listTitle: function() {
+        var hit = Nav.find(this.a.sidebarTabs, this.a.currentTable);
+        return hit ? hit.node.title : this.a.currentTable;
+      }
+    },
+    watch: {
+      // The open record went away under a phone (deleted, archived): back to the list, not to another row.
+      picked: function(row) { if (!row && this.open && this.a.mobile) this.close(); }
+    },
+    mounted: function() {
+      this._onPop = this.fromHistory.bind(this);
+      window.addEventListener('popstate', this._onPop);
+      this.fromHistory();
+    },
+    beforeUnmount: function() { window.removeEventListener('popstate', this._onPop); },
+    methods: {
+      pick: function(item) {
+        this.selId = item.id;
+        if (!this.a.mobile) return;
+        this.listScroll = window.scrollY;
+        try { history.pushState({ screen: this.a.currentTable, splitRow: item.id }, ''); } catch (e) {}
+        this.open = true;
+        var el = this.$el;
+        this.$nextTick(function() { if (el.getBoundingClientRect().top < 0) el.scrollIntoView(); });
+      },
+      close: function() {
+        var s = null; try { s = history.state; } catch (e) {}
+        if (s && s.splitRow) history.back(); else this.open = false;
+      },
+      fromHistory: function() {
+        var s = null; try { s = history.state; } catch (e) {}
+        var row = s && s.screen === this.a.currentTable && s.splitRow;
+        var wasOpen = this.open;
+        if (row) this.selId = row;
+        this.open = !!row;
+        var y = this.listScroll;
+        if (wasOpen && !row) this.$nextTick(function() { window.scrollTo(0, y); });
       }
     },
     template: '#data-split-tpl'
