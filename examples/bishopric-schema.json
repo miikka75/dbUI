@@ -990,6 +990,7 @@
       {
         "defaultSort": "date",
         "name": "meeting_agenda",
+        "layout": "split",
         "columns": [
           "date",
           "theme",
