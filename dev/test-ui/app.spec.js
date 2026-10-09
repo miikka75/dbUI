@@ -10106,7 +10106,7 @@ test.describe('A linked position shows its role on screen', () => {
 test.describe('split layout (master-detail)', () => {
   async function openSplit(page, size, rows) {
     const schema = JSON.parse(JSON.stringify(SCHEMA));
-    schema.views.push({ name: 'notes_split', sources: ['notes'], mode: 'union', layout: 'split', defaultSort: 'title', columns: ['title', 'content', 'author'] });
+    schema.views.push({ name: 'notes_split', sources: ['notes'], mode: 'union', layout: 'split', defaultSort: 'title', printable: 'view', columns: ['title', 'content', 'author'] });
     schema.nav = { items: [{ view: 'notes_split' }].concat((schema.nav && schema.nav.items) || []) };
     await page.setViewportSize(size);
     await page.request.post('/api/resetData');
@@ -10130,6 +10130,19 @@ test.describe('split layout (master-detail)', () => {
     await page.locator('[data-testid="split-row-n2"]').click();
     await expect(page.locator('[data-testid="split-record"]')).toContainText('second');
     await expect(page.locator('[data-testid="split-record"]')).not.toContainText('first');
+  });
+
+  test('Print view prints the whole view as a table, not one card per row', async ({ page }) => {
+    await openSplit(page, { width: 1280, height: 800 });
+    await expect(page.locator('[data-testid="split-row-n2"]')).toBeVisible();
+    const body = await page.evaluate(() => {
+      let out = null; appInstance._printOpen = (t, b) => { out = b; };
+      appInstance.printView();
+      return out;
+    });
+    expect(body).toContain('<table');
+    expect(body).toContain('Alpha');
+    expect(body).toContain('Beta');
   });
 
   test('a long list scrolls in its own pane, so the record stays on screen', async ({ page }) => {

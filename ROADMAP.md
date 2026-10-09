@@ -2728,6 +2728,10 @@ three gaps against them, all now closed:
 - **Each pane scrolls on its own** on a wide screen, at most one screen tall, so the open record stays in
   view however far down the list is read, as in a mail client.
 
+Print view prints a split as the table, not as one card per row: printing otherwise follows the screen's
+layout, but a split shows a list and one record, neither of them cards, and the printed bishopric music
+schedule is a table people hand out.
+
 Still not built: a URL deep link to the open row, arrow keys through the list, and a draggable divider.
 
 ### New column types

@@ -629,9 +629,8 @@
       {
         "hideEmpty": true,
         "readonly": true,
-        "layout": "card",
+        "layout": "split",
         "mode": "join",
-        "collapsed": true,
         "name": "meeting_program",
         "defaultSort": "date",
         "printable": "cards",
@@ -1058,6 +1057,7 @@
         "mode": "join",
         "defaultSort": "date",
         "name": "meeting_music",
+        "layout": "split",
         "printable": "view",
         "kind": "data"
       },
