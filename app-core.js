@@ -7432,7 +7432,9 @@ function createVueApp() {
         }
         var cols = this.visibleCols;
         var body = '<h2>' + Print.escape(title) + '</h2>';
-        if (this.useCardLayout) {
+        // A split draws one record beside a list, neither of them cards: on paper it is the whole view,
+        // which is the table.
+        if (this.useCardLayout && !this.useSplitLayout) {
           this.sortedData.forEach(function(row) { body += Print.cardHtml(cols, row, ctx); });
         } else {
           var afterCol = null;

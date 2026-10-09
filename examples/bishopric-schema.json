@@ -1058,6 +1058,7 @@
         "mode": "join",
         "defaultSort": "date",
         "name": "meeting_music",
+        "layout": "split",
         "printable": "view",
         "kind": "data"
       },
