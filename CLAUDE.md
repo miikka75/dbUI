@@ -8,7 +8,7 @@ versions of the elements below.
 
 | Element | Use |
 |---|---|
-| One-line value to copy (a link, an address) | `<copy-field :value="…">`: read-only field, copy icon inside |
+| One-line value to copy (a link, an address) | `<copy-field :value="…">`: read-only field, copy icon inside. `editable` (emits `change`) for a value you also paste in; `secret` adds an eye, shown via `v-model:reveal` (the CSP token) |
 | Multi-line block to copy (setup dialog's rules) | `<pre>` with an icon copy button over its corner |
 | Two-press row action: delete or archive | `<confirm-x :armed="isArmed(key)" @click="handler">` (`action="archive"`; `action="image"` removes a cell's picture; `dense` in data grids). The handler arms with `armConfirm(key)` and acts on the second press |
 | Two-press action that needs its words (unsubscribe, stop publishing, reset) | `<confirm-btn :armed="isArmed(key)" icon="…" :label="…" @click="handler">`, armed the same way. Row role by default; `section` for a section action, `full` to keep the label on a phone |

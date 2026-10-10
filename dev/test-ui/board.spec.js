@@ -63,3 +63,54 @@ test.describe('Board (kanban) view', () => {
     }, { timeout: 5000 }).toBe('done');
   });
 });
+
+test.describe('Board embedded in a page', () => {
+  test('renders as a board, keeps the move between lanes, and leaves add/archive/delete to its own screen', async ({ page }) => {
+    const schema = JSON.parse(JSON.stringify(SCHEMA));
+    schema.views.push({ name: 'board_page', kind: 'page', markdown: '## Work\n\n{{view:tickets_board}}' });
+    schema.nav = { items: [{ view: 'board_page' }].concat((schema.nav && schema.nav.items) || []) };
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema } });
+    for (const r of [{ id: 'tk1', title: 'Alpha', status: 'open', assignee: 'Sam' }, { id: 'tk2', title: 'Beta', status: 'in_progress', assignee: 'Ada' }])
+      await page.request.post('/api/putRow', { data: { tableId: 'tickets', data: r, tab: 'active' } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+    await page.evaluate(() => appInstance.selectTab('board_page'));
+
+    // A board, not a table of its rows.
+    await expect(page.locator('[data-testid="board-view"] [data-testid="board-lane-open"] [data-testid="board-card-tk1"]')).toBeVisible();
+    await expect(page.locator('[data-testid="board-del-tk1"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="board-arch-tk1"]')).toHaveCount(0);
+
+    await page.locator('[data-testid="board-card-tk1"] [data-testid="board-move-tk1"]').click();
+    await page.locator('.v-overlay .v-list-item', { hasText: 'done' }).first().click();
+    await expect(page.locator('[data-testid="board-lane-done"] [data-testid="board-card-tk1"]')).toBeVisible();
+    await expect.poll(async () => {
+      const s = await (await page.request.post('/api/getTableData', { data: { tableId: 'tickets', tab: 'active' } })).json();
+      return ((s.rows || []).find((x) => x.id === 'tk1') || {}).status;
+    }, { timeout: 5000 }).toBe('done');
+  });
+});
+
+test('a timeline and a form embedded in a page render as themselves, not as a table of their rows', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.views.push(
+    { name: 'tl', kind: 'timeline', sources: ['tickets'], mode: 'union', columns: ['title'], timeline: { start: 'due', end: 'due', label: ['title'] } },
+    { name: 'signup_form', kind: 'form', form: { table: 'signups', sections: [{ columns: ['dish'] }] } },
+    { name: 'mixed_page', kind: 'page', markdown: '{{view:tl}}\n\n{{view:signup_form}}' });
+  schema.tables.tickets.columns.push({ name: 'due', type: 'date' });
+  schema.nav = { items: [{ view: 'mixed_page' }].concat((schema.nav && schema.nav.items) || []) };
+  await page.request.post('/api/resetData');
+  await page.request.post('/api/saveSchema', { data: { schema } });
+  await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+  await page.goto('/');
+  await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+  await page.evaluate(() => appInstance.selectTab('mixed_page'));
+  await expect(page.locator('.v-main [data-testid="timeline-view"]')).toBeVisible();
+  // The form starts its own record in its own table, and then offers its own submit.
+  await page.locator('.v-main button', { hasText: 'btn.add' }).click();
+  await expect(page.locator('.v-main [data-testid="form-submit"]')).toBeVisible();
+  await expect.poll(async () => ((await (await page.request.post('/api/getTableData', { data: { tableId: 'signups', tab: 'active' } })).json()).rows || []).length).toBe(1);
+});

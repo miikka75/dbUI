@@ -19,7 +19,8 @@
     "test:differential": "node run-with-emulators.mjs --only firestore --project demo-diff -- node test-emulator/policy-differential.mjs",
     "test:emulated": "node run-with-emulators.mjs --only auth,firestore,storage --project demo-app -- node test-emulator/firestore-rules.mjs --and node test-emulator/policy-differential.mjs --and npx playwright test test-ui/firebase-emulator.spec.js && npm run test:storage-rules",
     "check:live": "node check-supabase.mjs",
-    "csp:log": "node csp-log.mjs"
+    "csp:log": "node csp-log.mjs",
+    "supabase:setup": "node setup-supabase.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.4",

@@ -330,7 +330,10 @@ function createVueApp() {
       // files (anything there is every visitor's), so an admin pastes it once per browser, the way the
       // Supabase URL and key arrive. `result` is CspClient.summarize's { site, extensions, total }.
       cspLog: { token: (function() { try { return localStorage.getItem('app_csp_token') || ''; } catch (e) { return ''; } })(),
-                result: null, busy: false, error: '', rotated: '', show: false },
+                result: null, busy: false, error: '', show: false },
+      // Settings -> Leftovers: the report, read on demand. `items` is Leftovers.inventory's list, or null
+      // before the first look.
+      leftovers: { items: null, busy: false },
       exampleUpdateChecked: false,
       firestoreRules: '',
       firebaseConfigInput: (function() { var c = Databases.config('firebase'); return c ? JSON.stringify(c) : ''; })(),
@@ -390,7 +393,7 @@ function createVueApp() {
       // Vuetify's v-img from ever rendering the profile avatar, since v-img loads on intersection.
       // _collapseCalendars, _collapseImport and _collapseUsers likewise: long or rarely used. What must
       // not wait -- an example update, a pending access request -- is drawn outside their folds.
-      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false, _collapseAppearance: true, _collapseCalendars: true, _collapseCsp: true, _collapseImport: true, _collapseUsers: true },
+      settings: { preload_archive: getSetting('preload_archive', true), preload_translations: getSetting('preload_translations', true), _collapseApp: false, _collapseSchema: false, _collapseLists: false, _collapseAppearance: true, _collapseCalendars: true, _collapseCsp: true, _collapseLeftovers: true, _collapseImport: true, _collapseUsers: true },
       appConfig: null,
       saveTimers: {},
       // Live sync (see the _live* methods). _liveSubs maps a store name -> its unsubscribe function, so
@@ -862,7 +865,7 @@ function createVueApp() {
       canPrintCard: function() { var p = this.currentConfig.printable; return this.isDataView && (p === 'cards' || (Array.isArray(p) && p.indexOf('cards') >= 0)); },
       useCardLayout: function() {
         var layout = this.currentConfig.layout;
-        if (layout === 'card' || layout === 'list' || layout === 'gallery') return true;
+        if (layout === 'card' || layout === 'list' || layout === 'gallery' || layout === 'split') return true;
         if (layout === 'table') return false;
         if (this.windowWidth < 600) return true;
         // declaredCols, NOT visibleCols: visibleCols applies hideEmpty only in table mode and so reads
@@ -872,6 +875,7 @@ function createVueApp() {
       },
       useListLayout: function() { return this.currentConfig.layout === 'list'; },
       useGalleryLayout: function() { return this.currentConfig.layout === 'gallery'; },
+      useSplitLayout: function() { return this.currentConfig.layout === 'split'; },
       // Add is offered wherever rows may be mutated, INCLUDING the read-only `list` layout: a table can
       // declare layout:'list' as its only presentation, so gating Add on an editable layout would leave
       // such a table with no way to create a row at all. The row lands and saves; it is just not
@@ -1048,9 +1052,21 @@ function createVueApp() {
         // root proxy), so Vue tracks it as a dependency without help.
         return sortByCol(rows, this.sortCol, VIEWS[this.currentTable], this.sortAsc);
       },
+      // Everything that can name a list or a lookup table: the authored schema (minus its `tables` map's
+      // keys, which declare rather than refer), the views as loaded (user-built calendars are merged in
+      // there), page bodies edited in the app, and the folder config.
+      leftoverCorpus: function() {
+        var doc = this.schemaData || {};
+        // Minus `example`, the record of which bundle was installed ({ bundle, revision, files }): it names
+        // a bundle, not anything the schema uses, and the bishopric bundle's id is also the name of a list
+        // its catalogue retired -- so the record of having installed it kept that list looking live.
+        var cfg = this.appConfig ? Object.assign({}, this.appConfig) : null;
+        if (cfg) delete cfg.example;
+        return Leftovers.corpus([doc, VIEWS, this.pageCache, cfg], [doc.tables || {}], [doc.views || [], VIEWS]);
+      },
       staticTranslationKeys: function() {
         return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.more',
-         'btn.edit', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
+         'btn.edit', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
          // View background images (Settings -> Backgrounds); bg.fit_* label the `fit` modes in bgFitItems.
@@ -1091,7 +1107,7 @@ function createVueApp() {
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
-         'list.link_user', 'list.unlink_user', 'list.locked_value', 'list.locked_group',
+         'list.link_user', 'list.unlink_user', 'list.not_referenced', 'settings.leftovers', 'settings.leftovers_scan', 'settings.leftovers_none', 'leftover.list', 'leftover.lookup', 'leftover.page', 'leftover.link', 'leftover.translation', 'list.locked_value', 'list.locked_group',
          'lang.app', 'lang.schema', 'lang.lists'].sort();
       },
       schemaTranslationKeys: function() {
@@ -1741,6 +1757,10 @@ function createVueApp() {
       },
       // Board: add a blank card pre-stamped with a lane value (like addRow, but prefilling board.lane so
       // the card lands in the clicked lane). Pushes into currentData so the board re-renders immediately.
+      // An EMBEDDED board's rows: the same embedRows path every other {{view:x}} embed takes, since
+      // currentData belongs to the page hosting it. (board-view asked for this long before anything
+      // dispatched a board as an embed, so it never existed and the lanes would have stayed empty.)
+      boardRowsFor: function(name) { return this.embedRows('view', name); },
       boardAddInLane: function(name, laneKey) {
         var v = VIEWS[name]; if (!v || !v.board || !this.canMutateRows) return;
         var primary = v.sources[0], prefill = {}; prefill[v.board.lane] = laneKey;
@@ -2597,19 +2617,20 @@ function createVueApp() {
       cspEndpoint: function() { return CspClient.endpointFrom(document); },
       setCspToken: function(v) {
         this.cspLog.token = (v || '').trim();
-        this.cspLog.result = null; this.cspLog.error = ''; this.cspLog.rotated = '';
+        this.cspLog.result = null; this.cspLog.error = '';
         try { if (this.cspLog.token) localStorage.setItem('app_csp_token', this.cspLog.token); else localStorage.removeItem('app_csp_token'); } catch (e) {}
       },
       // Rotate the read token, the way Regenerate replaces a calendar feed's link: the old one stops
-      // working at once. The new one is kept in this browser like a pasted one, and shown ONCE for
-      // handing to the other admins -- nothing can read it back from the collector afterwards.
+      // working at once. The new one replaces the old in the token field and is kept in this browser like
+      // a pasted one; the field is unmasked so the change is visible, and its copy icon is how it reaches
+      // the other admins -- nothing can read it back from the collector afterwards.
       rotateCspToken: function() {
         var self = this, log = this.cspLog;
         if (!this.cspEndpoint() || !log.token) return Promise.resolve(null);
         log.busy = true; log.error = '';
         return CspClient.rotateToken(this.cspEndpoint(), log.token).then(function(next) {
           self.setCspToken(next);
-          log.rotated = next;
+          log.show = true;
           return next;
         }, function(e) {
           log.error = e && e.status === 403 ? self.t('settings.csp_bad_token') : self.t('settings.csp_read_failed') + (e && e.status ? ' (' + e.status + ')' : '');
@@ -2715,6 +2736,9 @@ function createVueApp() {
       isRsvpName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'rsvp'; },
       isStatsName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'stats'; },
       isScanName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'scan'; },
+      isBoardName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'board'; },
+      isFormName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'form'; },
+      isTimelineName: function(name) { return SchemaNormalize.viewKind(VIEWS[name]) === 'timeline'; },
       // Resolve one scanned or typed code and, when it resolves to a row, write it. Returns the outcome
       // for the view to SHOW -- see scan.js: silence is the one answer a scanner must never get.
       //
@@ -3910,7 +3934,11 @@ function createVueApp() {
         // lookup dimension -- passing it through would draw the toggle's options from the wrong table.
         var fromLookup = this.lookupListValues(listName, altList ? null : Columns.colListValueCol(SCHEMA, col));
         var items = fromLookup || (listName && this.listsCache[listName] ? this.listsCache[listName] : []);
-        var result = items.map(function(v) { return { title: self.listLabel(listName, v), value: v }; });
+        var result = items.map(function(v) {
+          var o = { title: self.listLabel(listName, v), value: v }, role = self.listRole(listName, v);
+          if (role) o.subtitle = role;   // a linked position: the person is the title, the role its second line
+          return o;
+        });
         if (this.colIsSorted(col)) result.sort(function(a, b) { return a.title.localeCompare(b.title); });
         return result;
       },
@@ -4011,10 +4039,27 @@ function createVueApp() {
         if (!ns) return val;
         var linked = (this.isUserNameList(ns) && window.ListUsers)
           ? window.ListUsers.nameFor(this.listAvatars, ns, val) : '';
-        if (linked) return linked;
+        return linked || this._valueLabel(ns, val);
+      },
+      _valueLabel: function(ns, val) {
         var key = 'list.' + ns + '.' + val;
         var translated = this.t(key);
         return translated !== key ? translated : val;
+      },
+      // The ROLE a `userlink-name` value names, when the label is showing the person holding it instead:
+      // what the label would have said without the link. '' wherever the label already is the value (an
+      // unlinked position, any other kind of list), so there is nothing to add. Shown BESIDE the label --
+      // a dropdown option's second line, a cell's tooltip -- never inside it: listLabel stays the one
+      // label for the cell and the dropdown, and obscureNames has only the name to abbreviate.
+      listRole: function(ns, val) {
+        if (!ns || !this.isUserNameList(ns) || !window.ListUsers) return '';
+        return window.ListUsers.nameFor(this.listAvatars, ns, val) ? this._valueLabel(ns, val) : '';
+      },
+      // The same for a rendered cell: the namespace resolved exactly as displayValue resolves it.
+      valueRole: function(col, val, nsCol) {
+        var src = nsCol || col, ns = this.listNameForCol(src);
+        if (!ns && this.colIsRef(src)) { var rf = this.colRef(src); ns = rf && rf.table; }
+        return ns ? this.listRole(ns, val) : '';
       },
       // Whether a view obscures person names in `col`. obscureNames: true = all list/multiselect
       // columns (or all area columns for a rotationView); an array = exactly those columns. Display-only.
@@ -4078,6 +4123,53 @@ function createVueApp() {
       isReadonlyRefCell: function(item, col) { return !this.canEditCurrentRef || this.isLockedRefValue(item && item[col]); },
       // Whether a plain list is opted into `translatableLists` (its values have list.<list>.<value> labels).
       // Used only to show the translate badge in the Lists editor — values stay editable unless filter-pinned.
+      // A list or lookup table nothing in the schema names any more -- marked in the Lists and Lookup
+      // tabs, the negative only: on a healthy database almost everything is live, and a chip on the few
+      // leftovers is a glance where colouring the live ones is wallpaper. Leftovers.unreferenced is
+      // allowed to be silent and not allowed to be wrong; see leftovers.js for why it searches every
+      // string rather than enumerating the ways a name is reached.
+      isLeftover: function(name) { return Leftovers.unreferenced(name, this.leftoverCorpus); },
+      // The whole report. Reads what the badge cannot: every stored page body, every language's
+      // translations and the account links, each fetched fresh -- a stale copy would report something
+      // somebody restored a minute ago.
+      scanLeftovers: function() {
+        var self = this;
+        if (!this.isAdmin) return Promise.resolve(null);
+        this.leftovers.busy = true;
+        var lookups = {};
+        Object.keys(SCHEMA).forEach(function(t) { if (SCHEMA[t].isLookup) lookups[t] = Rows.partitionRows(self.dataCache, t, 'active').length; });
+        var translations = {};
+        return Promise.all([
+          Promise.resolve(backend.getTableData('_pages', 'active')).then(function(r) { return (parseTableResult(r).rows || []).map(function(x) { return x.id; }); }, function() { return []; }),
+          backend.getListUserLinks ? Promise.resolve(backend.getListUserLinks()).catch(function() { return {}; }) : Promise.resolve({}),
+          Promise.all((this.languages || []).map(function(l) {
+            return Promise.resolve(backend.getTranslations(l.code)).then(function(t) { translations[l.code] = t || {}; }, function() {});
+          }))
+        ]).then(function(res) {
+          self.leftovers.items = Leftovers.inventory({
+            text: self.leftoverCorpus, lists: self.listsCache || {}, lookups: lookups, tables: Object.keys(SCHEMA),
+            pages: res[0], views: VIEWS, links: res[1] || {}, translations: translations, keep: self.staticTranslationKeys
+          });
+        }).then(function() { self.leftovers.busy = false; }, function() { self.leftovers.busy = false; });
+      },
+      // One item, two presses, through the writes that already exist. A list goes the way a list is
+      // deliberately retired (saveLists without it), a page body is a _pages row, a link is unlinked. A
+      // lookup table and a translation key are reported only: the first is declared by the schema, and
+      // the backend contract has no way to delete a translation key (updateTranslations merges).
+      canDeleteLeftover: function(item) { return item.kind === 'list' || item.kind === 'page' || item.kind === 'link'; },
+      deleteLeftover: function(item) {
+        var self = this, key = 'leftover:' + item.kind + ':' + item.name;
+        if (!this.isArmed(key)) { this.armConfirm(key); return Promise.resolve(false); }
+        var done;
+        if (item.kind === 'list') { delete this.listsCache[item.name]; done = backend.saveLists(this.listsCache); }
+        else if (item.kind === 'page') { if (this.pageCache) delete this.pageCache[item.name]; done = Writes.deleteRow('_pages', item.name, 'active'); }
+        else if (item.kind === 'link') done = this.setListUserLink(item.list, item.value, '');
+        else return Promise.resolve(false);
+        return Promise.resolve(done).then(function() {
+          self.leftovers.items = (self.leftovers.items || []).filter(function(x) { return x !== item; });
+          return true;
+        });
+      },
       isTranslatableList: function(name) { return (((this.schemaData && this.schemaData.translatableLists) || []).indexOf(name) >= 0); },
       colAllowNew: function(col) { return Columns.colAllowNew(SCHEMA, col); },
       colIsSorted: function(col) { return Columns.colIsSorted(SCHEMA, col); },
@@ -7340,7 +7432,9 @@ function createVueApp() {
         }
         var cols = this.visibleCols;
         var body = '<h2>' + Print.escape(title) + '</h2>';
-        if (this.useCardLayout) {
+        // A split draws one record beside a list, neither of them cards: on paper it is the whole view,
+        // which is the table.
+        if (this.useCardLayout && !this.useSplitLayout) {
           this.sortedData.forEach(function(row) { body += Print.cardHtml(cols, row, ctx); });
         } else {
           var afterCol = null;
@@ -7616,6 +7710,7 @@ function createVueApp() {
           colIsDate: function(col) { return vm.colIsDate(col); },
           dateLabel: function(v) { return vm.dateLabel(v); },
           listValuePicture: function(col, val, ns) { return vm.listValuePicture(col, val, ns); },
+          valueRole: function(col, val, ns) { return vm.valueRole(col, val, ns); },
           profilePicture: function(email) { return vm.profilePicture(email); },
           userLabel: function(email) { return vm.userLabel(email); },
           colIsImage: function(col) { return vm.colIsImage(col); },
@@ -7736,6 +7831,9 @@ function createVueApp() {
       isRsvp: function() { return this.type === 'view' && !!(appInstance && appInstance.isRsvpName(this.name)); },
       isStats: function() { return this.type === 'view' && !!(appInstance && appInstance.isStatsName(this.name)); },
       isScan: function() { return this.type === 'view' && !!(appInstance && appInstance.isScanName(this.name)); },
+      isBoard: function() { return this.type === 'view' && !!(appInstance && appInstance.isBoardName(this.name)); },
+      isForm: function() { return this.type === 'view' && !!(appInstance && appInstance.isFormName(this.name)); },
+      isTimeline: function() { return this.type === 'view' && !!(appInstance && appInstance.isTimelineName(this.name)); },
       // A doc-view embedded inside another page (only via the no-spec page path; the spec path pre-tags kind='doc').
       isDoc: function() { return !this.spec && this.type === 'view' && !!(appInstance && appInstance.rendersOwnProse(this.name)); },
       // `kind` HERE is a rendering mode -- which embed body to draw -- and is deliberately not the
@@ -7745,11 +7843,10 @@ function createVueApp() {
       // token draw the grid rather than recurse. So `doc` is not a synonym for `page` and must not be
       // renamed into one. dev/test/view-kind.test.js pins both vocabularies and the gap between them.
       //
-      // board, form and timeline have no branch in the template below, so they fall through to `data`:
-      // embedding a kanban renders a table of its rows. All three components DO accept an `embed` prop,
-      // so the gap is in the dispatch, not in them -- recorded in ROADMAP.md and pinned by that same
-      // test, so it stays a known answer rather than a surprise.
-      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : this.isRsvp ? 'rsvp' : this.isStats ? 'stats' : this.isScan ? 'scan' : this.isDoc ? 'doc' : 'data'); },
+      // board, form and timeline render as THEMSELVES, each with its own state, the way the other kinds
+      // do: an embedded board keeps drag between lanes, an embedded form submits to its own table, and
+      // an embedded timeline draws its own date window from its own config.
+      kind: function() { return this.spec ? this.spec.kind : (this.isCal ? 'calendar' : this.isRot ? 'rotation' : this.isPiv ? 'pivot' : this.isRsvp ? 'rsvp' : this.isStats ? 'stats' : this.isScan ? 'scan' : this.isBoard ? 'board' : this.isForm ? 'form' : this.isTimeline ? 'timeline' : this.isDoc ? 'doc' : 'data'); },
       // Render blocks for a doc embed. Spec path carries its own blocks (built from the schema seed by
       // resolveEmbed); the page path builds them here from the ACCESS-GATED body: hidden entirely unless
       // canAccessPage passes, then the server-filtered pageCache body (seed only as a pre-load fallback).
@@ -7848,6 +7945,9 @@ function createVueApp() {
       + '<rsvp-view v-else-if="kind===\'rsvp\'" :name="calName" :embed="true"></rsvp-view>'
       + '<stats-view v-else-if="kind===\'stats\'" :name="calName" :embed="true"></stats-view>'
       + '<scan-view v-else-if="kind===\'scan\'" :name="calName" :embed="true"></scan-view>'
+      + '<board-view v-else-if="kind===\'board\'" :name="calName" :embed="true"></board-view>'
+      + '<form-view v-else-if="kind===\'form\'" :name="calName" :embed="true"></form-view>'
+      + '<timeline-view v-else-if="kind===\'timeline\'" :name="calName" :embed="true"></timeline-view>'
       + '<template v-else-if="kind===\'doc\'">'
       + '<div v-if="canEditDoc" class="d-flex align-center"><v-spacer></v-spacer>'
       + '<v-btn size="x-small" variant="text" density="comfortable" :icon="editing ? \'mdi-eye\' : \'mdi-pencil\'" :title="editing ? t(\'btn.preview\') : t(\'btn.edit\')" @click="toggleDocEdit()" data-testid="doc-edit"></v-btn>'
@@ -7936,6 +8036,8 @@ function createVueApp() {
       colPicker: function(col) { return appInstance.colPicker(col); },
       colListSwitch: function(col) { return appInstance.colListSwitch(col); },
       getListOptions: function(col) { return appInstance.getListOptions(col); },
+      // A dropdown option's second line: the role under a linked person's name (listRole).
+      optionProps: function(o) { return (o && o.subtitle) ? { subtitle: o.subtitle } : {}; },
       // single-select options: the primary honors the listSwitch alt list; the embed uses the plain list.
       listItems: function(col, item) {
         if (this.embed) return appInstance.getListOptions(col);
@@ -7996,21 +8098,21 @@ function createVueApp() {
       +   '<template v-else><list-value :col="col" :value="item[col]" :view-cfg="ownerCfg"></list-value></template>'
       + '</span>'
       + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82"><list-value :col="col" :value="item[col]" :view-cfg="ownerCfg"></list-value></span>'
-      + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col) && !colIsRef(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
-      + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="cellOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
+      + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col) && !colIsRef(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
+      + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="cellOptions(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
       + '<v-btn-toggle v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'toggle\'" :name="col" :model-value="item[col] || \'\'" density="compact" variant="outlined" divided @update:model-value="save(item, col, $event || \'\')">'
       + '<v-btn v-for="o in getListOptions(col)" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
       + '</v-btn-toggle>'
       + '<v-chip-group v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'chips\'" :name="col" :model-value="item[col] || \'\'" @update:model-value="save(item, col, $event || \'\')">'
       + '<v-chip v-for="o in getListOptions(col)" :key="o.value" :value="o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
       + '</v-chip-group>'
-      + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>'
+      + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>'
       + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || t(\'col.switch_list\')">mdi-swap-horizontal</v-icon></template>'
       + '</v-combobox>'
-      + '<v-autocomplete v-else-if="colIsList(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop>'
+      + '<v-autocomplete v-else-if="colIsList(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop>'
       + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || t(\'col.switch_list\')">mdi-swap-horizontal</v-icon></template>'
       + '</v-autocomplete>'
-      + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
+      + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
       + '<div v-else-if="colIsImage(col)" class="d-flex align-center" style="gap:6px;min-width:0">'
       +   '<template v-if="noThumb"></template>'
       +   '<img v-else-if="item[col] && isAsset(item[col])" :src="thumbSrc(item[col])" class="cell-thumb" alt="">'
@@ -8048,7 +8150,7 @@ function createVueApp() {
   window.VIEW_PARTS = {
     calendar: { month: 'cal-month', week: 'cal-week', list: 'cal-agenda' },
     rotation: { table: 'rotation-table', card: 'rotation-cards', list: 'rotation-list' },
-    data: { list: 'data-list', gallery: 'data-gallery' }   // read-only layouts; card/table editing grids remain inline (deeper refactor)
+    data: { list: 'data-list', gallery: 'data-gallery', split: 'data-split' }   // card/table editing grids remain inline (deeper refactor)
   };
   window.viewPartFor = function(kind, mode) { return ((window.VIEW_PARTS[kind]) || {})[mode] || null; };
 
@@ -8183,6 +8285,75 @@ function createVueApp() {
   // extracts cleanly with a small surface: rows/cols as props, action buttons proxied to appInstance.
   // The card/table layouts stay inline for now — they carry full inline editing + interleaved embeds,
   // which need a shared column-helper module before they can be split out without regressions.
+  // One record's fields, edited in place (#record-fields-tpl): the card layout's body and the split
+  // layout's right pane, one element rather than two copies of the same field loop.
+  app.component('record-fields', {
+    props: { item: { type: Object, required: true }, skipFirst: Boolean },
+    computed: { a: function() { return appInstance; } },
+    template: '#record-fields-tpl'
+  });
+  // `layout: "split"`: master-detail. The selection is this component's own state -- a row id, so a
+  // re-sort or a live update keeps the same record open -- and falls back to the first row when the
+  // selected one is gone (deleted, filtered out, archived).
+  // On a phone the list and the record are two screens, as in a mail app. The open record is a history
+  // entry -- the screen's own state plus `splitRow` -- so the browser's Back returns to the list rather
+  // than leaving the view, and a reload reopens the same record.
+  app.component('data-split', {
+    props: { rows: { type: Array, default: function() { return []; } }, cols: { type: Array, default: function() { return []; } } },
+    data: function() { return { selId: null, open: false, listScroll: 0 }; },
+    computed: {
+      a: function() { return appInstance; },
+      picked: function() {
+        var id = this.selId;
+        return this.rows.find(function(r) { return r.id === id; }) || null;
+      },
+      selected: function() { return this.picked || this.rows[0] || null; },
+      // A phone highlights only a row someone opened; until then no row is "the open one".
+      activeId: function() { return this.a.mobile ? (this.picked && this.picked.id) : (this.selected && this.selected.id); },
+      // The line under each row's name: the view's second column. A picture is not a line of text.
+      subCol: function() { var c = this.cols[1]; return c && !this.a.colIsImage(c) ? c : null; },
+      listTitle: function() {
+        var hit = Nav.find(this.a.sidebarTabs, this.a.currentTable);
+        return hit ? hit.node.title : this.a.currentTable;
+      }
+    },
+    watch: {
+      // The open record went away under a phone (deleted, archived): back to the list, not to another row.
+      picked: function(row) { if (!row && this.open && this.a.mobile) this.close(); }
+    },
+    mounted: function() {
+      this._onPop = this.fromHistory.bind(this);
+      window.addEventListener('popstate', this._onPop);
+      this.fromHistory();
+    },
+    beforeUnmount: function() { window.removeEventListener('popstate', this._onPop); },
+    methods: {
+      pick: function(item) {
+        this.selId = item.id;
+        if (!this.a.mobile) return;
+        this.listScroll = window.scrollY;
+        try { history.pushState({ screen: this.a.currentTable, splitRow: item.id }, ''); } catch (e) {}
+        this.open = true;
+        var el = this.$el;
+        this.$nextTick(function() { if (el.getBoundingClientRect().top < 0) el.scrollIntoView(); });
+      },
+      close: function() {
+        var s = null; try { s = history.state; } catch (e) {}
+        if (s && s.splitRow) history.back(); else this.open = false;
+      },
+      fromHistory: function() {
+        var s = null; try { s = history.state; } catch (e) {}
+        var row = s && s.screen === this.a.currentTable && s.splitRow;
+        var wasOpen = this.open;
+        if (row) this.selId = row;
+        this.open = !!row;
+        var y = this.listScroll;
+        if (wasOpen && !row) this.$nextTick(function() { window.scrollTo(0, y); });
+      }
+    },
+    template: '#data-split-tpl'
+  });
+
   app.component('data-list', {
     props: { rows: Array, cols: Array },
     computed: {
@@ -8389,14 +8560,36 @@ function createVueApp() {
   // ---- Shared UI elements. One definition each, used everywhere the element appears; CLAUDE.md
   // ("UI conventions") lists them, and dev/test/ui-conventions.test.js fails on a hand-made copy. ----
 
-  // A one-line value to copy: a read-only field with the copy icon INSIDE it, the way "Share the tool's
-  // address" has always worked. style / class / name / data-testid fall through to the field.
+  // A one-line value to copy: a field with the copy icon INSIDE it, the way "Share the tool's address" has
+  // always worked. style / class / name / data-testid fall through to the field.
+  //
+  // Read-only by default. `editable` makes it a field you can also type or paste into, emitting `change`
+  // with the value when it is committed (blur / Enter), as a v-text-field's native change does. `secret`
+  // masks it and puts an eye beside the copy icon; whether it is shown is the caller's (`v-model:reveal`),
+  // so the caller can show a value it has just replaced. A token is the case: the field you paste it into
+  // is the field you copy it from, and one field is what there is to read.
   app.component('copy-field', {
-    props: { value: { type: String, default: '' }, label: { type: String, default: undefined } },
+    props: { value: { type: String, default: '' }, label: { type: String, default: undefined },
+             editable: Boolean, secret: Boolean, reveal: Boolean },
+    emits: ['change', 'update:reveal'],
     inject: ['uiHost'],
-    methods: { copy: function() { this.uiHost.copy(this.value); } },
-    template: '<v-text-field :model-value="value" :label="label" readonly density="compact" variant="outlined" hide-details'
-      + ' append-inner-icon="mdi-content-copy" @click:append-inner="copy()"></v-text-field>'
+    computed: {
+      masked: function() { return this.secret && !this.reveal; },
+      eyeLabel: function() { return this.masked ? this.t('btn.show') : this.t('btn.hide'); }
+    },
+    methods: {
+      copy: function() { this.uiHost.copy(this.value); },
+      t: function(k) { return this.uiHost.t(k); }
+    },
+    template: '<v-text-field :model-value="value" :label="label" :readonly="!editable" :type="masked ? \'password\' : \'text\'"'
+      + ' autocomplete="off" density="compact" variant="outlined" hide-details @change="e => $emit(\'change\', e.target.value)">'
+      + '<template v-slot:append-inner>'
+      +   '<v-icon v-if="secret" :icon="masked ? \'mdi-eye\' : \'mdi-eye-off\'" role="button" tabindex="0" class="mr-1"'
+      +   ' :title="eyeLabel" :aria-label="eyeLabel"'
+      +   ' @click="$emit(\'update:reveal\', masked)" @keydown.enter.prevent="$emit(\'update:reveal\', masked)"></v-icon>'
+      +   '<v-icon icon="mdi-content-copy" role="button" tabindex="0" :title="t(\'btn.copy\')" :aria-label="t(\'btn.copy\')"'
+      +   ' @click="copy()" @keydown.enter.prevent="copy()"></v-icon>'
+      + '</template></v-text-field>'
   });
 
   // The two-press icon on a row: delete (the default) or archive. It only DRAWS the state -- the caller's
@@ -9084,13 +9277,13 @@ function createVueApp() {
         var arr = Array.isArray(v) ? v : ((v == null || v === '') ? [] : [v]);
         var ns = this.nsCol || '';
         return arr.filter(function(x) { return x != null && x !== ''; }).map(function(x) {
-          return { text: a.displayValue(col, x, ns, cfg), pic: a.listValuePicture(col, x, ns) };
+          return { text: a.displayValue(col, x, ns, cfg), pic: a.listValuePicture(col, x, ns), role: a.valueRole(col, x, ns) };
         });
       }
     },
     template: ''
       + '<span class="list-value">'
-      + '<span v-for="(it, i) in items" :key="i" class="list-value__item">'
+      + '<span v-for="(it, i) in items" :key="i" class="list-value__item" :title="it.role || null">'
       +   '<user-avatar v-if="it.pic" :picture="it.pic" :name="it.text" :size="size"></user-avatar>'
       +   '<span>{{ it.text }}{{ i < items.length - 1 ? \',\' : \'\' }}</span>'
       + '</span>'
@@ -9375,14 +9568,21 @@ function createVueApp() {
       // there is one escape away from a silent parse break.
       searchLabel: function() { return appInstance.t('btn.search'); },
       laneCol: function() { return this.cfg.lane; },
-      canEdit: function() { return !this.embed && appInstance.canMutateRows; },
+      // Embedded, the board answers for ITS view, not for whatever screen hosts it: the root's
+      // canMutateRows / currentSelfService describe the host. So an embed asks the per-view questions
+      // (viewReadonly, embedSelfServeTable) that data-cell already asks for an embedded cell.
+      selfServe: function() {
+        var a = appInstance;
+        if (this.embed) return a.embedSelfServeTable('view', this.viewName) || null;
+        return a.currentSelfService ? a.selfServeTable : null;
+      },
+      canEdit: function() { return this.embed ? (!appInstance.viewReadonly(this.viewName) || !!this.selfServe) : appInstance.canMutateRows; },
       // Moving a card writes the lane column. On a self-service table that is an owner-scoped write, so
       // a card is only movable if `ownerWritable` lets its owner set the lane — otherwise the drop would
       // be refused by the rules and the card would snap back unexplained.
       canMoveCards: function() {
-        var a = appInstance;
-        if (!a.currentSelfService) return true;
-        return a.ownerCanWrite(a.selfServeTable, this.laneCol);
+        var st = this.selfServe;
+        return !st || appInstance.ownerCanWrite(st, this.laneCol);
       },
       // The lane a member who may NOT write the lane column would land in by adding — the column's own
       // `default`. On such a board the per-lane `+` is offered there and nowhere else (see canAddInLane),
@@ -9397,7 +9597,7 @@ function createVueApp() {
       // than sorting a list), so the runtime search has to be applied here too -- otherwise typing a
       // name would narrow every view kind except this one.
       rows: function() {
-        if (this.embed) return appInstance.boardRowsFor ? appInstance.boardRowsFor(this.viewName) : [];
+        if (this.embed) return appInstance.boardRowsFor(this.viewName);
         var rows = appInstance.currentData || [];
         return (appInstance.searchable && appInstance.searchTerm)
           ? Rows.searchRows(rows, appInstance.searchTerm, appInstance.searchCols, appInstance.searchLabeler)
@@ -9473,12 +9673,19 @@ function createVueApp() {
       // canMutateRow per row (see ui.html) — the board did not, so a member saw pencil/archive/delete on
       // every card in the lane, including other people's. Non-self-service boards are unaffected
       // (canMutateRow is true for every row there).
-      canEditCard: function(item) { return this.canEdit && appInstance.canMutateRow(item); },
+      canEditCard: function(item) {
+        if (!this.canEdit) return false;
+        if (!this.embed) return appInstance.canMutateRow(item);
+        var st = this.selfServe;
+        return !st || (appInstance.rowOwnedByMe(item, st) && appInstance.ownerRowWritable(item, st));
+      },
       // Adding into a lane stamps that lane value, so it asks the same question as moving a card there.
       // A member who may not write the lane column still gets the `+`, but only on the lane the column's
       // own default would put them in — the one lane value they are allowed to write.
       canAddInLane: function(laneKey) {
-        if (!this.canEdit || !this.cfg.addInLane) return false;
+        // Adding, like archiving and deleting below, stays on the board's own screen: those go through the
+        // root's CURRENT view, which embedded is the host page, not this board.
+        if (this.embed || !this.canEdit || !this.cfg.addInLane) return false;
         return this.canMoveCards || laneKey === this.defaultLane;
       },
       laneLabel: function(k) { return k === '' ? appInstance.t('board.unassigned') : appInstance.displayValue(this.laneCol, k); },
@@ -9583,8 +9790,8 @@ function createVueApp() {
       + '        <div style="display:flex;align-items:flex-start;gap:4px">'
       + '          <div style="font-weight:600;font-size:0.85rem;flex:1">{{ cardTitle(item) }}</div>'
       + '          <v-btn v-if="canEditCard(item)" :icon="editing[item.id] ? \'mdi-check\' : \'mdi-pencil-outline\'" size="x-small" variant="text" density="comfortable" :color="editing[item.id] ? \'primary\' : undefined" :title="t(\'btn.edit\')" @click="toggleEdit(item)" :data-testid="\'board-edit-\'+item.id"></v-btn>'
-      + '          <confirm-x v-if="canEditCard(item) && hasArchive" :armed="isArchArmed(item)" action="archive" dense density="comfortable" :data-testid="\'board-arch-\'+item.id" @click="archItem(item)"></confirm-x>'
-      + '          <confirm-x v-if="canEditCard(item)" :armed="isDelArmed(item)" dense density="comfortable" :data-testid="\'board-del-\'+item.id" @click="delItem(item)"></confirm-x>'
+      + '          <confirm-x v-if="!embed && canEditCard(item) && hasArchive" :armed="isArchArmed(item)" action="archive" dense density="comfortable" :data-testid="\'board-arch-\'+item.id" @click="archItem(item)"></confirm-x>'
+      + '          <confirm-x v-if="!embed && canEditCard(item)" :armed="isDelArmed(item)" dense density="comfortable" :data-testid="\'board-del-\'+item.id" @click="delItem(item)"></confirm-x>'
       + '          <v-menu v-if="canEditCard(item) && canMoveCards" v-model="menuOf[item.id]"><template v-slot:activator="{ props }">'
       + '            <v-btn v-bind="props" icon="mdi-dots-vertical" size="x-small" variant="text" density="comfortable" :title="t(\'board.move_to\')" :data-testid="\'board-move-\'+item.id"></v-btn></template>'
       // No heading over the lane list: the menu opens from a button that already carries "move to" as its

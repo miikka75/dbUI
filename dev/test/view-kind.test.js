@@ -204,16 +204,9 @@ describe('viewKind -- every renderable kind has a component to render it', () =>
 
 describe('viewKind -- which kinds an EMBED can render as themselves', () => {
   // "Embedding is free" is what ROADMAP.md promises a new view kind: embed-view dispatches on the same
-  // classifier, so a {{view:x}} renders x properly the day the kind exists. That is true of six kinds.
-  //
-  // It is NOT true of board, form and timeline. All three have components that accept an `embed` prop,
-  // but embed-view's template has no branch for them, so they fall through to the data grid: embedding
-  // a kanban board in a document silently renders a table of its rows instead. Nothing said so, which
-  // is the actual problem -- the fallthrough is indistinguishable from a deliberate choice.
-  //
-  // This test does not decide which it should be (that question is recorded in ROADMAP.md). It makes
-  // the current answer EXPLICIT, so adding a kind without an embed branch is a failing test rather
-  // than a surprise for whoever first embeds one.
+  // classifier, so a {{view:x}} renders x properly the day the kind exists. board, form and timeline
+  // were the three it was not true of -- they fell through to the data grid -- until they got branches.
+  // A new kind without one is now a failing test rather than a surprise for whoever first embeds it.
   const embedBranches = () => {
     const src = fs.readFileSync(path.join(ROOT, 'app-core.js'), 'utf8');
     const from = src.indexOf("app.component('embed-view'");
@@ -223,16 +216,17 @@ describe('viewKind -- which kinds an EMBED can render as themselves', () => {
   };
 
   it('dispatches these kinds to their own component', () => {
-    assert.deepEqual(embedBranches(), ['calendar', 'doc', 'pivot', 'rotation', 'rsvp', 'scan', 'stats']);
+    assert.deepEqual(embedBranches(), ['board', 'calendar', 'doc', 'form', 'pivot', 'rotation', 'rsvp', 'scan', 'stats', 'timeline']);
   });
 
-  it('board, form and timeline fall through to the data grid -- recorded, not endorsed', () => {
+  it('every published kind with a component of its own embeds as itself', () => {
+    // `data` and `page` are the two that do not need a branch: `data` IS the fallthrough, and a page
+    // embeds as `doc` (or as `data` when it is sourced). Anything else falling through would render a
+    // kanban as a table of its rows, which is the gap this used to pin.
+    const published = read('schema.schema.json').$defs.view.properties.kind.enum
+      .filter((k) => k !== 'group' && k !== 'data' && k !== 'page');
     const branches = embedBranches();
-    for (const kind of ['board', 'form', 'timeline']) {
-      assert.ok(!branches.includes(kind),
-        kind + ' now has an embed branch. Good -- delete it from this list, and from the ROADMAP entry ' +
-        'that records the gap.');
-    }
+    assert.deepEqual(published.filter((k) => !branches.includes(k)), []);
   });
 
   // `doc` is the embed-level name for a page that renders its own prose, and it is deliberately NOT

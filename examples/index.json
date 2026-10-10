@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "3152f43558716773"
+      "hash": "7b1af8550ab48daf"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "78304914ca8dd266"
+      "hash": "df90536714bcad6d"
     }
   ],
   "bundles": [
@@ -20,12 +20,12 @@
       "title": "Bishopric Tool",
       "description": "A ward bishopric’s working tool — meeting programs, assignments, interviews and a members roster.",
       "icon": "./examples/bishopric-favicon.svg",
-      "revision": 39,
+      "revision": 41,
       "tables": 14,
       "views": 19,
       "schema": {
         "file": "bishopric-schema.json",
-        "hash": "cd6efc613200e267"
+        "hash": "e0a334b8528799ae"
       },
       "languages": [
         {
@@ -43,7 +43,7 @@
       ],
       "about": {
         "file": "bishopric-about.json",
-        "hash": "7714b00812fcf0be"
+        "hash": "13f4adb8d779a772"
       },
       "notes": {
         "29": "Welcome the newly baptized and those who moved in; releases now come before sustainings.",
@@ -55,7 +55,9 @@
         "36": "Ward business follows the General Handbook for priesthood quorum callings. Aaronic Priesthood quorum callings are announced in sacrament meeting without a vote, in a block of their own; they are sustained in the quorum meeting. Elders quorum callings leave the program: the stake presidency presents the presidency, and the quorum sustains the secretary and teachers. The deacons, teachers and priests quorums are now named under the Aaronic Priesthood (for example “Aaronic Priesthood – Priests Quorum – First Assistant”). The bishop is the priests quorum president, so the priests have no youth president, and their first and second counselors become the first and second assistants. UPDATING AN EXISTING DATABASE: an update does not change catalogue rows, so in Lookup, under young_men_priests, rename first_counselor to first_assistant and second_counselor to second_assistant, and delete president.",
         "37": "Ward business adds naming and blessing, and confirmation for those baptized but not yet confirmed; quorum callings are announced last. Finnish uses “apulainen” for the priests’ assistants. EXISTING DATABASE: in Lookup, add Welcome statuses child_blessing and confirmed.",
         "38": "Aaronic Priesthood quorum callings are announced once set apart (they are sustained and set apart in the quorum), not once accepted.",
-        "39": "Adds a personal calendar feed: the interviews, calling steps, reminders and sacrament meeting assignments that are yours, in your phone or computer calendar. Subscribe under Settings -> My calendar feeds; each person gets a private link, in the language they pick. What counts as yours comes from the member name and calling linked to your account in Lists. There is no new screen. Links are only issued where the deployment has file storage."
+        "39": "Adds a personal calendar feed: the interviews, calling steps, reminders and sacrament meeting assignments that are yours, in your phone or computer calendar. Subscribe under Settings -> My calendar feeds; each person gets a private link, in the language they pick. What counts as yours comes from the member name and calling linked to your account in Lists. There is no new screen. Links are only issued where the deployment has file storage.",
+        "40": "The meeting agenda is a list of Sundays beside the open meeting: pick a date to edit that Sunday’s programme without scrolling across a wide table. On a phone a date opens its meeting as its own screen, and Back returns to the list.",
+        "41": "Programs and Music are now a list of Sundays beside the open one, like the meeting agenda: pick a date to see that Sunday’s whole program, or to edit its hymns. On a phone a date opens its Sunday as its own screen, and Back returns to the list. Printing the music still gives the whole schedule as a table; a program still prints on its own."
       }
     },
     {

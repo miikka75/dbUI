@@ -77,6 +77,35 @@ global `window.supabase`), exactly like the Firebase compat SDK — no ES module
    visitor's browser, and those keys bypass RLS entirely — anyone loading the page would get
    unrestricted read/write over the whole database. They belong only on a trusted server.
 
+### Or: steps 4 onward in one command
+
+After the dashboard work (steps 1–3 here, and step 5 when you open the app), everything else is one
+re-runnable command. It needs `npx supabase@latest login` once:
+
+```bash
+cd dev
+npm run supabase:setup -- --project-ref <project-ref>
+```
+
+| Step | What it does |
+|---|---|
+| 1 | applies `supabase-schema.sql` (step 4 above) |
+| 2 | applies `supabase/csp-reports.sql`, the [CSP collector](#content-security-policy-reporting)'s storage |
+| 3 | checks the token functions exist |
+| 4 | deploys the `csp-report` Edge Function with `--no-verify-jwt` |
+| 5 | creates the collector's read token **if there is none**, and prints it once |
+| 6 | runs `check-supabase.mjs` against the site (`--site <url>`; default `https://dbui.ddns.net`) |
+
+**Running it again is safe.** The SQL and the deploy repeat harmlessly. The token is the exception,
+since replacing it locks out every admin holding the old one, so it is created only when neither a
+stored token nor an older `DBUI_CSP_REPORT_TOKEN` secret exists. **`--new-token`** replaces it on
+purpose, which is the way back from a lost token. The new token is written into the database, not set
+as a secret, so it works at once.
+
+`--csp-only` skips the app schema, for a Firestore deployment that wants only the collector.
+`--no-check` skips step 6. The token is shown once: paste it into **Settings → Security policy
+reports**, and press **Rotate token** there if the terminal is not somewhere a token should live.
+
 First sign-in, while no members exist, acts as **admin** (bootstrap). Import a schema
 (Settings → Import from JSON), then add yourself under **Settings → User Access**. From then on only
 registered users have access.
@@ -206,6 +235,9 @@ Cloud Function plus a Secret Manager secret — needs Blaze, which is exactly wh
 exists. The blocker here is the delivery, not the plan.
 
 ### Turning it on
+
+`npm run supabase:setup -- --project-ref <project-ref> --csp-only` does all of the following in one
+re-runnable command; see [Or: steps 4 onward in one command](#or-steps-4-onward-in-one-command). By hand:
 
 ```bash
 # Every command here runs FROM THE REPO ROOT: -f and the function deploy both read paths under it.
