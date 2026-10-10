@@ -169,13 +169,22 @@
             },
             "list": "ref_callings",
             "type": "select",
-            "valueCol": "slug"
+            "valueCol": "slug",
+            "listFilter": {
+              "organization": "bishopric"
+            }
           },
           {
             "name": "responsible",
             "type": "select",
             "list": "ref_callings",
-            "valueCol": "slug"
+            "valueCol": "slug",
+            "listFilter": {
+              "$or": [
+                { "organization": "bishopric" },
+                { "organization": "ward" }
+              ]
+            }
           },
           {
             "name": "opening_prayer",
@@ -272,7 +281,13 @@
             "name": "responsible",
             "type": "select",
             "list": "ref_callings",
-            "valueCol": "slug"
+            "valueCol": "slug",
+            "listFilter": {
+              "$or": [
+                { "organization": "bishopric" },
+                { "organization": "ward" }
+              ]
+            }
           },
           {
             "name": "item",
@@ -310,7 +325,13 @@
             "name": "responsible",
             "list": "ref_callings",
             "type": "select",
-            "valueCol": "slug"
+            "valueCol": "slug",
+            "listFilter": {
+              "$or": [
+                { "organization": "bishopric" },
+                { "organization": "ward" }
+              ]
+            }
           }
         ]
       },
@@ -377,7 +398,13 @@
             "name": "responsible",
             "list": "ref_callings",
             "type": "select",
-            "valueCol": "slug"
+            "valueCol": "slug",
+            "listFilter": {
+              "$or": [
+                { "organization": "bishopric" },
+                { "organization": "ward" }
+              ]
+            }
           },
           {
             "name": "expires",
@@ -460,7 +487,13 @@
             "name": "responsible",
             "list": "ref_callings",
             "type": "select",
-            "valueCol": "slug"
+            "valueCol": "slug",
+            "listFilter": {
+              "$or": [
+                { "organization": "bishopric" },
+                { "organization": "ward" }
+              ]
+            }
           },
           {
             "name": "notes",
@@ -629,9 +662,8 @@
       {
         "hideEmpty": true,
         "readonly": true,
-        "layout": "card",
+        "layout": "split",
         "mode": "join",
-        "collapsed": true,
         "name": "meeting_program",
         "defaultSort": "date",
         "printable": "cards",
@@ -990,6 +1022,7 @@
       {
         "defaultSort": "date",
         "name": "meeting_agenda",
+        "layout": "split",
         "columns": [
           "date",
           "theme",
@@ -1057,6 +1090,7 @@
         "mode": "join",
         "defaultSort": "date",
         "name": "meeting_music",
+        "layout": "split",
         "printable": "view",
         "kind": "data"
       },

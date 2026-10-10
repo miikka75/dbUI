@@ -181,6 +181,56 @@ test.describe('Lists management', () => {
     await lookupTab.click();
     await expect(page.locator('.v-main')).toContainText('status', { timeout: 5000 });
   });
+
+  test('a list nothing in the schema names is marked, and a live one is not', async ({ page }) => {
+    await ensureAppReady(page);
+    // A vocabulary a retired column used to read: still in the database, named by nothing.
+    await page.request.post('/api/saveLists', { data: { lists: { status: ['open', 'done'], assigned_to: ['ann'], crew: ['bob'], retired_terms: ['x'] } } });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item').filter({ hasText: /lookup|tab\.lookup/ }).click();
+    const mark = page.locator('[data-testid="leftover-list-retired_terms"]');
+    await expect(mark).toBeVisible();
+    // No visible words: an icon whose tooltip and accessible name carry them, beside the name in the warning colour.
+    await expect(mark).toHaveAttribute('aria-label', 'list.not_referenced');
+    await expect(mark.locator('xpath=preceding-sibling::span[1]')).toHaveClass(/text-warning/);
+    for (const live of ['status', 'assigned_to', 'crew']) await expect(page.locator('[data-testid="leftover-list-' + live + '"]')).toHaveCount(0);
+  });
+
+  test('the record of an installed example does not keep a list of the same name alive', async ({ page }) => {
+    // The bishopric bundle's id is also the name of a list its catalogue retired; appConfig.example
+    // ({ bundle: 'bishopric', ... }) is bookkeeping, not a reference.
+    await ensureAppReady(page);
+    await page.request.post('/api/saveLists', { data: { lists: { status: ['open', 'done'], assigned_to: ['ann'], crew: ['bob'], bishopric: ['x'] } } });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => { const a = window.appInstance; a.appConfig = Object.assign({}, a.appConfig, { example: { bundle: 'bishopric', revision: 3, files: {} } }); });
+    await page.locator('.v-navigation-drawer .v-list-item').filter({ hasText: /lookup|tab\.lookup/ }).click();
+    await expect(page.locator('[data-testid="leftover-list-bishopric"]')).toBeVisible();
+  });
+
+  test('Settings -> Leftovers reports what nothing names, and deletes one item on two presses', async ({ page }) => {
+    await ensureAppReady(page);
+    await page.request.post('/api/saveLists', { data: { lists: { status: ['open', 'done'], assigned_to: ['ann'], crew: ['bob'], retired_terms: ['x', 'y'] } } });
+    await page.request.post('/api/putRow', { data: { tableId: '_pages', tab: 'active', data: { id: 'renamed_away', markdown: '# old' } } });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.evaluate(() => window.appInstance.selectTab('__settings'));
+    await page.locator('[data-testid="leftovers-section-toggle"]').click();
+    await page.locator('[data-testid="leftovers-scan"]').click();
+    const list = page.locator('[data-testid="leftover-list-retired_terms"]');
+    await expect(list).toContainText('2');
+    await expect(page.locator('[data-testid="leftover-page-renamed_away"]')).toBeVisible();
+    await expect(page.locator('[data-testid="leftover-list-status"]')).toHaveCount(0);
+
+    await list.locator('button').click();          // arms
+    await expect(list).toBeVisible();
+    await list.locator('button').click();          // acts
+    await expect(list).toHaveCount(0);
+    const lists = await (await page.request.post('/api/getLists', { data: {} })).json();
+    expect(Object.keys(lists)).not.toContain('retired_terms');
+    expect(Object.keys(lists)).toContain('status');
+  });
 });
 
 test.describe('Theme toggle', () => {
@@ -10000,5 +10050,132 @@ test.describe('Security policy reports in Settings', () => {
     expect(await page.evaluate(() => window.__copied)).toBe('n'.repeat(64));
     await page.locator('[data-testid="csp-token"] [aria-label="btn.hide"]').click();
     await expect(field).toHaveAttribute('type', 'password');
+  });
+});
+
+test.describe('A linked position shows its role on screen', () => {
+  // `userlink-name` labels a linked value with the person holding it. The role it names is shown beside
+  // that label: as the dropdown option's second line, and as the cell's tooltip -- never in the label.
+  test('the dropdown shows the role under a linked name, and a read-only value has it as its tooltip', async ({ page }) => {
+    await ensureAppReady(page);   // resets the data, so the note goes in after it
+    await page.request.post('/api/putRow', { data: { tableId: 'notes', tab: 'active', data: { id: 'nr1', title: 'Role note', author: 'bishop' } } });
+    await page.reload();
+    await page.waitForSelector('.v-navigation-drawer .v-list-item', { timeout: 6000 });
+    await page.locator('.v-navigation-drawer .v-list-item', { hasText: 'tab.notes' }).first().click();
+    await expect(page.locator('input[name="author"]').first()).toBeVisible();
+    const r = await page.evaluate(() => {
+      const a = window.appInstance;
+      a.schemaData = Object.assign({}, a.schemaData, { listSources: { assigned_to: 'userlink-name' } });
+      a.listAvatars = { assigned_to: { bishop: { name: 'Ann Smith', picture: '' } } };
+      a.strings = Object.assign({}, a.strings, { 'list.assigned_to.bishop': 'Bishop', 'list.assigned_to.clerk': 'Clerk' });
+      a.listsCache.assigned_to = ['bishop', 'clerk'];
+      return { opts: a.getListOptions('author'), label: a.listLabel('assigned_to', 'bishop'), role: a.valueRole('author', 'bishop') };
+    });
+    // The label is unchanged: the person. The role is extra, and only where a person replaced it.
+    expect(r.label).toBe('Ann Smith');
+    expect(r.opts).toEqual([{ title: 'Ann Smith', value: 'bishop', subtitle: 'Bishop' }, { title: 'Clerk', value: 'clerk' }]);
+    expect(r.role).toBe('Bishop');
+
+    // On screen: open the author dropdown of the note, and the option carries the role as its second line.
+    const cell = page.locator('input[name="author"]').first();
+    await cell.click();
+    const opt = page.locator('.v-overlay .v-list-item', { hasText: 'Ann Smith' }).first();
+    await expect(opt).toBeVisible();
+    await expect(opt.locator('.v-list-item-subtitle')).toHaveText('Bishop');
+    await expect(page.locator('.v-overlay .v-list-item', { hasText: 'Clerk' }).first().locator('.v-list-item-subtitle')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+
+    // A read-only rendering (list-value) carries it as the tooltip.
+    const tip = await page.evaluate(() => {
+      const host = document.createElement('div'); document.body.appendChild(host);
+      const C = window.appInstance.$.appContext.components['list-value'];
+      const vm = Vue.createApp({ render: () => Vue.h(C, { col: 'author', value: 'bishop' }) });
+      vm._context.components = window.appInstance.$.appContext.components;
+      vm._context.provides = window.appInstance.$.appContext.provides;
+      Object.assign(vm._context.provides, window.appInstance.$.provides);
+      vm.mount(host);
+      const el = host.querySelector('.list-value__item');
+      const out = el && el.getAttribute('title');
+      vm.unmount(); host.remove();
+      return out;
+    });
+    expect(tip).toBe('Bishop');
+  });
+});
+
+test.describe('split layout (master-detail)', () => {
+  async function openSplit(page, size, rows) {
+    const schema = JSON.parse(JSON.stringify(SCHEMA));
+    schema.views.push({ name: 'notes_split', sources: ['notes'], mode: 'union', layout: 'split', defaultSort: 'title', printable: 'view', columns: ['title', 'content', 'author'] });
+    schema.nav = { items: [{ view: 'notes_split' }].concat((schema.nav && schema.nav.items) || []) };
+    await page.setViewportSize(size);
+    await page.request.post('/api/resetData');
+    await page.request.post('/api/saveSchema', { data: { schema } });
+    for (const r of rows || [{ id: 'n1', title: 'Alpha', content: 'first' }, { id: 'n2', title: 'Beta', content: 'second' }])
+      await page.request.post('/api/putRow', { data: { tableId: 'notes', tab: 'active', data: r } });
+    await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); });
+    await page.goto('/');
+    await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+    await page.evaluate(() => appInstance.selectTab('notes_split'));
+  }
+
+  test('lists the rows, shows the selected record editable beside them, and keeps the selection by id', async ({ page }) => {
+    await openSplit(page, { width: 1280, height: 800 });
+    await expect(page.locator('[data-testid="split-row-n1"]')).toBeVisible();
+    await expect(page.locator('[data-testid="split-row-n2"]')).toBeVisible();
+    // Each row is named by its first column, with its second beneath.
+    await expect(page.locator('[data-testid="split-row-n1"] .v-list-item-subtitle')).toHaveText('first');
+    // The first row is open until another is picked.
+    await expect(page.locator('[data-testid="split-record"]')).toContainText('first');
+    await page.locator('[data-testid="split-row-n2"]').click();
+    await expect(page.locator('[data-testid="split-record"]')).toContainText('second');
+    await expect(page.locator('[data-testid="split-record"]')).not.toContainText('first');
+  });
+
+  test('Print view prints the whole view as a table, not one card per row', async ({ page }) => {
+    await openSplit(page, { width: 1280, height: 800 });
+    await expect(page.locator('[data-testid="split-row-n2"]')).toBeVisible();
+    const body = await page.evaluate(() => {
+      let out = null; appInstance._printOpen = (t, b) => { out = b; };
+      appInstance.printView();
+      return out;
+    });
+    expect(body).toContain('<table');
+    expect(body).toContain('Alpha');
+    expect(body).toContain('Beta');
+  });
+
+  test('a long list scrolls in its own pane, so the record stays on screen', async ({ page }) => {
+    const rows = Array.from({ length: 40 }, (_, i) => ({ id: 'r' + i, title: 'Note ' + String(i).padStart(2, '0'), content: 'body ' + i }));
+    await openSplit(page, { width: 1280, height: 720 }, rows);
+    const list = page.locator('[data-testid="split-list"]');
+    await list.locator('[data-testid="split-row-r39"]').scrollIntoViewIfNeeded();
+    await list.locator('[data-testid="split-row-r39"]').click();
+    await expect(page.locator('[data-testid="split-record"]')).toContainText('body 39');
+    expect(await list.evaluate((el) => el.scrollTop > 0 && el.scrollHeight > el.clientHeight)).toBe(true);
+    const box = await page.locator('[data-testid="split-record"]').boundingBox();
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeLessThan(720);
+  });
+
+  test('on a phone a row opens its record in place of the list, and Back returns to the list', async ({ page }) => {
+    await openSplit(page, { width: 390, height: 844 });
+    await expect(page.locator('[data-testid="split-row-n1"]')).toBeVisible();
+    await expect(page.locator('[data-testid="split-record"]')).toHaveCount(0);
+
+    await page.locator('[data-testid="split-row-n2"]').click();
+    await expect(page.locator('[data-testid="split-record"]')).toContainText('second');
+    await expect(page.locator('[data-testid="split-list"]')).toHaveCount(0);
+    // The app's own back button, named after the list it returns to.
+    await page.locator('[data-testid="split-back"]').click();
+    await expect(page.locator('[data-testid="split-row-n2"]')).toBeVisible();
+    await expect(page.locator('[data-testid="split-record"]')).toHaveCount(0);
+
+    // The browser's Back closes the record, not the view.
+    await page.locator('[data-testid="split-row-n1"]').click();
+    await expect(page.locator('[data-testid="split-record"]')).toContainText('first');
+    await page.goBack();
+    await expect(page.locator('[data-testid="split-row-n1"]')).toBeVisible();
+    expect(await page.evaluate(() => appInstance.currentTable)).toBe('notes_split');
   });
 });

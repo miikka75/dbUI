@@ -46,6 +46,7 @@
     "board.js",
     "nav.js",
     "scan.js",
+    "leftovers.js",
     "live-sync.js",
     "backend-helpers.js",
     "csp.js"

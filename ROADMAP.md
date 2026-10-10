@@ -411,7 +411,7 @@ seven entries to find out what is left.
 | Open | From | Size | Why it is not done |
 |---|---|---|---|
 | ~~**Set `Csp.REPORT_ENDPOINT` and deploy the collector**~~ *(done)* | 7 | — | Done in `626cb93` (2026-09-23): `csp.js` points at the project's Supabase Edge Function (`…supabase.co/functions/v1/csp-report`), and the function answers. This row had not been moved. |
-| **`board` / `form` / `timeline` have no embed branch** | 4 | small code, large question | Three product questions wearing one costume: does a board keep drag-between-lanes inside a document? Does a `form` in a page mean a second submit target, or the same one twice? Does a timeline embed want its own date window or the page's? The dispatch set is asserted, so this is a recorded answer rather than an accident. |
+| ~~**`board` / `form` / `timeline` have no embed branch**~~ *(landed)* | 4 | — | Answered "each its own view, with its own state": an embedded board keeps the move between lanes (and in-card edits) under its OWN view's permission, while add / archive / delete stay on its own screen because they act through the root's current view; a form starts and submits its own record in its own table; a timeline draws the window its own config names. Building it found `boardRowsFor`, which board-view had called for its embed mode since it was written and which never existed, so an embedded board would have shown empty lanes. The dispatch test now asserts every published kind embeds as itself. |
 | ~~**`access:` on a `markdown` + `sources` view is half-honoured**~~ *(landed)* | 4 | small | Honoured on both paths now: `embed-view` asks `canAccessPage` before any branch draws, so a sourced page embedded elsewhere renders nothing for a member without the grant, as it already did at nav and in the doc branch. Pinned by *access: on a sourced page holds where it is embedded*. |
 | ~~**The extraction series**~~ *(done)* | 6 | done | Six cuts made (`brand.js`, `reorder.js`, the ref editor's deletes, `profiles.js` + `images.js`, `bundle.js`, the feed publisher). Ranked by how much of each seam is pure and how much duplication it already costs, which is how feeds went from first to last. |
 
@@ -1195,7 +1195,7 @@ read-only data path beside the inline-`{{self}}` block, the same branch again in
 printed more often than read on screen), a `schema.schema.json` property, a `validateSchema` check that
 every `{{col}}` names a real column, and a test. Read-only by nature: a sentence has no cells to edit.
 
-### Leftovers — data the schema no longer refers to
+### Leftovers — data the schema no longer refers to *(landed: the badge, and the report panel in Settings)*
 
 A schema moves on; the database does not. When the bishopric example replaced its `callings` list with
 a catalogue, a deployment that upgraded was left holding an `organizations` list and a `callings` list
@@ -1236,6 +1236,23 @@ a `computed.lookup` — miss one and the badge tells someone their live catalogu
 what can be PROVEN unreferenced, and stay silent when unsure. The badge is allowed to say nothing; it is
 not allowed to be wrong.
 
+*The badge LANDED*, and the fail-safe rule decided its shape. (Drawn since as the name in the warning colour plus an
+unlinked icon, with "not referenced" as the icon's tooltip and accessible name rather than visible text: colour
+is still not the only channel, the icon is the second one.) It does not enumerate the paths above:
+`leftovers.js` treats a name as referenced if it occurs as a whole word in ANY string, key or value, of
+the schema document (minus the `tables` map's own keys, which declare rather than refer), the loaded
+views, page bodies and folder config. Enumerating would miss the per-column-name list resolver, where a
+`select` with no `list` reads the list named after the column, and whichever path is added next. A
+substring search can only err towards silence.
+
+It erred too far once, and the case is worth keeping. The bishopric's `admin_bishopric` view groups its
+rows under a column it NAMES `callings`, so the retired `callings` list, read by no table, stayed
+unbadged. A view reaches a list only through a TABLE's column, so the positions holding a view's own
+column names (`columns`, `defaultSort`, `groupBy.column`/`from`, `filterBy`, `afterColumn`, a column
+entry's `name`) are now skipped inside views. That is an enumeration, but of positions to IGNORE, so one
+it misses still counts, and the answer stays silent rather than wrong. A `matchList` under any of them
+still counts. Checked against all three bundles: no list a table column reads is flagged.
+
 The badge does not subsume the report. It answers "is this one used?" for things that have a tab; the
 report answers "what is left over?" for the things that do not — orphaned page bodies, dead translation
 keys, links pointing at deleted values.
@@ -1269,6 +1286,14 @@ One subtlety worth building in from the start: a list and a lookup TABLE may sha
 bishopric example has both a `ref_statuses` table and, on older deployments, a `ref_statuses` list.
 The report has to say which of the two it means, and must never offer the table when the leftover is
 the list.
+
+*The panel LANDED* (Settings → Leftovers, read on demand) as `Leftovers.inventory`, and two of its rows
+report without a delete. A **lookup table** is declared by the schema, so removing it is a schema edit,
+not a data delete. A **dead translation key** cannot be deleted at all: `updateTranslations` merges, and
+no backend in the contract can remove a key. That would be a new method on four backends, which this did
+not add. Lists, page bodies and account links delete through writes that already exist, two presses each.
+"Collections for a table the schema no longer declares" is not in it either: the contract has no way to
+enumerate collections (`getAvailableTables` answers `[]` on Firebase).
 
 Cost: a pure function (schema + what the database holds -> an inventory), Node-tested; the panel; the
 deletes reuse writes that already exist. No engine module, no view kind. The same panel is the natural
@@ -2300,7 +2325,7 @@ instance, and renders a `shown` computed that is `rows` untouched until a header
 `Rows.sortByCol` over them — so an embedded `ref` column sorts in the same catalogue order as the grid.
 All three table bodies an embed can draw (the editable table, the read-only spec table, and an inline
 `{{self}}` table) have it, with no arrow — no sortable header in the app shows one any more; `aria-sort` carries the direction on all of them. The card, list and chip layouts have no header row and keep `defaultSort`.
-### Narrowing a lookup-backed picker — which rows are OFFERED
+### Narrowing a lookup-backed picker — which rows are OFFERED *(landed: the column shape, as `listFilter`)*
 
 A `select` whose `list:` names a lookup offers every row of it. `lookupListValues` sweeps
 `dataCache[name]`, derives each row's value in the asked-for dimension, dedupes, and returns the lot;
@@ -2349,7 +2374,18 @@ Cost: a predicate and its wiring into one function (`lookupListValues`), Node-te
 bishopric catalogue; plus, for the row shape, an editor affordance — which is the larger half, and the
 reason to prefer the column shape unless the exclusion is genuinely a property of the row.
 
-### A linked position that still says which position it is
+*LANDED as the column shape.* `"listFilter": { <condition> }` on a column whose `list:` names a lookup; the
+condition is the ordinary filter language over the lookup's rows, applied in `lookupListValues` (both
+dimension branches) only when the PICKER asks. `columnValueOrder` and the labels call it without one,
+so the invariant holds by construction: a stored value still sorts and renders. The cell's own current
+value is appended to its options when the narrowing excludes it. `Columns.vocabularyErrors` refuses a
+`listFilter` on a non-lookup list and a condition naming a column the lookup lacks. The bishopric example is
+NOT changed: its catalogue has no column that says which rows are positions, and choosing which callings
+may preside is that deployment's call. Named `listFilter` rather than the first draft's `offer`, because it pairs with the `list` it
+sits beside; and the values it names are pinned in `forEachFilterListValue` like a view filter's, so
+renaming one in the Lookup tab cannot silently empty the picker.
+
+### A linked position that still says which position it is *(landed on screen: the role beside the name, not in it)*
 
 `listLabel` puts the linked account's profile name FIRST, above the `list.<ns>.<value>` translation, for
 a `userlink-name` list. That is the whole point of the source kind: it exists to ask "who is the
@@ -2389,6 +2425,14 @@ fix the cell's missing capacity, so it is a smaller change and a smaller answer.
 
 Cost: the composition and its opt-in are small; the `obscureName` interaction is the part that needs a
 test of its own, and a print check on `meeting_agenda`, which is the densest grid the long form lands in.
+
+*LANDED, as neither shape above.* A third one, decided after the composed form was built (#269, closed)
+and compared: the role goes BESIDE the label rather than into it. A linked option's role is its second
+line in the dropdown (`subtitle`), and a displayed value's role is its tooltip (`list-value`'s `title`),
+both from `listRole`, for every `userlink-name` list with nothing to opt into. `listLabel` is untouched,
+so the one-label rule and `obscureNames` have nothing new to agree on. What it does not do is put the
+role on paper. That was judged unnecessary once #268's `listFilter` had already cut the presiding picker
+to the bishopric, which removed most of the people-and-roles mix the entry started from.
 
 ### `nav.layout: "browse"` — drill-down navigation instead of a drawer *(phases 1–5 landed, #230; 6 not planned)*
 
@@ -2678,9 +2722,37 @@ picture, a different request.
 Reverse-chronological activity stream. Pairs naturally with a changeset/audit trail if one is ever
 added.
 
-### `split`
+### `split` — a LAYOUT of a data view, like `gallery` *(landed)*
 
 Master-detail two-pane layout — a list on the left, the selected record on the right.
+
+Built as `layout: "split"`, for the reason `gallery` was: it is a way of drawing a data view's rows, and
+a new kind would have needed the whole seam to say the same thing. The right pane is the card layout's
+body, extracted as `record-fields` rather than copied, so a card and a split record edit identically,
+embeds and row actions included. The selection is the `data-split` component's own state, a row id, so a
+re-sort or a live update keeps the same record open, and it falls back to the first row when that one is
+gone. Not built: a deep link to the selected row, and selecting a row just added (Add appends to the
+list; the new row is one click away).
+
+**Follow-up: the conventions every list-detail layout keeps** (Material 3's list-detail, Apple's split
+view, mail clients, Airtable's Record review). Rendering the bishopric `meeting_agenda` as a split showed
+three gaps against them, all now closed:
+
+- **A phone gets two screens, not a stack.** Stacked, a record sat below the whole list and a tap on row
+  50 changed something off-screen. Now a row opens its record in the list's place, with a back button
+  named after the list. The open record is a history entry (the screen's state plus `splitRow`), so the
+  browser's Back and Android's back gesture return to the list rather than leaving the view.
+- **Two-line rows.** The first column alone named a meeting "10/18/2026". The second column now sits
+  beneath it, which is how a mail client shows subject and sender; an image column is skipped, as a
+  picture is not a line of text. No schema key: the view's column order already says which two matter.
+- **Each pane scrolls on its own** on a wide screen, at most one screen tall, so the open record stays in
+  view however far down the list is read, as in a mail client.
+
+Print view prints a split as the table, not as one card per row: printing otherwise follows the screen's
+layout, but a split shows a list and one record, neither of them cards, and the printed bishopric music
+schedule is a table people hand out.
+
+Still not built: a URL deep link to the open row, arrow keys through the list, and a draggable divider.
 
 ### New column types
 

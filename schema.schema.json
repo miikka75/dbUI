@@ -114,6 +114,10 @@
               "description": "Narrow a `ref` column's options by another column: { \"<this table's column>\": \"<ref table's column>\" }.",
               "additionalProperties": { "type": "string" }
             },
+            "listFilter": {
+              "type": "object",
+              "description": "For a column whose `list` names a LOOKUP TABLE: which of its rows the picker offers, as a condition over the lookup's columns (the filter language), e.g. { \"kind\": \"position\" }. Narrows the picker only: a value already stored keeps rendering and stays among its own cell's options."
+            },
             "default": { "description": "Literal seeded into the cell when a row is CREATED, then freely editable. Prefer an explicit value over \"whatever is first in the list\" — list order is data and can be reordered." },
             "defaultFrom": {
               "type": "string",
@@ -218,7 +222,7 @@
         },
         "readonly": { "type": "boolean", "description": "Disable editing (report views)." },
         "includeArchive": { "type": "boolean", "description": "Read the archive partition alongside the active one. A view sees only active rows by default, which is right for a worklist and wrong for a TOTAL: with archiveAfter in play, a sum that nets one thing against another goes wrong the moment either side ages out." },
-        "layout": { "type": "string", "enum": ["table", "card", "list", "gallery"], "description": "`list` is a READING layout: values render read-only, so a row added there has no editor. Use table/card/gallery for anything people actually enter data into. `gallery` is the card layout as a grid of tiles: the first image column it shows is the picture, and every column (the picture's included) is edited under it." },
+        "layout": { "type": "string", "enum": ["table", "card", "list", "gallery", "split"], "description": "`split` is master-detail: the rows as a list (first column, second beneath) beside the selected record, edited in place; on a phone a row opens its record as its own screen. `list` is a READING layout: values render read-only, so a row added there has no editor. Use table/card/gallery for anything people actually enter data into. `gallery` is the card layout as a grid of tiles: the first image column it shows is the picture, and every column (the picture's included) is edited under it." },
         "gallery": {
           "type": "object", "additionalProperties": false,
           "description": "How a `layout: \"gallery\"` draws its tiles. Every key is optional.",

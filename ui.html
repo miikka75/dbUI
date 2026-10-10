@@ -423,6 +423,8 @@
               </template>
             </template>
           </data-gallery>
+          <!-- Split layout: rows on the left, the selected record on the right (VIEW_PARTS.data.split) -->
+          <data-split v-else-if="a.useSplitLayout" :rows="a.sortedData" :cols="a.visibleCols"></data-split>
           <!-- List layout: compact single-line items (registry part VIEW_PARTS.data.list) -->
           <data-list v-else-if="a.useListLayout" :rows="a.sortedData" :cols="a.visibleCols"></data-list>
           <!-- Mobile: card layout -->
@@ -451,33 +453,7 @@
               </div>
               <!-- Remaining fields (collapsed unless expanded or not collapsed mode) -->
               <div v-show="!a.currentConfig.collapsed || a.expandedCard === item.id">
-              <!-- Embeds positioned after the first/title column (rendered here since a.visibleCols.slice(1) skips it) -->
-              <template v-for="(ei, eidx) in a.embedItems" :key="'emb0'+eidx">
-              <div v-if="ei.config.afterColumn === a.visibleCols[0] && a.embedWhenOk(ei, item) && a.embedVisible(ei, item)" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
-                <embed-view :spec="ei" :row="item"></embed-view>
-              </div>
-              </template>
-              <template v-for="col in a.visibleCols.slice(1)" :key="col">
-              <v-field v-if="!a.isColumnHidden(col, item)" class="field-box field-box--roomy" variant="outlined" active
-                       :label="a.t('field.' + col) || col">
-                <template v-slot:default="{ props: fp }"><div v-bind="fp" class="field-box-value">
-                  <data-cell :item="item" :col="col"></data-cell>
-                </div></template>
-              </v-field>
-              <!-- Inline text/embed after this column -->
-              <template v-for="(ei, eidx) in a.embedItems" :key="'emb'+col+eidx">
-              <div v-if="ei.config.afterColumn === col && a.embedWhenOk(ei, item) && a.embedVisible(ei, item)" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
-                <embed-view :spec="ei" :row="item"></embed-view>
-              </div>
-              </template>
-              </template>
-              <div class="mt-2">
-                <v-btn v-if="a.canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="a.printCard(item)"></v-btn>
-                <template v-if="a.canMutateRows && a.canMutateRow(item)">
-                <confirm-x v-if="a.hasArchive" :armed="a.isArmed('arch:'+item.id)" action="archive" dense @click="a.archiveRow(item)"></confirm-x>
-                <confirm-x :armed="a.isArmed('row:'+item.id)" dense @click="a.deleteRow(item)"></confirm-x>
-                </template>
-              </div>
+              <record-fields :item="item" skip-first></record-fields>
               </div>
             </v-card>
           </div>
@@ -609,7 +585,11 @@
               <template v-slot:activator="{ props }">
                 <v-list-item v-bind="props" prepend-icon="mdi-format-list-bulleted">
                   <div style="display:flex;align-items:center;width:100%">
-                    <span>{{ name }}</span>
+                    <!-- Not referenced: the name in the warning colour, and an unlinked icon so colour is not the only
+                         signal. The words are the icon's tooltip and accessible name only. -->
+                    <span :class="a.isLeftover(name) ? 'text-warning' : ''">{{ name }}</span>
+                    <v-icon v-if="a.isLeftover(name)" size="x-small" color="warning" class="ml-1" icon="mdi-link-variant-off"
+                            :title="a.t('list.not_referenced')" :aria-label="a.t('list.not_referenced')" :data-testid="'leftover-list-' + name"></v-icon>
                     <v-icon v-if="a.isTranslatableList(name)" size="x-small" style="margin-left:auto;opacity:0.45">mdi-translate</v-icon>
                   </div>
                 </v-list-item>
@@ -641,7 +621,11 @@
               <template v-slot:activator="{ props }">
                 <v-list-item v-bind="props" :prepend-icon="'mdi-database-outline'" @click="a.selectRefTable(rt)">
                   <div style="display:flex;align-items:center;width:100%">
-                    <span>{{ rt }}</span>
+                    <!-- Not referenced: the name in the warning colour, and an unlinked icon so colour is not the only
+                         signal. The words are the icon's tooltip and accessible name only. -->
+                    <span :class="a.isLeftover(rt) ? 'text-warning' : ''">{{ rt }}</span>
+                    <v-icon v-if="a.isLeftover(rt)" size="x-small" color="warning" class="ml-1" icon="mdi-link-variant-off"
+                            :title="a.t('list.not_referenced')" :aria-label="a.t('list.not_referenced')" :data-testid="'leftover-table-' + rt"></v-icon>
                     <v-icon v-if="a.isTranslatableList(rt)" size="x-small" style="margin-left:auto;opacity:0.45">mdi-translate</v-icon>
                   </div>
                   <!-- A sheet of scannable labels for these rows, offered only where something scans
@@ -704,6 +688,62 @@
      that is what the two kinds of node actually differ by: a GROUP is a value its rows carry and has no
      row of its own (row null, children are nodes), a LEAF is the row. A group renders its children as
      ref-nodes, so the component handles any depth the builder produces. -->
+<!-- One record's fields, edited in place: the card layout's body and the split layout's right pane.
+     `skip-first` is the card's case, whose first field is its header and is drawn there instead.
+     Embeds land after the column they name, as they always have in a card. -->
+<template id="record-fields-tpl">
+  <template v-if="skipFirst">
+    <template v-for="(ei, eidx) in a.embedItems" :key="'emb0'+eidx">
+    <div v-if="ei.config.afterColumn === a.visibleCols[0] && a.embedWhenOk(ei, item) && a.embedVisible(ei, item)" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
+      <embed-view :spec="ei" :row="item"></embed-view>
+    </div>
+    </template>
+  </template>
+  <template v-for="col in (skipFirst ? a.visibleCols.slice(1) : a.visibleCols)" :key="col">
+  <v-field v-if="!a.isColumnHidden(col, item)" class="field-box field-box--roomy" variant="outlined" active
+           :label="a.t('field.' + col) || col">
+    <template v-slot:default="{ props: fp }"><div v-bind="fp" class="field-box-value">
+      <data-cell :item="item" :col="col"></data-cell>
+    </div></template>
+  </v-field>
+  <!-- Inline text/embed after this column -->
+  <template v-for="(ei, eidx) in a.embedItems" :key="'emb'+col+eidx">
+  <div v-if="ei.config.afterColumn === col && a.embedWhenOk(ei, item) && a.embedVisible(ei, item)" :class="ei.config.bare ? 'my-1' : 'my-1 ml-2 pa-2'" :style="ei.config.bare ? '' : 'background: rgb(var(--v-theme-surface-variant), 0.15); border-radius: 8px'">
+    <embed-view :spec="ei" :row="item"></embed-view>
+  </div>
+  </template>
+  </template>
+  <div class="mt-2">
+    <v-btn v-if="a.canPrintCard" icon="mdi-printer" size="x-small" variant="text" @click="a.printCard(item)"></v-btn>
+    <template v-if="a.canMutateRows && a.canMutateRow(item)">
+    <confirm-x v-if="a.hasArchive" :armed="a.isArmed('arch:'+item.id)" action="archive" dense @click="a.archiveRow(item)"></confirm-x>
+    <confirm-x :armed="a.isArmed('row:'+item.id)" dense @click="a.deleteRow(item)"></confirm-x>
+    </template>
+  </div>
+</template>
+<!-- Split layout: the rows as a list, each named by its first column with its second beneath, beside the
+     selected record. The selection is the component's own; the first row is selected until someone picks
+     another. On a phone the list and the record are two screens: a row opens its record in the list's
+     place, and the back button (or the browser's Back) returns to the list. -->
+<template id="data-split-tpl">
+  <v-row no-gutters data-testid="data-split" :class="{ 'data-split--panes': !a.mobile }">
+    <v-col v-if="!a.mobile || !open" :cols="a.mobile ? 12 : 4" class="data-split__pane" data-testid="split-list"
+           :style="a.mobile ? '' : 'border-right:1px solid rgb(var(--v-theme-outline),0.15)'">
+      <v-list density="compact" nav>
+        <v-list-item v-for="item in rows" :key="item.id" :active="activeId === item.id" color="primary"
+                     :data-testid="'split-row-' + item.id" @click="pick(item)">
+          <v-list-item-title><list-value v-if="cols.length" :col="cols[0]" :value="item[cols[0]]"></list-value></v-list-item-title>
+          <v-list-item-subtitle v-if="subCol && !a.isColumnHidden(subCol, item)"><list-value :col="subCol" :value="item[subCol]" :size="14"></list-value></v-list-item-subtitle>
+        </v-list-item>
+      </v-list>
+    </v-col>
+    <v-col v-if="!a.mobile || open" :cols="a.mobile ? 12 : 8" class="data-split__pane pa-3" data-testid="split-record">
+      <v-btn v-if="a.mobile" variant="text" size="small" class="text-none mb-1" prepend-icon="mdi-chevron-left"
+             data-testid="split-back" @click="close()">{{ listTitle }}</v-btn>
+      <record-fields v-if="selected" :key="selected.id" :item="selected"></record-fields>
+    </v-col>
+  </v-row>
+</template>
 <template id="ref-node-tpl">
   <v-list-group v-if="isGroup" :value="node.value">
     <template v-slot:activator="{ props }">
@@ -1011,6 +1051,32 @@
               <v-btn size="small" variant="outlined" class="mt-2" prepend-icon="mdi-download"
                      data-testid="example-update-apply" @click="a.reinstallExample()">{{ a.t('settings.examples_reinstall') }}</v-btn>
             </v-alert>
+            </template>
+            <!-- Leftovers: what the database still holds that the schema no longer names. A report read on
+                 demand, one item at a time, never a sweep: a rename looks exactly like a deletion plus a
+                 creation, and the data is the only copy. Each delete takes two presses. -->
+            <template v-if="a.isAdmin">
+            <v-divider class="my-4"></v-divider>
+            <section-toggle v-model:collapsed="a.settings._collapseLeftovers" :title="a.t('settings.leftovers')" data-testid="leftovers-section-toggle"></section-toggle>
+            <div v-show="!a.settings._collapseLeftovers" class="ml-5" data-testid="leftovers-body">
+              <v-btn variant="outlined" size="small" prepend-icon="mdi-magnify" class="mb-2" :loading="a.leftovers.busy"
+                     data-testid="leftovers-scan" @click="a.scanLeftovers()">{{ a.t('settings.leftovers_scan') }}</v-btn>
+              <template v-if="a.leftovers.items">
+                <p v-if="!a.leftovers.items.length" class="text-caption text-medium-emphasis" data-testid="leftovers-none">{{ a.t('settings.leftovers_none') }}</p>
+                <v-table v-else density="compact" data-testid="leftovers-list">
+                  <template v-slot:default>
+                  <tbody>
+                    <tr v-for="it in a.leftovers.items" :key="it.kind + ':' + it.name" :data-testid="'leftover-' + it.kind + '-' + it.name">
+                      <td class="text-medium-emphasis" style="white-space:nowrap">{{ a.t('leftover.' + it.kind) }}</td>
+                      <td style="word-break:break-all">{{ it.name }}</td>
+                      <td class="text-right">{{ it.count != null ? it.count : '' }}</td>
+                      <td class="text-right" style="width:44px"><confirm-x v-if="a.canDeleteLeftover(it)" dense :armed="a.isArmed('leftover:' + it.kind + ':' + it.name)" @click="a.deleteLeftover(it)"></confirm-x></td>
+                    </tr>
+                  </tbody>
+                  </template>
+                </v-table>
+              </template>
+            </div>
             </template>
             <template v-if="a.isAdmin">
             <v-divider class="my-4"></v-divider>
