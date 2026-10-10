@@ -6240,7 +6240,9 @@ function createVueApp() {
         if (selected.indexOf('all') >= 0 && prev.indexOf('all') < 0) return 'all';
         if (selected.indexOf('all') >= 0 && selected.length > 1) return selected.filter(function(s) { return s !== 'all'; });
         if (selected.indexOf('all') >= 0) return 'all';
-        return selected.length ? selected : 'all';
+        // An empty EDIT row is not "unrestricted" by itself: the view row may still hold read-only
+        // grants. _saveGrants falls back to 'all' only when the merged grant is empty.
+        return selected;
       },
       removeUser: function(uid) {
         var self = this;
