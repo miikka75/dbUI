@@ -250,8 +250,23 @@
         {
           "name": "note",
           "type": "text"
+        },
+        {
+          "name": "attendance",
+          "type": "select",
+          "list": "attendance_status",
+          "picker": "toggle",
+          "default": "pending"
         }
-      ]
+      ],
+      "ownerWritable": [
+        "practice",
+        "response",
+        "note"
+      ],
+      "ownerWritableWhile": {
+        "attendance": "pending"
+      }
     },
     "tickets": {
       "archivable": true,
@@ -707,6 +722,40 @@
       }
     },
     {
+      "name": "rsvp_roll",
+      "kind": "data",
+      "sources": [
+        "rsvps"
+      ],
+      "columns": [
+        "owner",
+        "response",
+        "attendance"
+      ],
+      "defaultSort": "owner"
+    },
+    {
+      "name": "attendance_check",
+      "kind": "data",
+      "sources": [
+        "practices"
+      ],
+      "layout": "card",
+      "defaultSort": "date",
+      "columns": [
+        "date",
+        "title",
+        {
+          "view": "rsvp_roll",
+          "filterBy": {
+            "practice": "id"
+          },
+          "hideEmpty": true
+        }
+      ],
+      "icon": "mdi-clipboard-check-outline"
+    },
+    {
       "name": "leaderboard",
       "kind": "data",
       "sources": [
@@ -1038,6 +1087,10 @@
           {
             "view": "my_rsvp",
             "icon": "mdi-account-check"
+          },
+          {
+            "view": "attendance_check",
+            "icon": "mdi-clipboard-check-outline"
           },
           {
             "table": "practices",

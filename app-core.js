@@ -2870,6 +2870,17 @@ function createVueApp() {
         return this._createBlankRow(v.form.table);
       },
 
+      // My response to one event has left the state my owner grant reaches (`ownerWritableWhile` -- e.g. an
+      // organizer marked attendance), so the picker must not offer a change the write layers will refuse.
+      // Only where my writes go through self-service: an editor with a grant on the table is not bounded.
+      rsvpFrozen: function(name, eventKey) {
+        var v = VIEWS[name]; if (!v || !v.rsvp) return false;
+        var table = v.rsvp.responses, ownerCol = getOwnerCol(table) || 'owner';
+        var linkColumn = this.rsvpLink(v.rsvp).linkColumn, me = this.currentUserEmail || '';
+        if (!this.canSelfServe(table)) return false;
+        var mine = (this.dataCache[table] || []).find(function(r) { return r[linkColumn] === eventKey && r[ownerCol] === me; });
+        return !!mine && !this.ownerRowWritable(mine, table);
+      },
       // Upsert the current user's response for one event: update my existing owned row, else create one
       // stamped with owner = my email. Self-service — not gated by role (firestore rules enforce ownership).
       setRsvp: function(name, eventKey, status) {
@@ -2884,6 +2895,7 @@ function createVueApp() {
         if (!this.dataCache[table]) this.dataCache[table] = [];
         var rows = this.dataCache[table];
         var mine = rows.find(function(r) { return r[linkColumn] === eventKey && r[ownerCol] === me; });
+        if (this.rsvpFrozen(name, eventKey)) return;   // verified: no longer mine to change (rsvpFrozen)
         // Removing the vote (toggled off -> empty status): delete my response row rather than leave an
         // empty-status orphan that would show as a blank line in the roster.
         if (!status) {
@@ -2901,6 +2913,7 @@ function createVueApp() {
         } else {
           var row = { id: this.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           getColumns(table).forEach(function(c) { if (!(c in row)) row[c] = ''; });
+          this._seedDefaults(table, row);
           row[ownerCol] = me; row[linkColumn] = eventKey; row[cfg.statusColumn] = status; row.rosterPublic = pub;
           rows.push(row);
           Writes.putRow(table, row, 'active');
@@ -3687,6 +3700,19 @@ function createVueApp() {
       // is open stamps `_status` and still writes to the active store, because that is where a row
       // lives under the field model. Creating it in the archive store instead made it invisible to
       // every session that had not loaded that store (boot does not, unless preload_archive is on).
+      // Seeded-on-create columns: a `defaultFrom` token resolved per user, or a literal `default`. Both
+      // stay editable afterwards (unlike owner), and a caller's prefill applied after this overrides them.
+      // Every path that CREATES a row goes through here: an owner-bounded table's write layers compare a
+      // non-owner-writable column against its default at create, so a row born without it is refused --
+      // and a gate column (`ownerWritableWhile`) born blank would freeze the row for its owner at once.
+      _seedDefaults: function(src, row) {
+        var self = this, cols = getColumns(src);
+        getDefaultCols(src).forEach(function(dc) {
+          if (cols.indexOf(dc.name) < 0) return;
+          row[dc.name] = dc.from ? self.defaultFromValue(dc.from, dc.name) : dc.value;
+        });
+        return row;
+      },
       _createBlankRow: function(primary, opts) {
         var self = this, o = opts || {}, part = o.part || 'active', prefill = o.prefill || {};
         var id = this.generateId(), primaryRow = null;
@@ -3709,12 +3735,7 @@ function createVueApp() {
             row[oc] = self.currentUserEmail || '';
             row.rosterPublic = !(SCHEMA[src] && SCHEMA[src].privateRoster);
           }
-          // Seeded-on-create columns: a `defaultFrom` token resolved per user, or a literal `default`.
-          // Both stay editable afterwards (unlike owner), and an explicit prefill below overrides them.
-          getDefaultCols(src).forEach(function(dc) {
-            if (cols.indexOf(dc.name) < 0) return;
-            row[dc.name] = dc.from ? self.defaultFromValue(dc.from, dc.name) : dc.value;
-          });
+          self._seedDefaults(src, row);
           for (var pc in prefill) { if (cols.indexOf(pc) >= 0) row[pc] = prefill[pc]; }  // only columns the mirror actually has
           if (part !== 'active') row._status = part;
           if (!self.dataCache[src]) self.dataCache[src] = [];
@@ -9383,16 +9404,16 @@ function createVueApp() {
   // The current user's status control for one event — the 3 picker variants share this so the rsvp table
   // and card layouts render the same widget. Emits 'set' with the chosen value ('' when deselected).
   app.component('rsvp-picker', {
-    props: { options: { type: Array, default: function() { return []; } }, picker: { type: String, default: 'dropdown' }, value: { default: '' } },
+    props: { options: { type: Array, default: function() { return []; } }, picker: { type: String, default: 'dropdown' }, value: { default: '' }, disabled: Boolean },
     emits: ['set'],
     template: ''
-      + '<v-btn-toggle v-if="picker===\'toggle\'" :model-value="value" density="compact" variant="outlined" divided @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle">'
+      + '<v-btn-toggle v-if="picker===\'toggle\'" :model-value="value" :disabled="disabled" density="compact" variant="outlined" divided @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle">'
       + '<v-btn v-for="o in options" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
       + '</v-btn-toggle>'
-      + '<v-chip-group v-else-if="picker===\'chips\'" :model-value="value" @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle">'
+      + '<v-chip-group v-else-if="picker===\'chips\'" :model-value="value" :disabled="disabled" @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle">'
       + '<v-chip v-for="o in options" :key="o.value" :value="o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
       + '</v-chip-group>'
-      + '<v-select v-else :model-value="value" :items="options" item-title="title" item-value="value" density="compact" variant="outlined" hide-details clearable placeholder="…" style="min-width:130px;max-width:170px" @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle"></v-select>'
+      + '<v-select v-else :model-value="value" :disabled="disabled" :items="options" item-title="title" item-value="value" density="compact" variant="outlined" hide-details clearable placeholder="…" style="min-width:130px;max-width:170px" @update:model-value="$emit(\'set\', $event)" data-testid="rsvp-toggle"></v-select>'
   });
 
   // RSVP / signup view — name/embed parameterized. Lists upcoming events (from rsvpFor) each with the
@@ -9548,7 +9569,7 @@ function createVueApp() {
       + '<tr v-for="ev in events" :key="ev.id">'
       + '<td style="white-space:nowrap">{{ a.dateLabel(ev.date) }}</td>'
       + '<td>{{ ev.title }}</td>'
-      + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker></td>'
+      + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpFrozen(viewName, ev.key)" @set="set(ev.key, $event)"></rsvp-picker></td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
       + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></td>'
       + '</tr>'
@@ -9559,7 +9580,7 @@ function createVueApp() {
       + '<v-card v-for="ev in events" :key="ev.id" variant="tonal" class="mb-2 pa-3">'
       + '<div>{{ a.dateLabel(ev.date) }}</div>'
       + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}</div>'
-      + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" @set="set(ev.key, $event)"></rsvp-picker>'
+      + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpFrozen(viewName, ev.key)" @set="set(ev.key, $event)"></rsvp-picker>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
       + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></div>'
       + '</v-card>'
