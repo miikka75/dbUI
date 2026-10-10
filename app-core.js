@@ -3866,7 +3866,9 @@ function createVueApp() {
       // free-string list beside it that nothing can score. `translatableLists` already accepts a lookup
       // table name for the same reason. The option VALUE is the lookup's GROUP dimension (see below);
       // the rest of the row is reference data.
-      lookupListValues: function(name, valueCol) {
+      // `where` (a column's `listFilter`) narrows which ROWS contribute -- the picker's concern only; the sort
+      // and the labels call this without it, so a value nothing offers any more still sorts and renders.
+      lookupListValues: function(name, valueCol, where) {
         if (!name || !SCHEMA[name] || !SCHEMA[name].isLookup) return null;
         // An explicit dimension wins over the default below. A catalogue with more than one meaningful
         // column -- an organization, a calling, and the handle naming the pair -- can only be drawn
@@ -3877,6 +3879,7 @@ function createVueApp() {
           // Columns.rowHandle for why the stored value is an override and not the source.
           var def = SCHEMA[name], order = getColumns(name), seen = {}, out = [];
           this._catalogueRows(name).forEach(function(r) {
+            if (where && !condMatches(r, where)) return;
             var v = Columns.rowHandle(def, order, r, valueCol);
             if (!v || seen[v]) return;
             seen[v] = 1; out.push(v);
@@ -3892,7 +3895,7 @@ function createVueApp() {
         // one dimension it has that anyone typed.
         var order = getColumns(name), h = Columns.lookupHierarchy(SCHEMA[name], order);
         var defaultCol = h ? (h.by === 'id' ? h.value : h.parent) : Columns.lookupCols(SCHEMA[name], order)[0];
-        return defaultCol ? this._lookupColumnValues(name, defaultCol) : [];
+        return defaultCol ? this._lookupColumnValues(name, defaultCol, where) : [];
       },
       // A lookup table's rows in CATALOGUE order -- the one answer to "what order is this lookup in",
       // asked by the Lookup editor, the board's ref lane, every picker drawn from a lookup, and the sort
@@ -3918,22 +3921,33 @@ function createVueApp() {
       // One column of a lookup, deduped and in catalogue order, skipping blanks. A blank is how a row says
       // it has no value in THIS dimension -- an ordination is a row of the callings catalogue that names
       // no ward position -- so it must not become an empty option.
-      _lookupColumnValues: function(name, col) {
+      _lookupColumnValues: function(name, col, where) {
         var seen = {}, out = [];
         this._catalogueRows(name).forEach(function(r) {
+          if (where && !condMatches(r, where)) return;
           var v = r[col];
           if (v == null || v === '' || seen[v]) return;
           seen[v] = 1; out.push(v);
         });
         return out;
       },
-      getListOptions: function(col, altList) {
+      // `item`, when given, is the row being edited: under a `listFilter` narrowing its CURRENT value stays
+      // among the options even when the narrowing excludes it. Values are stored as text, so a historical
+      // agenda holds whoever actually presided, and a picker that cannot show the cell's own value is a
+      // cell that silently blanks the next time someone touches it.
+      getListOptions: function(col, altList, item) {
         var self = this;
         var listName = altList || this.colIsList(col);
         // The alternate list of a `listSwitch` is a list of its own, so it never carries the column's
         // lookup dimension -- passing it through would draw the toggle's options from the wrong table.
-        var fromLookup = this.lookupListValues(listName, altList ? null : Columns.colListValueCol(SCHEMA, col));
+        var narrow = altList ? null : Columns.colListFilter(SCHEMA, col);
+        var fromLookup = this.lookupListValues(listName, altList ? null : Columns.colListValueCol(SCHEMA, col), narrow);
         var items = fromLookup || (listName && this.listsCache[listName] ? this.listsCache[listName] : []);
+        if (fromLookup && narrow && item) {
+          var cur = item[col], have = {};
+          items.forEach(function(v) { have[v] = 1; });
+          items = items.concat((Array.isArray(cur) ? cur : [cur]).filter(function(v) { return v != null && v !== '' && !have[v]; }));
+        }
         var result = items.map(function(v) {
           var o = { title: self.listLabel(listName, v), value: v }, role = self.listRole(listName, v);
           if (role) o.subtitle = role;   // a linked position: the person is the title, the role its second line
@@ -4415,7 +4429,7 @@ function createVueApp() {
       // getListOptions unconditionally, which returns [] for a `ref` -- its values live in a lookup
       // TABLE, not a list -- so a multi-valued ref would have rendered an empty picker.
       cellOptions: function(col, item) {
-        return this.colIsRef(col) ? this.getRefOptions(col, item) : this.getListOptions(col);
+        return this.colIsRef(col) ? this.getRefOptions(col, item) : this.getListOptions(col, null, item);
       },
       // Options for a `ref` cell: the lookup's rows, labelled the way every other surface labels them.
       //
@@ -8042,9 +8056,9 @@ function createVueApp() {
       optionProps: function(o) { return (o && o.subtitle) ? { subtitle: o.subtitle } : {}; },
       // single-select options: the primary honors the listSwitch alt list; the embed uses the plain list.
       listItems: function(col, item) {
-        if (this.embed) return appInstance.getListOptions(col);
+        if (this.embed) return appInstance.getListOptions(col, null, item);
         var sw = appInstance.colListSwitch(col);
-        return appInstance.getListOptions(col, (sw && appInstance.isAltList(col, item)) ? sw.list : null);
+        return appInstance.getListOptions(col, (sw && appInstance.isAltList(col, item)) ? sw.list : null, item);
       },
       getRefOptions: function(col, item) { return appInstance.getRefOptions(col, item); },
       cellOptions: function(col, item) { return appInstance.cellOptions(col, item); },

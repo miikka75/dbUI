@@ -43,7 +43,7 @@ function _normalizeSchema(parsed) {
 // colName/isEmbed/isViewEmbed/isText (view column-entry shape predicates) are globals from columns.js.
 // Shared list-value seeding: ensure filter-referenced values exist in listsCache. Returns true if anything was added.
 // THE walk over every list-backed filter VALUE a schema declares — view filters, inline-embed filters,
-// and legacy shorthand conditional columns — calling cb(listName, value). Two consumers used to
+// legacy shorthand conditional columns, and columns' `listFilter` — calling cb(listName, value). Two consumers used to
 // duplicate this traversal with different payloads: _seedListValues (adds them to the list) and
 // app-core's lockedListValues (marks them undeletable + mints their translation key). SCHEMA.md pairs
 // the two ("auto-seeded and non-deletable"), so they must see exactly the same values.
@@ -64,6 +64,20 @@ function forEachFilterListValue(cb) {
       var vals = Array.isArray(cond) ? cond : [cond];
       vals.forEach(function(val) { if (typeof val === 'string' && !isFilterToken(val)) cb(ln, val); });
     });
+  }
+  // A column's `listFilter` pins values too, and of the LOOKUP its `list` names -- the condition is over
+  // that table's columns, so the values are recorded under it directly rather than resolved through a
+  // column name, which here would find whichever table happens to have a column called the same.
+  // Renaming a pinned value in the Lookup tab would otherwise make the picker silently offer nothing.
+  for (var lt in SCHEMA) {
+    var lcols = (SCHEMA[lt] && SCHEMA[lt].columns) || {};
+    for (var lc in lcols) {
+      var ld = lcols[lc];
+      if (!ld || typeof ld !== 'object' || !ld.listFilter || !ld.list || !SCHEMA[ld.list] || !SCHEMA[ld.list].isLookup) continue;
+      forEachCondCol(ld.listFilter, function(col, cond) {
+        (Array.isArray(cond) ? cond : [cond]).forEach(function(val) { if (typeof val === 'string' && !isFilterToken(val)) cb(ld.list, val); });
+      });
+    }
   }
   for (var vn in VIEWS) {
     var view = VIEWS[vn];
