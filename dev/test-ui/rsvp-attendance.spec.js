@@ -236,3 +236,63 @@ test('registering at the venue: the organizer shows a QR for the page, and the l
   await expect.poll(() => p.evaluate(() => appInstance.currentTable)).toBe('my_rsvp');
   await ctx.close();
 });
+
+test('rotating code: while the QR is open it stamps by itself, accepts the previous code, and drops the one before', async ({ page }) => {
+  const ymd = await setupCheckin(page);
+  // setupCheckin saved check-in without rotation; turn it on.
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.rsvps.columns.push({ name: 'checkin_code', type: 'text' });
+  schema.tables.rsvps.ownerWritable.push('checkin_code');
+  schema.views[0].rsvp.checkin = { codeColumn: 'checkin_code', set: { attendance: 'attended' }, rotateMinutes: 5 };
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  for (const u of ['cy@x']) await page.request.post('/api/setUserRole', { data: { uid: u, role: 'editor', user: u, tables: { practices: 'r', rsvps: 'r' } }, headers: ADMIN });
+  // A member's claim, written as that member through the server's owner enforcement.
+  const claim = (user, code) => page.request.post('/api/putRow', { headers: { 'X-User': user }, data: { tableId: 'rsvps', tab: 'active',
+    data: { id: 'r-' + user, owner: user, practice: 'p1', response: 'coming', attendance: 'pending', checkin_code: code, rosterPublic: true } } });
+  const att = async () => Object.fromEntries(((await (await page.request.post('/api/getTableData', { data: { tableId: 'rsvps', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => [r.owner, r.attendance]));
+
+  await page.clock.install({ time: new Date(ymd + 'T10:00:00') });
+  await bootAs(page, 'org@x');
+  // No box to type in: the code is made, not typed.
+  await expect(page.locator('[data-testid="rsvp-checkin-real"]')).toHaveCount(0);
+  await page.locator('[data-testid="rsvp-checkin-qr"]').click();
+  const caption = page.locator('[data-testid="qr-dialog-caption"]');
+  await expect(caption).toHaveText(/^[A-HJKMNP-Z2-9]{5}$/);
+  const first = await caption.textContent();
+
+  // Ann claims the code on screen and is marked with no press.
+  expect((await claim('ann@x', first.toLowerCase())).ok()).toBe(true);
+  await page.clock.fastForward(20000);
+  await expect.poll(att).toEqual({ 'ann@x': 'attended' });
+
+  // Five minutes on: a new code, and the first still counts for Bob, who scanned as it changed.
+  await page.clock.fastForward(5 * 60000);
+  await expect(caption).not.toHaveText(first);
+  const second = await caption.textContent();
+  await claim('bob@x', first);
+  await page.clock.fastForward(20000);
+  await expect.poll(att).toEqual({ 'ann@x': 'attended', 'bob@x': 'attended' });
+
+  // Another five: the first code is two back and refused; the second is still accepted.
+  await page.clock.fastForward(5 * 60000);
+  await expect(caption).not.toHaveText(second);
+  await claim('cy@x', first);
+  await page.clock.fastForward(20000);
+  await expect.poll(att).toEqual({ 'ann@x': 'attended', 'bob@x': 'attended', 'cy@x': 'pending' });
+  await claim('cy@x', second);
+  await page.clock.fastForward(20000);
+  await expect.poll(att).toEqual({ 'ann@x': 'attended', 'bob@x': 'attended', 'cy@x': 'attended' });
+});
+
+test('validateSchema: rotateMinutes must be a positive number', async ({ page }) => {
+  await setupCheckin(page);
+  await bootAs(page, 'org@x');
+  const errs = await page.evaluate(() => {
+    const out = [];
+    for (const bad of [0, -5, '5']) { VIEWS.my_rsvp.rsvp.checkin.rotateMinutes = bad; out.push(validateSchema().join(' | ')); }
+    VIEWS.my_rsvp.rsvp.checkin.rotateMinutes = 10; out.push(validateSchema().join(' | '));
+    return out;
+  });
+  for (const e of errs.slice(0, 3)) expect(e).toContain('rotateMinutes');
+  expect(errs[3]).not.toContain('rotateMinutes');
+});

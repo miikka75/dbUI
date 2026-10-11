@@ -1383,7 +1383,7 @@ The events live in one table; responses in another that has an **`owner` column*
 ### `checkin` — self check-in with a shared code
 
 ```json
-"rsvp": { …, "checkin": { "codeColumn": "checkin_code", "set": { "attendance": "attended" } } }
+"rsvp": { …, "checkin": { "codeColumn": "checkin_code", "set": { "attendance": "attended" }, "rotateMinutes": 5 } }
 ```
 
 On a day with events, the RSVP view offers one **Check-in code** box above the list. **The code is the
@@ -1406,6 +1406,13 @@ people who arrive after it.
   because a link is something anyone can send. The QR is drawn on the organizer's screen from what they
   typed; the code is still stored nowhere. A member who has not responded gets no box, so they must
   respond before they can scan.
+- **`rotateMinutes`** (optional, a positive number): the code changes by itself. The organizer types
+  nothing; opening the QR shows a random five-character code (no look-alikes such as 0/O or 1/I/L) that
+  is replaced every `rotateMinutes`. While the QR is open it stamps by itself every 15 seconds, accepting
+  the **current and the previous** code, so a code is good for between one and two periods and a member
+  who scans as it changes is still marked. It keeps the screen on where the browser allows. If the tablet
+  sleeps, nobody is marked until it wakes; a claim on a code older than the previous one must be made
+  again. **Check in** still stamps by hand with the current and previous code.
 - **The claim and the verdict are separate columns.** `codeColumn` must be in `ownerWritable`, and every
   `set` column must not be, or a member can mark themselves present without any code. `validateSchema`
   refuses both, and a responses table with no `ownerWritable` at all.

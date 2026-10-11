@@ -867,6 +867,25 @@ this removes. The cost is accepted: a member who leaves after the first class is
 second. Neither this nor the entrance log (a `scan` view at the door) requires the other; joining them
 is a report, not a rule.
 
+**LANDED: the code changes by itself while the QR is on screen (`checkin.rotateMinutes`).** Asked for
+2026-10-12. Today the code changes only when the organizer types a new one, and a press accepts only the
+code in the box, so a member who scanned just before a change is not marked. With `rotateMinutes: N`:
+
+- the organizer's screen makes a fresh random code every N minutes while the QR dialog is open: five
+  characters from an alphabet without look-alikes (no 0/O, 1/I/L), from `crypto.getRandomValues`;
+- the open dialog stamps by itself every 15 seconds, accepting the **current and the previous** code, and
+  stamps once more just before each change and on close. So a code is good for at least N minutes and at
+  most 2N, and a member who scans as the code changes is still marked;
+- it holds a screen wake lock while open, where the browser offers one;
+- the typed box goes away (the organizer types nothing), and **Check in** still stamps by hand with the
+  current and previous code.
+
+Still browser-only: no rules change, and the codes are stored nowhere. The server cannot tell when a
+claim was made, so the frequent stamping is what bounds a code's life, not a timestamp. The failure mode is
+benign: if the tablet sleeps, the code stops changing and nobody is marked until it wakes; claims wait,
+and a claim older than the previous code must be made again. It narrows texting the code home to the
+code's lifetime; it does not close it.
+
 **Later, both modes from one setting.** `checkin.verify: "organizer"` (the default, what landed) or
 `"code"`, where a matching claim is the verdict and the member is marked present with no stamping
 press. `"code"` is the second row of the table above, and it has the cost that row lists. The rules

@@ -2864,12 +2864,15 @@ function createVueApp() {
         });
       },
       // Returns how many rows it marked, which the button reports: "nobody" is as much an answer as "12".
-      stampRsvpCheckin: function(name, code) {
+      // `codes`: the accepted codes (a rotating code's current and previous). `quiet`: the open QR dialog
+      // stamping by itself every few seconds, which says nothing and records nothing when nobody matched.
+      stampRsvpCheckin: function(name, codes, quiet) {
         var v = VIEWS[name], cfg = v && v.rsvp, ci = cfg && cfg.checkin;
         if (!ci || !this.rsvpCanStamp(name)) return 0;
         var table = cfg.responses, now = new Date().toISOString();
         var rows = Rsvp.checkinTargets(Rows.partitionRows(this.dataCache, table, 'active'), {
-          code: code, linkColumn: this.rsvpLink(cfg).linkColumn, eventKeys: this.rsvpTodayKeys(name), checkinColumn: ci.codeColumn, set: ci.set });
+          codes: codes, linkColumn: this.rsvpLink(cfg).linkColumn, eventKeys: this.rsvpTodayKeys(name), checkinColumn: ci.codeColumn, set: ci.set });
+        if (quiet && !rows.length) return 0;
         // One press, one undo entry, however many rows: written the way _writeReorder writes, partial and
         // recorded per row, since saveField's debounced writes would each land as an entry of their own.
         Undo.action('checkin', function() {
@@ -9567,7 +9570,10 @@ function createVueApp() {
     emits: ['update:modelValue'],
     data: function() { return { svg: '' }; },
     computed: { a: function() { return appInstance; } },
-    watch: { modelValue: { immediate: true, handler: function(open) { if (open) this.draw(); } } },
+    watch: {
+      modelValue: { immediate: true, handler: function(open) { if (open) this.draw(); } },
+      link: function() { if (this.modelValue) this.draw(); }
+    },
     methods: {
       draw: function() {
         var self = this, link = this.link;
@@ -9593,10 +9599,12 @@ function createVueApp() {
   // (or is handed, by that QR) the code they were shown, which lands on each event they reserved today.
   // `mine`: the member's reserved events today.
   app.component('rsvp-checkin', {
-    props: { viewName: String, mine: { type: Array, default: function() { return []; } }, canStamp: Boolean, armed: { type: String, default: '' } },
+    // `rotateMinutes`: the view's `checkin.rotateMinutes` -- the code changes by itself while the QR is open.
+    props: { viewName: String, mine: { type: Array, default: function() { return []; } }, canStamp: Boolean, armed: { type: String, default: '' }, rotateMinutes: { type: Number, default: 0 } },
     emits: ['claimed'],
-    // `code`: what the organizer typed. Not stored anywhere.
-    data: function() { return { code: '', qrOpen: false }; },
+    // `code`: what the organizer typed. `current`/`previous`/`rotatedAt`: the rotating code and the one
+    // before it, which is still accepted. None of it is stored anywhere.
+    data: function() { return { code: '', qrOpen: false, current: '', previous: '', rotatedAt: 0, timer: null, lock: null }; },
     computed: {
       a: function() { return appInstance; },
       frozen: function() { var self = this; return this.mine.every(function(e) { return appInstance.rsvpFrozen(self.viewName, e.key); }); },
@@ -9608,20 +9616,51 @@ function createVueApp() {
         return e ? e.myCode : '';
       },
       typed: function() { return String(this.code || '').trim(); },
-      // Drawn from what was typed, on this screen only.
-      qrLink: function() { return appInstance.scanDeepLink(this.viewName, this.typed); }
+      // The code on show: the rotating one, or what was typed.
+      shown: function() { return this.rotateMinutes ? this.current : this.typed; },
+      accepted: function() { return this.rotateMinutes ? [this.current, this.previous] : [this.typed]; },
+      // Drawn on this screen only.
+      qrLink: function() { return appInstance.scanDeepLink(this.viewName, this.shown); }
     },
+    watch: { qrOpen: function(open) { if (!this.rotateMinutes) return; if (open) this.start(); else this.stop(); } },
+    beforeUnmount: function() { this.stop(); },
     methods: {
-      stamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.typed); },
+      stamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.accepted); },
+      // While the QR is open: stamp every 15 s, and change the code every `rotateMinutes`, stamping once
+      // more first so a claim on the code about to drop out still counts. The current and previous codes
+      // are accepted, so a code lives between one and two periods, and a scan as it changes still counts.
+      start: function() {
+        if (!this.current) this.rotate();
+        if (!this.timer) this.timer = setInterval(this.tick, 15000);
+        var self = this;
+        // Keeps a tablet's screen on while it shows the code. Not everywhere, and refused when hidden.
+        try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function(l) { self.lock = l; }, function() {}); } catch (e) {}
+      },
+      stop: function() {
+        if (this.timer) { clearInterval(this.timer); this.timer = null; this.autoStamp(); }
+        if (this.lock) { try { this.lock.release(); } catch (e) {} this.lock = null; }
+      },
+      tick: function() {
+        this.autoStamp();
+        if (Date.now() - this.rotatedAt >= this.rotateMinutes * 60000) this.rotate();
+      },
+      rotate: function() {
+        var ints = new Uint32Array(5);
+        crypto.getRandomValues(ints);
+        this.previous = this.current;
+        this.current = Rsvp.checkinCode(ints);
+        this.rotatedAt = Date.now();
+      },
+      autoStamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.accepted, true); },
       claim: function(value) { appInstance.setRsvpCode(this.viewName, value); this.$emit('claimed'); }
     },
     template: ''
       + '<div class="d-flex align-center flex-wrap pa-2" style="gap:8px" data-testid="rsvp-checkin">'
       + '<template v-if="canStamp">'
-      +   '<v-text-field v-model="code" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" style="max-width:200px" data-testid="rsvp-checkin-real"></v-text-field>'
-      +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :disabled="!typed" :title="a.t(\'rsvp.show_code\')" :aria-label="a.t(\'rsvp.show_code\')" data-testid="rsvp-checkin-qr" @click="qrOpen = true"></v-btn>'
-      +   '<v-btn size="small" variant="text" class="text-none" :disabled="!typed" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-stamp" @click="stamp()"><v-icon icon="mdi-account-check"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t(\'rsvp.checkin\') }}</span></v-btn>'
-      +   '<qr-dialog v-model="qrOpen" :link="qrLink" :caption="typed" mono></qr-dialog>'
+      +   '<v-text-field v-if="!rotateMinutes" v-model="code" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" style="max-width:200px" data-testid="rsvp-checkin-real"></v-text-field>'
+      +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :disabled="!rotateMinutes && !typed" :title="a.t(\'rsvp.show_code\')" :aria-label="a.t(\'rsvp.show_code\')" data-testid="rsvp-checkin-qr" @click="qrOpen = true"></v-btn>'
+      +   '<v-btn size="small" variant="text" class="text-none" :disabled="!shown" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-stamp" @click="stamp()"><v-icon icon="mdi-account-check"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t(\'rsvp.checkin\') }}</span></v-btn>'
+      +   '<qr-dialog v-model="qrOpen" :link="qrLink" :caption="shown" mono></qr-dialog>'
       + '</template>'
       + '<v-text-field v-else :model-value="armed || myCode" @change="e => claim(e.target.value)" :disabled="frozen" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" :autofocus="!!armed" style="max-width:200px" data-testid="rsvp-checkin-claim">'
       // A code from a link is ARMED, not written: one press saves it, because a link is something anyone
@@ -9720,7 +9759,7 @@ function createVueApp() {
       +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :title="a.t(\'rsvp.page_qr\')" :aria-label="a.t(\'rsvp.page_qr\')" data-testid="rsvp-page-qr" @click="pageQr = true"></v-btn>'
       +   '<qr-dialog v-model="pageQr" :link="pageLink" :caption="pageTitle"></qr-dialog>'
       + '</div>'
-      + '<rsvp-checkin v-if="checkinShown" :view-name="viewName" :mine="todayMine" :can-stamp="canStamp" :armed="armed" @claimed="claimed()"></rsvp-checkin>'
+      + '<rsvp-checkin v-if="checkinShown" :view-name="viewName" :mine="todayMine" :can-stamp="canStamp" :armed="armed" :rotate-minutes="cfg.checkin.rotateMinutes || 0" @claimed="claimed()"></rsvp-checkin>'
       + '<v-table v-if="!a.mobile" density="compact">'
       + '<thead><tr>'
       + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'date\')" :aria-sort="ariaSort(\'date\')" data-testid="rsvp-sort-date">{{ a.t(\'rsvp.date\') }}</th>'

@@ -122,10 +122,20 @@ describe('rsvp.js — self check-in with a shared code', () => {
     { id: 'e', owner: 'eve@x', practice: 'p1', code: '', attendance: 'pending' },
     { id: 'f', owner: 'ann@x', practice: 'p3', code: 'lion', attendance: 'pending' }
   ];
-  const opts = (code) => ({ code, linkColumn: 'practice', eventKeys: ['p1', 'p3'], checkinColumn: 'code', set: { attendance: 'attended' } });
+  const opts = (...codes) => ({ codes, linkColumn: 'practice', eventKeys: ['p1', 'p3'], checkinColumn: 'code', set: { attendance: 'attended' } });
 
   it('stamps the given events\' rows whose claim matches, ignoring case and space, skipping the already-marked', () => {
     assert.deepEqual(Rsvp.checkinTargets(rows, opts('LION')).map((r) => r.id), ['a', 'f']);
+  });
+
+  it('accepts any of several codes -- a rotating code and the one before it', () => {
+    assert.deepEqual(Rsvp.checkinTargets(rows, opts('puma', 'tiger')).map((r) => r.id), ['b']);
+    assert.deepEqual(Rsvp.checkinTargets(rows, opts('tiger', 'lion')).map((r) => r.id), ['a', 'b', 'f']);
+  });
+
+  it('a rotating code is drawn from an alphabet without look-alikes', () => {
+    assert.equal(Rsvp.checkinCode([0, 1, 30, 31, 62]), 'AB9AA');
+    assert.doesNotMatch(Rsvp.checkinCode(Array.from({ length: 200 }, (_, i) => i)), /[01ILO]/);
   });
 
   it('a blank code or an empty `set` stamps nobody, so an unclaimed row never matches', () => {

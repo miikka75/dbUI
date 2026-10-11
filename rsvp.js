@@ -83,19 +83,28 @@
   // The code is the DAY's, not one event's: one scan claims every event the member reserved that day,
   // and one press stamps them all -- a gym's classes, where a member does several in a visit.
   //
-  // Returns the rows to stamp: those of `eventKeys`, whose claim equals `code` (case and surrounding
-  // space ignored), and which do not already carry every value of `set`.
+  // Returns the rows to stamp: those of `eventKeys`, whose claim equals one of `codes` (case and
+  // surrounding space ignored), and which do not already carry every value of `set`. Several codes,
+  // because a rotating code also accepts the one before it.
   function norm(v) { return String(v == null ? '' : v).trim().toLowerCase(); }
   function checkinTargets(responses, opts) {
-    var want = norm(opts.code), set = opts.set || {}, cols = Object.keys(set);
-    if (!want || !cols.length) return [];
+    var want = (opts.codes || []).map(norm).filter(Boolean), set = opts.set || {}, cols = Object.keys(set);
+    if (!want.length || !cols.length) return [];
     return (responses || []).filter(function(r) {
-      if (!r || (opts.eventKeys || []).indexOf(r[opts.linkColumn]) < 0 || norm(r[opts.checkinColumn]) !== want) return false;
+      if (!r || (opts.eventKeys || []).indexOf(r[opts.linkColumn]) < 0 || want.indexOf(norm(r[opts.checkinColumn])) < 0) return false;
       return !cols.every(function(c) { return String(r[c] == null ? '' : r[c]) === String(set[c]); });
     });
   }
 
-  var M = { build: build, checkinTargets: checkinTargets };
+  // A rotating check-in code (`checkin.rotateMinutes`): one character per random integer, from an alphabet
+  // with no look-alikes (no 0/O, 1/I/L), since people also type it off the screen. The caller supplies
+  // the integers -- crypto.getRandomValues in the browser -- so this stays pure.
+  var CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  function checkinCode(ints) {
+    return Array.prototype.map.call(ints || [], function(n) { return CODE_ALPHABET.charAt(n % CODE_ALPHABET.length); }).join('');
+  }
+
+  var M = { build: build, checkinTargets: checkinTargets, checkinCode: checkinCode };
   if (typeof module !== 'undefined' && module.exports) module.exports = M;
   else root.Rsvp = M;
 })(typeof self !== 'undefined' ? self : this);

@@ -553,6 +553,7 @@ function validateSchema() {
           else if (!Array.isArray(ow)) errors.push(at + '"' + rvp.responses + '" declares no ownerWritable, so a member can write "' + c + '" themselves and mark their own attendance');
           else if (ow.indexOf(c) >= 0) errors.push(at + '"' + c + '" is in ownerWritable, so a member can mark their own attendance without the code');
         });
+        if (ci && ci.rotateMinutes !== undefined && !(typeof ci.rotateMinutes === 'number' && ci.rotateMinutes > 0)) errors.push(at + '`rotateMinutes` must be a positive number of minutes');
       }
     }
     // Board (kanban) view: exactly one writable source + a select lane column (drag writes that column).
