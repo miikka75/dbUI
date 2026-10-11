@@ -80,14 +80,17 @@
   // The real code is stored nowhere. Kept on the event row, every member could read it from home, and the
   // only thing this arrangement buys is that being marked present takes being told the code.
   //
-  // Returns the rows to stamp: this event's, whose claim equals `code` (case and surrounding space
-  // ignored), and which do not already carry every value of `set`.
+  // The code is the DAY's, not one event's: one scan claims every event the member reserved that day,
+  // and one press stamps them all -- a gym's classes, where a member does several in a visit.
+  //
+  // Returns the rows to stamp: those of `eventKeys`, whose claim equals `code` (case and surrounding
+  // space ignored), and which do not already carry every value of `set`.
   function norm(v) { return String(v == null ? '' : v).trim().toLowerCase(); }
   function checkinTargets(responses, opts) {
     var want = norm(opts.code), set = opts.set || {}, cols = Object.keys(set);
     if (!want || !cols.length) return [];
     return (responses || []).filter(function(r) {
-      if (!r || r[opts.linkColumn] !== opts.eventKey || norm(r[opts.checkinColumn]) !== want) return false;
+      if (!r || (opts.eventKeys || []).indexOf(r[opts.linkColumn]) < 0 || norm(r[opts.checkinColumn]) !== want) return false;
       return !cols.every(function(c) { return String(r[c] == null ? '' : r[c]) === String(set[c]); });
     });
   }

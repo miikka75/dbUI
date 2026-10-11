@@ -1103,7 +1103,7 @@ function createVueApp() {
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'cal.today', 'btn.reset',
          'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
-         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none', 'rsvp.checkin_code', 'rsvp.checkin', 'msg.checked_in',
+         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none', 'rsvp.checkin_code', 'rsvp.checkin', 'rsvp.show_code', 'rsvp.page_qr', 'msg.checked_in',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
@@ -2834,34 +2834,42 @@ function createVueApp() {
           checkinColumn: cfg.checkin && cfg.checkin.codeColumn
         }, cfg, this.rsvpLink(cfg)));
       },
-      // Self check-in with a shared code (`rsvp.checkin`). Two sides of one event, and the split is the
-      // point: the member writes only their CLAIM (the code they were shown), into a column their owner
+      // Self check-in with a shared code (`rsvp.checkin`). The code is the DAY's: one claim covers every
+      // event the member reserved today, one press stamps all of today's events. Two sides, and the
+      // split is the point: the member writes only their CLAIM (the code they were shown), into a column their owner
       // grant reaches; the organizer types the real code and stamps the verdict onto every matching row.
       // The real code is never stored -- see Rsvp.checkinTargets.
       //
       // Whoever may write the responses table outright is an organizer here; a member's writes go
       // through self-service and cannot reach the verdict column.
-      rsvpCanStamp: function(name) {
+      rsvpOrganizer: function(name) {
         var v = VIEWS[name], t = v && v.rsvp && v.rsvp.responses;
-        if (!t || !v.rsvp.checkin || this.currentUserRole === 'viewer' || this.canSelfServe(t)) return false;
+        if (!t || this.currentUserRole === 'viewer' || this.canSelfServe(t)) return false;
         var w = this.userWritableTables;
         return !w || w.indexOf(t) >= 0;
       },
-      setRsvpCode: function(name, eventKey, code) {
-        var v = VIEWS[name], cfg = v && v.rsvp, ci = cfg && cfg.checkin;
-        if (!ci || !ci.codeColumn || this.rsvpFrozen(name, eventKey)) return;
+      rsvpCanStamp: function(name) { var v = VIEWS[name]; return !!(v && v.rsvp && v.rsvp.checkin) && this.rsvpOrganizer(name); },
+      rsvpTodayKeys: function(name) {
+        return this.rsvpFor(name).events.filter(function(e) { return e.isToday; }).map(function(e) { return e.key; });
+      },
+      // The claim goes onto each of my responses for today that is not frozen yet.
+      setRsvpCode: function(name, code) {
+        var self = this, v = VIEWS[name], cfg = v && v.rsvp, ci = cfg && cfg.checkin;
+        if (!ci || !ci.codeColumn) return;
         var table = cfg.responses, ownerCol = getOwnerCol(table) || 'owner', me = this.currentUserEmail || '';
-        var link = this.rsvpLink(cfg).linkColumn;
-        var mine = (this.dataCache[table] || []).find(function(r) { return r[link] === eventKey && r[ownerCol] === me; });
-        if (mine) this.saveField(mine, ci.codeColumn, String(code || '').trim(), table);
+        var link = this.rsvpLink(cfg).linkColumn, keys = this.rsvpTodayKeys(name), value = String(code || '').trim();
+        (this.dataCache[table] || []).forEach(function(r) {
+          if (r[ownerCol] !== me || keys.indexOf(r[link]) < 0 || self.rsvpFrozen(name, r[link])) return;
+          self.saveField(r, ci.codeColumn, value, table);
+        });
       },
       // Returns how many rows it marked, which the button reports: "nobody" is as much an answer as "12".
-      stampRsvpCheckin: function(name, eventKey, code) {
+      stampRsvpCheckin: function(name, code) {
         var v = VIEWS[name], cfg = v && v.rsvp, ci = cfg && cfg.checkin;
         if (!ci || !this.rsvpCanStamp(name)) return 0;
         var table = cfg.responses, now = new Date().toISOString();
         var rows = Rsvp.checkinTargets(Rows.partitionRows(this.dataCache, table, 'active'), {
-          code: code, linkColumn: this.rsvpLink(cfg).linkColumn, eventKey: eventKey, checkinColumn: ci.codeColumn, set: ci.set });
+          code: code, linkColumn: this.rsvpLink(cfg).linkColumn, eventKeys: this.rsvpTodayKeys(name), checkinColumn: ci.codeColumn, set: ci.set });
         // One press, one undo entry, however many rows: written the way _writeReorder writes, partial and
         // recorded per row, since saveField's debounced writes would each land as an entry of their own.
         Undo.action('checkin', function() {
@@ -5621,12 +5629,13 @@ function createVueApp() {
       // deliberate press records it. Zero-tap is safe in an in-app scanner, where the person
       // pointing the camera IS the intent; it is not safe for a URL.
       //
-      // `view` is honoured only alongside `scan`, and only when it names a scan view: this is a scan
-      // contract, not a general view-routing parameter that something else may later want.
+      // With `scan`, `view` must name a view that takes a scanned code: a scan view, or an rsvp view with
+      // `checkin` (the organizer's QR). Without it, see _linkedViewFromUrl.
       _pendingScanFromUrl: function() {
         var p = new URLSearchParams(location.search);
         var code = p.get('scan'), view = p.get('view');
-        if (!code || !view || SchemaNormalize.viewKind(VIEWS[view]) !== 'scan') return null;
+        var v = VIEWS[view], kind = SchemaNormalize.viewKind(v);
+        if (!code || !view || !(kind === 'scan' || (kind === 'rsvp' && v.rsvp.checkin))) return null;
         // Consume it from the address bar: a reload must not re-arm, and the link should not stay in
         // history with a code in it.
         try {
@@ -5636,10 +5645,26 @@ function createVueApp() {
         } catch (e) {}
         return { view: view, code: code };
       },
+      // A plain `?view=<name>` link: a QR on a gym's tablet that opens the class list on the member's own
+      // phone. Consumed like the scan link, so a reload goes back to ordinary navigation.
+      _linkedViewFromUrl: function() {
+        var p = new URLSearchParams(location.search), view = p.get('view');
+        if (!view || p.get('scan')) return null;
+        try {
+          p['delete']('view');
+          var q = p.toString();
+          history.replaceState(null, '', location.pathname + (q ? '?' + q : '') + location.hash);
+        } catch (e) {}
+        return view;
+      },
       _autoSelectTab: function() {
         // A deep-linked code names the view it belongs to, so it decides which tab opens.
         var pend = this._pendingScanFromUrl();
         if (pend) { this.pendingScan = pend; this.selectTab(pend.view, true); return; }
+        // A linked view resolves through _screenFor like a history entry: against the access-filtered nav,
+        // so a link to a screen this user is not granted opens the first screen instead of revealing it.
+        var linked = this._linkedViewFromUrl();
+        if (linked) { var lid = this._screenFor(linked); if (lid) this.selectTab(lid, true); return; }
         if (this.currentTable) return;
         // A reload keeps the history entry, and with it the screen it recorded.
         var id = this._screenFor(this._historyScreen());
@@ -7490,18 +7515,19 @@ function createVueApp() {
           // label sheet fall back to Code 39 rather than print a name with no code under it. Passed in
           // rather than read as a global inside print.js, so the print builders stay pure over ctx and
           // their Node tests need no 56 KB stub.
-          qr: function(text) {
-            if (typeof qrcode === 'undefined' || !text) return null;
-            try {
-              // Type 0 = "the smallest version that fits"; M is the middle error correction, which is
-              // what survives a scuffed label without inflating the module count.
-              var q = qrcode(0, 'M');
-              q.addData(String(text));
-              q.make();
-              return { size: q.getModuleCount(), isDark: function(r, c) { return q.isDark(r, c); } };
-            } catch (e) { return null; }        // too much data for any version -> Code 39 instead
-          }
+          qr: function(text) { return self.qrMatrix(text); }
         };
+      },
+      qrMatrix: function(text) {
+        if (typeof qrcode === 'undefined' || !text) return null;
+        try {
+          // Type 0 = "the smallest version that fits"; M is the middle error correction, which is
+          // what survives a scuffed label without inflating the module count.
+          var q = qrcode(0, 'M');
+          q.addData(String(text));
+          q.make();
+          return { size: q.getModuleCount(), isDark: function(r, c) { return q.isDark(r, c); } };
+        } catch (e) { return null; }        // too much data for any version -> Code 39 instead
       },
       printView: function() {
         var self = this, ctx = this._printCtx();
@@ -7560,15 +7586,15 @@ function createVueApp() {
       // The URL a QR on a label carries: this deployment, this view, this code. `db` rides along because
       // an installed app says which database it is that way (databases.js manifestIdentity), and two
       // databases installed from one origin share a scope -- so without it the wrong one may answer.
-      scanDeepLink: function(view, code) {
+      viewDeepLink: function(view) {
         var base = location.origin + location.pathname;
         var q = [];
         var dbKey = (typeof Databases !== 'undefined' && Databases.activeKey) ? Databases.activeKey() : '';
         if (dbKey) q.push('db=' + encodeURIComponent(dbKey));
         q.push('view=' + encodeURIComponent(view));
-        q.push('scan=' + encodeURIComponent(code));
         return base + '?' + q.join('&');
       },
+      scanDeepLink: function(view, code) { return this.viewDeepLink(view) + '&scan=' + encodeURIComponent(code); },
       // The scan view whose codes these catalogue rows carry, or '' when nothing scans them. This is
       // what puts `Print codes` in the LOOKUP editor: a label belongs to the catalogue row it names,
       // so it is printed where those rows are kept rather than from the view that happens to read
@@ -9532,19 +9558,106 @@ function createVueApp() {
       + '</v-card>'
   });
 
+  // A link as a large QR, for a phone's own camera to open -- iOS has no BarcodeDetector, but every camera
+  // app offers to open a link it finds in a QR. The caption goes under it for anyone who cannot scan: the
+  // check-in code (`mono`), or the page's name. With no encoder (offline, /vendor missing) only the
+  // caption shows. Drawn on open, since the link may change while the dialog is closed.
+  app.component('qr-dialog', {
+    props: { modelValue: Boolean, link: { type: String, default: '' }, caption: { type: String, default: '' }, mono: Boolean },
+    emits: ['update:modelValue'],
+    data: function() { return { svg: '' }; },
+    computed: { a: function() { return appInstance; } },
+    watch: { modelValue: { immediate: true, handler: function(open) { if (open) this.draw(); } } },
+    methods: {
+      draw: function() {
+        var self = this, link = this.link;
+        appInstance._ensureQrEncoder().then(function() {
+          var m = appInstance.qrMatrix(link);
+          var px = Math.max(160, Math.min(480, window.innerWidth - 96, window.innerHeight - 260));
+          self.svg = m ? Print.qrSvg(m, px) : '';
+        });
+      }
+    },
+    template: ''
+      + '<v-dialog :model-value="modelValue" @update:model-value="$emit(\'update:modelValue\', $event)" max-width="560">'
+      +   '<v-card class="pa-4 text-center" data-testid="qr-dialog">'
+      +     '<div class="d-flex"><v-spacer></v-spacer><v-btn icon="mdi-close" size="small" variant="text" :title="a.t(\'btn.close\')" :aria-label="a.t(\'btn.close\')" @click="$emit(\'update:modelValue\', false)"></v-btn></div>'
+      // The SVG is built from the module matrix alone -- numbers, no text from anyone -- so v-html is safe.
+      +     '<div v-if="svg" v-html="svg" class="d-flex justify-center"></div>'
+      +     '<div class="mt-3" :style="mono ? \'font-family:monospace;font-size:2.5rem;letter-spacing:0.1em;word-break:break-all\' : \'font-size:1.5rem\'" data-testid="qr-dialog-caption">{{ caption }}</div>'
+      +   '</v-card>'
+      + '</v-dialog>'
+  });
+  // Today's check-in controls, once above the list: the code is the day's, not one event's. The organizer
+  // types the real code, can show it as a QR for the room, and stamps every event of today; a member types
+  // (or is handed, by that QR) the code they were shown, which lands on each event they reserved today.
+  // `mine`: the member's reserved events today.
+  app.component('rsvp-checkin', {
+    props: { viewName: String, mine: { type: Array, default: function() { return []; } }, canStamp: Boolean, armed: { type: String, default: '' } },
+    emits: ['claimed'],
+    // `code`: what the organizer typed. Not stored anywhere.
+    data: function() { return { code: '', qrOpen: false }; },
+    computed: {
+      a: function() { return appInstance; },
+      frozen: function() { var self = this; return this.mine.every(function(e) { return appInstance.rsvpFrozen(self.viewName, e.key); }); },
+      // From the events still open: a member back for a later class has a frozen morning row carrying the
+      // code, and showing it would leave a retyped identical code with no change to save.
+      myCode: function() {
+        var self = this, open = this.mine.filter(function(e) { return !appInstance.rsvpFrozen(self.viewName, e.key); });
+        var e = (open.length ? open : this.mine).find(function(x) { return x.myCode; });
+        return e ? e.myCode : '';
+      },
+      typed: function() { return String(this.code || '').trim(); },
+      // Drawn from what was typed, on this screen only.
+      qrLink: function() { return appInstance.scanDeepLink(this.viewName, this.typed); }
+    },
+    methods: {
+      stamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.typed); },
+      claim: function(value) { appInstance.setRsvpCode(this.viewName, value); this.$emit('claimed'); }
+    },
+    template: ''
+      + '<div class="d-flex align-center flex-wrap pa-2" style="gap:8px" data-testid="rsvp-checkin">'
+      + '<template v-if="canStamp">'
+      +   '<v-text-field v-model="code" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" style="max-width:200px" data-testid="rsvp-checkin-real"></v-text-field>'
+      +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :disabled="!typed" :title="a.t(\'rsvp.show_code\')" :aria-label="a.t(\'rsvp.show_code\')" data-testid="rsvp-checkin-qr" @click="qrOpen = true"></v-btn>'
+      +   '<v-btn size="small" variant="text" class="text-none" :disabled="!typed" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-stamp" @click="stamp()"><v-icon icon="mdi-account-check"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t(\'rsvp.checkin\') }}</span></v-btn>'
+      +   '<qr-dialog v-model="qrOpen" :link="qrLink" :caption="typed" mono></qr-dialog>'
+      + '</template>'
+      + '<v-text-field v-else :model-value="armed || myCode" @change="e => claim(e.target.value)" :disabled="frozen" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" :autofocus="!!armed" style="max-width:200px" data-testid="rsvp-checkin-claim">'
+      // A code from a link is ARMED, not written: one press saves it, because a link is something anyone
+      // can send you.
+      +   '<template v-if="armed" v-slot:append-inner>'
+      +     '<v-btn icon="mdi-check" size="small" color="primary" variant="tonal" :disabled="frozen" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-claim-save" @click="claim(armed)"></v-btn>'
+      +   '</template>'
+      + '</v-text-field>'
+      + '</div>'
+  });
   app.component('rsvp-view', {
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
     // Sort is component-local: rsvp renders its own event list (from the rsvp.js engine), not the root's
     // currentData, so the root sortCol/sortAsc the data grid uses would sort a list nobody displays.
     // null = the engine's own order (chronological, upcoming first) -- the view's natural default.
-    // `codes`: what an organizer has typed per event, before pressing Check in. Not stored anywhere.
-    data: function() { return { sortCol: null, sortAsc: true, codes: {} }; },
+    // `pageQr`: the organizer's "QR code for this page" dialog, for a tablet or a printout at the venue.
+    data: function() { return { sortCol: null, sortAsc: true, pageQr: false }; },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
       cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].rsvp) || {}; },
       data: function() { return appInstance.rsvpFor(this.viewName); },
       canStamp: function() { return appInstance.rsvpCanStamp(this.viewName); },
+      organizer: function() { return appInstance.rsvpOrganizer(this.viewName); },
+      pageLink: function() { return appInstance.viewDeepLink(this.viewName); },
+      pageTitle: function() { return appInstance.t('view.' + this.viewName) || this.viewName; },
+      // Check-in happens AT the venue, so it is offered only on a day with events: to the organizer, and
+      // to a member who reserved at least one of them.
+      todayMine: function() { return ((this.data && this.data.events) || []).filter(function(e) { return e.isToday && e.myRowId; }); },
+      checkinShown: function() {
+        if (!this.cfg.checkin) return false;
+        return this.canStamp ? ((this.data && this.data.events) || []).some(function(e) { return e.isToday; }) : this.todayMine.length > 0;
+      },
+      // A code that arrived by the organizer's QR (`?view=&scan=`). It stays on the root until the member
+      // presses, rather than being taken into this component: opening the link re-renders the view.
+      armed: function() { var p = appInstance.pendingScan; return p && p.view === this.viewName ? p.code : ''; },
       // The rendered rows: engine order until a header is clicked, then Rows.compareValues -- the same
       // comparator the data grid and embeds use, so blanks-last/numeric ordering all agree.
       events: function() {
@@ -9573,10 +9686,7 @@ function createVueApp() {
     },
     methods: Object.assign({}, SORT_UI, {
       set: function(key, status) { appInstance.setRsvp(this.viewName, key, status || ''); },
-      // Check-in happens AT the event, so only today's row offers it: a member with a response types the
-      // code they were shown, an organizer types the real one and stamps the room.
-      checkinOn: function(ev) { return !!this.cfg.checkin && ev.isToday && (this.canStamp || !!ev.myRowId); },
-      stamp: function(ev) { appInstance.stampRsvpCheckin(this.viewName, ev.key, this.codes[ev.key] || ''); },
+      claimed: function() { appInstance.pendingScan = null; },
       toDateStr: toDateStr,
       // Translated label for a status VALUE, keyed by `list.<statusList||statusColumn>.<value>` (falls back
       // to the raw value). `statusList` lets the view name a translation namespace distinct from the column
@@ -9605,6 +9715,12 @@ function createVueApp() {
     }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" data-testid="rsvp-view">'
+      // Top-level only: embedded, the view is a part of another page, whose own link that would not be.
+      + '<div v-if="organizer && !embed" class="d-flex px-2 pt-1"><v-spacer></v-spacer>'
+      +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :title="a.t(\'rsvp.page_qr\')" :aria-label="a.t(\'rsvp.page_qr\')" data-testid="rsvp-page-qr" @click="pageQr = true"></v-btn>'
+      +   '<qr-dialog v-model="pageQr" :link="pageLink" :caption="pageTitle"></qr-dialog>'
+      + '</div>'
+      + '<rsvp-checkin v-if="checkinShown" :view-name="viewName" :mine="todayMine" :can-stamp="canStamp" :armed="armed" @claimed="claimed()"></rsvp-checkin>'
       + '<v-table v-if="!a.mobile" density="compact">'
       + '<thead><tr>'
       + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'date\')" :aria-sort="ariaSort(\'date\')" data-testid="rsvp-sort-date">{{ a.t(\'rsvp.date\') }}</th>'
@@ -9619,13 +9735,6 @@ function createVueApp() {
       + '<td style="white-space:nowrap">{{ a.dateLabel(ev.date) }}</td>'
       + '<td>{{ ev.title }}</td>'
       + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpFrozen(viewName, ev.key)" @set="set(ev.key, $event)"></rsvp-picker>'
-      + '<div v-if="checkinOn(ev)" class="d-flex align-center flex-wrap mt-1" style="gap:8px" data-testid="rsvp-checkin">'
-      + '<template v-if="canStamp">'
-      +   '<v-text-field v-model="codes[ev.key]" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" style="max-width:200px" data-testid="rsvp-checkin-real"></v-text-field>'
-      +   '<v-btn size="small" variant="text" class="text-none" :disabled="!(codes[ev.key] || \'\').trim()" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-stamp" @click="stamp(ev)"><v-icon icon="mdi-account-check"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t(\'rsvp.checkin\') }}</span></v-btn>'
-      + '</template>'
-      + '<v-text-field v-else :model-value="ev.myCode" @change="e => a.setRsvpCode(viewName, ev.key, e.target.value)" :disabled="a.rsvpFrozen(viewName, ev.key)" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" style="max-width:200px" data-testid="rsvp-checkin-claim"></v-text-field>'
-      + '</div>'
       + '</td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
       + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></td>'
@@ -9638,13 +9747,6 @@ function createVueApp() {
       + '<div>{{ a.dateLabel(ev.date) }}</div>'
       + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}</div>'
       + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpFrozen(viewName, ev.key)" @set="set(ev.key, $event)"></rsvp-picker>'
-      + '<div v-if="checkinOn(ev)" class="d-flex align-center flex-wrap mt-1" style="gap:8px" data-testid="rsvp-checkin">'
-      + '<template v-if="canStamp">'
-      +   '<v-text-field v-model="codes[ev.key]" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" style="max-width:200px" data-testid="rsvp-checkin-real"></v-text-field>'
-      +   '<v-btn size="small" variant="text" class="text-none" :disabled="!(codes[ev.key] || \'\').trim()" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-stamp" @click="stamp(ev)"><v-icon icon="mdi-account-check"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t(\'rsvp.checkin\') }}</span></v-btn>'
-      + '</template>'
-      + '<v-text-field v-else :model-value="ev.myCode" @change="e => a.setRsvpCode(viewName, ev.key, e.target.value)" :disabled="a.rsvpFrozen(viewName, ev.key)" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" style="max-width:200px" data-testid="rsvp-checkin-claim"></v-text-field>'
-      + '</div>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
       + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></div>'
       + '</v-card>'

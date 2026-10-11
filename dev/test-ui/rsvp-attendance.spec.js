@@ -46,7 +46,7 @@ async function bootAs(page, user) {
   await page.goto('/');
   await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
   await page.evaluate(() => appInstance.selectTab('my_rsvp'));
-  await expect(page.locator('[data-testid="rsvp-toggle"]')).toBeVisible();
+  await expect(page.locator('[data-testid="rsvp-toggle"]').first()).toBeVisible();
 }
 const stored = async (page) => {
   const res = await page.request.post('/api/getTableData', { data: { tableId: 'rsvps', tab: 'active' }, headers: ADMIN });
@@ -87,7 +87,8 @@ test('a member responds, an organizer marks attendance, and the response is then
   expect(late.status()).toBe(403);
 });
 
-test('self check-in: members type the code shown at the event, the organizer stamps every match', async ({ page, browser }) => {
+// Today's practice, with check-in configured: the claim column is the member's, the verdict is not.
+async function setupCheckin(page) {
   const schema = JSON.parse(JSON.stringify(SCHEMA));
   schema.tables.practices.columns[0] = { name: 'date', type: 'date' };
   schema.tables.rsvps.columns.push({ name: 'checkin_code', type: 'text' });
@@ -100,6 +101,11 @@ test('self check-in: members type the code shown at the event, the organizer sta
   await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
   await page.request.post('/api/saveLists', { data: { lists: { rsvp_status: ['coming', 'out'], attendance_status: ['pending', 'attended', 'absent'] } }, headers: ADMIN });
   await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p1', date: ymd, title: 'Tonight' } }, headers: ADMIN });
+  return ymd;
+}
+
+test('self check-in: members type the code shown at the event, the organizer stamps every match', async ({ page, browser }) => {
+  await setupCheckin(page);
 
   // Two members respond and claim: Ann types what was on the slide, Bob guesses.
   for (const [user, claim] of [['ann@x', ' LION '], ['bob@x', 'tiger']]) {
@@ -127,4 +133,106 @@ test('self check-in: members type the code shown at the event, the organizer sta
   // One press, one undo.
   await page.evaluate(() => appInstance.undoLast());
   await expect.poll(att).toEqual({ 'ann@x': 'pending', 'bob@x': 'pending' });
+});
+
+test('self check-in by QR: one scan claims every class reserved today, one press stamps them all', async ({ page, browser }) => {
+  const ymd = await setupCheckin(page);
+  // A second class today, and one tomorrow that the code must not touch.
+  const tomorrow = new Date(Date.now() + 86400000); const ymd2 = [tomorrow.getFullYear(), String(tomorrow.getMonth() + 1).padStart(2, '0'), String(tomorrow.getDate()).padStart(2, '0')].join('-');
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p2', date: ymd, title: 'Late' } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p3', date: ymd2, title: 'Tomorrow' } }, headers: ADMIN });
+
+  // The organizer types the code and shows it: a QR, and the code in text under it.
+  await bootAs(page, 'org@x');
+  await expect(page.locator('[data-testid="rsvp-checkin-qr"]')).toBeDisabled();
+  await page.locator('[data-testid="rsvp-checkin-real"] input').fill('lion');
+  await page.locator('[data-testid="rsvp-checkin-qr"]').click();
+  await expect(page.locator('[data-testid="qr-dialog"] svg')).toBeVisible();
+  await expect(page.locator('[data-testid="qr-dialog-caption"]')).toHaveText('lion');
+  // What the QR carries: a link to this view and this code -- the day's, not one class's.
+  const link = new URL(await page.evaluate(() => appInstance.scanDeepLink('my_rsvp', 'lion')));
+  expect(link.searchParams.get('scan')).toBe('lion');
+
+  // Ann has reserved all three classes; her phone's camera opens the link.
+  const ctx = await browser.newContext();
+  const p = await ctx.newPage();
+  await bootAs(p, 'ann@x');
+  for (const b of await p.locator('[data-testid="rsvp-toggle"]').all()) await b.locator('button', { hasText: 'coming' }).click();
+  await expect.poll(async () => (await (await p.request.post('/api/getTableData', { data: { tableId: 'rsvps', tab: 'active' }, headers: ADMIN })).json()).rows.length).toBe(3);
+  await p.goto('/' + link.search);
+  await p.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+  // Armed, not written: the box holds the code, the link has left the address bar, nothing is stored yet.
+  await expect(p.locator('[data-testid="rsvp-checkin-claim"] input')).toHaveValue('lion');
+  expect(new URL(p.url()).searchParams.get('scan')).toBeNull();
+  const byClass = async (col) => Object.fromEntries(((await (await page.request.post('/api/getTableData', { data: { tableId: 'rsvps', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => [r.practice, r[col] || '']));
+  expect(await byClass('checkin_code')).toEqual({ p1: '', p2: '', p3: '' });
+  await p.locator('[data-testid="rsvp-checkin-claim-save"]').click();
+  await expect.poll(() => byClass('checkin_code')).toEqual({ p1: 'lion', p2: 'lion', p3: '' });
+  await expect(p.locator('[data-testid="rsvp-checkin-claim-save"]')).toHaveCount(0);
+  await ctx.close();
+
+  // One press marks both of today's classes; tomorrow's stays pending.
+  await page.keyboard.press('Escape');
+  await page.locator('[data-testid="rsvp-checkin-stamp"]').click();
+  await expect.poll(() => byClass('attendance')).toEqual({ p1: 'attended', p2: 'attended', p3: 'pending' });
+});
+
+test('self check-in, twice in a day: attend one class, leave, reserve another, come back and check in again', async ({ page, browser }) => {
+  const ymd = await setupCheckin(page);
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p2', date: ymd, title: 'Evening' } }, headers: ADMIN });
+  const byClass = async (col) => Object.fromEntries(((await (await page.request.post('/api/getTableData', { data: { tableId: 'rsvps', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => [r.practice, r[col] || '']));
+  const ctx = await browser.newContext();
+  const p = await ctx.newPage();
+  await bootAs(p, 'ann@x');
+  const claim = p.locator('[data-testid="rsvp-checkin-claim"] input');
+
+  // Morning: Ann has reserved only the first class, checks in, and is marked.
+  await p.locator('[data-testid="rsvp-toggle"]').first().locator('button', { hasText: 'coming' }).click();
+  await claim.fill('lion'); await claim.press('Tab');
+  await expect.poll(() => byClass('checkin_code')).toEqual({ p1: 'lion' });
+  await bootAs(page, 'org@x');
+  await page.locator('[data-testid="rsvp-checkin-real"] input').fill('lion');
+  await page.locator('[data-testid="rsvp-checkin-stamp"]').click();
+  await expect.poll(() => byClass('attendance')).toEqual({ p1: 'attended' });
+
+  // Later: she reserves the evening class; the box is empty again, because the morning row is done.
+  await p.reload();
+  await p.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+  await p.evaluate(() => appInstance.selectTab('my_rsvp'));
+  await p.locator('[data-testid="rsvp-toggle"]').nth(1).locator('button', { hasText: 'coming' }).click();
+  await expect(claim).toHaveValue('');
+  await claim.fill('lion'); await claim.press('Tab');
+  await expect.poll(() => byClass('checkin_code')).toEqual({ p1: 'lion', p2: 'lion' });
+  await ctx.close();
+
+  // The organizer presses again for the late arrivals; the morning mark is untouched.
+  await page.locator('[data-testid="rsvp-checkin-stamp"]').click();
+  await expect.poll(() => byClass('attendance')).toEqual({ p1: 'attended', p2: 'attended' });
+});
+
+test('registering at the venue: the organizer shows a QR for the page, and the link opens it on a member phone', async ({ page, browser }) => {
+  await setup(page);
+  await bootAs(page, 'org@x');
+  await page.locator('[data-testid="rsvp-page-qr"]').click();
+  await expect(page.locator('[data-testid="qr-dialog"] svg')).toBeVisible();
+  const link = new URL(await page.evaluate(() => appInstance.viewDeepLink('my_rsvp')));
+  expect(link.searchParams.get('view')).toBe('my_rsvp');
+  expect(link.searchParams.get('scan')).toBeNull();
+
+  const ctx = await browser.newContext();
+  const p = await ctx.newPage();
+  await p.setViewportSize({ width: 1280, height: 800 });
+  await p.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('test_user', 'ann@x'); });
+  // A member is not offered the page QR.
+  await p.goto('/' + link.search);
+  await p.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+  await expect.poll(() => p.evaluate(() => appInstance.currentTable)).toBe('my_rsvp');
+  await expect(p.locator('[data-testid="rsvp-toggle"]').first()).toBeVisible();
+  await expect(p.locator('[data-testid="rsvp-page-qr"]')).toHaveCount(0);
+  expect(new URL(p.url()).searchParams.get('view')).toBeNull();
+  // A link to a screen that does not exist (or is not granted) opens the app as usual, with no error.
+  await p.goto('/?view=nope');
+  await p.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+  await expect.poll(() => p.evaluate(() => appInstance.currentTable)).toBe('my_rsvp');
+  await ctx.close();
 });

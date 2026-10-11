@@ -119,12 +119,13 @@ describe('rsvp.js — self check-in with a shared code', () => {
     { id: 'b', owner: 'bob@x', practice: 'p1', code: 'tiger', attendance: 'pending' },
     { id: 'c', owner: 'cy@x', practice: 'p1', code: 'lion', attendance: 'attended' },
     { id: 'd', owner: 'dan@x', practice: 'p2', code: 'lion', attendance: 'pending' },
-    { id: 'e', owner: 'eve@x', practice: 'p1', code: '', attendance: 'pending' }
+    { id: 'e', owner: 'eve@x', practice: 'p1', code: '', attendance: 'pending' },
+    { id: 'f', owner: 'ann@x', practice: 'p3', code: 'lion', attendance: 'pending' }
   ];
-  const opts = (code) => ({ code, linkColumn: 'practice', eventKey: 'p1', checkinColumn: 'code', set: { attendance: 'attended' } });
+  const opts = (code) => ({ code, linkColumn: 'practice', eventKeys: ['p1', 'p3'], checkinColumn: 'code', set: { attendance: 'attended' } });
 
-  it('stamps this event\'s rows whose claim matches, ignoring case and space, skipping the already-marked', () => {
-    assert.deepEqual(Rsvp.checkinTargets(rows, opts('LION')).map((r) => r.id), ['a']);
+  it('stamps the given events\' rows whose claim matches, ignoring case and space, skipping the already-marked', () => {
+    assert.deepEqual(Rsvp.checkinTargets(rows, opts('LION')).map((r) => r.id), ['a', 'f']);
   });
 
   it('a blank code or an empty `set` stamps nobody, so an unclaimed row never matches', () => {

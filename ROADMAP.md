@@ -752,7 +752,13 @@ offered a change the server refused; `rsvpFrozen` disables it. A third trap went
 the two above: adding the gate to a table that already has rows freezes those rows until their gate
 column is filled.
 
-### QR check-in — scan a code to mark attendance *(the shared-code arrangement's first step landed: claim + organizer stamp; scan phase 1.5 is the verifier arrangement)*
+### QR check-in — scan a code to mark attendance *(the shared-code arrangement is the chosen one: claim + organizer stamp landed, the organizer's QR is next; the verifier arrangement was dropped)*
+
+**Decided 2026-10-10: members check themselves in; nobody scans the attendee.** The verifier
+arrangement below was built (#264) and closed unmerged. Standing at the door scanning phones one by
+one is the queue this was meant to remove, and it needs every member to carry a personal code first.
+The shared code needs neither, so it is the one this entry builds on. The verifier text is kept for its
+reasoning; *Scan to log an action* phase 1.5 is withdrawn with it.
 
 The companion to *RSVP attendance verification* above: instead of the verifier hunting for each name
 in a list, they scan a code and the attendance column is written.
@@ -840,6 +846,36 @@ not: the organizer types it on the stamping screen and it goes nowhere else, bec
 event row is readable by every member from home, which undoes the one thing this step stops. The rows
 below it (a rule checking a stored `_checkin` code, expiry, rotation) remain unbuilt.
 
+**Next: the organizer shows the code as a QR, and the phone's own camera reads it.** Typing a code off a
+slide works, but scanning it is what people expect. The QR carries the deep link the scan view's labels
+already use (`?view=<rsvp view>&scan=<code>`), so iOS Camera, Control Center and
+Android's camera open the app on the right view. No in-app decoder, no `BarcodeDetector`, which iOS does
+not have. The pieces exist: `_ensureQrEncoder`, `Print.qrSvg` and `_pendingScanFromUrl`. What is new:
+
+- an icon button beside the organizer's code box that shows the typed code as a large QR, with the code
+  in text under it for anyone who cannot scan;
+- `_pendingScanFromUrl` also accepts an rsvp view with `checkin`, and the view fills the member's code
+  box. Like a scanned label it **arms, it does not write**: the member presses once,
+  because a link is something anyone can send you.
+
+The code is still stored nowhere. The QR is drawn from what the organizer typed, on their screen only.
+
+**Decided 2026-10-10: the code is the day's, not one event's.** A gym member doing two classes scans
+once, and the claim lands on every response they have for today; the organizer's one press stamps all of
+today's events. Per-event codes would mean one QR per class and a scan per class, which is the friction
+this removes. The cost is accepted: a member who leaves after the first class is still marked for the
+second. Neither this nor the entrance log (a `scan` view at the door) requires the other; joining them
+is a report, not a rule.
+
+**Later, both modes from one setting.** `checkin.verify: "organizer"` (the default, what landed) or
+`"code"`, where a matching claim is the verdict and the member is marked present with no stamping
+press. `"code"` is the second row of the table above, and it has the cost that row lists. The rules
+must compare the claim against a code the member cannot read: a `_checkin/<eventKey>` document only
+editors can read or write, which the organizer's screen writes when it shows the QR, with a
+`validUntil`. That same check is needed in four places: Firestore rules, Supabase RLS, the dev server
+and `backend-helpers`. Build it only when the stamping press is the actual complaint. A member who was
+not told the code can still be told it by text, in either mode.
+
 **No step closes relaying.** Someone at the event can always text the code to someone who is not. A
 30-second window narrows it; it does not shut it. Every "type the code on the screen" system has this,
 and it is worth deciding up front that it is acceptable rather than buying rotation expecting it to be
@@ -878,7 +914,43 @@ exists, since without that there is nothing for a scan to do. Of the two, the sh
 better first build — it needs no camera at all in its typed form, so it can ship and be used at a real
 event before any of the decoding work above is done.
 
-### Scan to log an action — the same camera, a row appended *(phases 1–4 landed; 1.5 and 5 open)*
+### Registering at the venue — a QR that opens the page on the member's phone *(A: building; B: optional, unbuilt)*
+
+Asked for 2026-10-10: a gym has a tablet with a QR, and a member scans it to register for classes there,
+as they would in the app.
+
+**A. The QR opens the page on the member's own phone.** To scan anything the member needs their phone,
+signed in, and that phone can already register them. So the QR's only job is getting them to the right
+page: it carries `?view=<rsvp view>`, the phone's camera app opens it, and they register as themselves
+on the usual screen. No new identity, no rules, nothing left signed in on a shared device. The tablet
+just shows the code, or the code is printed.
+
+What it needs: a plain `?view=` link opens that screen. Until now `view` was honoured only beside
+`scan`, deliberately, as a scan contract. It becomes a general one: the view opens if the access-filtered
+nav reaches it, and otherwise the app opens as it would anyway (`_screenFor`), so a link cannot reveal a
+screen the reader is not granted. The organizer gets a "QR code for this page" button on the rsvp view,
+which shows the same QR dialog the check-in code uses.
+
+**B. The phone unlocks the tablet (optional, only if A is not enough).** The tablet itself becomes the
+screen the member registers on:
+
+1. The tablet stays signed in as a kiosk account and shows a QR naming a fresh session id.
+2. The member's phone, opening that link, writes a grant: `_kiosk/<session> = { member: me, until }`,
+   creatable only with `member == myEmail()`, and `until` at most a few minutes ahead of `request.time`.
+3. The rules let the kiosk create and change rows stamped `owner == grant.member` while
+   `request.time < grant.until`, within the same `ownerWritable` bounds the member has.
+4. The tablet locks when the member presses Done, or after a minute idle; the grant expires either way.
+
+It needs no server functions, so it fits the free plan. The cost is that it is a new access path,
+"someone acts for you", and it must be written into four layers: Firestore rules, Supabase RLS, the dev
+server and `backend-helpers`. The details that decide whether it is safe: a grant cannot be created for
+someone else, its `until` cannot be pushed out, a session id is single-use (a second grant for it is
+refused), and the kiosk account can do nothing without a live grant. Worth building only for a venue
+where phones are the problem: a small screen, or a member who would rather not use their own device.
+If the tablet should also check members in once unlocked, it can stamp their claim the same way, which
+would make the day code unnecessary there.
+
+### Scan to log an action — the same camera, a row appended *(phases 1–4 landed; 1.5 withdrawn; 5 open)*
 
 QR check-in, above, writes an *answer* onto a row that already exists: someone signed up, and the scan
 records that they turned up. This entry asks whether the same scan can create the record instead — a
@@ -1055,9 +1127,9 @@ afterwards. And **the config check belongs to `scan.js`, not to `validateSchema`
 is the precedent, and it is what makes requirement 4 (a view that renders but cannot write) a tested
 property rather than an error string nobody executes.
 
-**Phase 1.5 — check-in, as config.** `match: "owner"` plus `codeCol` turns the same module into the
-entry above, still with no camera. It is listed as a half-phase because it is a resolver branch and a
-test, not a feature.
+**Phase 1.5 — check-in, as config. WITHDRAWN.** `match: "owner"` plus `codeCol` would have turned the
+same module into the verifier arrangement of the entry above. It was built (#264) and closed: members
+check themselves in with the organizer's shared code instead, which lives in `rsvp.checkin`.
 
 **Phase 2 — codes on paper. LANDED.** A printable label sheet over the scan view's catalogue, one code
 per row, through `print.js`. Code 39 is a 44-entry pattern table rendered as inline SVG — no vendored
@@ -3146,10 +3218,8 @@ has asked rather than work waiting to be done.
 shipped — see its entry above, which is kept in place rather than reduced to a Shipped bullet because
 the reasoning behind what landed is the same document as the reasoning for the rest of it.)
 
-**Scan phase 1.5** — check-in as config (`match: "owner"` + `codeCol`) — is the cheapest unbuilt thing
-now that the date label has shipped, a resolver branch and a test, and it is what turns the shipped scan view into the QR
-check-in entry above. Worth doing only when somebody actually wants the verifier-scans-attendee
-arrangement; it is not owed to the shipped half.
+**Scan phase 1.5** (verifier-scans-attendee check-in) was built and withdrawn (#264). Members check
+themselves in with the organizer's shared code instead; see *QR check-in*.
 
 **Sorting inside an embed** sat beside it on cost, and has shipped (#233) — both the `ref` order and the
 clickable header.

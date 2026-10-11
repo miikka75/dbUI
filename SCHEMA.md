@@ -1373,6 +1373,12 @@ The events live in one table; responses in another that has an **`owner` column*
   that puts on it.
 - With owner-scoped reads a non-organizer receives only their own response from the backend, so the
   rendered tally/roster reflects exactly what that user is permitted to see.
+- **Registering at the venue.** An organizer has a **QR code for this page** button (top-level only). The
+  QR carries `?view=<this view>`, so a member's phone camera opens the page in the app, signed in as
+  themselves, and they register as usual. Put it on a tablet or print it. A plain `?view=` link works for
+  any view: it opens that screen if the reader's nav reaches it, and otherwise the app opens as usual, so
+  a link cannot show a screen the reader is not granted. A view kept out of `nav` therefore cannot be
+  opened this way.
 
 ### `checkin` — self check-in with a shared code
 
@@ -1380,15 +1386,26 @@ The events live in one table; responses in another that has an **`owner` column*
 "rsvp": { …, "checkin": { "codeColumn": "checkin_code", "set": { "attendance": "attended" } } }
 ```
 
-On the **day** of an event, the RSVP row offers a **Check-in code** box. A member who responded types the
-code shown at the event (on a slide, a poster) into `codeColumn` of their own row. An organizer (anyone
-who may write the responses table outright, rather than through self-service) sees a box of their own
-instead: they type the real code and press **Check in**, which writes `set` onto every row of that event
-whose code matches. Case and surrounding spaces are ignored, rows already marked are skipped, and the
-press is one undo.
+On a day with events, the RSVP view offers one **Check-in code** box above the list. **The code is the
+day's, not one event's.** A member who reserved at least one of today's events types the code shown at
+the venue (on a slide, a poster, at the door), and it is saved into `codeColumn` of **every** response
+they have for today. An organizer (anyone who may write the responses table outright, rather than
+through self-service) sees a box of their own instead: they type the real code and press **Check in**,
+which writes `set` onto every row of today's events whose code matches. Case and surrounding spaces are
+ignored, rows already marked are skipped, and the press is one undo. Press again later in the day for
+people who arrive after it.
+
+- **One scan covers every class of the day**, which is the point for a gym: a member doing two classes
+  checks in once. The flip side is that they are marked for both, even if they leave after the first.
 
 - **The real code is stored nowhere.** Kept on the event row, every member could read it from home.
   What this buys is that being marked present takes being told the code.
+- **The organizer can show the code as a QR** (the icon beside their box). It carries a link,
+  `?view=<this view>&scan=<code>`, so a phone's own camera app opens the app on this
+  view with the member's box already filled. Nothing is saved until the member presses the check mark,
+  because a link is something anyone can send. The QR is drawn on the organizer's screen from what they
+  typed; the code is still stored nowhere. A member who has not responded gets no box, so they must
+  respond before they can scan.
 - **The claim and the verdict are separate columns.** `codeColumn` must be in `ownerWritable`, and every
   `set` column must not be, or a member can mark themselves present without any code. `validateSchema`
   refuses both, and a responses table with no `ownerWritable` at all.
