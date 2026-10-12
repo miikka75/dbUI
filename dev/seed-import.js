@@ -46,6 +46,8 @@ const DATA = path.join(EXAMPLES, BUNDLE + '-data.json');
 // opposite of the feature.
 const CHORES_MEMBER = { chore_log: 'rw', reward_claim: 'rw', home_shopping: 'rw',
                         ref_duties: 'r', ref_chores: 'r', ref_rewards: 'r' };
+const GYM_MEMBER = { classes: 'r', news: 'r', coach_library: 'r',
+                     ref_gyms: 'r', ref_class_types: 'r', ref_plans: 'r', ref_exercises: 'r', ref_rewards: 'r' };
 const SEED = {
   demo: {
     users: [
@@ -85,6 +87,25 @@ const SEED = {
       { list: 'members', value: 'Dan',  email: 'dan@dev' }
     ],
     hint: '?user=ann@dev (one duty column, logs her own chores) | ?user=local@dev (the parent, approves)'
+  },
+  // Members book, check in and log through self-service (owner columns); the grant is read-only
+  // reference data. The front desk (local@dev) runs the schedule, memberships and PT requests.
+  gym: {
+    users: [
+      { email: 'local@dev', role: 'admin',  tables: 'all' },
+      { email: 'aino@dev',  role: 'editor', tables: GYM_MEMBER },
+      { email: 'eero@dev',  role: 'editor', tables: GYM_MEMBER }
+    ],
+    profiles: [
+      { email: 'local@dev', name: 'Front desk', shared: true },
+      { email: 'aino@dev',  name: 'Aino',       shared: true },
+      { email: 'eero@dev',  name: 'Eero',       shared: true }
+    ],
+    links: [
+      { list: 'members', value: 'Aino', email: 'aino@dev' },
+      { list: 'members', value: 'Eero', email: 'eero@dev' }
+    ],
+    hint: '?user=aino@dev (a member: books, checks in, logs training) | ?user=local@dev (front desk)'
   }
 };
 

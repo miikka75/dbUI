@@ -150,6 +150,44 @@
         "12": "Adds Take Attendance under Crew: each practice as a card listing who answered, where an organizer marks each person Attended or Absent. A member cannot mark themselves, and once they are marked their RSVP for that practice can no longer be changed. RSVPs now also keep to their own fields (practice, response, note), so a member can no longer write anything else on their response.",
         "13": "Check-in with a code: on a day with practices, My RSVP shows one Check-in code box for the whole day. Members type the code shown at practice, or scan it: an organizer can show it as a QR code that opens the app with the code filled in. The code counts for every practice the member answered for that day. The organizer types the same code on their own screen and presses Check in, which marks everyone who entered it as Attended in all of the day's practices. The code is never saved, so it cannot be looked up from home."
       }
+    },
+    {
+      "id": "gym",
+      "title": "Fitness Club",
+      "description": "A gym's member app — class booking with door check-in, a training log and stats, memberships, personal training and a workout video library.",
+      "icon": "./examples/gym-favicon.svg",
+      "revision": 1,
+      "tables": 15,
+      "views": 32,
+      "schema": {
+        "file": "gym-schema.json",
+        "hash": "00c0906b534d57e1"
+      },
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "file": "gym-lang-en.json",
+          "hash": "26cf547fa965299d"
+        },
+        {
+          "code": "fi",
+          "name": "Suomi",
+          "file": "gym-lang-fi.json",
+          "hash": "97cb3f344ea52a42"
+        }
+      ],
+      "data": {
+        "file": "gym-data.json",
+        "hash": "f9ce2a6574bd6837"
+      },
+      "about": {
+        "file": "gym-about.json",
+        "hash": "b7e5e0fc264374b2"
+      },
+      "notes": {
+        "1": "First release: book group classes and check in with a rotating code, log gym visits by scanning the door code, a workout and step log with weekly minutes and your top 3 exercises, a loyalty level and a reward shop paid in coins earned by visiting, buying a membership or a single visit, requesting a personal trainer, news and a library of workouts and multi-week programmes. The front desk gets attendance, membership, PT and reward boards."
+      }
     }
   ]
 }

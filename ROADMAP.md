@@ -969,6 +969,177 @@ where phones are the problem: a small screen, or a member who would rather not u
 If the tablet should also check members in once unlocked, it can stamp their claim the same way, which
 would make the day code unnecessary there.
 
+### A gym's booking app — what the `gym` example could not express *(proposed 2026-10-12)*
+
+The `gym` bundle was built to mimic a real member app (GOGO Liikuntakeskus, from its store listing and a
+screen recording of every tab). Most of it mapped onto what exists: class booking is `rsvp`, the gate is a
+`scan`, the training history is `stats`, the loyalty shop is the chores bundle's reward shop paid in coins
+earned per visit. What follows is what did NOT map, in the order it should be built. Each item names
+what it costs, because two of them touch the rules and the rest are engine or UI work.
+
+**The flow being mimicked.** The member presses the app's key button and the camera opens. The QR at
+the gate opens the gate. A second QR inside, near the studios, checks them in to the classes they
+booked, with no further press. A member who booked nothing, scanning that second QR, picks a class from
+today's list and is booked and checked in at once. A booked member who has not checked in **10 minutes
+before the start** loses the place, and anyone may take it. Every class row shows the places left, or
+"full".
+
+#### 1. A self-service table's lists are unreadable to the members who use it *(defect)*
+
+Found building the bundle, and it is a defect rather than a gap: SCHEMA.md recommends giving an rsvp's
+status column its own `list`, and on a deployment where members hold no grant on the responses table
+(the normal case — it is self-service) that list never reaches them. `ListAccess.filterLists` and the
+`_lists` read rule (`listAllowed`) both ask whether the reader has access to a table that owns the list,
+and a self-service table is not a grant. The booking view rendered with no toggle at all. The bundle
+works around it with inline `statuses`; every other self-service list (attendance, PT status, claim
+status) renders only because those columns are read-only for the owner and fall back to the stored
+value's translation.
+
+Fix: a list is also readable when any of its owning tables is a self-service one. Both inputs are already
+mirrored — `_meta/listTables` and `_meta/ownerTables` — so it is one more disjunct in `listAllowed`,
+the matching clause in the Supabase policy, `filterLists` in the dev server, and a rules test each way.
+Reading a vocabulary reveals no rows, so this widens nothing that matters. **Small; rules.**
+
+#### 2. Check-in that needs no press — `checkin.link: "submit"`
+
+The day-code check-in deliberately arms the box and waits for a press, because a link is something
+anyone can send. `scan` already has the per-view answer to exactly that trade, `"link": "submit"`, and
+check-in should take the same key with the same default. With `rotateMinutes` the code in the link is
+dead within two periods, so a forwarded link buys a minute at most, and pressing nothing after the
+camera opens the app is the gym's whole experience. Same wait-for-tables guard the scan path has. **Small;
+UI only.**
+
+#### 3. Scanning with nothing booked offers today's classes
+
+Today a member with no response for today gets no code box, so the room QR does nothing for them. With
+a code in the link and no booking, show today's remaining classes with a Book button each; booking then
+claims the code into the new row in the same write. It is the rsvp view filtered to today with the code
+carried, not a new screen. Once capacity exists (5) a full class is shown but not offered. **Small; UI
+only.**
+
+#### 4. A start time a rule can compare — `startColumn`
+
+`classes.starts` is free text ("18:40"). Release (6) is decided at the server against `request.time` /
+`now()`, which needs one comparable instant, and the timezone is the trap: "18:40" is local, the rules
+clock is UTC. Proposal: the events table declares a start column holding a full ISO instant with offset
+(`2026-10-13T18:40:00+03:00`), written by staff (trusted) through a date+time editor, and the rsvp view
+names it (`rsvp.startColumn`). `dateColumn` keeps meaning the day. A `time` column type is the
+alternative and is worse here: it moves the date+time+zone arithmetic into both rules languages. Also
+fixes the calendar and the booking list sorting by a string. **Small–medium; a column editor.**
+
+#### 5. Capacity — places left, and the booking refused when full
+
+The display and the enforcement turn out to be one mechanism, because of privacy. A booking table is
+`privateRoster`: a member reads only their own rows, so the client cannot count anyone else's booking,
+and making the roster public to get a count publishes who trains when. So the count has to be held by
+the server, on the class row, and that same counter is what refuses the 26th booking.
+
+- **Supabase:** a trigger on booking insert/delete that locks the class row (`select … for update`),
+  counts, refuses past `capacity`, and writes `booked` onto it. A policy alone is not enough: two
+  concurrent inserts each see 24 and both pass.
+- **Firestore:** rules cannot count, so the client writes the booking and `class.booked + 1` in one
+  batch, and the rules allow a member to touch exactly that field of a class they cannot otherwise
+  write, by exactly ±1, only alongside a create/delete of their own booking for that class
+  (`getAfter`), and only while `booked < capacity`. This is the expensive half: a new "member writes one
+  field of a row they have no grant on" path, in the rules, the dev server and the differential test.
+- Schema: `rsvp.capacity: "<column>"` on the events table; the view shows *N left* / *Full*.
+
+**Medium–large; rules in both backends.** This is the item the bundle most visibly lacks.
+
+#### 6. Releasing a no-show's place 10 minutes before the start
+
+No scheduled job is needed — the Spark plan has none anyway. A booking simply stops *holding* a place
+once `now > start − release` and it has not been checked in. The counter then has two parts:
+`booked` (5) and `checked_in`, the second written by the organizer's stamp, which already writes every
+checked-in row. Before the release instant a place is free when `booked < capacity`; after it, when
+`checked_in < capacity`, and a booking made after the release is made at the venue (3) and is claimed
+in the same write. The no-show's own row is left as it is, so the organizer's attendance list still
+says who booked and did not come — which is what `attendance: no_show` is for. Schema:
+`rsvp.release: { "minutesBefore": 10 }`. **Medium; it rides on 4 and 5.**
+
+#### 7. A waitlist — a full class still takes a booking, in a queue
+
+The app being mimicked has none: a full class is full until a place is released at the door. A queue is
+better for the member who planned ahead, and it is asked for, so it is recorded here, with the one
+thing that makes it weaker in this deployment than in a native app said first: **nobody can be told
+they got in.** There is no server to send a push (see *Not proposed*). The member finds out by opening
+the app, or from their calendar, where a promoted booking appears in the per-person feed once 8 exists.
+That is a real answer for a class booked a day ahead and no answer for one two hours away, which is
+what `until` below is for.
+
+**The shape.** Booking a full class writes the booking with `booking: waitlisted` instead of refusing
+it. A waitlisted booking holds no place and is not counted in `booked`. When a booked place is
+cancelled, the **oldest** waitlisted booking for that class becomes `booked`. The member sees *Booked*
+or *Waitlisted — 3rd*, and can leave the queue the way they cancel.
+
+```json
+"rsvp": { …, "capacity": "capacity",
+          "waitlist": { "status": "waitlisted", "until": 120 } }
+```
+
+`until` (minutes before the start) is when the queue stops moving. After it, a freed place is not handed
+to someone who may not know they have it; it waits for the release (6) and goes to whoever is at the
+door, as in the app being mimicked. A waitlisted member who is at the venue takes it the same way
+anyone does, by scanning (3).
+
+**Who promotes is the whole design**, because the cancelling member cannot see the queue (the roster is
+private) and so cannot write the next person's row.
+
+- **Supabase:** the capacity trigger (5) already runs on every cancellation with the class row locked.
+  It promotes the oldest waitlisted row in the same transaction. Ordered, atomic, and nobody's client is
+  involved. This is the natural home, and it is the live deploy.
+- **Firestore:** no trigger exists, so promotion must be a client write that the rules can check.
+  The class row gets a ticket counter: joining the queue takes `ticket = class.tickets + 1` in the same
+  batch (rules check the increment, as in 5). A waitlisted member's own client may then promote its own
+  row when `booked < capacity` and its ticket is the lowest one still waiting. The rules cannot see
+  "lowest still waiting" (that needs a query), so the class row also carries `served`, the highest ticket
+  promoted or abandoned, and a member leaving the queue advances it past any run of abandoned tickets.
+  It works, and it is three counters kept in step by members who cannot read each other's rows. The
+  honest alternative for Firestore is **organizer promotion**: the attendance view gets a *Promote next*
+  press, which needs no new rule at all, because the organizer may write every booking already.
+  Recommendation: build Supabase's trigger, give Firestore the organizer press, and build the ticket
+  counters only if a Firestore deployment asks for self-service promotion.
+- **Position** (*Waitlisted — 3rd*) is also something a member cannot count. Supabase returns it from a
+  `security definer` function that counts only rows ahead of the caller's own. Firestore shows
+  `ticket − served` from the class row, which is exact when nobody ahead has left and an upper bound
+  when someone has; it reads "about 3rd", and says so.
+
+**Medium; it rides on 5, and is only fully useful with 8.**
+
+#### 8. My upcoming bookings, and "Add to calendar"
+
+A booking row has no date — it refers to a class. So the home page cannot list *my upcoming classes*,
+and the per-person feed cannot carry them. Proposal: a calendar source (and a data view's
+`defaultSort`/filter) may take its date **through the ref**: `{ "table": "bookings", "dateColumn":
+"class.date" }`, resolved with the lookup machinery `computed.lookup` already uses. That makes both the
+home list and the feed work with no copy of the date on the booking. **Small–medium; engine.**
+
+#### 9. Statistics the app shows that `stats` cannot
+
+- **A series**: one tile per period, for the last N periods — "minutes per week, last 6 weeks". The
+  bundle hand-writes four tiles with `@week-1`…`@week-3`; `"series": { "column": "done_on",
+  "interval": "weekly", "count": 6 }` generates them, labelled by period. **Small; `stats.js`.**
+- **A streak**: consecutive periods, ending now, with at least one row — the app's class streak and
+  workout streak. `agg: "streak"` with an `interval`. **Small; `stats.js`.**
+- **Time of day**: the app's night-owl and early-bird badges need the hour of a timestamp. A
+  `computed.hourOf` would let a `when` say it. **Small; low value — do it only if asked.**
+
+#### 10. A per-viewer "my gym" choice
+
+Every list in the app is narrowed to the gym the member picked once. dbUI has per-viewer conveniences
+(the nav layout is one, kept in the browser), but none that filters views. A viewer-chosen value for one
+`@` token (`"gym": "@chosen"`) would do it, display-only like `@me`. **Medium; low priority.**
+
+#### Not proposed
+
+- **Opening the gate.** It needs the gate controller's own API and a server to call it from; the
+  `scan` already records the visit, which is the part a database is for.
+- **Push notifications** (booking reminders, membership expiry, a freed place). They need a server to
+  send them, which the Spark plan forbids and GitHub Pages does not have. The subscribable calendar feed
+  is the reminder this deployment can give, which is one more reason for 8.
+- **Payment, device step sync, recommendations.** Payment is a provider integration, Apple Health has no
+  web API, and recommendations are a product rather than a schema.
+
 ### Scan to log an action — the same camera, a row appended *(phases 1–4 landed; 1.5 withdrawn; 5 open)*
 
 QR check-in, above, writes an *answer* onto a row that already exists: someone signed up, and the scan
@@ -3268,6 +3439,29 @@ refused every feed file. Nothing of the feed is ranked here any more.
 of it. Neither fixes anything that is wrong on screen; both pay back in tests and in what can be moved
 out later. Its first step (`calendar-view`) is cheap enough to do whenever the calendar is next open
 for another reason.
+
+**The gym entry is ranked inside itself, and its first item jumps the queue.** Item 1 (a
+self-service table's lists are unreadable to its members) is a defect in something SCHEMA.md tells
+authors to do, so it goes ahead of every proposal here, behind only what is wrong in production. Then
+the order is by what each step unlocks for the least risk:
+
+1. **Lists of self-service tables** — the defect; one disjunct per rules layer.
+2. **`checkin.link: "submit"`** and 3. **scan with nothing booked** — UI only, and together they make
+   the room QR behave like the app's: one scan, booked or not, and you are in.
+4. **`startColumn`** — small, and the prerequisite for release; worth doing before capacity so the
+   counter design is written against real instants from the start.
+5. **Capacity** — the expensive one and the one the example most visibly lacks. Build Supabase first
+   (the live deploy; a trigger is the natural home), Firestore second (the new one-field write path).
+6. **No-show release** — only once 4 and 5 exist; small on top of them.
+7. **Waitlist** — after release, not before: both change what "holds a place" means, and settling
+   release first keeps the waitlist's `until` a cut-over to an existing rule rather than a second
+   design. Supabase's trigger promotion and Firestore's organizer press first; Firestore self-service
+   promotion only if asked.
+8. **Bookings through the ref** — independent of 4–7 and could move up if "my upcoming classes" is
+   wanted before capacity. It is also the waitlist's only way of telling a member they got in, so if
+   the waitlist ships, this should ship with it.
+9. **`stats` series and streak** — independent, cheap, and unranked against the rest: do them whenever
+   `stats.js` is next open. Time-of-day and the per-viewer gym choice (10) wait for someone to ask.
 
 `groupBy.having` (recorded inside *Empty groups*, in Shipped) is unranked on purpose. It is a genuine
 gap — there is no predicate over an aggregated row — but it was named there to stop it being built as

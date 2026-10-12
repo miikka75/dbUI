@@ -1,0 +1,1484 @@
+{
+  "$schema": "../schema.schema.json",
+  "schemaVersion": 4,
+  "icons": {
+    "favicon": "./examples/gym-favicon.svg"
+  },
+  "theme": {
+    "light": {
+      "primary": "#c62828",
+      "secondary": "#ef6c00",
+      "success": "#2e7d32"
+    },
+    "dark": {
+      "primary": "#ef5350",
+      "secondary": "#ffa726",
+      "success": "#66bb6a"
+    }
+  },
+  "defaultLanguage": "English",
+  "translatableLists": [
+    "booking_status",
+    "attendance_status",
+    "order_state",
+    "membership_status",
+    "pt_status",
+    "coach_category",
+    "coach_level",
+    "ref_class_types",
+    "ref_exercises",
+    "ref_plans",
+    "coach_format",
+    "claim_status",
+    "ref_rewards"
+  ],
+  "listSources": {
+    "members": "userlink"
+  },
+  "tables": {
+    "ref_gyms": {
+      "isLookup": true,
+      "hierarchy": false,
+      "columns": [
+        {
+          "name": "gym",
+          "type": "text"
+        },
+        {
+          "name": "address",
+          "type": "text"
+        },
+        {
+          "name": "opening_hours",
+          "type": "text"
+        },
+        {
+          "name": "code",
+          "type": "text"
+        },
+        {
+          "name": "coins_per_visit",
+          "type": "number"
+        }
+      ]
+    },
+    "ref_class_types": {
+      "isLookup": true,
+      "hierarchy": false,
+      "columns": [
+        {
+          "name": "class_type",
+          "type": "text"
+        },
+        {
+          "name": "duration_min",
+          "type": "number"
+        },
+        {
+          "name": "intensity",
+          "type": "number"
+        },
+        {
+          "name": "category",
+          "type": "text"
+        },
+        {
+          "name": "description",
+          "type": "text"
+        }
+      ]
+    },
+    "ref_plans": {
+      "isLookup": true,
+      "hierarchy": false,
+      "columns": [
+        {
+          "name": "plan",
+          "type": "text"
+        },
+        {
+          "name": "months",
+          "type": "number"
+        },
+        {
+          "name": "price_eur",
+          "type": "number"
+        }
+      ]
+    },
+    "ref_exercises": {
+      "isLookup": true,
+      "hierarchy": false,
+      "columns": [
+        {
+          "name": "exercise",
+          "type": "text"
+        },
+        {
+          "name": "muscle_group",
+          "type": "text"
+        }
+      ]
+    },
+    "classes": {
+      "archivable": true,
+      "defaultSort": "date",
+      "columns": [
+        {
+          "name": "date",
+          "type": "date"
+        },
+        {
+          "name": "starts",
+          "type": "text"
+        },
+        {
+          "name": "class_type",
+          "type": "ref",
+          "table": "ref_class_types",
+          "valueCol": "class_type"
+        },
+        {
+          "name": "gym",
+          "type": "ref",
+          "table": "ref_gyms",
+          "valueCol": "gym"
+        },
+        {
+          "name": "room",
+          "type": "text"
+        },
+        {
+          "name": "instructor",
+          "type": "select",
+          "list": "trainers",
+          "allowNew": true,
+          "sorted": true
+        },
+        {
+          "name": "capacity",
+          "type": "number"
+        }
+      ]
+    },
+    "bookings": {
+      "privateRoster": true,
+      "columns": [
+        {
+          "name": "owner",
+          "type": "owner"
+        },
+        {
+          "name": "class",
+          "type": "ref",
+          "table": "classes",
+          "valueCol": "id"
+        },
+        {
+          "name": "booking",
+          "type": "select",
+          "list": "booking_status"
+        },
+        {
+          "name": "attendance",
+          "type": "select",
+          "list": "attendance_status",
+          "picker": "toggle",
+          "default": "pending"
+        },
+        {
+          "name": "checkin_code",
+          "type": "text"
+        }
+      ],
+      "ownerWritable": [
+        "class",
+        "booking",
+        "checkin_code"
+      ],
+      "ownerWritableWhile": {
+        "attendance": "pending"
+      }
+    },
+    "visits": {
+      "privateRoster": true,
+      "defaultSort": "visited_on",
+      "columns": [
+        {
+          "name": "owner",
+          "type": "owner"
+        },
+        {
+          "name": "member",
+          "type": "select",
+          "list": "members",
+          "sorted": true,
+          "defaultFrom": "@me"
+        },
+        {
+          "name": "gym",
+          "type": "ref",
+          "table": "ref_gyms",
+          "valueCol": "gym"
+        },
+        {
+          "name": "visited_on",
+          "type": "date"
+        },
+        {
+          "name": "at",
+          "type": "text",
+          "hidden": true
+        }
+      ],
+      "ownerWritable": [
+        "member",
+        "gym",
+        "visited_on",
+        "at"
+      ]
+    },
+    "workouts": {
+      "privateRoster": true,
+      "defaultSort": "done_on",
+      "columns": [
+        {
+          "name": "owner",
+          "type": "owner"
+        },
+        {
+          "name": "member",
+          "type": "select",
+          "list": "members",
+          "sorted": true,
+          "defaultFrom": "@me"
+        },
+        {
+          "name": "done_on",
+          "type": "date"
+        },
+        {
+          "name": "exercise",
+          "type": "ref",
+          "table": "ref_exercises",
+          "valueCol": "exercise"
+        },
+        {
+          "name": "sets",
+          "type": "number"
+        },
+        {
+          "name": "reps",
+          "type": "number"
+        },
+        {
+          "name": "weight_kg",
+          "type": "number"
+        },
+        {
+          "name": "minutes",
+          "type": "number"
+        },
+        {
+          "name": "km",
+          "type": "number"
+        },
+        {
+          "name": "note",
+          "type": "text"
+        }
+      ],
+      "ownerWritable": [
+        "member",
+        "done_on",
+        "exercise",
+        "sets",
+        "reps",
+        "weight_kg",
+        "minutes",
+        "km",
+        "note"
+      ]
+    },
+    "steps": {
+      "privateRoster": true,
+      "defaultSort": "day",
+      "columns": [
+        {
+          "name": "owner",
+          "type": "owner"
+        },
+        {
+          "name": "member",
+          "type": "select",
+          "list": "members",
+          "sorted": true,
+          "defaultFrom": "@me"
+        },
+        {
+          "name": "day",
+          "type": "date"
+        },
+        {
+          "name": "step_count",
+          "type": "number"
+        }
+      ],
+      "ownerWritable": [
+        "member",
+        "day",
+        "step_count"
+      ]
+    },
+    "memberships": {
+      "privateRoster": true,
+      "defaultSort": "start_on",
+      "columns": [
+        {
+          "name": "owner",
+          "type": "owner"
+        },
+        {
+          "name": "member",
+          "type": "select",
+          "list": "members",
+          "sorted": true,
+          "defaultFrom": "@me"
+        },
+        {
+          "name": "plan",
+          "type": "ref",
+          "table": "ref_plans",
+          "valueCol": "plan"
+        },
+        {
+          "name": "start_on",
+          "type": "date"
+        },
+        {
+          "name": "order_state",
+          "type": "select",
+          "list": "order_state",
+          "default": "draft"
+        },
+        {
+          "name": "membership_status",
+          "type": "select",
+          "list": "membership_status",
+          "picker": "chips",
+          "default": "pending"
+        },
+        {
+          "name": "valid_until",
+          "type": "date"
+        }
+      ],
+      "ownerWritable": [
+        "member",
+        "plan",
+        "start_on",
+        "order_state"
+      ],
+      "ownerWritableWhile": {
+        "order_state": "draft"
+      }
+    },
+    "pt_sessions": {
+      "privateRoster": true,
+      "defaultSort": "preferred_on",
+      "columns": [
+        {
+          "name": "owner",
+          "type": "owner"
+        },
+        {
+          "name": "member",
+          "type": "select",
+          "list": "members",
+          "sorted": true,
+          "defaultFrom": "@me"
+        },
+        {
+          "name": "trainer",
+          "type": "select",
+          "list": "trainers",
+          "sorted": true
+        },
+        {
+          "name": "preferred_on",
+          "type": "date"
+        },
+        {
+          "name": "goal",
+          "type": "text"
+        },
+        {
+          "name": "pt_status",
+          "type": "select",
+          "list": "pt_status",
+          "picker": "chips",
+          "default": "requested"
+        },
+        {
+          "name": "trainer_notes",
+          "type": "text"
+        }
+      ],
+      "ownerWritable": [
+        "member",
+        "trainer",
+        "preferred_on",
+        "goal"
+      ],
+      "ownerWritableWhile": {
+        "pt_status": "requested"
+      }
+    },
+    "news": {
+      "archivable": true,
+      "defaultSort": "published_on",
+      "columns": [
+        {
+          "name": "published_on",
+          "type": "date"
+        },
+        {
+          "name": "headline",
+          "type": "text"
+        },
+        {
+          "name": "body",
+          "type": "text"
+        },
+        {
+          "name": "picture",
+          "type": "image"
+        }
+      ]
+    },
+    "coach_library": {
+      "defaultSort": "title",
+      "columns": [
+        {
+          "name": "title",
+          "type": "text"
+        },
+        {
+          "name": "format",
+          "type": "select",
+          "list": "coach_format",
+          "picker": "chips"
+        },
+        {
+          "name": "weeks",
+          "type": "number"
+        },
+        {
+          "name": "equipment",
+          "type": "text"
+        },
+        {
+          "name": "category",
+          "type": "select",
+          "list": "coach_category"
+        },
+        {
+          "name": "level",
+          "type": "select",
+          "list": "coach_level",
+          "picker": "chips"
+        },
+        {
+          "name": "minutes",
+          "type": "number"
+        },
+        {
+          "name": "video",
+          "type": "url"
+        },
+        {
+          "name": "thumbnail",
+          "type": "image"
+        }
+      ]
+    },
+    "ref_rewards": {
+      "isLookup": true,
+      "hierarchy": false,
+      "columns": [
+        {
+          "name": "reward",
+          "type": "text"
+        },
+        {
+          "name": "category",
+          "type": "text"
+        },
+        {
+          "name": "cost",
+          "type": "number"
+        },
+        {
+          "name": "details",
+          "type": "text"
+        }
+      ]
+    },
+    "reward_claims": {
+      "privateRoster": true,
+      "archivable": true,
+      "defaultSort": "claimed_on",
+      "columns": [
+        {
+          "name": "owner",
+          "type": "owner"
+        },
+        {
+          "name": "member",
+          "type": "select",
+          "list": "members",
+          "sorted": true,
+          "defaultFrom": "@me"
+        },
+        {
+          "name": "reward",
+          "type": "ref",
+          "table": "ref_rewards",
+          "valueCol": "reward"
+        },
+        {
+          "name": "claimed_on",
+          "type": "date"
+        },
+        {
+          "name": "claim_status",
+          "type": "select",
+          "list": "claim_status",
+          "picker": "toggle",
+          "default": "requested"
+        }
+      ],
+      "ownerWritable": [
+        "member",
+        "reward",
+        "claimed_on"
+      ],
+      "ownerWritableWhile": {
+        "claim_status": "requested"
+      }
+    }
+  },
+  "views": [
+    {
+      "name": "doc_home",
+      "kind": "page",
+      "icon": "mdi-home",
+      "markdown": "# {{t:text.home_heading}}\n\n{{view:visit_scan}}\n\n{{view:my_level}}\n\n## {{t:text.home_month}}\n\n{{view:my_pulse}}\n\n## {{t:text.home_news}}\n\n{{view:news_feed}}\n"
+    },
+    {
+      "name": "visit_scan",
+      "kind": "scan",
+      "icon": "mdi-qrcode-scan",
+      "sources": [
+        "visits"
+      ],
+      "mode": "union",
+      "defaultSort": "visited_on",
+      "filter": {
+        "member": "@me"
+      },
+      "columns": [
+        "visited_on",
+        "gym"
+      ],
+      "scan": {
+        "column": "gym",
+        "codeCol": "code",
+        "set": {
+          "visited_on": "@today",
+          "at": "@now"
+        },
+        "once": "day"
+      }
+    },
+    {
+      "name": "class_booking",
+      "kind": "rsvp",
+      "icon": "mdi-calendar-check",
+      "rsvp": {
+        "events": "classes",
+        "dateColumn": "date",
+        "titleColumns": [
+          "starts",
+          "class_type",
+          "instructor",
+          "gym"
+        ],
+        "responses": "bookings",
+        "statusColumn": "booking",
+        "statuses": [
+          "booked"
+        ],
+        "statusList": "booking_status",
+        "picker": "toggle",
+        "showCounts": true,
+        "rosterVisibility": "admins",
+        "checkin": {
+          "codeColumn": "checkin_code",
+          "set": {
+            "attendance": "attended"
+          },
+          "rotateMinutes": 5
+        }
+      }
+    },
+    {
+      "name": "class_calendar",
+      "kind": "calendar",
+      "icon": "mdi-calendar-month",
+      "calendar": {
+        "sources": [
+          {
+            "table": "classes",
+            "dateColumn": "date",
+            "titleColumns": [
+              "starts",
+              "class_type",
+              "instructor"
+            ],
+            "label": "Class"
+          }
+        ],
+        "defaultView": "week",
+        "weekStart": 1
+      }
+    },
+    {
+      "name": "doc_training",
+      "kind": "page",
+      "icon": "mdi-dumbbell",
+      "markdown": "## {{t:text.training_stats}}\n\n{{view:my_pulse}}\n\n## {{t:text.training_weeks}}\n\n{{view:my_minutes_weeks}}\n\n## {{t:text.training_top}}\n\n{{view:my_top_exercises}}\n\n## {{t:text.training_steps}}\n\n{{view:my_steps_week}}\n\n## {{t:text.training_log}}\n\n{{view:my_workouts}}\n\n## {{t:text.training_visits}}\n\n{{view:my_visits}}\n"
+    },
+    {
+      "name": "my_pulse",
+      "kind": "stats",
+      "icon": "mdi-gauge",
+      "sources": [
+        "visits",
+        "workouts"
+      ],
+      "mode": "union",
+      "filter": {
+        "member": "@me"
+      },
+      "readonly": true,
+      "stats": {
+        "tiles": [
+          {
+            "label": "text.pulse_visits_month",
+            "agg": "count",
+            "when": {
+              "visited_on": {
+                "within": "@month"
+              }
+            },
+            "goal": 12
+          },
+          {
+            "label": "text.pulse_workouts_week",
+            "agg": "count",
+            "when": {
+              "done_on": {
+                "within": "@week"
+              }
+            },
+            "goal": 10
+          },
+          {
+            "label": "text.pulse_minutes_month",
+            "agg": "sum",
+            "column": "minutes",
+            "when": {
+              "done_on": {
+                "within": "@month"
+              }
+            },
+            "display": "number"
+          },
+          {
+            "label": "text.pulse_km_week",
+            "agg": "sum",
+            "column": "km",
+            "when": {
+              "done_on": {
+                "within": "@week"
+              }
+            },
+            "display": "number"
+          }
+        ]
+      }
+    },
+    {
+      "name": "my_minutes_weeks",
+      "kind": "stats",
+      "icon": "mdi-chart-bar",
+      "sources": [
+        "workouts"
+      ],
+      "mode": "union",
+      "filter": {
+        "member": "@me"
+      },
+      "readonly": true,
+      "stats": {
+        "goal": "max",
+        "tiles": [
+          {
+            "label": "text.week_0",
+            "agg": "sum",
+            "column": "minutes",
+            "when": {
+              "done_on": {
+                "within": "@week"
+              }
+            }
+          },
+          {
+            "label": "text.week_1",
+            "agg": "sum",
+            "column": "minutes",
+            "when": {
+              "done_on": {
+                "within": "@week-1"
+              }
+            }
+          },
+          {
+            "label": "text.week_2",
+            "agg": "sum",
+            "column": "minutes",
+            "when": {
+              "done_on": {
+                "within": "@week-2"
+              }
+            }
+          },
+          {
+            "label": "text.week_3",
+            "agg": "sum",
+            "column": "minutes",
+            "when": {
+              "done_on": {
+                "within": "@week-3"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "my_steps_week",
+      "kind": "stats",
+      "icon": "mdi-shoe-print",
+      "sources": [
+        "steps"
+      ],
+      "mode": "union",
+      "filter": {
+        "member": "@me"
+      },
+      "readonly": true,
+      "stats": {
+        "tiles": [
+          {
+            "label": "text.steps_today",
+            "agg": "sum",
+            "column": "step_count",
+            "when": {
+              "day": {
+                "within": "@today"
+              }
+            },
+            "goal": 10000
+          },
+          {
+            "label": "text.steps_week_avg",
+            "agg": "avg",
+            "column": "step_count",
+            "when": {
+              "day": {
+                "within": "@week"
+              }
+            },
+            "goal": 10000,
+            "decimals": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "my_top_exercises",
+      "kind": "stats",
+      "icon": "mdi-podium",
+      "sources": [
+        "workouts"
+      ],
+      "mode": "union",
+      "groupBy": {
+        "column": "exercise",
+        "from": [
+          "exercise"
+        ]
+      },
+      "aggregate": {
+        "count": true,
+        "into": "times"
+      },
+      "columns": [
+        "exercise",
+        "times"
+      ],
+      "filter": {
+        "member": "@me",
+        "done_on": {
+          "within": "@month"
+        }
+      },
+      "readonly": true,
+      "stats": {
+        "rowTiles": {
+          "label": "exercise",
+          "value": "times"
+        },
+        "goal": "max",
+        "limit": 3
+      }
+    },
+    {
+      "name": "my_workouts",
+      "kind": "data",
+      "icon": "mdi-weight-lifter",
+      "search": [
+        "exercise",
+        "note"
+      ],
+      "sources": [
+        "workouts"
+      ],
+      "mode": "union",
+      "layout": "table",
+      "defaultSort": "done_on",
+      "filter": {
+        "member": "@me"
+      },
+      "columns": [
+        "done_on",
+        "exercise",
+        "sets",
+        "reps",
+        "weight_kg",
+        "minutes",
+        "km",
+        "note"
+      ]
+    },
+    {
+      "name": "my_visits",
+      "kind": "data",
+      "icon": "mdi-door-open",
+      "sources": [
+        "visits"
+      ],
+      "mode": "union",
+      "layout": "table",
+      "readonly": true,
+      "defaultSort": "visited_on",
+      "filter": {
+        "member": "@me"
+      },
+      "columns": [
+        "visited_on",
+        "gym"
+      ]
+    },
+    {
+      "name": "exercise_heatmap",
+      "kind": "pivot",
+      "icon": "mdi-grid",
+      "pivot": {
+        "source": "workouts",
+        "row": "member",
+        "column": "exercise",
+        "aggregate": "count",
+        "totals": "count"
+      }
+    },
+    {
+      "name": "my_calendar",
+      "kind": "calendar",
+      "icon": "mdi-calendar-account",
+      "calendar": {
+        "sources": [
+          {
+            "table": "workouts",
+            "dateColumn": "done_on",
+            "titleColumns": [
+              "exercise"
+            ],
+            "label": "Workout",
+            "filter": {
+              "member": "@me"
+            }
+          },
+          {
+            "table": "visits",
+            "dateColumn": "visited_on",
+            "titleColumns": [
+              "gym"
+            ],
+            "label": "Visit",
+            "filter": {
+              "member": "@me"
+            }
+          }
+        ],
+        "defaultView": "month",
+        "weekStart": 1,
+        "addTo": "workouts"
+      }
+    },
+    {
+      "name": "membership_buy",
+      "kind": "form",
+      "icon": "mdi-card-account-details",
+      "form": {
+        "table": "memberships",
+        "columns": [
+          "plan",
+          "start_on"
+        ],
+        "required": [
+          "plan",
+          "start_on"
+        ],
+        "once": false,
+        "submitColumn": "order_state",
+        "submitValue": "submitted"
+      }
+    },
+    {
+      "name": "plan_list",
+      "kind": "data",
+      "icon": "mdi-tag-multiple",
+      "sources": [
+        "ref_plans"
+      ],
+      "mode": "join",
+      "layout": "card",
+      "readonly": true,
+      "defaultSort": "price_eur",
+      "columns": [
+        "plan",
+        "months",
+        "price_eur"
+      ]
+    },
+    {
+      "name": "my_membership",
+      "kind": "data",
+      "icon": "mdi-card-account-details-outline",
+      "sources": [
+        "memberships"
+      ],
+      "mode": "join",
+      "layout": "card",
+      "readonly": true,
+      "defaultSort": "start_on",
+      "filter": {
+        "member": "@me"
+      },
+      "columns": [
+        "plan",
+        "membership_status",
+        "start_on",
+        "valid_until"
+      ]
+    },
+    {
+      "name": "doc_membership",
+      "kind": "page",
+      "icon": "mdi-card-account-details",
+      "markdown": "## {{t:text.membership_mine}}\n\n{{view:my_membership?}}\n\n## {{t:text.membership_plans}}\n\n{{view:plan_list}}\n\n## {{t:text.membership_buy}}\n\n{{view:membership_buy}}\n"
+    },
+    {
+      "name": "membership_board",
+      "kind": "board",
+      "icon": "mdi-card-account-details-star",
+      "sources": [
+        "memberships"
+      ],
+      "mode": "join",
+      "defaultSort": "start_on",
+      "columns": [
+        "member",
+        "start_on",
+        "valid_until"
+      ],
+      "board": {
+        "lane": "membership_status",
+        "lanes": [
+          "pending",
+          "active",
+          "paused",
+          "ended"
+        ],
+        "title": "plan",
+        "color": "member"
+      }
+    },
+    {
+      "name": "pt_mine",
+      "kind": "data",
+      "icon": "mdi-account-tie",
+      "sources": [
+        "pt_sessions"
+      ],
+      "mode": "join",
+      "layout": "card",
+      "defaultSort": "preferred_on",
+      "filter": {
+        "member": "@me"
+      },
+      "columns": [
+        "preferred_on",
+        "trainer",
+        "goal",
+        "pt_status",
+        "trainer_notes"
+      ]
+    },
+    {
+      "name": "pt_board",
+      "kind": "board",
+      "icon": "mdi-account-tie-voice",
+      "sources": [
+        "pt_sessions"
+      ],
+      "mode": "join",
+      "defaultSort": "preferred_on",
+      "columns": [
+        "member",
+        "preferred_on",
+        "goal",
+        "trainer_notes"
+      ],
+      "board": {
+        "lane": "pt_status",
+        "lanes": [
+          "requested",
+          "confirmed",
+          "done",
+          "cancelled"
+        ],
+        "title": "trainer",
+        "color": "trainer"
+      }
+    },
+    {
+      "name": "news_feed",
+      "kind": "data",
+      "icon": "mdi-newspaper-variant",
+      "sources": [
+        "news"
+      ],
+      "mode": "join",
+      "layout": "card",
+      "readonly": true,
+      "defaultSort": "published_on",
+      "hideEmpty": true,
+      "columns": [
+        "picture",
+        "headline",
+        "published_on",
+        "body"
+      ]
+    },
+    {
+      "name": "coach",
+      "kind": "data",
+      "icon": "mdi-play-box-multiple",
+      "search": [
+        "title",
+        "category",
+        "equipment"
+      ],
+      "sources": [
+        "coach_library"
+      ],
+      "mode": "join",
+      "layout": "gallery",
+      "readonly": true,
+      "gallery": {
+        "shape": "landscape"
+      },
+      "defaultSort": "title",
+      "columns": [
+        "thumbnail",
+        "title",
+        "format",
+        "category",
+        "level",
+        "minutes",
+        "weeks",
+        "equipment",
+        "video"
+      ]
+    },
+    {
+      "name": "gyms",
+      "kind": "data",
+      "icon": "mdi-map-marker",
+      "sources": [
+        "ref_gyms"
+      ],
+      "mode": "join",
+      "layout": "card",
+      "readonly": true,
+      "defaultSort": "gym",
+      "columns": [
+        "gym",
+        "address",
+        "opening_hours",
+        "coins_per_visit"
+      ]
+    },
+    {
+      "name": "class_roll",
+      "kind": "data",
+      "sources": [
+        "bookings"
+      ],
+      "columns": [
+        "owner",
+        "booking",
+        "attendance"
+      ],
+      "defaultSort": "owner"
+    },
+    {
+      "name": "attendance_check",
+      "kind": "data",
+      "icon": "mdi-clipboard-check-outline",
+      "sources": [
+        "classes"
+      ],
+      "layout": "card",
+      "defaultSort": "date",
+      "columns": [
+        "date",
+        "starts",
+        "class_type",
+        "room",
+        "instructor",
+        "capacity",
+        {
+          "view": "class_roll",
+          "filterBy": {
+            "class": "id"
+          },
+          "hideEmpty": true
+        }
+      ]
+    },
+    {
+      "name": "class_popularity",
+      "kind": "pivot",
+      "icon": "mdi-chart-box",
+      "includeArchive": true,
+      "pivot": {
+        "source": "classes",
+        "row": "class_type",
+        "column": "gym",
+        "aggregate": "count",
+        "totals": "count"
+      }
+    },
+    {
+      "name": "my_level",
+      "kind": "stats",
+      "icon": "mdi-medal",
+      "sources": [
+        "visits"
+      ],
+      "mode": "union",
+      "filter": {
+        "member": "@me"
+      },
+      "readonly": true,
+      "includeArchive": true,
+      "stats": {
+        "tiles": [
+          {
+            "label": "text.level_visits_year",
+            "agg": "count",
+            "when": {
+              "visited_on": {
+                "within": "@year"
+              }
+            },
+            "goal": [
+              {
+                "at": 25,
+                "label": "text.tier_bronze"
+              },
+              {
+                "at": 75,
+                "label": "text.tier_silver"
+              },
+              {
+                "at": 150,
+                "label": "text.tier_gold"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "my_coins",
+      "kind": "stats",
+      "icon": "mdi-hand-coin",
+      "sources": [
+        "visits",
+        "reward_claims"
+      ],
+      "mode": "union",
+      "groupBy": {
+        "column": "member",
+        "from": [
+          "member"
+        ]
+      },
+      "compute": [
+        {
+          "name": "delta",
+          "source": "visits",
+          "computed": {
+            "lookup": {
+              "table": "ref_gyms",
+              "match": "gym",
+              "on": "gym",
+              "field": "coins_per_visit",
+              "default": 0
+            }
+          }
+        },
+        {
+          "name": "delta",
+          "source": "reward_claims",
+          "scale": -1,
+          "computed": {
+            "lookup": {
+              "table": "ref_rewards",
+              "match": "reward",
+              "on": "reward",
+              "field": "cost",
+              "default": 0
+            }
+          }
+        }
+      ],
+      "aggregate": {
+        "sum": "delta",
+        "into": "coins"
+      },
+      "columns": [
+        "member",
+        "coins"
+      ],
+      "filter": {
+        "$and": [
+          {
+            "member": "@me"
+          },
+          {
+            "$or": [
+              {
+                "visited_on": {
+                  "notEmpty": true
+                }
+              },
+              {
+                "claim_status": {
+                  "ne": "denied"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "readonly": true,
+      "includeArchive": true,
+      "stats": {
+        "display": "number",
+        "rowTiles": {
+          "label": "member",
+          "value": "coins"
+        }
+      }
+    },
+    {
+      "name": "reward_shop",
+      "kind": "data",
+      "icon": "mdi-gift",
+      "sources": [
+        "ref_rewards"
+      ],
+      "mode": "join",
+      "layout": "card",
+      "readonly": true,
+      "defaultSort": "cost",
+      "search": [
+        "reward",
+        "category"
+      ],
+      "columns": [
+        "reward",
+        "category",
+        "cost",
+        "details"
+      ]
+    },
+    {
+      "name": "reward_mine",
+      "kind": "data",
+      "icon": "mdi-gift-open",
+      "sources": [
+        "reward_claims"
+      ],
+      "mode": "join",
+      "layout": "table",
+      "defaultSort": "claimed_on",
+      "filter": {
+        "member": "@me"
+      },
+      "columns": [
+        "claimed_on",
+        "reward",
+        "claim_status"
+      ]
+    },
+    {
+      "name": "doc_loyalty",
+      "kind": "page",
+      "icon": "mdi-star-circle",
+      "markdown": "## {{t:text.loyalty_level}}\n\n{{view:my_level}}\n\n## {{t:text.loyalty_coins}}\n\n{{view:my_coins}}\n\n## {{t:text.loyalty_shop}}\n\n{{view:reward_shop}}\n\n## {{t:text.loyalty_mine}}\n\n{{view:reward_mine}}\n"
+    },
+    {
+      "name": "reward_board",
+      "kind": "board",
+      "icon": "mdi-gift-open-outline",
+      "sources": [
+        "reward_claims"
+      ],
+      "mode": "join",
+      "defaultSort": "claimed_on",
+      "columns": [
+        "member",
+        "claimed_on"
+      ],
+      "board": {
+        "lane": "claim_status",
+        "lanes": [
+          "requested",
+          "granted",
+          "denied"
+        ],
+        "title": "reward",
+        "color": "member"
+      }
+    }
+  ],
+  "nav": {
+    "layout": "drawer",
+    "items": [
+      {
+        "view": "doc_home"
+      },
+      {
+        "view": "class_booking"
+      },
+      {
+        "view": "doc_training",
+        "hideFromAdmin": true
+      },
+      {
+        "view": "my_calendar",
+        "hideFromAdmin": true
+      },
+      {
+        "view": "doc_membership",
+        "hideFromAdmin": true
+      },
+      {
+        "view": "pt_mine",
+        "hideFromAdmin": true
+      },
+      {
+        "view": "doc_loyalty",
+        "hideFromAdmin": true
+      },
+      {
+        "view": "coach"
+      },
+      {
+        "view": "class_calendar"
+      },
+      {
+        "view": "gyms"
+      },
+      {
+        "group": "Front desk",
+        "icon": "mdi-desk",
+        "adminOnly": true,
+        "items": [
+          {
+            "view": "attendance_check"
+          },
+          {
+            "view": "membership_board"
+          },
+          {
+            "view": "pt_board"
+          },
+          {
+            "view": "reward_board"
+          },
+          {
+            "view": "class_popularity"
+          },
+          {
+            "view": "exercise_heatmap"
+          },
+          {
+            "table": "classes"
+          },
+          {
+            "table": "news"
+          },
+          {
+            "table": "coach_library"
+          }
+        ]
+      }
+    ],
+    "bottomNav": [
+      "doc_home",
+      "class_booking",
+      "doc_training",
+      "coach",
+      "doc_loyalty"
+    ]
+  }
+}

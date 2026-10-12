@@ -288,7 +288,7 @@ describe('what a <id>-schema.json is, which is what "export as example" has to p
   // AND EMPTY, and the only tables carrying rows are lookups. Both rules are assumptions about the shipped bundles, so they are pinned
   // HERE — the day an example seeds a list or ships rows for an ordinary table, the exporter is wrong
   // and this says so instead of a contributor finding out from a rejected pull request.
-  const BUNDLES = ['bishopric-schema.json', 'chores-schema.json', 'demo-schema.json'];
+  const BUNDLES = ['bishopric-schema.json', 'chores-schema.json', 'demo-schema.json', 'gym-schema.json'];
 
   for (const file of BUNDLES) {
     it(file + ' declares its lists empty and carries rows only for lookups', () => {
