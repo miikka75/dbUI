@@ -51,7 +51,7 @@
         // backend-firebase.js — the two must mirror the SAME set or the rules layers diverge.
         return Promise.all([
           S.setMeta('schema', schema),
-          S.setMeta('ownerTables', { tables: H.ownerTablesOf(schema) }),
+          S.setMeta('ownerTables', H.ownerTablesMirror(schema)),
           S.setMeta('pageAccess', H.pageAccessOf(schema)),
           S.setMeta('ownerWritable', H.ownerWritableOf(schema)),
           S.setMeta('stamped', H.stampedOf(schema)),

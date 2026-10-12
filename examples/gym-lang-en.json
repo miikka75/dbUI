@@ -14,6 +14,7 @@
       "field.at": "Time",
       "field.attendance": "Attendance",
       "field.body": "Text",
+      "field.booked": "Booked",
       "field.booking": "Booking",
       "field.capacity": "Places",
       "field.category": "Category",

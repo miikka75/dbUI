@@ -7,7 +7,9 @@ service cloud.firestore {
     // _meta/ownerTables, _meta/ownerWritable, _meta/stamped — FIVE of ten. (Distinct documents; a
     // repeated read of the same one is cached within an evaluation. _meta/pageAccess is only on the
     // _pages read path, _meta/listTables / _meta/listWritable only on _lists writes, and _lists reads
-    // add _meta/ownerTables to the three docs a read already costs.)
+    // add _meta/ownerTables to the three docs a read already costs.) A CAPACITY-capped response adds
+    // the event row before and after the batch. Its config rides in _meta/ownerTables, which this path
+    // already reads: a sixth mirror document is exactly what ran this path out of reads.
     //
     // Eight mirror documents exist in total, so the headroom is real but no longer generous — it was
     // four on this path before `stamped` was added. The failure mode is a hard denial at write time,
@@ -456,6 +458,80 @@ service cloud.firestore {
       // ACCESS-CALL BUDGET at the top of this file -- do the _meta/rulesMirror merge it prescribes
       // first. A write-time check would also leave rows already stored as they are, so a table
       // switched to privateRoster later keeps its existing public rows until they are swept.
+      // --- Capacity (a response table's `capacity`, mirrored as the `capacity` field of _meta/ownerTables)
+      // The event row carries how many responses hold a place (`count`). Rules cannot count, so the CLIENT
+      // writes the count, in the same batch as the response, and each side checks the other:
+      //   * a member's response that takes or gives up a place must come with the event's count moved by
+      //     exactly one and `lastBooking` naming this response (one response per batch, so two bookings
+      //     cannot share one increment), and an increment may not pass the limit;
+      //   * a member, who has no grant on the events table, may change exactly `count`/`lastBooking`/
+      //     `updated_at` of an event row, by one, and only when the response it names is theirs, is for
+      //     this event, and changes from not holding to holding (or back) in the same batch.
+      // Two members taking the last place race on the count: the second commit sees the first's value
+      // and its +1 no longer adds up, so it is refused. Grant-holders are exempt, as from every bound
+      // here (the client keeps their count right; Postgres recounts and cannot drift at all).
+      // Mirrors app_capacity_trg in supabase-schema.sql.
+      function capDoc() { return /databases/$(database)/documents/_meta/ownerTables; }
+      function capMirror() { return get(capDoc()).data.get('capacity', { 'responses': {}, 'events': {} }); }
+      function capped(coll) {
+        return coll.matches('.*__active$') && exists(capDoc())
+          && (coll.split('__')[0] in capMirror().responses);
+      }
+      function capCfg(coll) { return capMirror().responses[coll.split('__')[0]]; }
+      function capHolds(cfg, st) { return st != null && st != '' && (cfg.holds.size() == 0 || st in cfg.holds); }
+      function counted(cfg, eid, delta, bid) {
+        let p = /databases/$(database)/documents/$(cfg.events + '__active')/$(eid);
+        let before = get(p).data;
+        let after = getAfter(p).data;
+        let cap = before.get(cfg.capacity, '');
+        return after.get(cfg.count, 0) == before.get(cfg.count, 0) + delta
+          && after.get('lastBooking', '') == bid
+          && (delta < 0 || !(cap is number) || after.get(cfg.count, 0) <= cap);
+      }
+      function capCreateOk(coll, id) {
+        return !capped(coll)
+          || !capHolds(capCfg(coll), request.resource.data.get(capCfg(coll).status, ''))
+          || counted(capCfg(coll), request.resource.data.get(capCfg(coll).link, ''), 1, id);
+      }
+      function capUpdateOk(coll, id) { return !capped(coll) || capUpdateCapped(capCfg(coll), id); }
+      function capUpdateCapped(cfg, id) {
+        let was = capHolds(cfg, resource.data.get(cfg.status, ''));
+        let now = capHolds(cfg, request.resource.data.get(cfg.status, ''));
+        // The link may not move: that would take a place in one event and free one in another, which
+        // a single count cannot express.
+        return request.resource.data.get(cfg.link, '') == resource.data.get(cfg.link, '')
+          && (was == now
+              || (now && counted(cfg, resource.data.get(cfg.link, ''), 1, id))
+              || (was && counted(cfg, resource.data.get(cfg.link, ''), -1, id)));
+      }
+      function capDeleteOk(coll, id) {
+        return !capped(coll)
+          || !capHolds(capCfg(coll), resource.data.get(capCfg(coll).status, ''))
+          || counted(capCfg(coll), resource.data.get(capCfg(coll).link, ''), -1, id);
+      }
+      function capacityBump(coll, id) {
+        return coll.matches('.*__active$') && exists(capDoc())
+          && (coll.split('__')[0] in capMirror().events)
+          && capBumpOk(capMirror().events[coll.split('__')[0]], id);
+      }
+      function capBumpOk(rt, id) {
+        let cfg = capMirror().responses[rt];
+        let bid = request.resource.data.get('lastBooking', '');
+        let d = request.resource.data.get(cfg.count, 0) - resource.data.get(cfg.count, 0);
+        let cap = resource.data.get(cfg.capacity, '');
+        return bid is string && bid != ''
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([cfg.count, 'lastBooking', 'updated_at'])
+          && capBumpBooking(rt, cfg, id, bid, d, cap);
+      }
+      function capBumpBooking(rt, cfg, id, bid, d, cap) {
+        let bp = /databases/$(database)/documents/$(rt + '__active')/$(bid);
+        let heldBefore = exists(bp) && get(bp).data.get(cfg.link, '') == id && capHolds(cfg, get(bp).data.get(cfg.status, ''));
+        let heldAfter = existsAfter(bp) && getAfter(bp).data.get(cfg.link, '') == id && capHolds(cfg, getAfter(bp).data.get(cfg.status, ''));
+        return (d == 1 && !heldBefore && heldAfter && getAfter(bp).data.get('owner', '') == myEmail()
+                && (!(cap is number) || request.resource.data.get(cfg.count, 0) <= cap))
+          || (d == -1 && heldBefore && !heldAfter && get(bp).data.get('owner', '') == myEmail());
+      }
+
       allow read: if base(collection) && (
         noUsers() || role() == 'admin' || hasTableAccess(collection) ||
         resource.data.get('owner', '') == myEmail() ||
@@ -467,7 +543,7 @@ service cloud.firestore {
       allow create: if base(collection) && (
         noUsers() || role() == 'admin' ||
         (stampedOk(collection) && (
-          (request.resource.data.owner == myEmail() && selfServiceTable(collection) && ownerCreateOk(collection) && statusValueOk()) || // self-service: my own row, only on an owner-column table, only the fields I may set
+          (request.resource.data.owner == myEmail() && selfServiceTable(collection) && ownerCreateOk(collection) && statusValueOk() && capCreateOk(collection, doc)) || // self-service: my own row, only on an owner-column table, only the fields I may set
           (role() == 'editor' && hasTableWrite(collection))
         ))
       );
@@ -476,13 +552,15 @@ service cloud.firestore {
         (stampedOk(collection) && (
           // edit my own (can't reassign owner) — bounded to owner-column tables like create, so a stray
           // owner-stamped row in a non-self-service table doesn't stay member-editable forever
-          (resource.data.owner == myEmail() && request.resource.data.owner == myEmail() && selfServiceTable(collection) && ownerUpdateOk(collection) && statusValueOk()) ||
+          (resource.data.owner == myEmail() && request.resource.data.owner == myEmail() && selfServiceTable(collection) && ownerUpdateOk(collection) && statusValueOk() && capUpdateOk(collection, doc)) ||
+          // a member moving an event's count by one, alongside their own response (capacity, above)
+          capacityBump(collection, doc) ||
           (role() == 'editor' && hasTableWrite(collection))
         ))
       );
       allow delete: if base(collection) && (
         noUsers() || role() == 'admin' ||
-        (resource.data.owner == myEmail() && selfServiceTable(collection) && ownerStateOk(collection)) || // delete my own owned row (self-service tables only, and only while it is still owner-writable)
+        (resource.data.owner == myEmail() && selfServiceTable(collection) && ownerStateOk(collection) && capDeleteOk(collection, doc)) || // delete my own owned row (self-service tables only, and only while it is still owner-writable)
         (role() == 'editor' && hasTableWrite(collection))
       );
     }

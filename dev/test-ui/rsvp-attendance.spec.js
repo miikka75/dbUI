@@ -368,3 +368,68 @@ test('scanning with nothing booked: the list narrows to today, and booking a cla
   await expect(p.locator('[data-testid="rsvp-toggle"]')).toHaveCount(2);
   await ctx.close();
 });
+
+test('capacity: places left are shown, a full event cannot be joined, and losing the race says so', async ({ page, browser }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns.push({ name: 'capacity', type: 'number' }, { name: 'booked', type: 'number' });
+  schema.tables.rsvps.capacity = { link: 'practice', status: 'response', column: 'capacity', count: 'booked', holds: ['coming'] };
+  schema.views[0].rsvp.showCounts = true;
+  await page.request.post('/api/resetData');
+  await page.request.post('/api/setUserRole', { data: { uid: 'org@x', role: 'admin', user: 'org@x', tables: 'all' } });
+  for (const u of ['ann@x', 'bob@x']) await page.request.post('/api/setUserRole', { data: { uid: u, role: 'editor', user: u, tables: { practices: 'r' } }, headers: ADMIN });
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/saveLists', { data: { lists: { rsvp_status: ['coming', 'out'], attendance_status: ['pending', 'attended', 'absent'] } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p1', date: future, title: 'Tuesday', capacity: 1 } }, headers: ADMIN });
+
+  // Bob opens the page while the place is still free.
+  const ctx = await browser.newContext();
+  const bob = await ctx.newPage();
+  await bootAs(bob, 'bob@x');
+  await expect(bob.locator('[data-testid="rsvp-places"]')).toContainText('1');
+
+  // Ann takes it.
+  await bootAs(page, 'ann@x');
+  await page.locator('[data-testid="rsvp-toggle"]').first().locator('button', { hasText: 'coming' }).click();
+  await expect(page.locator('[data-testid="rsvp-places"]')).toHaveText(/full/i);
+  // Hers to give up: a member holding a place in a full event is not locked out of it.
+  await expect(page.locator('[data-testid="rsvp-toggle"]').first().locator('button', { hasText: 'coming' })).toBeEnabled();
+
+  // Bob's open screen hears about it: the class shows full and his choice locks, with no reload.
+  await expect(bob.locator('[data-testid="rsvp-places"]')).toHaveText(/full/i);
+  await expect(bob.locator('[data-testid="rsvp-toggle"]').first().locator('button', { hasText: 'coming' })).toBeDisabled();
+  // The race the lock cannot close -- he pressed in the moment before the news arrived. The server
+  // refuses, his row goes away, and he is told why.
+  await bob.evaluate(() => { const ev = appInstance.dataCache.practices.find((e) => e.id === 'p1'); ev.booked = 0; appInstance.setRsvp('my_rsvp', 'p1', 'coming'); });
+  await expect.poll(() => bob.evaluate(() => appInstance.snackText)).toBe('msg.capacity_full');
+  const rows = async () => ((await (await page.request.post('/api/getTableData', { data: { tableId: 'rsvps', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => r.owner);
+  expect(await rows()).toEqual(['ann@x']);
+  await expect.poll(() => bob.evaluate(() => (appInstance.dataCache.rsvps || []).filter((r) => r.owner === 'bob@x').length)).toBe(0);
+
+  // A fresh look shows him it is full, and the choice is locked.
+  await bootAs(bob, 'bob@x');
+  await expect(bob.locator('[data-testid="rsvp-places"]')).toHaveText(/full/i);
+  await expect(bob.locator('[data-testid="rsvp-toggle"]').first().locator('button', { hasText: 'coming' })).toBeDisabled();
+  await ctx.close();
+});
+
+test('validateSchema: a capacity config that does not resolve is named', async ({ page }) => {
+  await setup(page);
+  await bootAs(page, 'org@x');
+  const errs = await page.evaluate(() => {
+    const t = SCHEMA.rsvps, out = [];
+    const tries = [
+      { link: 'note', status: 'response', column: 'x', count: 'y' },                       // not a ref
+      { link: 'practice', status: 'response', column: 'title', count: 'nope' },           // not a number; missing
+      { link: 'practice', status: 'response', column: 'title', count: 'title', holds: [] } // empty holds
+    ];
+    for (const c of tries) { t.capacity = c; out.push(validateSchema().filter((e) => /capacity/.test(e)).join(' | ')); }
+    delete t.capacity;
+    out.push(validateSchema().filter((e) => /capacity/.test(e)).join(' | '));
+    return out;
+  });
+  expect(errs[0]).toContain('must be a ref column');
+  expect(errs[1]).toContain('must be a number column');
+  expect(errs[1]).toContain('"nope" is not a column');
+  expect(errs[2]).toContain('`holds` must be a non-empty list');
+  expect(errs[3]).toBe('');
+});

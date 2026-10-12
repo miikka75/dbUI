@@ -188,6 +188,29 @@ function validateSchema() {
     });
     if (!Array.isArray(SCHEMA[ot].ownerWritable)) errors.push('table "' + ot + '": `ownerWritableWhile` has no effect without `ownerWritable` (nothing bounds an owner-scoped write to begin with)');
   }
+  // `capacity` on a response table. Every part of it is read by a rules layer that cannot say why a write
+  // was refused, so a config that does not resolve is named here instead of half-enforced there.
+  var capEvents = {};
+  for (var ct in SCHEMA) {
+    var cap = SCHEMA[ct] && SCHEMA[ct].capacity;
+    if (cap === undefined) continue;
+    var cat = 'table "' + ct + '" capacity: ', ccols2 = SCHEMA[ct].columns || {};
+    if (!cap || typeof cap !== 'object' || Array.isArray(cap)) { errors.push(cat + 'must be an object like { "link": "class", "status": "booking", "column": "capacity", "count": "booked" }'); continue; }
+    if (!Columns.ownerColOf(SCHEMA[ct])) errors.push(cat + 'the table has no owner column — capacity caps self-service responses');
+    var lk = ccols2[cap.link];
+    if (!lk || typeof lk !== 'object' || lk.type !== 'ref' || !SCHEMA[lk.table]) { errors.push(cat + '`link` "' + cap.link + '" must be a ref column naming the events table'); continue; }
+    if (lk.valueCol && lk.valueCol !== 'id') errors.push(cat + '`link` "' + cap.link + '" must refer to the event by id (valueCol "id"), which is what the count is kept against');
+    if (!ccols2[cap.status]) errors.push(cat + '`status` "' + cap.status + '" is not a column of the table');
+    var ecols = SCHEMA[lk.table].columns || {};
+    ['column', 'count'].forEach(function(k) {
+      var d = ecols[cap[k]], ty = (typeof d === 'string') ? d : (d && d.type);
+      if (!d) errors.push(cat + '`' + k + '` "' + cap[k] + '" is not a column of "' + lk.table + '"');
+      else if (ty !== 'number') errors.push(cat + '`' + k + '` "' + cap[k] + '" must be a number column');
+    });
+    if (cap.holds !== undefined && (!Array.isArray(cap.holds) || !cap.holds.length)) errors.push(cat + '`holds` must be a non-empty list of statuses (omit it to let any status take a place)');
+    if (capEvents[lk.table]) errors.push(cat + '"' + lk.table + '" is already capped by "' + capEvents[lk.table] + '" — one count per event row');
+    capEvents[lk.table] = ct;
+  }
   // `valueCol` on a LIST-backed column says which dimension of a lookup its options come from. It is a
   // legal key everywhere (Columns.COLUMN_KEYS), so a wrong one is not a vocabulary error -- and it fails
   // the way every unread key does: silently, with the picker quietly falling back to the lookup's group

@@ -1103,7 +1103,7 @@ function createVueApp() {
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'cal.today', 'btn.reset',
          'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
-         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none', 'rsvp.checkin_code', 'rsvp.checkin', 'rsvp.show_code', 'rsvp.page_qr', 'msg.checked_in',
+         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none', 'rsvp.checkin_code', 'rsvp.checkin', 'rsvp.show_code', 'rsvp.page_qr', 'rsvp.places_left', 'rsvp.full', 'msg.capacity_full', 'msg.checked_in',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
@@ -2831,8 +2831,14 @@ function createVueApp() {
         var responses = this.dataCache[cfg.responses] || [];
         return Rsvp.build(events, responses, Object.assign({
           me: this.currentUserEmail || '', ownerCol: getOwnerCol(cfg.responses) || 'owner', today: fmtDate(new Date()),
-          checkinColumn: cfg.checkin && cfg.checkin.codeColumn
+          checkinColumn: cfg.checkin && cfg.checkin.codeColumn,
+          capacity: this.rsvpCapacity(cfg)
         }, cfg, this.rsvpLink(cfg)));
+      },
+      // The response table's `capacity`, as the engine reads it -- null when the table has none.
+      rsvpCapacity: function(cfg) {
+        var c = SCHEMA[cfg.responses] && SCHEMA[cfg.responses].capacity;
+        return c ? { column: c.column, count: c.count, holds: Array.isArray(c.holds) ? c.holds : [] } : null;
       },
       // Self check-in with a shared code (`rsvp.checkin`). The code is the DAY's: one claim covers every
       // event the member reserved today, one press stamps all of today's events. Two sides, and the
@@ -2939,7 +2945,7 @@ function createVueApp() {
       // stamped with owner = my email. Self-service — not gated by role (firestore rules enforce ownership).
       setRsvp: function(name, eventKey, status) {
         var v = VIEWS[name]; if (!v || !v.rsvp) return;
-        var cfg = v.rsvp, table = cfg.responses, ownerCol = getOwnerCol(table) || 'owner';
+        var self = this, cfg = v.rsvp, table = cfg.responses, ownerCol = getOwnerCol(table) || 'owner';
         var linkColumn = this.rsvpLink(cfg).linkColumn;
         var me = this.currentUserEmail || '';
         if (!me) { this.notify(this.t('msg.sign_in_respond')); return; }
@@ -2950,10 +2956,22 @@ function createVueApp() {
         var rows = this.dataCache[table];
         var mine = rows.find(function(r) { return r[linkColumn] === eventKey && r[ownerCol] === me; });
         if (this.rsvpFrozen(name, eventKey)) return;   // verified: no longer mine to change (rsvpFrozen)
+        // A capped event's count moves on this screen at once (the server moves the stored one), and moves
+        // back if the server refuses -- so the number a member sees is never one press behind their own.
+        var cap = this.rsvpCapacity(cfg), evRow = cap && (this.dataCache[cfg.events] || []).find(function(e) { return e.id === eventKey; });
+        var holds = function(st) { return !!cap && st != null && st !== '' && (!cap.holds.length || cap.holds.indexOf(String(st)) >= 0); };
+        var bump = function(d) { if (evRow && d) evRow[cap.count] = (Number(evRow[cap.count]) || 0) + d; };
+        var before = mine ? mine[cfg.statusColumn] : '';
+        var delta = (holds(status) ? 1 : 0) - (holds(before) ? 1 : 0);
+        var refused = function(undo) { return function(e) { undo(); bump(-delta); self.rsvpRefused(e); }; };
         // Removing the vote (toggled off -> empty status): delete my response row rather than leave an
         // empty-status orphan that would show as a blank line in the roster.
         if (!status) {
-          if (mine) { var mi = rows.indexOf(mine); if (mi >= 0) rows.splice(mi, 1); Writes.deleteRow(table, mine.id, 'active'); }
+          if (mine) {
+            var mi = rows.indexOf(mine); if (mi >= 0) rows.splice(mi, 1);
+            bump(delta);
+            Writes.deleteRow(table, mine.id, 'active').catch(refused(function() { rows.push(mine); }));
+          }
           return;
         }
         if (mine) {
@@ -2963,15 +2981,23 @@ function createVueApp() {
           // already correct on the stored row.
           var patch = { id: mine.id, rosterPublic: pub, updated_at: mine.updated_at };
           patch[cfg.statusColumn] = status;
-          Writes.putRow(table, patch, 'active');
+          bump(delta);
+          Writes.putRow(table, patch, 'active').catch(refused(function() { mine[cfg.statusColumn] = before; }));
         } else {
           var row = { id: this.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           getColumns(table).forEach(function(c) { if (!(c in row)) row[c] = ''; });
           this._seedDefaults(table, row);
           row[ownerCol] = me; row[linkColumn] = eventKey; row[cfg.statusColumn] = status; row.rosterPublic = pub;
           rows.push(row);
-          Writes.putRow(table, row, 'active');
+          bump(delta);
+          Writes.putRow(table, row, 'active').catch(refused(function() { var i = rows.indexOf(row); if (i >= 0) rows.splice(i, 1); }));
         }
+      },
+      // Why a response did not save. "Full" is the one a member can act on (pick another class), so it
+      // gets its own words; anything else is the generic failure every other write reports.
+      rsvpRefused: function(e) {
+        var m = String((e && (e.error || e.message)) || e || '');
+        this.notify(/is full/.test(m) ? this.t('msg.capacity_full') : this.t('msg.error') + ' ' + m);
       },
       // Doc-view bodies live in a server-side "_pages" collection (not in schema.json).
       // Falls back to the view's schema-defined `markdown` (seed), then caches it.
@@ -9751,6 +9777,10 @@ function createVueApp() {
     methods: Object.assign({}, SORT_UI, {
       set: function(key, status) { appInstance.setRsvp(this.viewName, key, status || ''); },
       claimed: function() { appInstance.pendingScan = null; },
+      // Frozen (attendance verified), or full and not mine to keep: a full class cannot be joined, but a
+      // member holding a place in it can still give it up.
+      locked: function(ev) { return appInstance.rsvpFrozen(this.viewName, ev.key) || (ev.full && !ev.myHolds); },
+      placesText: function(ev) { return ev.full ? this.a.t('rsvp.full') : this.a.t('rsvp.places_left') + ': ' + Math.max(0, ev.capacity - ev.booked); },
       toDateStr: toDateStr,
       // Translated label for a status VALUE, keyed by `list.<statusList||statusColumn>.<value>` (falls back
       // to the raw value). `statusList` lets the view name a translation namespace distinct from the column
@@ -9797,8 +9827,8 @@ function createVueApp() {
       + '<tbody>'
       + '<tr v-for="ev in events" :key="ev.id">'
       + '<td style="white-space:nowrap">{{ a.dateTimeLabel(ev.date) }}</td>'
-      + '<td>{{ ev.title }}</td>'
-      + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpFrozen(viewName, ev.key)" @set="set(ev.key, $event)"></rsvp-picker>'
+      + '<td>{{ ev.title }}<div v-if="ev.capacity !== null" style="font-size:0.8rem;opacity:0.7" data-testid="rsvp-places">{{ placesText(ev) }}</div></td>'
+      + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
       + '</td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
       + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></td>'
@@ -9809,8 +9839,8 @@ function createVueApp() {
       + '<div v-else class="pa-1">'
       + '<v-card v-for="ev in events" :key="ev.id" variant="tonal" class="mb-2 pa-3">'
       + '<div>{{ a.dateTimeLabel(ev.date) }}</div>'
-      + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}</div>'
-      + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpFrozen(viewName, ev.key)" @set="set(ev.key, $event)"></rsvp-picker>'
+      + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}<div v-if="ev.capacity !== null" style="font-size:0.8rem" data-testid="rsvp-places">{{ placesText(ev) }}</div></div>'
+      + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
       + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></div>'
       + '</v-card>'

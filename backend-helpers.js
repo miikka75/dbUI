@@ -337,6 +337,45 @@
       return out.sort();
     },
 
+    // The _meta/ownerTables document: the self-service tables, and the CAPACITY config beside them. The
+    // two share a document because the rules path that needs capacity (a member writing their own
+    // response) already reads this one, and Firestore allows ten document reads per write: a separate
+    // _meta/capacity was the read that ran out. See THE ACCESS-CALL BUDGET in firestore.rules.
+    ownerTablesMirror: function(schema) {
+      return { tables: H.ownerTablesOf(schema), capacity: H.capacityOf(schema) };
+    },
+
+    // CAPACITY: a response table declaring `capacity: { link, status, column, count, holds? }` caps how
+    // many of its rows may hold a place in one event. The count lives ON the event row (`count`), kept by
+    // the server -- a member cannot count bookings they are not allowed to read -- and mirrored (as the
+    // `capacity` field of _meta/ownerTables, see ownerTablesMirror) as
+    //   { responses: { <table>: { events, link, status, capacity, count, holds } }, events: { <events>: <table> } }
+    // so both schema-blind rules layers can find the config from either side of the write. `events` is
+    // the table the link column refers to; `holds` = the statuses that take a place ([] = any non-empty).
+    // A table whose config does not resolve (no such ref, no such columns) is left out: validateSchema
+    // names it, and enforcing half a config would refuse writes for a reason nobody can see.
+    capacityOf: function(schema) {
+      var tables = (schema && schema.tables) || {}, out = { responses: {}, events: {} };
+      for (var t in tables) {
+        var cap = tables[t] && tables[t].capacity;
+        if (!cap || typeof cap !== 'object') continue;
+        var defs = Cols().columnDefs(tables[t]), ld = defs[cap.link];
+        var ev = ld && typeof ld === 'object' && ld.type === 'ref' && ld.table;
+        if (!ev || !tables[ev] || !defs[cap.status] || out.events[ev]) continue;
+        var edefs = Cols().columnDefs(tables[ev]);
+        if (!edefs[cap.column] || !edefs[cap.count]) continue;
+        out.responses[t] = { events: ev, link: cap.link, status: cap.status, capacity: cap.column, count: cap.count,
+                             holds: Array.isArray(cap.holds) ? cap.holds.map(String) : [] };
+        out.events[ev] = t;
+      }
+      return out;
+    },
+    // Whether a response's status takes a place, under one capacityOf entry.
+    capacityHolds: function(cfg, status) {
+      if (status == null || status === '') return false;
+      return !cfg.holds.length || cfg.holds.indexOf(String(status)) >= 0;
+    },
+
     // Per-page access map for RESTRICTED doc-views: { pageName: [tables...] } for every markdown view
     // that declares a non-empty `access` array ("visible to users granted any of these tables"). A page
     // WITHOUT `access` is omitted -> readable by every registered user (the default). Firestore rules are

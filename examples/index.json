@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "d4fc9fd89b059302"
+      "hash": "6e3b48dfb7303891"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "cada9df02160519e"
+      "hash": "1a2c3e74945738de"
     }
   ],
   "bundles": [
@@ -161,25 +161,25 @@
       "views": 32,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "5a98242e6086a428"
+        "hash": "fbf4c8e2c49aebe4"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "gym-lang-en.json",
-          "hash": "6b58e67261d3f970"
+          "hash": "ae24a90ae818ed6c"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "gym-lang-fi.json",
-          "hash": "7c6e937bf3cf6865"
+          "hash": "ecd93a00801be7ea"
         }
       ],
       "data": {
         "file": "gym-data.json",
-        "hash": "d0f86cf351578509"
+        "hash": "476182bb93a2f96d"
       },
       "about": {
         "file": "gym-about.json",

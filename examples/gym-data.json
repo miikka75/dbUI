@@ -240,7 +240,8 @@
         "gym": "City Centre",
         "room": "Cycling studio",
         "instructor": "Mikko",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-12-1730",
@@ -249,7 +250,8 @@
         "gym": "City Centre",
         "room": "Main hall",
         "instructor": "Laura",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 2
       },
       {
         "id": "cls-2026-10-12-1830",
@@ -258,7 +260,8 @@
         "gym": "Harbour",
         "room": "Main hall",
         "instructor": "Sanna",
-        "capacity": 15
+        "capacity": 15,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-12-1900",
@@ -267,7 +270,8 @@
         "gym": "Harbour",
         "room": "Main hall",
         "instructor": "Mikko",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-13-0700",
@@ -276,7 +280,8 @@
         "gym": "City Centre",
         "room": "Cycling studio",
         "instructor": "Mikko",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 1
       },
       {
         "id": "cls-2026-10-13-1730",
@@ -285,7 +290,8 @@
         "gym": "City Centre",
         "room": "Main hall",
         "instructor": "Laura",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-13-1830",
@@ -294,7 +300,8 @@
         "gym": "Harbour",
         "room": "Main hall",
         "instructor": "Sanna",
-        "capacity": 15
+        "capacity": 15,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-13-1900",
@@ -303,7 +310,8 @@
         "gym": "Harbour",
         "room": "Main hall",
         "instructor": "Mikko",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-14-0700",
@@ -312,7 +320,8 @@
         "gym": "City Centre",
         "room": "Cycling studio",
         "instructor": "Mikko",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-14-1730",
@@ -321,7 +330,8 @@
         "gym": "City Centre",
         "room": "Main hall",
         "instructor": "Laura",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-14-1830",
@@ -330,7 +340,8 @@
         "gym": "Harbour",
         "room": "Main hall",
         "instructor": "Sanna",
-        "capacity": 15
+        "capacity": 15,
+        "booked": 1
       },
       {
         "id": "cls-2026-10-14-1900",
@@ -339,7 +350,8 @@
         "gym": "Harbour",
         "room": "Main hall",
         "instructor": "Mikko",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-15-0700",
@@ -348,7 +360,8 @@
         "gym": "City Centre",
         "room": "Cycling studio",
         "instructor": "Mikko",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-15-1730",
@@ -357,7 +370,8 @@
         "gym": "City Centre",
         "room": "Main hall",
         "instructor": "Laura",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-15-1830",
@@ -366,7 +380,8 @@
         "gym": "Harbour",
         "room": "Main hall",
         "instructor": "Sanna",
-        "capacity": 15
+        "capacity": 15,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-15-1900",
@@ -375,7 +390,8 @@
         "gym": "Harbour",
         "room": "Main hall",
         "instructor": "Mikko",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-16-0700",
@@ -384,7 +400,8 @@
         "gym": "City Centre",
         "room": "Cycling studio",
         "instructor": "Mikko",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-16-1730",
@@ -393,7 +410,8 @@
         "gym": "City Centre",
         "room": "Main hall",
         "instructor": "Laura",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-16-1830",
@@ -402,7 +420,8 @@
         "gym": "Harbour",
         "room": "Main hall",
         "instructor": "Sanna",
-        "capacity": 15
+        "capacity": 15,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-16-1900",
@@ -411,7 +430,8 @@
         "gym": "Harbour",
         "room": "Main hall",
         "instructor": "Mikko",
-        "capacity": 25
+        "capacity": 25,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-17-1830",
@@ -420,7 +440,8 @@
         "gym": "Harbour",
         "room": "Main hall",
         "instructor": "Sanna",
-        "capacity": 15
+        "capacity": 15,
+        "booked": 0
       },
       {
         "id": "cls-2026-10-18-1830",
@@ -429,7 +450,8 @@
         "gym": "Harbour",
         "room": "Main hall",
         "instructor": "Sanna",
-        "capacity": 15
+        "capacity": 15,
+        "booked": 0
       }
     ],
     "bookings": [

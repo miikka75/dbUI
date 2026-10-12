@@ -17,6 +17,9 @@
 //   upcoming     default true (only future/today events); false = all
 //   limit        max events after sorting (optional)
 //   checkinColumn response column a member types the event's shared check-in code into (optional)
+//   capacity     { column, count, holds } from the response table's `capacity` (optional): each event
+//                then carries its limit, how many hold a place (the server's count), whether it is full,
+//                and whether MY response holds one -- a full event is still mine to leave.
 (function(root) {
   // The local day a date or datetime value falls on. A UTC instant's first ten characters are the UTC
   // day, which is the wrong day for an evening class east of Greenwich.
@@ -25,12 +28,20 @@
     var d = new Date(s); if (isNaN(d.getTime())) return s.slice(0, 10);
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
+  // A blank or non-numeric limit is no limit -- the same reading both rules layers give it.
+  function limitOf(v) { return (typeof v === 'number' && isFinite(v)) ? v : null; }
+  function holds(cap, st) {
+    if (st == null || st === '') return false;
+    var h = (cap && cap.holds) || [];
+    return !h.length || h.indexOf(String(st)) >= 0;
+  }
   function build(events, responses, opts) {
     events = events || []; responses = responses || [];
     var ownerCol = opts.ownerCol || 'owner';
     var dateCol = opts.dateColumn, key = opts.eventKey || dateCol;
     var linkCol = opts.linkColumn, statusCol = opts.statusColumn;
     var titleCols = opts.titleColumns || [];
+    var cap = opts.capacity || null;
 
     // Index responses by the event key, and note distinct statuses for a legend.
     var byEvent = {}, statusSeen = {}, statuses = [];
@@ -69,6 +80,10 @@
         myRowId: mine ? mine.id : null,
         myCode: mine && opts.checkinColumn ? (mine[opts.checkinColumn] || '') : '',
         isToday: !!opts.today && dayOf(e[dateCol]) === opts.today,
+        capacity: cap ? limitOf(e[cap.column]) : null,
+        booked: cap ? (Number(e[cap.count]) || 0) : 0,
+        full: !!cap && limitOf(e[cap.column]) !== null && (Number(e[cap.count]) || 0) >= limitOf(e[cap.column]),
+        myHolds: !!mine && holds(cap, mine[statusCol]),
         tally: tally,
         total: responded.length,
         participants: participants

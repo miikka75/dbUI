@@ -194,6 +194,16 @@
           "minProperties": 1,
           "maxProperties": 1
         },
+        "capacity": {
+          "type": "object",
+          "description": "Caps how many rows of this response table may hold a place in one event. `link`: the ref column naming the event (by id); `status`: the response column; `column`: the events table's number column holding the limit (blank = no limit); `count`: its number column the server keeps the count in; `holds`: the statuses that take a place (default: any non-empty). Enforced in both rules layers from the _meta/capacity mirror.",
+          "required": ["link", "status", "column", "count"],
+          "additionalProperties": false,
+          "properties": {
+            "link": { "type": "string" }, "status": { "type": "string" }, "column": { "type": "string" }, "count": { "type": "string" },
+            "holds": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          }
+        },
         "privateRoster": { "type": "boolean", "description": "Rows of this response table are not visible to other participants: the app stamps rosterPublic:false on each row instead of true. The rules enforce that per-row FLAG, not this policy — an owner may still publish a row they own. See \"What privateRoster actually guarantees\" in SCHEMA.md." },
         "partitionLabels": { "$ref": "#/$defs/partitionLabels" }
       }

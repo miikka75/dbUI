@@ -460,9 +460,20 @@ const server = http.createServer(async (req, res) => {
     // what it receives as that row's new state — handing it the patch would be fine for the columns it
     // names and silently wrong about nothing else, but re-reading costs a dev-server map lookup and
     // removes the question entirely.
+    // A response to a CAPACITY-capped table moves its event's count -- in Postgres, by the trigger, which
+    // no route sees. Announce the event row too, as Supabase realtime would, or every open screen goes on
+    // showing the place as free.
+    async function broadcastCapacity(tableId, tab, row) {
+      if ((tab || 'active') !== 'active' || !row) return;
+      const cfg = (BackendHelpers.capacityOf(await backend.getSchema() || {}).responses || {})[BackendHelpers.tableOf(tableId)];
+      const ev = cfg && row[cfg.link];
+      if (ev) await broadcast(_store(cfg.events, 'active'), ev, await _rowById(cfg.events, 'active', ev) || null);
+    }
     async function putOk(b) {
       const id = b.data && b.data.id;
-      if (id) await broadcast(_store(b.tableId, b.tab), id, await _rowById(b.tableId, b.tab, id) || b.data);
+      const stored = id ? await _rowById(b.tableId, b.tab, id) : null;
+      if (id) await broadcast(_store(b.tableId, b.tab), id, stored || b.data);
+      await broadcastCapacity(b.tableId, b.tab, stored);
       return json(res, { ok: true });
     }
     // Admin-only API surface, checked in ONE place so the list is auditable rather than scattered
@@ -608,6 +619,7 @@ const server = http.createServer(async (req, res) => {
         const delOk = async () => {
           const deleted = await backend.deleteRow(body.tableId, body.id, body.tab);
           await broadcast(_store(body.tableId, body.tab), body.id, null, prior);
+          await broadcastCapacity(body.tableId, body.tab, prior);
           return json(res, { deleted });
         };
         if (pagesTable(body.tableId)) {

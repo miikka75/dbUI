@@ -71,7 +71,7 @@ describe('rules parity — ownerWritableWhile (the owner-branch state gate)', ()
   it('firestore.rules gates owner UPDATE and DELETE on it', () => {
     assert.match(RULES, /function ownerStateOk\(coll\)/, 'firestore.rules needs ownerStateOk');
     assert.match(RULES, /ownerStateOk\(coll\)[\s\S]{0,200}?affectedKeys/, 'ownerUpdateOk must consult ownerStateOk');
-    assert.match(RULES, /selfServiceTable\(collection\) && ownerStateOk\(collection\)\) \|\| \/\/ delete/,
+    assert.match(RULES, /selfServiceTable\(collection\) && ownerStateOk\(collection\)( && capDeleteOk\(collection, doc\))?\) \|\| \/\/ delete/,
       'the owner DELETE branch must consult ownerStateOk');
   });
   it('supabase-schema.sql gates owner UPDATE and DELETE on it', () => {

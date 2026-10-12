@@ -583,6 +583,69 @@ create policy kv_delete on public.kv
   for delete to authenticated
   using (public.app_can_delete(store, key, value));
 
+-- ---------- Capacity (a response table's `capacity`, mirrored to _meta/ownerTables.capacity) --------
+-- An event row carries how many responses hold a place in it (`count`), and a response that would take
+-- the place past `capacity` is refused. The count is the SERVER's: a member reads only their own
+-- responses on a private roster, so no client can count the others. Mirrors the batch rules in
+-- firestore.rules (capacityOk / capacityBump), which have to make the client write the count instead.
+--
+-- An AFTER trigger, so the count includes the row being written, and raising aborts that write. The
+-- event row is locked first: two members taking the last place each lock it in turn, and the second
+-- counts after the first has committed (READ COMMITTED gives every statement a fresh snapshot), so it
+-- sees 25 and is refused rather than both seeing 24. Recounted rather than incremented, so a count can
+-- never drift from the rows, whoever wrote them -- an organizer deleting a booking in the grid included.
+-- Only the `__active` partition holds places.
+create or replace function public.app_capacity_holds(cfg jsonb, st text)
+returns boolean language sql immutable as $$
+  select coalesce(st, '') <> ''
+     and (jsonb_array_length(coalesce(cfg -> 'holds', '[]'::jsonb)) = 0 or (cfg -> 'holds') ? st)
+$$;
+
+create or replace function public.app_capacity_trg()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  st text := coalesce(new.store, old.store);
+  cfg jsonb;
+  link text; ev_store text; ev text; n bigint; cap numeric; ev_row jsonb;
+  takes boolean;
+begin
+  if st not like '%\_\_active' then return null; end if;
+  select value -> 'capacity' -> 'responses' -> split_part(st, '__', 1) into cfg
+    from public.kv where store = '_meta' and key = 'ownerTables';
+  if cfg is null then return null; end if;
+  link := cfg ->> 'link';
+  ev_store := (cfg ->> 'events') || '__active';
+  for ev in
+    select distinct e from unnest(array[old.value ->> link, new.value ->> link]) e where coalesce(e, '') <> ''
+  loop
+    select value into ev_row from public.kv where store = ev_store and key = ev for update;
+    if ev_row is null then continue; end if;
+    select count(*) into n from public.kv
+      where store = st and value ->> link = ev and public.app_capacity_holds(cfg, value ->> (cfg ->> 'status'));
+    -- A blank or non-numeric limit is no limit, as in the rules.
+    cap := case when jsonb_typeof(ev_row -> (cfg ->> 'capacity')) = 'number' then (ev_row ->> (cfg ->> 'capacity'))::numeric end;
+    -- Refuse only the write that TAKES a place here: a member editing a note on a booking in a class
+    -- the organizer has since shrunk below its count is not taking anything.
+    takes := tg_op <> 'DELETE' and new.value ->> link = ev
+      and public.app_capacity_holds(cfg, new.value ->> (cfg ->> 'status'))
+      and (tg_op = 'INSERT' or old.value ->> link is distinct from ev
+           or not public.app_capacity_holds(cfg, old.value ->> (cfg ->> 'status')));
+    if takes and cap is not null and n > cap then
+      raise exception 'capacity: % is full', ev using errcode = 'P0001', hint = 'capacity_full';
+    end if;
+    if (ev_row -> (cfg ->> 'count')) is distinct from to_jsonb(n) then
+      update public.kv set value = jsonb_set(value, array[cfg ->> 'count'], to_jsonb(n)), updated_at = now()
+        where store = ev_store and key = ev;
+    end if;
+  end loop;
+  return null;
+end
+$$;
+
+drop trigger if exists kv_capacity on public.kv;
+create trigger kv_capacity after insert or update or delete on public.kv
+  for each row execute function public.app_capacity_trg();
+
 -- ---------- Realtime (live sync between clients) ------------------------------------------------------
 -- The app subscribes to kv changes so one client's write appears in another's open view immediately
 -- (backend-supabase.js subscribeTable -> live-sync.js). That needs kv in the realtime publication.

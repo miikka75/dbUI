@@ -154,6 +154,10 @@
         {
           "name": "capacity",
           "type": "number"
+        },
+        {
+          "name": "booked",
+          "type": "number"
         }
       ]
     },
@@ -194,6 +198,15 @@
       ],
       "ownerWritableWhile": {
         "attendance": "pending"
+      },
+      "capacity": {
+        "link": "class",
+        "status": "booking",
+        "column": "capacity",
+        "count": "booked",
+        "holds": [
+          "booked"
+        ]
       }
     },
     "visits": {
@@ -1172,6 +1185,7 @@
         "room",
         "instructor",
         "capacity",
+        "booked",
         {
           "view": "class_roll",
           "filterBy": {

@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where, writeBatch } from 'firebase/firestore';
 
 const rulesPath = fileURLToPath(new URL('../../firestore.rules', import.meta.url));
 const testEnv = await initializeTestEnvironment({
@@ -552,6 +552,49 @@ await ok('an ADMIN can still correct a wrong stamp',
   assertSucceeds(setDoc(doc(admin, 'home_shopping__active/milk'), shop({ added_by: 'Cara' }))));
 await ok('a table absent from the mirror is unbounded (opt-in)',
   assertSucceeds(setDoc(doc(viewer, 'plainlist__active/free'), { id: 'free', added_by: 'Whoever' })));
+
+// --- Capacity: a response that takes a place travels with the event's count, in one batch. ---
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  const ot = (await getDoc(doc(db, '_meta/ownerTables'))).data().tables;
+  await setDoc(doc(db, '_meta/ownerTables'), { tables: ot.concat(['gbookings']), capacity: {
+    responses: { gbookings: { events: 'gclasses', link: 'class', status: 'booking', capacity: 'capacity', count: 'booked', holds: ['booked'] } },
+    events: { gclasses: 'gbookings' }
+  } });
+  await setDoc(doc(db, 'gclasses__active/c1'), { id: 'c1', capacity: 1, booked: 0 });
+});
+const bk = (who, id, status) => ({ id, owner: who, class: 'c1', booking: status, rosterPublic: false });
+const book = (db, who, id, status, booked) => {
+  const b = writeBatch(db);
+  b.set(doc(db, 'gbookings__active/' + id), bk(who, id, status));
+  if (booked !== undefined) b.set(doc(db, 'gclasses__active/c1'), { booked, lastBooking: id }, { merge: true });
+  return b.commit();
+};
+const batch = (db, fill) => { const b = writeBatch(db); fill(b); return b.commit(); };
+await ok('capacity: a member books with the count moved by one in the same batch',
+  assertSucceeds(book(viewer, 'viewer@x.com', 'b1', 'booked', 1)));
+await ok('capacity: a booking WITHOUT the count moving is refused',
+  assertFails(book(editor, 'editor@x.com', 'b2', 'booked')));
+await ok('capacity: a booking that moves the count past the limit is refused',
+  assertFails(book(editor, 'editor@x.com', 'b2', 'booked', 2)));
+await ok('capacity: moving the count with no booking of mine behind it is refused',
+  assertFails(setDoc(doc(editor, 'gclasses__active/c1'), { booked: 0, lastBooking: 'b1' }, { merge: true })));
+await ok('capacity: a status that holds no place needs no count',
+  assertSucceeds(book(editor, 'editor@x.com', 'b2', 'maybe')));
+await ok('capacity: cancelling without giving the place back is refused',
+  assertFails(deleteDoc(doc(viewer, 'gbookings__active/b1'))));
+await ok('capacity: cancelling with the count moved back down succeeds',
+  assertSucceeds(batch(viewer, (b) => { b.delete(doc(viewer, 'gbookings__active/b1')); b.set(doc(viewer, 'gclasses__active/c1'), { booked: 0, lastBooking: 'b1' }, { merge: true }); })));
+await ok('capacity: switching to a status that holds a place takes the freed one',
+  assertSucceeds(batch(editor, (b) => { b.set(doc(editor, 'gbookings__active/b2'), { booking: 'booked' }, { merge: true }); b.set(doc(editor, 'gclasses__active/c1'), { booked: 1, lastBooking: 'b2' }, { merge: true }); })));
+await ok('capacity: two bookings cannot share one increment',
+  assertFails(batch(viewer, (b) => {
+    b.set(doc(viewer, 'gbookings__active/b3'), bk('viewer@x.com', 'b3', 'booked'));
+    b.set(doc(viewer, 'gbookings__active/b4'), bk('viewer@x.com', 'b4', 'booked'));
+    b.set(doc(viewer, 'gclasses__active/c1'), { booked: 2, lastBooking: 'b3' }, { merge: true });
+  })));
+await ok('capacity: a member may not touch any other field of the event',
+  assertFails(setDoc(doc(viewer, 'gclasses__active/c1'), { capacity: 99 }, { merge: true })));
 
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);

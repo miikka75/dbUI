@@ -1426,6 +1426,52 @@ people who arrive after it.
 - **It does not stop relaying.** Someone at the event can text the code to someone who is not. Pair it
   with *Verified attendance* (`ownerWritableWhile` on the verdict) so a marked response is frozen.
 
+### `capacity` — places, and the booking refused when they are gone
+
+A **table** property of the responses table, not a view key, because it is enforced by the server
+whichever screen writes the row:
+
+```json
+"bookings": {
+  "columns": [ …, { "name": "class", "type": "ref", "table": "classes", "valueCol": "id" },
+                  { "name": "booking", "type": "select", "list": "booking_status" } ],
+  "capacity": { "link": "class", "status": "booking", "column": "capacity", "count": "booked", "holds": ["booked"] }
+}
+```
+
+| Key | Meaning |
+|-----|---------|
+| `link` | The ref column naming the event, by `id` |
+| `status` | The response column |
+| `column` | The events table's `number` column holding the limit. Blank = no limit |
+| `count` | The events table's `number` column the **server** keeps the count in. Leave it to the server |
+| `holds` | The statuses that take a place (optional; default: any non-empty one). `maybe` usually should not |
+
+The booking list shows *Places left: N* under each event, or *Full*. A full event cannot be joined, but a
+member who holds a place in it can still give it up. Booking the last place on a stale screen is refused
+by the server, the row is taken back, and the member is told it was full.
+
+- **Why the count lives on the event row.** A private roster means a member reads only their own
+  responses, so no client can count anyone else's. The count is the server's, and the same mechanism
+  that shows *Places left* is what refuses the booking after the last one.
+- **Postgres (Supabase, the dev server)**: a trigger (`app_capacity_trg`) recounts the event's holding
+  responses after every write, with the event row locked so two members taking the last place are
+  served one at a time, and refuses the write that would take a place past the limit. Recounted, not
+  incremented, so the count cannot drift, whoever wrote the rows.
+- **Firestore**: rules cannot count, so the client writes the count in the same transaction as the
+  response, and the rules check both sides: a response that takes or gives up a place must come with
+  the event's count moved by exactly one, naming it; and a member, who holds no grant on the events
+  table, may change only that count, by one, for their own response. An organizer's writes are not
+  bound (the app keeps their count right).
+- **The link may not move** on a member's own response: that would take a place in one event and free
+  one in another, which one count cannot express. Respond to the other event instead.
+- Only the `active` partition holds places. The config is mirrored as the `capacity` field of
+  `_meta/ownerTables`, which the owner-write path already reads: Firestore allows ten document reads per
+  write, and a mirror document of its own was the one too many.
+- `validateSchema` names a `link` that is not a ref to the events table by id, a `status`, `column` or
+  `count` that does not exist or is not a number, an empty `holds`, and two response tables capping one
+  events table.
+
 ## search — a box the reader types in
 
 `filter` is **authored**: it decides what a view *is*. `search` is the other kind — what the person

@@ -23,6 +23,7 @@ backend = {
     });
   },
   saveSchema: function(schema) {
+    this._capacityMirror = null;   // re-read by _capacityFor: the capacity config is part of what this rewrites
     // Mirror the schema-derived facts the schema-blind firestore rules need, kept in sync on every
     // schema write: _meta/ownerTables (tables with an owner column -> gates owner-create),
     // _meta/pageAccess (restricted doc-views -> gates _pages__active reads; see pageAccessOf),
@@ -32,7 +33,7 @@ backend = {
     // _meta/listWritable (which lists a NON-ADMIN may add to at all; see userWritableListsOf).
     return Promise.all([
       StorageFirestore.setMeta('schema', schema),
-      StorageFirestore.setMeta('ownerTables', { tables: BackendHelpers.ownerTablesOf(schema) }),
+      StorageFirestore.setMeta('ownerTables', BackendHelpers.ownerTablesMirror(schema)),
       StorageFirestore.setMeta('pageAccess', BackendHelpers.pageAccessOf(schema)),
       StorageFirestore.setMeta('ownerWritable', BackendHelpers.ownerWritableOf(schema)),
       StorageFirestore.setMeta('stamped', BackendHelpers.stampedOf(schema)),
@@ -246,10 +247,58 @@ backend = {
   },
   putRow: function(tableId, data, tab) {
     if (!data.id) return Promise.resolve();
-    return StorageFirestore.put(_storeName(tableId, tab), data.id, data);
+    var self = this;
+    return self._capacityFor(tableId, tab).then(function(cfg) {
+      return cfg ? self._capacityWrite(tableId, cfg, data.id, data)
+                 : StorageFirestore.put(_storeName(tableId, tab), data.id, data);
+    });
   },
   deleteRow: function(tableId, id, tab) {
-    return StorageFirestore.delete(_storeName(tableId, tab), id);
+    var self = this;
+    return self._capacityFor(tableId, tab).then(function(cfg) {
+      return cfg ? self._capacityWrite(tableId, cfg, id, null)
+                 : StorageFirestore.delete(_storeName(tableId, tab), id);
+    });
+  },
+  // CAPACITY (a response table's `capacity`; the config rides in _meta/ownerTables). The rules cannot
+  // count, so a response that takes or gives up a place is written TOGETHER with the event's count,
+  // moved by one, and `lastBooking` naming the response -- the batch firestore.rules checks from both
+  // sides (capCreateOk/capUpdateOk/capDeleteOk and capacityBump). A transaction rather than a batch so
+  // the count it moves is the one stored now: two members taking the last place are serialized, and the
+  // second retries, re-reads, and is refused here as full rather than by a bare rules denial.
+  // Only the `active` partition holds places, as in the rules and the Postgres trigger.
+  _capacityFor: function(tableId, tab) {
+    if ((tab || 'active') !== 'active') return Promise.resolve(null);
+    var self = this;
+    if (!self._capacityMirror) {
+      self._capacityMirror = StorageFirestore.getMeta('ownerTables')
+        .then(function(d) { return (d && d.capacity) || null; }, function() { return null; });
+    }
+    return self._capacityMirror.then(function(c) { return (c && c.responses && c.responses[tableId]) || null; });
+  },
+  _capacityWrite: function(tableId, cfg, id, data) {
+    var bRef = _db.collection(_storeName(tableId, 'active')).doc(id);
+    var holds = function(r) { return !!r && BackendHelpers.capacityHolds(cfg, r[cfg.status]); };
+    // The stored response is read OUTSIDE the transaction: a member may not read a response that does
+    // not exist yet (the read rule needs a row to test), and a transaction read that is refused aborts
+    // the whole transaction. A row only its owner writes cannot change under them anyway.
+    return bRef.get().then(function(s) { return s.exists ? s.data() : null; }, function() { return null; }).then(function(old) {
+      var next = data === null ? null : Object.assign({}, old || {}, data);
+      var was = holds(old), now = holds(next), ev = (next || old || {})[cfg.link];
+      var write = function(tx) { if (data === null) tx.delete(bRef); else tx.set(bRef, data, { merge: true }); };
+      if (was === now || !ev) return _db.runTransaction(function(tx) { write(tx); return Promise.resolve(); });
+      var eRef = _db.collection(_storeName(cfg.events, 'active')).doc(ev);
+      return _db.runTransaction(function(tx) {
+        return tx.get(eRef).then(function(es) {
+          var e = es.exists ? es.data() : {}, n = Number(e[cfg.count]) || 0, cap = e[cfg.capacity], d = now ? 1 : -1;
+          if (d > 0 && typeof cap === 'number' && n + 1 > cap) throw new Error('capacity: ' + ev + ' is full');
+          var bump = { lastBooking: id, updated_at: new Date().toISOString() };
+          bump[cfg.count] = n + d;
+          tx.set(eRef, bump, { merge: true });
+          write(tx);
+        });
+      });
+    });
   },
   moveRow: function(tableId, rowData, fromTab, toTab) {
     var self = this;

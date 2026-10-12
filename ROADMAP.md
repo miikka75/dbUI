@@ -1037,7 +1037,13 @@ names it (`rsvp.startColumn`). `dateColumn` keeps meaning the day. A `time` colu
 alternative and is worse here: it moves the date+time+zone arithmetic into both rules languages. Also
 fixes the calendar and the booking list sorting by a string. **Small–medium; a column editor.**
 
-#### 5. Capacity — places left, and the booking refused when full
+#### 5. Capacity — places left, and the booking refused when full *(landed, both backends)*
+
+*What landed:* as proposed, with two changes the build forced. The config is a TABLE property of the
+responses table (`capacity: { link, status, column, count, holds }`), since the server enforces it whatever
+screen writes. And its mirror rides inside `_meta/ownerTables`: a `_meta/capacity` of its own put the
+single-write owner path over Firestore's ten document reads, which the emulator caught. The Firestore
+client writes through a transaction rather than a bare batch, so the count it moves is the stored one.
 
 The display and the enforcement turn out to be one mechanism, because of privacy. A booking table is
 `privateRoster`: a member reads only their own rows, so the client cannot count anyone else's booking,
