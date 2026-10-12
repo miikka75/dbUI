@@ -984,14 +984,14 @@ today's list and is booked and checked in at once. A booked member who has not c
 before the start** loses the place, and anyone may take it. Every class row shows the places left, or
 "full".
 
-#### 1. A self-service table's lists are unreadable to the members who use it *(defect)*
+#### 1. A self-service table's lists are unreadable to the members who use it *(defect — landed)*
 
 Found building the bundle, and it is a defect rather than a gap: SCHEMA.md recommends giving an rsvp's
 status column its own `list`, and on a deployment where members hold no grant on the responses table
 (the normal case — it is self-service) that list never reaches them. `ListAccess.filterLists` and the
 `_lists` read rule (`listAllowed`) both ask whether the reader has access to a table that owns the list,
 and a self-service table is not a grant. The booking view rendered with no toggle at all. The bundle
-works around it with inline `statuses`; every other self-service list (attendance, PT status, claim
+worked around it with inline `statuses` until the fix; every other self-service list (attendance, PT status, claim
 status) renders only because those columns are read-only for the owner and fall back to the stored
 value's translation.
 

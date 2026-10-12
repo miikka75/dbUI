@@ -40,14 +40,14 @@ const ACTORS = {
 const SCHEMA = {
   tables: {
     tasks:   { columns: { id: { type: 'text' }, title: { type: 'text' } } },
-    notes:   { columns: { id: { type: 'text' }, body: { type: 'text' } } },
+    notes:   { columns: { id: { type: 'text' }, body: { type: 'text' }, tag: { type: 'text', list: 'note_tags' } } },
     shopping: {
       columns: { id: { type: 'text' }, item: { type: 'text' },
                  added_by: { type: 'text', list: 'members', defaultFrom: '@me', stamped: true } }
     },
     signups: {
       ownerWritable: ['status'],
-      columns: { id: { type: 'text' }, owner: { type: 'owner' }, status: { type: 'text' }, organizerNote: { type: 'text' } }
+      columns: { id: { type: 'text' }, owner: { type: 'owner' }, status: { type: 'text', list: 'signup_status' }, organizerNote: { type: 'text' } }
     }
   },
   views: []
@@ -70,6 +70,11 @@ const MATRIX = [
   ['viewer@x.com', 'signups__active', 's1', 'write', { id: 's1', owner: 'viewer@x.com', status: 'y' }, 'allow'],
   ['viewer@x.com', 'signups__active', 's2', 'write', { id: 's2', owner: 'editor@x.com', status: 'y' }, 'deny'],
   ['viewer@x.com', 'signups__active', 's1', 'read',  null,                                            'allow'],
+  // A self-service table's lists reach a member with no grant (they fill those columns in); a list
+  // owned only by a table they lack does not.
+  ['viewer@x.com', '_lists', 'signup_status', 'read', null, 'allow'],
+  ['viewer@x.com', '_lists', 'note_tags',     'read', null, 'deny'],
+  ['editor@x.com', '_lists', 'signup_status', 'read', null, 'allow'],
   // ownerWritable: the column bound holds even on a row they own.
   ['viewer@x.com', 'signups__active', 's1', 'write', { id: 's1', owner: 'viewer@x.com', organizerNote: 'no' }, 'deny'],
   // A stamped column: the one bound that binds a GRANT-HOLDER, so both engines must agree that an `rw`
@@ -135,6 +140,9 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   await setDoc(doc(db, 'notes__active/r2'), { id: 'r2', body: 'seed' });
   await setDoc(doc(db, 'signups__active/s1'), { id: 's1', owner: 'viewer@x.com', status: 'y' });
   await setDoc(doc(db, 'shopping__active/h1'), { id: 'h1', item: 'Bread', added_by: 'Bob' });
+  for (const [name, tables] of Object.entries(ListAccess.listOwnershipMap(SCHEMA.tables))) {
+    await setDoc(doc(db, '_lists/' + name), { name, items: ['x'], tables });
+  }
 });
 
 const fsDb = {};
@@ -175,6 +183,9 @@ await S._seed('tasks__active', 'r1', { id: 'r1', title: 'seed' });
 await S._seed('notes__active', 'r2', { id: 'r2', body: 'seed' });
 await S._seed('signups__active', 's1', { id: 's1', owner: 'viewer@x.com', status: 'y' });
 await S._seed('shopping__active', 'h1', { id: 'h1', item: 'Bread', added_by: 'Bob' });
+for (const [name, tables] of Object.entries(ListAccess.listOwnershipMap(SCHEMA.tables))) {
+  await S._seed('_lists', name, { name, items: ['x'], tables });
+}
 
 async function postgresVerdict(email, store, key, op, payload) {
   S.setCaller(email);

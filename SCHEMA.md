@@ -2349,6 +2349,10 @@ table — the `rsvp` view is one presentation of it; a plain data grid over an o
   to ride on the row because both rules layers are schema-blind. Leave it off for a shared log whose
   totals everyone should see (a chore leaderboard); switch it on for genuinely private submissions.
   Rows written before this behaviour existed carry no flag and stay owner-private until re-saved.
+- **Its lists are readable by every registered member**, grant or not: a member fills in the columns of
+  a self-service table, so the vocabularies those columns use (an rsvp's status list) must reach them.
+  Reading a list reveals no rows. Enforced from the same `_meta/ownerTables` mirror (`listAllowed`,
+  `app_list_allowed`, `ListAccess.filterLists`).
 - **Read-only grant + `owner` column** is the other useful combination: `{ "<table>": "r" }` lets a
   member see every row while writes still route through self-service, so they change only their own.
   See **Access modes** below.

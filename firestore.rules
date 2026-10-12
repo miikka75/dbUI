@@ -6,7 +6,8 @@ service cloud.firestore {
     // owner-scoped create on a data table: _meta/users (the bootstrap probe), _users/<me>,
     // _meta/ownerTables, _meta/ownerWritable, _meta/stamped — FIVE of ten. (Distinct documents; a
     // repeated read of the same one is cached within an evaluation. _meta/pageAccess is only on the
-    // _pages read path, and _meta/listTables / _meta/listWritable only on _lists writes.)
+    // _pages read path, _meta/listTables / _meta/listWritable only on _lists writes, and _lists reads
+    // add _meta/ownerTables to the three docs a read already costs.)
     //
     // Eight mirror documents exist in total, so the headroom is real but no longer generous — it was
     // four on this path before `stamped` was added. The failure mode is a hard denial at write time,
@@ -58,11 +59,16 @@ service cloud.firestore {
     // checker tries to find a SINGLE type for a let-bound name that satisfies every clause, cannot
     // (there isn't one, by design), and warns on every deploy -- noise that buries a real warning.
     // `u` is still bound once, so this is the same single userData() read.
+    // A list is also readable when a SELF-SERVICE table owns it (_meta/ownerTables): a member writes
+    // their own rows there with no grant, so the vocabulary of the column they fill in must reach them.
+    // No mirror doc -> no such widening (reads fail closed; the grant branches still apply).
     function listAllowed() {
       let u = userData();
       return u.tables == 'all'
         || (u.tables is list && u.tables.hasAny(resource.data.tables))
-        || (u.tables is map && u.tables.keys().hasAny(resource.data.tables));
+        || (u.tables is map && u.tables.keys().hasAny(resource.data.tables))
+        || (exists(/databases/$(database)/documents/_meta/ownerTables)
+            && get(/databases/$(database)/documents/_meta/ownerTables).data.tables.hasAny(resource.data.tables));
     }
 
     // Meta: read by registered. `lists` and `users` docs are admin-only reads (users holds every

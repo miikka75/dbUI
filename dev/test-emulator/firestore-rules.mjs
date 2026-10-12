@@ -64,6 +64,14 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
 });
 await ok('viewer CAN create their own row in a self-service (owner-column) table',
   assertSucceeds(setDoc(doc(viewer, 'rsvps__active/mine'), { id: 'mine', owner: 'viewer@x.com', status: 'coming' })));
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), '_lists/rsvp_status'), { name: 'rsvp_status', items: ['coming'], tables: ['rsvps'] });
+  await setDoc(doc(ctx.firestore(), '_lists/task_tags'), { name: 'task_tags', items: ['x'], tables: ['tasks'] });
+});
+await ok('viewer with no grant CAN read a list owned by a self-service table (its status vocabulary)',
+  assertSucceeds(getDoc(doc(viewer, '_lists/rsvp_status'))));
+await ok('viewer with no grant CANNOT read a list owned only by a granted table',
+  assertFails(getDoc(doc(viewer, '_lists/task_tags'))));
 await ok('viewer CANNOT owner-inject into a non-self-service table (the #3 fix)',
   assertFails(setDoc(doc(viewer, 'tasks__active/spam'), { id: 'spam', owner: 'viewer@x.com', title: 'junk' })));
 // --- _profiles shape validation (display names feed user-backed lists / roster). ---

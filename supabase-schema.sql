@@ -122,9 +122,14 @@ returns boolean language sql stable security definer set search_path = public as
     when public.app_is_admin() then true
     when public.app_user_data() is null then false
     when public.app_user_data() -> 'tables' = '"all"'::jsonb then true
+    -- A grant on an owning table, or an owning table that is SELF-SERVICE (_meta/ownerTables): a member
+    -- writes their own rows there with no grant, so the column's vocabulary must reach them. No mirror
+    -- row -> no such widening. Mirrors firestore.rules listAllowed.
     else exists (
       select 1 from jsonb_array_elements_text(coalesce(row_tables, '[]'::jsonb)) e
       where (public.app_user_data() -> 'tables') ? e
+         or coalesce((select value -> 'tables' from public.kv where store = '_meta' and key = 'ownerTables'),
+                     '[]'::jsonb) ? e
     )
   end
 $$;

@@ -292,7 +292,6 @@ backend = {
   getLists: function() {
     var self = this;
     return self._myTables().then(function(tabs) {
-      if (tabs !== null && !tabs.length) return {};
       if (tabs === null) {
         return _db.collection('_lists').get().then(function(snap) {
           if (!snap.empty) { var o = {}; snap.forEach(function(d) { var v = d.data(); o[v.name || d.id] = v.items || []; }); return o; }
@@ -303,24 +302,14 @@ backend = {
           });
         });
       }
-      // restricted: Firestore rules can't prove-authorize an `array-contains-any` query against a
-      // get()-fetched allow-set (userData().tables), so the collection query is denied. Instead read
-      // each accessible list DOC individually — single-doc reads ARE authorized by the /_lists
-      // `listAllowed()` rule (it evaluates that one doc's `resource.data.tables`). The candidate list
-      // names are exactly the lists referenced by the user's accessible tables' columns.
-      return StorageFirestore.getMeta('schema').then(function(sd) {
-        var parsed = BackendHelpers.unwrapSchemaDoc(sd) || {};
-        var schemaTables = parsed.tables || {};
-        var wanted = {};
-        tabs.forEach(function(t) {
-          Columns.columnDefList(schemaTables[t]).forEach(function(d) {
-            if (d && typeof d === 'object') {
-              if (d.list) wanted[d.list] = 1;
-              if (d.listSwitch && d.listSwitch.list) wanted[d.listSwitch.list] = 1;
-            }
-          });
-        });
-        var names = Object.keys(wanted);
+      // restricted: rules cannot prove-authorize an `array-contains-any` query against a get()-fetched
+      // allow-set, so the collection query is denied; read each list the caller may read by name instead
+      // (a single-doc read is what listAllowed() evaluates). The candidates are ListAccess.accessibleListNames: the lists of their granted tables, plus
+      // those of every self-service table, which a member writes with no grant. A caller with no grants
+      // still asks, because self-service needs none; a refused schema read means nothing to ask for.
+      return StorageFirestore.getMeta('schema').catch(function () { return null; }).then(function (sd) {
+        var schemaTables = (BackendHelpers.unwrapSchemaDoc(sd) || {}).tables || {};
+        var names = ListAccess.accessibleListNames(schemaTables, tabs, Object.keys(ListAccess.listOwnershipMap(schemaTables)), true);
         if (!names.length) return {};
         return Promise.all(names.map(function(name) {
           return _db.collection('_lists').doc(name).get()

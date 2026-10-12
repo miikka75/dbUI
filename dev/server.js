@@ -504,7 +504,7 @@ const server = http.createServer(async (req, res) => {
         await backend.initSchema(tablesB);   // creates the tables/files; ids ARE names
         const languagesB = await backend.getAvailableLanguages();
         const allowedB = getAllowedTables(); // null => unrestricted (admin / no users)
-        const listsB = filterLists(await backend.getLists(), tablesB, allowedB);
+        const listsB = filterLists(await backend.getLists(), tablesB, allowedB, !!userRecord());
         // Boot sends NO table data -- see the note in backend-firebase.js. A view loads its own tables
         // when it opens, through app-core's _ensureCached, and the dev server keeps the same boot shape
         // as the two production backends so a bug can still only exist in one of the three.
@@ -629,10 +629,11 @@ const server = http.createServer(async (req, res) => {
       case 'deleteLanguage': await backend.deleteLanguage(body.code); return json(res, { ok: true });
       case 'renameLanguage': await backend.renameLanguage(body.code, body.name); return json(res, { ok: true });
       case 'getLists': {
-        // Per-list access: return only lists owned by a table the user can access (admin: all).
+        // Per-list access: return only lists owned by a table the user can access, or by a self-service
+        // table when they are registered (admin: all). See ListAccess.listReaderTables.
         const allowed = getAllowedTables();          // null => unrestricted (admin/no users)
         const schemaTables = (await backend.getSchema() || {}).tables || {};
-        return json(res, filterLists(await backend.getLists(), schemaTables, allowed));
+        return json(res, filterLists(await backend.getLists(), schemaTables, allowed, !!userRecord()));
       }
       case 'saveLists': {
         // Which lists this caller may write is the policies' question (userWritableLists -> the _lists

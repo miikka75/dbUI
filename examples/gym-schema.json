@@ -616,10 +616,6 @@
         ],
         "responses": "bookings",
         "statusColumn": "booking",
-        "statuses": [
-          "booked"
-        ],
-        "statusList": "booking_status",
         "picker": "toggle",
         "showCounts": true,
         "rosterVisibility": "admins",
