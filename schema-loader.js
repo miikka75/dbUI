@@ -554,6 +554,7 @@ function validateSchema() {
           else if (ow.indexOf(c) >= 0) errors.push(at + '"' + c + '" is in ownerWritable, so a member can mark their own attendance without the code');
         });
         if (ci && ci.rotateMinutes !== undefined && !(typeof ci.rotateMinutes === 'number' && ci.rotateMinutes > 0)) errors.push(at + '`rotateMinutes` must be a positive number of minutes');
+        if (ci && ci.link !== undefined && ci.link !== 'arm' && ci.link !== 'submit') errors.push(at + '`link` is "' + ci.link + '" — use "submit" (a code from a link saves itself) or "arm" (the default: it waits for a press)');
       }
     }
     // Board (kanban) view: exactly one writable source + a select lane column (drag writes that column).

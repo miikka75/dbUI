@@ -296,3 +296,46 @@ test('validateSchema: rotateMinutes must be a positive number', async ({ page })
   for (const e of errs.slice(0, 3)) expect(e).toContain('rotateMinutes');
   expect(errs[3]).not.toContain('rotateMinutes');
 });
+
+test('checkin.link "submit": the code from the QR saves itself, with no press', async ({ page, browser }) => {
+  await setupCheckin(page);
+  // Turn it on for this view: the gym's room QR, where scanning IS the check-in.
+  const schema = (await (await page.request.post('/api/getSchema', { headers: ADMIN })).json());
+  schema.views[0].rsvp.checkin.link = 'submit';
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+
+  const ctx = await browser.newContext();
+  const p = await ctx.newPage();
+  await bootAs(p, 'ann@x');
+  await p.locator('[data-testid="rsvp-toggle"]').first().locator('button', { hasText: 'coming' }).click();
+  const code = async () => ((await (await page.request.post('/api/getTableData', { data: { tableId: 'rsvps', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => r.checkin_code || '');
+  await expect.poll(code).toEqual(['']);
+
+  const link = new URL(await p.evaluate(() => appInstance.scanDeepLink('my_rsvp', 'otter')));
+  await p.goto('/' + link.search);
+  await p.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+  await expect.poll(code).toEqual(['otter']);
+  // Saved, so nothing is left waiting for a press.
+  await expect(p.locator('[data-testid="rsvp-checkin-claim-save"]')).toHaveCount(0);
+  await ctx.close();
+});
+
+test('validateSchema: checkin.link is "arm" or "submit"', async ({ page }) => {
+  await setupCheckin(page);
+  await bootAs(page, 'org@x');
+  const errs = await page.evaluate(() => {
+    const out = [];
+    for (const v of ['auto', 'submit', 'arm']) { VIEWS.my_rsvp.rsvp.checkin.link = v; out.push(validateSchema().join(' | ')); }
+    return out;
+  });
+  expect(errs[0]).toContain('`link`');
+  expect(errs[1]).not.toContain('`link`');
+  expect(errs[2]).not.toContain('`link`');
+});
+
+test('a member with NO grant on the responses table still gets the status options (self-service lists)', async ({ page }) => {
+  await setup(page);
+  await page.request.post('/api/setUserRole', { data: { uid: 'ann@x', role: 'editor', user: 'ann@x', tables: { practices: 'r' } }, headers: ADMIN });
+  await bootAs(page, 'ann@x');
+  await expect(page.locator('[data-testid="rsvp-toggle"]').first().locator('button', { hasText: 'coming' })).toBeVisible();
+});

@@ -1406,6 +1406,11 @@ people who arrive after it.
   because a link is something anyone can send. The QR is drawn on the organizer's screen from what they
   typed; the code is still stored nowhere. A member who has not responded gets no box, so they must
   respond before they can scan.
+- **`link`** (optional, `"arm"` or `"submit"`, default `"arm"`): what a code that arrives by the QR's link
+  does. `"arm"` fills the member's box and waits for the check mark, because a link is something anyone
+  can send. `"submit"` saves it with no press, which is the gym's room QR: scanning IS checking in. It is
+  the same trade as a scan view's `link`, and is safe to pair with `rotateMinutes`, where a forwarded
+  link carries a code that is dead within two periods.
 - **`rotateMinutes`** (optional, a positive number): the code changes by itself. The organizer types
   nothing; opening the QR shows a random five-character code (no look-alikes such as 0/O or 1/I/L) that
   is replaced every `rotateMinutes`. While the QR is open it stamps by itself every 15 seconds, accepting

@@ -624,7 +624,8 @@
           "set": {
             "attendance": "attended"
           },
-          "rotateMinutes": 5
+          "rotateMinutes": 5,
+          "link": "submit"
         }
       }
     },

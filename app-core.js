@@ -9600,7 +9600,8 @@ function createVueApp() {
   // `mine`: the member's reserved events today.
   app.component('rsvp-checkin', {
     // `rotateMinutes`: the view's `checkin.rotateMinutes` -- the code changes by itself while the QR is open.
-    props: { viewName: String, mine: { type: Array, default: function() { return []; } }, canStamp: Boolean, armed: { type: String, default: '' }, rotateMinutes: { type: Number, default: 0 } },
+    // `autoClaim`: `checkin.link: "submit"` -- a code that arrives by link is saved with no press.
+    props: { viewName: String, mine: { type: Array, default: function() { return []; } }, canStamp: Boolean, armed: { type: String, default: '' }, rotateMinutes: { type: Number, default: 0 }, autoClaim: Boolean },
     emits: ['claimed'],
     // `code`: what the organizer typed. `current`/`previous`/`rotatedAt`: the rotating code and the one
     // before it, which is still accepted. None of it is stored anywhere.
@@ -9623,6 +9624,10 @@ function createVueApp() {
       qrLink: function() { return appInstance.scanDeepLink(this.viewName, this.shown); }
     },
     watch: { qrOpen: function(open) { if (!this.rotateMinutes) return; if (open) this.start(); else this.stop(); } },
+    // This component renders only once the member's own responses for today are known (rsvp-view's
+    // checkinShown), so by mount there is something to write the code onto -- the wait the scan view's
+    // auto-submit has to do for itself is already done here.
+    mounted: function() { if (this.autoClaim && this.armed && !this.canStamp && !this.frozen) this.claim(this.armed); },
     beforeUnmount: function() { this.stop(); },
     methods: {
       stamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.accepted); },
@@ -9759,7 +9764,7 @@ function createVueApp() {
       +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :title="a.t(\'rsvp.page_qr\')" :aria-label="a.t(\'rsvp.page_qr\')" data-testid="rsvp-page-qr" @click="pageQr = true"></v-btn>'
       +   '<qr-dialog v-model="pageQr" :link="pageLink" :caption="pageTitle"></qr-dialog>'
       + '</div>'
-      + '<rsvp-checkin v-if="checkinShown" :view-name="viewName" :mine="todayMine" :can-stamp="canStamp" :armed="armed" :rotate-minutes="cfg.checkin.rotateMinutes || 0" @claimed="claimed()"></rsvp-checkin>'
+      + '<rsvp-checkin v-if="checkinShown" :view-name="viewName" :mine="todayMine" :can-stamp="canStamp" :armed="armed" :rotate-minutes="cfg.checkin.rotateMinutes || 0" :auto-claim="cfg.checkin.link === \'submit\'" @claimed="claimed()"></rsvp-checkin>'
       + '<v-table v-if="!a.mobile" density="compact">'
       + '<thead><tr>'
       + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'date\')" :aria-sort="ariaSort(\'date\')" data-testid="rsvp-sort-date">{{ a.t(\'rsvp.date\') }}</th>'

@@ -1000,7 +1000,7 @@ mirrored — `_meta/listTables` and `_meta/ownerTables` — so it is one more di
 the matching clause in the Supabase policy, `filterLists` in the dev server, and a rules test each way.
 Reading a vocabulary reveals no rows, so this widens nothing that matters. **Small; rules.**
 
-#### 2. Check-in that needs no press — `checkin.link: "submit"`
+#### 2. Check-in that needs no press — `checkin.link: "submit"` *(landed)*
 
 The day-code check-in deliberately arms the box and waits for a press, because a link is something
 anyone can send. `scan` already has the per-view answer to exactly that trade, `"link": "submit"`, and
