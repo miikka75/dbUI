@@ -1009,11 +1009,13 @@ dead within two periods, so a forwarded link buys a minute at most, and pressing
 camera opens the app is the gym's whole experience. Same wait-for-tables guard the scan path has. **Small;
 UI only.**
 
-#### 3. Scanning with nothing booked offers today's classes
+#### 3. Scanning with nothing booked offers today's classes *(landed)*
 
 Today a member with no response for today gets no code box, so the room QR does nothing for them. With
 a code in the link and no booking, show today's remaining classes with a Book button each; booking then
-claims the code into the new row in the same write. It is the rsvp view filtered to today with the code
+claims the code into the new row. *(Landed as: the list narrows to today and the code shows disabled
+above it; the booking unfreezes it, and `link` decides whether it then saves itself. Two writes, not
+one: the booking, then the claim — the same two a member makes by hand.)* It is the rsvp view filtered to today with the code
 carried, not a new screen. Once capacity exists (5) a full class is shown but not offered. **Small; UI
 only.**
 

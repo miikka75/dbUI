@@ -9623,11 +9623,16 @@ function createVueApp() {
       // Drawn on this screen only.
       qrLink: function() { return appInstance.scanDeepLink(this.viewName, this.shown); }
     },
-    watch: { qrOpen: function(open) { if (!this.rotateMinutes) return; if (open) this.start(); else this.stop(); } },
-    // This component renders only once the member's own responses for today are known (rsvp-view's
-    // checkinShown), so by mount there is something to write the code onto -- the wait the scan view's
-    // auto-submit has to do for itself is already done here.
-    mounted: function() { if (this.autoClaim && this.armed && !this.canStamp && !this.frozen) this.claim(this.armed); },
+    watch: {
+      qrOpen: function(open) { if (!this.rotateMinutes) return; if (open) this.start(); else this.stop(); },
+      frozen: function(f) { if (!f) this.autoClaimNow(); }
+    },
+    // For a member this renders once their own responses for today are known (rsvp-view's checkinShown),
+    // so the wait the scan view's auto-submit does for itself is already done. With nothing booked today
+    // (rsvp-view's pickToday) it mounts with `mine` empty, which reads as frozen: the code shows,
+    // disabled, while they book a class below -- and the booking unfreezes it, so the claim follows the
+    // booking rather than needing a second scan.
+    mounted: function() { this.autoClaimNow(); },
     beforeUnmount: function() { this.stop(); },
     methods: {
       stamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.accepted); },
@@ -9657,6 +9662,7 @@ function createVueApp() {
         this.rotatedAt = Date.now();
       },
       autoStamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.accepted, true); },
+      autoClaimNow: function() { if (this.autoClaim && this.armed && !this.canStamp && !this.frozen) this.claim(this.armed); },
       claim: function(value) { appInstance.setRsvpCode(this.viewName, value); this.$emit('claimed'); }
     },
     template: ''
@@ -9697,7 +9703,13 @@ function createVueApp() {
       todayMine: function() { return ((this.data && this.data.events) || []).filter(function(e) { return e.isToday && e.myRowId; }); },
       checkinShown: function() {
         if (!this.cfg.checkin) return false;
-        return this.canStamp ? ((this.data && this.data.events) || []).some(function(e) { return e.isToday; }) : this.todayMine.length > 0;
+        return this.canStamp ? ((this.data && this.data.events) || []).some(function(e) { return e.isToday; }) : (this.todayMine.length > 0 || this.pickToday);
+      },
+      // A member who scanned the venue's code with nothing booked today: the list narrows to today's
+      // events so they can pick one there and then, and booking it carries the code on (rsvp-checkin).
+      pickToday: function() {
+        if (!this.cfg.checkin || !this.armed || this.canStamp || this.todayMine.length) return false;
+        return ((this.data && this.data.events) || []).some(function(e) { return e.isToday; });
       },
       // A code that arrived by the organizer's QR (`?view=&scan=`). It stays on the root until the member
       // presses, rather than being taken into this component: opening the link re-renders the view.
@@ -9706,6 +9718,7 @@ function createVueApp() {
       // comparator the data grid and embeds use, so blanks-last/numeric ordering all agree.
       events: function() {
         var evs = (this.data && this.data.events) || [];
+        if (this.pickToday) evs = evs.filter(function(e) { return e.isToday; });
         if (!this.sortCol) return evs;
         var col = this.sortCol, asc = this.sortAsc;
         // "Your response" is a status value: order it by the configured status order, not alphabetically

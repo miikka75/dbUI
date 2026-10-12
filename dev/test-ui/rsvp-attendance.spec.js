@@ -339,3 +339,32 @@ test('a member with NO grant on the responses table still gets the status option
   await bootAs(page, 'ann@x');
   await expect(page.locator('[data-testid="rsvp-toggle"]').first().locator('button', { hasText: 'coming' })).toBeVisible();
 });
+
+test('scanning with nothing booked: the list narrows to today, and booking a class there checks you in', async ({ page, browser }) => {
+  await setupCheckin(page);
+  const schema = (await (await page.request.post('/api/getSchema', { headers: ADMIN })).json());
+  schema.views[0].rsvp.checkin.link = 'submit';
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  const tomorrow = new Date(Date.now() + 86400000); const ymd2 = [tomorrow.getFullYear(), String(tomorrow.getMonth() + 1).padStart(2, '0'), String(tomorrow.getDate()).padStart(2, '0')].join('-');
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p3', date: ymd2, title: 'Tomorrow' } }, headers: ADMIN });
+
+  const ctx = await browser.newContext();
+  const p = await ctx.newPage();
+  await bootAs(p, 'ann@x');
+  await expect(p.locator('[data-testid="rsvp-toggle"]')).toHaveCount(2);     // today and tomorrow
+  const link = new URL(await p.evaluate(() => appInstance.scanDeepLink('my_rsvp', 'heron')));
+  await p.goto('/' + link.search);
+  await p.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+
+  // Only today's class is offered, and the code is shown but has nowhere to go yet.
+  await expect(p.locator('[data-testid="rsvp-toggle"]')).toHaveCount(1);
+  await expect(p.locator('[data-testid="rsvp-checkin-claim"] input')).toHaveValue('heron');
+  await expect(p.locator('[data-testid="rsvp-checkin-claim"] input')).toBeDisabled();
+
+  await p.locator('[data-testid="rsvp-toggle"]').first().locator('button', { hasText: 'coming' }).click();
+  const rows = async () => ((await (await page.request.post('/api/getTableData', { data: { tableId: 'rsvps', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => [r.practice, r.checkin_code || '']);
+  await expect.poll(rows).toEqual([['p1', 'heron']]);
+  // Done with the code, the whole list is back.
+  await expect(p.locator('[data-testid="rsvp-toggle"]')).toHaveCount(2);
+  await ctx.close();
+});

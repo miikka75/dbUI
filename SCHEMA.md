@@ -1402,10 +1402,11 @@ people who arrive after it.
   What this buys is that being marked present takes being told the code.
 - **The organizer can show the code as a QR** (the icon beside their box). It carries a link,
   `?view=<this view>&scan=<code>`, so a phone's own camera app opens the app on this
-  view with the member's box already filled. Nothing is saved until the member presses the check mark,
-  because a link is something anyone can send. The QR is drawn on the organizer's screen from what they
-  typed; the code is still stored nowhere. A member who has not responded gets no box, so they must
-  respond before they can scan.
+  view with the member's box already filled. Nothing is saved until the member presses the check mark
+  (unless `link` below says otherwise), because a link is something anyone can send. The QR is drawn on
+  the organizer's screen from what they typed; the code is still stored nowhere. A member who scans
+  with nothing reserved today sees the code, disabled, above **today's events only**; reserving one
+  there carries the code onto it, and the full list returns.
 - **`link`** (optional, `"arm"` or `"submit"`, default `"arm"`): what a code that arrives by the QR's link
   does. `"arm"` fills the member's box and waits for the check mark, because a link is something anyone
   can send. `"submit"` saves it with no press, which is the gym's room QR: scanning IS checking in. It is
