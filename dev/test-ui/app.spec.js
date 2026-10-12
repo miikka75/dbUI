@@ -4602,6 +4602,12 @@ test.describe('v3 @both partition toggle in an embed', () => {
     await pub.locator('[data-testid="feed-stop-ppa_cal"]').click();
     await expect(pub.locator('[data-testid="feed-publish-ppa_cal"]')).toBeVisible();
     await expect(pub.locator('[data-testid="feed-stop-ppa_cal"]')).toHaveCount(0);
+    // The button flips back as soon as publishing is off; the subscribers' files are blanked after it,
+    // one write each, so wait for them rather than read them once (a slow CI runner caught one unwritten).
+    await expect.poll(() => page.evaluate((ids) => ids.every((id) => {
+      const t = window.__uploads.filter((u) => u.path === 'feeds/' + id + '.ics').pop().text;
+      return t.includes('BEGIN:VCALENDAR') && !t.includes('VEVENT');
+    }), firstIds)).toBe(true);
     const stopped = await page.evaluate((ids) => {
       const app = window.appInstance;
       const last = (id) => window.__uploads.filter((u) => u.path === 'feeds/' + id + '.ics').pop().text;
