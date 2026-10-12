@@ -183,3 +183,22 @@ describe('calendar.js — primitives', () => {
     assert.equal(Calendar.fmtDate(new Date(2026, 0, 3)), '2026-01-03'); // zero-padded
   });
 });
+
+describe('calendar.js — datetime values', () => {
+  const C = require('../../calendar');
+  it('round-trips a local wall time through the stored UTC instant', () => {
+    const iso = C.fromLocalInput('2026-10-13T18:40');
+    assert.match(iso, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/);
+    assert.equal(C.toLocalInput(iso), '2026-10-13T18:40');
+    assert.equal(C.toDateStr(iso), '2026-10-13');
+  });
+  it('labels a datetime with its time, and a plain date as before', () => {
+    const iso = C.fromLocalInput('2026-10-13T18:40');
+    assert.equal(C.dateTimeLabel(iso, 'en-GB'), '13/10/2026 18:40');
+    assert.equal(C.dateTimeLabel('2026-10-13', 'en-GB'), C.dateLabel('2026-10-13', 'en-GB'));
+  });
+  it('blank and unparseable values stay empty rather than inventing a moment', () => {
+    assert.equal(C.fromLocalInput(''), '');
+    assert.equal(C.toLocalInput('nope'), '');
+  });
+});

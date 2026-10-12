@@ -73,7 +73,7 @@
     "columnType": {
       "description": "An unknown type is NOT an error the app can see on its own — it silently reads as \"text\", so a typo renders a working text column and the dropdown just never appears. Kept in step with Columns.COLUMN_TYPES by dev/test/schema-meta.test.js.",
       "type": "string",
-      "enum": ["text", "number", "date", "select", "multiselect", "ref", "url", "image", "owner"]
+      "enum": ["text", "number", "date", "datetime", "select", "multiselect", "ref", "url", "image", "owner"]
     },
 
     "column": {

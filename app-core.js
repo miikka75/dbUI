@@ -2042,7 +2042,7 @@ function createVueApp() {
           if (!s || !s.table || !SCHEMA[s.table]) { errs.push(self.t('cal.err_table')); return; }
           var cols = (SCHEMA[s.table] && SCHEMA[s.table].columns) || {};
           if (!s.dateColumn || !cols[s.dateColumn]) { errs.push(self.t('cal.err_date_col')); return; }
-          if (!Columns.colIsDate(SCHEMA, s.dateColumn)) errs.push(self.t('cal.err_not_date'));
+          if (!Columns.colIsDate(SCHEMA, s.dateColumn) && !Columns.colIsDateTime(SCHEMA, s.dateColumn)) errs.push(self.t('cal.err_not_date'));
           (s.titleColumns || []).forEach(function(c) { if (!cols[c]) errs.push(self.t('cal.err_title_col')); });
         });
         return errs;
@@ -2063,7 +2063,7 @@ function createVueApp() {
         return (c.sources || []).map(function(s) { return self.tOr('tab.' + s.table, s.table); }).join(', ');
       },
       dateColumnsOf: function(table) {
-        return getColumns(table).filter(function(c) { return Columns.colIsDate(SCHEMA, c); });
+        return getColumns(table).filter(function(c) { return Columns.colIsDate(SCHEMA, c) || Columns.colIsDateTime(SCHEMA, c); });
       },
       // The rows a calendar reads, present before anything renders a FILE from them.
       //
@@ -3917,6 +3917,7 @@ function createVueApp() {
 
       // Column helpers
       colIsDate: function(col) { return Columns.colIsDate(SCHEMA, col); },
+      colIsDateTime: function(col) { return Columns.colIsDateTime(SCHEMA, col); },
       colIsNumber: function(col) { return Columns.colIsNumber(SCHEMA, col); },
       colIsImage: function(col) { return Columns.colIsImage(SCHEMA, col); },
       colIsUrl: function(col) { return Columns.colIsUrl(SCHEMA, col); },
@@ -3924,6 +3925,7 @@ function createVueApp() {
       toDateStr: function(v) { return toDateStr(v); },
       // A date as displayed, in the app language's locale (calendar.js dateLabel). Display only.
       dateLabel: function(v) { return Calendar.dateLabel(v, this.calLocale()); },
+      dateTimeLabel: function(v) { return Calendar.dateTimeLabel(v, this.calLocale()); },
       // Whether the active backend can store an uploaded file (Firebase Storage). Other backends lack it,
       // so an `image` column degrades to a paste-a-URL text input. See uploadFile.
       canUploadFiles: function() { return !!(typeof backend !== 'undefined' && backend && backend.uploadFile); },
@@ -4103,6 +4105,7 @@ function createVueApp() {
       displayValue: function(col, val, nsCol, viewCfg) {
         if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x, nsCol, viewCfg); }).filter(Boolean).join(', '); }
         if (!val) return '';
+        if (this.colIsDateTime(col)) return this.dateTimeLabel(val);
         var out = val;
         // Translation namespace: a list column uses its list name; a `ref` column uses its lookup TABLE name,
         // so ref-backed values (e.g. a board's 2-D ref lane and its group dimension) localize through the same
@@ -7866,6 +7869,7 @@ function createVueApp() {
     tOr: function(k, f) { return appInstance ? appInstance.tOr(k, f) : f; },
     displayValue: function(c, v, n, vc) { return appInstance ? appInstance.displayValue(c, v, n, vc) : v; },
     colIsDate: function(c) { return appInstance ? appInstance.colIsDate(c) : false; },
+    colIsDateTime: function(c) { return appInstance ? appInstance.colIsDateTime(c) : false; },
     colIsImage: function(c) { return appInstance ? appInstance.colIsImage(c) : false; },
     colIsUrl: function(c) { return appInstance ? appInstance.colIsUrl(c) : false; },
     // Sanitize a user-supplied url/image cell before it goes into an attribute. safeHref (for <a href>)
@@ -7883,6 +7887,8 @@ function createVueApp() {
     // A cell's small picture: the thumbnail the value carries, else the picture itself.
     thumbSrc: function(u) { var s = Images.splitRef(u); return appInstance ? appInstance.assetSrc(s.thumb || s.full) : ''; },
     toDateStr: toDateStr,
+    toLocalInput: Calendar.toLocalInput,
+    fromLocalInput: Calendar.fromLocalInput,
     dateLabel: function(v) { return appInstance ? appInstance.dateLabel(v) : toDateStr(v); }
   };
 
@@ -8245,6 +8251,7 @@ function createVueApp() {
       +   '<input type="url" :value="item[col] || \'\'" @change="save(item, col, $event.target.value)" placeholder="https://…" spellcheck="false" style="border:none;background:transparent;color:inherit;font:inherit;flex:1;min-width:60px">'
       +   '<a v-if="item[col]" :href="safeHref(item[col])" target="_blank" @click.stop><v-icon size="x-small">mdi-open-in-new</v-icon></a>'
       + '</div>'
+      + '<input v-else-if="colIsDateTime(col)" type="datetime-local" :value="toLocalInput(item[col])" @change="save(item, col, fromLocalInput($event.target.value))" style="border:none;background:transparent;color:inherit;font:inherit">'
       + '<input v-else-if="colIsDate(col)" type="date" :value="toDateStr(item[col])" @change="save(item, col, $event.target.value)" style="border:none;background:transparent;color:inherit;font:inherit">'
       + '<span v-else class="editable-cell" contenteditable @blur="save(item, col, $event.target.textContent)" style="min-width:auto">{{ item[col] || \'\' }}</span>'
   });
@@ -9789,7 +9796,7 @@ function createVueApp() {
       + '</tr></thead>'
       + '<tbody>'
       + '<tr v-for="ev in events" :key="ev.id">'
-      + '<td style="white-space:nowrap">{{ a.dateLabel(ev.date) }}</td>'
+      + '<td style="white-space:nowrap">{{ a.dateTimeLabel(ev.date) }}</td>'
       + '<td>{{ ev.title }}</td>'
       + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpFrozen(viewName, ev.key)" @set="set(ev.key, $event)"></rsvp-picker>'
       + '</td>'
@@ -9801,7 +9808,7 @@ function createVueApp() {
       + '</v-table>'
       + '<div v-else class="pa-1">'
       + '<v-card v-for="ev in events" :key="ev.id" variant="tonal" class="mb-2 pa-3">'
-      + '<div>{{ a.dateLabel(ev.date) }}</div>'
+      + '<div>{{ a.dateTimeLabel(ev.date) }}</div>'
       + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}</div>'
       + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpFrozen(viewName, ev.key)" @set="set(ev.key, $event)"></rsvp-picker>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'

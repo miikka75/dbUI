@@ -122,15 +122,11 @@
     },
     "classes": {
       "archivable": true,
-      "defaultSort": "date",
+      "defaultSort": "starts_at",
       "columns": [
         {
-          "name": "date",
-          "type": "date"
-        },
-        {
-          "name": "starts",
-          "type": "text"
+          "name": "starts_at",
+          "type": "datetime"
         },
         {
           "name": "class_type",
@@ -607,9 +603,8 @@
       "icon": "mdi-calendar-check",
       "rsvp": {
         "events": "classes",
-        "dateColumn": "date",
+        "dateColumn": "starts_at",
         "titleColumns": [
-          "starts",
           "class_type",
           "instructor",
           "gym"
@@ -637,9 +632,8 @@
         "sources": [
           {
             "table": "classes",
-            "dateColumn": "date",
+            "dateColumn": "starts_at",
             "titleColumns": [
-              "starts",
               "class_type",
               "instructor"
             ],
@@ -1171,10 +1165,9 @@
         "classes"
       ],
       "layout": "card",
-      "defaultSort": "date",
+      "defaultSort": "starts_at",
       "columns": [
-        "date",
-        "starts",
+        "starts_at",
         "class_type",
         "room",
         "instructor",

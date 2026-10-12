@@ -38,6 +38,25 @@
     return f.format(d);
   }
 
+  // A `datetime` value (an ISO instant) as a person reads it: the date label and the local time. A plain
+  // date passes through as dateLabel, so a caller need not ask which it holds.
+  var timeFmts = {};
+  function dateTimeLabel(v, locale) {
+    var s = String(v || ''); if (s.length <= 10) return dateLabel(s, locale);
+    var d = new Date(s); if (isNaN(d.getTime())) return s;
+    var f = timeFmts[locale] || (timeFmts[locale] = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }));
+    return dateLabel(s, locale) + ' ' + f.format(d);
+  }
+  // An <input type="datetime-local"> speaks local wall time with no zone (`2026-10-13T18:40`); the stored
+  // value is the UTC instant. These two are the only crossing between them.
+  function toLocalInput(v) {
+    var d = v ? new Date(v) : null; if (!d || isNaN(d.getTime())) return '';
+    return fmtDate(d) + 'T' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  function fromLocalInput(s) {
+    if (!s) return ''; var d = new Date(s); return isNaN(d.getTime()) ? '' : d.toISOString();
+  }
+
   // 42-cell (6x7) month grid whose weeks start on `weekStart` (0=Sun..1=Mon), containing `anchor`.
   // `today` (a 'YYYY-MM-DD' string) drives the isToday flag; `anchor` defaults to it.
   function cellsMonth(anchor, weekStart, today) {
@@ -113,7 +132,7 @@
   function rotationSources(views, name) { var v = views[name]; return (v && v.calendar && v.calendar.rotationSources) || []; }
 
   var C = {
-    fmtDate: fmtDate, toDateStr: toDateStr, dateLabel: dateLabel, cellsMonth: cellsMonth, cellsWeek: cellsWeek, windowFor: windowFor,
+    fmtDate: fmtDate, toDateStr: toDateStr, dateLabel: dateLabel, dateTimeLabel: dateTimeLabel, toLocalInput: toLocalInput, fromLocalInput: fromLocalInput, cellsMonth: cellsMonth, cellsWeek: cellsWeek, windowFor: windowFor,
     hashColor: hashColor, paletteAt: paletteAt, sources: sources, rotationSources: rotationSources
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = C;

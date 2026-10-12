@@ -7,7 +7,8 @@
 // opts:
 //   me           current user's identity (the owner value to match/stamp — an email)
 //   ownerCol     owner column in the response rows (default 'owner')
-//   dateColumn   event date column ('YYYY-MM-DD' strings; used for upcoming filter + sort)
+//   dateColumn   event date column: a `date` ('YYYY-MM-DD') or a `datetime` (an ISO instant), used for the
+//                upcoming filter, 'today' and sort. A datetime counts on the LOCAL day it falls on.
 //   eventKey     event column that responses link by (default = dateColumn — dates must be unique)
 //   titleColumns event columns joined into the display title
 //   linkColumn   response column holding the event key
@@ -17,6 +18,13 @@
 //   limit        max events after sorting (optional)
 //   checkinColumn response column a member types the event's shared check-in code into (optional)
 (function(root) {
+  // The local day a date or datetime value falls on. A UTC instant's first ten characters are the UTC
+  // day, which is the wrong day for an evening class east of Greenwich.
+  function dayOf(v) {
+    var s = String(v == null ? '' : v); if (s.length <= 10) return s;
+    var d = new Date(s); if (isNaN(d.getTime())) return s.slice(0, 10);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
   function build(events, responses, opts) {
     events = events || []; responses = responses || [];
     var ownerCol = opts.ownerCol || 'owner';
@@ -34,7 +42,7 @@
     });
 
     var list = events.slice().sort(function(a, b) { return String(a[dateCol] || '').localeCompare(String(b[dateCol] || '')); });
-    if (opts.upcoming !== false && opts.today) list = list.filter(function(e) { return String(e[dateCol] || '') >= opts.today; });
+    if (opts.upcoming !== false && opts.today) list = list.filter(function(e) { return dayOf(e[dateCol]) >= opts.today; });
     if (opts.limit) list = list.slice(0, opts.limit);
 
     var out = list.map(function(e) {
@@ -60,7 +68,7 @@
         myStatus: mine ? mine[statusCol] : '',
         myRowId: mine ? mine.id : null,
         myCode: mine && opts.checkinColumn ? (mine[opts.checkinColumn] || '') : '',
-        isToday: !!opts.today && String(e[dateCol] || '') === opts.today,
+        isToday: !!opts.today && dayOf(e[dateCol]) === opts.today,
         tally: tally,
         total: responded.length,
         participants: participants

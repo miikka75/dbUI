@@ -6383,7 +6383,7 @@ test.describe('calendar view', () => {
       return errs.join(' | ');
     });
     expect(joined).toContain('cal_bad1');
-    expect(joined.toLowerCase()).toContain('must be a date column');
+    expect(joined.toLowerCase()).toContain('must be a date or datetime column');
     expect(joined).toContain('non-existent table');
   });
 

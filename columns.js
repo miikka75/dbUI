@@ -57,7 +57,7 @@
   // `multiselect` is here despite being legacy (migration v3 rewrites it to select + multiple): the
   // migration is idempotent and runs at load, but a schema on disk may still spell it, and rejecting
   // what the migration accepts would fail the document before it got the chance to be upgraded.
-  var COLUMN_TYPES = ['text', 'number', 'date', 'select', 'multiselect', 'ref', 'url', 'image', 'owner'];
+  var COLUMN_TYPES = ['text', 'number', 'date', 'datetime', 'select', 'multiselect', 'ref', 'url', 'image', 'owner'];
   var COLUMN_KEYS = [
     'name', 'type', 'hidden',                                   // identity + display
     'list', 'listSwitch', 'allowNew', 'sorted', 'picker', 'listFilter', // list-backed columns
@@ -311,10 +311,11 @@
     for (var t in schema) {
       var cols = (schema[t] && schema[t].columns) || {};
       for (var c in cols) {
-        var e = info[c] || (info[c] = { list: null, listValueCol: null, listFilter: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null });
+        var e = info[c] || (info[c] = { list: null, listValueCol: null, listFilter: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, datetime: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null });
         var typ = columnType(schema, t, c), d = cols[c];
         if (typ === 'multiselect') e.multiselect = true;
         if (typ === 'date') e.date = true;
+        if (typ === 'datetime') e.datetime = true;
         if (typ === 'image') e.image = true;
         if (typ === 'url') e.url = true;
         if (typ === 'number') e.number = true;
@@ -347,7 +348,7 @@
     }
     return info;
   }
-  var _EMPTY = { list: null, listValueCol: null, listFilter: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null };
+  var _EMPTY = { list: null, listValueCol: null, listFilter: null, listSwitch: null, multiselect: false, ref: false, refDef: null, date: false, datetime: false, allowNew: false, sorted: false, image: false, url: false, number: false, picker: null };
   function colInfo(schema, col) {
     var m = _scanCache && _scanCache.get(schema);
     if (!m) { m = scanSchema(schema); if (_scanCache) _scanCache.set(schema, m); }
@@ -356,6 +357,10 @@
   function colIsList(schema, col) { return colInfo(schema, col).list; }                    // list name or null
   function colIsMultiselect(schema, col) { return colInfo(schema, col).multiselect; }
   function colIsDate(schema, col) { return colInfo(schema, col).date; }
+  // A moment, stored as an ISO instant in UTC (`2026-10-13T15:40:00.000Z`, what toISOString writes and
+  // what `created_at` already holds) -- so it sorts as a string and both rules languages can compare it.
+  // Shown and edited in the reader's local time.
+  function colIsDateTime(schema, col) { return colInfo(schema, col).datetime; }
   function colIsNumber(schema, col) { return colInfo(schema, col).number; }                // any table declaring it `number` -> sort numerically (views have no SCHEMA entry)
   function colIsRef(schema, col) { return colInfo(schema, col).ref; }
   function colListSwitch(schema, col) { return colInfo(schema, col).listSwitch; }
@@ -504,7 +509,7 @@
     isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol,
     tableDefaultCols: tableDefaultCols, tableRefCol: tableRefCol,
     lookupCols: lookupCols, lookupHierarchy: lookupHierarchy, buildHierarchy: buildHierarchy,
-    colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate, colIsNumber: colIsNumber,
+    colIsList: colIsList, colIsMultiselect: colIsMultiselect, colIsDate: colIsDate, colIsDateTime: colIsDateTime, colIsNumber: colIsNumber,
     colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted, colListValueCol: colListValueCol, colListFilter: colListFilter, lookupIdentityCol: lookupIdentityCol, rowHandle: rowHandle,
     colIsImage: colIsImage, colIsUrl: colIsUrl, colPicker: colPicker,
     colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText,

@@ -1019,7 +1019,15 @@ one: the booking, then the claim — the same two a member makes by hand.)* It i
 carried, not a new screen. Once capacity exists (5) a full class is shown but not offered. **Small; UI
 only.**
 
-#### 4. A start time a rule can compare — `startColumn`
+#### 4. A start time a rule can compare *(landed — as a `datetime` column type, not `startColumn`)*
+
+*What landed:* a `datetime` column type stored as the UTC instant (`toISOString`, the shape `created_at`
+has), edited and shown in local time. An rsvp's existing `dateColumn` may be one, so there is no second
+key: the local day drives today/upcoming, the instant drives the order, and the list shows the time.
+Calendars accept it too. UTC rather than an offset (below) because a string compare is then
+chronological, which is what the rules in 5 and 6 need.
+
+*The proposal as written:*
 
 `classes.starts` is free text ("18:40"). Release (6) is decided at the server against `request.time` /
 `now()`, which needs one comparable instant, and the timezone is the trap: "18:40" is local, the rules

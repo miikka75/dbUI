@@ -234,6 +234,7 @@ hand. Reversible from the archive tab like any other archived row.
 | `text` | Plain text (default) |
 | `number` | Numeric value (used e.g. as a `rotation`/`reorderable` position, and by pivot `sum`) |
 | `date` | Date picker, stored as `YYYY-MM-DD` |
+| `datetime` | A moment: date **and** time, picked and shown in the reader's local time, stored as the UTC instant (`2026-10-13T15:40:00.000Z`, the shape `created_at` has). It sorts as a string and both rules layers can compare it, which is what a deadline the server checks needs. A calendar or rsvp `dateColumn` may be one: the event lands on the **local** day it falls on, and the booking list shows its time |
 | `select` | Dropdown from a named list |
 | `multiselect` | **Legacy spelling of `select` + `multiple: true`.** Still read, and migrated to that form on load (schema v3). |
 | `ref` | Reference to a lookup-table column |
@@ -1329,7 +1330,7 @@ The events live in one table; responses in another that has an **`owner` column*
 { "name": "my_rsvp",
   "rsvp": {
     "events": "practices",          // REQUIRED — the events table
-    "dateColumn": "date",            // REQUIRED — event date column (YYYY-MM-DD): upcoming filter + sort
+    "dateColumn": "date",            // REQUIRED — a date or datetime column: upcoming filter, today + sort
     "titleColumns": ["title", "opponent"], // OPTIONAL — joined with " — " for the event title
     "responses": "rsvps",           // REQUIRED — response table: needs an `owner` column + a `ref` to `events`
     "statusColumn": "response",      // REQUIRED — response column holding the status value

@@ -516,7 +516,7 @@ function validateSchema() {
         else {
           var dd = ccols[s.dateColumn], dt = (typeof dd === 'string') ? dd : (dd && dd.type);
           if (!dd) errors.push('calendar "' + v + '" dateColumn "' + s.dateColumn + '" not found in "' + s.table + '"');
-          else if (dt !== 'date') errors.push('calendar "' + v + '" dateColumn "' + s.dateColumn + '" in "' + s.table + '" must be a date column');
+          else if (dt !== 'date' && dt !== 'datetime') errors.push('calendar "' + v + '" dateColumn "' + s.dateColumn + '" in "' + s.table + '" must be a date or datetime column');
         }
         (s.titleColumns || []).forEach(function(tc) { if (!ccols[tc]) errors.push('calendar "' + v + '" titleColumns references non-existent column "' + tc + '" in "' + s.table + '"'); });
         // A calendar source's `filter` runs over that ONE table's rows (calEventsFor), so the same proof

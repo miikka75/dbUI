@@ -150,3 +150,21 @@ describe('rsvp.js — self check-in with a shared code', () => {
     assert.deepEqual(out.events.map((e) => [e.key, e.isToday, e.myCode]), [['p1', true, ' Lion '], ['p2', false, '']]);
   });
 });
+
+describe('rsvp.js — a datetime dateColumn', () => {
+  // A class at 21:30 Helsinki time is 18:30 UTC the same day; one at 01:30 local is the PREVIOUS UTC day.
+  // "Today" and "upcoming" are the reader's local day, so the engine must not read the UTC prefix.
+  const local = (y, m, d, h, mi) => new Date(y, m - 1, d, h, mi).toISOString();
+  const evs = [
+    { id: 'late', starts_at: local(2026, 10, 13, 23, 30), title: 'Late' },
+    { id: 'early', starts_at: local(2026, 10, 13, 7, 0), title: 'Early' },
+    { id: 'past', starts_at: local(2026, 10, 12, 18, 0), title: 'Yesterday' }
+  ];
+  const opts = { me: 'me@x', dateColumn: 'starts_at', eventKey: 'id', titleColumns: ['title'], linkColumn: 'cls', statusColumn: 's', today: '2026-10-13' };
+
+  it('counts an event on the LOCAL day it falls on, sorted by the instant', () => {
+    const r = Rsvp.build(evs, [], opts);
+    assert.deepEqual(r.events.map(e => e.key), ['early', 'late']);
+    assert.deepEqual(r.events.map(e => e.isToday), [true, true]);
+  });
+});
