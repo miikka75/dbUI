@@ -112,3 +112,41 @@ describe('rsvp.js — build', () => {
     assert.deepEqual(rByDate.events.find(e => e.id === 'e2').tally, { coming: 1, out: 1 });
   });
 });
+
+describe('rsvp.js — self check-in with a shared code', () => {
+  const rows = [
+    { id: 'a', owner: 'ann@x', practice: 'p1', code: ' Lion ', attendance: 'pending' },
+    { id: 'b', owner: 'bob@x', practice: 'p1', code: 'tiger', attendance: 'pending' },
+    { id: 'c', owner: 'cy@x', practice: 'p1', code: 'lion', attendance: 'attended' },
+    { id: 'd', owner: 'dan@x', practice: 'p2', code: 'lion', attendance: 'pending' },
+    { id: 'e', owner: 'eve@x', practice: 'p1', code: '', attendance: 'pending' },
+    { id: 'f', owner: 'ann@x', practice: 'p3', code: 'lion', attendance: 'pending' }
+  ];
+  const opts = (...codes) => ({ codes, linkColumn: 'practice', eventKeys: ['p1', 'p3'], checkinColumn: 'code', set: { attendance: 'attended' } });
+
+  it('stamps the given events\' rows whose claim matches, ignoring case and space, skipping the already-marked', () => {
+    assert.deepEqual(Rsvp.checkinTargets(rows, opts('LION')).map((r) => r.id), ['a', 'f']);
+  });
+
+  it('accepts any of several codes -- a rotating code and the one before it', () => {
+    assert.deepEqual(Rsvp.checkinTargets(rows, opts('puma', 'tiger')).map((r) => r.id), ['b']);
+    assert.deepEqual(Rsvp.checkinTargets(rows, opts('tiger', 'lion')).map((r) => r.id), ['a', 'b', 'f']);
+  });
+
+  it('a rotating code is drawn from an alphabet without look-alikes', () => {
+    assert.equal(Rsvp.checkinCode([0, 1, 30, 31, 62]), 'AB9AA');
+    assert.doesNotMatch(Rsvp.checkinCode(Array.from({ length: 200 }, (_, i) => i)), /[01ILO]/);
+  });
+
+  it('a blank code or an empty `set` stamps nobody, so an unclaimed row never matches', () => {
+    assert.deepEqual(Rsvp.checkinTargets(rows, opts('  ')), []);
+    assert.deepEqual(Rsvp.checkinTargets(rows, Object.assign(opts('lion'), { set: {} })), []);
+  });
+
+  it('build carries my claim and whether the event is today', () => {
+    const out = Rsvp.build([{ id: 'p1', date: '2026-09-09' }, { id: 'p2', date: '2026-09-10' }], rows, {
+      me: 'ann@x', dateColumn: 'date', eventKey: 'id', linkColumn: 'practice', statusColumn: 'attendance',
+      checkinColumn: 'code', today: '2026-09-09' });
+    assert.deepEqual(out.events.map((e) => [e.key, e.isToday, e.myCode]), [['p1', true, ' Lion '], ['p2', false, '']]);
+  });
+});
