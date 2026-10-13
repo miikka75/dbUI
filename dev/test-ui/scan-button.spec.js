@@ -30,7 +30,7 @@ const SCHEMA = {
       statusColumn: 'booking', picker: 'toggle', checkin: { codeColumn: 'checkin_code', set: { attendance: 'attended' } } } },
     { name: 'home', kind: 'page', markdown: '# Home' }
   ],
-  nav: { items: [{ view: 'home' }, { view: 'book' }], scan: ['door', 'book'] }
+  nav: { items: [{ view: 'home' }, { view: 'book' }], fab: 'scan', scan: ['door', 'book'] }
 };
 const ADMIN = { 'X-User': 'org@x' };
 const ymd = (d) => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
@@ -87,13 +87,28 @@ test('scan button: a QR names its own view; a link to another site is refused', 
 
 test('scan button: absent without nav.scan, and validateSchema names a view that takes no code', async ({ page }) => {
   const schema = JSON.parse(JSON.stringify(SCHEMA));
-  delete schema.nav.scan;
+  delete schema.nav.scan; delete schema.nav.fab;
   await setup(page, schema);
   await boot(page, 'org@x');
   await expect(page.locator('[data-testid="scan-fab"]')).toHaveCount(0);
   const err = await page.evaluate(() => validateRefs({ tables: SCHEMA, views: [{ name: 'home', markdown: '# x' }], nav: { items: [], scan: ['home', 'nope'] } }).join(' | '));
   expect(err).toContain('scan view "home" takes no code');
   expect(err).toContain('missing view "nope"');
+});
+
+test('the corner button is the screen\'s: nav.fab sets the default, a view\'s own `fab` overrides it', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.views.find((v) => v.name === 'book').fab = 'none';
+  await setup(page, schema);
+  await boot(page, 'ann@x');
+  await page.evaluate(() => appInstance.selectTab('home'));
+  await expect(page.locator('[data-testid="scan-fab"]')).toBeVisible();
+  await page.evaluate(() => appInstance.selectTab('book'));
+  await expect(page.locator('[data-testid="scan-fab"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid="add-fab"]')).toHaveCount(0);
+  const err = await page.evaluate(() => validateRefs({ tables: SCHEMA, views: [{ name: 'x', fab: 'jump' }], nav: { items: [], fab: 'scan' } }).join(' | '));
+  expect(err).toContain('`fab` is "jump"');
+  expect(err).toContain('`fab: "scan"` needs `nav.scan`');
 });
 
 test('door code that changes (scan.verify): the door screen shows it, the member claims it, the screen confirms and names the door', async ({ page, browser }) => {
@@ -141,4 +156,16 @@ test('validateSchema: a door screen\'s verdict cannot be the member\'s to write'
   });
   expect(err).toContain('"verified" is in ownerWritable');
   expect(err).toContain('"door" is in ownerWritable');
+});
+
+test('with no `fab` anywhere, the corner button is Add on a phone, as it always was', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  delete schema.nav.scan; delete schema.nav.fab;
+  schema.views.push({ name: 'all_classes', sources: ['classes'], columns: ['date', 'title'] });
+  schema.nav.items.push({ view: 'all_classes' });
+  await setup(page, schema);
+  await boot(page, 'org@x');
+  await page.evaluate(() => appInstance.selectTab('all_classes'));
+  await expect(page.locator('[data-testid="add-fab"]')).toBeVisible();
+  await expect(page.locator('[data-testid="scan-fab"]')).toHaveCount(0);
 });

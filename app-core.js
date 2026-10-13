@@ -980,6 +980,16 @@ function createVueApp() {
           return { view: n, label: label };
         });
       },
+      // THE CORNER BUTTON: one per screen, and what it does is the screen's to say. A view's `fab`
+      // ("add" | "scan" | "none") wins; else `nav.fab` sets the app's default; else "add", the button
+      // the grid has always had on a phone. null = no button here (nothing to add, or nowhere to scan to).
+      fabAction: function() {
+        var v = VIEWS[this.currentTable];
+        var want = (v && v.fab) || (this.navConfig && this.navConfig.fab) || 'add';
+        if (want === 'scan') return this.scanTargets.length ? 'scan' : null;
+        if (want === 'add') return (this.mobile && this.canAddRows && this.isDataView) ? 'add' : null;
+        return null;
+      },
       scanPickLabel: function() { var p = this.scanPick; return (this.scanTargets.filter(function(x) { return x.view === p; })[0] || {}).label || ''; },
       // The Lookup tab is where reference data is MAINTAINED. Someone who can change nothing in it -- a
       // member who reads the catalogues through the app's own views -- gets no tab for it: a screen of
@@ -5719,6 +5729,7 @@ function createVueApp() {
       // menu. Where the browser cannot decode (no BarcodeDetector: iPhone Safari, desktop Chrome on
       // Windows), or the picture held no code, it opens a field to type the code into instead.
       // Unlike a deep link, an in-app scan SAVES: the person pointing the camera is the intent.
+      fabPress: function() { if (this.fabAction === 'scan') this.scanPress(); else if (this.fabAction === 'add') this.addRow(); },
       scanPress: function() {
         if (typeof BarcodeDetector === 'undefined') { this.openScanDialog(''); return; }
         var el = document.getElementById('scan-fab-photo'); if (el) el.click();

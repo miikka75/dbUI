@@ -329,6 +329,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `search` | boolean \| string[] | Offer a **runtime search box** over this view's rows: `true` = every column, an array = only those. Narrows what is rendered, never the data. See **search** below |
 | `obscureNames` | boolean \| string[] | Display-only privacy: abbreviate person names to "First L." in this view. `true` = all list/multiselect columns (or all area columns of a rotationView); an array = exactly those columns. Stored data is untouched |
 | `mineOnly` | boolean \| `{list}` | **rotationViews only.** Show a viewer only the slot column that *is* them, so one shared view is the whole matrix for an admin and a single column for a member (see "Per-person views" below). `{ "list": "<listName>" }` resolves identity through that list; `true` uses the profile display name. An object, not a bare string, so it cannot be misread as the column array `obscureNames` takes. Display-only |
+| `fab` | string | What the corner button does on this screen: `"add"`, `"scan"` or `"none"`. Overrides `nav.fab` (see **nav**) |
 | `background` | object | Background image for this view's card (see **background images** below). Works on **every** view kind |
 
 A view's `columns` may contain, besides plain column names:
@@ -2896,9 +2897,12 @@ from the authenticated session — never asked for.
   grants, and an entry hidden here is still reachable if something else links to it. Pair `adminOnly`
   with a read-only (`'r'`) grant when the point is that members must not change the data.
 - System tabs (Lookup / Languages / Settings) are appended automatically.
-- **`scan`** (string[], optional) — **the scan button**: the views a scanned code may go to (scan views,
-  and rsvp views with `checkin`). With it, a large floating button sits in the bottom-right corner (above
-  Add on a phone when both show). It opens the camera where the browser can decode codes in the page
+- **`fab`** (`"add"` | `"scan"` | `"none"`, optional) — **the corner button**: ONE floating button in the
+  bottom-right corner, and the screen says what it does. A view's own `fab` wins; else `nav.fab` sets the
+  app's default; else `"add"`, the add-a-row button grids have always had on a phone. `"scan"` needs
+  `nav.scan`. The gym sets `"scan"`, so its corner button opens the camera everywhere.
+- **`scan`** (string[], optional) — **where the scan button sends codes**: scan views, and rsvp views with
+  `checkin`. The button is the corner button with `fab: "scan"`. It opens the camera where the browser can decode codes in the page
   (`BarcodeDetector`: Android Chrome), and a typing field where it cannot (iPhone Safari, desktop Chrome
   on Windows) or when the picture held no code. A QR the app drew carries `?view=…&scan=…` and goes to
   its own view; a typed code goes to the one picked in the dialog. Either way it **saves** at once — the

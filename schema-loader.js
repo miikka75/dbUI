@@ -844,6 +844,15 @@ function validateRefs(schema) {
     if (it.table && !hasTable(it.table)) errs.push('Nav -> missing table "' + it.table + '"');
     if (it.items) walk(it.items);
   }); })(schema.nav && schema.nav.items);
+  // `fab` -- the corner button's action, app-wide (nav) or per view. "scan" with nowhere to scan to would
+  // simply show no button, which reads as a bug rather than a missing list.
+  var fabOk = function(val, where) {
+    if (val === undefined) return;
+    if (['add', 'scan', 'none'].indexOf(val) < 0) errs.push(where + ' `fab` is "' + val + '" — use add, scan or none');
+    else if (val === 'scan' && !(schema.nav && Array.isArray(schema.nav.scan) && schema.nav.scan.length)) errs.push(where + ' `fab: "scan"` needs `nav.scan` to name where scanned codes go');
+  };
+  fabOk(schema.nav && schema.nav.fab, 'Nav ->');
+  (Array.isArray(schema.views) ? schema.views : []).forEach(function(fv) { if (fv) fabOk(fv.fab, 'View "' + fv.name + '" ->'); });
   // `nav.scan`: the scan button's destinations. A view that takes no code would swallow every scan sent
   // to it -- the button would look like it worked and nothing would be logged.
   if (schema.nav && schema.nav.scan !== undefined) {

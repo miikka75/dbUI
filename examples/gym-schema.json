@@ -1538,6 +1538,7 @@
       "coach",
       "doc_loyalty"
     ],
+    "fab": "scan",
     "scan": [
       "visit_scan",
       "class_booking"
