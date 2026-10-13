@@ -112,10 +112,25 @@ const SEED = {
 const seed = SEED[BUNDLE] || { users: [], profiles: [], links: [], hint: '' };
 const USERS = seed.users, PROFILES = seed.profiles, LINKS = seed.links;
 
-const post = (action, body) => fetch(BASE + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then(r => r.json());
-const postAs = (email, action, body) => fetch(BASE + action, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user': email }, body: JSON.stringify(body || {}) }).then(r => r.json());
+// Every call is checked. A refused one used to be read as a success, so a database somebody else had
+// already claimed (a browser tab opened as ?user=ann@dev registers Ann as its first admin) took the rows
+// and silently dropped the users and links -- leaving the one account the seed is built around locked out.
+const call = (email, action, body) => fetch(BASE + action, { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, email ? { 'x-user': email } : {}), body: JSON.stringify(body || {}) })
+  .then(r => r.json().then(j => {
+    if (r.ok) return j;
+    const who = email || 'local@dev';
+    throw new Error(action + ' was refused for ' + who + ' (' + ((j && j.error) || r.status) + '). '
+      + (r.status === 403 ? 'This database already has an admin who is not ' + who + ' -- usually a browser tab opened it first as'
+        + ' ?user=<someone>, and an empty database makes its first visitor admin. Seed a fresh APP_DB, or make'
+        + ' local@dev an admin from that account first.' : ''));
+  }));
+const post = (action, body) => call(null, action, body);
+const postAs = (email, action, body) => call(email, action, body);
 
 (async () => {
+  // The seed's own admin first: on an empty database this closes bootstrap with local@dev as its admin
+  // before anything else can claim it -- a browser tab left open on another ?user= included.
+  for (const u of USERS.filter(x => x.role === 'admin')) await post('setUserRole', { uid: u.email, user: u.email, role: u.role, tables: u.tables });
   const bundle = JSON.parse(fs.readFileSync(DATA, 'utf8'));
   const schema = JSON.parse(fs.readFileSync(path.join(EXAMPLES, BUNDLE + '-schema.json'), 'utf8'));
   // The whole schema, not just its tables: views, nav and list config are what make the example an APP.
