@@ -9230,6 +9230,7 @@ function createVueApp() {
       +     '<span v-else>{{ tOr(t.label, t.label) }}</span>'
       +   '</div>'
       +   '<div style="display:flex;align-items:baseline;gap:6px">'
+      +     '<v-icon v-if="t.icon" :icon="t.icon" color="primary" size="26" style="align-self:center" data-testid="stat-icon"></v-icon>'
       +     '<span style="font-size:1.7rem;font-weight:700;line-height:1.1" data-testid="stat-value">{{ fmt(t) }}</span>'
       +     '<span v-if="t.goal !== null" style="font-size:0.8rem;opacity:0.6">/ {{ t.goal }}</span>'
       +     '<span v-if="t.tier" data-testid="stat-tier" style="font-size:0.68rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;padding:1px 7px;border-radius:10px;background:rgba(var(--v-theme-primary),0.16);color:rgb(var(--v-theme-primary))">{{ tierLabel(t.tier) }}</span>'

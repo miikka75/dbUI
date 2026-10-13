@@ -325,3 +325,40 @@ describe('stats.js — tiered goals (bronze / silver / gold)', () => {
     assert.equal(at(50, []).pct, null);
   });
 });
+
+describe('stats.js — streak (periods in a row) and icons by value', () => {
+  const now = new Date(2026, 9, 13, 12);   // Tuesday 13 Oct 2026, local
+  const tile = (rows, t) => Stats.build(rows, { tiles: [Object.assign({ agg: 'streak', column: 'd' }, t)] }, { now }).tiles[0];
+  const days = (...ds) => ds.map((d) => ({ d }));
+
+  it('counts weeks in a row ending this week, Monday-start', () => {
+    assert.equal(tile(days('2026-09-28', '2026-10-06', '2026-10-12')).value, 3);   // 28 Sep, 5 Oct and 12 Oct weeks
+  });
+  it('an empty CURRENT week does not break it -- the week is not over', () => {
+    assert.equal(tile(days('2026-09-29', '2026-10-07')).value, 2);
+  });
+  it('a missed week does', () => {
+    assert.equal(tile(days('2026-09-21', '2026-10-07')).value, 1);
+    assert.equal(tile(days('2026-09-21')).value, 0);
+  });
+  it('several rows in one period count once', () => {
+    assert.equal(tile(days('2026-10-06', '2026-10-07', '2026-10-08')).value, 1);
+  });
+  it('daily and monthly intervals', () => {
+    assert.equal(tile(days('2026-10-11', '2026-10-12', '2026-10-13'), { interval: 'daily' }).value, 3);
+    assert.equal(tile(days('2026-08-03', '2026-09-30', '2026-10-01'), { interval: 'monthly' }).value, 3);
+  });
+  it('reads a datetime on its LOCAL day', () => {
+    // 23:30 on Monday, local: whatever its UTC date, it is yesterday from Tuesday noon, so one day in a row.
+    assert.equal(tile([{ d: new Date(2026, 9, 12, 23, 30).toISOString() }], { interval: 'daily' }).value, 1);
+  });
+  it('a streak is a number, never formatted as the date column it counts', () => {
+    assert.equal(tile(days('2026-10-12')).column, null);
+  });
+  it('icons: the highest rung reached, or none below the first', () => {
+    const icons = [{ at: 1, icon: 'mdi-sprout' }, { at: 3, icon: 'mdi-fire' }];
+    assert.equal(tile(days('2026-10-12'), { icons }).icon, 'mdi-sprout');
+    assert.equal(tile(days('2026-09-28', '2026-10-06', '2026-10-12'), { icons }).icon, 'mdi-fire');
+    assert.equal(tile([], { icons }).icon, null);
+  });
+});

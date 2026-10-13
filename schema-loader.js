@@ -664,7 +664,7 @@ function validateSchema() {
     // already checked by the data-view rules above; what is checked here is only the `stats` object.
     if (view.stats) {
       var st = view.stats;
-      var stAggs = ['count', 'sum', 'avg', 'min', 'max', 'latest'];
+      var stAggs = ['count', 'sum', 'avg', 'min', 'max', 'latest', 'streak'];
       if (st.rowTiles && st.tiles) errors.push('stats "' + v + '": use `rowTiles` OR `tiles`, not both');
       else if (!st.rowTiles && !Array.isArray(st.tiles)) errors.push('stats "' + v + '" needs `tiles` (an array) or `rowTiles`');
       // A goal is either a number to measure against or the string "max" (scale to the largest tile).
@@ -749,6 +749,17 @@ function validateSchema() {
         else if (ag !== 'count' && !t.column) errors.push('stats "' + v + '" ' + at + ': `' + ag + '` needs a `column`');
         stCol(t.column, at);
         stGoalOk(t.goal, at, false);
+        // An unknown interval would silently be weekly; a streak of the wrong unit still looks right.
+        if (t.interval !== undefined && ['daily', 'weekly', 'monthly'].indexOf(t.interval) < 0) errors.push('stats "' + v + '" ' + at + ': `interval` is "' + t.interval + '" — use daily, weekly or monthly');
+        if (t.interval !== undefined && ag !== 'streak') errors.push('stats "' + v + '" ' + at + ': `interval` is read only by `agg: "streak"`');
+        // `icons` rungs must ascend for the same reason a goal ladder must: the highest one reached wins.
+        if (t.icons !== undefined) {
+          if (!Array.isArray(t.icons) || !t.icons.length) errors.push('stats "' + v + '" ' + at + ': `icons` must be a list like [{ "at": 1, "icon": "mdi-fire" }]');
+          else { var ip = null; t.icons.forEach(function(r, ri) {
+            if (!r || typeof r.at !== 'number' || !(r.at >= 0) || typeof r.icon !== 'string' || !r.icon) { errors.push('stats "' + v + '" ' + at + ': `icons` step ' + ri + ' must be { "at": <number>, "icon": "mdi-…" }'); return; }
+            if (ip !== null && r.at <= ip) errors.push('stats "' + v + '" ' + at + ': `icons` steps must ascend — ' + r.at + ' comes after ' + ip);
+            ip = r.at; }); }
+        }
       });
     }
     // A scan view IS a data view over the log it writes — sources, filter and columns are checked by the

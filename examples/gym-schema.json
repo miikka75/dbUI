@@ -681,6 +681,30 @@
       "stats": {
         "tiles": [
           {
+            "label": "text.streak_gym",
+            "agg": "streak",
+            "column": "visited_on",
+            "interval": "weekly",
+            "icons": [
+              {
+                "at": 1,
+                "icon": "mdi-sprout"
+              },
+              {
+                "at": 3,
+                "icon": "mdi-fire"
+              },
+              {
+                "at": 8,
+                "icon": "mdi-trophy"
+              },
+              {
+                "at": 26,
+                "icon": "mdi-crown"
+              }
+            ]
+          },
+          {
             "label": "text.pulse_visits_month",
             "agg": "count",
             "when": {
@@ -1224,9 +1248,47 @@
           {
             "label": "text.classes_attended",
             "agg": "count"
+          },
+          {
+            "label": "text.streak_classes",
+            "agg": "streak",
+            "column": "class_start",
+            "interval": "weekly",
+            "icons": [
+              {
+                "at": 1,
+                "icon": "mdi-sprout"
+              },
+              {
+                "at": 3,
+                "icon": "mdi-fire"
+              },
+              {
+                "at": 8,
+                "icon": "mdi-trophy"
+              },
+              {
+                "at": 26,
+                "icon": "mdi-crown"
+              }
+            ]
           }
         ]
-      }
+      },
+      "compute": [
+        {
+          "name": "class_start",
+          "source": "bookings",
+          "computed": {
+            "lookup": {
+              "table": "classes",
+              "match": "class",
+              "on": "id",
+              "field": "starts_at"
+            }
+          }
+        }
+      ]
     },
     {
       "name": "my_coins",

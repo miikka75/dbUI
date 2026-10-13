@@ -1709,7 +1709,7 @@ The two are mutually exclusive; declaring both is a load-time error.
 | `limit` | `rowTiles` only: cap the tile count. Applied after `order`, so it is the first N of the order asked for |
 | `rowTiles.skipUntargeted` | Drop a tile that resolved no goal — the gate that keeps a seeded key set (`groupBy.seed`) to the rows still being measured |
 
-**Aggregates**: `count` (needs no `column`), `sum`, `avg`, `min`, `max`, `latest`. Everything but
+**Aggregates**: `count` (needs no `column`), `sum`, `avg`, `min`, `max`, `latest`. And `streak`, below. Everything but
 `count` requires a `column`, and says so at load rather than showing an em dash forever.
 
 ### A goal each row carries
@@ -1749,6 +1749,24 @@ row. The shipped `chore_cadence` view is exactly this, reading `ref_chores.targe
   schema edit — and it is under its own name rather than implied by seeding, because a tile with a
   value and no goal is legitimate elsewhere (a `display: "number"` scorecard is exactly that). With no
   `goal` declared anywhere it would drop every tile, so that combination is a load-time error.
+
+### Streaks, and an icon that grows with the number
+
+`agg: "streak"` counts **periods**, not rows: how many `interval`s in a row (`daily`, `weekly` — the
+default — or `monthly`), ending now, have at least one row dated in them by `column` (a date or datetime;
+a computed `lookup` works, which is how a booking is dated by its class). Weeks start on Monday, as
+`within: "@week"` does, and days are the reader's local days.
+
+```json
+{ "label": "text.streak_gym", "agg": "streak", "column": "visited_on", "interval": "weekly",
+  "icons": [{ "at": 1, "icon": "mdi-sprout" }, { "at": 3, "icon": "mdi-fire" }, { "at": 8, "icon": "mdi-trophy" }] }
+```
+
+- **The current period does not break it.** A streak counts this week when it already has a row, and
+  when it does not yet, it counts back from last week: a week is not missed until it is over, and a
+  streak that read 0 every Monday morning would be measuring the calendar.
+- **`icons`** (any tile): the icon of the highest rung the value has reached, beside the number; none
+  below the first. Rungs ascend, like a goal ladder.
 
 ### Which end of the board is the point (`order`)
 

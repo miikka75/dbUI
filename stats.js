@@ -14,7 +14,10 @@
 //
 //   tiles   — explicit tiles over the WHOLE row set. Each names an aggregate:
 //               { label, agg, column, goal, when, display, decimals }
-//             `agg` is count | sum | avg | min | max | latest. `column` is required by all but count.
+//             `agg` is count | sum | avg | min | max | latest | streak. `column` is required by all but count.
+//             `streak` counts PERIODS, not rows: how many `interval`s in a row (daily | weekly | monthly,
+//             default weekly), ending now, have at least one row dated in them by `column`.
+//             `icons: [{ at, icon }]` picks the tile's icon by its value -- the highest rung reached.
 //             `when` narrows the rows for that tile only (the shared condition language), which is how
 //             "signed in today" and "signed in this week" become two tiles over one view.
 //
@@ -39,6 +42,40 @@
   /** @type {any} */ var Rows = isNode ? require('./rows') : root;
 
   function num(v) { var n = Number(v); return isNaN(n) ? null : n; }
+
+  // A date or datetime value as the LOCAL calendar day it falls on, counted in days from 1970-01-01.
+  // Local, because "this week" is the reader's week: an evening visit east of Greenwich is still today.
+  function dayIndex(v) {
+    var s = String(v == null ? '' : v); if (!s) return null;
+    var d = s.length <= 10 ? new Date(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) : new Date(s);
+    if (isNaN(d.getTime())) return null;
+    return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+  }
+  // The period a day falls in, as a number that goes up by one per period. Weeks start on Monday, as
+  // `within: "@week"` does: 1970-01-01 was a Thursday, so +3 puts every Monday on a multiple of seven.
+  function periodOf(day, interval) {
+    if (interval === 'daily') return day;
+    if (interval === 'monthly') { var d = new Date(day * 86400000); return d.getUTCFullYear() * 12 + d.getUTCMonth(); }
+    return Math.floor((day + 3) / 7);
+  }
+  // Periods in a row with something in them, ending at the current one. The current period counts when
+  // it already has a row, and does NOT break the streak when it has none yet: a week is not missed
+  // until it is over, and a streak that read 0 every Monday morning would be measuring the calendar.
+  function streak(rows, col, interval, now) {
+    var seen = {};
+    rows.forEach(function(r) { var d = dayIndex(r[col]); if (d !== null) seen[periodOf(d, interval)] = true; });
+    var cur = periodOf(dayIndex(now.toISOString()), interval), n = 0;
+    if (!seen[cur]) cur--;
+    while (seen[cur]) { n++; cur--; }
+    return n;
+  }
+  // The icon of the highest rung the value has reached, or null below the first.
+  function iconFor(value, icons) {
+    if (!Array.isArray(icons) || typeof value !== 'number') return null;
+    var hit = null;
+    icons.forEach(function(r) { if (r && typeof r.at === 'number' && value >= r.at && r.icon) hit = r.icon; });
+    return hit;
+  }
 
   // One aggregate over an already-narrowed bucket of rows.
   //
@@ -140,9 +177,11 @@
     return { goal: (next || tiers[tiers.length - 1]).at, tier: reached };
   }
 
-  function build(rows, opts) {
+  // `env.now` (a Date) is when "now" is, for `streak`; the default is the clock, and tests pass one.
+  function build(rows, opts, env) {
     rows = rows || [];
     opts = opts || {};
+    var now = (env && env.now) || new Date();
     var defDisplay = opts.display || 'bar';
     var out = [];
 
@@ -160,7 +199,7 @@
     } else {
       (opts.tiles || []).forEach(function(t) {
         var bucket = t.when ? rows.filter(function(r) { return Rows.condMatches(r, t.when); }) : rows;
-        var v = reduce(bucket, t.agg || 'count', t.column);
+        var v = t.agg === 'streak' ? streak(bucket, t.column, t.interval || 'weekly', now) : reduce(bucket, t.agg || 'count', t.column);
         if ((t.agg || 'count') === 'avg') v = roundAvg(v, t.decimals);
         out.push({
           label: t.label || '',
@@ -168,7 +207,9 @@
           value: v,
           rawGoal: (t.goal !== undefined ? t.goal : opts.goal),
           display: t.display || defDisplay,
-          column: t.column || null                 // lets the renderer format through the column's type
+          // A streak is a count of periods; formatting it through its date column would print a date.
+          column: t.agg === 'streak' ? null : (t.column || null),   // lets the renderer format through the column's type
+          icon: iconFor(v, t.icons)
         });
       });
     }

@@ -453,12 +453,16 @@ test('closeBefore: booking from anywhere stops before the start, and reopens for
   await page.request.post('/api/setUserRole', { data: { uid: 'ann@x', role: 'viewer', user: 'ann@x', tables: { practices: 'r' } }, headers: ADMIN });
   await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
   await page.request.post('/api/saveLists', { data: { lists: { rsvp_status: ['coming', 'out'], attendance_status: ['pending', 'attended', 'absent'] } }, headers: ADMIN });
-  const at = (min) => new Date(Date.now() + min * 60000).toISOString();
+  // Noon today, fixed in the member's browser: "20 minutes from now" must stay TODAY, which it is not
+  // when the suite runs at 23:50 -- and the venue reopens only today's events.
+  const noon = new Date(); noon.setHours(12, 0, 0, 0);
+  const at = (min) => new Date(noon.getTime() + min * 60000).toISOString();
   await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'soon', date: at(20), title: 'Soon' } }, headers: ADMIN });
   await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'later', date: at(120), title: 'Later' } }, headers: ADMIN });
 
   const ctx = await browser.newContext();
   const p = await ctx.newPage();
+  await p.clock.setFixedTime(noon);
   await bootAs(p, 'ann@x');
   const row = (title) => p.locator('tr', { hasText: title });
   // From home: 20 minutes before is inside the window, so it says where to book; two hours is not.
