@@ -1146,6 +1146,42 @@ Every list in the app is narrowed to the gym the member picked once. dbUI has pe
 (the nav layout is one, kept in the browser), but none that filters views. A viewer-chosen value for one
 `@` token (`"gym": "@chosen"`) would do it, display-only like `@me`. **Medium; low priority.**
 
+#### 11. One scan button for the door and the class, and a door code that changes *(proposed 2026-10-14)*
+
+The app being mimicked has ONE key button: the camera opens, and the QR decides what happens (the gate
+opens, or the member is checked in to their classes). Here the two are separate: the door is a code box
+on the home page, the class is the phone's own camera on the front desk's QR, or a box on the booking
+page. Asked for: one button, large (on a phone, the floating corner button the grid's Add uses), the
+typing field only when the camera cannot read a code, and a door code that rotates like the class one.
+
+**a. A scan button that routes by the QR.** Every QR the app draws already carries
+`?view=<view>&scan=<code>`, so the QR knows where it goes. A floating button (phone: bottom right, the Add
+button's place and look; desktop: the app bar) opens the camera, decodes, and hands the link to the same
+`_pendingScanFromUrl` path the phone's camera uses -- same origin only, and only to a view the schema
+lists for it. Schema: `nav.scan: ["visit_scan", "class_booking"]`. In-app the person pointing the camera IS
+the intent, so it may save without the press a forwarded link needs (the existing deep-link comment says
+exactly this). **Small; UI only.**
+
+**b. The typing field as the fallback.** Decoding in the app needs the browser's `BarcodeDetector`:
+Android Chrome has it; iPhone Safari and desktop Chrome on Windows do not. Where it exists, the button is
+the camera and the field is one tap away ("Type the code"); where it does not, the button opens the field
+directly, and the phone's own camera app still works on the printed or shown QR, as today. Vendoring a
+JS QR decoder would bring the in-app camera to iPhones too; worth it only if the camera-app path is not
+good enough there. **Small; UI only.**
+
+**c. A door code that changes.** A printed code never changes, so anyone can photograph it and log visits
+from home. A changing one needs something AT the door to show it and to vouch for what was scanned --
+the server cannot, because, like the class code, the real code is stored nowhere. So: the class
+check-in's arrangement, generalised to a scan view. A tablet at the door, signed in as staff, shows a QR
+that rotates every few minutes and stamps (`verified`) the visits whose claimed code matches the current or
+previous one; members' visits are claims until then, and the stats count verified ones. Schema:
+`scan.rotate: { minutes, set: { verified: "yes" } }` with the same claim/verdict split `checkin` enforces
+(the verdict column not owner-writable). **Medium**: it lifts `rsvp-checkin`'s rotation and stamping
+into something both views use, rather than copying it. Without the tablet nothing is verified, which is
+the honest cost: the visits, and the gym streak, are worth exactly what the door can vouch for.
+
+Order: a and b together (one change to how scanning starts), then c.
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the
