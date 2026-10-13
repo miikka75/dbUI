@@ -88,13 +88,14 @@ const SEED = {
     ],
     hint: '?user=ann@dev (one duty column, logs her own chores) | ?user=local@dev (the parent, approves)'
   },
-  // Members book, check in and log through self-service (owner columns); the grant is read-only
+  // Members book, check in and log through self-service (owner columns), which needs no role: they are
+  // VIEWERS, since an editor may edit every page, the front page included. The grant is read-only
   // reference data. The front desk (local@dev) runs the schedule, memberships and PT requests.
   gym: {
     users: [
       { email: 'local@dev', role: 'admin',  tables: 'all' },
-      { email: 'aino@dev',  role: 'editor', tables: GYM_MEMBER },
-      { email: 'eero@dev',  role: 'editor', tables: GYM_MEMBER }
+      { email: 'aino@dev',  role: 'viewer', tables: GYM_MEMBER },
+      { email: 'eero@dev',  role: 'viewer', tables: GYM_MEMBER }
     ],
     profiles: [
       { email: 'local@dev', name: 'Front desk', shared: true },
