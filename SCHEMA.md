@@ -1338,7 +1338,8 @@ The events live in one table; responses in another that has an **`owner` column*
     "statusList": "rsvp_status",     // OPTIONAL — label translation namespace override (see below)
     "picker": "toggle",              // OPTIONAL — status control: "dropdown" (default) | "toggle" | "chips"
     "showCounts": true,              // OPTIONAL — show a per-event count of each response
-    "rosterVisibility": "all"        // OPTIONAL — who sees the participant roster (see below)
+    "rosterVisibility": "all",       // OPTIONAL — who sees the participant roster (see below)
+    "closeBefore": 30                 // OPTIONAL — minutes before the start when booking from anywhere stops (see below)
   }
 }
 ```
@@ -1380,6 +1381,18 @@ The events live in one table; responses in another that has an **`owner` column*
   any view: it opens that screen if the reader's nav reaches it, and otherwise the app opens as usual, so
   a link cannot show a screen the reader is not granted. A view kept out of `nav` therefore cannot be
   opened this way.
+
+### `closeBefore` — booking from home stops before the start
+
+With a **datetime** `dateColumn`, `closeBefore: 30` stops joining an event from anywhere 30 minutes before
+it starts; the row says *Book at the gym*. From then until the start it is open only to a member **at the
+venue**: one who opened the check-in link (`?view=…&scan=…`) or has already checked in today. Once it
+has started, nobody joins. Leaving is never closed. With `checkin.link: "submit"`, booking at the venue
+checks the member in to it at once.
+
+It is a screen rule, not a rule the server holds: the server cannot tell "at the venue" from a typed
+code, because the real code is stored nowhere (see `checkin`). What a member gains by going round it is
+a booking that was never checked in, and the organizer's list shows it as such.
 
 ### `checkin` — self check-in with a shared code
 
@@ -2081,7 +2094,8 @@ logs it going out. The code names the *thing*; the person comes from being signe
     "column": "chore",               // REQUIRED — a `ref` column; its lookup is the catalogue
     "codeCol": "code",               // OPTIONAL — the lookup column the code matches (default: its valueCol)
     "set": { "done_on": "@today" },  // OPTIONAL — the rest of the row
-    "once": "day"                    // OPTIONAL — "day" | "ever"; omitted, every scan appends
+    "once": "day",                   // OPTIONAL — "day" | "ever"; omitted, every scan appends
+    "label": "text.door_code"         // OPTIONAL — the box's label: a translation key, falling back to the literal
   }
 }
 ```

@@ -215,6 +215,7 @@
       "rsvp.your_response": "Your response",
       "rsvp.places_left": "Places left",
       "rsvp.full": "Full",
+      "rsvp.closed": "Book at the gym",
       "msg.capacity_full": "That one is full — your place was not taken.",
       "scan.already": "Already logged",
       "scan.ambiguous": "That code is on more than one row",

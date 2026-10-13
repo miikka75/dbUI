@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "6e3b48dfb7303891"
+      "hash": "9b2c031ea4f3bb24"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "1a2c3e74945738de"
+      "hash": "6e7c2ab6800df9cc"
     }
   ],
   "bundles": [
@@ -161,32 +161,32 @@
       "views": 32,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "b36e750332032c21"
+        "hash": "ff6363969ada8d00"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "gym-lang-en.json",
-          "hash": "ae24a90ae818ed6c"
+          "hash": "8536e15dbb3cd6bb"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "gym-lang-fi.json",
-          "hash": "ecd93a00801be7ea"
+          "hash": "ea478a89d8544943"
         }
       ],
       "data": {
         "file": "gym-data.json",
-        "hash": "476182bb93a2f96d"
+        "hash": "31e21861f121ac47"
       },
       "about": {
         "file": "gym-about.json",
-        "hash": "b7e5e0fc264374b2"
+        "hash": "4ee6847c8f4306da"
       },
       "notes": {
-        "1": "First release: book group classes and check in with a rotating code, log gym visits by scanning the door code, a workout and step log with weekly minutes and your top 3 exercises, a loyalty level and a reward shop paid in coins earned by visiting, buying a membership or a single visit, requesting a personal trainer, news and a library of workouts and multi-week programmes. The front desk gets attendance, membership, PT and reward boards."
+        "1": "First release: book group classes, with places left, a full class refused, and booking from home closing 30 minutes before the start (after that, at the gym); check in to classes by scanning the room code, and log gym visits by scanning the door code; a workout and step log with weekly counts and your top 3 exercises; coins earned by attending classes, spent in a reward shop; buying a membership or a single visit; requesting a personal trainer; news and a library of workouts and multi-week programmes. The front desk gets attendance, membership, PT and reward boards."
       }
     }
   ]

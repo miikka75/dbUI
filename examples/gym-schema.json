@@ -55,10 +55,6 @@
         {
           "name": "code",
           "type": "text"
-        },
-        {
-          "name": "coins_per_visit",
-          "type": "number"
         }
       ]
     },
@@ -158,6 +154,11 @@
         {
           "name": "booked",
           "type": "number"
+        },
+        {
+          "name": "coins",
+          "type": "number",
+          "default": 100
         }
       ]
     },
@@ -606,7 +607,8 @@
         "set": {
           "visited_on": "@today",
           "at": "@now"
-        }
+        },
+        "label": "text.door_code"
       }
     },
     {
@@ -633,7 +635,8 @@
           },
           "rotateMinutes": 5,
           "link": "submit"
-        }
+        },
+        "closeBefore": 30
       }
     },
     {
@@ -684,8 +687,7 @@
               "visited_on": {
                 "within": "@month"
               }
-            },
-            "goal": 12
+            }
           },
           {
             "label": "text.pulse_workouts_week",
@@ -694,8 +696,7 @@
               "done_on": {
                 "within": "@week"
               }
-            },
-            "goal": 10
+            }
           },
           {
             "label": "text.pulse_minutes_month",
@@ -705,8 +706,7 @@
               "done_on": {
                 "within": "@month"
               }
-            },
-            "display": "number"
+            }
           },
           {
             "label": "text.pulse_km_week",
@@ -716,10 +716,10 @@
               "done_on": {
                 "within": "@week"
               }
-            },
-            "display": "number"
+            }
           }
-        ]
+        ],
+        "display": "number"
       }
     },
     {
@@ -735,7 +735,6 @@
       },
       "readonly": true,
       "stats": {
-        "goal": "max",
         "tiles": [
           {
             "label": "text.week_0",
@@ -777,7 +776,8 @@
               }
             }
           }
-        ]
+        ],
+        "display": "number"
       }
     },
     {
@@ -802,8 +802,7 @@
               "day": {
                 "within": "@today"
               }
-            },
-            "goal": 10000
+            }
           },
           {
             "label": "text.steps_week_avg",
@@ -814,10 +813,10 @@
                 "within": "@week"
               }
             },
-            "goal": 10000,
             "decimals": 0
           }
-        ]
+        ],
+        "display": "number"
       }
     },
     {
@@ -854,8 +853,8 @@
           "label": "exercise",
           "value": "times"
         },
-        "goal": "max",
-        "limit": 3
+        "limit": 3,
+        "display": "number"
       }
     },
     {
@@ -1152,8 +1151,7 @@
       "columns": [
         "gym",
         "address",
-        "opening_hours",
-        "coins_per_visit"
+        "opening_hours"
       ]
     },
     {
@@ -1212,38 +1210,20 @@
       "kind": "stats",
       "icon": "mdi-medal",
       "sources": [
-        "visits"
+        "bookings"
       ],
       "mode": "union",
       "filter": {
-        "member": "@me"
+        "attendance": "attended"
       },
       "readonly": true,
       "includeArchive": true,
       "stats": {
+        "display": "number",
         "tiles": [
           {
-            "label": "text.level_visits_year",
-            "agg": "count",
-            "when": {
-              "visited_on": {
-                "within": "@year"
-              }
-            },
-            "goal": [
-              {
-                "at": 25,
-                "label": "text.tier_bronze"
-              },
-              {
-                "at": 75,
-                "label": "text.tier_silver"
-              },
-              {
-                "at": 150,
-                "label": "text.tier_gold"
-              }
-            ]
+            "label": "text.classes_attended",
+            "agg": "count"
           }
         ]
       }
@@ -1253,26 +1233,20 @@
       "kind": "stats",
       "icon": "mdi-hand-coin",
       "sources": [
-        "visits",
+        "bookings",
         "reward_claims"
       ],
       "mode": "union",
-      "groupBy": {
-        "column": "member",
-        "from": [
-          "member"
-        ]
-      },
       "compute": [
         {
           "name": "delta",
-          "source": "visits",
+          "source": "bookings",
           "computed": {
             "lookup": {
-              "table": "ref_gyms",
-              "match": "gym",
-              "on": "gym",
-              "field": "coins_per_visit",
+              "table": "classes",
+              "match": "class",
+              "on": "id",
+              "field": "coins",
               "default": 0
             }
           }
@@ -1292,23 +1266,15 @@
           }
         }
       ],
-      "aggregate": {
-        "sum": "delta",
-        "into": "coins"
-      },
-      "columns": [
-        "member",
-        "coins"
-      ],
       "filter": {
-        "$and": [
+        "$or": [
           {
-            "member": "@me"
+            "attendance": "attended"
           },
           {
-            "$or": [
+            "$and": [
               {
-                "visited_on": {
+                "claim_status": {
                   "notEmpty": true
                 }
               },
@@ -1325,10 +1291,13 @@
       "includeArchive": true,
       "stats": {
         "display": "number",
-        "rowTiles": {
-          "label": "member",
-          "value": "coins"
-        }
+        "tiles": [
+          {
+            "label": "text.loyalty_coins",
+            "agg": "sum",
+            "column": "delta"
+          }
+        ]
       }
     },
     {

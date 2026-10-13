@@ -215,6 +215,7 @@
       "rsvp.your_response": "Vastauksesi",
       "rsvp.places_left": "Paikkoja jäljellä",
       "rsvp.full": "Täynnä",
+      "rsvp.closed": "Varaa salilla",
       "msg.capacity_full": "Täynnä — paikkaa ei varattu.",
       "scan.already": "Kirjattu jo",
       "scan.ambiguous": "Koodi on usealla rivillä",

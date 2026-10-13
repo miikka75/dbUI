@@ -560,6 +560,14 @@ function validateSchema() {
         for (var rc in rcols) { var rd = rcols[rc]; if (rd && typeof rd === 'object' && rd.type === 'ref' && rd.table === rvp.events) { hasLink = true; break; } }
         if (!hasLink) errors.push('rsvp "' + v + '": responses table "' + rvp.responses + '" needs a `ref` column pointing at the events table "' + rvp.events + '" (it is the response↔event link — replaces linkColumn/eventKey)');
       }
+      // `closeBefore`: minutes before the start when booking from anywhere stops. It needs a start TIME to
+      // count back from, so a plain date column would make it close at midnight, which nobody means.
+      if (rvp.closeBefore !== undefined) {
+        var cbd = SCHEMA[rvp.events] && (SCHEMA[rvp.events].columns || {})[rvp.dateColumn];
+        var cbt = (typeof cbd === 'string') ? cbd : (cbd && cbd.type);
+        if (!(typeof rvp.closeBefore === 'number' && rvp.closeBefore >= 0)) errors.push('rsvp "' + v + '": `closeBefore` must be a number of minutes');
+        else if (cbt !== 'datetime') errors.push('rsvp "' + v + '": `closeBefore` needs `dateColumn` to be a datetime column — it counts back from the start time');
+      }
       // Self check-in: the member's claim must be writable by them, and the verdict must NOT be -- a
       // verdict column in ownerWritable lets every member mark themselves present, and the arrangement
       // is worth nothing.

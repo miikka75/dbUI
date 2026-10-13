@@ -441,3 +441,45 @@ test('Lookup is offered to whoever can change something in it, not to a member w
   await bootAs(page, 'org@x');
   expect(await page.evaluate(() => appInstance.sidebarTabs.some((t) => t.id === '__lookup'))).toBe(true);
 });
+
+test('closeBefore: booking from anywhere stops before the start, and reopens for a member at the venue', async ({ page, browser }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns[0] = { name: 'date', type: 'datetime' };
+  schema.tables.rsvps.columns.push({ name: 'checkin_code', type: 'text' });
+  schema.tables.rsvps.ownerWritable.push('checkin_code');
+  Object.assign(schema.views[0].rsvp, { closeBefore: 30, checkin: { codeColumn: 'checkin_code', set: { attendance: 'attended' }, link: 'submit' } });
+  await page.request.post('/api/resetData');
+  await page.request.post('/api/setUserRole', { data: { uid: 'org@x', role: 'admin', user: 'org@x', tables: 'all' } });
+  await page.request.post('/api/setUserRole', { data: { uid: 'ann@x', role: 'viewer', user: 'ann@x', tables: { practices: 'r' } }, headers: ADMIN });
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/saveLists', { data: { lists: { rsvp_status: ['coming', 'out'], attendance_status: ['pending', 'attended', 'absent'] } }, headers: ADMIN });
+  const at = (min) => new Date(Date.now() + min * 60000).toISOString();
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'soon', date: at(20), title: 'Soon' } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'later', date: at(120), title: 'Later' } }, headers: ADMIN });
+
+  const ctx = await browser.newContext();
+  const p = await ctx.newPage();
+  await bootAs(p, 'ann@x');
+  const row = (title) => p.locator('tr', { hasText: title });
+  // From home: 20 minutes before is inside the window, so it says where to book; two hours is not.
+  await expect(row('Soon').locator('[data-testid="rsvp-places"]')).toHaveText('rsvp.closed');
+  await expect(row('Soon').locator('button', { hasText: 'coming' })).toBeDisabled();
+  await expect(row('Later').locator('button', { hasText: 'coming' })).toBeEnabled();
+
+  // At the gym: the venue's link reopens today's closing event, and booking it checks her in.
+  const link = new URL(await p.evaluate(() => appInstance.scanDeepLink('my_rsvp', 'heron')));
+  await p.goto('/' + link.search);
+  await p.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+  await expect(row('Soon').locator('button', { hasText: 'coming' })).toBeEnabled();
+  await row('Soon').locator('button', { hasText: 'coming' }).click();
+  const stored = async () => ((await (await page.request.post('/api/getTableData', { data: { tableId: 'rsvps', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => [r.practice, r.checkin_code || '']);
+  await expect.poll(stored).toEqual([['soon', 'heron']]);
+  await ctx.close();
+});
+
+test('validateSchema: closeBefore needs a datetime dateColumn', async ({ page }) => {
+  await setup(page);
+  await bootAs(page, 'org@x');
+  const err = await page.evaluate(() => { VIEWS.my_rsvp.rsvp.closeBefore = 30; const e = validateSchema().join(' | '); delete VIEWS.my_rsvp.rsvp.closeBefore; return e; });
+  expect(err).toContain('`closeBefore` needs `dateColumn` to be a datetime column');
+});

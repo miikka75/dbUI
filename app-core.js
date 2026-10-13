@@ -1111,7 +1111,7 @@ function createVueApp() {
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'cal.today', 'btn.reset',
          'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
-         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none', 'rsvp.checkin_code', 'rsvp.checkin', 'rsvp.show_code', 'rsvp.page_qr', 'rsvp.places_left', 'rsvp.full', 'msg.capacity_full', 'msg.checked_in',
+         'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none', 'rsvp.checkin_code', 'rsvp.checkin', 'rsvp.show_code', 'rsvp.page_qr', 'rsvp.places_left', 'rsvp.full', 'rsvp.closed', 'msg.capacity_full', 'msg.checked_in',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.share_name', 'profile.picture',
          'period.this_week', 'period.weeks_ago', 'period.current',
@@ -9389,9 +9389,9 @@ function createVueApp() {
       +   '<input type="file" accept="image/*" capture="environment" ref="photo" style="display:none" data-testid="scan-photo" @change="onPhoto($event)">'
       +   '<v-btn block variant="tonal" color="primary" prepend-icon="mdi-camera" class="mb-3" :loading="reading" data-testid="scan-camera" @click="$refs.photo.click()">{{ a.t(\'scan.camera\') }}</v-btn>'
       + '</template>'
-      + '<v-text-field ref="box" v-model="code" :label="a.t(\'scan.code\')" density="compact" variant="outlined" hide-details autofocus autocomplete="off" data-testid="scan-code" @keydown.enter="submit()">'
+      + '<v-text-field ref="box" v-model="code" :label="a.tOr(cfg.label, a.t(\'scan.code\'))" density="compact" variant="outlined" hide-details autofocus autocomplete="off" data-testid="scan-code" @keydown.enter="submit()">'
       +   '<template v-slot:append-inner>'
-      +     '<v-btn size="small" icon="mdi-barcode-scan" :disabled="!code.trim()" :color="armed ? \'primary\' : undefined" :variant="armed ? \'tonal\' : \'text\'" :title="a.t(\'scan.code\')" @click="submit()" data-testid="scan-submit"></v-btn>'
+      +     '<v-btn size="small" icon="mdi-barcode-scan" :disabled="!code.trim()" :color="armed ? \'primary\' : undefined" :variant="armed ? \'tonal\' : \'text\'" :title="a.tOr(cfg.label, a.t(\'scan.code\'))" @click="submit()" data-testid="scan-submit"></v-btn>'
       +   '</template>'
       + '</v-text-field>'
       + '<v-alert v-if="last" :type="tone" density="compact" variant="tonal" class="mt-3" data-testid="scan-outcome" :data-outcome="last.outcome">'
@@ -9666,7 +9666,8 @@ function createVueApp() {
     },
     watch: {
       qrOpen: function(open) { if (!this.rotateMinutes) return; if (open) this.start(); else this.stop(); },
-      frozen: function(f) { if (!f) this.autoClaimNow(); }
+      frozen: function(f) { if (!f) this.autoClaimNow(); },
+      mine: function() { this.autoClaimNow(); }
     },
     // For a member this renders once their own responses for today are known (rsvp-view's checkinShown),
     // so the wait the scan view's auto-submit does for itself is already done. With nothing booked today
@@ -9703,7 +9704,13 @@ function createVueApp() {
         this.rotatedAt = Date.now();
       },
       autoStamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.accepted, true); },
-      autoClaimNow: function() { if (this.autoClaim && this.armed && !this.canStamp && !this.frozen) this.claim(this.armed); },
+      // The code is the one the link brought, or -- once claimed -- the one already on today's rows. Only
+      // written while some open event of today lacks it, so it never re-saves an unchanged code.
+      autoClaimNow: function() {
+        var self = this, code = this.armed || this.myCode;
+        if (!this.autoClaim || !code || this.canStamp || this.frozen) return;
+        if (this.mine.some(function(e) { return !appInstance.rsvpFrozen(self.viewName, e.key) && e.myCode !== code; })) this.claim(code);
+      },
       claim: function(value) { appInstance.setRsvpCode(this.viewName, value); this.$emit('claimed'); }
     },
     template: ''
@@ -9729,7 +9736,10 @@ function createVueApp() {
     // currentData, so the root sortCol/sortAsc the data grid uses would sort a list nobody displays.
     // null = the engine's own order (chronological, upcoming first) -- the view's natural default.
     // `pageQr`: the organizer's "QR code for this page" dialog, for a tablet or a printout at the venue.
-    data: function() { return { sortCol: null, sortAsc: true, pageQr: false }; },
+    // `now`: ticks every 30 s, so an event closes on screen when its booking window does.
+    data: function() { return { sortCol: null, sortAsc: true, pageQr: false, now: Date.now(), clock: null }; },
+    mounted: function() { var self = this; if (this.cfg.closeBefore !== undefined) this.clock = setInterval(function() { self.now = Date.now(); }, 30000); },
+    beforeUnmount: function() { if (this.clock) clearInterval(this.clock); },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
@@ -9748,6 +9758,9 @@ function createVueApp() {
       },
       // A member who scanned the venue's code with nothing booked today: the list narrows to today's
       // events so they can pick one there and then, and booking it carries the code on (rsvp-checkin).
+      // At the venue: arrived by the venue's check-in link, or already checked in today. Being here is
+      // what reopens today's events after `closeBefore`.
+      onSite: function() { return !!this.armed || this.todayMine.some(function(e) { return !!e.myCode; }); },
       pickToday: function() {
         if (!this.cfg.checkin || !this.armed || this.canStamp || this.todayMine.length) return false;
         return ((this.data && this.data.events) || []).some(function(e) { return e.isToday; });
@@ -9787,8 +9800,22 @@ function createVueApp() {
       claimed: function() { appInstance.pendingScan = null; },
       // Frozen (attendance verified), or full and not mine to keep: a full class cannot be joined, but a
       // member holding a place in it can still give it up.
-      locked: function(ev) { return appInstance.rsvpFrozen(this.viewName, ev.key) || (ev.full && !ev.myHolds); },
-      placesText: function(ev) { return ev.full ? this.a.t('rsvp.full') : this.a.t('rsvp.places_left') + ': ' + Math.max(0, ev.capacity - ev.booked); },
+      locked: function(ev) { return appInstance.rsvpFrozen(this.viewName, ev.key) || (!ev.myHolds && (ev.full || this.closed(ev))); },
+      // `closeBefore` minutes before the start, joining from anywhere stops; from then until the start it
+      // is open only to a member at the venue, and once the event has started, to nobody. Leaving is never
+      // closed. A date with no time has no start to count back from (validateSchema says so).
+      closed: function(ev) {
+        var mins = this.cfg.closeBefore, st = String(ev.date || '').length > 10 ? Date.parse(ev.date) : NaN;
+        if (mins === undefined || isNaN(st)) return false;
+        if (this.now >= st) return true;
+        if (this.now < st - mins * 60000) return false;
+        return !(this.onSite && ev.isToday);
+      },
+      placesText: function(ev) {
+        if (!ev.myHolds && this.closed(ev)) return this.a.t('rsvp.closed');
+        return ev.full ? this.a.t('rsvp.full') : this.a.t('rsvp.places_left') + ': ' + Math.max(0, ev.capacity - ev.booked);
+      },
+      placesShown: function(ev) { return ev.capacity !== null || (!ev.myHolds && this.closed(ev)); },
       toDateStr: toDateStr,
       // Translated label for a status VALUE, keyed by `list.<statusList||statusColumn>.<value>` (falls back
       // to the raw value). `statusList` lets the view name a translation namespace distinct from the column
@@ -9835,7 +9862,7 @@ function createVueApp() {
       + '<tbody>'
       + '<tr v-for="ev in events" :key="ev.id">'
       + '<td style="white-space:nowrap">{{ a.dateTimeLabel(ev.date) }}</td>'
-      + '<td>{{ ev.title }}<div v-if="ev.capacity !== null" style="font-size:0.8rem;opacity:0.7" data-testid="rsvp-places">{{ placesText(ev) }}</div></td>'
+      + '<td>{{ ev.title }}<div v-if="placesShown(ev)" style="font-size:0.8rem;opacity:0.7" data-testid="rsvp-places">{{ placesText(ev) }}</div></td>'
       + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
       + '</td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
@@ -9847,7 +9874,7 @@ function createVueApp() {
       + '<div v-else class="pa-1">'
       + '<v-card v-for="ev in events" :key="ev.id" variant="tonal" class="mb-2 pa-3">'
       + '<div>{{ a.dateTimeLabel(ev.date) }}</div>'
-      + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}<div v-if="ev.capacity !== null" style="font-size:0.8rem" data-testid="rsvp-places">{{ placesText(ev) }}</div></div>'
+      + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}<div v-if="placesShown(ev)" style="font-size:0.8rem" data-testid="rsvp-places">{{ placesText(ev) }}</div></div>'
       + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
       + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></div>'
