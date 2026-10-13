@@ -103,6 +103,16 @@
   // indistinguishable from a scan that did not register, and that is how someone stops trusting it.
   function plan(code, opts) {
     opts = opts || {};
+    // VERIFIED mode (`scan.verify`): the code is a changing one, shown by a screen at the door and stored
+    // nowhere, so there is no catalogue to check it against here. It is saved as the member's CLAIM; the
+    // door's screen confirms it (verifyTargets) and fills in which catalogue row it stands at.
+    if (opts.verify) {
+      var claim = String(code == null ? '' : code).trim();
+      if (!claim) return { outcome: 'unknown', code: claim };
+      var pre = resolveSet(opts.set, opts);
+      pre[opts.verify.claim] = claim;
+      return { outcome: 'claimed', code: claim, prefill: pre };
+    }
     var valueCol = opts.valueCol || 'id';
     var found = matches(opts.catalog, code, opts.codeCol || valueCol);
     var typed = String(code == null ? '' : code).trim();
@@ -153,6 +163,25 @@
     if (origin && u.origin !== origin) return null;
     var code = u.searchParams.get('scan');
     return code ? { view: u.searchParams.get('view') || null, code: code } : null;
+  }
+
+  // The door screen's half of VERIFIED mode: today's claims carrying an accepted code (the current one,
+  // or the one before it) that are not yet confirmed. `day` is the local date; a row's day is when it
+  // was CREATED, so yesterday's claim on a code that happens to repeat is never confirmed today. Codes
+  // compare without case or surrounding space, as a typed one would be.
+  function verifyTargets(rows, opts) {
+    var norm = function (v) { return String(v == null ? '' : v).trim().toUpperCase(); };
+    var want = (opts.codes || []).map(norm).filter(Boolean), set = opts.set || {}, cols = Object.keys(set);
+    if (!want.length || !cols.length) return [];
+    return (rows || []).filter(function (r) {
+      if (!r || want.indexOf(norm(r[opts.claim])) < 0) return false;
+      if (opts.day && localDay(r.created_at) !== opts.day) return false;
+      return !cols.every(function (c) { return String(r[c] == null ? '' : r[c]) === String(set[c]); });
+    });
+  }
+  function localDay(v) {
+    var d = v ? new Date(v) : null; if (!d || isNaN(d.getTime())) return '';
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
 
   // ---- Code 39, the symbology the printed sheet uses ---------------------------------------------
@@ -293,15 +322,31 @@
       if (!Cols().tableOwnerCol(schema, table)) errors.push(at + 'table "' + table + '" has no `owner` column, so a scanned row would belong to nobody and the self-service write layers will refuse it');
       var ow = schema[table].ownerWritable;
       if (Array.isArray(ow)) {
-        [sc.column].concat(Object.keys(set)).forEach(function (col) {
+        // Verified mode: the member writes the claim, not the scanned column -- the door fills that in.
+        var written = sc.verify ? [sc.verify.claim] : [sc.column];
+        written.concat(Object.keys(set)).forEach(function (col) {
           if (col && defs[col] && ow.indexOf(col) < 0) errors.push(at + '"' + col + '" is written by the scan but missing from "' + table + '".ownerWritable, so the write layers would refuse the row');
         });
       }
     }
+    // `verify`: the claim is the member's, the verdict -- and which door -- the door screen's. Either in
+    // ownerWritable would let a member confirm themselves, and the arrangement would be worth nothing.
+    if (sc.verify !== undefined) {
+      var vf = sc.verify, vset = vf && vf.set, vow = schema[table] && schema[table].ownerWritable;
+      if (!vf || typeof vf !== 'object' || !vf.claim) errors.push(at + '`verify` needs `claim` -- the column a member\'s scanned code is saved into');
+      else if (schema[table] && !defs[vf.claim]) errors.push(at + '`verify.claim` "' + vf.claim + '" is not a column of "' + table + '"');
+      if (!vset || typeof vset !== 'object' || Array.isArray(vset) || !Object.keys(vset).length) errors.push(at + '`verify` needs `set` -- what confirming writes, e.g. { "verified": "yes" }');
+      else if (!Array.isArray(vow)) errors.push(at + '"' + table + '" declares no ownerWritable, so a member could confirm their own visit');
+      else Object.keys(vset).concat([sc.column]).forEach(function (c) {
+        if (c && vow.indexOf(c) >= 0) errors.push(at + '"' + c + '" is in ownerWritable, so a member could write what only the door screen may');
+      });
+      if (vf && vf.rotateMinutes !== undefined && !(typeof vf.rotateMinutes === 'number' && vf.rotateMinutes > 0)) errors.push(at + '`verify.rotateMinutes` must be a positive number of minutes');
+      if (sc.once !== undefined) errors.push(at + '`once` compares scanned codes, and in `verify` mode every code is a fresh one -- drop it');
+    }
     return errors;
   }
 
-  var M = { plan: plan, matches: matches, resolveSet: resolveSet, priorScan: priorScan, configErrors: configErrors,
+  var M = { plan: plan, verifyTargets: verifyTargets, matches: matches, resolveSet: resolveSet, priorScan: priorScan, configErrors: configErrors,
             code39: code39, C39: C39, codeFrom: codeFrom, targetFrom: targetFrom, viewsForCatalog: viewsForCatalog, TOKENS: TOKENS };
   if (isNode) module.exports = M;
   else root.Scan = M;

@@ -222,6 +222,8 @@
       "scan.camera": "Scan with the camera",
       "scan.camera_failed": "Could not read that picture",
       "scan.code": "Code",
+      "scan.claimed": "Checked in",
+      "scan.door": "This screen is at",
       "scan.press": "Scan a code",
       "scan.foreign": "That code is not one of ours.",
       "scan.created": "Logged",

@@ -30,7 +30,8 @@
     "ref_plans",
     "coach_format",
     "claim_status",
-    "ref_rewards"
+    "ref_rewards",
+    "visit_check"
   ],
   "listSources": {
     "members": "userlink"
@@ -239,13 +240,23 @@
           "name": "at",
           "type": "text",
           "hidden": true
+        },
+        {
+          "name": "door_code",
+          "type": "text",
+          "hidden": true
+        },
+        {
+          "name": "verified",
+          "type": "select",
+          "list": "visit_check"
         }
       ],
       "ownerWritable": [
         "member",
-        "gym",
         "visited_on",
-        "at"
+        "at",
+        "door_code"
       ]
     },
     "workouts": {
@@ -599,7 +610,8 @@
       },
       "columns": [
         "visited_on",
-        "gym"
+        "gym",
+        "verified"
       ],
       "scan": {
         "column": "gym",
@@ -608,7 +620,14 @@
           "visited_on": "@today",
           "at": "@now"
         },
-        "label": "text.door_code"
+        "label": "text.door_code",
+        "verify": {
+          "claim": "door_code",
+          "set": {
+            "verified": "yes"
+          },
+          "rotateMinutes": 5
+        }
       }
     },
     {
@@ -702,7 +721,10 @@
                 "at": 26,
                 "icon": "mdi-crown"
               }
-            ]
+            ],
+            "when": {
+              "verified": "yes"
+            }
           },
           {
             "label": "text.pulse_visits_month",
@@ -710,7 +732,8 @@
             "when": {
               "visited_on": {
                 "within": "@month"
-              }
+              },
+              "verified": "yes"
             }
           },
           {
@@ -925,7 +948,8 @@
       },
       "columns": [
         "visited_on",
-        "gym"
+        "gym",
+        "verified"
       ]
     },
     {

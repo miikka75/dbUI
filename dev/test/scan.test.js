@@ -334,3 +334,31 @@ describe('scan.js — which catalogue is scannable', () => {
     assert.deepEqual(Scan.viewsForCatalog(schema, views, 'nope'), []);
   });
 });
+
+describe('scan.js — the scan button and the door that changes its code', () => {
+  const S = require('../../scan');
+  const origin = 'http://127.0.0.1:3000';
+  it('targetFrom: a link of ours names its view; a bare code names none; another site is refused', () => {
+    assert.deepEqual(S.targetFrom(origin + '/?view=book&scan=K7PQM', origin), { view: 'book', code: 'K7PQM' });
+    assert.deepEqual(S.targetFrom(' FRONT-1 ', origin), { view: null, code: 'FRONT-1' });
+    assert.equal(S.targetFrom('https://elsewhere.example/?view=book&scan=x', origin), null);
+    assert.equal(S.targetFrom(origin + '/?view=book', origin), null);
+  });
+  it('plan in verify mode: any code is saved as the claim, with no catalogue to check it against', () => {
+    const r = S.plan(' k7pqm ', { verify: { claim: 'door_code' }, set: { seen_on: '@today' }, today: '2026-10-14', now: 'x' });
+    assert.equal(r.outcome, 'claimed');
+    assert.deepEqual(r.prefill, { seen_on: '2026-10-14', door_code: 'k7pqm' });
+    assert.equal(S.plan('  ', { verify: { claim: 'door_code' } }).outcome, 'unknown');
+  });
+  it('verifyTargets: today\'s unconfirmed claims on an accepted code, ignoring case', () => {
+    const now = new Date(), iso = now.toISOString();
+    const day = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+    const rows = [
+      { id: 'a', door_code: 'k7pqm', created_at: iso },
+      { id: 'old', door_code: 'K7PQM', created_at: '2020-01-01T10:00:00Z' },
+      { id: 'other', door_code: 'ZZZZZ', created_at: iso },
+      { id: 'done', door_code: 'K7PQM', created_at: iso, verified: 'yes' }
+    ];
+    assert.deepEqual(S.verifyTargets(rows, { codes: ['K7PQM', ''], claim: 'door_code', set: { verified: 'yes' }, day }).map((r) => r.id), ['a']);
+  });
+});

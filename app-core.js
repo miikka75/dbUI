@@ -1103,7 +1103,7 @@ function createVueApp() {
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
          'msg.ref_has_children',
          'pivot.total', 'stats.empty',
-         'scan.code', 'scan.press', 'scan.foreign', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
+         'scan.code', 'scan.press', 'scan.foreign', 'scan.claimed', 'scan.door', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
          'scan.print_codes', 'scan.print_code', 'scan.no_barcode',
          'scan.camera', 'scan.no_code_found', 'scan.several_codes', 'scan.camera_failed',
          'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.archive', 'board.confirm_archive',
@@ -2786,11 +2786,11 @@ function createVueApp() {
           catalog: this.dataCache[ref.table] || [],
           rows: this.dataCache[table] || [],
           column: cfg.column, codeCol: cfg.codeCol, valueCol: ref.valueCol,
-          set: cfg.set, once: cfg.once || '',
+          set: cfg.set, once: cfg.once || '', verify: cfg.verify || null,
           me: me, ownerCol: getOwnerCol(table) || 'owner',
           today: fmtDate(now), now: now.toISOString()
         });
-        if (res.outcome === 'created') {
+        if (res.outcome === 'created' || res.outcome === 'claimed') {
           var row = this._createBlankRow(table, { prefill: res.prefill });
           // currentData is DERIVED, not aliased to dataCache, so a pushed row does not appear by
           // itself -- the same reason addRow pushes explicitly. Only when this view is the one on
@@ -2914,6 +2914,35 @@ function createVueApp() {
         });
         this.notify(this.t('msg.checked_in') + ' (' + rows.length + ')');
         return rows.length;
+      },
+      // The door screen of a `verify` scan view: confirm today's claims on an accepted code, and record
+      // WHICH door -- the catalogue row the screen was set to -- since a changing code names no door. One
+      // undo entry however many rows, written the way stampRsvpCheckin writes. `quiet`: the open QR
+      // stamping by itself, which says nothing when nobody matched.
+      stampScanVerify: function(name, codes, at, quiet) {
+        var v = VIEWS[name], cfg = v && v.scan, vf = cfg && cfg.verify;
+        if (!vf || !this.scanCanVerify(name)) return 0;
+        var table = (v.sources || [])[0], now = new Date();
+        var set = Object.assign({}, vf.set); if (at) set[cfg.column] = at;
+        var rows = Scan.verifyTargets(Rows.partitionRows(this.dataCache, table, 'active'), { codes: codes, claim: vf.claim, set: set, day: fmtDate(now) });
+        if (quiet && !rows.length) return 0;
+        var stamp = now.toISOString();
+        Undo.action('checkin', function() {
+          rows.forEach(function(r) {
+            var fwd = { id: r.id }, inv = { id: r.id };
+            Object.keys(set).forEach(function(c) { fwd[c] = set[c]; inv[c] = r[c] == null ? '' : r[c]; r[c] = set[c]; });
+            r.updated_at = stamp;
+            Undo.record({ table: table, part: 'active', forward: { type: 'put', id: r.id, row: fwd }, inverse: { type: 'put', id: r.id, row: inv } });
+            Writes.putRow(table, Object.assign({ updated_at: stamp }, fwd), 'active');
+          });
+        });
+        if (rows.length) this.notify(this.t('msg.checked_in') + ' (' + rows.length + ')');
+        return rows.length;
+      },
+      // Who may run a door screen: whoever writes the scan's table outright (a grant, not self-service).
+      scanCanVerify: function(name) {
+        var v = VIEWS[name], table = v && (v.sources || [])[0], w = this.userWritableTables;
+        return !!(v && v.scan && v.scan.verify && table && (!w || w.indexOf(table) >= 0));
       },
       // The `form` view: one focused record the member fills in properly, rather than a cell edited in
       // a grid. Everything underneath is the self-service machinery rsvp already uses -- an owner-stamped
@@ -9296,6 +9325,44 @@ function createVueApp() {
   //
   // Every outcome is shown, none is swallowed. A scan that quietly does nothing looks exactly like a
   // scan that never registered, and that is how somebody standing at a door at 3am stops trusting it.
+  // A CODE THAT CHANGES BY ITSELF, shown as a QR on a staff screen, which confirms whoever claimed it.
+  // Shared by class check-in (rsvp-checkin) and the door (scan-view's `verify`): both are "a member
+  // saves the code they were shown, and the screen showing it vouches for the claims that match".
+  // The component supplies `rotateMinutes` and `autoStamp()`, and opens `qrOpen`.
+  //
+  // While the QR is open: stamp every 15 s, and change the code every `rotateMinutes`, stamping once
+  // more first so a claim on the code about to drop out still counts. The current and previous codes
+  // are accepted, so a code lives between one and two periods, and a scan as it changes still counts.
+  // None of it is stored anywhere: being shown the code is what a claim proves.
+  var ROTATING_CODE = {
+    data: function() { return { qrOpen: false, current: '', previous: '', rotatedAt: 0, timer: null, lock: null }; },
+    watch: { qrOpen: function(open) { if (!this.rotateMinutes) return; if (open) this.start(); else this.stop(); } },
+    beforeUnmount: function() { this.stop(); },
+    methods: {
+      start: function() {
+        if (!this.current) this.rotate();
+        if (!this.timer) this.timer = setInterval(this.tick, 15000);
+        var self = this;
+        // Keeps a tablet's screen on while it shows the code. Not everywhere, and refused when hidden.
+        try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function(l) { self.lock = l; }, function() {}); } catch (e) {}
+      },
+      stop: function() {
+        if (this.timer) { clearInterval(this.timer); this.timer = null; this.autoStamp(); }
+        if (this.lock) { try { this.lock.release(); } catch (e) {} this.lock = null; }
+      },
+      tick: function() {
+        this.autoStamp();
+        if (Date.now() - this.rotatedAt >= this.rotateMinutes * 60000) this.rotate();
+      },
+      rotate: function() {
+        var ints = new Uint32Array(5);
+        crypto.getRandomValues(ints);
+        this.previous = this.current;
+        this.current = Rsvp.checkinCode(ints);
+        this.rotatedAt = Date.now();
+      }
+    }
+  };
   // A photo -> the one code in it, with the browser's own decoder. Both symbologies the app prints: the
   // sheet's Code 39 and a QR carrying the `?scan=` link. Several codes in one picture is a framing
   // problem, and choosing one would log a door nobody aimed at. Resolves { raw } or { outcome }.
@@ -9310,8 +9377,9 @@ function createVueApp() {
       }, function() { return { outcome: 'camera_failed' }; });
   }
   app.component('scan-view', {
+    mixins: [ROTATING_CODE],
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
-    data: function() { return { code: '', last: null, armed: false, reading: false, autoSubmit: false }; },
+    data: function() { return { code: '', last: null, armed: false, reading: false, autoSubmit: false, door: '' }; },
     // A `?scan=` deep link hands its code to the view it names. Taken once -- after that the box is
     // the person's, and `armed` is what makes "something is waiting for you to press" visible.
     //
@@ -9330,6 +9398,16 @@ function createVueApp() {
       viewName: function() { return this.name || appInstance.currentTable; },
       cfg: function() { return (VIEWS[this.viewName] || {}).scan || {}; },
       pending: function() { return appInstance.pendingScan; },
+      // The DOOR SCREEN (`verify`, staff only): which door it stands at, and the changing code it shows.
+      doorScreen: function() { return !this.embed && appInstance.scanCanVerify(this.viewName); },
+      rotateMinutes: function() { var vf = this.cfg.verify; return vf ? (vf.rotateMinutes || 5) : 0; },
+      doors: function() {
+        var ref = getColumnRef((VIEWS[this.viewName].sources || [])[0], this.cfg.column) || {};
+        var vc = ref.valueCol || 'id';
+        return (appInstance.dataCache[ref.table] || []).map(function(r) { return r[vc]; }).filter(function(x) { return x != null && x !== ''; });
+      },
+      accepted: function() { return [this.current, this.previous]; },
+      qrLink: function() { return appInstance.scanDeepLink(this.viewName, this.current); },
       // The browser's own barcode decoder, or nothing. `BarcodeDetector` is native where it exists and
       // absent on iOS Safari, Firefox and desktop Chrome on Windows -- so the camera is an ENHANCEMENT
       // and the typed box stays the interface everywhere. No button appears rather than a button that
@@ -9358,7 +9436,7 @@ function createVueApp() {
       // printed twice, or a code already logged.
       tone: function() {
         var o = this.last && this.last.outcome;
-        return o === 'created' ? 'success' : o === 'already' ? 'warning' : 'error';
+        return (o === 'created' || o === 'claimed') ? 'success' : o === 'already' ? 'warning' : 'error';
       },
       // Same split as statsFor, and for the same reason: top-level renders the rows loadTableData just
       // built (which carry the period offset), an embed renders its own rows, because currentData
@@ -9413,6 +9491,7 @@ function createVueApp() {
           self.submit();
         });
       },
+      autoStamp: function() { appInstance.stampScanVerify(this.viewName, this.accepted, this.door, true); },
       takePending: function() {
         var p = appInstance.pendingScan;
         if (!p || p.view !== this.viewName) return;
@@ -9441,6 +9520,12 @@ function createVueApp() {
     }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'pa-4\'" data-testid="scan-view">'
+      // The door screen: pick the door, show its changing code. Staff only, and never embedded.
+      + '<div v-if="doorScreen" class="d-flex align-center mb-3" style="gap:8px" data-testid="scan-door-screen">'
+      +   '<v-select v-model="door" :items="doors" :label="a.t(\'scan.door\')" density="compact" variant="outlined" hide-details style="max-width:260px" data-testid="scan-door"></v-select>'
+      +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :disabled="!door" :title="a.t(\'rsvp.show_code\')" :aria-label="a.t(\'rsvp.show_code\')" data-testid="scan-door-qr" @click="qrOpen = true"></v-btn>'
+      +   '<qr-dialog v-model="qrOpen" :link="qrLink" :caption="current" mono></qr-dialog>'
+      + '</div>'
       + '<template v-if="cameraOk">'
       +   '<input type="file" accept="image/*" capture="environment" ref="photo" style="display:none" data-testid="scan-photo" @change="onPhoto($event)">'
       +   '<v-btn block variant="tonal" color="primary" prepend-icon="mdi-camera" class="mb-3" :loading="reading" data-testid="scan-camera" @click="$refs.photo.click()">{{ a.t(\'scan.camera\') }}</v-btn>'
@@ -9696,13 +9781,14 @@ function createVueApp() {
   // (or is handed, by that QR) the code they were shown, which lands on each event they reserved today.
   // `mine`: the member's reserved events today.
   app.component('rsvp-checkin', {
+    mixins: [ROTATING_CODE],
     // `rotateMinutes`: the view's `checkin.rotateMinutes` -- the code changes by itself while the QR is open.
     // `autoClaim`: `checkin.link: "submit"` -- a code that arrives by link is saved with no press.
     props: { viewName: String, mine: { type: Array, default: function() { return []; } }, canStamp: Boolean, armed: { type: String, default: '' }, rotateMinutes: { type: Number, default: 0 }, autoClaim: Boolean },
     emits: ['claimed'],
     // `code`: what the organizer typed. `current`/`previous`/`rotatedAt`: the rotating code and the one
     // before it, which is still accepted. None of it is stored anywhere.
-    data: function() { return { code: '', qrOpen: false, current: '', previous: '', rotatedAt: 0, timer: null, lock: null }; },
+    data: function() { return { code: '' }; },
     computed: {
       a: function() { return appInstance; },
       frozen: function() { var self = this; return this.mine.every(function(e) { return appInstance.rsvpFrozen(self.viewName, e.key); }); },
@@ -9721,7 +9807,6 @@ function createVueApp() {
       qrLink: function() { return appInstance.scanDeepLink(this.viewName, this.shown); }
     },
     watch: {
-      qrOpen: function(open) { if (!this.rotateMinutes) return; if (open) this.start(); else this.stop(); },
       frozen: function(f) { if (!f) this.autoClaimNow(); },
       mine: function() { this.autoClaimNow(); },
       armed: function() { this.autoClaimNow(); }
@@ -9732,34 +9817,8 @@ function createVueApp() {
     // disabled, while they book a class below -- and the booking unfreezes it, so the claim follows the
     // booking rather than needing a second scan.
     mounted: function() { this.autoClaimNow(); },
-    beforeUnmount: function() { this.stop(); },
     methods: {
       stamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.accepted); },
-      // While the QR is open: stamp every 15 s, and change the code every `rotateMinutes`, stamping once
-      // more first so a claim on the code about to drop out still counts. The current and previous codes
-      // are accepted, so a code lives between one and two periods, and a scan as it changes still counts.
-      start: function() {
-        if (!this.current) this.rotate();
-        if (!this.timer) this.timer = setInterval(this.tick, 15000);
-        var self = this;
-        // Keeps a tablet's screen on while it shows the code. Not everywhere, and refused when hidden.
-        try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function(l) { self.lock = l; }, function() {}); } catch (e) {}
-      },
-      stop: function() {
-        if (this.timer) { clearInterval(this.timer); this.timer = null; this.autoStamp(); }
-        if (this.lock) { try { this.lock.release(); } catch (e) {} this.lock = null; }
-      },
-      tick: function() {
-        this.autoStamp();
-        if (Date.now() - this.rotatedAt >= this.rotateMinutes * 60000) this.rotate();
-      },
-      rotate: function() {
-        var ints = new Uint32Array(5);
-        crypto.getRandomValues(ints);
-        this.previous = this.current;
-        this.current = Rsvp.checkinCode(ints);
-        this.rotatedAt = Date.now();
-      },
       autoStamp: function() { appInstance.stampRsvpCheckin(this.viewName, this.accepted, true); },
       // The code is the one the link brought, or -- once claimed -- the one already on today's rows. Only
       // written while some open event of today lacks it, so it never re-saves an unchanged code.

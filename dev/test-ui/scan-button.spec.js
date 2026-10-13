@@ -95,3 +95,50 @@ test('scan button: absent without nav.scan, and validateSchema names a view that
   expect(err).toContain('scan view "home" takes no code');
   expect(err).toContain('missing view "nope"');
 });
+
+test('door code that changes (scan.verify): the door screen shows it, the member claims it, the screen confirms and names the door', async ({ page, browser }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  const visits = schema.tables.visits;
+  visits.columns.push({ name: 'door_code', type: 'text' }, { name: 'verified', type: 'text' });
+  visits.ownerWritable = ['seen_on', 'door_code'];
+  schema.views[0].scan.verify = { claim: 'door_code', set: { verified: 'yes' }, rotateMinutes: 5 };
+  await setup(page, schema);
+  await page.request.post('/api/putRow', { data: { tableId: 'ref_doors', tab: 'active', data: { id: 'd2', door: 'Back', code: 'BACK-1' } }, headers: ADMIN });
+
+  // The door screen: staff, at the Back door, showing the code. Its clock is the test's, so the 15 s
+  // stamping can be run on demand.
+  await page.clock.install();
+  await boot(page, 'org@x');
+  await page.evaluate(() => appInstance.selectTab('door'));
+  await page.locator('[data-testid="scan-door"]').click();
+  await page.locator('.v-overlay .v-list-item', { hasText: 'Back' }).click();
+  await page.locator('[data-testid="scan-door-qr"]').click();
+  const code = (await page.locator('[data-testid="qr-dialog-caption"]').innerText()).trim();
+  expect(code).toMatch(/^[A-Z2-9]{5}$/);
+
+  // The member: the printed code of old is now just a claim nobody confirms; the screen's code is not.
+  const ctx = await browser.newContext();
+  const ann = await ctx.newPage();
+  await boot(ann, 'ann@x');
+  await ann.evaluate((c) => appInstance.routeScan(location.origin + '/?view=door&scan=' + c, null), code);
+  await expect(ann.locator('[data-testid="scan-outcome"]')).toHaveAttribute('data-outcome', 'claimed');
+  await expect.poll(async () => (await rows(page, 'visits')).map((r) => [r.door_code, r.verified || '', r.door || ''])).toEqual([[code, '', '']]);
+
+  // Within one 15 s round the screen confirms it, and records where.
+  await page.clock.runFor(16000);
+  await expect.poll(async () => (await rows(page, 'visits')).map((r) => [r.verified, r.door])).toEqual([['yes', 'Back']]);
+  await ctx.close();
+});
+
+test('validateSchema: a door screen\'s verdict cannot be the member\'s to write', async ({ page }) => {
+  await setup(page);
+  await boot(page, 'org@x');
+  const err = await page.evaluate(() => {
+    SCHEMA.visits.ownerWritable = ['door', 'seen_on', 'door_code', 'verified'];
+    SCHEMA.visits.columns.door_code = { type: 'text' }; SCHEMA.visits.columns.verified = { type: 'text' };
+    VIEWS.door.scan.verify = { claim: 'door_code', set: { verified: 'yes' } };
+    return validateSchema().join(' | ');
+  });
+  expect(err).toContain('"verified" is in ownerWritable');
+  expect(err).toContain('"door" is in ownerWritable');
+});

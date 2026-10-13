@@ -2141,6 +2141,27 @@ already says the scan registered. The print action is top-level only for the sam
 out of `nav` is still a view — `{{view:…}}` and the `?scan=` deep link both name the VIEW, not a tab —
 so removing its tab costs nothing.
 
+### A code that changes (`verify`) — a screen at the door vouches for it
+
+A printed code never changes, so a photo of it logs visits from anywhere. With `verify`, the code is
+shown by a **screen at the door** and changes every `rotateMinutes` (default 5):
+
+```json
+"scan": { "column": "gym", "set": { "visited_on": "@today" },
+          "verify": { "claim": "door_code", "set": { "verified": "yes" }, "rotateMinutes": 5 } }
+```
+
+- **The member** scans or types the code as usual; it is saved as their **claim** (`claim`), unchecked —
+  there is no catalogue to check a changing code against. The outcome reads *Checked in*.
+- **The door screen** is the same view opened by staff (anyone with a write grant on the table): they
+  choose which catalogue row it stands at (the door) and show the QR. While it is open, every 15 seconds
+  it confirms today's claims on the current or previous code — writing `set` and the door into `column`.
+  It is the class check-in's rotation, shared (the `ROTATING_CODE` mixin), not a copy of it.
+- **The claim and the verdict are separate columns**: `claim` must be in `ownerWritable`, and neither the
+  `set` columns nor `column` may be, or a member could confirm themselves. `validateSchema` refuses both,
+  and `once` (every code is fresh). Count only confirmed rows where it matters (`when: { "verified": "yes" }`).
+- What it costs: nothing is confirmed while no door screen is showing the code.
+
 ### The code names a catalogue row
 
 `column` must be a **`ref`**, because the lookup it points at is what a code is checked against. A code
