@@ -2875,6 +2875,14 @@ from the authenticated session — never asked for.
   grants, and an entry hidden here is still reachable if something else links to it. Pair `adminOnly`
   with a read-only (`'r'`) grant when the point is that members must not change the data.
 - System tabs (Lookup / Languages / Settings) are appended automatically.
+- **`scan`** (string[], optional) — **the scan button**: the views a scanned code may go to (scan views,
+  and rsvp views with `checkin`). With it, a large floating button sits in the bottom-right corner (above
+  Add on a phone when both show). It opens the camera where the browser can decode codes in the page
+  (`BarcodeDetector`: Android Chrome), and a typing field where it cannot (iPhone Safari, desktop Chrome
+  on Windows) or when the picture held no code. A QR the app drew carries `?view=…&scan=…` and goes to
+  its own view; a typed code goes to the one picked in the dialog. Either way it **saves** at once — the
+  person pointing the camera is the intent — where a forwarded deep link only arms the box. A link to
+  another site is refused.
 - **`bottomNav`** (string[], optional) — **mobile only**: view/table ids shown in the bottom
   navigation bar, in this order. More than 5 → the first 4 plus a "⋯ More" button that opens the
   drawer. Omit to auto-pick the first 5 flattened nav items. Ids must match `items` entries

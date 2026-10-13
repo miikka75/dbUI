@@ -142,6 +142,19 @@
     return found || v;
   }
 
+  // Where an in-app scan goes: the QR's own `?view=…&scan=…` when it carries one, else just a code for
+  // the caller to place. A link to ANOTHER site is refused (null) rather than unwrapped: its `scan` is a
+  // code somebody chose, and the in-app button saves without the press a forwarded link needs.
+  function targetFrom(raw, origin) {
+    var v = String(raw == null ? '' : raw).trim();
+    if (!v) return null;
+    if (!/^https?:\/\//i.test(v)) return { view: null, code: v };
+    var u; try { u = new URL(v); } catch (e) { return null; }
+    if (origin && u.origin !== origin) return null;
+    var code = u.searchParams.get('scan');
+    return code ? { view: u.searchParams.get('view') || null, code: code } : null;
+  }
+
   // ---- Code 39, the symbology the printed sheet uses ---------------------------------------------
   //
   // Chosen because it needs no library and no vendoring ceremony: 44 characters, each nine elements --
@@ -289,7 +302,7 @@
   }
 
   var M = { plan: plan, matches: matches, resolveSet: resolveSet, priorScan: priorScan, configErrors: configErrors,
-            code39: code39, C39: C39, codeFrom: codeFrom, viewsForCatalog: viewsForCatalog, TOKENS: TOKENS };
+            code39: code39, C39: C39, codeFrom: codeFrom, targetFrom: targetFrom, viewsForCatalog: viewsForCatalog, TOKENS: TOKENS };
   if (isNode) module.exports = M;
   else root.Scan = M;
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : this));

@@ -355,6 +355,8 @@ function createVueApp() {
       // A code a `?scan=` deep link handed over, and the scan view it belongs to. Held here rather
       // than in the component because it arrives before that component exists.
       pendingScan: null,
+      // The scan button (nav.scan): its typing dialog, what is typed, and which view a typed code is for.
+      scanDialog: false, scanTyped: '', scanPick: '', scanNote: '',
       dataCache: {},
       sortCol: null,
       sortAsc: true,
@@ -967,6 +969,18 @@ function createVueApp() {
       // True when at least one list is editable — the Lists editor's own affordances are per list
       // (canEditList), this only answers "is any of this editable at all".
       canEditLists: function() { return this.isAdmin || this.userWritableLists.length > 0; },
+      // The views the scan button reaches (`nav.scan`), each with the name its code goes by: a scan view
+      // by its own label, an rsvp view by "Check-in code". Empty = no button.
+      scanTargets: function() {
+        var self = this, list = (this.navConfig && Array.isArray(this.navConfig.scan)) ? this.navConfig.scan : [];
+        if (this.selfUnregistered) return [];
+        return list.filter(function(n) { return VIEWS[n]; }).map(function(n) {
+          var v = VIEWS[n], kind = SchemaNormalize.viewKind(v);
+          var label = kind === 'scan' ? self.tOr(v.scan.label, self.t('scan.code')) : self.t('rsvp.checkin_code');
+          return { view: n, label: label };
+        });
+      },
+      scanPickLabel: function() { var p = this.scanPick; return (this.scanTargets.filter(function(x) { return x.view === p; })[0] || {}).label || ''; },
       // The Lookup tab is where reference data is MAINTAINED. Someone who can change nothing in it -- a
       // member who reads the catalogues through the app's own views -- gets no tab for it: a screen of
       // read-only vocabularies is clutter to them, not a feature.
@@ -1089,7 +1103,7 @@ function createVueApp() {
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
          'msg.ref_has_children',
          'pivot.total', 'stats.empty',
-         'scan.code', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
+         'scan.code', 'scan.press', 'scan.foreign', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
          'scan.print_codes', 'scan.print_code', 'scan.no_barcode',
          'scan.camera', 'scan.no_code_found', 'scan.several_codes', 'scan.camera_failed',
          'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.archive', 'board.confirm_archive',
@@ -5671,6 +5685,37 @@ function createVueApp() {
       //
       // With `scan`, `view` must name a view that takes a scanned code: a scan view, or an rsvp view with
       // `checkin` (the organizer's QR). Without it, see _linkedViewFromUrl.
+      // THE SCAN BUTTON. One button for every code the app prints: the camera reads it, and the QR says
+      // where it goes -- the door's QR to the visit log, the room's to class check-in -- so there is no
+      // menu. Where the browser cannot decode (no BarcodeDetector: iPhone Safari, desktop Chrome on
+      // Windows), or the picture held no code, it opens a field to type the code into instead.
+      // Unlike a deep link, an in-app scan SAVES: the person pointing the camera is the intent.
+      scanPress: function() {
+        if (typeof BarcodeDetector === 'undefined') { this.openScanDialog(''); return; }
+        var el = document.getElementById('scan-fab-photo'); if (el) el.click();
+      },
+      openScanDialog: function(note) {
+        this.scanNote = note || ''; this.scanTyped = '';
+        if (!this.scanPick || !this.scanTargets.some(function(t) { return t.view === this.scanPick; }, this)) this.scanPick = (this.scanTargets[0] || {}).view || '';
+        this.scanDialog = true;
+      },
+      onScanFabPhoto: function(ev) {
+        var self = this, file = ev.target.files && ev.target.files[0];
+        ev.target.value = '';
+        if (!file) return;
+        decodePhoto(file).then(function(r) { if (r.raw) self.routeScan(r.raw, null); else self.openScanDialog(self.t('scan.' + r.outcome)); });
+      },
+      // `raw`: what the camera read, or what was typed. `view`: the view a TYPED code is for (the dialog
+      // says which); a QR names its own. Only views the schema lists in nav.scan are reachable this way.
+      routeScan: function(raw, view) {
+        var t = Scan.targetFrom(raw, location.origin), names = this.scanTargets.map(function(x) { return x.view; });
+        if (!t) { this.openScanDialog(this.t('scan.foreign')); return; }
+        var dest = t.view || view || names[0];
+        if (names.indexOf(dest) < 0) { this.openScanDialog(this.t('scan.foreign')); return; }
+        this.scanDialog = false;
+        this.pendingScan = { view: dest, code: t.code, direct: true };
+        this.selectTab(dest, true);
+      },
       _pendingScanFromUrl: function() {
         var p = new URLSearchParams(location.search);
         var code = p.get('scan'), view = p.get('view');
@@ -9251,6 +9296,19 @@ function createVueApp() {
   //
   // Every outcome is shown, none is swallowed. A scan that quietly does nothing looks exactly like a
   // scan that never registered, and that is how somebody standing at a door at 3am stops trusting it.
+  // A photo -> the one code in it, with the browser's own decoder. Both symbologies the app prints: the
+  // sheet's Code 39 and a QR carrying the `?scan=` link. Several codes in one picture is a framing
+  // problem, and choosing one would log a door nobody aimed at. Resolves { raw } or { outcome }.
+  function decodePhoto(file) {
+    return Promise.resolve()
+      .then(function() { return createImageBitmap(file); })
+      .then(function(bmp) { return new BarcodeDetector({ formats: ['code_39', 'qr_code'] }).detect(bmp); })
+      .then(function(found) {
+        if (!found || !found.length) return { outcome: 'no_code_found' };
+        if (found.length > 1) return { outcome: 'several_codes' };
+        return { raw: found[0].rawValue };
+      }, function() { return { outcome: 'camera_failed' }; });
+  }
   app.component('scan-view', {
     props: { name: { type: String, default: null }, embed: { type: Boolean, default: false } },
     data: function() { return { code: '', last: null, armed: false, reading: false, autoSubmit: false }; },
@@ -9260,19 +9318,18 @@ function createVueApp() {
     // `link: "submit"` logs it with no press at all. The view's tables may still be in flight (selectTab
     // started the fetches a tick ago), so the write waits for `viewLoaded` rather than racing them --
     // the watcher below is what fires when they land, and runPending is a no-op if they already had.
-    mounted: function() {
-      var p = appInstance.pendingScan;
-      if (!p || p.view !== this.viewName) return;
-      appInstance.pendingScan = null;
-      this.code = p.code;
-      this.armed = true;
-      if (this.cfg.link === 'submit') { this.autoSubmit = true; this.runPending(); }
+    // A code from the scan button submits too: there the person pointing the camera is the intent.
+    mounted: function() { this.takePending(); },
+    watch: {
+      viewLoaded: function(ready) { if (ready) this.runPending(); },
+      // Scanned again while this view is open: the view does not remount, so the code is taken here.
+      pending: function() { this.takePending(); }
     },
-    watch: { viewLoaded: function(ready) { if (ready) this.runPending(); } },
     computed: {
       a: function() { return appInstance; },
       viewName: function() { return this.name || appInstance.currentTable; },
       cfg: function() { return (VIEWS[this.viewName] || {}).scan || {}; },
+      pending: function() { return appInstance.pendingScan; },
       // The browser's own barcode decoder, or nothing. `BarcodeDetector` is native where it exists and
       // absent on iOS Safari, Firefox and desktop Chrome on Windows -- so the camera is an ENHANCEMENT
       // and the typed box stays the interface everywhere. No button appears rather than a button that
@@ -9349,22 +9406,20 @@ function createVueApp() {
         ev.target.value = '';                 // reset, so re-picking the same photo fires change again
         if (!file) return;
         this.reading = true;
-        var fail = function(outcome) { self.reading = false; self.last = { outcome: outcome, code: '' }; };
-        // Both symbologies the app itself produces: the printed sheet's Code 39, and a QR carrying the
-        // `?scan=` deep link, which `Scan.codeFrom` unwraps rather than navigating to.
-        Promise.resolve()
-          .then(function() { return createImageBitmap(file); })
-          .then(function(bmp) { return new BarcodeDetector({ formats: ['code_39', 'qr_code'] }).detect(bmp); })
-          .then(function(found) {
-            if (!found || !found.length) return fail('no_code_found');
-            // Several codes in one picture is a framing problem, and choosing one of them would log a
-            // door nobody aimed at -- the same reason a duplicated catalogue code refuses.
-            if (found.length > 1) return fail('several_codes');
-            self.reading = false;
-            self.code = Scan.codeFrom(found[0].rawValue);
-            self.submit();
-          })
-          .catch(function() { fail('camera_failed'); });
+        decodePhoto(file).then(function(r) {
+          self.reading = false;
+          if (!r.raw) { self.last = { outcome: r.outcome, code: '' }; return; }
+          self.code = Scan.codeFrom(r.raw);
+          self.submit();
+        });
+      },
+      takePending: function() {
+        var p = appInstance.pendingScan;
+        if (!p || p.view !== this.viewName) return;
+        appInstance.pendingScan = null;
+        this.code = p.code;
+        this.armed = true;
+        if (this.cfg.link === 'submit' || p.direct) { this.autoSubmit = true; this.runPending(); }
       },
       submit: function() {
         var self = this;
@@ -9668,7 +9723,8 @@ function createVueApp() {
     watch: {
       qrOpen: function(open) { if (!this.rotateMinutes) return; if (open) this.start(); else this.stop(); },
       frozen: function(f) { if (!f) this.autoClaimNow(); },
-      mine: function() { this.autoClaimNow(); }
+      mine: function() { this.autoClaimNow(); },
+      armed: function() { this.autoClaimNow(); }
     },
     // For a member this renders once their own responses for today are known (rsvp-view's checkinShown),
     // so the wait the scan view's auto-submit does for itself is already done. With nothing booked today
@@ -9769,6 +9825,7 @@ function createVueApp() {
       // A code that arrived by the organizer's QR (`?view=&scan=`). It stays on the root until the member
       // presses, rather than being taken into this component: opening the link re-renders the view.
       armed: function() { var p = appInstance.pendingScan; return p && p.view === this.viewName ? p.code : ''; },
+      armedDirect: function() { var p = appInstance.pendingScan; return !!(p && p.view === this.viewName && p.direct); },
       // The rendered rows: engine order until a header is clicked, then Rows.compareValues -- the same
       // comparator the data grid and embeds use, so blanks-last/numeric ordering all agree.
       events: function() {
@@ -9850,7 +9907,7 @@ function createVueApp() {
       +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :title="a.t(\'rsvp.page_qr\')" :aria-label="a.t(\'rsvp.page_qr\')" data-testid="rsvp-page-qr" @click="pageQr = true"></v-btn>'
       +   '<qr-dialog v-model="pageQr" :link="pageLink" :caption="pageTitle"></qr-dialog>'
       + '</div>'
-      + '<rsvp-checkin v-if="checkinShown" :view-name="viewName" :mine="todayMine" :can-stamp="canStamp" :armed="armed" :rotate-minutes="cfg.checkin.rotateMinutes || 0" :auto-claim="cfg.checkin.link === \'submit\'" @claimed="claimed()"></rsvp-checkin>'
+      + '<rsvp-checkin v-if="checkinShown" :view-name="viewName" :mine="todayMine" :can-stamp="canStamp" :armed="armed" :rotate-minutes="cfg.checkin.rotateMinutes || 0" :auto-claim="cfg.checkin.link === \'submit\' || armedDirect" @claimed="claimed()"></rsvp-checkin>'
       + '<v-table v-if="!a.mobile" density="compact">'
       + '<thead><tr>'
       + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'date\')" :aria-sort="ariaSort(\'date\')" data-testid="rsvp-sort-date">{{ a.t(\'rsvp.date\') }}</th>'

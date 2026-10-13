@@ -380,6 +380,27 @@
     <!-- FAB: floating add button on mobile -->
     <v-btn v-if="mobile && canAddRows && isDataView" icon="mdi-plus" color="primary" size="large" style="position:fixed; bottom:72px; right:16px; z-index:100" elevation="4" @click="addRow"></v-btn>
 
+    <!-- The scan button (nav.scan): one button for every code the app prints. On a phone it is the
+         floating corner button, above Add when both show; on a wider screen, the same corner. -->
+    <template v-if="scanTargets.length && !loading">
+      <input type="file" accept="image/*" capture="environment" id="scan-fab-photo" style="display:none" @change="onScanFabPhoto($event)">
+      <v-btn icon="mdi-qrcode-scan" color="primary" size="x-large" elevation="6" :title="t('scan.press')" :aria-label="t('scan.press')" data-testid="scan-fab"
+        :style="'position:fixed; right:16px; z-index:101; bottom:' + (mobile ? ((canAddRows && isDataView) ? 144 : 72) : 24) + 'px'" @click="scanPress()"></v-btn>
+      <v-dialog v-model="scanDialog" max-width="420">
+        <v-card class="pa-4" data-testid="scan-dialog">
+          <v-alert v-if="scanNote" type="warning" density="compact" variant="tonal" class="mb-3">{{ scanNote }}</v-alert>
+          <v-btn-toggle v-if="scanTargets.length > 1" v-model="scanPick" mandatory density="compact" color="primary" variant="outlined" class="mb-3" data-testid="scan-pick">
+            <v-btn v-for="st in scanTargets" :key="st.view" :value="st.view" size="small" class="text-none">{{ st.label }}</v-btn>
+          </v-btn-toggle>
+          <v-text-field v-model="scanTyped" :label="scanPickLabel" autofocus autocomplete="off" density="compact" variant="outlined" hide-details data-testid="scan-typed" @keydown.enter="scanTyped.trim() && routeScan(scanTyped, scanPick)"></v-text-field>
+          <div class="d-flex mt-4" style="gap:8px"><v-spacer></v-spacer>
+            <v-btn @click="scanDialog = false">{{ t('btn.cancel') }}</v-btn>
+            <v-btn variant="flat" color="primary" :disabled="!scanTyped.trim()" data-testid="scan-typed-go" @click="routeScan(scanTyped, scanPick)">{{ t('rsvp.checkin') }}</v-btn>
+          </div>
+        </v-card>
+      </v-dialog>
+    </template>
+
     <!-- Bottom navigation for mobile -->
     <v-bottom-navigation v-if="mobile && !loading && navLayout === 'drawer'" :model-value="currentTable" @update:model-value="selectTab($event)" grow>
       <v-btn v-for="tab in bottomNavVisible" :key="tab.id" :value="tab.id" size="small">

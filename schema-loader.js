@@ -844,6 +844,16 @@ function validateRefs(schema) {
     if (it.table && !hasTable(it.table)) errs.push('Nav -> missing table "' + it.table + '"');
     if (it.items) walk(it.items);
   }); })(schema.nav && schema.nav.items);
+  // `nav.scan`: the scan button's destinations. A view that takes no code would swallow every scan sent
+  // to it -- the button would look like it worked and nothing would be logged.
+  if (schema.nav && schema.nav.scan !== undefined) {
+    if (!Array.isArray(schema.nav.scan)) errs.push('Nav -> `scan` must be a list of view names');
+    else schema.nav.scan.forEach(function(n) {
+      var sv = (schema.views || []).filter(function(x) { return x && x.name === n; })[0];
+      if (!sv) errs.push('Nav -> scan names missing view "' + n + '"');
+      else if (!sv.scan && !(sv.rsvp && sv.rsvp.checkin)) errs.push('Nav -> scan view "' + n + '" takes no code: name a scan view, or an rsvp view with `checkin`');
+    });
+  }
   // The rest of the nav's rules need no schema, so they live with the tree they protect (nav.js).
   return errs.concat(Nav.errors(schema.nav));
 }

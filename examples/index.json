@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "9b2c031ea4f3bb24"
+      "hash": "824cfddbc33723e9"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "6e7c2ab6800df9cc"
+      "hash": "d88c6b3471ee59ee"
     }
   ],
   "bundles": [
@@ -161,7 +161,7 @@
       "views": 32,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "3ff903a9a39d6d07"
+        "hash": "27a81a2b3fdb00a1"
       },
       "languages": [
         {

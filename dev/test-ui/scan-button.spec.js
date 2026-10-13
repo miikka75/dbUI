@@ -1,0 +1,97 @@
+// The scan button (`nav.scan`): one button for every code the app prints. The QR names its own view, a
+// typed code goes to the view picked in the dialog, and either SAVES -- the person pointing the camera
+// is the intent, where a forwarded deep link only arms the box.
+//
+// The browser here has no BarcodeDetector, which is the iPhone/Windows case: the button opens the
+// typing dialog. The camera's half is the same routeScan a decoded picture is handed to, called directly.
+const { test, expect } = require('./server-fixture');
+
+const SCHEMA = {
+  defaultLanguage: 'en',
+  tables: {
+    ref_doors: { isLookup: true, hierarchy: false, columns: [{ name: 'door', type: 'text' }, { name: 'code', type: 'text' }] },
+    visits: {
+      ownerWritable: ['door', 'seen_on'],
+      columns: [{ name: 'owner', type: 'owner' }, { name: 'door', type: 'ref', table: 'ref_doors', valueCol: 'door' }, { name: 'seen_on', type: 'date' }]
+    },
+    classes: { columns: [{ name: 'date', type: 'date' }, { name: 'title', type: 'text' }] },
+    bookings: {
+      ownerWritable: ['class', 'booking', 'checkin_code'],
+      ownerWritableWhile: { attendance: 'pending' },
+      columns: [{ name: 'owner', type: 'owner' }, { name: 'class', type: 'ref', table: 'classes', valueCol: 'id' },
+                { name: 'booking', type: 'select', list: 'booking_status' }, { name: 'checkin_code', type: 'text' },
+                { name: 'attendance', type: 'select', list: 'attendance_status', default: 'pending' }]
+    }
+  },
+  views: [
+    { name: 'door', kind: 'scan', sources: ['visits'], mode: 'union', columns: ['seen_on', 'door'],
+      scan: { column: 'door', codeCol: 'code', set: { seen_on: '@today' }, label: 'Door code' } },
+    { name: 'book', kind: 'rsvp', rsvp: { events: 'classes', dateColumn: 'date', titleColumns: ['title'], responses: 'bookings',
+      statusColumn: 'booking', picker: 'toggle', checkin: { codeColumn: 'checkin_code', set: { attendance: 'attended' } } } },
+    { name: 'home', kind: 'page', markdown: '# Home' }
+  ],
+  nav: { items: [{ view: 'home' }, { view: 'book' }], scan: ['door', 'book'] }
+};
+const ADMIN = { 'X-User': 'org@x' };
+const ymd = (d) => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+
+async function setup(page, schema) {
+  await page.request.post('/api/resetData');
+  await page.request.post('/api/setUserRole', { data: { uid: 'org@x', role: 'admin', user: 'org@x', tables: 'all' } });
+  await page.request.post('/api/setUserRole', { data: { uid: 'ann@x', role: 'viewer', user: 'ann@x', tables: { classes: 'r', ref_doors: 'r' } }, headers: ADMIN });
+  await page.request.post('/api/saveSchema', { data: { schema: schema || SCHEMA }, headers: ADMIN });
+  await page.request.post('/api/saveLists', { data: { lists: { booking_status: ['booked'], attendance_status: ['pending', 'attended'] } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'ref_doors', tab: 'active', data: { id: 'd1', door: 'Front', code: 'FRONT-1' } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'classes', tab: 'active', data: { id: 'c1', date: ymd(new Date()), title: 'Spin' } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'bookings', tab: 'active', data: { id: 'b1', owner: 'ann@x', class: 'c1', booking: 'booked', attendance: 'pending', checkin_code: '', rosterPublic: false } }, headers: ADMIN });
+}
+async function boot(page, user) {
+  await page.setViewportSize({ width: 400, height: 800 });
+  await page.addInitScript((u) => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('test_user', u); }, user);
+  await page.goto('/');
+  await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+}
+const rows = async (page, table) => ((await (await page.request.post('/api/getTableData', { data: { tableId: table, tab: 'active' }, headers: ADMIN })).json()).rows || []);
+
+test('scan button: a typed door code logs a visit, a typed check-in code checks in -- both without a second press', async ({ page }) => {
+  await setup(page);
+  await boot(page, 'ann@x');
+  const fab = page.locator('[data-testid="scan-fab"]');
+  await expect(fab).toBeVisible();
+
+  await fab.click();
+  await page.locator('[data-testid="scan-typed"] input').fill('FRONT-1');
+  await page.locator('[data-testid="scan-typed-go"]').click();
+  await expect.poll(async () => (await rows(page, 'visits')).map((r) => r.door)).toEqual(['Front']);
+
+  await fab.click();
+  await page.locator('[data-testid="scan-pick"] button', { hasText: 'rsvp.checkin_code' }).click();
+  await page.locator('[data-testid="scan-typed"] input').fill('otter');
+  await page.locator('[data-testid="scan-typed-go"]').click();
+  await expect.poll(async () => (await rows(page, 'bookings')).map((r) => r.checkin_code)).toEqual(['otter']);
+});
+
+test('scan button: a QR names its own view; a link to another site is refused', async ({ page }) => {
+  await setup(page);
+  await boot(page, 'ann@x');
+  // What the camera would hand over: the room's QR, a link to the check-in view.
+  await page.evaluate(() => appInstance.routeScan(location.origin + '/?view=book&scan=heron', null));
+  await expect.poll(async () => (await rows(page, 'bookings')).map((r) => r.checkin_code)).toEqual(['heron']);
+  expect(await page.evaluate(() => appInstance.currentTable)).toBe('book');
+
+  await page.evaluate(() => appInstance.routeScan('https://elsewhere.example/?view=door&scan=FRONT-1', null));
+  await expect(page.locator('[data-testid="scan-dialog"]')).toBeVisible();
+  expect(await page.evaluate(() => appInstance.scanNote)).toBe('scan.foreign');
+  expect(await rows(page, 'visits')).toEqual([]);
+});
+
+test('scan button: absent without nav.scan, and validateSchema names a view that takes no code', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  delete schema.nav.scan;
+  await setup(page, schema);
+  await boot(page, 'org@x');
+  await expect(page.locator('[data-testid="scan-fab"]')).toHaveCount(0);
+  const err = await page.evaluate(() => validateRefs({ tables: SCHEMA, views: [{ name: 'home', markdown: '# x' }], nav: { items: [], scan: ['home', 'nope'] } }).join(' | '));
+  expect(err).toContain('scan view "home" takes no code');
+  expect(err).toContain('missing view "nope"');
+});

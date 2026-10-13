@@ -316,6 +316,11 @@
         "layout": { "type": "string", "enum": ["drawer", "tabs", "browse"], "description": "Side drawer (default), top tabs on desktop, or browse: no drawer — home lists the top level, a group opens as a page listing its entries, and a breadcrumb leads back up. Each user can override it in Settings." },
         "display": { "type": "string", "enum": ["list", "tiles"], "description": "BROWSE ONLY: how a level's entries are drawn — a list (default) or a grid of tiles. A group or a view with entries may override it with its own." },
         "items": { "type": "array", "items": { "$ref": "#/$defs/navItem" } },
+        "scan": {
+          "type": "array",
+          "description": "The scan button: views it may send a scanned code to -- scan views, and rsvp views with `checkin`. A QR the app drew names its own view; a typed code goes to the one picked. Empty or absent: no button.",
+          "items": { "type": "string" }
+        },
         "bottomNav": {
           "type": "array",
           "description": "MOBILE ONLY: view/table ids in the bottom bar, in this order. More than 5 -> the first 4 plus a \"More\" button. Omit to auto-pick the first 5 flattened items. Unresolved ids are silently dropped.",

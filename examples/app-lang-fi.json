@@ -222,6 +222,8 @@
       "scan.camera": "Lue kameralla",
       "scan.camera_failed": "Kuvaa ei voitu lukea",
       "scan.code": "Koodi",
+      "scan.press": "Skannaa koodi",
+      "scan.foreign": "Koodi ei ole tämän sovelluksen.",
       "scan.created": "Kirjattu",
       "scan.no_barcode": "Koodia ei voi tulostaa viivakoodina",
       "scan.no_code_found": "Kuvassa ei ole koodia",

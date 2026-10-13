@@ -1146,7 +1146,7 @@ Every list in the app is narrowed to the gym the member picked once. dbUI has pe
 (the nav layout is one, kept in the browser), but none that filters views. A viewer-chosen value for one
 `@` token (`"gym": "@chosen"`) would do it, display-only like `@me`. **Medium; low priority.**
 
-#### 11. One scan button for the door and the class, and a door code that changes *(proposed 2026-10-14)*
+#### 11. One scan button for the door and the class, and a door code that changes *(a and b landed: `nav.scan`)*
 
 The app being mimicked has ONE key button: the camera opens, and the QR decides what happens (the gate
 opens, or the member is checked in to their classes). Here the two are separate: the door is a code box

@@ -583,7 +583,7 @@
       "name": "doc_home",
       "kind": "page",
       "icon": "mdi-home",
-      "markdown": "# {{t:text.home_heading}}\n\n{{view:visit_scan}}\n\n{{view:my_level}}\n\n## {{t:text.home_month}}\n\n{{view:my_pulse}}\n\n## {{t:text.home_news}}\n\n{{view:news_feed}}\n"
+      "markdown": "# {{t:text.home_heading}}\n\n{{view:my_level}}\n\n## {{t:text.home_month}}\n\n{{view:my_pulse}}\n\n## {{t:text.home_news}}\n\n{{view:news_feed}}\n"
     },
     {
       "name": "visit_scan",
@@ -1513,6 +1513,10 @@
       "doc_training",
       "coach",
       "doc_loyalty"
+    ],
+    "scan": [
+      "visit_scan",
+      "class_booking"
     ]
   }
 }
