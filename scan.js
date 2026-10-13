@@ -184,6 +184,22 @@
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
 
+  // A TYPED code has no link around it, so it has to say where it goes by itself. Two ways it can:
+  //   * a printed, static code is a catalogue row's code -- the target whose catalogue holds it;
+  //   * a changing code starts with its target's TAG: one character per entry of nav.scan, in order,
+  //     from the same no-look-alike alphabet the codes use. To a member it is just part of the code.
+  // `targets`: [{ view, tag, codes }] (`codes`: a static target's catalogue codes). null = no target.
+  var TAGS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  function tagFor(index) { return index >= 0 && index < TAGS.length ? TAGS.charAt(index) : ''; }
+  function targetForCode(code, targets) {
+    var v = String(code == null ? '' : code).trim().toUpperCase();
+    if (!v) return null;
+    var byCatalog = (targets || []).filter(function (t) { return (t.codes || []).some(function (c) { return String(c).trim().toUpperCase() === v; }); });
+    if (byCatalog.length) return byCatalog[0].view;
+    var byTag = (targets || []).filter(function (t) { return t.tag && v.charAt(0) === t.tag; });
+    return byTag.length ? byTag[0].view : null;
+  }
+
   // ---- Code 39, the symbology the printed sheet uses ---------------------------------------------
   //
   // Chosen because it needs no library and no vendoring ceremony: 44 characters, each nine elements --
@@ -346,7 +362,7 @@
     return errors;
   }
 
-  var M = { plan: plan, verifyTargets: verifyTargets, matches: matches, resolveSet: resolveSet, priorScan: priorScan, configErrors: configErrors,
+  var M = { plan: plan, verifyTargets: verifyTargets, tagFor: tagFor, targetForCode: targetForCode, matches: matches, resolveSet: resolveSet, priorScan: priorScan, configErrors: configErrors,
             code39: code39, C39: C39, codeFrom: codeFrom, targetFrom: targetFrom, viewsForCatalog: viewsForCatalog, TOKENS: TOKENS };
   if (isNode) module.exports = M;
   else root.Scan = M;

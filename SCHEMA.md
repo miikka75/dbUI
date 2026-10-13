@@ -2905,7 +2905,11 @@ from the authenticated session — never asked for.
   `checkin`. The button is the corner button with `fab: "scan"`. It opens the camera where the browser can decode codes in the page
   (`BarcodeDetector`: Android Chrome), and a typing field where it cannot (iPhone Safari, desktop Chrome
   on Windows) or when the picture held no code. A QR the app drew carries `?view=…&scan=…` and goes to
-  its own view; a typed code goes to the one picked in the dialog. Either way it **saves** at once — the
+  its own view. A **typed** code finds its own way too, with no question asked: a printed code is
+  found in the catalogue of the scan view that holds it, and a changing code (class check-in, a
+  `verify` door) starts with its destination's **tag** — one character per entry of `scan`, in order
+  (`A`, `B`, …), from the same no-look-alike alphabet, so to a member it is just part of the code. A code
+  that is neither is refused and the field stays open. Either way it **saves** at once — the
   person pointing the camera is the intent — where a forwarded deep link only arms the box. A link to
   another site is refused.
 - **`bottomNav`** (string[], optional) — **mobile only**: view/table ids shown in the bottom

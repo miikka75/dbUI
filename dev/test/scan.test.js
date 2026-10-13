@@ -336,6 +336,15 @@ describe('scan.js — which catalogue is scannable', () => {
 });
 
 describe('scan.js — the scan button and the door that changes its code', () => {
+  it('targetForCode: a printed code by its catalogue, a changing one by its tag, else nothing', () => {
+    const S = require('../../scan');
+    const T = [{ view: 'door', tag: S.tagFor(0), codes: ['FRONT-1'] }, { view: 'book', tag: S.tagFor(1), codes: [] }];
+    assert.equal(S.targetForCode(' front-1 ', T), 'door');
+    assert.equal(S.targetForCode('ak7pqm', T), 'door');
+    assert.equal(S.targetForCode('BK7PQM', T), 'book');
+    assert.equal(S.targetForCode('ZK7PQM', T), null);
+    assert.equal(S.tagFor(99), '');
+  });
   const S = require('../../scan');
   const origin = 'http://127.0.0.1:3000';
   it('targetFrom: a link of ours names its view; a bare code names none; another site is refused', () => {

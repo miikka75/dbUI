@@ -356,7 +356,7 @@ function createVueApp() {
       // than in the component because it arrives before that component exists.
       pendingScan: null,
       // The scan button (nav.scan): its typing dialog, what is typed, and which view a typed code is for.
-      scanDialog: false, scanTyped: '', scanPick: '', scanNote: '',
+      scanDialog: false, scanTyped: '', scanNote: '',
       dataCache: {},
       sortCol: null,
       sortAsc: true,
@@ -990,7 +990,6 @@ function createVueApp() {
         if (want === 'add') return (this.mobile && this.canAddRows && this.isDataView) ? 'add' : null;
         return null;
       },
-      scanPickLabel: function() { var p = this.scanPick; return (this.scanTargets.filter(function(x) { return x.view === p; })[0] || {}).label || ''; },
       // The Lookup tab is where reference data is MAINTAINED. Someone who can change nothing in it -- a
       // member who reads the catalogues through the app's own views -- gets no tab for it: a screen of
       // read-only vocabularies is clutter to them, not a feature.
@@ -5736,7 +5735,6 @@ function createVueApp() {
       },
       openScanDialog: function(note) {
         this.scanNote = note || ''; this.scanTyped = '';
-        if (!this.scanPick || !this.scanTargets.some(function(t) { return t.view === this.scanPick; }, this)) this.scanPick = (this.scanTargets[0] || {}).view || '';
         this.scanDialog = true;
       },
       onScanFabPhoto: function(ev) {
@@ -5748,13 +5746,42 @@ function createVueApp() {
       // `raw`: what the camera read, or what was typed. `view`: the view a TYPED code is for (the dialog
       // says which); a QR names its own. Only views the schema lists in nav.scan are reachable this way.
       routeScan: function(raw, view) {
-        var t = Scan.targetFrom(raw, location.origin), names = this.scanTargets.map(function(x) { return x.view; });
-        if (!t) { this.openScanDialog(this.t('scan.foreign')); return; }
-        var dest = t.view || view || names[0];
-        if (names.indexOf(dest) < 0) { this.openScanDialog(this.t('scan.foreign')); return; }
+        var self = this, t = Scan.targetFrom(raw, location.origin);
+        if (!t) { this.openScanDialog(this.t('scan.foreign')); return Promise.resolve(); }
+        if (t.view || view) { this._goScan(t.view || view, t.code); return Promise.resolve(); }
+        // A typed code finds its own way: a printed one by the catalogue that holds it, which the screen
+        // the button was pressed on may not have loaded yet -- so load the catalogues first.
+        var cats = this.scanTargets.map(function(x) { var v = VIEWS[x.view]; return v.scan && !v.scan.verify ? (getColumnRef((v.sources || [])[0], v.scan.column) || {}).table : null; }).filter(Boolean);
+        return Promise.resolve(this._ensureCached(cats)).then(function() {
+          var dest = self.scanTargetForCode(t.code);
+          if (!dest) { self.openScanDialog(self.t('scan.unknown')); return; }
+          self._goScan(dest, t.code);
+        });
+      },
+      _goScan: function(dest, code) {
+        if (!this.scanTargets.some(function(x) { return x.view === dest; })) { this.openScanDialog(this.t('scan.foreign')); return; }
         this.scanDialog = false;
-        this.pendingScan = { view: dest, code: t.code, direct: true };
+        this.pendingScan = { view: dest, code: code, direct: true };
         this.selectTab(dest, true);
+      },
+      // A typed code's target (Scan.targetForCode): a static catalogue code, or a changing code's tag.
+      scanTargetForCode: function(code) {
+        var self = this;
+        return Scan.targetForCode(code, this.scanTargets.map(function(t, i) {
+          var v = VIEWS[t.view], codes = [];
+          if (v.scan && !v.scan.verify) {
+            var ref = getColumnRef((v.sources || [])[0], v.scan.column) || {};
+            var cc = v.scan.codeCol || ref.valueCol || 'id';
+            codes = (self.dataCache[ref.table] || []).map(function(r) { return r[cc]; });
+          }
+          return { view: t.view, tag: Scan.tagFor(i), codes: codes };
+        }));
+      },
+      // The tag a screen showing changing codes for `view` puts first, so a typed one finds its way back
+      // through the scan button. '' when the view is not one the button reaches.
+      scanTag: function(view) {
+        var list = (this.navConfig && Array.isArray(this.navConfig.scan)) ? this.navConfig.scan : [];
+        return Scan.tagFor(list.indexOf(view));
       },
       _pendingScanFromUrl: function() {
         var p = new URLSearchParams(location.search);
@@ -9369,7 +9396,7 @@ function createVueApp() {
         var ints = new Uint32Array(5);
         crypto.getRandomValues(ints);
         this.previous = this.current;
-        this.current = Rsvp.checkinCode(ints);
+        this.current = appInstance.scanTag(this.viewName) + Rsvp.checkinCode(ints);
         this.rotatedAt = Date.now();
       }
     }

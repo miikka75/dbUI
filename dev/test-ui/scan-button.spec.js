@@ -64,11 +64,19 @@ test('scan button: a typed door code logs a visit, a typed check-in code checks 
   await page.locator('[data-testid="scan-typed-go"]').click();
   await expect.poll(async () => (await rows(page, 'visits')).map((r) => r.door)).toEqual(['Front']);
 
+  // No choice of which code it is: a changing code starts with its destination's tag -- the second
+  // entry of nav.scan is "B" -- and the printed door code above was found in the door catalogue.
   await fab.click();
-  await page.locator('[data-testid="scan-pick"] button', { hasText: 'rsvp.checkin_code' }).click();
-  await page.locator('[data-testid="scan-typed"] input').fill('otter');
+  await expect(page.locator('[data-testid="scan-pick"]')).toHaveCount(0);
+  await page.locator('[data-testid="scan-typed"] input').fill('bk7pqm');
   await page.locator('[data-testid="scan-typed-go"]').click();
-  await expect.poll(async () => (await rows(page, 'bookings')).map((r) => r.checkin_code)).toEqual(['otter']);
+  await expect.poll(async () => (await rows(page, 'bookings')).map((r) => r.checkin_code)).toEqual(['bk7pqm']);
+
+  // A code that is neither is refused, with the field left open to try again.
+  await fab.click();
+  await page.locator('[data-testid="scan-typed"] input').fill('ZZZZZZ');
+  await page.locator('[data-testid="scan-typed-go"]').click();
+  expect(await page.evaluate(() => appInstance.scanNote)).toBe('scan.unknown');
 });
 
 test('scan button: a QR names its own view; a link to another site is refused', async ({ page }) => {
@@ -129,13 +137,16 @@ test('door code that changes (scan.verify): the door screen shows it, the member
   await page.locator('.v-overlay .v-list-item', { hasText: 'Back' }).click();
   await page.locator('[data-testid="scan-door-qr"]').click();
   const code = (await page.locator('[data-testid="qr-dialog-caption"]').innerText()).trim();
-  expect(code).toMatch(/^[A-Z2-9]{5}$/);
+  expect(code).toMatch(/^A[A-Z2-9]{5}$/);   // the door is nav.scan's first entry, so its codes start "A"
 
   // The member: the printed code of old is now just a claim nobody confirms; the screen's code is not.
   const ctx = await browser.newContext();
   const ann = await ctx.newPage();
   await boot(ann, 'ann@x');
-  await ann.evaluate((c) => appInstance.routeScan(location.origin + '/?view=door&scan=' + c, null), code);
+  // Typed off the screen, with no word about which code it is: the tag takes it to the door.
+  await ann.locator('[data-testid="scan-fab"]').click();
+  await ann.locator('[data-testid="scan-typed"] input').fill(code);
+  await ann.locator('[data-testid="scan-typed-go"]').click();
   await expect(ann.locator('[data-testid="scan-outcome"]')).toHaveAttribute('data-outcome', 'claimed');
   await expect.poll(async () => (await rows(page, 'visits')).map((r) => [r.door_code, r.verified || '', r.door || ''])).toEqual([[code, '', '']]);
 

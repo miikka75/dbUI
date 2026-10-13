@@ -390,13 +390,10 @@
       <v-dialog v-model="scanDialog" max-width="420">
         <v-card class="pa-4" data-testid="scan-dialog">
           <v-alert v-if="scanNote" type="warning" density="compact" variant="tonal" class="mb-3">{{ scanNote }}</v-alert>
-          <v-btn-toggle v-if="scanTargets.length > 1" v-model="scanPick" mandatory density="compact" color="primary" variant="outlined" class="mb-3" data-testid="scan-pick">
-            <v-btn v-for="st in scanTargets" :key="st.view" :value="st.view" size="small" class="text-none">{{ st.label }}</v-btn>
-          </v-btn-toggle>
-          <v-text-field v-model="scanTyped" :label="scanPickLabel" autofocus autocomplete="off" density="compact" variant="outlined" hide-details data-testid="scan-typed" @keydown.enter="scanTyped.trim() && routeScan(scanTyped, scanPick)"></v-text-field>
+          <v-text-field v-model="scanTyped" :label="t('scan.code')" autofocus autocomplete="off" density="compact" variant="outlined" hide-details data-testid="scan-typed" @keydown.enter="scanTyped.trim() && routeScan(scanTyped, null)"></v-text-field>
           <div class="d-flex mt-4" style="gap:8px"><v-spacer></v-spacer>
             <v-btn @click="scanDialog = false">{{ t('btn.cancel') }}</v-btn>
-            <v-btn variant="flat" color="primary" :disabled="!scanTyped.trim()" data-testid="scan-typed-go" @click="routeScan(scanTyped, scanPick)">{{ t('rsvp.checkin') }}</v-btn>
+            <v-btn variant="flat" color="primary" :disabled="!scanTyped.trim()" data-testid="scan-typed-go" @click="routeScan(scanTyped, null)">{{ t('rsvp.checkin') }}</v-btn>
           </div>
         </v-card>
       </v-dialog>
