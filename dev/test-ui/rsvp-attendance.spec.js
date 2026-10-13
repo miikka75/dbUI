@@ -433,3 +433,11 @@ test('validateSchema: a capacity config that does not resolve is named', async (
   expect(errs[2]).toContain('`holds` must be a non-empty list');
   expect(errs[3]).toBe('');
 });
+
+test('Lookup is offered to whoever can change something in it, not to a member who can only read', async ({ page }) => {
+  await setup(page);
+  await bootAs(page, 'ann@x');
+  expect(await page.evaluate(() => appInstance.sidebarTabs.some((t) => t.id === '__lookup'))).toBe(false);
+  await bootAs(page, 'org@x');
+  expect(await page.evaluate(() => appInstance.sidebarTabs.some((t) => t.id === '__lookup'))).toBe(true);
+});

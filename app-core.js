@@ -460,7 +460,7 @@ function createVueApp() {
         var canAccess = function(id) { return self.canAccessNavId(id); };
         var navCfg = self.navConfig;
         var navItems = (navCfg && Array.isArray(navCfg.items)) ? navCfg.items : [];
-        return Nav.build(navItems, self.t.bind(self), canAccess, { isAdmin: self.isAdmin, hasLookup: self.refTables.length || Object.keys(self.visibleLists).length, views: VIEWS, schema: SCHEMA, display: navCfg && navCfg.display, appearance: (self.appConfig && self.appConfig.navAppearance) || {} });
+        return Nav.build(navItems, self.t.bind(self), canAccess, { isAdmin: self.isAdmin, hasLookup: self.canUseLookup, views: VIEWS, schema: SCHEMA, display: navCfg && navCfg.display, appearance: (self.appConfig && self.appConfig.navAppearance) || {} });
       },
       bottomNavTabs: function() {
         // Schema can define explicit bottom nav items: nav.bottomNav = ["view1", "view2", ...]
@@ -967,6 +967,14 @@ function createVueApp() {
       // True when at least one list is editable — the Lists editor's own affordances are per list
       // (canEditList), this only answers "is any of this editable at all".
       canEditLists: function() { return this.isAdmin || this.userWritableLists.length > 0; },
+      // The Lookup tab is where reference data is MAINTAINED. Someone who can change nothing in it -- a
+      // member who reads the catalogues through the app's own views -- gets no tab for it: a screen of
+      // read-only vocabularies is clutter to them, not a feature.
+      canUseLookup: function() {
+        var self = this, w = this.userWritableTables;
+        return this.refTables.some(function(t) { return !w || w.indexOf(t) >= 0; })
+          || Object.keys(this.visibleLists).some(function(l) { return self.canEditList(l); });
+      },
       // Doc-view bodies are writable by admins/editors (mirrors the _pages__active rule / dev-server
       // gate); viewers get a read-only page with no Edit button instead of a save that would 403.
       canEditPages: function() { return this.isAdmin || this.currentUserRole === 'editor'; },
