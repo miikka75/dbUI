@@ -762,6 +762,12 @@ function validateSchema() {
         }
       });
     }
+    // A form taking a fresh record each time finds the one being filled in as the caller's latest one not
+    // yet submitted -- so without `submitColumn` it can never find it, and Start would make a row nobody
+    // can then see.
+    if (view.form && view.form.once === false && !view.form.submitColumn) {
+      errors.push('form "' + v + '": `once: false` needs `submitColumn` — it is how the form tells the record being filled in from the ones already sent');
+    }
     // A scan view IS a data view over the log it writes — sources, filter and columns are checked by the
     // rules above — plus a resolver config, whose shape (and whose write-layer prerequisites) scan.js
     // owns. Same division as Columns.vocabularyErrors: the module that reads a config reports what is

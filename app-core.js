@@ -3258,7 +3258,14 @@ function createVueApp() {
       embedWhenOk: function(ei, item) { return Embeds.embedWhenOk(ei, item); },
       embedVisible: function(ei, item) { return Embeds.embedVisible(ei, item); },
       // Embed row controls — operate on the active partition across the mirror cluster (dataCache is reactive)
-      embedSources: function(type, name) { return type === 'view' && VIEWS[name] ? (VIEWS[name].sources || []) : [name]; },
+      // A form view names its table as `form.table` rather than `sources`; it is still the one table its
+      // cells write, so the self-service gate (embedSelfServeTable) must see it -- or every field of a
+      // member's own form record renders read-only.
+      embedSources: function(type, name) {
+        var v = type === 'view' && VIEWS[name];
+        if (!v) return [name];
+        return v.sources || (v.form && v.form.table ? [v.form.table] : []);
+      },
       // The embed's self-service table, mirroring `selfServeTable` for the top-level grid: a single
       // source with an owner column the viewer holds no WRITE grant on. Without this an embed asked only
       // "may I write the source table?", so a member whose read-only grant makes the table self-service
@@ -4619,6 +4626,19 @@ function createVueApp() {
       //
       // Values are unaffected: `value` stays the raw key, and so do the `counts`/`seen` maps below --
       // what a row IS is its stored value, and only the title is a display concern.
+      // The cards a `picker: "cards"` ref offers: each option of getRefOptions with its catalogue row and
+      // the columns worth showing on it -- the lookup's own, less the value itself, hidden and bookkeeping
+      // ones. A catalogue is small and its columns ARE the description (price, months, details).
+      refCards: function(col, item) {
+        var ref = this.colRef(col) || {}, vc = ref.valueCol || 'id', rows = this.dataCache[ref.table] || [];
+        var skip = { id: 1, created_at: 1, updated_at: 1, position: 1 }; skip[vc] = 1;
+        var defs = Columns.columnDefs(SCHEMA[ref.table] || {});
+        var cols = getColumns(ref.table).filter(function(c) { var d = defs[c]; return !skip[c] && !(d && typeof d === 'object' && d.hidden); });
+        return this.getRefOptions(col, item).filter(function(o) { return o.value !== ''; }).map(function(o) {
+          var row = rows.filter(function(r) { return r[vc] === o.value; })[0] || {};
+          return { value: o.value, title: o.title, row: row, cols: cols.filter(function(c) { return row[c] != null && row[c] !== ''; }) };
+        });
+      },
       getRefOptions: function(col, item) {
         var ref = getColumnRef(null, col);   // memoized any-table scan (see colRef); was the same loop
         if (!ref) return [];
@@ -8323,6 +8343,7 @@ function createVueApp() {
         return appInstance.getListOptions(col, (sw && appInstance.isAltList(col, item)) ? sw.list : null, item);
       },
       getRefOptions: function(col, item) { return appInstance.getRefOptions(col, item); },
+      refCards: function(col, item) { return appInstance.refCards(col, item); },
       cellOptions: function(col, item) { return appInstance.cellOptions(col, item); },
       isAltList: function(col, item) { return appInstance.isAltList(col, item); },
       toggleListSwitch: function(col, item) { return appInstance.toggleListSwitch(col, item); },
@@ -8390,6 +8411,16 @@ function createVueApp() {
       + '<v-autocomplete v-else-if="colIsList(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop>'
       + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || t(\'col.switch_list\')">mdi-swap-horizontal</v-icon></template>'
       + '</v-autocomplete>'
+      // `picker: "cards"` on a ref: the catalogue rows themselves, each with its other columns. The same
+      // options the dropdown would offer (getRefOptions, so filterBy narrows both alike); pressing the
+      // chosen card again clears it, as a deselected chip or toggle does.
+      + '<tile-grid v-else-if="colIsRef(col) && !colIsMultiselect(col) && colPicker(col)===\'cards\'" min="170px" :data-testid="\'cards-\' + col">'
+      +   '<v-card v-for="o in refCards(col, item)" :key="o.value" :variant="item[col] === o.value ? \'outlined\' : \'tonal\'" :color="item[col] === o.value ? \'primary\' : undefined"'
+      +     ' class="pa-3" style="cursor:pointer" role="radio" :aria-checked="item[col] === o.value" data-testid="pick-card" @click="save(item, col, item[col] === o.value ? \'\' : o.value)">'
+      +     '<div class="d-flex align-center" style="gap:6px"><b style="flex:1">{{ o.title }}</b><v-icon v-if="item[col] === o.value" size="small">mdi-check-circle</v-icon></div>'
+      +     '<div v-for="c in o.cols" :key="c" style="font-size:0.8rem;opacity:0.8"><span style="opacity:0.7">{{ t(\'field.\' + c) || c }}: </span><list-value :col="c" :value="o.row[c]"></list-value></div>'
+      +   '</v-card>'
+      + '</tile-grid>'
       + '<v-autocomplete v-else-if="colIsRef(col)" :name="col" :model-value="item[col] || \'\'" :items="getRefOptions(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop></v-autocomplete>'
       + '<div v-else-if="colIsImage(col)" class="d-flex align-center" style="gap:6px;min-width:0">'
       +   '<template v-if="noThumb"></template>'
@@ -9768,7 +9799,9 @@ function createVueApp() {
         if (!this.canSubmit) { appInstance.notify(appInstance.t("msg.form_incomplete")); return; }
         var col = this.cfg.submitColumn;
         if (col && this.item) {
-          appInstance.saveField(this.item, col, this.cfg.submitValue === undefined ? "submitted" : this.cfg.submitValue);
+          // The form's table, named: without it saveField writes to the screen that is open -- the page the
+          // form is embedded in, or the form view itself -- and the server refuses a table that is neither.
+          appInstance.saveField(this.item, col, this.cfg.submitValue === undefined ? "submitted" : this.cfg.submitValue, this.cfg.table);
         }
         appInstance.notify(appInstance.t("msg.form_submitted"));
       }
@@ -9782,7 +9815,7 @@ function createVueApp() {
       +       '<div v-for="(b, i) in doneText" :key="i" v-html="b.html"></div>'
       +       '<v-alert v-if="!doneText.length" type="success" variant="tonal" density="compact">{{ a.t("msg.form_submitted") }}</v-alert>'
       +     '</div>'
-      +     '<v-btn v-else-if="!item" color="primary" @click="start">{{ a.tOr(cfg.startLabel, a.t("btn.add")) }}</v-btn>'
+      +     '<v-btn v-else-if="!item" color="primary" data-testid="form-start" @click="start">{{ a.tOr(cfg.startLabel, a.t("btn.add")) }}</v-btn>'
       +     '<div v-else>'
       +       '<div v-for="(sec, si) in built.sections" :key="si" class="mb-4">'
       +         '<div v-if="sec.title" class="text-subtitle-2 mb-2" style="opacity:0.85">{{ a.tOr(sec.title, sec.title) }}</div>'

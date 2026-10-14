@@ -103,8 +103,8 @@
             "sorted": { "type": "boolean", "description": "Sort dropdown items alphabetically." },
             "picker": {
               "type": "string",
-              "enum": ["chips", "toggle"],
-              "description": "Input widget for a single `select` column; omit for the default dropdown. Ignored with `allowNew` (which needs free-text entry) and with `multiple` (already chips)."
+              "enum": ["chips", "toggle", "cards"],
+              "description": "Input widget for a single `select` column; omit for the default dropdown. `cards` is for a `ref` column: its catalogue rows as cards showing their other columns, the chosen one outlined. Ignored with `allowNew` (which needs free-text entry) and with `multiple` (already chips)."
             },
             "multiple": { "type": "boolean", "description": "Hold several values instead of one, stored as an array. Cardinality is all that ever separated `multiselect` from `select`, so it is a flag rather than a type — which is what lets it compose with `ref` too." },
             "table": { "type": "string", "description": "Lookup table a `ref` column points at." },

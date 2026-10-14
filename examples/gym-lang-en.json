@@ -59,6 +59,7 @@
       "field.reps": "Reps",
       "field.reward": "Reward",
       "field.room": "Room",
+      "field.sent": "Sent",
       "field.sets": "Sets",
       "field.start_on": "Starts",
       "field.starts_at": "Starts",
@@ -141,6 +142,8 @@
       "tab.workouts": "Workouts",
       "text.add_workout": "Add workout",
       "text.buy": "Buy",
+      "text.choose_plan": "Choose a plan",
+      "text.claim": "Claim",
       "text.claim_reward": "Claim a reward",
       "text.classes_attended": "Classes attended",
       "text.door_code": "Door code",
@@ -153,7 +156,6 @@
       "text.loyalty_shop": "Reward shop",
       "text.membership_buy": "Buy a membership",
       "text.membership_mine": "My membership",
-      "text.membership_plans": "Plans",
       "text.pulse_km_week": "Distance this week (km)",
       "text.pulse_minutes_month": "Minutes trained this month",
       "text.pulse_visits_month": "Gym visits this month",
@@ -198,12 +200,11 @@
       "view.my_visits": "Gym visits",
       "view.my_workouts": "Workout log",
       "view.news_feed": "News",
-      "view.plan_list": "Plans",
       "view.pt_board": "PT requests",
       "view.pt_mine": "Personal training",
       "view.reward_board": "Reward claims",
+      "view.reward_claim_form": "Claim a reward",
       "view.reward_mine": "My rewards",
-      "view.reward_shop": "Reward shop",
       "view.visit_scan": "Check in at the gym"
     }
   }

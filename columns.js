@@ -403,7 +403,7 @@
   function colListFilter(schema, col) { return colInfo(schema, col).listFilter; }   // which lookup rows a `list:` column's picker offers
   function colIsImage(schema, col) { return colInfo(schema, col).image; }
   function colIsUrl(schema, col) { return colInfo(schema, col).url; }
-  function colPicker(schema, col) { return colInfo(schema, col).picker; }   // 'chips' | 'toggle' | null (dropdown)
+  function colPicker(schema, col) { return colInfo(schema, col).picker; }   // 'chips' | 'toggle' | 'cards' | null (dropdown)
 
   // View column-entry shape predicates (a view's `columns` array mixes plain names, {name,...} defs,
   // inline embeds, named-view embeds and legacy text blocks). Moved here from schema-loader.js so the

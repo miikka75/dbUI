@@ -158,28 +158,28 @@
       "icon": "./examples/gym-favicon.svg",
       "revision": 1,
       "tables": 15,
-      "views": 32,
+      "views": 31,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "b0a3cc436d3a2469"
+        "hash": "1076b93ee3684308"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "gym-lang-en.json",
-          "hash": "a15ffbab92006bd1"
+          "hash": "ae3568fcda2c3e36"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "gym-lang-fi.json",
-          "hash": "c38029a2152a8c70"
+          "hash": "fb1cc3275bfdc84d"
         }
       ],
       "data": {
         "file": "gym-data.json",
-        "hash": "5b2bc0b8d74f227a"
+        "hash": "878fde15da45f303"
       },
       "about": {
         "file": "gym-about.json",

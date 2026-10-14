@@ -1182,6 +1182,22 @@ the honest cost: the visits, and the gym streak, are worth exactly what the door
 
 Order: a and b together (one change to how scanning starts), then c.
 
+#### 12. Choosing by card — `picker: "cards"` *(landed)*
+
+The plan cards and the reward shop were read-only lists beside a dropdown that did the choosing. Asked
+for: pick the card itself, then press Buy / Claim. First drafted as a button on each card that made a row
+elsewhere (`rowAction`); asked instead to be a SELECTOR, like the dropdown and usable in its place — which
+is the better shape, because it is one more value of the existing column `picker` (`chips`, `toggle`)
+and so works wherever the column is edited: a form, a card, a grid.
+
+- `picker: "cards"` on a `ref` column: its catalogue rows as cards, each showing the lookup's other
+  columns (price, months, details); the chosen one is outlined with a check, pressing it again clears it.
+  The options are the same `getRefOptions` the dropdown offers, so `filterBy` narrows them identically.
+- Buy and Claim are then ordinary `form`s whose field is that column: choose the card, press the form's
+  button. No new write path.
+
+**Small; UI only.**
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the

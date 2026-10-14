@@ -59,6 +59,7 @@
       "field.reps": "Toistot",
       "field.reward": "Palkinto",
       "field.room": "Huone",
+      "field.sent": "Lähetetty",
       "field.sets": "Sarjat",
       "field.start_on": "Alkaa",
       "field.starts_at": "Alkaa",
@@ -141,6 +142,8 @@
       "tab.workouts": "Treenit",
       "text.add_workout": "Lisää treeni",
       "text.buy": "Osta",
+      "text.choose_plan": "Valitse jäsenyys",
+      "text.claim": "Lunasta",
       "text.claim_reward": "Lunasta palkinto",
       "text.classes_attended": "Osallistutut tunnit",
       "text.door_code": "Ovikoodi",
@@ -153,7 +156,6 @@
       "text.loyalty_shop": "Palkintokauppa",
       "text.membership_buy": "Osta jäsenyys",
       "text.membership_mine": "Jäsenyyteni",
-      "text.membership_plans": "Jäsenyystyypit",
       "text.pulse_km_week": "Matka tällä viikolla (km)",
       "text.pulse_minutes_month": "Treeniminuutit tässä kuussa",
       "text.pulse_visits_month": "Salikäynnit tässä kuussa",
@@ -198,12 +200,11 @@
       "view.my_visits": "Salikäynnit",
       "view.my_workouts": "Treenipäiväkirja",
       "view.news_feed": "Uutiset",
-      "view.plan_list": "Jäsenyystyypit",
       "view.pt_board": "PT-pyynnöt",
       "view.pt_mine": "Personal training",
       "view.reward_board": "Lunastukset",
+      "view.reward_claim_form": "Lunasta palkinto",
       "view.reward_mine": "Omat palkinnot",
-      "view.reward_shop": "Palkintokauppa",
       "view.visit_scan": "Kirjaudu salille"
     }
   }

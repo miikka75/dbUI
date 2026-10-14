@@ -370,7 +370,8 @@
           "name": "plan",
           "type": "ref",
           "table": "ref_plans",
-          "valueCol": "plan"
+          "valueCol": "plan",
+          "picker": "cards"
         },
         {
           "name": "start_on",
@@ -565,11 +566,17 @@
           "name": "reward",
           "type": "ref",
           "table": "ref_rewards",
-          "valueCol": "reward"
+          "valueCol": "reward",
+          "picker": "cards"
         },
         {
           "name": "claimed_on",
           "type": "date"
+        },
+        {
+          "name": "sent",
+          "type": "text",
+          "hidden": true
         },
         {
           "name": "claim_status",
@@ -582,7 +589,8 @@
       "ownerWritable": [
         "member",
         "reward",
-        "claimed_on"
+        "claimed_on",
+        "sent"
       ],
       "ownerWritableWhile": {
         "claim_status": "requested"
@@ -1022,25 +1030,9 @@
         "once": false,
         "submitColumn": "order_state",
         "submitValue": "submitted",
-        "startLabel": "text.buy"
+        "startLabel": "text.choose_plan",
+        "submitLabel": "text.buy"
       }
-    },
-    {
-      "name": "plan_list",
-      "kind": "data",
-      "icon": "mdi-tag-multiple",
-      "sources": [
-        "ref_plans"
-      ],
-      "mode": "join",
-      "layout": "card",
-      "readonly": true,
-      "defaultSort": "price_eur",
-      "columns": [
-        "plan",
-        "months",
-        "price_eur"
-      ]
     },
     {
       "name": "my_membership",
@@ -1067,12 +1059,7 @@
       "name": "doc_membership",
       "kind": "page",
       "icon": "mdi-card-account-details",
-      "fab": {
-        "open": "membership_buy",
-        "label": "text.buy",
-        "icon": "mdi-cart"
-      },
-      "markdown": "## {{t:text.membership_mine}}\n\n{{view:my_membership?}}\n\n## {{t:text.membership_plans}}\n\n{{view:plan_list}}\n\n## {{t:text.membership_buy}}\n\n{{view:membership_buy}}\n"
+      "markdown": "## {{t:text.membership_mine}}\n\n{{view:my_membership?}}\n\n## {{t:text.membership_buy}}\n\n{{view:membership_buy}}\n"
     },
     {
       "name": "membership_board",
@@ -1378,9 +1365,7 @@
           {
             "$and": [
               {
-                "claim_status": {
-                  "notEmpty": true
-                }
+                "sent": "yes"
               },
               {
                 "claim_status": {
@@ -1405,28 +1390,6 @@
       }
     },
     {
-      "name": "reward_shop",
-      "kind": "data",
-      "icon": "mdi-gift",
-      "sources": [
-        "ref_rewards"
-      ],
-      "mode": "join",
-      "layout": "card",
-      "readonly": true,
-      "defaultSort": "cost",
-      "search": [
-        "reward",
-        "category"
-      ],
-      "columns": [
-        "reward",
-        "category",
-        "cost",
-        "details"
-      ]
-    },
-    {
       "name": "reward_mine",
       "kind": "data",
       "icon": "mdi-gift-open",
@@ -1437,24 +1400,21 @@
       "layout": "table",
       "defaultSort": "claimed_on",
       "filter": {
-        "member": "@me"
+        "member": "@me",
+        "sent": "yes"
       },
       "columns": [
         "claimed_on",
         "reward",
         "claim_status"
-      ]
+      ],
+      "readonly": true
     },
     {
       "name": "doc_loyalty",
       "kind": "page",
       "icon": "mdi-star-circle",
-      "fab": {
-        "add": "reward_mine",
-        "label": "text.claim_reward",
-        "icon": "mdi-gift"
-      },
-      "markdown": "## {{t:text.loyalty_level}}\n\n{{view:my_level}}\n\n## {{t:text.loyalty_coins}}\n\n{{view:my_coins}}\n\n## {{t:text.loyalty_shop}}\n\n{{view:reward_shop}}\n\n## {{t:text.loyalty_mine}}\n\n{{view:reward_mine}}\n"
+      "markdown": "## {{t:text.loyalty_level}}\n\n{{view:my_level}}\n\n## {{t:text.loyalty_coins}}\n\n{{view:my_coins}}\n\n## {{t:text.loyalty_shop}}\n\n{{view:reward_claim_form}}\n\n## {{t:text.loyalty_mine}}\n\n{{view:reward_mine}}\n"
     },
     {
       "name": "reward_board",
@@ -1478,6 +1438,28 @@
         ],
         "title": "reward",
         "color": "member"
+      },
+      "filter": {
+        "sent": "yes"
+      }
+    },
+    {
+      "name": "reward_claim_form",
+      "kind": "form",
+      "icon": "mdi-gift",
+      "form": {
+        "table": "reward_claims",
+        "columns": [
+          "reward"
+        ],
+        "required": [
+          "reward"
+        ],
+        "once": false,
+        "submitColumn": "sent",
+        "submitValue": "yes",
+        "startLabel": "text.claim_reward",
+        "submitLabel": "text.claim"
       }
     }
   ],
