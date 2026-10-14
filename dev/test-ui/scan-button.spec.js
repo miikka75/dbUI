@@ -82,6 +82,10 @@ test('scan button: a typed door code logs a visit, a typed check-in code checks 
 test('scan button: a QR names its own view; a link to another site is refused', async ({ page }) => {
   await setup(page);
   await boot(page, 'ann@x');
+  // The button covers check-in here, so Ann has no box of her own on the booking page.
+  await page.evaluate(() => appInstance.selectTab('book'));
+  await expect(page.locator('[data-testid="rsvp-checkin"]')).toBeAttached();
+  await expect(page.locator('[data-testid="rsvp-checkin-claim"]')).toHaveCount(0);
   // What the camera would hand over: the room's QR, a link to the check-in view.
   await page.evaluate(() => appInstance.routeScan(location.origin + '/?view=book&scan=heron', null));
   await expect.poll(async () => (await rows(page, 'bookings')).map((r) => r.checkin_code)).toEqual(['heron']);

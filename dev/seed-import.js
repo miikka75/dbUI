@@ -144,7 +144,14 @@ const postAs = (email, action, body) => call(email, action, body);
   for (const f of fs.readdirSync(EXAMPLES).filter(n => langRe.test(n))) {
     const pack = JSON.parse(fs.readFileSync(path.join(EXAMPLES, f), 'utf8'));
     bundle.languages.push(...(pack.languages || []));
-    Object.assign(bundle.translations, pack.translations || {});
+    // The app's own UI text in the same language (app-lang-<code>.json), first, so the bundle's labels
+    // win where both name a key -- what the example picker installs. Without it every button and
+    // heading shows its raw key (`rsvp.checkin_code`).
+    for (const [code, map] of Object.entries(pack.translations || {})) {
+      const app = path.join(EXAMPLES, 'app-lang-' + code + '.json');
+      const ui = fs.existsSync(app) ? (JSON.parse(fs.readFileSync(app, 'utf8')).translations || {})[code] : null;
+      bundle.translations[code] = Object.assign({}, ui || {}, map);
+    }
   }
 
   // 1) Ensure tables exist (idempotent), then apply the bundle's DATA on top of the schema.

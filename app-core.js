@@ -9839,7 +9839,10 @@ function createVueApp() {
     mixins: [ROTATING_CODE],
     // `rotateMinutes`: the view's `checkin.rotateMinutes` -- the code changes by itself while the QR is open.
     // `autoClaim`: `checkin.link: "submit"` -- a code that arrives by link is saved with no press.
-    props: { viewName: String, mine: { type: Array, default: function() { return []; } }, canStamp: Boolean, armed: { type: String, default: '' }, rotateMinutes: { type: Number, default: 0 }, autoClaim: Boolean },
+    // `hideClaim`: the scan button reaches this view, so a member has no use for a box of their own. The
+    // component stays (it is what saves a code that arrives by link); only the box goes, unless a code is
+    // waiting for a press nobody could otherwise make.
+    props: { viewName: String, mine: { type: Array, default: function() { return []; } }, canStamp: Boolean, armed: { type: String, default: '' }, rotateMinutes: { type: Number, default: 0 }, autoClaim: Boolean, hideClaim: Boolean },
     emits: ['claimed'],
     // `code`: what the organizer typed. `current`/`previous`/`rotatedAt`: the rotating code and the one
     // before it, which is still accepted. None of it is stored anywhere.
@@ -9892,7 +9895,7 @@ function createVueApp() {
       +   '<v-btn size="small" variant="text" class="text-none" :disabled="!shown" :title="a.t(\'rsvp.checkin\')" :aria-label="a.t(\'rsvp.checkin\')" data-testid="rsvp-checkin-stamp" @click="stamp()"><v-icon icon="mdi-account-check"></v-icon><span class="d-none d-sm-inline ml-2">{{ a.t(\'rsvp.checkin\') }}</span></v-btn>'
       +   '<qr-dialog v-model="qrOpen" :link="qrLink" :caption="shown" mono></qr-dialog>'
       + '</template>'
-      + '<v-text-field v-else :model-value="armed || myCode" @change="e => claim(e.target.value)" :disabled="frozen" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" :autofocus="!!armed" style="max-width:200px" data-testid="rsvp-checkin-claim">'
+      + '<v-text-field v-else-if="!hideClaim || (armed && !autoClaim)" :model-value="armed || myCode" @change="e => claim(e.target.value)" :disabled="frozen" :label="a.t(\'rsvp.checkin_code\')" density="compact" variant="outlined" hide-details autocomplete="off" :autofocus="!!armed" style="max-width:200px" data-testid="rsvp-checkin-claim">'
       // A code from a link is ARMED, not written: one press saves it, because a link is something anyone
       // can send you.
       +   '<template v-if="armed" v-slot:append-inner>'
@@ -9939,6 +9942,7 @@ function createVueApp() {
       // A code that arrived by the organizer's QR (`?view=&scan=`). It stays on the root until the member
       // presses, rather than being taken into this component: opening the link re-renders the view.
       armed: function() { var p = appInstance.pendingScan; return p && p.view === this.viewName ? p.code : ''; },
+      byScanButton: function() { var n = this.viewName; return appInstance.scanTargets.some(function(t) { return t.view === n; }); },
       armedDirect: function() { var p = appInstance.pendingScan; return !!(p && p.view === this.viewName && p.direct); },
       // The rendered rows: engine order until a header is clicked, then Rows.compareValues -- the same
       // comparator the data grid and embeds use, so blanks-last/numeric ordering all agree.
@@ -10021,7 +10025,7 @@ function createVueApp() {
       +   '<v-btn icon="mdi-qrcode" size="small" variant="text" :title="a.t(\'rsvp.page_qr\')" :aria-label="a.t(\'rsvp.page_qr\')" data-testid="rsvp-page-qr" @click="pageQr = true"></v-btn>'
       +   '<qr-dialog v-model="pageQr" :link="pageLink" :caption="pageTitle"></qr-dialog>'
       + '</div>'
-      + '<rsvp-checkin v-if="checkinShown" :view-name="viewName" :mine="todayMine" :can-stamp="canStamp" :armed="armed" :rotate-minutes="cfg.checkin.rotateMinutes || 0" :auto-claim="cfg.checkin.link === \'submit\' || armedDirect" @claimed="claimed()"></rsvp-checkin>'
+      + '<rsvp-checkin v-if="checkinShown" :view-name="viewName" :mine="todayMine" :can-stamp="canStamp" :armed="armed" :rotate-minutes="cfg.checkin.rotateMinutes || 0" :auto-claim="cfg.checkin.link === \'submit\' || armedDirect" :hide-claim="byScanButton" @claimed="claimed()"></rsvp-checkin>'
       + '<v-table v-if="!a.mobile" density="compact">'
       + '<thead><tr>'
       + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'date\')" :aria-sort="ariaSort(\'date\')" data-testid="rsvp-sort-date">{{ a.t(\'rsvp.date\') }}</th>'
