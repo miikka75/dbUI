@@ -983,11 +983,22 @@ function createVueApp() {
       // THE CORNER BUTTON: one per screen, and what it does is the screen's to say. A view's `fab`
       // ("add" | "scan" | "none") wins; else `nav.fab` sets the app's default; else "add", the button
       // the grid has always had on a phone. null = no button here (nothing to add, or nowhere to scan to).
-      fabAction: function() {
+      //
+      // A view's `fab` may also be an object naming WHICH activity, for a page whose activity lives in an
+      // embed or on another screen: { add: "<view>" } adds a row to that view ("Add workout" on a page
+      // embedding the workout log), { open: "<view>" } goes there ("Buy" -> the order form). Each takes
+      // `label` and `icon`. A button the viewer could not use is not shown: no button, no activity.
+      // Resolves to { kind, target, label, icon, extended } or null.
+      fab: function() {
         var v = VIEWS[this.currentTable];
         var want = (v && v.fab) || (this.navConfig && this.navConfig.fab) || 'add';
-        if (want === 'scan') return this.scanTargets.length ? 'scan' : null;
-        if (want === 'add') return (this.mobile && this.canAddRows && this.isDataView) ? 'add' : null;
+        if (want === 'scan') return this.scanTargets.length ? { kind: 'scan', icon: 'mdi-qrcode-scan', label: 'scan.press' } : null;
+        if (want === 'add') return (this.mobile && this.canAddRows && this.isDataView) ? { kind: 'add', icon: 'mdi-plus', label: 'btn.add' } : null;
+        if (want && typeof want === 'object') {
+          var ext = { label: want.label, icon: want.icon, extended: !!want.label };
+          if (want.add && VIEWS[want.add] && this.canMutateEmbed('view', want.add)) return Object.assign({ kind: 'addTo', target: want.add, icon: 'mdi-plus' }, ext, { icon: want.icon || 'mdi-plus', label: want.label || 'btn.add' });
+          if (want.open && VIEWS[want.open]) return Object.assign({ kind: 'open', target: want.open }, ext, { icon: want.icon || 'mdi-arrow-right', label: want.label || ('view.' + want.open) });
+        }
         return null;
       },
       // The Lookup tab is where reference data is MAINTAINED. Someone who can change nothing in it -- a
@@ -5728,7 +5739,13 @@ function createVueApp() {
       // menu. Where the browser cannot decode (no BarcodeDetector: iPhone Safari, desktop Chrome on
       // Windows), or the picture held no code, it opens a field to type the code into instead.
       // Unlike a deep link, an in-app scan SAVES: the person pointing the camera is the intent.
-      fabPress: function() { if (this.fabAction === 'scan') this.scanPress(); else if (this.fabAction === 'add') this.addRow(); },
+      fabPress: function() {
+        var f = this.fab; if (!f) return;
+        if (f.kind === 'scan') this.scanPress();
+        else if (f.kind === 'add') this.addRow();
+        else if (f.kind === 'addTo') this.embedAddRow('view', f.target);
+        else if (f.kind === 'open') this.selectTab(f.target);
+      },
       scanPress: function() {
         if (typeof BarcodeDetector === 'undefined') { this.openScanDialog(''); return; }
         var el = document.getElementById('scan-fab-photo'); if (el) el.click();

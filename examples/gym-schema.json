@@ -594,6 +594,7 @@
       "name": "doc_home",
       "kind": "page",
       "icon": "mdi-home",
+      "fab": "scan",
       "markdown": "# {{t:text.home_heading}}\n\n{{view:my_level}}\n\n## {{t:text.home_month}}\n\n{{view:my_pulse}}\n\n## {{t:text.home_news}}\n\n{{view:news_feed}}\n"
     },
     {
@@ -634,6 +635,7 @@
       "name": "class_booking",
       "kind": "rsvp",
       "icon": "mdi-calendar-check",
+      "fab": "scan",
       "rsvp": {
         "events": "classes",
         "dateColumn": "starts_at",
@@ -682,6 +684,11 @@
       "name": "doc_training",
       "kind": "page",
       "icon": "mdi-dumbbell",
+      "fab": {
+        "add": "my_workouts",
+        "label": "text.add_workout",
+        "icon": "mdi-plus"
+      },
       "markdown": "## {{t:text.training_stats}}\n\n{{view:my_pulse}}\n\n## {{t:text.training_weeks}}\n\n{{view:my_minutes_weeks}}\n\n## {{t:text.training_top}}\n\n{{view:my_top_exercises}}\n\n## {{t:text.training_steps}}\n\n{{view:my_steps_week}}\n\n## {{t:text.training_log}}\n\n{{view:my_workouts}}\n\n## {{t:text.training_visits}}\n\n{{view:my_visits}}\n"
     },
     {
@@ -1014,7 +1021,8 @@
         ],
         "once": false,
         "submitColumn": "order_state",
-        "submitValue": "submitted"
+        "submitValue": "submitted",
+        "startLabel": "text.buy"
       }
     },
     {
@@ -1059,6 +1067,11 @@
       "name": "doc_membership",
       "kind": "page",
       "icon": "mdi-card-account-details",
+      "fab": {
+        "open": "membership_buy",
+        "label": "text.buy",
+        "icon": "mdi-cart"
+      },
       "markdown": "## {{t:text.membership_mine}}\n\n{{view:my_membership?}}\n\n## {{t:text.membership_plans}}\n\n{{view:plan_list}}\n\n## {{t:text.membership_buy}}\n\n{{view:membership_buy}}\n"
     },
     {
@@ -1091,6 +1104,11 @@
       "name": "pt_mine",
       "kind": "data",
       "icon": "mdi-account-tie",
+      "fab": {
+        "add": "pt_mine",
+        "label": "text.request_trainer",
+        "icon": "mdi-account-plus"
+      },
       "sources": [
         "pt_sessions"
       ],
@@ -1431,6 +1449,11 @@
       "name": "doc_loyalty",
       "kind": "page",
       "icon": "mdi-star-circle",
+      "fab": {
+        "add": "reward_mine",
+        "label": "text.claim_reward",
+        "icon": "mdi-gift"
+      },
       "markdown": "## {{t:text.loyalty_level}}\n\n{{view:my_level}}\n\n## {{t:text.loyalty_coins}}\n\n{{view:my_coins}}\n\n## {{t:text.loyalty_shop}}\n\n{{view:reward_shop}}\n\n## {{t:text.loyalty_mine}}\n\n{{view:reward_mine}}\n"
     },
     {
@@ -1538,7 +1561,6 @@
       "coach",
       "doc_loyalty"
     ],
-    "fab": "scan",
     "scan": [
       "visit_scan",
       "class_booking"

@@ -377,12 +377,14 @@
         </v-container>
     </v-main>
 
-    <!-- The corner button (fabAction): ONE per screen, and the screen says what it does -- add a row
+    <!-- The corner button (fab): ONE per screen, and the screen says what it does -- add a row
          (the default, on a phone), or scan a code (nav.scan). -->
-    <v-btn v-if="fabAction" :icon="fabAction === 'scan' ? 'mdi-qrcode-scan' : 'mdi-plus'" color="primary" :size="fabAction === 'scan' ? 'x-large' : 'large'" elevation="4"
-      :title="fabAction === 'scan' ? t('scan.press') : t('btn.add')" :aria-label="fabAction === 'scan' ? t('scan.press') : t('btn.add')"
-      :data-testid="fabAction === 'scan' ? 'scan-fab' : 'add-fab'"
+    <v-btn v-if="fab && !fab.extended" :icon="fab.icon" color="primary" :size="fab.kind === 'scan' ? 'x-large' : 'large'" elevation="4"
+      :title="tOr(fab.label, fab.label)" :aria-label="tOr(fab.label, fab.label)" :data-testid="fab.kind === 'scan' ? 'scan-fab' : 'add-fab'"
       :style="'position:fixed; right:16px; z-index:100; bottom:' + (mobile ? 72 : 24) + 'px'" @click="fabPress()"></v-btn>
+    <!-- A labelled one ("Add workout", "Buy"): the words say which activity, so they stay on a phone. -->
+    <v-btn v-if="fab && fab.extended" :prepend-icon="fab.icon" color="primary" size="large" rounded="pill" elevation="4" class="text-none" data-testid="action-fab"
+      :style="'position:fixed; right:16px; z-index:100; bottom:' + (mobile ? 72 : 24) + 'px'" @click="fabPress()">{{ tOr(fab.label, fab.label) }}</v-btn>
 
     <!-- What scanning needs, when the corner button can scan: the camera's file input and the typing dialog. -->
     <template v-if="scanTargets.length && !loading">
@@ -412,7 +414,9 @@
     </v-bottom-navigation>
 
     <!-- Snackbar -->
-    <v-snackbar v-model="snackbar" :timeout="2000" location="bottom">{{ snackText }}</v-snackbar>
+    <!-- At the top while a corner button shows: at the bottom it covers the button on a phone, so a
+         second "Add workout" in a row could not be pressed until the message went away. -->
+    <v-snackbar v-model="snackbar" :timeout="2000" :location="fab ? 'top' : 'bottom'">{{ snackText }}</v-snackbar>
   </v-app>
 </div>
 

@@ -848,7 +848,13 @@ function validateRefs(schema) {
   // simply show no button, which reads as a bug rather than a missing list.
   var fabOk = function(val, where) {
     if (val === undefined) return;
-    if (['add', 'scan', 'none'].indexOf(val) < 0) errs.push(where + ' `fab` is "' + val + '" — use add, scan or none');
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      var fk = ['add', 'open'].filter(function(k) { return val[k] !== undefined; });
+      if (fk.length !== 1) errs.push(where + ' `fab` object names one activity: { "add": "<view>" } or { "open": "<view>" }');
+      else if (!views[val[fk[0]]]) errs.push(where + ' `fab.' + fk[0] + '` names missing view "' + val[fk[0]] + '"');
+      return;
+    }
+    if (['add', 'scan', 'none'].indexOf(val) < 0) errs.push(where + ' `fab` is "' + val + '" — use add, scan, none, or { add | open: "<view>" }');
     else if (val === 'scan' && !(schema.nav && Array.isArray(schema.nav.scan) && schema.nav.scan.length)) errs.push(where + ' `fab: "scan"` needs `nav.scan` to name where scanned codes go');
   };
   fabOk(schema.nav && schema.nav.fab, 'Nav ->');

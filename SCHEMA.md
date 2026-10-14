@@ -329,7 +329,7 @@ Named, reusable. Views are flat — hierarchy lives in `nav` (no `views.views` n
 | `search` | boolean \| string[] | Offer a **runtime search box** over this view's rows: `true` = every column, an array = only those. Narrows what is rendered, never the data. See **search** below |
 | `obscureNames` | boolean \| string[] | Display-only privacy: abbreviate person names to "First L." in this view. `true` = all list/multiselect columns (or all area columns of a rotationView); an array = exactly those columns. Stored data is untouched |
 | `mineOnly` | boolean \| `{list}` | **rotationViews only.** Show a viewer only the slot column that *is* them, so one shared view is the whole matrix for an admin and a single column for a member (see "Per-person views" below). `{ "list": "<listName>" }` resolves identity through that list; `true` uses the profile display name. An object, not a bare string, so it cannot be misread as the column array `obscureNames` takes. Display-only |
-| `fab` | string | What the corner button does on this screen: `"add"`, `"scan"` or `"none"`. Overrides `nav.fab` (see **nav**) |
+| `fab` | string | object | What the corner button does on this screen: `"add"` (a row here), `"scan"`, `"none"`, or an activity that lives elsewhere — `{ "add": "<view>", "label": "text.add_workout", "icon": "mdi-plus" }` adds a row to that view (a page embedding it), `{ "open": "<view>", "label": "text.buy" }` goes to it. A labelled button shows its words, on a phone too. A button the viewer could not use is not shown. Overrides `nav.fab` (see **nav**) |
 | `background` | object | Background image for this view's card (see **background images** below). Works on **every** view kind |
 
 A view's `columns` may contain, besides plain column names:

@@ -161,20 +161,20 @@
       "views": 32,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "3fe622327b35a19c"
+        "hash": "b0a3cc436d3a2469"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "gym-lang-en.json",
-          "hash": "a26001c895953f22"
+          "hash": "a15ffbab92006bd1"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "gym-lang-fi.json",
-          "hash": "49ce03d9e43e43ff"
+          "hash": "c38029a2152a8c70"
         }
       ],
       "data": {

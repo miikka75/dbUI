@@ -180,3 +180,38 @@ test('with no `fab` anywhere, the corner button is Add on a phone, as it always 
   await expect(page.locator('[data-testid="add-fab"]')).toBeVisible();
   await expect(page.locator('[data-testid="scan-fab"]')).toHaveCount(0);
 });
+
+test('a page names its own activity: { add: view } adds a row there, { open: view } goes there, and nothing usable means no button', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  delete schema.nav.fab;
+  schema.views.push(
+    { name: 'my_visits', sources: ['visits'], columns: ['seen_on', 'door'] },
+    { name: 'log_page', kind: 'page', markdown: '{{view:my_visits}}', fab: { add: 'my_visits', label: 'Log a visit' } },
+    { name: 'go_page', kind: 'page', markdown: '# Go', fab: { open: 'book', label: 'Book' } },
+    { name: 'class_list', sources: ['classes'], columns: ['date', 'title'], readonly: true, fab: { add: 'class_list', label: 'Add class' } }
+  );
+  schema.nav.items.push({ view: 'log_page' }, { view: 'go_page' }, { view: 'class_list' });
+  await setup(page, schema);
+  await boot(page, 'ann@x');
+  const fab = page.locator('[data-testid="action-fab"]');
+
+  await page.evaluate(() => appInstance.selectTab('log_page'));
+  await expect(fab).toHaveText('Log a visit');
+  await fab.click();
+  await expect.poll(() => page.evaluate(() => (appInstance.dataCache.visits || []).length)).toBe(1);
+
+  await page.evaluate(() => appInstance.selectTab('go_page'));
+  await fab.click();
+  expect(await page.evaluate(() => appInstance.currentTable)).toBe('book');
+
+  // A read-only class list Ann cannot add to: the button would do nothing, so there is none.
+  await page.evaluate(() => appInstance.selectTab('class_list'));
+  await expect(fab).toHaveCount(0);
+  await page.evaluate(() => appInstance.selectTab('home'));
+  await expect(fab).toHaveCount(0);
+  await expect(page.locator('[data-testid="scan-fab"]')).toHaveCount(0);
+
+  const err = await page.evaluate(() => validateRefs({ tables: SCHEMA, views: [{ name: 'x', fab: { add: 'nope' } }, { name: 'y', fab: { add: 'x', open: 'x' } }], nav: { items: [] } }).join(' | '));
+  expect(err).toContain('`fab.add` names missing view "nope"');
+  expect(err).toContain('`fab` object names one activity');
+});
