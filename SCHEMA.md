@@ -1263,6 +1263,14 @@ appointment date and an expiry date):
 Per-source fields: `table` (req), `dateColumn` (req), `titleColumns` (opt), `filter` (opt, data-view
 grammar), `label` (opt — the type tag + colour key; defaults to the table's translated `tab.<table>`).
 
+### Filters the reader picks (`filters`)
+
+`"filters": ["gym"]` on a calendar puts a multi-select per column above it; the reader picks values and the
+events narrow to those. The options are the column's own (a ref's catalogue, a list's values). A filter only
+narrows events whose row HAS the column, so a calendar of classes and workouts filtered by gym keeps the
+workouts. The picks are kept in the reader's browser, per calendar — a convenience, not a setting.
+`validateSchema` names a filter column no source has, or one with no options.
+
 ### Booking from the calendar (`respond`)
 
 A source may name an rsvp view over its own table — `{ "table": "classes", "dateColumn": "starts_at", "respond":

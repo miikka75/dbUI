@@ -539,3 +539,28 @@ test('a calendar list starts today, orders a day by time and shows it; range set
   await expect(page.locator('[data-testid="cal-event-time"]').first()).toContainText('07');
   await expect(page.locator('[data-testid="cal-window"]')).toHaveCount(0);
 });
+
+test('calendar filters: pick values of a column to narrow the events, remembered in the browser', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns.push({ name: 'venue', type: 'select', list: 'venues' });
+  schema.views.push({ name: 'timetable', kind: 'calendar', calendar: { sources: [{ table: 'practices', dateColumn: 'date', titleColumns: ['title'] }], defaultView: 'list', filters: ['venue'] } });
+  schema.nav.items.push({ view: 'timetable' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/saveLists', { data: { lists: { rsvp_status: ['coming', 'out'], attendance_status: ['pending', 'attended', 'absent'], venues: ['North', 'South'] } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p1', date: future, title: 'Tuesday', venue: 'North' } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p2', date: future, title: 'Other', venue: 'South' } }, headers: ADMIN });
+  await bootAs(page, 'ann@x');
+  await page.evaluate(() => appInstance.selectTab('timetable'));
+  const titles = () => page.locator('[data-testid="cal-view"]').innerText();
+  await expect.poll(titles).toContain('Other');
+  await page.locator('[data-testid="cal-filter-venue"]').click();
+  await page.locator('.v-overlay .v-list-item', { hasText: 'North' }).click();
+  await page.keyboard.press('Escape');
+  await expect.poll(titles).not.toContain('Other');
+  await expect.poll(titles).toContain('Tuesday');
+  await page.reload();
+  await page.waitForFunction(() => window.appInstance && !appInstance.loading);
+  await page.evaluate(() => appInstance.selectTab('timetable'));
+  await expect.poll(titles).not.toContain('Other');       // remembered
+});

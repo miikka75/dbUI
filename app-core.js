@@ -8180,7 +8180,10 @@ function createVueApp() {
           config: function(name) { return (VIEWS[name] && VIEWS[name].calendar) || {}; },
           events: function(name, win) { return vm.calEventsFor(name, win); },
           canAdd: function(name) { return vm.canCalendarAdd(name); },
-          addOnDay: function(name, date) { vm.calendarAddOnDay(name, date); }
+          addOnDay: function(name, date) { vm.calendarAddOnDay(name, date); },
+          // A `filters` column's choices: the dropdown's own (a ref's catalogue, a list's values).
+          filterOptions: function(col) { return vm.colIsRef(col) ? vm.getRefOptions(col, {}).filter(function(o) { return o.value !== ''; }) : vm.getListOptions(col); },
+          fieldLabel: function(col) { return vm.tOr('field.' + col, col); }
         },
         // The shared UI elements (CLAUDE.md "UI conventions"): words, and the clipboard with its notice.
         uiHost: {
@@ -9274,11 +9277,31 @@ function createVueApp() {
     inject: ['calendarHost'],
     data: function() {
       var today = this.calendarHost.today();
-      return { mode: this.calendarHost.config(this.name).defaultView || 'month', anchor: today, sel: today };
+      // `picked`: the reader's `filters` choices, { column: [values] }, kept in THIS browser -- a
+      // convenience of the viewer's, not a setting of the calendar's.
+      var picked = {};
+      try { picked = JSON.parse(localStorage.getItem('cal_filter:' + this.name) || '{}') || {}; } catch (e) { picked = {}; }
+      return { mode: this.calendarHost.config(this.name).defaultView || 'month', anchor: today, sel: today, picked: picked };
     },
     computed: {
       weekStart: function() { var c = this.calendarHost.config(this.name); return c.weekStart != null ? Number(c.weekStart) : 1; },
-      events: function() { return this.calendarHost.events(this.name, Calendar.windowFor(this.anchor, this.mode, this.weekStart, this.calendarHost.today())); },
+      filters: function() { return this.calendarHost.config(this.name).filters || []; },
+      // The events, narrowed by the reader's picks. A filter narrows only the events whose row HAS that
+      // column: a calendar of classes and workouts filtered by gym still shows the workouts.
+      events: function() {
+        var all = this.calendarHost.events(this.name, Calendar.windowFor(this.anchor, this.mode, this.weekStart, this.calendarHost.today()));
+        var picked = this.picked, cols = this.filters.filter(function(c) { return (picked[c] || []).length; });
+        if (!cols.length) return all;
+        var out = {};
+        Object.keys(all).forEach(function(k) {
+          var kept = all[k].filter(function(ev) {
+            var r = ev.row || {};
+            return cols.every(function(c) { return !(c in r) || picked[c].indexOf(r[c]) >= 0; });
+          });
+          if (kept.length) out[k] = kept;
+        });
+        return out;
+      },
       displayMode: function() { return (this.calendarHost.isMobile() && this.mode === 'month') ? 'list' : (this.mode || 'month'); },
       monthCells: function() { var ev = this.events; return Calendar.cellsMonth(this.anchor, this.weekStart, this.calendarHost.today()).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
       weekCells: function() { var ev = this.events; return Calendar.cellsWeek(this.anchor, this.weekStart, this.calendarHost.today()).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
@@ -9298,7 +9321,11 @@ function createVueApp() {
       goToday: function() { this.anchor = this.sel = this.calendarHost.today(); },
       setMode: function(m) { this.mode = m; },
       addOnDay: function() { this.calendarHost.addOnDay(this.name, this.sel); },
-      selectDay: function(d) { this.sel = d; }
+      selectDay: function(d) { this.sel = d; },
+      setPicked: function(col, vals) {
+        var p = Object.assign({}, this.picked); p[col] = vals || []; this.picked = p;
+        try { localStorage.setItem('cal_filter:' + this.name, JSON.stringify(p)); } catch (e) {}
+      }
     }),
     template: ''
       + '<component :is="embed ? \'div\' : \'v-card\'" :variant="embed ? undefined : \'outlined\'" :class="embed ? \'my-2\' : \'\'" :style="embed ? \'border:1px solid rgb(var(--v-theme-outline),0.2);border-radius:8px\' : \'\'" :data-testid="embed ? undefined : \'cal-view\'">'
@@ -9312,6 +9339,9 @@ function createVueApp() {
       + '<v-btn value="week" size="small">{{ t(\'cal.week\') }}</v-btn>'
       + '<v-btn value="list" size="small">{{ t(\'cal.list\') }}</v-btn></v-btn-toggle>'
       + '<slot name="actions"></slot></div>'
+      + '<div v-if="filters.length" class="d-flex flex-wrap px-2 pb-2" style="gap:8px" data-testid="cal-filters">'
+      +   '<v-select v-for="c in filters" :key="c" :model-value="picked[c] || []" :items="calendarHost.filterOptions(c)" item-title="title" item-value="value" :label="calendarHost.fieldLabel(c)" multiple chips closable-chips clearable density="compact" variant="outlined" hide-details style="min-width:200px;max-width:420px" :data-testid="\'cal-filter-\' + c" @update:model-value="setPicked(c, $event)"></v-select>'
+      + '</div>'
       + '<slot name="tools"></slot>'
       + '<v-divider></v-divider>'
       + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'

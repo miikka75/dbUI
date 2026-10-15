@@ -1140,7 +1140,7 @@ home list and the feed work with no copy of the date on the booking. **Small–m
 - **Time of day**: the app's night-owl and early-bird badges need the hour of a timestamp. A
   `computed.hourOf` would let a `when` say it. **Small; low value — do it only if asked.**
 
-#### 10. A per-viewer "my gym" choice
+#### 10. A per-viewer "my gym" choice *(partly: a calendar's `filters`, remembered per viewer)*
 
 Every list in the app is narrowed to the gym the member picked once. dbUI has per-viewer conveniences
 (the nav layout is one, kept in the browser), but none that filters views. A viewer-chosen value for one

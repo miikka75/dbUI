@@ -785,14 +785,18 @@
             "dateColumn": "starts_at",
             "titleColumns": [
               "class_type",
-              "instructor"
+              "instructor",
+              "gym"
             ],
             "label": "Class",
             "respond": "class_booking"
           }
         ],
         "defaultView": "week",
-        "weekStart": 1
+        "weekStart": 1,
+        "filters": [
+          "gym"
+        ]
       }
     },
     {

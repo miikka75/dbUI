@@ -526,6 +526,16 @@ function validateSchema() {
       if (cvv.source && cvv.sources) errors.push('calendar "' + v + '": use `source` OR `sources`, not both');
       if (cvv.defaultView && ['month', 'week', 'list'].indexOf(cvv.defaultView) < 0) errors.push('calendar "' + v + '" defaultView must be month/week/list');
       var csrcs = cvv.sources || [{ table: cvv.source, dateColumn: cvv.dateColumn, titleColumns: cvv.titleColumns }];
+      // `filters`: columns the reader narrows the events by. Each must be a column of some source, with options
+      // to pick from -- a list or a ref -- or the selector would offer nothing, or narrow nothing.
+      if (cvv.filters !== undefined) {
+        if (!Array.isArray(cvv.filters)) errors.push('calendar "' + v + '": `filters` must be a list of column names');
+        else cvv.filters.forEach(function(fc) {
+          var has = csrcs.some(function(cs) { return cs && SCHEMA[cs.table] && (SCHEMA[cs.table].columns || {})[fc]; });
+          if (!has) errors.push('calendar "' + v + '": filter "' + fc + '" is not a column of any of its sources');
+          else if (!Columns.colIsList(SCHEMA, fc) && !Columns.colIsRef(SCHEMA, fc)) errors.push('calendar "' + v + '": filter "' + fc + '" has no options to pick — use a list or ref column');
+        });
+      }
       // `addTo` names which source a day-add creates in (needed once there are several). A name that is
       // not one of them silently leaves the button off, so say so.
       if (cvv.addTo && !csrcs.some(function(s) { return s && s.table === cvv.addTo; })) {
