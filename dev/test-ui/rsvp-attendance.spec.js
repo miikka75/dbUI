@@ -518,3 +518,24 @@ test('validateSchema: a calendar source can only respond through an rsvp view ov
   });
   expect(err).toContain('books events of "practices", not this source');
 });
+
+test('a calendar list starts today, orders a day by time and shows it; range settings are for admins', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns[0] = { name: 'date', type: 'datetime' };
+  schema.views.push({ name: 'timetable', kind: 'calendar', calendar: { sources: [{ table: 'practices', dateColumn: 'date', titleColumns: ['title'], respond: 'my_rsvp' }], defaultView: 'list' } });
+  schema.nav.items.push({ view: 'timetable' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  const at = (days, h) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(h, 0, 0, 0); return d.toISOString(); };
+  for (const [id, title, when] of [['late', 'Late', at(1, 19)], ['early', 'Early', at(1, 7)], ['past', 'Yesterday', at(-1, 12)]]) {
+    await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id, date: when, title } }, headers: ADMIN });
+  }
+  await page.request.post('/api/deleteRow', { data: { tableId: 'practices', tab: 'active', id: 'p1' }, headers: ADMIN });
+  await bootAs(page, 'ann@x');
+  await page.evaluate(() => appInstance.selectTab('timetable'));
+  const rows = page.locator('[data-testid="cal-book"]').locator('xpath=..');
+  await expect(rows).toHaveCount(2);                      // yesterday's is not listed
+  await expect(rows.first()).toContainText('Early');      // 07:00 before 19:00
+  await expect(page.locator('[data-testid="cal-event-time"]').first()).toContainText('07');
+  await expect(page.locator('[data-testid="cal-window"]')).toHaveCount(0);
+});

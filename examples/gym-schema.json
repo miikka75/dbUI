@@ -777,6 +777,7 @@
       "name": "class_calendar",
       "kind": "calendar",
       "icon": "mdi-calendar-month",
+      "fab": "scan",
       "calendar": {
         "sources": [
           {
@@ -1899,9 +1900,6 @@
         "view": "doc_home"
       },
       {
-        "view": "class_booking"
-      },
-      {
         "view": "doc_training",
         "hideFromAdmin": true
       },
@@ -1936,6 +1934,9 @@
         "adminOnly": true,
         "items": [
           {
+            "view": "class_booking"
+          },
+          {
             "view": "attendance_check"
           },
           {
@@ -1967,7 +1968,7 @@
     ],
     "bottomNav": [
       "doc_home",
-      "class_booking",
+      "class_calendar",
       "doc_training",
       "coach",
       "doc_loyalty"

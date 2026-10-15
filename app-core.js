@@ -8667,9 +8667,12 @@ function createVueApp() {
 
   app.component('cal-event-row', {
     props: { ev: { type: Object, required: true }, compact: { type: Boolean, default: false } },
+    inject: ['calendarHost'],
+    methods: { timeOf: function(v) { var d = new Date(v); return isNaN(d.getTime()) ? '' : new Intl.DateTimeFormat(this.calendarHost.locale(), { hour: '2-digit', minute: '2-digit' }).format(d); } },
     template: ''
       + '<div :style="(compact ? \'padding:3px 0;font-size:0.9rem\' : \'padding:5px 12px;font-size:0.88rem;border-bottom:1px solid rgb(var(--v-theme-outline),0.06)\') + \';display:flex;align-items:center;gap:8px\'">'
       + '<span :style="{ width:\'9px\', height:\'9px\', borderRadius:\'50%\', background: ev.color, flex:\'0 0 auto\' }"></span>'
+      + '<span v-if="ev.at" style="font-variant-numeric:tabular-nums;opacity:0.75" data-testid="cal-event-time">{{ timeOf(ev.at) }}</span>'
       + '<b style="opacity:0.8">{{ ev.label }}</b> <span style="opacity:0.85">{{ ev.title }}</span>'
       + '<span v-if="ev.readOnly" style="opacity:0.5;font-size:0.7rem">(read-only)</span>'
       + '<rsvp-event-picker v-if="ev.respond" :view="ev.respond" :event-id="ev.row && ev.row.id" style="margin-left:auto"></rsvp-event-picker>'
@@ -9283,7 +9286,8 @@ function createVueApp() {
       title: function() { var loc = this.calendarHost.locale(); if (this.mode === 'week') { var cs = this.weekCells, f = cs[0].date.split('-'), l = cs[6].date.split('-'); return new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' }).format(new Date(+f[0], +f[1] - 1, +f[2])) + ' – ' + new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(+l[0], +l[1] - 1, +l[2])); } var p = this.anchor.split('-'); return new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, 1)); },
       selEvents: function() { return this.events[this.sel] || []; },
       selLabel: function() { if (!this.sel) return ''; var p = this.sel.split('-'); return new Intl.DateTimeFormat(this.calendarHost.locale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, +p[2])); },
-      listDays: function() { var ev = this.events, loc = this.calendarHost.locale(); return Object.keys(ev).filter(function(k) { return k !== '__undated__'; }).sort().map(function(k) { var p = k.split('-'); return { date: k, label: new Intl.DateTimeFormat(loc, { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: ev[k] }; }); },
+      // A list reads FORWARD: today and after. The month and week grids are where the past is browsed.
+      listDays: function() { var ev = this.events, loc = this.calendarHost.locale(), today = fmtDate(new Date()); return Object.keys(ev).filter(function(k) { return k !== '__undated__' && k >= today; }).sort().map(function(k) { var p = k.split('-'); return { date: k, label: new Intl.DateTimeFormat(loc, { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: ev[k] }; }); },
       undated: function() { return this.events['__undated__'] || []; },
       canAdd: function() { return this.calendarHost.canAdd(this.name); },
       body: function() { return window.viewPartFor('calendar', this.displayMode) || 'cal-agenda'; }
@@ -9365,10 +9369,11 @@ function createVueApp() {
       + '<feed-subscription :name="viewName"></feed-subscription>'
       + '</v-card></v-menu></template>'
       + '<template v-slot:tools>'
-      // Export/publish range. Mirrors the rotation toolbar: everyone with view access may change it, only
-      // an admin writes it through. Sits beside the buttons it governs so "how far does this file reach"
+      // Export/publish range. Mirrors the rotation toolbar: only an admin writes it through. Sits beside the buttons it governs so "how far does this file reach"
       // is answered where the file is produced, rather than in a settings screen away from it.
-      + '<div class="px-2 pb-2 d-flex align-center flex-wrap" style="gap:8px" data-testid="cal-window">'
+      // Only to someone who can change it: for anyone else it is a row of greyed-out settings about a file
+      // they did not ask about (the download uses whatever range was saved).
+      + '<div v-if="a.isAdmin" class="px-2 pb-2 d-flex align-center flex-wrap" style="gap:8px" data-testid="cal-window">'
       + '<v-text-field :model-value="win.back" name="cal-window-back" :label="t(\'cal.window_back\')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ back: $event })" data-testid="cal-window-back"></v-text-field>'
       + '<v-text-field :model-value="win.forward" name="cal-window-forward" :label="t(\'cal.window_forward\')" density="compact" variant="outlined" hide-details style="max-width:130px" :disabled="!a.canMutateCurrent" @update:model-value="setWindow({ forward: $event })" data-testid="cal-window-forward"></v-text-field>'
       // Language of the generated file. Blank means "as I see it" for a download and the deployment

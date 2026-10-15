@@ -61,7 +61,9 @@
         var key = d || '__undated__';                 // an undated row is still the user's row: bucket it
         (out[key] = out[key] || []).push({            // rather than dropping it silently
           id: s.table + ':' + s.dateColumn + ':' + r.id, title: title || tag, label: tag,
-          color: ctx.hashColor(s.label || s.table), table: s.table, dateCol: s.dateColumn, row: r, respond: s.respond || null
+          color: ctx.hashColor(s.label || s.table), table: s.table, dateCol: s.dateColumn, row: r, respond: s.respond || null,
+          // A datetime's instant: orders a day's events by when they start, and shows the time.
+          at: String(r[s.dateColumn] || '').length > 10 ? String(r[s.dateColumn]) : ''
         });
       });
     });
@@ -135,7 +137,8 @@
     if (win) rotationEvents(name, win, ctx, out);
     // One stable order per day, so two renders of the same data agree and a print matches the screen.
     Object.keys(out).forEach(function(k) {
-      out[k].sort(function(a, b) { return (a.label + a.title).localeCompare(b.label + b.title); });
+      // Timed events by their time (untimed ones first, as all-day), then by label and title.
+      out[k].sort(function(a, b) { return String(a.at || '').localeCompare(String(b.at || '')) || (a.label + a.title).localeCompare(b.label + b.title); });
     });
     return out;
   }
