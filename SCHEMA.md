@@ -262,8 +262,9 @@ This list is **closed** — a property not on it is never read, and `validateSch
 | `defaultFrom` | Seed the cell when a row is **created**. Only token: `"@me"` = the signed-in user's identity, resolved exactly as the `@me` filter does for that column (a `userlink` list's curated value, else the profile display name) (blank when they have none, like the `@me` filter). Takes precedence over `default` if both are set. Unlike `owner`, the value stays editable afterwards — use it so a self-service row is attributed to its author by default without hard-wiring it |
 | `table` | Reference table name (for `ref`) |
 | `valueCol` | Column used as value (for `ref`) |
+| `label` | For a `ref`: the referenced table's columns that NAME a row in its options and cells, instead of the raw value — `"label": ["plan", "start_on"]` reads "12 months · 15/01/2026" where the value is an id |
 | `filterBy` | Filter ref options by another column (for `ref`) |
-| `listFilter` | For a column whose `list` names a **lookup table**: which of its rows the picker offers, as a condition over the lookup's columns (`"listFilter": { "kind": "position" }`, with `$and`/`$or`). Narrows the **picker only**: a value already stored keeps rendering and sorting, and stays among its own cell's options, so a historical row never blanks. The values it names are **pinned** like a view filter's: the lookup rows carrying them cannot be renamed or deleted in the Lookup tab, since that would silently empty the picker. A column the lookup lacks, or a `list` that is not a lookup, is a load-time error |
+| `listFilter` | For a `ref`, or a column whose `list` names a **lookup table**: which of its rows the picker offers, as a condition over the lookup's columns (`"listFilter": { "kind": "position" }`, with `$and`/`$or`). Narrows the **picker only**: a value already stored keeps rendering and sorting, and stays among its own cell's options, so a historical row never blanks. The values it names are **pinned** like a view filter's: the lookup rows carrying them cannot be renamed or deleted in the Lookup tab, since that would silently empty the picker. A column the lookup lacks, or a `list` that is not a lookup, is a load-time error |
 | `enabledWhen` | Which options a picker lets you **choose**, as a condition over each option's catalogue row (a `ref`, or a `list` naming a lookup). Options that fail stay on show, greyed — a reward you cannot afford yet is still worth seeing — and a value already chosen is never greyed. An operand may be `{ "view": "<view>", "field": "<col>" }`, the first row of a view (e.g. *my coins to spend*), or `{ "col": "<col>" }`, another column of the option's row: `"enabledWhen": { "cost": { "lte": { "view": "coin_spendable", "field": "coins" } } }`. Display-level: it stops a choice on screen, not at the server |
 
 ```json
@@ -600,8 +601,8 @@ A column with `computed` derives its value from other columns at render time (no
   ```
   General-purpose — chore→points, member→role/phone, room→capacity, category→colour, etc. Pairs with
   `view.compute` + `aggregate.sum` to total a looked-up value (see **Leaderboard totals**).
-- **A date moved** (`dateAdd`): `{ "from": "start_on", "months": { "col": "plan_months" }, "days": -1 }` — whole
-  months, then days; an amount may name another column, a computed one earlier in the list included. Months
+- **A date moved** (`dateAdd`): `{ "from": "start_on", "months": { "col": "plan_months" }, "weeks": { "col": "paused_weeks" }, "days": -1 }` — whole
+  months, then weeks and days; an amount may name another column, a computed one earlier in the list included. Months
   clamp to the month end (31 Jan + 1 month = 28 Feb). A blank start, or an amount that is not a number, gives
   no date. Renders and sorts as a date.
 - **Age of a row** (`daysSince`): whole days from a date column to today, as a **number** (negative for a

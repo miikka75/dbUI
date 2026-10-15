@@ -61,7 +61,7 @@
   var COLUMN_KEYS = [
     'name', 'type', 'hidden',                                   // identity + display
     'list', 'listSwitch', 'allowNew', 'sorted', 'picker', 'listFilter', // list-backed columns
-    'table', 'valueCol', 'filterBy',                             // ref columns
+    'table', 'valueCol', 'filterBy', 'label',                    // ref columns
     'multiple',                                                  // cardinality (composes with select AND ref)
     'default', 'defaultFrom', 'stamped',                         // what a new row starts with, and who may rewrite it
     'syncFrom',                                                  // mirror columns
@@ -92,13 +92,26 @@
                         '" — nothing reads it, so it does nothing (see SCHEMA.md, "column properties")');
           }
         });
+        // `label` on a ref: the referenced table's columns an option and a cell show instead of the raw value.
+        if (d.label != null) {
+          var lat = 'table "' + t + '": column "' + c + '" `label`';
+          if (d.type !== 'ref' || !tables[d.table]) errors.push(lat + ' applies only to a `ref` column');
+          else if (!Array.isArray(d.label) || !d.label.length) errors.push(lat + ' must be a list of columns of "' + d.table + '"');
+          else { var labCols = columnDefs(tables[d.table]); d.label.forEach(function(k) { if (!labCols[k]) errors.push(lat + ' names "' + k + '", which is not a column of "' + d.table + '"'); }); }
+        }
         // `listFilter` narrows which rows of a lookup-backed `list:` the picker offers. It means nothing on any
         // other column, and a condition naming a column the lookup lacks would empty the picker silently.
         if (d.listFilter != null) {
           var lk = d.list && tables[d.list];
           var at = 'table "' + t + '": column "' + c + '" `listFilter`';
           if (!d.listFilter || typeof d.listFilter !== 'object' || Array.isArray(d.listFilter)) errors.push(at + ' must be a condition object, like { "kind": "position" }');
-          else if (!lk || !lk.isLookup) errors.push(at + ' applies only to a column whose `list` names a lookup table — it narrows which of its rows are offered');
+          else if (d.type === 'ref' && tables[d.table]) {
+            var rcols = columnDefs(tables[d.table]);
+            conditionColumns(d.listFilter).forEach(function(k) {
+              if (!rcols[k] && k !== 'id') errors.push(at + ' names "' + k + '", which is not a column of "' + d.table + '"');
+            });
+          }
+          else if (!lk || !lk.isLookup) errors.push(at + ' applies only to a column whose `list` names a lookup table, or to a `ref` — it narrows which of its rows are offered');
           else {
             var lcols = columnDefs(lk);
             conditionColumns(d.listFilter).forEach(function(k) {
@@ -384,7 +397,7 @@
           // already a legal key on any column -- it simply had no reader, so a select over a
           // multi-dimensional catalogue was stuck with whichever dimension lookupListValues defaults to.
           if (e.listValueCol == null && d.list && d.valueCol) e.listValueCol = d.valueCol;
-          if (e.listFilter == null && d.list && d.listFilter) e.listFilter = d.listFilter;
+          if (e.listFilter == null && (d.list || d.type === 'ref') && d.listFilter) e.listFilter = d.listFilter;   // a ref narrows its rows the same way
           if (e.listSwitch == null && d.listSwitch) e.listSwitch = d.listSwitch;
           if (d.allowNew) e.allowNew = true;
           if (d.sorted) e.sorted = true;

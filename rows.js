@@ -103,8 +103,9 @@
     var from = r[spec.from];
     if (!from) return '';
     var amt = function(x) { if (x == null) return 0; var v = (typeof x === 'object' && typeof x.col === 'string') ? r[x.col] : x; if (v === '' || v == null) return NaN; return Number(v); };
-    var m = amt(spec.months), dd = amt(spec.days);
-    if (isNaN(m) || isNaN(dd)) return '';
+    var m = amt(spec.months), w = amt(spec.weeks), dd = amt(spec.days);
+    if (isNaN(m) || isNaN(w) || isNaN(dd)) return '';
+    dd += 7 * w;
     var p = String(from).slice(0, 10).split('-'), y = +p[0], mo = +p[1] - 1, day = +p[2];
     if (!y || isNaN(mo) || !day) return '';
     // Month arithmetic clamps to the month's last day (31 Jan + 1 month = 28/29 Feb), as people count it.

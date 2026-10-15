@@ -157,29 +157,29 @@
       "description": "A gym's member app — class booking with door check-in, a training log and stats, memberships, personal training and a workout video library.",
       "icon": "./examples/gym-favicon.svg",
       "revision": 1,
-      "tables": 15,
-      "views": 34,
+      "tables": 16,
+      "views": 38,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "4be0c1618c2b631f"
+        "hash": "784bd094efa007de"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "gym-lang-en.json",
-          "hash": "1005df7ee095be5c"
+          "hash": "e94e6d806cb08066"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "gym-lang-fi.json",
-          "hash": "c1b4e756d8fd672c"
+          "hash": "a5d00b46fd3f3090"
         }
       ],
       "data": {
         "file": "gym-data.json",
-        "hash": "19198342e82360cc"
+        "hash": "e25119f59ae5cc97"
       },
       "about": {
         "file": "gym-about.json",

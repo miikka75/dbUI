@@ -114,6 +114,11 @@
               "description": "Narrow a `ref` column's options by another column: { \"<this table's column>\": \"<ref table's column>\" }.",
               "additionalProperties": { "type": "string" }
             },
+            "label": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "For a ref: the referenced table's columns that name a row in its options and cells, instead of the raw value."
+            },
             "enabledWhen": {
               "type": "object",
               "description": "Which options a picker lets you choose: a condition over each option's catalogue row (a ref, or a list naming a lookup). Unmatched options stay on show, greyed. Operands may be { \"view\": \"<view>\", \"field\": \"<col>\" } (a view's first row) or { \"col\": \"<col>\" } (the option row's own column)."

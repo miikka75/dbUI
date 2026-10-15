@@ -496,3 +496,11 @@ describe('rows.js — dateAdd and max/min aggregates', () => {
     assert.deepEqual(out({ min: 'e', into: 'x' }), { a: '2026-05-01', b: '' });
   });
 });
+
+describe('rows.js — dateAdd weeks', () => {
+  const R = require('../../rows');
+  it('weeks move the date by seven days each, after the months', () => {
+    const r = R.resolveComputed([{ s: '2026-01-15', m: 12, w: 2 }], [{ name: 'e', computed: { dateAdd: { from: 's', months: { col: 'm' }, weeks: { col: 'w' }, days: -1 } } }], {})[0];
+    assert.equal(r.e, '2027-01-28');
+  });
+});

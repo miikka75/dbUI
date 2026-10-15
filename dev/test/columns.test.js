@@ -478,3 +478,21 @@ describe('Columns.pickerErrors — one picker vocabulary, and what each widget n
     assert.equal(C.colPicker({ t: { columns: { a: { list: 'l', picker: 'dropdown' } } } }, 'a'), null);
   });
 });
+
+describe('Columns.vocabularyErrors — a ref\'s label and listFilter', () => {
+  const C = require('../../columns');
+  const tables = {
+    m: { columns: [{ name: 'plan' }, { name: 'start_on', type: 'date' }] },
+    p: { columns: [
+      { name: 'ok', type: 'ref', table: 'm', valueCol: 'id', label: ['plan', 'start_on'], listFilter: { plan: { ne: '' } } },
+      { name: 'badlabel', type: 'ref', table: 'm', valueCol: 'id', label: ['nope'] },
+      { name: 'notref', list: 'x', label: ['plan'] },
+      { name: 'badfilter', type: 'ref', table: 'm', valueCol: 'id', listFilter: { nope: 1 } }
+    ] }
+  };
+  const errs = C.vocabularyErrors(tables);
+  it('accepts a label and a listFilter naming the referenced table\'s columns', () => assert.ok(!errs.some((e) => e.includes('"ok"'))));
+  it('names a label or filter column the table lacks, and a label on a non-ref', () => {
+    for (const c of ['badlabel', 'notref', 'badfilter']) assert.ok(errs.some((e) => e.includes('"' + c + '"')), c);
+  });
+});

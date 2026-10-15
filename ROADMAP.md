@@ -1210,6 +1210,22 @@ the real gate is the hand-over. Four general pieces, each usable elsewhere:
 - a column's `enabledWhen`: picker options greyed by a condition over their catalogue row, with
   `{ view, field }` operands (cards above *coins to spend*).
 
+#### 14. Pausing a membership *(landed)*
+
+A 12-month membership may be paused for two weeks in all (two one-week pauses), a 6-month one for one week;
+each week paused moves the end date a week later. Built from what exists — a `pauses` table (one row per
+week), a form with `rules` (weeks left on the plan; the week inside the membership), a per-membership
+count (`lookup.view` of an aggregate) — plus three small general pieces:
+
+- a `ref` column's **`label`**: the columns an option and a cell show instead of the raw value, so a
+  reference to a membership reads "12 months · 15/01/2026" rather than its id;
+- **`listFilter` on a `ref`**: narrow which rows are offered (bought, not ended), as it already does for a
+  lookup-backed list;
+- **`weeks`** in `dateAdd`, so the end date moves by the weeks paused without arithmetic in the schema.
+
+Not in it: the membership reading *Paused* during a pause week (the front desk's status column already has
+it), and refusing two pauses in the same week. **Small–medium.**
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the

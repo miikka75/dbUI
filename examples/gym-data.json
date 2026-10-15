@@ -129,31 +129,36 @@
         "id": "plan-monthly",
         "plan": "Monthly",
         "months": 1,
-        "price_eur": 49
+        "price_eur": 49,
+        "pause_weeks": ""
       },
       {
         "id": "plan-6-months",
         "plan": "6 months",
         "months": 6,
-        "price_eur": 270
+        "price_eur": 270,
+        "pause_weeks": 1
       },
       {
         "id": "plan-12-months",
         "plan": "12 months",
         "months": 12,
-        "price_eur": 480
+        "price_eur": 480,
+        "pause_weeks": 2
       },
       {
         "id": "plan-student-monthly",
         "plan": "Student monthly",
         "months": 1,
-        "price_eur": 35
+        "price_eur": 35,
+        "pause_weeks": ""
       },
       {
         "id": "plan-single-visit",
         "plan": "Single visit",
         "months": "",
-        "price_eur": 15
+        "price_eur": 15,
+        "pause_weeks": ""
       }
     ],
     "ref_exercises": [

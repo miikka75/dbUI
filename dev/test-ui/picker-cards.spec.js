@@ -162,3 +162,17 @@ test('form rules: a computed value shows in the form, and submit waits until eve
   await page.locator('[data-testid="form-submit"]').click();
   await expect.poll(() => claims(page)).toEqual([['Day pass', 'yes']]);
 });
+
+test('a ref names its row by `label`, and `listFilter` narrows the rows it offers', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  const col = schema.tables.claims.columns[1];
+  delete col.picker;
+  col.label = ['reward', 'cost'];
+  col.listFilter = { cost: { lt: 1000 } };
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await boot(page, 'ann@x');
+  await page.evaluate(() => appInstance.selectTab('shop'));
+  await expect.poll(() => page.evaluate(() => appInstance.getRefOptions('reward', {}).map((o) => o.title))).toEqual(['Day pass · 300']);
+  expect(await page.evaluate(() => appInstance.displayValue('reward', 'Day pass'))).toBe('Day pass · 300');
+});

@@ -4246,10 +4246,19 @@ function createVueApp() {
       // `currentTable` names the host. So a view that asked for abbreviated names printed them in full
       // the moment it was embedded, and the host's own obscureNames array reached across into columns
       // it was never written for.
-      displayValue: function(col, val, nsCol, viewCfg) {
+      // `plain`: no ref label -- what a label's own columns are rendered with, since a label column may share
+      // its name with the ref it labels (claims.reward labelled by ref_rewards.reward) and would recurse.
+      displayValue: function(col, val, nsCol, viewCfg, plain) {
         if (Array.isArray(val)) { var self = this; return val.map(function(x) { return self.displayValue(col, x, nsCol, viewCfg); }).filter(Boolean).join(', '); }
         if (!val) return '';
         if (this.colIsDateTime(col)) return this.dateTimeLabel(val);
+        // A labelled ref names the row it points at, not its key ("12 months · 15/01/2026", not an id).
+        var lab = !plain && this.colIsRef(col) && this.refRowLabel(col);
+        if (lab) {
+          var rf = this.colRef(col) || {}, vcol = rf.valueCol || 'id';
+          var hit = (this.dataCache[rf.table] || []).filter(function(r) { return r[vcol] === val; })[0];
+          if (hit) return lab(hit);
+        }
         var out = val;
         // Translation namespace: a list column uses its list name; a `ref` column uses its lookup TABLE name,
         // so ref-backed values (e.g. a board's 2-D ref lane and its group dimension) localize through the same
@@ -4687,6 +4696,14 @@ function createVueApp() {
         });
         return this.markEnabled(col, cards);
       },
+      // A ref column's `label`: a function from a referenced row to the words that name it -- its label
+      // columns, each as a cell would show it, joined. null when the column declares none.
+      refRowLabel: function(col) {
+        var self = this, def = null;
+        for (var t in SCHEMA) { var d = Columns.columnDefs(SCHEMA[t])[col]; if (d && typeof d === 'object' && Array.isArray(d.label)) { def = d; break; } }
+        if (!def) return null;
+        return function(r) { return def.label.map(function(c) { return self.colIsDate(c) ? self.dateLabel(r[c]) : self.displayValue(c, r[c], '', null, true); }).filter(Boolean).join(' · '); };
+      },
       // A column's `enabledWhen`: which options may be chosen, as a condition over each option's catalogue
       // row. An operand may be { view, field } -- the first row of a view, e.g. "my coins to spend" -- or
       // { col } -- another column of the catalogue row. Unmatched options stay on show, disabled: a
@@ -4731,6 +4748,10 @@ function createVueApp() {
         if (!ref) return [];
         var self = this, ns = ref.table;
         var rows = this._catalogueRows(ref.table);
+        // `listFilter` narrows a ref's rows exactly as it narrows a lookup-backed list's: the picker only.
+        var narrow = Columns.colListFilter(SCHEMA, col);
+        if (narrow) rows = rows.filter(function(r) { return condMatches(r, narrow); });
+        var labelOf = this.refRowLabel(col);
         if (ref.filterBy) {
           var filterBy = ref.filterBy;
           var hasFilter = false;
@@ -4771,7 +4792,7 @@ function createVueApp() {
         var opts = [];
         rows.forEach(function(r) {
           var v = r[valueCol];
-          if (v && !seen[v]) { seen[v] = true; opts.push({ title: self.listLabel(ns, v), value: v }); }
+          if (v && !seen[v]) { seen[v] = true; opts.push({ title: (labelOf && labelOf(r)) || self.listLabel(ns, v), value: v }); }
         });
         return opts;
       },
