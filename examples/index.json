@@ -156,12 +156,12 @@
       "title": "Fitness Club",
       "description": "A gym's member app — class booking with door check-in, a training log and stats, memberships, personal training and a workout video library.",
       "icon": "./examples/gym-favicon.svg",
-      "revision": 2,
+      "revision": 1,
       "tables": 15,
       "views": 33,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "88e52716cfea4794"
+        "hash": "48309c0e70d42f7c"
       },
       "languages": [
         {

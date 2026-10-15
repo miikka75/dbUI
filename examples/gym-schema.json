@@ -1054,7 +1054,8 @@
       "readonly": true,
       "defaultSort": "start_on",
       "filter": {
-        "member": "@me"
+        "member": "@me",
+        "order_state": "submitted"
       },
       "columns": [
         "plan",
@@ -1093,6 +1094,9 @@
         ],
         "title": "plan",
         "color": "member"
+      },
+      "filter": {
+        "order_state": "submitted"
       }
     },
     {
