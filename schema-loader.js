@@ -144,7 +144,7 @@ function validateSchema() {
   // pure function over the tables map so the unit suite runs the SAME one (dev/test/schema-vocabulary
   // .test.js) rather than a copy. `schema.schema.json` states the same vocabulary for the author's
   // editor, and schema-meta.test.js holds the two together.
-  errors = errors.concat(Columns.vocabularyErrors(SCHEMA));
+  errors = errors.concat(Columns.vocabularyErrors(SCHEMA), Columns.pickerErrors(SCHEMA));
   // A table NAME is a storage identifier, not a label. Every partition store is `<table>__<part>`
   // (BackendHelpers.storeName), and all three access layers invert that by TRUNCATION at the first
   // `__`: `collection.split('__')[0]` in firestore.rules, `split_part(coll, '__', 1)` in the Postgres
@@ -560,6 +560,9 @@ function validateSchema() {
         for (var rc in rcols) { var rd = rcols[rc]; if (rd && typeof rd === 'object' && rd.type === 'ref' && rd.table === rvp.events) { hasLink = true; break; } }
         if (!hasLink) errors.push('rsvp "' + v + '": responses table "' + rvp.responses + '" needs a `ref` column pointing at the events table "' + rvp.events + '" (it is the response↔event link — replaces linkColumn/eventKey)');
       }
+      // The status control speaks the column `picker` vocabulary. Not `cards`: a status is a word, with no
+      // catalogue row behind it to show.
+      if (rvp.picker !== undefined && ['dropdown', 'toggle', 'chips'].indexOf(rvp.picker) < 0) errors.push('rsvp "' + v + '": `picker` is "' + rvp.picker + '" — use dropdown, toggle or chips');
       // `closeBefore`: minutes before the start when booking from anywhere stops. It needs a start TIME to
       // count back from, so a plain date column would make it close at midnight, which nobody means.
       if (rvp.closeBefore !== undefined) {

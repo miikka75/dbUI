@@ -4630,11 +4630,18 @@ function createVueApp() {
       // the columns worth showing on it -- the lookup's own, less the value itself, hidden and bookkeeping
       // ones. A catalogue is small and its columns ARE the description (price, months, details).
       refCards: function(col, item) {
-        var ref = this.colRef(col) || {}, vc = ref.valueCol || 'id', rows = this.dataCache[ref.table] || [];
+        var ref = this.colRef(col);
+        // A list naming a lookup: the dimension it draws on, as the dropdown resolves it (lookupListValues).
+        if (!ref) {
+          var ln = this.colIsList(col), lo = getColumns(ln), lh = SCHEMA[ln] ? Columns.lookupHierarchy(SCHEMA[ln], lo) : null;
+          ref = { table: ln, valueCol: Columns.colListValueCol(SCHEMA, col) || (lh ? (lh.by === 'id' ? lh.value : lh.parent) : (SCHEMA[ln] ? Columns.lookupCols(SCHEMA[ln], lo)[0] : null)) };
+        }
+        var vc = ref.valueCol || 'id', rows = this.dataCache[ref.table] || [];
         var skip = { id: 1, created_at: 1, updated_at: 1, position: 1 }; skip[vc] = 1;
         var defs = Columns.columnDefs(SCHEMA[ref.table] || {});
         var cols = getColumns(ref.table).filter(function(c) { var d = defs[c]; return !skip[c] && !(d && typeof d === 'object' && d.hidden); });
-        return this.getRefOptions(col, item).filter(function(o) { return o.value !== ''; }).map(function(o) {
+        var opts = this.colRef(col) ? this.getRefOptions(col, item) : this.getListOptions(col, null, item);
+        return opts.filter(function(o) { return o.value !== ''; }).map(function(o) {
           var row = rows.filter(function(r) { return r[vc] === o.value; })[0] || {};
           return { value: o.value, title: o.title, row: row, cols: cols.filter(function(c) { return row[c] != null && row[c] !== ''; }) };
         });
@@ -8344,6 +8351,10 @@ function createVueApp() {
       },
       getRefOptions: function(col, item) { return appInstance.getRefOptions(col, item); },
       refCards: function(col, item) { return appInstance.refCards(col, item); },
+      // Every picker but the dropdown lays out the same options the dropdown offers: a ref's (filterBy
+      // applies) or a list's.
+      hasOptions: function(col) { return !!(appInstance.colIsList(col) || appInstance.colIsRef(col)); },
+      pickerOptions: function(col, item) { return appInstance.colIsRef(col) ? appInstance.getRefOptions(col, item).filter(function(o) { return o.value !== ''; }) : appInstance.getListOptions(col); },
       cellOptions: function(col, item) { return appInstance.cellOptions(col, item); },
       isAltList: function(col, item) { return appInstance.isAltList(col, item); },
       toggleListSwitch: function(col, item) { return appInstance.toggleListSwitch(col, item); },
@@ -8399,11 +8410,11 @@ function createVueApp() {
       + '<span v-else-if="!embed && colIsMirrorForTable(col)" style="opacity:0.82"><list-value :col="col" :value="item[col]" :view-cfg="ownerCfg"></list-value></span>'
       + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col) && !colIsRef(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
       + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="cellOptions(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
-      + '<v-btn-toggle v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'toggle\'" :name="col" :model-value="item[col] || \'\'" density="compact" variant="outlined" divided @update:model-value="save(item, col, $event || \'\')">'
-      + '<v-btn v-for="o in getListOptions(col)" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
+      + '<v-btn-toggle v-else-if="hasOptions(col) && !colIsMultiselect(col) && colPicker(col)===\'toggle\'" :name="col" :model-value="item[col] || \'\'" density="compact" variant="outlined" divided @update:model-value="save(item, col, $event || \'\')">'
+      + '<v-btn v-for="o in pickerOptions(col, item)" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
       + '</v-btn-toggle>'
-      + '<v-chip-group v-else-if="colIsList(col) && !colIsMultiselect(col) && colPicker(col)===\'chips\'" :name="col" :model-value="item[col] || \'\'" @update:model-value="save(item, col, $event || \'\')">'
-      + '<v-chip v-for="o in getListOptions(col)" :key="o.value" :value="o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
+      + '<v-chip-group v-else-if="hasOptions(col) && !colIsMultiselect(col) && colPicker(col)===\'chips\'" :name="col" :model-value="item[col] || \'\'" @update:model-value="save(item, col, $event || \'\')">'
+      + '<v-chip v-for="o in pickerOptions(col, item)" :key="o.value" :value="o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
       + '</v-chip-group>'
       + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>'
       + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || t(\'col.switch_list\')">mdi-swap-horizontal</v-icon></template>'
@@ -8414,7 +8425,7 @@ function createVueApp() {
       // `picker: "cards"` on a ref: the catalogue rows themselves, each with its other columns. The same
       // options the dropdown would offer (getRefOptions, so filterBy narrows both alike); pressing the
       // chosen card again clears it, as a deselected chip or toggle does.
-      + '<tile-grid v-else-if="colIsRef(col) && !colIsMultiselect(col) && colPicker(col)===\'cards\'" min="170px" :data-testid="\'cards-\' + col">'
+      + '<tile-grid v-else-if="hasOptions(col) && !colIsMultiselect(col) && colPicker(col)===\'cards\'" min="170px" :data-testid="\'cards-\' + col">'
       +   '<v-card v-for="o in refCards(col, item)" :key="o.value" :variant="item[col] === o.value ? \'outlined\' : \'tonal\'" :color="item[col] === o.value ? \'primary\' : undefined"'
       +     ' class="pa-3" style="cursor:pointer" role="radio" :aria-checked="item[col] === o.value" data-testid="pick-card" @click="save(item, col, item[col] === o.value ? \'\' : o.value)">'
       +     '<div class="d-flex align-center" style="gap:6px"><b style="flex:1">{{ o.title }}</b><v-icon v-if="item[col] === o.value" size="small">mdi-check-circle</v-icon></div>'

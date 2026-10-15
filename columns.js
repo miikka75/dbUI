@@ -110,6 +110,32 @@
     return errors;
   }
 
+  // THE PICKER: how a column's value is chosen. One word everywhere a choice is made -- a column's
+  // `picker`, an rsvp's `picker` -- with `dropdown` the default. Every widget but the dropdown shows ALL
+  // its options at once, so each needs a single value chosen from a set: a list or a ref, not `multiple`
+  // (already chips) and not `allowNew` (which needs typing). `cards` also needs a catalogue row behind
+  // each option to show, so it takes a ref -- or a list that names a lookup table.
+  var PICKERS = ['dropdown', 'chips', 'toggle', 'cards'];
+  function pickerErrors(tables) {
+    var errors = [];
+    for (var t in (tables || {})) {
+      var defs = columnDefs(tables[t]);
+      for (var c in defs) {
+        var d = defs[c];
+        if (!d || typeof d !== 'object' || d.picker === undefined) continue;
+        var at = 'table "' + t + '": column "' + c + '" `picker` ', p = d.picker;
+        if (PICKERS.indexOf(p) < 0) { errors.push(at + 'is "' + p + '" — use ' + PICKERS.join(', ')); continue; }
+        if (p === 'dropdown') continue;
+        var isRef = d.type === 'ref', isList = !!d.list && d.type !== 'ref';
+        if (!isRef && !isList) errors.push(at + '"' + p + '" needs a column with options — a `list` or a `ref`');
+        else if (d.multiple || d.type === 'multiselect') errors.push(at + '"' + p + '" picks one value; a `multiple` column is already chips');
+        else if (d.allowNew) errors.push(at + '"' + p + '" shows a fixed set; `allowNew` needs a field to type a new value into');
+        else if (p === 'cards' && isList && !(tables[d.list] && tables[d.list].isLookup)) errors.push(at + '"cards" shows each option\'s catalogue row — a `ref`, or a `list` naming a lookup table; "' + d.list + '" is a plain list');
+      }
+    }
+    return errors;
+  }
+
   // The columns a condition reads, through $and / $or / $not.
   function conditionColumns(cond) {
     var out = [];
@@ -403,7 +429,8 @@
   function colListFilter(schema, col) { return colInfo(schema, col).listFilter; }   // which lookup rows a `list:` column's picker offers
   function colIsImage(schema, col) { return colInfo(schema, col).image; }
   function colIsUrl(schema, col) { return colInfo(schema, col).url; }
-  function colPicker(schema, col) { return colInfo(schema, col).picker; }   // 'chips' | 'toggle' | 'cards' | null (dropdown)
+  // 'chips' | 'toggle' | 'cards' | null (dropdown). An explicit 'dropdown' is the default, said out loud.
+  function colPicker(schema, col) { var p = colInfo(schema, col).picker; return p === 'dropdown' ? null : p; }
 
   // View column-entry shape predicates (a view's `columns` array mixes plain names, {name,...} defs,
   // inline embeds, named-view embeds and legacy text blocks). Moved here from schema-loader.js so the
@@ -503,7 +530,7 @@
   }
 
   var C = {
-    COLUMN_TYPES: COLUMN_TYPES, COLUMN_KEYS: COLUMN_KEYS, vocabularyErrors: vocabularyErrors,
+    COLUMN_TYPES: COLUMN_TYPES, COLUMN_KEYS: COLUMN_KEYS, vocabularyErrors: vocabularyErrors, pickerErrors: pickerErrors, PICKERS: PICKERS,
     columnDefs: columnDefs, columnDefList: columnDefList, ownerColOf: ownerColOf,
     columnType: columnType, columnList: columnList, columnRef: columnRef,
     isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol,

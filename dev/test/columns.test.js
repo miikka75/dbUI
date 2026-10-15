@@ -454,3 +454,27 @@ describe('a lookup addressed through more than one of its dimensions', () => {
     assert.equal(Columns.lookupIdentityCol(split, 'ref_callings'), null);
   });
 });
+
+describe('Columns.pickerErrors — one picker vocabulary, and what each widget needs from its column', () => {
+  const C = require('../../columns');
+  const tables = {
+    cat: { isLookup: true, columns: [{ name: 'x' }] },
+    t: { columns: [
+      { name: 'ok_drop', list: 'l', picker: 'dropdown' }, { name: 'ok_ref', type: 'ref', table: 'cat', valueCol: 'x', picker: 'toggle' },
+      { name: 'ok_cards', list: 'cat', picker: 'cards' },
+      { name: 'bad', picker: 'wheel' }, { name: 'text', type: 'text', picker: 'chips' }, { name: 'many', list: 'l', multiple: true, picker: 'toggle' },
+      { name: 'typed', list: 'l', allowNew: true, picker: 'chips' }, { name: 'plaincards', list: 'l', picker: 'cards' }
+    ] }
+  };
+  const errs = C.pickerErrors(tables);
+  it('accepts dropdown, chips/toggle on a ref, and cards on a lookup-backed list', () => {
+    for (const c of ['ok_drop', 'ok_ref', 'ok_cards']) assert.ok(!errs.some((e) => e.includes('"' + c + '"')), c);
+  });
+  it('names an unknown widget, one with no options, a multiple, an allowNew, and cards over a plain list', () => {
+    for (const c of ['bad', 'text', 'many', 'typed', 'plaincards']) assert.ok(errs.some((e) => e.includes('"' + c + '"')), c);
+    assert.equal(errs.length, 5);
+  });
+  it('an explicit dropdown reads as the default', () => {
+    assert.equal(C.colPicker({ t: { columns: { a: { list: 'l', picker: 'dropdown' } } } }, 'a'), null);
+  });
+});

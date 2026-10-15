@@ -75,3 +75,19 @@ test('validateSchema: a fresh-record form needs a submitColumn to find its draft
   const err = await page.evaluate(() => { delete VIEWS.claim_form.form.submitColumn; return validateSchema().join(' | '); });
   expect(err).toContain('`once: false` needs `submitColumn`');
 });
+
+test('chips and toggle on a REF column offer the catalogue, like the dropdown would', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.claims.columns[1].picker = 'chips';
+  schema.views.push({ name: 'mine', sources: ['claims'], columns: ['reward'] });
+  schema.nav.items.push({ view: 'mine' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'claims', tab: 'active', data: { id: 'c1', owner: 'ann@x', reward: '', sent: '' } }, headers: ADMIN });
+  await boot(page, 'ann@x');
+  await page.evaluate(() => appInstance.selectTab('mine'));
+  const chip = page.locator('.v-chip', { hasText: 'Day pass' }).first();
+  await expect(chip).toBeVisible();
+  await chip.click();
+  await expect.poll(() => claims(page)).toEqual([['Day pass', '']]);
+});
