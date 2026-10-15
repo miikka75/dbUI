@@ -1762,6 +1762,9 @@ function createVueApp() {
       canCalendarAdd: function(name) {
         var s = this.calAddSource(name);
         if (!s || !s.table || !s.dateColumn || !SCHEMA[s.table]) return false;
+        // A member's OWN row on a self-service table is theirs to add whatever their role -- a viewer books
+        // and logs exactly this way -- so it is decided before the role-wide read-only rule.
+        if (this.canSelfServe(s.table) && !(VIEWS[name] || {}).readonly) return true;
         if (this.viewReadonly(name)) return false;
         // Adding writes the whole mirror cluster, so a grant must cover all of it — but a member with no
         // grant at all may still own rows on a self-service table, and refusing them here was the only

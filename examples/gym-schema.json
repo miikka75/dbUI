@@ -699,7 +699,10 @@
         "membership",
         "starts_on",
         "sent"
-      ]
+      ],
+      "ownerWritableWhile": {
+        "sent": ""
+      }
     }
   },
   "views": [
@@ -798,17 +801,6 @@
           "gym"
         ]
       }
-    },
-    {
-      "name": "doc_training",
-      "kind": "page",
-      "icon": "mdi-dumbbell",
-      "fab": {
-        "add": "my_workouts",
-        "label": "text.add_workout",
-        "icon": "mdi-plus"
-      },
-      "markdown": "## {{t:text.training_weeks}}\n\n{{view:my_minutes_weeks}}\n\n## {{t:text.training_top}}\n\n{{view:my_top_exercises}}\n\n## {{t:text.training_steps}}\n\n{{view:my_steps_week}}\n\n## {{t:text.training_log}}\n\n{{view:my_workouts}}\n\n## {{t:text.training_visits}}\n\n{{view:my_visits}}\n"
     },
     {
       "name": "my_pulse",
@@ -1127,6 +1119,32 @@
             "label": "Visit",
             "filter": {
               "member": "@me"
+            }
+          },
+          {
+            "table": "pauses",
+            "dateColumn": "starts_on",
+            "titleColumns": [
+              "membership"
+            ],
+            "label": "Pause",
+            "filter": {
+              "sent": "yes"
+            }
+          },
+          {
+            "table": "pt_sessions",
+            "dateColumn": "preferred_on",
+            "titleColumns": [
+              "trainer",
+              "goal"
+            ],
+            "label": "Trainer",
+            "filter": {
+              "member": "@me",
+              "pt_status": {
+                "ne": "cancelled"
+              }
             }
           }
         ],
@@ -1895,6 +1913,17 @@
         "starts_on",
         "pause_until"
       ]
+    },
+    {
+      "name": "doc_mycal",
+      "kind": "page",
+      "icon": "mdi-calendar-account",
+      "fab": {
+        "add": "my_workouts",
+        "label": "text.add_workout",
+        "icon": "mdi-plus"
+      },
+      "markdown": "{{view:my_calendar}}\n\n## {{t:text.training_weeks}}\n\n{{view:my_minutes_weeks}}\n\n## {{t:text.training_top}}\n\n{{view:my_top_exercises}}\n\n## {{t:text.training_steps}}\n\n{{view:my_steps_week}}\n\n## {{t:text.training_log}}\n\n{{view:my_workouts}}\n\n## {{t:text.training_visits}}\n\n{{view:my_visits}}\n"
     }
   ],
   "nav": {
@@ -1907,12 +1936,7 @@
         "view": "class_calendar"
       },
       {
-        "view": "doc_training",
-        "hideFromAdmin": true
-      },
-      {
-        "view": "my_calendar",
-        "hideFromAdmin": true
+        "view": "doc_mycal"
       },
       {
         "view": "doc_membership",
@@ -1973,7 +1997,7 @@
     "bottomNav": [
       "doc_home",
       "class_calendar",
-      "doc_training",
+      "doc_mycal",
       "coach",
       "doc_loyalty"
     ],

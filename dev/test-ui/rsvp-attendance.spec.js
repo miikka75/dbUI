@@ -564,3 +564,17 @@ test('calendar filters: pick values of a column to narrow the events, remembered
   await page.evaluate(() => appInstance.selectTab('timetable'));
   await expect.poll(titles).not.toContain('Other');       // remembered
 });
+
+test('a viewer adds their own row from a calendar day (self-service is decided before the role)', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.logs = { ownerWritable: ['done_on', 'what'], columns: [{ name: 'owner', type: 'owner' }, { name: 'done_on', type: 'date' }, { name: 'what', type: 'text' }] };
+  schema.views.push({ name: 'mycal', kind: 'calendar', calendar: { sources: [{ table: 'logs', dateColumn: 'done_on', titleColumns: ['what'] }], defaultView: 'month', addTo: 'logs' } });
+  schema.nav.items.push({ view: 'mycal' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/setUserRole', { data: { uid: 'ann@x', role: 'viewer', user: 'ann@x', tables: { practices: 'r' } }, headers: ADMIN });
+  await bootAs(page, 'ann@x');
+  await page.evaluate(() => appInstance.selectTab('mycal'));
+  await page.locator('[data-testid="cal-add-on-day"]').click();
+  await expect.poll(async () => ((await (await page.request.post('/api/getTableData', { data: { tableId: 'logs', tab: 'active' }, headers: ADMIN })).json()).rows || []).map((r) => r.owner)).toEqual(['ann@x']);
+});
