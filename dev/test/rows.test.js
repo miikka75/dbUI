@@ -459,3 +459,18 @@ describe('rows.js — sortByCol direction', () => {
     assert.deepEqual(Rows.sortByCol(rows, 'n', null, false).map(r => r.n), ['c', 'b', 'a']);
   });
 });
+
+describe('rows.js — comparing to another column, and a lookup that reads a view', () => {
+  const R = require('../../rows');
+  it('an operand { col } reads the same row', () => {
+    assert.equal(R.condMatches({ balance: 350, cost: 300 }, { balance: { gte: { col: 'cost' } } }), true);
+    assert.equal(R.condMatches({ balance: 150, cost: 300 }, { balance: { gte: { col: 'cost' } } }), false);
+    assert.equal(R.condMatches({ a: 1, b: 1 }, { a: { ne: { col: 'b' } } }), false);
+  });
+  it('lookup.view takes its rows from ctx.viewRows', () => {
+    const rows = R.resolveComputed([{ owner: 'a@x' }, { owner: 'b@x' }],
+      [{ name: 'balance', computed: { lookup: { view: 'bal', match: 'owner', on: 'owner', field: 'coins', default: 0 } } }],
+      { dataCache: {}, viewRows: (n) => (n === 'bal' ? [{ owner: 'a@x', coins: 350 }] : []) });
+    assert.deepEqual(rows.map((r) => r.balance), [350, 0]);
+  });
+});

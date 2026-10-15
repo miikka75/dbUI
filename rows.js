@@ -56,11 +56,13 @@
         else {
           if (c.notEmpty && !v) return false;
           if (c.empty && v) return false;
-          if ('ne' in c && v === c.ne) return false;
-          if ('lt' in c && !(_cmp(v, c.lt) < 0)) return false;
-          if ('gt' in c && !(_cmp(v, c.gt) > 0)) return false;
-          if ('lte' in c && !(_cmp(v, c.lte) <= 0)) return false;
-          if ('gte' in c && !(_cmp(v, c.gte) >= 0)) return false;
+          // An operand may name ANOTHER column of the same row -- { gte: { col: "cost" } } -- which is how
+          // "balance >= cost" is said without arithmetic in the condition language.
+          if ('ne' in c && v === _operand(item, c.ne)) return false;
+          if ('lt' in c && !(_cmp(v, _operand(item, c.lt)) < 0)) return false;
+          if ('gt' in c && !(_cmp(v, _operand(item, c.gt)) > 0)) return false;
+          if ('lte' in c && !(_cmp(v, _operand(item, c.lte)) <= 0)) return false;
+          if ('gte' in c && !(_cmp(v, _operand(item, c.gte)) >= 0)) return false;
         }
       } else {
         if (v !== c) return false;
@@ -85,6 +87,7 @@
   // date column works without a separate operator. Returns NaN when either side is blank or missing:
   // every comparison against NaN is false, so an unset value matches NO ordered filter in either
   // direction (fail-closed, matching `within`) instead of silently sorting as zero.
+  function _operand(item, x) { return (x && typeof x === 'object' && !Array.isArray(x) && typeof x.col === 'string') ? item[x.col] : x; }
   function _cmp(a, b) {
     if (a == null || a === '' || b == null || b === '') return NaN;
     var na = Number(a), nb = Number(b);
@@ -585,8 +588,11 @@
       // view render, and a chore-log row looking up points on the chores table made the render path
       // O(rows x lookupTable) -- the only super-linear term in it. Map, not a plain object, because the
       // scan compared with === : an object would coerce every key to a string and make 1 match "1".
-      var lk = comp.lookup, onCol = lk.on || lk.match, ikey = lk.table + '|' + onCol;
-      var lmap = idx[ikey] || (idx[ikey] = _indexBy(cache[lk.table] || [], onCol));
+      // `view` instead of `table`: look the field up in a VIEW's rows -- an aggregate such as a balance
+      // per member -- which the caller supplies through ctx.viewRows (rows.js reads no views itself).
+      var lk = comp.lookup, onCol = lk.on || lk.match, ikey = (lk.view ? '@' + lk.view : lk.table) + '|' + onCol;
+      var lsrc = lk.view ? ((ctx && ctx.viewRows) ? ctx.viewRows(lk.view) : []) : (cache[lk.table] || []);
+      var lmap = idx[ikey] || (idx[ikey] = _indexBy(lsrc, onCol));
       var lhit = lmap.get(r[lk.match]);
       r[d.name] = (lhit && lhit[lk.field] != null) ? lhit[lk.field] : (lk.default != null ? lk.default : '');
       return;

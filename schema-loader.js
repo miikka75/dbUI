@@ -144,7 +144,7 @@ function validateSchema() {
   // pure function over the tables map so the unit suite runs the SAME one (dev/test/schema-vocabulary
   // .test.js) rather than a copy. `schema.schema.json` states the same vocabulary for the author's
   // editor, and schema-meta.test.js holds the two together.
-  errors = errors.concat(Columns.vocabularyErrors(SCHEMA), Columns.pickerErrors(SCHEMA));
+  errors = errors.concat(Columns.vocabularyErrors(SCHEMA), Columns.pickerErrors(SCHEMA), Columns.enabledWhenErrors(SCHEMA));
   // A table NAME is a storage identifier, not a label. Every partition store is `<table>__<part>`
   // (BackendHelpers.storeName), and all three access layers invert that by TRUNCATION at the first
   // `__`: `collection.split('__')[0]` in firestore.rules, `split_part(coll, '__', 1)` in the Postgres
@@ -765,6 +765,20 @@ function validateSchema() {
         }
       });
     }
+    // `board.laneWhen`: a condition per lane. A lane naming nothing, or a condition that is not one, would
+    // refuse every move into it or none, with nothing on screen to say which.
+    if (view.board && view.board.laneWhen !== undefined) {
+      var lw = view.board.laneWhen;
+      if (!lw || typeof lw !== 'object' || Array.isArray(lw)) errors.push('board "' + v + '": `laneWhen` must map a lane to a condition, like { "granted": { "balance": { "gte": { "col": "cost" } } } }');
+      else Object.keys(lw).forEach(function(k) { if (!lw[k] || typeof lw[k] !== 'object' || Array.isArray(lw[k])) errors.push('board "' + v + '": `laneWhen.' + k + '` must be a condition object'); });
+    }
+    // A computed lookup reading a view (`lookup.view`) must name one that exists, and not the view itself.
+    (view.columns || []).concat(view.compute || []).forEach(function(cc) {
+      var lk = cc && typeof cc === 'object' && cc.computed && cc.computed.lookup;
+      if (!lk || lk.view === undefined) return;
+      if (!VIEWS[lk.view]) errors.push('view "' + v + '": `lookup.view` names missing view "' + lk.view + '"');
+      else if (lk.view === v) errors.push('view "' + v + '": `lookup.view` cannot read the view it is in');
+    });
     // A form taking a fresh record each time finds the one being filled in as the caller's latest one not
     // yet submitted -- so without `submitColumn` it can never find it, and Start would make a row nobody
     // can then see.

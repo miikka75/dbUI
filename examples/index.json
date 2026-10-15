@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "96ddece77574924d"
+      "hash": "46c152a2909792dc"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "8420866375afe71d"
+      "hash": "eaad3bbcc9ca84fa"
     }
   ],
   "bundles": [
@@ -156,25 +156,25 @@
       "title": "Fitness Club",
       "description": "A gym's member app — class booking with door check-in, a training log and stats, memberships, personal training and a workout video library.",
       "icon": "./examples/gym-favicon.svg",
-      "revision": 1,
+      "revision": 2,
       "tables": 15,
-      "views": 31,
+      "views": 33,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "1076b93ee3684308"
+        "hash": "88e52716cfea4794"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "gym-lang-en.json",
-          "hash": "ae3568fcda2c3e36"
+          "hash": "81e8ab37d6e57f49"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "gym-lang-fi.json",
-          "hash": "fb1cc3275bfdc84d"
+          "hash": "ba12cfa0525aee4a"
         }
       ],
       "data": {

@@ -91,3 +91,52 @@ test('chips and toggle on a REF column offer the catalogue, like the dropdown wo
   await chip.click();
   await expect.poll(() => claims(page)).toEqual([['Day pass', '']]);
 });
+
+test('affordability: unaffordable cards are greyed for the member, and the front desk cannot hand over what is not covered', async ({ page }) => {
+  test.setTimeout(30000);
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.earnings = { columns: [{ name: 'owner', type: 'owner' }, { name: 'coins', type: 'number' }] };
+  schema.tables.claims.columns.push({ name: 'status', type: 'select', list: 'claim_status', default: 'requested' });
+  schema.tables.claims.columns[1].enabledWhen = { cost: { lte: { view: 'spendable', field: 'coins' } } };
+  const delta = [
+    { name: 'delta', source: 'earnings', computed: { lookup: { table: 'earnings', match: 'id', on: 'id', field: 'coins', default: 0 } } },
+    { name: 'delta', source: 'claims', scale: -1, computed: { lookup: { table: 'ref_rewards', match: 'reward', on: 'reward', field: 'cost', default: 0 } } }
+  ];
+  const bal = (name, spent) => ({ name, sources: ['earnings', 'claims'], mode: 'union', groupBy: { column: 'owner', from: ['owner'] }, compute: delta,
+    aggregate: { sum: 'delta', into: 'coins' }, columns: ['owner', 'coins'], filter: { $or: [{ coins: { notEmpty: true } }, spent] }, readonly: true });
+  schema.views.push(bal('spendable', { sent: 'yes' }), bal('handed', { status: 'granted' }));
+  schema.views.push({ name: 'desk', kind: 'board', sources: ['claims'], mode: 'join', columns: ['owner',
+      { name: 'cost', computed: { lookup: { table: 'ref_rewards', match: 'reward', on: 'reward', field: 'cost', default: 0 } } },
+      { name: 'balance', computed: { lookup: { view: 'handed', match: 'owner', on: 'owner', field: 'coins', default: 0 } } }],
+    board: { lane: 'status', lanes: ['requested', 'granted'], title: 'reward', laneWhen: { granted: { balance: { gte: { col: 'cost' } } } } } });
+  schema.nav.items.push({ view: 'desk' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/saveLists', { data: { lists: { claim_status: ['requested', 'granted'] } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'earnings', tab: 'active', data: { id: 'e1', owner: 'ann@x', coins: 500 } }, headers: ADMIN });
+
+  // Ann has 500: the 300 day pass may be chosen, the 1700 bottle may not.
+  await boot(page, 'ann@x');
+  await page.evaluate(() => appInstance.selectTab('shop'));
+  await page.locator('[data-testid="form-start"]').click();
+  const card = (t) => page.locator('[data-testid="pick-card"]', { hasText: t });
+  await expect(card('Bottle')).toHaveAttribute('aria-disabled', 'true');
+  await expect(card('Day pass')).toHaveAttribute('aria-disabled', 'false');
+  await card('Bottle').click({ force: true });   // pressed anyway: nothing is chosen
+  await expect(card('Bottle')).toHaveAttribute('aria-checked', 'false');
+
+  // Two claims arrive at the desk: one covered, one not (written as staff, past the member's screen).
+  for (const [id, reward] of [['ok', 'Day pass'], ['big', 'Bottle']]) {
+    await page.request.post('/api/putRow', { data: { tableId: 'claims', tab: 'active', data: { id, owner: 'ann@x', reward, sent: 'yes', status: 'requested' } }, headers: ADMIN });
+  }
+  await boot(page, 'org@x');
+  await page.evaluate(() => appInstance.selectTab('desk'));
+  const move = async (id) => { await page.locator('[data-testid="board-move-' + id + '"]').click(); return page.locator('.v-overlay--active .v-list-item', { hasText: 'granted' }).last(); };
+  const big = await move('big');
+  await expect(big).toHaveClass(/v-list-item--disabled/);
+  await page.keyboard.press('Escape');
+  const ok = await move('ok');
+  await ok.click();
+  const status = async () => Object.fromEntries(((await (await page.request.post('/api/getTableData', { data: { tableId: 'claims', tab: 'active' }, headers: ADMIN })).json()).rows || []).filter((r) => r.id === 'ok' || r.id === 'big').map((r) => [r.id, r.status]));
+  await expect.poll(status).toEqual({ ok: 'granted', big: 'requested' });
+});

@@ -1198,6 +1198,18 @@ and so works wherever the column is edited: a form, a card, a grid.
 
 **Small; UI only.**
 
+#### 13. Rewards only when covered *(landed)*
+
+A claim spends coins the member may not have. Not enforced by the server, deliberately: coins come only from
+attended classes (staff-verified), and a claim is only a request until the front desk hands it over -- so
+the real gate is the hand-over. Four general pieces, each usable elsewhere:
+
+- `lookup.view`: a computed lookup reading a VIEW's rows (a balance per member);
+- condition operands `{ col }`: compare one column to another (`balance >= cost`);
+- `board.laneWhen`: a lane a card may enter only while it matches (*Handed over*);
+- a column's `enabledWhen`: picker options greyed by a condition over their catalogue row, with
+  `{ view, field }` operands (cards above *coins to spend*).
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the

@@ -64,7 +64,8 @@
     'table', 'valueCol', 'filterBy',                             // ref columns
     'multiple',                                                  // cardinality (composes with select AND ref)
     'default', 'defaultFrom', 'stamped',                         // what a new row starts with, and who may rewrite it
-    'syncFrom'                                                   // mirror columns
+    'syncFrom',                                                  // mirror columns
+    'enabledWhen'                                                // which options a picker lets you choose
   ];
 
   // Every way a column def can be wrong ABOUT ITSELF, as a list of messages. Pure over the tables map
@@ -131,6 +132,25 @@
         else if (d.multiple || d.type === 'multiselect') errors.push(at + '"' + p + '" picks one value; a `multiple` column is already chips');
         else if (d.allowNew) errors.push(at + '"' + p + '" shows a fixed set; `allowNew` needs a field to type a new value into');
         else if (p === 'cards' && isList && !(tables[d.list] && tables[d.list].isLookup)) errors.push(at + '"cards" shows each option\'s catalogue row — a `ref`, or a `list` naming a lookup table; "' + d.list + '" is a plain list');
+      }
+    }
+    return errors;
+  }
+  // `enabledWhen`: which options may be chosen, as a condition over each option's catalogue row. Needs a
+  // catalogue to read -- a ref, or a list naming a lookup -- or every option would be judged on nothing.
+  function enabledWhenErrors(tables) {
+    var errors = [];
+    for (var t in (tables || {})) {
+      var defs = columnDefs(tables[t]);
+      for (var c in defs) {
+        var d = defs[c];
+        if (!d || typeof d !== 'object' || d.enabledWhen === undefined) continue;
+        var at = 'table "' + t + '": column "' + c + '" `enabledWhen` ';
+        if (!d.enabledWhen || typeof d.enabledWhen !== 'object' || Array.isArray(d.enabledWhen)) { errors.push(at + 'must be a condition object'); continue; }
+        var cat = d.type === 'ref' ? d.table : (d.list && tables[d.list] && tables[d.list].isLookup ? d.list : null);
+        if (!cat || !tables[cat]) { errors.push(at + 'needs a catalogue to judge each option by — a `ref`, or a `list` naming a lookup table'); continue; }
+        var lcols = columnDefs(tables[cat]);
+        conditionColumns(d.enabledWhen).forEach(function(k) { if (!lcols[k]) errors.push(at + 'names "' + k + '", which is not a column of "' + cat + '"'); });
       }
     }
     return errors;
@@ -530,7 +550,7 @@
   }
 
   var C = {
-    COLUMN_TYPES: COLUMN_TYPES, COLUMN_KEYS: COLUMN_KEYS, vocabularyErrors: vocabularyErrors, pickerErrors: pickerErrors, PICKERS: PICKERS,
+    COLUMN_TYPES: COLUMN_TYPES, COLUMN_KEYS: COLUMN_KEYS, vocabularyErrors: vocabularyErrors, pickerErrors: pickerErrors, enabledWhenErrors: enabledWhenErrors, PICKERS: PICKERS,
     columnDefs: columnDefs, columnDefList: columnDefList, ownerColOf: ownerColOf,
     columnType: columnType, columnList: columnList, columnRef: columnRef,
     isMirror: isMirror, tableMirrorSource: tableMirrorSource, tableOwnerCol: tableOwnerCol,

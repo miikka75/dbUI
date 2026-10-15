@@ -291,7 +291,7 @@
     var raw = cfg.columns || (cfg.view && ctx.views[cfg.view] ? ctx.views[cfg.view].columns : []);
     var columns = raw.map(function(c) { return Cols.colName(c); });
     var rows = Rows.buildRows(ctx.viewWithMe(cfg), ctx.dataCache);
-    Rows.resolveComputed(rows, cfg.columns || [], { dataCache: ctx.dataCache, rotationAnchor: ctx.anchorForView(ctx.currentTable) });
+    Rows.resolveComputed(rows, cfg.columns || [], { dataCache: ctx.dataCache, rotationAnchor: ctx.anchorForView(ctx.currentTable), viewRows: ctx.viewRows });
     if (cfg.defaultSort) { rows = Rows.sortByCol(rows, cfg.defaultSort); }
     if (cfg.hideEmpty) { columns = columns.filter(function(col) { return rows.some(function(r) { return r[col]; }); }); }
     // Inline embed markdown: build blocks (prose + {{self}} markers for own table)
@@ -352,7 +352,7 @@
       var esrc = Rows.buildRows(vMe, ctx.dataCache, part || 'active');
       // One context for the embedded view's whole pipeline -- computeds AND a seeded groupBy, which
       // reads the catalogue its group column references out of the same cache.
-      var ectx = { dataCache: ctx.dataCache, rotationAnchor: ctx.anchorForView(v.name) };
+      var ectx = { dataCache: ctx.dataCache, rotationAnchor: ctx.anchorForView(v.name), viewRows: ctx.viewRows };
       if (v.compute) esrc = Rows.resolveComputed(esrc, v.compute, ectx);
       return Rows.sortByCol(Rows.resolveComputed(Rows.aggregateRows(vMe, esrc, ectx), v.columns, ectx), v.defaultSort, v);
     }

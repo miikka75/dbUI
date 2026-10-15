@@ -114,6 +114,10 @@
               "description": "Narrow a `ref` column's options by another column: { \"<this table's column>\": \"<ref table's column>\" }.",
               "additionalProperties": { "type": "string" }
             },
+            "enabledWhen": {
+              "type": "object",
+              "description": "Which options a picker lets you choose: a condition over each option's catalogue row (a ref, or a list naming a lookup). Unmatched options stay on show, greyed. Operands may be { \"view\": \"<view>\", \"field\": \"<col>\" } (a view's first row) or { \"col\": \"<col>\" } (the option row's own column)."
+            },
             "listFilter": {
               "type": "object",
               "description": "For a column whose `list` names a LOOKUP TABLE: which of its rows the picker offers, as a condition over the lookup's columns (the filter language), e.g. { \"kind\": \"position\" }. Narrows the picker only: a value already stored keeps rendering and stays among its own cell's options."

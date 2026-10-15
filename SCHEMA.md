@@ -264,6 +264,7 @@ This list is **closed** — a property not on it is never read, and `validateSch
 | `valueCol` | Column used as value (for `ref`) |
 | `filterBy` | Filter ref options by another column (for `ref`) |
 | `listFilter` | For a column whose `list` names a **lookup table**: which of its rows the picker offers, as a condition over the lookup's columns (`"listFilter": { "kind": "position" }`, with `$and`/`$or`). Narrows the **picker only**: a value already stored keeps rendering and sorting, and stays among its own cell's options, so a historical row never blanks. The values it names are **pinned** like a view filter's: the lookup rows carrying them cannot be renamed or deleted in the Lookup tab, since that would silently empty the picker. A column the lookup lacks, or a `list` that is not a lookup, is a load-time error |
+| `enabledWhen` | Which options a picker lets you **choose**, as a condition over each option's catalogue row (a `ref`, or a `list` naming a lookup). Options that fail stay on show, greyed — a reward you cannot afford yet is still worth seeing — and a value already chosen is never greyed. An operand may be `{ "view": "<view>", "field": "<col>" }`, the first row of a view (e.g. *my coins to spend*), or `{ "col": "<col>" }`, another column of the option's row: `"enabledWhen": { "cost": { "lte": { "view": "coin_spendable", "field": "coins" } } }`. Display-level: it stops a choice on screen, not at the server |
 
 ```json
 "tasks": {
@@ -584,7 +585,10 @@ A column with `computed` derives its value from other columns at render time (no
   ```json
   { "name": "type", "computed": { "fromColumn": "person", "matchList": { "members": "Internal", "leads": "External" } } }
   ```
-- **Lookup a field** (`lookup`): denormalize one field from another (keyed / `ref`) table into the row.
+- **Lookup a field** (`lookup`): denormalize one field from another (keyed / `ref`) table into the row —
+  or, with `view` in place of `table`, from a VIEW's rows: an aggregate like a balance per member,
+  `{ "lookup": { "view": "coin_balance", "match": "owner", "on": "owner", "field": "coins" } }`. The
+  view's own tables are loaded with it.
   Matches this row's `lookup.match` column against the target table's `lookup.on` column (defaults to the
   same name) and copies `lookup.field` (or `lookup.default` when there's no match):
   ```json
@@ -621,6 +625,7 @@ row when **every** field matches. Each field accepts a scalar (equality) or an o
 | `{ "f": { "notEmpty": true } }` | `row.f` is truthy (set) |
 | `{ "f": { "empty": true } }` | `row.f` is falsy (blank) |
 | `{ "f": { "ne": v } }` | `row.f !== v` |
+| `{ "f": { "gte": { "col": "g" } } }` | compare to ANOTHER column of the same row (any of `ne`/`lt`/`gt`/`lte`/`gte`): `{ "balance": { "gte": { "col": "cost" } } }` |
 | `{ "f": { "lt": v } }` / `gt` / `lte` / `gte` | ordered comparison. **Numeric** when both sides parse as numbers (`9 < 10`, not `"9" > "10"`), otherwise a string compare — which orders `YYYY-MM-DD` dates correctly, so no separate date operator is needed. Combinable in one object for a range: `{ "gte": 10, "lte": 20 }`. A **blank or missing value is incomparable** and matches *no* ordered filter in either direction (fail-closed — otherwise `Number('') === 0` would quietly pull undated rows into an "overdue" view) |
 | `{ "$or": [...] }` / `{ "$and": [...] }` | logical groups (membership via `$or` of equalities) |
 | `{ "f": { "matchList": "L" } }` / `notMatchList` | value in / not in named list |
@@ -1557,11 +1562,18 @@ reuses the data-view load path (filters, `compute`, `defaultSort` all apply) and
     ],
     "title": "title",                // OPTIONAL — card heading column (default: first entry of `columns`)
     "color": "assignee",             // OPTIONAL — column whose value tints each card's left border (hashed)
-    "addInLane": true                // OPTIONAL — per-lane "+" adds a row pre-stamped with that lane value
+    "addInLane": true,               // OPTIONAL — per-lane "+" adds a row pre-stamped with that lane value
+    "laneWhen": { "done": { … } }   // OPTIONAL — a card may enter that lane only while its row matches
   },
   "columns": ["title", "assignee"]   // card-face columns (the lane/title columns are shown separately)
 }
 ```
+
+**`laneWhen`** gates a lane on the card's row, computed columns included: the gym's reward board hands a
+claim over only while `{ "balance": { "gte": { "col": "cost" } } }` — the member's balance (a `lookup.view`
+of a per-member balance view) covers the reward's price. A drop that fails is refused with a word, and
+the move menu greys the lane. It is the board's rule, not the server's: an admin editing the row elsewhere
+is not stopped by it.
 
 - **One source, one lane column.** The source must be **exactly one** table and `lane` must be a `select`
   **or a `ref`** column on it (load-time validation enforces both) — a drag writes one column on one table,

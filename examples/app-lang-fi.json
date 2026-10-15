@@ -222,6 +222,7 @@
       "scan.camera": "Lue kameralla",
       "scan.camera_failed": "Kuvaa ei voitu lukea",
       "scan.code": "Koodi",
+      "board.lane_blocked": "Ei vielä — kortti ei täytä sarakkeen ehtoa.",
       "scan.claimed": "Kirjattu sisään",
       "scan.door": "Tämä näyttö on",
       "scan.press": "Skannaa koodi",

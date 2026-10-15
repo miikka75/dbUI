@@ -567,7 +567,15 @@
           "type": "ref",
           "table": "ref_rewards",
           "valueCol": "reward",
-          "picker": "cards"
+          "picker": "cards",
+          "enabledWhen": {
+            "cost": {
+              "lte": {
+                "view": "coin_spendable",
+                "field": "coins"
+              }
+            }
+          }
         },
         {
           "name": "claimed_on",
@@ -1414,7 +1422,7 @@
       "name": "doc_loyalty",
       "kind": "page",
       "icon": "mdi-star-circle",
-      "markdown": "## {{t:text.loyalty_level}}\n\n{{view:my_level}}\n\n## {{t:text.loyalty_coins}}\n\n{{view:my_coins}}\n\n## {{t:text.loyalty_shop}}\n\n{{view:reward_claim_form}}\n\n## {{t:text.loyalty_mine}}\n\n{{view:reward_mine}}\n"
+      "markdown": "## {{t:text.loyalty_coins}}\n\n{{view:my_coins}}\n\n## {{t:text.loyalty_shop}}\n\n{{view:reward_claim_form}}\n\n## {{t:text.loyalty_mine}}\n\n{{view:reward_mine}}\n"
     },
     {
       "name": "reward_board",
@@ -1427,7 +1435,31 @@
       "defaultSort": "claimed_on",
       "columns": [
         "member",
-        "claimed_on"
+        "claimed_on",
+        {
+          "name": "cost",
+          "computed": {
+            "lookup": {
+              "table": "ref_rewards",
+              "match": "reward",
+              "on": "reward",
+              "field": "cost",
+              "default": 0
+            }
+          }
+        },
+        {
+          "name": "balance",
+          "computed": {
+            "lookup": {
+              "view": "coin_balance",
+              "match": "owner",
+              "on": "owner",
+              "field": "coins",
+              "default": 0
+            }
+          }
+        }
       ],
       "board": {
         "lane": "claim_status",
@@ -1437,7 +1469,16 @@
           "denied"
         ],
         "title": "reward",
-        "color": "member"
+        "color": "member",
+        "laneWhen": {
+          "granted": {
+            "balance": {
+              "gte": {
+                "col": "cost"
+              }
+            }
+          }
+        }
       },
       "filter": {
         "sent": "yes"
@@ -1461,6 +1502,145 @@
         "startLabel": "text.claim_reward",
         "submitLabel": "text.claim"
       }
+    },
+    {
+      "name": "coin_spendable",
+      "kind": "data",
+      "icon": "mdi-hand-coin",
+      "sources": [
+        "bookings",
+        "reward_claims"
+      ],
+      "mode": "union",
+      "groupBy": {
+        "column": "owner",
+        "from": [
+          "owner"
+        ]
+      },
+      "compute": [
+        {
+          "name": "delta",
+          "source": "bookings",
+          "computed": {
+            "lookup": {
+              "table": "classes",
+              "match": "class",
+              "on": "id",
+              "field": "coins",
+              "default": 0
+            }
+          }
+        },
+        {
+          "name": "delta",
+          "source": "reward_claims",
+          "scale": -1,
+          "computed": {
+            "lookup": {
+              "table": "ref_rewards",
+              "match": "reward",
+              "on": "reward",
+              "field": "cost",
+              "default": 0
+            }
+          }
+        }
+      ],
+      "aggregate": {
+        "sum": "delta",
+        "into": "coins"
+      },
+      "columns": [
+        "owner",
+        "coins"
+      ],
+      "filter": {
+        "$or": [
+          {
+            "attendance": "attended"
+          },
+          {
+            "$and": [
+              {
+                "sent": "yes"
+              },
+              {
+                "claim_status": {
+                  "ne": "denied"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "readonly": true,
+      "includeArchive": true
+    },
+    {
+      "name": "coin_balance",
+      "kind": "data",
+      "icon": "mdi-hand-coin",
+      "sources": [
+        "bookings",
+        "reward_claims"
+      ],
+      "mode": "union",
+      "groupBy": {
+        "column": "owner",
+        "from": [
+          "owner"
+        ]
+      },
+      "compute": [
+        {
+          "name": "delta",
+          "source": "bookings",
+          "computed": {
+            "lookup": {
+              "table": "classes",
+              "match": "class",
+              "on": "id",
+              "field": "coins",
+              "default": 0
+            }
+          }
+        },
+        {
+          "name": "delta",
+          "source": "reward_claims",
+          "scale": -1,
+          "computed": {
+            "lookup": {
+              "table": "ref_rewards",
+              "match": "reward",
+              "on": "reward",
+              "field": "cost",
+              "default": 0
+            }
+          }
+        }
+      ],
+      "aggregate": {
+        "sum": "delta",
+        "into": "coins"
+      },
+      "columns": [
+        "owner",
+        "coins"
+      ],
+      "filter": {
+        "$or": [
+          {
+            "attendance": "attended"
+          },
+          {
+            "claim_status": "granted"
+          }
+        ]
+      },
+      "readonly": true,
+      "includeArchive": true
     }
   ],
   "nav": {

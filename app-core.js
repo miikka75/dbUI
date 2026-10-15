@@ -1123,7 +1123,7 @@ function createVueApp() {
          'msg.server_error', 'msg.import_blocked', 'msg.import_error', 'msg.palette_applied', 'msg.error', 'msg.locked',
          'msg.ref_has_children',
          'pivot.total', 'stats.empty',
-         'scan.code', 'scan.press', 'scan.foreign', 'scan.claimed', 'scan.door', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
+         'board.lane_blocked', 'scan.code', 'scan.press', 'scan.foreign', 'scan.claimed', 'scan.door', 'scan.created', 'scan.already', 'scan.unknown', 'scan.ambiguous', 'scan.recent',
          'scan.print_codes', 'scan.print_code', 'scan.no_barcode',
          'scan.camera', 'scan.no_code_found', 'scan.several_codes', 'scan.camera_failed',
          'board.move_to', 'board.unassigned', 'board.add_in_lane', 'board.archive', 'board.confirm_archive',
@@ -3144,6 +3144,12 @@ function createVueApp() {
           if (isEmbed(c)) (c.sources || []).forEach(expand);
           else if (isViewEmbed(c)) expand(c.view);
         });
+        // A computed lookup that reads a VIEW (`lookup.view`) needs that view's rows, so everything they
+        // are built from -- or the looked-up value is a blank that reads like a real zero.
+        (v.columns || []).concat(v.compute || []).forEach(function(c) {
+          var lk = c && typeof c === 'object' && c.computed && c.computed.lookup;
+          if (lk && lk.view) expand(lk.view);
+        });
         return out;
       },
 
@@ -3171,6 +3177,7 @@ function createVueApp() {
         // pivot.source and rsvp.events may each name a VIEW whose own config wants history -- the same
         // indirection _viewTables expands, and missing it here would fetch nothing while that view
         // silently rendered a short total.
+        if ((v.columns || []).concat(v.compute || []).some(function(c) { var lk = c && typeof c === 'object' && c.computed && c.computed.lookup; return lk && lk.view && self._viewNeedsArchive(lk.view, seen); })) return true;
         if (v.pivot && self._viewNeedsArchive(v.pivot.source, seen)) return true;
         if (v.rsvp && self._viewNeedsArchive(v.rsvp.events, seen)) return true;
 
@@ -3231,7 +3238,19 @@ function createVueApp() {
           viewWithMe: function(v) { return self._viewWithMe(v); },
           anchorForView: function(n) { return self.anchorForView(n); },
           rotationRowsFor: function(n, rv) { return self.rotationRowsFor(n, rv); },
-          rotationColsFor: function(n, rows, cfg) { return self.rotationColsFor(n, rows, cfg); }
+          rotationColsFor: function(n, rows, cfg) { return self.rotationColsFor(n, rows, cfg); },
+          viewRows: self._viewRowsFn()
+        };
+      },
+      // A computed `lookup.view`'s rows: the view's own pipeline (embedRows). Guarded against a view
+      // reached again while its rows are being built -- a lookup cycle validateSchema also refuses -- so
+      // a mistake renders blanks rather than overflowing the stack.
+      _viewRowsFn: function() {
+        var self = this, busy = this._viewRowsBusy || (this._viewRowsBusy = {});
+        return function(name) {
+          if (!VIEWS[name] || busy[name]) return [];
+          busy[name] = true;
+          try { return Embeds.embedRows('view', name, null, self._embedCtx()); } finally { delete busy[name]; }
         };
       },
       buildEmbedBlock: function(type, name, part) { return Embeds.buildEmbedBlock(type, name, part, this._embedCtx()); },
@@ -3633,7 +3652,7 @@ function createVueApp() {
           var srcRows = buildRows(vMe, cache, part);
           // One context for the whole pipeline: the computeds resolve their lookups out of it, and a
           // seeded groupBy reads the referenced catalogue's rows from the same cache.
-          var rctx = { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) };
+          var rctx = { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable), viewRows: self._viewRowsFn() };
           // Resolve source-row computeds (e.g. a per-row lookup) BEFORE grouping so an aggregate can sum them.
           if (view.compute) srcRows = resolveComputed(srcRows, view.compute, rctx);
           var rows = resolveComputed(aggregateRows(vMe, srcRows, rctx), view.columns, rctx);
@@ -3645,7 +3664,7 @@ function createVueApp() {
             var src2 = buildRows(vMe2, self.dataCache, part);
             // Rebuilt rather than captured: this runs when a LATE table lands, so the cache it reads
             // must be the one that exists then -- including the catalogue a seeded groupBy waits for.
-            var rctx2 = { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable) };
+            var rctx2 = { dataCache: self.dataCache, rotationAnchor: self.anchorForView(self.currentTable), viewRows: self._viewRowsFn() };
             if (view.compute) src2 = resolveComputed(src2, view.compute, rctx2);
             self.currentData = resolveComputed(aggregateRows(vMe2, src2, rctx2), view.columns, rctx2);
           };
@@ -4641,10 +4660,50 @@ function createVueApp() {
         var defs = Columns.columnDefs(SCHEMA[ref.table] || {});
         var cols = getColumns(ref.table).filter(function(c) { var d = defs[c]; return !skip[c] && !(d && typeof d === 'object' && d.hidden); });
         var opts = this.colRef(col) ? this.getRefOptions(col, item) : this.getListOptions(col, null, item);
-        return opts.filter(function(o) { return o.value !== ''; }).map(function(o) {
+        var cards = opts.filter(function(o) { return o.value !== ''; }).map(function(o) {
           var row = rows.filter(function(r) { return r[vc] === o.value; })[0] || {};
           return { value: o.value, title: o.title, row: row, cols: cols.filter(function(c) { return row[c] != null && row[c] !== ''; }) };
         });
+        return this.markEnabled(col, cards);
+      },
+      // A column's `enabledWhen`: which options may be chosen, as a condition over each option's catalogue
+      // row. An operand may be { view, field } -- the first row of a view, e.g. "my coins to spend" -- or
+      // { col } -- another column of the catalogue row. Unmatched options stay on show, disabled: a
+      // reward the member cannot afford yet is still worth seeing. A choice already made is never greyed.
+      markEnabled: function(col, opts) {
+        var when = this._colEnabledWhen(col);
+        if (!when) return opts;
+        var self = this, cond = this.resolveViewOperands(when);
+        var ref = this.colRef(col), lt = ref ? ref.table : this.colIsList(col), vc = ref ? (ref.valueCol || 'id') : null;
+        var rows = this.dataCache[lt] || [];
+        return opts.map(function(o) {
+          var row = o.row || rows.filter(function(r) { return vc ? r[vc] === o.value : Object.keys(r).some(function(k) { return r[k] === o.value; }); })[0] || {};
+          return Object.assign({}, o, { disabled: !condMatches(row, cond) });
+        });
+      },
+      // A column is typed the same wherever it appears (the any-table rule colInfo follows), but the same
+      // NAME can also be a catalogue's own column -- `reward` in ref_rewards -- so look for the def that
+      // declares it rather than the first table that has the name.
+      _colEnabledWhen: function(col) {
+        for (var t in SCHEMA) { var d = Columns.columnDefs(SCHEMA[t])[col]; if (d && typeof d === 'object' && d.enabledWhen) return d.enabledWhen; }
+        return null;
+      },
+      // `{ view, field }` operands resolved to a value: the field of the view's first row ('' when none).
+      resolveViewOperands: function(cond) {
+        var self = this;
+        return (function walk(c) {
+          if (Array.isArray(c)) return c.map(walk);
+          if (!c || typeof c !== 'object') return c;
+          if (typeof c.view === 'string' && typeof c.field === 'string') {
+            // The view's tables may be ones this screen never loads (the picker sits on a form). Ask for
+            // what is missing; the answer re-renders through dataCache when it lands.
+            var need = self._viewTables(c.view).filter(function(t) { return !self.dataCache[t]; });
+            if (need.length) self._ensureCached(need);
+            var r = self.embedRows('view', c.view)[0];
+            return r && r[c.field] != null ? r[c.field] : '';
+          }
+          var out = {}; for (var k in c) out[k] = walk(c[k]); return out;
+        })(cond);
       },
       getRefOptions: function(col, item) {
         var ref = getColumnRef(null, col);   // memoized any-table scan (see colRef); was the same loop
@@ -8342,7 +8401,7 @@ function createVueApp() {
       colListSwitch: function(col) { return appInstance.colListSwitch(col); },
       getListOptions: function(col) { return appInstance.getListOptions(col); },
       // A dropdown option's second line: the role under a linked person's name (listRole).
-      optionProps: function(o) { return (o && o.subtitle) ? { subtitle: o.subtitle } : {}; },
+      optionProps: function(o) { var p = {}; if (o && o.subtitle) p.subtitle = o.subtitle; if (o && o.disabled) p.disabled = true; return p; },
       // single-select options: the primary honors the listSwitch alt list; the embed uses the plain list.
       listItems: function(col, item) {
         if (this.embed) return appInstance.getListOptions(col, null, item);
@@ -8354,7 +8413,7 @@ function createVueApp() {
       // Every picker but the dropdown lays out the same options the dropdown offers: a ref's (filterBy
       // applies) or a list's.
       hasOptions: function(col) { return !!(appInstance.colIsList(col) || appInstance.colIsRef(col)); },
-      pickerOptions: function(col, item) { return appInstance.colIsRef(col) ? appInstance.getRefOptions(col, item).filter(function(o) { return o.value !== ''; }) : appInstance.getListOptions(col); },
+      pickerOptions: function(col, item) { return appInstance.markEnabled(col, appInstance.colIsRef(col) ? appInstance.getRefOptions(col, item).filter(function(o) { return o.value !== ''; }) : appInstance.getListOptions(col)); },
       cellOptions: function(col, item) { return appInstance.cellOptions(col, item); },
       isAltList: function(col, item) { return appInstance.isAltList(col, item); },
       toggleListSwitch: function(col, item) { return appInstance.toggleListSwitch(col, item); },
@@ -8411,10 +8470,10 @@ function createVueApp() {
       + '<v-combobox v-else-if="colIsMultiselect(col) && colAllowNew(col) && !colIsRef(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="getListOptions(col)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-combobox>'
       + '<v-autocomplete v-else-if="colIsMultiselect(col)" :name="col" multiple chips closable-chips :model-value="item[col] || []" :items="cellOptions(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details style="flex:1" @update:model-value="save(item, col, $event)" @keydown.home.stop @keydown.end.stop><template v-slot:chip="{ props }"><v-chip v-bind="props" size="small" color="secondary"></v-chip></template></v-autocomplete>'
       + '<v-btn-toggle v-else-if="hasOptions(col) && !colIsMultiselect(col) && colPicker(col)===\'toggle\'" :name="col" :model-value="item[col] || \'\'" density="compact" variant="outlined" divided @update:model-value="save(item, col, $event || \'\')">'
-      + '<v-btn v-for="o in pickerOptions(col, item)" :key="o.value" :value="o.value" size="small">{{ o.title }}</v-btn>'
+      + '<v-btn v-for="o in pickerOptions(col, item)" :key="o.value" :value="o.value" :disabled="o.disabled && item[col] !== o.value" size="small">{{ o.title }}</v-btn>'
       + '</v-btn-toggle>'
       + '<v-chip-group v-else-if="hasOptions(col) && !colIsMultiselect(col) && colPicker(col)===\'chips\'" :name="col" :model-value="item[col] || \'\'" @update:model-value="save(item, col, $event || \'\')">'
-      + '<v-chip v-for="o in pickerOptions(col, item)" :key="o.value" :value="o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
+      + '<v-chip v-for="o in pickerOptions(col, item)" :key="o.value" :value="o.value" :disabled="o.disabled && item[col] !== o.value" size="small" filter variant="outlined" color="primary">{{ o.title }}</v-chip>'
       + '</v-chip-group>'
       + '<v-combobox v-else-if="colIsList(col) && colAllowNew(col)" :name="col" :model-value="item[col] || \'\'" :items="listItems(col, item)" item-title="title" item-value="value" :item-props="optionProps" density="compact" variant="plain" hide-details single-line style="flex:1" @update:model-value="save(item, col, $event)" @blur="addToListOnBlur(item, col)" @keydown.home.stop @keydown.end.stop>'
       + '<template v-if="!embed && colListSwitch(col)" v-slot:prepend-inner><v-icon size="x-small" :color="isAltList(col, item) ? \'primary\' : \'\'" @click.stop="toggleListSwitch(col, item)" :title="colListSwitch(col).label || t(\'col.switch_list\')">mdi-swap-horizontal</v-icon></template>'
@@ -8427,7 +8486,7 @@ function createVueApp() {
       // chosen card again clears it, as a deselected chip or toggle does.
       + '<tile-grid v-else-if="hasOptions(col) && !colIsMultiselect(col) && colPicker(col)===\'cards\'" min="170px" :data-testid="\'cards-\' + col">'
       +   '<v-card v-for="o in refCards(col, item)" :key="o.value" :variant="item[col] === o.value ? \'outlined\' : \'tonal\'" :color="item[col] === o.value ? \'primary\' : undefined"'
-      +     ' class="pa-3" style="cursor:pointer" role="radio" :aria-checked="item[col] === o.value" data-testid="pick-card" @click="save(item, col, item[col] === o.value ? \'\' : o.value)">'
+      +     ' class="pa-3" :style="(o.disabled && item[col] !== o.value) ? \'opacity:0.45;cursor:not-allowed\' : \'cursor:pointer\'" role="radio" :aria-checked="item[col] === o.value" :aria-disabled="!!o.disabled" data-testid="pick-card" @click="(o.disabled && item[col] !== o.value) || save(item, col, item[col] === o.value ? \'\' : o.value)">'
       +     '<div class="d-flex align-center" style="gap:6px"><b style="flex:1">{{ o.title }}</b><v-icon v-if="item[col] === o.value" size="small">mdi-check-circle</v-icon></div>'
       +     '<div v-for="c in o.cols" :key="c" style="font-size:0.8rem;opacity:0.8"><span style="opacity:0.7">{{ t(\'field.\' + c) || c }}: </span><list-value :col="c" :value="o.row[c]"></list-value></div>'
       +   '</v-card>'
@@ -10284,11 +10343,22 @@ function createVueApp() {
         if (!this.canEdit || this.dragId == null) return;
         var id = this.dragId, self = this;
         var item = (appInstance.currentData || []).find(function(r) { return r.id === id; });
-        if (item && String(item[self.laneCol] || '') !== laneKey) appInstance.saveField(item, self.laneCol, laneKey, self.viewName);
+        if (item && String(item[self.laneCol] || '') !== laneKey) self.moveTo(item, laneKey, true);
         this.onDragEnd();
       },
+      // `board.laneWhen: { <lane>: <condition> }` -- a card may enter that lane only while its row (computed
+      // columns included) matches: "handed over" only while the member can afford it. Refused with a
+      // word rather than snapping back unexplained; the move menu greys the lane out.
+      laneAllowed: function(item, laneKey) {
+        var w = ((this.cfg || {}).laneWhen || {})[laneKey];
+        return !w || condMatches(item, w);
+      },
       // --- mobile / a11y fallback: move via menu ---
-      moveTo: function(item, laneKey) { if (this.canEditCard(item) && this.canMoveCards && String(item[this.laneCol] || '') !== laneKey) appInstance.saveField(item, this.laneCol, laneKey, this.viewName); },
+      moveTo: function(item, laneKey, dropped) {
+        if (!(dropped || (this.canEditCard(item) && this.canMoveCards)) || String(item[this.laneCol] || '') === laneKey) return;
+        if (!this.laneAllowed(item, laneKey)) { appInstance.notify(appInstance.t('board.lane_blocked')); return; }
+        appInstance.saveField(item, this.laneCol, laneKey, this.viewName);
+      },
       laneMenuItems: function() { var self = this; return this.laneOrder.map(function(k) { return { value: k, title: self.laneLabel(k) }; }); },
       addInLane: function(laneKey) { appInstance.boardAddInLane(this.viewName, laneKey); },
       // Per-card row controls (mirror the grid's row-append buttons): archive files the card to the archive
@@ -10350,7 +10420,7 @@ function createVueApp() {
       // tooltip, and every item in it is a lane, so the header only restated the question. `board.move_to`
       // stays in use as that tooltip.
       + '            <v-list density="compact">'
-      + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value)" :active="String(item[laneCol]||\'\')===opt.value">'
+      + '            <v-list-item v-for="opt in laneMenuItems()" :key="opt.value" @click="moveTo(item, opt.value)" :active="String(item[laneCol]||\'\')===opt.value" :disabled="!laneAllowed(item, opt.value)">'
       + '              <v-list-item-title>{{ opt.title }}</v-list-item-title></v-list-item></v-list></v-menu>'
       + '        </div>'
       // Field face (both modes): one <v-field> per column — the SAME component v-text-field wraps its
