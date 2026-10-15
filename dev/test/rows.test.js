@@ -474,3 +474,25 @@ describe('rows.js — comparing to another column, and a lookup that reads a vie
     assert.deepEqual(rows.map((r) => r.balance), [350, 0]);
   });
 });
+
+describe('rows.js — dateAdd and max/min aggregates', () => {
+  const R = require('../../rows');
+  const add = (row, spec) => R.resolveComputed([row], [{ name: 'e', computed: { dateAdd: spec } }], {})[0].e;
+  it('adds months then days; an amount may name a column', () => {
+    assert.equal(add({ s: '2026-01-15', m: 12 }, { from: 's', months: { col: 'm' }, days: -1 }), '2027-01-14');
+    assert.equal(add({ s: '2026-03-10' }, { from: 's', days: 14 }), '2026-03-24');
+  });
+  it('clamps to the month end (31 Jan + 1 month = 28 Feb)', () => {
+    assert.equal(add({ s: '2026-01-31' }, { from: 's', months: 1 }), '2026-02-28');
+  });
+  it('no start, or an amount that is not a number, gives no date', () => {
+    assert.equal(add({ s: '' }, { from: 's', months: 1 }), '');
+    assert.equal(add({ s: '2026-01-01', m: '' }, { from: 's', months: { col: 'm' } }), '');
+  });
+  it('max / min per group, blank when a group has no value', () => {
+    const rows = [{ o: 'a', e: '2026-05-01' }, { o: 'a', e: '2027-01-14' }, { o: 'b', e: '' }];
+    const out = (agg) => Object.fromEntries(R.aggregateRows({ groupBy: { column: 'o' }, aggregate: agg }, rows).map((r) => [r.o, r.x]));
+    assert.deepEqual(out({ max: 'e', into: 'x' }), { a: '2027-01-14', b: '' });
+    assert.deepEqual(out({ min: 'e', into: 'x' }), { a: '2026-05-01', b: '' });
+  });
+});

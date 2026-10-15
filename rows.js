@@ -99,6 +99,20 @@
   // Whole days between a YYYY-MM-DD value and today (or `today`, which tests pin to a fixed date).
   // Parsed at local midnight on both ends and rounded, so a DST boundary inside the span can't turn a
   // whole number of days into 6.96. '' for a missing or unparseable date.
+  function _dateAdd(r, spec) {
+    var from = r[spec.from];
+    if (!from) return '';
+    var amt = function(x) { if (x == null) return 0; var v = (typeof x === 'object' && typeof x.col === 'string') ? r[x.col] : x; if (v === '' || v == null) return NaN; return Number(v); };
+    var m = amt(spec.months), dd = amt(spec.days);
+    if (isNaN(m) || isNaN(dd)) return '';
+    var p = String(from).slice(0, 10).split('-'), y = +p[0], mo = +p[1] - 1, day = +p[2];
+    if (!y || isNaN(mo) || !day) return '';
+    // Month arithmetic clamps to the month's last day (31 Jan + 1 month = 28/29 Feb), as people count it.
+    var t = new Date(y, mo + m, 1), last = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+    t.setDate(Math.min(day, last));
+    t.setDate(t.getDate() + dd);
+    return fmtDate(t);
+  }
   function _daysSince(dateVal, today) {
     if (!dateVal) return '';
     var from = new Date(String(dateVal).slice(0, 10) + 'T00:00:00');
@@ -459,6 +473,23 @@
       // groupBy.filter matches the aggregated KEY row, so it is one predicate over a key -- applied to
       // a seeded key and a counted one alike, or a filtered-out group would come back as a zero.
       var keyOk = function(key) { if (!agf) return true; var tmp = {}; tmp[akeyCol] = key; return condMatches(tmp, agf); };
+      // max / min: the largest or smallest value per group, compared as the condition language compares
+      // (numbers as numbers, YYYY-MM-DD dates as strings) -- "the latest end date per member". A group
+      // with no value gets '' rather than a zero that would read as one.
+      var pickCol = agg.max || agg.min, sign = agg.max ? 1 : -1;
+      if (pickCol) {
+        var best = {};
+        rows.forEach(function(r) {
+          akeysFrom.forEach(function(k) {
+            var key = r[k], v = r[pickCol];
+            if (key == null || key === '' || !keyOk(key)) return;
+            if (!(key in best)) best[key] = '';
+            if (v == null || v === '') return;
+            if (best[key] === '' || sign * _cmp(v, best[key]) > 0) best[key] = v;
+          });
+        });
+        return Object.keys(best).map(function(key) { var row = { id: key }; row[akeyCol] = key; row[into] = best[key]; return row; });
+      }
       var totals = {};
       if (view.groupBy.seed) seedKeys(view, ctx).forEach(function(key) { if (keyOk(key)) totals[key] = 0; });
       rows.forEach(function(r) {
@@ -576,6 +607,14 @@
     // Recomputed every render (never stored), so an "overdue" filter re-evaluates as the day rolls over.
     // A blank/unparseable date yields '' rather than 0, so `empty` still reads correctly and the ordered
     // operators (which treat '' as incomparable) leave undated rows out of both < and > filters.
+    // dateAdd: a date moved by whole months and/or days -- the end of a 12-month membership from its start
+    // ({ from: "start_on", months: { col: "plan_months" }, days: -1 }). An amount may name another column
+    // ({ col }), computed earlier in the same list included. A blank start, or an amount that is not a
+    // number (a plan with no length), gives '' -- no end -- rather than a date that means nothing.
+    if (comp.dateAdd) {
+      r[d.name] = _dateAdd(r, comp.dateAdd);
+      return;
+    }
     if (comp.daysSince) {
       r[d.name] = _daysSince(r[comp.daysSince], ctx && ctx.todayDate);
       return;

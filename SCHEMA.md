@@ -475,7 +475,11 @@ A view with `groupBy` + `collect` groups rows by person/key and collects a colum
   `"collectWith": "role"` → values render as `"2026-06-01 (slot1)"` instead of just `"2026-06-01"`.
   Useful for cross-table aggregates where you need to see *which role* produced each entry.
 
-#### Leaderboard totals (`aggregate` count/sum)
+#### Leaderboard totals (`aggregate` count/sum/max/min)
+
+`aggregate: { "max": "<col>" }` (or `min`) keeps the largest / smallest value per group instead of a
+total — compared as conditions compare, so `YYYY-MM-DD` dates work: *each member's latest end date*. A group
+with no value gets a blank, not a zero.
 Instead of `collect`, use `aggregate` to produce one **numeric** row per group, ranked highest-first:
 ```json
 { "name": "leaderboard", "sources": ["chore_log"], "mode": "union",
@@ -596,6 +600,10 @@ A column with `computed` derives its value from other columns at render time (no
   ```
   General-purpose — chore→points, member→role/phone, room→capacity, category→colour, etc. Pairs with
   `view.compute` + `aggregate.sum` to total a looked-up value (see **Leaderboard totals**).
+- **A date moved** (`dateAdd`): `{ "from": "start_on", "months": { "col": "plan_months" }, "days": -1 }` — whole
+  months, then days; an amount may name another column, a computed one earlier in the list included. Months
+  clamp to the month end (31 Jan + 1 month = 28 Feb). A blank start, or an amount that is not a number, gives
+  no date. Renders and sorts as a date.
 - **Age of a row** (`daysSince`): whole days from a date column to today, as a **number** (negative for a
   future date, `""` when the date is blank or unparseable):
   ```json
@@ -1647,6 +1655,8 @@ once rather than toggled — surveys, applications, intake, feedback.
 | `required` | Columns that must be answered before the form may be submitted. A name that is not one of the form's columns is ignored — otherwise the form could never be completed and nothing on screen would say why |
 | `once` | `true` (default) = one record per person, reopened for editing. `false` = a fresh blank record each time: the one being filled in is the person's latest not yet submitted, so it needs `submitColumn` |
 | `submitColumn` / `submitValue` | Optional. On submit, stamp this column (default value `"submitted"`). Pair it with `ownerWritableWhile` to make submission final — see below |
+| `compute` | Computed columns over the record (the same shapes a view's use): naming one in `columns` shows it read-only — an end date as the start and plan are chosen |
+| `rules` | `[{ "require": <condition>, "message": "<key>" }]` — conditions the record, computed columns included, must meet before it can be submitted. Once the required fields are in, each failing rule shows its message and the submit button waits |
 | `intro` / `done` | Optional markdown shown above the form, and in place of it once the record is locked. `{{t:key}}` works |
 | `startLabel` / `submitLabel` | Optional translation keys for the two buttons |
 

@@ -1079,8 +1079,7 @@
         "plan": "12 months",
         "start_on": "2026-01-15",
         "order_state": "submitted",
-        "membership_status": "active",
-        "valid_until": "2027-01-14"
+        "membership_status": "active"
       },
       {
         "id": "ms-eero-1",
@@ -1089,8 +1088,7 @@
         "plan": "Monthly",
         "start_on": "2026-10-20",
         "order_state": "submitted",
-        "membership_status": "pending",
-        "valid_until": ""
+        "membership_status": "pending"
       }
     ],
     "pt_sessions": [

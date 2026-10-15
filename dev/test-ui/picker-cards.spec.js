@@ -140,3 +140,25 @@ test('affordability: unaffordable cards are greyed for the member, and the front
   const status = async () => Object.fromEntries(((await (await page.request.post('/api/getTableData', { data: { tableId: 'claims', tab: 'active' }, headers: ADMIN })).json()).rows || []).filter((r) => r.id === 'ok' || r.id === 'big').map((r) => [r.id, r.status]));
   await expect.poll(status).toEqual({ ok: 'granted', big: 'requested' });
 });
+
+test('form rules: a computed value shows in the form, and submit waits until every rule holds', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  Object.assign(schema.views[0].form, {
+    columns: ['reward', 'price'],
+    compute: [{ name: 'price', computed: { lookup: { table: 'ref_rewards', match: 'reward', on: 'reward', field: 'cost' } } }],
+    rules: [{ require: { price: { lt: 1000 } }, message: 'Too dear' }]
+  });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await boot(page, 'ann@x');
+  await page.evaluate(() => appInstance.selectTab('shop'));
+  await page.locator('[data-testid="form-start"]').click();
+  await page.locator('[data-testid="pick-card"]', { hasText: 'Bottle' }).click();
+  await expect(page.locator('[data-testid="form-computed"][data-col="price"]')).toContainText('1700');
+  await expect(page.locator('[data-testid="form-rule"]')).toHaveText('Too dear');
+  await expect(page.locator('[data-testid="form-submit"]')).toBeDisabled();
+  await page.locator('[data-testid="pick-card"]', { hasText: 'Day pass' }).click();
+  await expect(page.locator('[data-testid="form-rule"]')).toHaveCount(0);
+  await page.locator('[data-testid="form-submit"]').click();
+  await expect.poll(() => claims(page)).toEqual([['Day pass', 'yes']]);
+});

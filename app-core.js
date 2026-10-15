@@ -2989,6 +2989,21 @@ function createVueApp() {
       // Create the caller's record if they have none. Returns it either way, so the component can edit
       // through the ordinary data-cell path -- a form field is the same editor as a grid cell, which is
       // how every column type and widget works here for free.
+      // The record as the form judges it: its stored fields plus `form.compute` (an end date from a start
+      // and a plan, a balance looked up from a view), resolved through the same pipeline a view uses.
+      formComputed: function(name, rec) {
+        var v = VIEWS[name], comp = v && v.form && v.form.compute;
+        if (!rec || !comp) return rec;
+        return resolveComputed([Object.assign({}, rec)], comp, { dataCache: this.dataCache, viewRows: this._viewRowsFn() })[0];
+      },
+      // `form.rules`: [{ require: <condition>, message }] -- conditions the record (computed columns
+      // included) must meet before it is submitted. Returns the messages of the ones it fails.
+      formRuleFailures: function(name, rec) {
+        var v = VIEWS[name], rules = (v && v.form && v.form.rules) || [], full = this.formComputed(name, rec), self = this;
+        if (!rec) return [];
+        return rules.filter(function(r) { return r && r.require && !condMatches(full, r.require); })
+          .map(function(r) { return self.tOr(r.message, r.message || self.t('msg.form_incomplete')); });
+      },
       formRecord: function(name) {
         var v = VIEWS[name];
         if (!v || !v.form || !v.form.table) return null;
@@ -3121,6 +3136,11 @@ function createVueApp() {
         // A form writes ONE table, named per-kind rather than in `sources` -- so nothing else
         // derives it, and without this the view would load nothing and show an empty record.
         if (v.form && v.form.table) push(v.form.table);
+        if (v.form) (v.form.compute || []).forEach(function(c) {
+          var lk = c && c.computed && c.computed.lookup;
+          if (lk && lk.table) push(lk.table);
+          if (lk && lk.view) expand(lk.view);
+        });
         // A scan resolves its code against the LOOKUP its target column references. That table is read,
         // never written, so it is not in `sources` -- and without it the view would load the log it
         // writes and nothing to check a code against, reporting every scan as an unknown code.
@@ -4039,7 +4059,8 @@ function createVueApp() {
       },
 
       // Column helpers
-      colIsDate: function(col) { return Columns.colIsDate(SCHEMA, col); },
+      // A computed `dateAdd` IS a date, though no table declares it -- so it renders and sorts like one.
+      colIsDate: function(col) { return Columns.colIsDate(SCHEMA, col) || !!computedDateCols()[col]; },
       colIsDateTime: function(col) { return Columns.colIsDateTime(SCHEMA, col); },
       colIsNumber: function(col) { return Columns.colIsNumber(SCHEMA, col); },
       colIsImage: function(col) { return Columns.colIsImage(SCHEMA, col); },
@@ -9519,6 +9540,20 @@ function createVueApp() {
       }
     }
   };
+  // Names of computed columns that hold a date (dateAdd), from every view and form. Memoized on VIEWS,
+  // which a schema change replaces wholesale.
+  var _cdKey = null, _cdCols = {};
+  function computedDateCols() {
+    if (_cdKey === VIEWS) return _cdCols;
+    _cdKey = VIEWS; _cdCols = {};
+    Object.keys(VIEWS || {}).forEach(function(n) {
+      var v = VIEWS[n] || {};
+      (v.columns || []).concat(v.compute || [], (v.form && v.form.compute) || []).forEach(function(c) {
+        if (c && typeof c === 'object' && c.name && c.computed && c.computed.dateAdd) _cdCols[c.name] = true;
+      });
+    });
+    return _cdCols;
+  }
   // A photo -> the one code in it, with the browser's own decoder. Both symbologies the app prints: the
   // sheet's Code 39 and a QR carrying the `?scan=` link. Several codes in one picture is a framing
   // problem, and choosing one would log a door nobody aimed at. Resolves { raw } or { outcome }.
@@ -9852,7 +9887,10 @@ function createVueApp() {
       item: function() { return this.built.record; },
       signedIn: function() { return !!appInstance.currentUserEmail; },
       missing: function() { return this.built.missing; },
-      canSubmit: function() { return this.built.complete && this.built.editable; },
+      canSubmit: function() { return this.built.complete && this.built.editable && !this.ruleFailures.length; },
+      full: function() { return appInstance.formComputed(this.viewName, this.item); },
+      // Shown once the required fields are in: a rule over a half-filled record would only nag.
+      ruleFailures: function() { return this.built.complete ? appInstance.formRuleFailures(this.viewName, this.item) : []; },
       // Once the state gate has closed, say so. The rules would refuse the write anyway; a dead editor
       // that fails on save is the version that looks like a bug.
       locked: function() { return this.built.submitted && !this.built.editable; },
@@ -9863,9 +9901,11 @@ function createVueApp() {
       label: function(col) { return appInstance.tOr("field." + col, col); },
       isMissing: function(col) { return this.touched && this.missing.indexOf(col) >= 0; },
       isRequired: function(col) { return this.built.required.indexOf(col) >= 0; },
+      isComputed: function(col) { return (this.cfg.compute || []).some(function(c) { return c && c.name === col; }); },
       start: function() { appInstance.formRecord(this.viewName); },
       submit: function() {
         this.touched = true;
+        if (this.ruleFailures.length) { appInstance.notify(this.ruleFailures[0]); return; }
         if (!this.canSubmit) { appInstance.notify(appInstance.t("msg.form_incomplete")); return; }
         var col = this.cfg.submitColumn;
         if (col && this.item) {
@@ -9891,11 +9931,13 @@ function createVueApp() {
       +         '<div v-if="sec.title" class="text-subtitle-2 mb-2" style="opacity:0.85">{{ a.tOr(sec.title, sec.title) }}</div>'
       +         '<div v-for="col in sec.columns" :key="col" class="mb-3">'
       +           '<div class="text-caption" style="opacity:0.75">{{ label(col) }}<span v-if="isRequired(col)" style="opacity:0.6"> *</span></div>'
-      +           '<data-cell :item="item" :col="col" :owner="viewName"></data-cell>'
+      +           '<span v-if="isComputed(col)" data-testid="form-computed" :data-col="col"><list-value :col="col" :value="full[col]"></list-value><span v-if="!full[col]" style="opacity:0.5">—</span></span>'
+      +           '<data-cell v-else :item="item" :col="col" :owner="viewName"></data-cell>'
       +           '<div v-if="isMissing(col)" class="text-caption text-error">{{ a.t("msg.form_required") }}</div>'
       +         '</div>'
       +       '</div>'
-      +       '<v-btn color="primary" data-testid="form-submit" @click="submit">{{ a.tOr(cfg.submitLabel, a.t("btn.save")) }}</v-btn>'
+      +       '<v-alert v-for="(m, mi) in ruleFailures" :key="mi" type="warning" variant="tonal" density="compact" class="mb-3" data-testid="form-rule">{{ m }}</v-alert>'
+      +       '<v-btn color="primary" data-testid="form-submit" :disabled="ruleFailures.length > 0" @click="submit">{{ a.tOr(cfg.submitLabel, a.t("btn.save")) }}</v-btn>'
       +     '</div>'
       +   '</template>'
       + '</v-card>'

@@ -389,10 +389,6 @@
           "list": "membership_status",
           "picker": "chips",
           "default": "pending"
-        },
-        {
-          "name": "valid_until",
-          "type": "date"
         }
       ],
       "ownerWritable": [
@@ -1029,7 +1025,8 @@
         "table": "memberships",
         "columns": [
           "plan",
-          "start_on"
+          "start_on",
+          "valid_until"
         ],
         "required": [
           "plan",
@@ -1039,7 +1036,64 @@
         "submitColumn": "order_state",
         "submitValue": "submitted",
         "startLabel": "text.choose_plan",
-        "submitLabel": "text.buy"
+        "submitLabel": "text.buy",
+        "compute": [
+          {
+            "name": "plan_months",
+            "computed": {
+              "lookup": {
+                "table": "ref_plans",
+                "match": "plan",
+                "on": "plan",
+                "field": "months"
+              }
+            }
+          },
+          {
+            "name": "valid_until",
+            "computed": {
+              "dateAdd": {
+                "from": "start_on",
+                "months": {
+                  "col": "plan_months"
+                },
+                "days": -1
+              }
+            }
+          },
+          {
+            "name": "latest_end",
+            "computed": {
+              "lookup": {
+                "view": "membership_ends",
+                "match": "owner",
+                "on": "owner",
+                "field": "last_end"
+              }
+            }
+          }
+        ],
+        "rules": [
+          {
+            "require": {
+              "$or": [
+                {
+                  "latest_end": {
+                    "empty": true
+                  }
+                },
+                {
+                  "start_on": {
+                    "gt": {
+                      "col": "latest_end"
+                    }
+                  }
+                }
+              ]
+            },
+            "message": "text.membership_overlap"
+          }
+        ]
       }
     },
     {
@@ -1061,7 +1115,29 @@
         "plan",
         "membership_status",
         "start_on",
-        "valid_until"
+        {
+          "name": "plan_months",
+          "computed": {
+            "lookup": {
+              "table": "ref_plans",
+              "match": "plan",
+              "on": "plan",
+              "field": "months"
+            }
+          }
+        },
+        {
+          "name": "valid_until",
+          "computed": {
+            "dateAdd": {
+              "from": "start_on",
+              "months": {
+                "col": "plan_months"
+              },
+              "days": -1
+            }
+          }
+        }
       ]
     },
     {
@@ -1082,7 +1158,29 @@
       "columns": [
         "member",
         "start_on",
-        "valid_until"
+        {
+          "name": "plan_months",
+          "computed": {
+            "lookup": {
+              "table": "ref_plans",
+              "match": "plan",
+              "on": "plan",
+              "field": "months"
+            }
+          }
+        },
+        {
+          "name": "valid_until",
+          "computed": {
+            "dateAdd": {
+              "from": "start_on",
+              "months": {
+                "col": "plan_months"
+              },
+              "days": -1
+            }
+          }
+        }
       ],
       "board": {
         "lane": "membership_status",
@@ -1645,6 +1743,60 @@
       },
       "readonly": true,
       "includeArchive": true
+    },
+    {
+      "name": "membership_ends",
+      "kind": "data",
+      "sources": [
+        "memberships"
+      ],
+      "mode": "union",
+      "filter": {
+        "order_state": "submitted",
+        "membership_status": {
+          "ne": "ended"
+        }
+      },
+      "compute": [
+        {
+          "name": "plan_months",
+          "computed": {
+            "lookup": {
+              "table": "ref_plans",
+              "match": "plan",
+              "on": "plan",
+              "field": "months"
+            }
+          }
+        },
+        {
+          "name": "valid_until",
+          "computed": {
+            "dateAdd": {
+              "from": "start_on",
+              "months": {
+                "col": "plan_months"
+              },
+              "days": -1
+            }
+          }
+        }
+      ],
+      "groupBy": {
+        "column": "owner",
+        "from": [
+          "owner"
+        ]
+      },
+      "aggregate": {
+        "max": "valid_until",
+        "into": "last_end"
+      },
+      "columns": [
+        "owner",
+        "last_end"
+      ],
+      "readonly": true
     }
   ],
   "nav": {
