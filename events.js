@@ -51,7 +51,9 @@
     Calendar.sources(ctx.views, name).forEach(function(s) {
       if (!s || !s.table || !s.dateColumn) return;
       if (!ctx.canReachTable(s.table)) return;
-      var rows = Rows.filterRows(ctx.dataCache[s.table] || [], ctx.resolveMeTokens(s.filter));
+      // The table's computed columns too (a booking dated by its class), via the root's derivation.
+      var raw = ctx.dataCache[s.table] || [];
+      var rows = Rows.filterRows(ctx.deriveRows ? ctx.deriveRows(s.table, raw) : raw, ctx.resolveMeTokens(s.filter));
       var tag = s.label || ctx.t('tab.' + s.table);
       rows.forEach(function(r) {
         var title = (s.titleColumns || []).map(function(c) { return ctx.displayValue(c, r[c], '', calCfg); }).filter(Boolean).join(' — ');
@@ -59,7 +61,7 @@
         var key = d || '__undated__';                 // an undated row is still the user's row: bucket it
         (out[key] = out[key] || []).push({            // rather than dropping it silently
           id: s.table + ':' + s.dateColumn + ':' + r.id, title: title || tag, label: tag,
-          color: ctx.hashColor(s.label || s.table), table: s.table, dateCol: s.dateColumn, row: r
+          color: ctx.hashColor(s.label || s.table), table: s.table, dateCol: s.dateColumn, row: r, respond: s.respond || null
         });
       });
     });

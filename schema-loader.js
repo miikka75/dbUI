@@ -534,6 +534,13 @@ function validateSchema() {
       csrcs.forEach(function(s) {
         if (!s || !s.table) { errors.push('calendar "' + v + '": each source needs a table'); return; }
         if (!SCHEMA[s.table]) { errors.push('calendar "' + v + '" references non-existent table "' + s.table + '"'); return; }
+        // `respond`: book an event from the calendar, through an rsvp view over THIS source's table -- any other
+        // view would put a booking control on events it does not know, which would never show a choice.
+        if (s.respond !== undefined) {
+          var rv = VIEWS[s.respond];
+          if (!rv || !rv.rsvp) errors.push('calendar "' + v + '" source "' + s.table + '": `respond` must name an rsvp view (got "' + s.respond + '")');
+          else if (rv.rsvp.events !== s.table) errors.push('calendar "' + v + '" source "' + s.table + '": `respond` view "' + s.respond + '" books events of "' + rv.rsvp.events + '", not this source');
+        }
         var ccols = SCHEMA[s.table].columns || {};
         if (!s.dateColumn) { errors.push('calendar "' + v + '" source "' + s.table + '" needs a dateColumn'); }
         else {

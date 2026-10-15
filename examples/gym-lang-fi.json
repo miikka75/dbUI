@@ -23,6 +23,8 @@
       "field.claim_status": "Tila",
       "field.claimed_on": "Lunastettu",
       "field.class": "Tunti",
+      "field.class_name": "Tunti",
+      "field.class_start": "Alkaa",
       "field.class_type": "Tunti",
       "field.code": "Ovikoodi",
       "field.coins": "Kolikot",

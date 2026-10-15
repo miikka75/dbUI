@@ -23,6 +23,8 @@
       "field.claim_status": "Status",
       "field.claimed_on": "Claimed",
       "field.class": "Class",
+      "field.class_name": "Class",
+      "field.class_start": "Starts",
       "field.class_type": "Class",
       "field.code": "Door code",
       "field.coins": "Coins",

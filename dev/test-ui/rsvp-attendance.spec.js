@@ -487,3 +487,34 @@ test('validateSchema: closeBefore needs a datetime dateColumn', async ({ page })
   const err = await page.evaluate(() => { VIEWS.my_rsvp.rsvp.closeBefore = 30; const e = validateSchema().join(' | '); delete VIEWS.my_rsvp.rsvp.closeBefore; return e; });
   expect(err).toContain('`closeBefore` needs `dateColumn` to be a datetime column');
 });
+
+test('booking from a calendar (respond), and the booking on my own calendar through its event\'s date', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.rsvps.columns.push({ name: 'practice_date', type: 'date', computed: { lookup: { table: 'practices', match: 'practice', on: 'id', field: 'date' } } });
+  schema.views.push(
+    { name: 'timetable', kind: 'calendar', calendar: { sources: [{ table: 'practices', dateColumn: 'date', titleColumns: ['title'], respond: 'my_rsvp' }], defaultView: 'list' } },
+    { name: 'mine_cal', kind: 'calendar', calendar: { sources: [{ table: 'rsvps', dateColumn: 'practice_date', titleColumns: ['practice'], label: 'Booked', filter: { response: 'coming' } }], defaultView: 'list' } }
+  );
+  schema.nav.items.push({ view: 'timetable' }, { view: 'mine_cal' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await bootAs(page, 'ann@x');
+  await page.evaluate(() => appInstance.selectTab('timetable'));
+  const book = page.locator('[data-testid="cal-book"]').first();
+  await book.locator('button', { hasText: 'coming' }).click();
+  await expect.poll(async () => (await stored(page)).map((r) => [r.owner, r.response])).toEqual([['ann@x', 'coming']]);
+  // Never stored: the derived date rides on reads only.
+  expect((await stored(page))[0].practice_date).toBeUndefined();
+  await page.evaluate(() => appInstance.selectTab('mine_cal'));
+  await expect.poll(() => page.evaluate(() => { const e = appInstance.calEventsFor('mine_cal', { from: '2000-01-01', to: '2100-01-01' }); return Object.keys(e).filter((k) => e[k].length); })).toEqual([future]);
+});
+
+test('validateSchema: a calendar source can only respond through an rsvp view over its own table', async ({ page }) => {
+  await setup(page);
+  await bootAs(page, 'org@x');
+  const err = await page.evaluate(() => {
+    VIEWS.bad_cal = { name: 'bad_cal', calendar: { sources: [{ table: 'rsvps', dateColumn: 'note', respond: 'my_rsvp' }] } };
+    const e = validateSchema().join(' | '); delete VIEWS.bad_cal; return e;
+  });
+  expect(err).toContain('books events of "practices", not this source');
+});

@@ -1830,6 +1830,7 @@ function createVueApp() {
         var self = this;
         return {
           views: VIEWS, dataCache: this.dataCache,
+          deriveRows: function(t, rows) { return self.deriveRows(t, rows); },
           today: function() { return self._calToday(); },
           t: function(k) { return self.t(k); },
           tOr: function(k, fb) { return self.tOr(k, fb); },
@@ -2897,6 +2898,44 @@ function createVueApp() {
         return !w || w.indexOf(t) >= 0;
       },
       rsvpCanStamp: function(name) { var v = VIEWS[name]; return !!(v && v.rsvp && v.rsvp.checkin) && this.rsvpOrganizer(name); },
+      // A status VALUE's words: `list.<statusList || the status column's list || the column>.<value>`.
+      rsvpStatusLabel: function(name, v) {
+        var cfg = (VIEWS[name] && VIEWS[name].rsvp) || {};
+        var list = cfg.statusList || this.colIsList(cfg.statusColumn) || cfg.statusColumn;
+        return this.tOr('list.' + list + '.' + v, v);
+      },
+      // The status choices, as { value, title }: the view's inline `statuses`, else the column's list.
+      rsvpOptions: function(name) {
+        var self = this, cfg = (VIEWS[name] && VIEWS[name].rsvp) || {};
+        var vals = cfg.statuses || (this.getListOptions(cfg.statusColumn) || []).map(function(o) { return o.value; });
+        return vals.map(function(v) { return { value: v, title: self.rsvpStatusLabel(name, v) }; });
+      },
+      // At the venue: arrived by the venue's check-in link, or already checked in today. Being here is
+      // what reopens today's events after `closeBefore`.
+      rsvpOnSite: function(name) {
+        var p = this.pendingScan;
+        if (p && p.view === name) return true;
+        return this.rsvpFor(name).events.some(function(e) { return e.isToday && e.myRowId && !!e.myCode; });
+      },
+      // `closeBefore` minutes before the start, joining from anywhere stops; from then until the start it
+      // is open only to a member at the venue, and once the event has started, to nobody. Leaving is never
+      // closed. A date with no time has no start to count back from (validateSchema says so).
+      rsvpClosed: function(name, ev, now) {
+        var mins = ((VIEWS[name] && VIEWS[name].rsvp) || {}).closeBefore, st = String(ev.date || '').length > 10 ? Date.parse(ev.date) : NaN;
+        if (mins === undefined || isNaN(st)) return false;
+        now = now || Date.now();
+        if (now >= st) return true;
+        if (now < st - mins * 60000) return false;
+        return !(this.rsvpOnSite(name) && ev.isToday);
+      },
+      // Frozen (attendance verified), or full or closed and not mine to keep: a full class cannot be
+      // joined, but a member holding a place in it can still give it up.
+      rsvpLocked: function(name, ev, now) { return this.rsvpFrozen(name, ev.key) || (!ev.myHolds && (ev.full || this.rsvpClosed(name, ev, now))); },
+      rsvpPlacesShown: function(name, ev, now) { return ev.capacity !== null || (!ev.myHolds && this.rsvpClosed(name, ev, now)); },
+      rsvpPlacesText: function(name, ev, now) {
+        if (!ev.myHolds && this.rsvpClosed(name, ev, now)) return this.t('rsvp.closed');
+        return ev.full ? this.t('rsvp.full') : this.t('rsvp.places_left') + ': ' + Math.max(0, ev.capacity - ev.booked);
+      },
       rsvpTodayKeys: function(name) {
         return this.rsvpFor(name).events.filter(function(e) { return e.isToday; }).map(function(e) { return e.key; });
       },
@@ -3073,7 +3112,7 @@ function createVueApp() {
           Writes.putRow(table, patch, 'active').catch(refused(function() { mine[cfg.statusColumn] = before; }));
         } else {
           var row = { id: this.generateId(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-          getColumns(table).forEach(function(c) { if (!(c in row)) row[c] = ''; });
+          getColumns(table).forEach(function(c) { if (!(c in row) && !Columns.isDerived(SCHEMA, table, c)) row[c] = ''; });   // derived: never stored
           this._seedDefaults(table, row);
           row[ownerCol] = me; row[linkColumn] = eventKey; row[cfg.statusColumn] = status; row.rosterPublic = pub;
           rows.push(row);
@@ -8633,7 +8672,25 @@ function createVueApp() {
       + '<span :style="{ width:\'9px\', height:\'9px\', borderRadius:\'50%\', background: ev.color, flex:\'0 0 auto\' }"></span>'
       + '<b style="opacity:0.8">{{ ev.label }}</b> <span style="opacity:0.85">{{ ev.title }}</span>'
       + '<span v-if="ev.readOnly" style="opacity:0.5;font-size:0.7rem">(read-only)</span>'
+      + '<rsvp-event-picker v-if="ev.respond" :view="ev.respond" :event-id="ev.row && ev.row.id" style="margin-left:auto"></rsvp-event-picker>'
       + '</div>'
+  });
+  // A calendar source with `respond: "<rsvp view>"`: each event carries that view's booking control, with
+  // the same rules the booking list applies (rsvpLocked: full, closed, frozen) and the places left. An
+  // event the rsvp view does not list (one already past) gets none.
+  app.component('rsvp-event-picker', {
+    props: { view: String, eventId: String },
+    data: function() { return { now: Date.now() }; },
+    computed: {
+      a: function() { return appInstance; },
+      ev: function() { var id = this.eventId; return appInstance.rsvpFor(this.view).events.filter(function(e) { return e.id === id; })[0] || null; },
+      picker: function() { return ((VIEWS[this.view] || {}).rsvp || {}).picker || 'dropdown'; }
+    },
+    template: ''
+      + '<span v-if="ev" class="d-inline-flex align-center" style="gap:8px" data-testid="cal-book">'
+      +   '<span v-if="a.rsvpPlacesShown(view, ev, now)" style="font-size:0.75rem;opacity:0.7">{{ a.rsvpPlacesText(view, ev, now) }}</span>'
+      +   '<rsvp-picker :options="a.rsvpOptions(view)" :picker="picker" :value="ev.myStatus" :disabled="a.rsvpLocked(view, ev, now)" @set="a.setRsvp(view, ev.key, $event || \'\')"></rsvp-picker>'
+      + '</span>'
   });
 
   // Shared prop contract for the swappable calendar body parts.
@@ -10146,7 +10203,7 @@ function createVueApp() {
       // events so they can pick one there and then, and booking it carries the code on (rsvp-checkin).
       // At the venue: arrived by the venue's check-in link, or already checked in today. Being here is
       // what reopens today's events after `closeBefore`.
-      onSite: function() { return !!this.armed || this.todayMine.some(function(e) { return !!e.myCode; }); },
+      onSite: function() { return appInstance.rsvpOnSite(this.viewName); },
       pickToday: function() {
         if (!this.cfg.checkin || !this.armed || this.canStamp || this.todayMine.length) return false;
         return ((this.data && this.data.events) || []).some(function(e) { return e.isToday; });
@@ -10171,11 +10228,7 @@ function createVueApp() {
       },
       // Status choices as { value, title } — from the view's inline `statuses`, else the status column's
       // list. Titles are translated (see statusLabel).
-      options: function() {
-        var self = this;
-        var vals = this.cfg.statuses || (appInstance.getListOptions(this.cfg.statusColumn) || []).map(function(o) { return o.value; });
-        return vals.map(function(v) { return { value: v, title: self.statusLabel(v) }; });
-      },
+      options: function() { return appInstance.rsvpOptions(this.viewName); },
       // UI element for choosing a status: 'toggle' (segmented buttons, default) | 'chips' | 'dropdown'.
       picker: function() { return this.cfg.picker || 'dropdown'; },
       // Whether to show WHO registered (names), per the view's `roster` setting: 'all' -> everyone,
@@ -10188,27 +10241,16 @@ function createVueApp() {
       claimed: function() { appInstance.pendingScan = null; },
       // Frozen (attendance verified), or full and not mine to keep: a full class cannot be joined, but a
       // member holding a place in it can still give it up.
-      locked: function(ev) { return appInstance.rsvpFrozen(this.viewName, ev.key) || (!ev.myHolds && (ev.full || this.closed(ev))); },
-      // `closeBefore` minutes before the start, joining from anywhere stops; from then until the start it
-      // is open only to a member at the venue, and once the event has started, to nobody. Leaving is never
-      // closed. A date with no time has no start to count back from (validateSchema says so).
-      closed: function(ev) {
-        var mins = this.cfg.closeBefore, st = String(ev.date || '').length > 10 ? Date.parse(ev.date) : NaN;
-        if (mins === undefined || isNaN(st)) return false;
-        if (this.now >= st) return true;
-        if (this.now < st - mins * 60000) return false;
-        return !(this.onSite && ev.isToday);
-      },
-      placesText: function(ev) {
-        if (!ev.myHolds && this.closed(ev)) return this.a.t('rsvp.closed');
-        return ev.full ? this.a.t('rsvp.full') : this.a.t('rsvp.places_left') + ': ' + Math.max(0, ev.capacity - ev.booked);
-      },
-      placesShown: function(ev) { return ev.capacity !== null || (!ev.myHolds && this.closed(ev)); },
+      // The rules are the root's (rsvpLocked & co.), shared with a calendar that books; `now` ticks here.
+      locked: function(ev) { return appInstance.rsvpLocked(this.viewName, ev, this.now); },
+      closed: function(ev) { return appInstance.rsvpClosed(this.viewName, ev, this.now); },
+      placesText: function(ev) { return appInstance.rsvpPlacesText(this.viewName, ev, this.now); },
+      placesShown: function(ev) { return appInstance.rsvpPlacesShown(this.viewName, ev, this.now); },
       toDateStr: toDateStr,
       // Translated label for a status VALUE, keyed by `list.<statusList||statusColumn>.<value>` (falls back
       // to the raw value). `statusList` lets the view name a translation namespace distinct from the column
       // — whose name may resolve to another table's list under the per-column-name list resolver.
-      statusLabel: function(v) { var list = this.cfg.statusList || appInstance.colIsList(this.cfg.statusColumn) || this.cfg.statusColumn; return appInstance.tOr('list.' + list + '.' + v, v); },
+      statusLabel: function(v) { return appInstance.rsvpStatusLabel(this.viewName, v); },
       tallyText: function(ev) { var self = this; return Object.keys(ev.tally).sort().map(function(s) { return self.statusLabel(s) + ': ' + ev.tally[s]; }).join('  ·  '); },
       // A participant's display label under the profile-privacy rule: a shared (named) member shows their
       // name; an admin additionally sees the raw email for members who haven't shared; a non-admin gets ''

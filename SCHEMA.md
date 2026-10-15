@@ -1263,6 +1263,18 @@ appointment date and an expiry date):
 Per-source fields: `table` (req), `dateColumn` (req), `titleColumns` (opt), `filter` (opt, data-view
 grammar), `label` (opt — the type tag + colour key; defaults to the table's translated `tab.<table>`).
 
+### Booking from the calendar (`respond`)
+
+A source may name an rsvp view over its own table — `{ "table": "classes", "dateColumn": "starts_at", "respond":
+"class_booking" }` — and each event then carries that view's booking control and places left, under the same
+rules as the booking list (full, `closeBefore`, frozen once attendance is marked). A past event, which the
+rsvp view no longer lists, gets none. The rules are the root's (`rsvpLocked` & co.), shared by both screens.
+
+The other half — a member's bookings on their own calendar — needs no calendar feature: a booking has no
+date of its own, so give the responses table a computed column that reads its event's, and use it as the
+`dateColumn` (`{ "name": "class_start", "type": "datetime", "computed": { "lookup": { "table": "classes",
+"match": "class", "on": "id", "field": "starts_at" } } }`). Calendar sources read a table's computed columns.
+
 ### Adding on a day (`addTo`)
 Clicking a day and pressing **+** creates a row with that day prefilled in the source's `dateColumn`,
 then lands on a grid so it can be filled in. With one source that source is the target; with several,
