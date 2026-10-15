@@ -579,7 +579,25 @@ A `{view}` column embed with `filterBy` dynamically filters embed rows per card:
   where `assignee` value is in the named list (same syntax as in `filter`).
 
 ### computed columns
-A column with `computed` derives its value from other columns at render time (not stored):
+A column with `computed` derives its value from other columns at render time (not stored).
+
+**On a table** it is said once and every reader sees it — views, lookups, reference paths, forms, rules —
+like a stored column it can never be written to: a new row does not carry it, an owner bound does not
+lock it, a cell does not edit it. Its inputs' tables load with it, through cycles (a membership counts
+its pauses; a pause reads its membership's end). **In a view** (`columns` or `compute`) it is that
+view's alone. The gym's membership:
+
+```json
+{ "name": "pauses_used", "computed": { "count": "pauses", "on": "membership", "where": { "sent": "yes" } } },
+{ "name": "valid_until", "computed": { "dateAdd": { "from": "start_on",
+    "months": { "col": "plan.months" }, "weeks": { "col": "pauses_used" }, "days": -1 } } }
+```
+
+**Reference paths.** `"plan.months"` follows the `plan` ref to the row it names and reads `months`
+there, to any depth (`"membership.plan.pause_weeks"`). A path works as a condition key, a `{ "col" }`
+operand and a `dateAdd` amount. A step that is not a ref, or names no row, reads as blank.
+
+Shapes:
 ```json
 { "name": "flagged", "computed": { "fromColumns": ["slot1","slot2","slot3"], "matchList": "leads" } }
 ```
@@ -601,6 +619,8 @@ A column with `computed` derives its value from other columns at render time (no
   ```
   General-purpose — chore→points, member→role/phone, room→capacity, category→colour, etc. Pairs with
   `view.compute` + `aggregate.sum` to total a looked-up value (see **Leaderboard totals**).
+- **How many rows point here** (`count`): `{ "count": "<table>", "on": "<its ref column>", "match": "id", "where": {…} }` —
+  active rows of that table whose `on` column holds this row's `match` (default `id`), optionally narrowed.
 - **A date moved** (`dateAdd`): `{ "from": "start_on", "months": { "col": "plan_months" }, "weeks": { "col": "paused_weeks" }, "days": -1 }` — whole
   months, then weeks and days; an amount may name another column, a computed one earlier in the list included. Months
   clamp to the month end (31 Jan + 1 month = 28 Feb). A blank start, or an amount that is not a number, gives

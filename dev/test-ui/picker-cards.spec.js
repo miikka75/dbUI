@@ -176,3 +176,33 @@ test('a ref names its row by `label`, and `listFilter` narrows the rows it offer
   await expect.poll(() => page.evaluate(() => appInstance.getRefOptions('reward', {}).map((o) => o.title))).toEqual(['Day pass · 300']);
   expect(await page.evaluate(() => appInstance.displayValue('reward', 'Day pass'))).toBe('Day pass · 300');
 });
+
+test('a table\'s computed column: shown in views and forms, never edited, never stored; paths reach through refs', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.ref_rewards.columns.push({ name: 'days', type: 'number' });
+  schema.tables.claims.columns.push({ name: 'claimed_on', type: 'date' },
+    { name: 'ready_on', computed: { dateAdd: { from: 'claimed_on', days: { col: 'reward.days' } } } });
+  schema.tables.claims.ownerWritable.push('claimed_on');
+  Object.assign(schema.views[0].form, { columns: ['reward', 'claimed_on', 'ready_on'] });
+  schema.views.push({ name: 'mine', sources: ['claims'], columns: ['reward', 'claimed_on', 'ready_on'] });
+  schema.nav.items.push({ view: 'mine' });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'ref_rewards', tab: 'active', data: { id: 'r2', reward: 'Day pass', cost: 300, days: 3 } }, headers: ADMIN });
+  await boot(page, 'ann@x');
+  await page.evaluate(() => appInstance.selectTab('shop'));
+  await page.locator('[data-testid="form-start"]').click();
+  await page.locator('[data-testid="pick-card"]', { hasText: 'Day pass' }).click();
+  const d = page.locator('input[type=date]').last(); await d.fill('2026-11-02'); await d.dispatchEvent('change');
+  // The form shows it at once, read-only, as a date.
+  await expect(page.locator('[data-testid="form-computed"][data-col="ready_on"]')).not.toHaveText(/—/);
+  await expect(page.locator('[data-testid="form-computed"][data-col="ready_on"]')).toContainText('2026');
+  await page.locator('[data-testid="form-submit"]').click();
+  // Stored without it.
+  await expect.poll(async () => ((await (await page.request.post('/api/getTableData', { data: { tableId: 'claims', tab: 'active' }, headers: ADMIN })).json()).rows || [])
+    .map((r) => [r.reward, r.claimed_on, 'ready_on' in r])).toEqual([['Day pass', '2026-11-02', false]]);
+  // A view lists it, derived, and offers no editor for it.
+  await page.evaluate(() => appInstance.selectTab('mine'));
+  await expect.poll(() => page.evaluate(() => (appInstance.currentData[0] || {}).ready_on)).toBe('2026-11-05');
+  expect(await page.evaluate(() => appInstance.cellReadonly(appInstance.currentData[0], 'ready_on', 'mine'))).toBe(true);
+});

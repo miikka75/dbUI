@@ -1226,6 +1226,23 @@ count (`lookup.view` of an aggregate) — plus three small general pieces:
 Not in it: the membership reading *Paused* during a pause week (the front desk's status column already has
 it), and refusing two pauses in the same week. **Small–medium.**
 
+#### 15. Derived values said once — computed columns on a table, reference paths, counting related rows *(landed)*
+
+The gym defined its membership end date in five places, with helper views only to carry values one step
+along. The same shape recurs in any schema with a due date (loans, invoices, certificates, service
+intervals, task durations), so three general pieces:
+
+- **A `computed` column on a TABLE**: derived on read wherever the table's rows go — views, lookups, paths,
+  forms, rules — and never stored: a new row does not write it, an owner bound does not lock it, a cell does
+  not edit it. A table whose derivation needs another table pulls that table's dependencies in too.
+- **Reference paths** `a.b.c`: follow a `ref` to the row it names — in condition keys, `{ col }` operands
+  and `dateAdd` amounts (`"months": { "col": "plan.months" }`).
+- **`count`**: how many rows of another table point at this one —
+  `{ "count": "pauses", "on": "membership", "where": { "sent": "yes" } }`.
+
+The names are the schema's, never the engine's. **Medium**: the derivation sits on the row path every view
+uses, so it is tested there.
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the

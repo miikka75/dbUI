@@ -393,6 +393,31 @@
           "list": "membership_status",
           "picker": "chips",
           "default": "pending"
+        },
+        {
+          "name": "pauses_used",
+          "computed": {
+            "count": "pauses",
+            "on": "membership",
+            "where": {
+              "sent": "yes"
+            }
+          }
+        },
+        {
+          "name": "valid_until",
+          "computed": {
+            "dateAdd": {
+              "from": "start_on",
+              "months": {
+                "col": "plan.months"
+              },
+              "weeks": {
+                "col": "pauses_used"
+              },
+              "days": -1
+            }
+          }
         }
       ],
       "ownerWritable": [
@@ -636,6 +661,15 @@
           "name": "sent",
           "type": "text",
           "hidden": true
+        },
+        {
+          "name": "pause_until",
+          "computed": {
+            "dateAdd": {
+              "from": "starts_on",
+              "days": 6
+            }
+          }
         }
       ],
       "ownerWritable": [
@@ -1083,41 +1117,6 @@
         "submitLabel": "text.buy",
         "compute": [
           {
-            "name": "plan_months",
-            "computed": {
-              "lookup": {
-                "table": "ref_plans",
-                "match": "plan",
-                "on": "plan",
-                "field": "months"
-              }
-            }
-          },
-          {
-            "name": "paused_weeks",
-            "computed": {
-              "lookup": {
-                "view": "pause_weeks_used",
-                "match": "id",
-                "on": "membership",
-                "field": "weeks",
-                "default": 0
-              }
-            }
-          },
-          {
-            "name": "valid_until",
-            "computed": {
-              "dateAdd": {
-                "from": "start_on",
-                "months": {
-                  "col": "plan_months"
-                },
-                "days": -1
-              }
-            }
-          },
-          {
             "name": "latest_end",
             "computed": {
               "lookup": {
@@ -1171,45 +1170,10 @@
         "plan",
         "membership_status",
         "start_on",
-        {
-          "name": "plan_months",
-          "computed": {
-            "lookup": {
-              "table": "ref_plans",
-              "match": "plan",
-              "on": "plan",
-              "field": "months"
-            }
-          }
-        },
-        {
-          "name": "paused_weeks",
-          "computed": {
-            "lookup": {
-              "view": "pause_weeks_used",
-              "match": "id",
-              "on": "membership",
-              "field": "weeks",
-              "default": 0
-            }
-          }
-        },
-        {
-          "name": "valid_until",
-          "computed": {
-            "dateAdd": {
-              "from": "start_on",
-              "months": {
-                "col": "plan_months"
-              },
-              "weeks": {
-                "col": "paused_weeks"
-              },
-              "days": -1
-            }
-          }
-        }
-      ]
+        "pauses_used",
+        "valid_until"
+      ],
+      "hideEmpty": true
     },
     {
       "name": "doc_membership",
@@ -1229,44 +1193,8 @@
       "columns": [
         "member",
         "start_on",
-        {
-          "name": "plan_months",
-          "computed": {
-            "lookup": {
-              "table": "ref_plans",
-              "match": "plan",
-              "on": "plan",
-              "field": "months"
-            }
-          }
-        },
-        {
-          "name": "paused_weeks",
-          "computed": {
-            "lookup": {
-              "view": "pause_weeks_used",
-              "match": "id",
-              "on": "membership",
-              "field": "weeks",
-              "default": 0
-            }
-          }
-        },
-        {
-          "name": "valid_until",
-          "computed": {
-            "dateAdd": {
-              "from": "start_on",
-              "months": {
-                "col": "plan_months"
-              },
-              "weeks": {
-                "col": "paused_weeks"
-              },
-              "days": -1
-            }
-          }
-        }
+        "pauses_used",
+        "valid_until"
       ],
       "board": {
         "lane": "membership_status",
@@ -1843,46 +1771,6 @@
           "ne": "ended"
         }
       },
-      "compute": [
-        {
-          "name": "plan_months",
-          "computed": {
-            "lookup": {
-              "table": "ref_plans",
-              "match": "plan",
-              "on": "plan",
-              "field": "months"
-            }
-          }
-        },
-        {
-          "name": "paused_weeks",
-          "computed": {
-            "lookup": {
-              "view": "pause_weeks_used",
-              "match": "id",
-              "on": "membership",
-              "field": "weeks",
-              "default": 0
-            }
-          }
-        },
-        {
-          "name": "valid_until",
-          "computed": {
-            "dateAdd": {
-              "from": "start_on",
-              "months": {
-                "col": "plan_months"
-              },
-              "weeks": {
-                "col": "paused_weeks"
-              },
-              "days": -1
-            }
-          }
-        }
-      ],
       "groupBy": {
         "column": "owner",
         "from": [
@@ -1896,86 +1784,6 @@
       "columns": [
         "owner",
         "last_end"
-      ],
-      "readonly": true
-    },
-    {
-      "name": "pause_weeks_used",
-      "kind": "data",
-      "sources": [
-        "pauses"
-      ],
-      "mode": "union",
-      "filter": {
-        "sent": "yes"
-      },
-      "groupBy": {
-        "column": "membership",
-        "from": [
-          "membership"
-        ]
-      },
-      "aggregate": {
-        "count": true,
-        "into": "weeks"
-      },
-      "columns": [
-        "membership",
-        "weeks"
-      ],
-      "readonly": true
-    },
-    {
-      "name": "membership_periods",
-      "kind": "data",
-      "sources": [
-        "memberships"
-      ],
-      "mode": "union",
-      "compute": [
-        {
-          "name": "plan_months",
-          "computed": {
-            "lookup": {
-              "table": "ref_plans",
-              "match": "plan",
-              "on": "plan",
-              "field": "months"
-            }
-          }
-        },
-        {
-          "name": "paused_weeks",
-          "computed": {
-            "lookup": {
-              "view": "pause_weeks_used",
-              "match": "id",
-              "on": "membership",
-              "field": "weeks",
-              "default": 0
-            }
-          }
-        },
-        {
-          "name": "valid_until",
-          "computed": {
-            "dateAdd": {
-              "from": "start_on",
-              "months": {
-                "col": "plan_months"
-              },
-              "weeks": {
-                "col": "paused_weeks"
-              },
-              "days": -1
-            }
-          }
-        }
-      ],
-      "columns": [
-        "plan",
-        "start_on",
-        "valid_until"
       ],
       "readonly": true
     },
@@ -1999,80 +1807,12 @@
         "submitValue": "yes",
         "startLabel": "text.pause_start",
         "submitLabel": "text.pause_confirm",
-        "compute": [
-          {
-            "name": "m_plan",
-            "computed": {
-              "lookup": {
-                "table": "memberships",
-                "match": "membership",
-                "on": "id",
-                "field": "plan"
-              }
-            }
-          },
-          {
-            "name": "allowed",
-            "computed": {
-              "lookup": {
-                "table": "ref_plans",
-                "match": "m_plan",
-                "on": "plan",
-                "field": "pause_weeks",
-                "default": 0
-              }
-            }
-          },
-          {
-            "name": "used",
-            "computed": {
-              "lookup": {
-                "view": "pause_weeks_used",
-                "match": "membership",
-                "on": "membership",
-                "field": "weeks",
-                "default": 0
-              }
-            }
-          },
-          {
-            "name": "m_start",
-            "computed": {
-              "lookup": {
-                "table": "memberships",
-                "match": "membership",
-                "on": "id",
-                "field": "start_on"
-              }
-            }
-          },
-          {
-            "name": "m_end",
-            "computed": {
-              "lookup": {
-                "view": "membership_periods",
-                "match": "membership",
-                "on": "id",
-                "field": "valid_until"
-              }
-            }
-          },
-          {
-            "name": "pause_until",
-            "computed": {
-              "dateAdd": {
-                "from": "starts_on",
-                "days": 6
-              }
-            }
-          }
-        ],
         "rules": [
           {
             "require": {
-              "used": {
+              "membership.pauses_used": {
                 "lt": {
-                  "col": "allowed"
+                  "col": "membership.plan.pause_weeks"
                 }
               }
             },
@@ -2082,12 +1822,12 @@
             "require": {
               "starts_on": {
                 "gte": {
-                  "col": "m_start"
+                  "col": "membership.start_on"
                 }
               },
               "pause_until": {
                 "lte": {
-                  "col": "m_end"
+                  "col": "membership.valid_until"
                 }
               }
             },
@@ -2113,15 +1853,7 @@
       "columns": [
         "membership",
         "starts_on",
-        {
-          "name": "pause_until",
-          "computed": {
-            "dateAdd": {
-              "from": "starts_on",
-              "days": 6
-            }
-          }
-        }
+        "pause_until"
       ]
     }
   ],

@@ -148,7 +148,7 @@
         for (var c2 in defs) {
           var d2 = defs[c2];
           if (list.indexOf(c2) >= 0 || SYSTEM.indexOf(c2) >= 0) continue;
-          if (d2 && typeof d2 === 'object' && (d2.type === 'owner' || d2.defaultFrom)) continue;
+          if (d2 && typeof d2 === 'object' && (d2.type === 'owner' || d2.defaultFrom || d2.computed)) continue;   // computed: derived on read, never written
           locked[c2] = (d2 && typeof d2 === 'object' && d2['default'] !== undefined) ? d2['default'] : '';
         }
         // `ownerWritableWhile` is a one-key map; extra keys are rejected at load (validateSchema), and

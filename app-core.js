@@ -2993,8 +2993,10 @@ function createVueApp() {
       // and a plan, a balance looked up from a view), resolved through the same pipeline a view uses.
       formComputed: function(name, rec) {
         var v = VIEWS[name], comp = v && v.form && v.form.compute;
-        if (!rec || !comp) return rec;
-        return resolveComputed([Object.assign({}, rec)], comp, { dataCache: this.dataCache, viewRows: this._viewRowsFn() })[0];
+        if (!rec) return rec;
+        var full = v && v.form && v.form.table ? this.deriveRows(v.form.table, [rec])[0] : rec;
+        if (!comp) return full;
+        return resolveComputed([Object.assign({}, full)], comp, { dataCache: this.dataCache, viewRows: this._viewRowsFn() })[0];
       },
       // `form.rules`: [{ require: <condition>, message }] -- conditions the record (computed columns
       // included) must meet before it is submitted. Returns the messages of the ones it fails.
@@ -3265,6 +3267,41 @@ function createVueApp() {
       // A computed `lookup.view`'s rows: the view's own pipeline (embedRows). Guarded against a view
       // reached again while its rows are being built -- a lookup cycle validateSchema also refuses -- so
       // a mistake renders blanks rather than overflowing the stack.
+      // A TABLE's computed columns, filled in on read: copies of the rows, never the cached objects, so
+      // nothing derived is ever written back. Memoized for one tick (a render asks the same table many
+      // times; any edit happens in a later one), and guarded against a table reached again while its
+      // own values are being derived.
+      deriveRows: function(table, rows, cache) {
+        var defs = SCHEMA[table] ? Columns.derivedDefs(SCHEMA[table]) : [];
+        if (!defs.length || !rows || !rows.length) return rows || [];
+        var self = this, memo = this._deriveMemo;
+        if (!memo) { memo = this._deriveMemo = new Map(); Promise.resolve().then(function() { self._deriveMemo = null; }); }
+        var hit = memo.get(rows); if (hit) return hit;
+        var busy = this._deriveBusy || (this._deriveBusy = {});
+        if (busy[table]) return rows;
+        busy[table] = true;
+        try {
+          var out = resolveComputed(rows.map(function(r) { return Object.assign({}, r); }), defs, { dataCache: cache || this.dataCache, viewRows: this._viewRowsFn() });
+          memo.set(rows, out);
+          return out;
+        } finally { delete busy[table]; }
+      },
+      // A reference path from a row: "plan.months" follows the `plan` ref to the row it names and reads
+      // `months` there (derived columns included); any depth. A step that is not a ref, or names no row,
+      // reads as blank.
+      rowPath: function(row, path) {
+        var parts = String(path).split('.'), cur = row;
+        for (var i = 0; i < parts.length - 1; i++) {
+          if (!cur) return '';
+          var ref = getColumnRef(null, parts[i]);
+          if (!ref || !ref.table) return '';
+          var vc = ref.valueCol || 'id', key = cur[parts[i]];
+          var rows = this.deriveRows(ref.table, Rows.partitionRows(this.dataCache, ref.table, 'active'));
+          cur = rows.filter(function(r) { return r[vc] === key; })[0];
+        }
+        var last = parts[parts.length - 1];
+        return cur && cur[last] != null ? cur[last] : '';
+      },
       _viewRowsFn: function() {
         var self = this, busy = this._viewRowsBusy || (this._viewRowsBusy = {});
         return function(name) {
@@ -3920,7 +3957,7 @@ function createVueApp() {
         withMirrors([primary]).forEach(function(src) {
           var row = { id: id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           var cols = getColumns(src);
-          cols.forEach(function(c) { if (!row[c]) row[c] = ''; });
+          cols.forEach(function(c) { if (!row[c] && !Columns.isDerived(SCHEMA, src, c)) row[c] = ''; });   // derived: never stored
           // Stamp owner on create, and with it the table's roster policy. rosterPublic has to ride on the
           // ROW because both rules layers are schema-blind (firestore.rules `resource.data.rosterPublic`,
           // supabase app_can_read) — without it an owner-stamped row is readable only by its owner, so a
@@ -4541,6 +4578,8 @@ function createVueApp() {
       // On a self-service table the viewer-role blanket-readonly yields to per-row ownership: I may edit
       // MY rows, others stay read-only (owner/mirror/union-foreign columns are always read-only).
       cellReadonly: function(item, col, ownerId) {
+        var dt = item ? this.getSource(item, ownerId) : null;
+        if (dt && Columns.isDerived(SCHEMA, dt, col)) return true;
         if (this.isReadonlyCell(item, col, ownerId)) return true;
         // A STAMPED column is filled in by the app and rewritten by nobody. Every write layer refuses a
         // change to it from anyone but an admin, so offering an editor here would only produce a refused
@@ -8002,6 +8041,9 @@ function createVueApp() {
     errorCaptured: function(err) { console.error('Vue error:', err); this.notify(this.t('msg.error') + ' ' + (err.message || err)); return false; },
     mounted: function() {
       var self = this;
+      // Rows.js derives a table's computed columns and follows reference paths through these, since only
+      // the root knows the schema and the cache.
+      Rows.setHooks({ derive: function(t, rows, cache) { return self.deriveRows(t, rows, cache); }, path: function(r, p) { return self.rowPath(r, p); } });
       window.addEventListener('resize', function() { self.mobile = window.innerWidth < 768; self.windowWidth = window.innerWidth; });
       window.addEventListener('popstate', function() { self._onPopState(); });
       // Republish calendar feeds when their data changes. Registered on the write funnel, which is the
@@ -9561,12 +9603,16 @@ function createVueApp() {
       }
     }
   };
-  // Names of computed columns that hold a date (dateAdd), from every view and form. Memoized on VIEWS,
+  // Names of computed columns that hold a date (dateAdd), from every table, view and form. Memoized on VIEWS,
   // which a schema change replaces wholesale.
   var _cdKey = null, _cdCols = {};
   function computedDateCols() {
     if (_cdKey === VIEWS) return _cdCols;
     _cdKey = VIEWS; _cdCols = {};
+    // A table's own derived columns too.
+    Object.keys(SCHEMA || {}).forEach(function(t) {
+      Columns.derivedDefs(SCHEMA[t]).forEach(function(d) { if (d.computed && d.computed.dateAdd) _cdCols[d.name] = true; });
+    });
     Object.keys(VIEWS || {}).forEach(function(n) {
       var v = VIEWS[n] || {};
       (v.columns || []).concat(v.compute || [], (v.form && v.form.compute) || []).forEach(function(c) {
@@ -9922,7 +9968,7 @@ function createVueApp() {
       label: function(col) { return appInstance.tOr("field." + col, col); },
       isMissing: function(col) { return this.touched && this.missing.indexOf(col) >= 0; },
       isRequired: function(col) { return this.built.required.indexOf(col) >= 0; },
-      isComputed: function(col) { return (this.cfg.compute || []).some(function(c) { return c && c.name === col; }); },
+      isComputed: function(col) { return (this.cfg.compute || []).some(function(c) { return c && c.name === col; }) || Columns.isDerived(SCHEMA, this.cfg.table, col); },
       start: function() { appInstance.formRecord(this.viewName); },
       submit: function() {
         this.touched = true;

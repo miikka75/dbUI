@@ -65,6 +65,7 @@
     'multiple',                                                  // cardinality (composes with select AND ref)
     'default', 'defaultFrom', 'stamped',                         // what a new row starts with, and who may rewrite it
     'syncFrom',                                                  // mirror columns
+    'computed',                                                  // derived on read, never stored
     'enabledWhen'                                                // which options a picker lets you choose
   ];
 
@@ -492,6 +493,7 @@
     var comp = def.computed;
     if (comp && typeof comp === 'object') {
       if (comp.lookup && comp.lookup.table) out.push(comp.lookup.table);
+      if (typeof comp.count === 'string' && comp.count) out.push(comp.count);
       if (comp.rotationTable) out.push(comp.rotationTable);
       if (comp.occurrenceSource) out.push(comp.occurrenceSource);
     }
@@ -543,9 +545,27 @@
   // `columns` ships in BOTH shapes -- a name->def map, and an array of {name,...} defs (examples/
   // bishopric-schema.json uses the array form). Normalizing to a list of defs handles both; defTables
   // reads only the def, never the key.
-  function tableDeps(schema, table) {
-    var seen = {}, out = [];
-    var add = function(t) { if (t && t !== table && !seen[t]) { seen[t] = 1; out.push(t); } };
+  function hasComputed(tableDef) { return columnDefList(tableDef).some(function(d) { return d && typeof d === 'object' && !!d.computed; }); }
+  // The table's computed (derived) columns, as resolveComputed takes them.
+  function derivedDefs(tableDef) {
+    var defs = columnDefs(tableDef || {}), out = [];
+    for (var c in defs) { var d = defs[c]; if (d && typeof d === 'object' && d.computed) out.push(Object.assign({ name: c }, d)); }
+    return out;
+  }
+  function isDerived(schema, table, col) { var d = columnDefs((schema && schema[table]) || {})[col]; return !!(d && typeof d === 'object' && d.computed); }
+  // `_seen` is shared across the recursion below, so tables whose derivations point at each other
+  // (a membership counts its pauses; a pause reads its membership) are each visited once.
+  function tableDeps(schema, table, _seen) {
+    var seen = _seen || {}, out = [];
+    seen[table] = 1;
+    // A dependency with computed columns of its own needs THEIR inputs too -- a pause reads its
+    // membership's end date, which reads the plan and the other pauses -- so follow those, and only those:
+    // a plain ref chain stays one level, as it always was.
+    var add = function(t) {
+      if (!t || t === table || seen[t]) return;
+      seen[t] = 1; out.push(t);
+      if (hasComputed(schema && schema[t])) out.push.apply(out, tableDeps(schema, t, seen));
+    };
     columnDefList(schema && schema[table]).forEach(function(d) {
       defTables(d).forEach(add);
       // A SIXTH shape, and the one defTables cannot recognise on its own: a `list:` may name a lookup
@@ -573,7 +593,7 @@
     colIsRef: colIsRef, colListSwitch: colListSwitch, colAllowNew: colAllowNew, colIsSorted: colIsSorted, colListValueCol: colListValueCol, colListFilter: colListFilter, lookupIdentityCol: lookupIdentityCol, rowHandle: rowHandle,
     colIsImage: colIsImage, colIsUrl: colIsUrl, colPicker: colPicker,
     colName: colName, isEmbed: isEmbed, isViewEmbed: isViewEmbed, isText: isText,
-    defTables: defTables, entryTables: entryTables, tableDeps: tableDeps, mirrorCluster: mirrorCluster
+    defTables: defTables, entryTables: entryTables, tableDeps: tableDeps, derivedDefs: derivedDefs, isDerived: isDerived, mirrorCluster: mirrorCluster
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
   else { root.Columns = C; root.colName = colName; root.isEmbed = isEmbed; root.isViewEmbed = isViewEmbed; root.isText = isText; } // shape predicates as bare globals (schema-loader + app-core call them unqualified)

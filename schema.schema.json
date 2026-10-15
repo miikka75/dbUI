@@ -119,6 +119,10 @@
               "items": { "type": "string" },
               "description": "For a ref: the referenced table's columns that name a row in its options and cells, instead of the raw value."
             },
+            "computed": {
+              "type": "object",
+              "description": "Derived on read, never stored: lookup, count, dateAdd, daysSince, … (see SCHEMA.md, computed columns). On a table, every view, lookup, path, form and rule sees it; it is never written or edited."
+            },
             "enabledWhen": {
               "type": "object",
               "description": "Which options a picker lets you choose: a condition over each option's catalogue row (a ref, or a list naming a lookup). Unmatched options stay on show, greyed. Operands may be { \"view\": \"<view>\", \"field\": \"<col>\" } (a view's first row) or { \"col\": \"<col>\" } (the option row's own column)."

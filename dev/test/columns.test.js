@@ -496,3 +496,27 @@ describe('Columns.vocabularyErrors — a ref\'s label and listFilter', () => {
     for (const c of ['badlabel', 'notref', 'badfilter']) assert.ok(errs.some((e) => e.includes('"' + c + '"')), c);
   });
 });
+
+describe('Columns — a table\'s computed (derived) columns', () => {
+  const C = require('../../columns');
+  const tables = {
+    memberships: { columns: [{ name: 'plan', type: 'ref', table: 'plans', valueCol: 'plan' },
+      { name: 'used', computed: { count: 'pauses', on: 'membership' } }, { name: 'end', computed: { dateAdd: { from: 'start' } } }] },
+    pauses: { columns: [{ name: 'membership', type: 'ref', table: 'memberships', valueCol: 'id' }, { name: 'until', computed: { dateAdd: { from: 'start' } } }] },
+    plans: { isLookup: true, columns: [{ name: 'plan' }] }
+  };
+  it('lists them, and knows one', () => {
+    assert.deepEqual(C.derivedDefs(tables.memberships).map((d) => d.name), ['used', 'end']);
+    assert.equal(C.isDerived(tables, 'memberships', 'end'), true);
+    assert.equal(C.isDerived(tables, 'memberships', 'plan'), false);
+  });
+  it('dependencies follow derived tables, through a cycle, each once', () => {
+    assert.deepEqual(C.tableDeps(tables, 'pauses').sort(), ['memberships', 'plans']);
+    assert.deepEqual(C.tableDeps(tables, 'memberships').sort(), ['pauses', 'plans']);
+  });
+  it('an owner bound never locks a derived column, since it is never sent', () => {
+    const H = require('../../backend-helpers');
+    const b = H.ownerWritableOf({ tables: { t: { ownerWritable: ['a'], columns: [{ name: 'owner', type: 'owner' }, { name: 'a' }, { name: 'd', computed: { dateAdd: { from: 'a' } } }] } } });
+    assert.deepEqual(Object.keys(b.t.locked), []);
+  });
+});

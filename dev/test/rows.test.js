@@ -504,3 +504,30 @@ describe('rows.js — dateAdd weeks', () => {
     assert.equal(r.e, '2027-01-28');
   });
 });
+
+describe('rows.js — count, reference paths and table derivation hooks', () => {
+  const R = require('../../rows');
+  it('count: active rows of another table pointing here, optionally narrowed', () => {
+    const cache = { p: [{ id: 1, mem: 'm1', sent: 'yes' }, { id: 2, mem: 'm1', sent: '' }, { id: 3, mem: 'm2', sent: 'yes', _status: 'archive' }] };
+    const rows = R.resolveComputed([{ id: 'm1' }, { id: 'm2' }], [{ name: 'n', computed: { count: 'p', on: 'mem', where: { sent: 'yes' } } }], { dataCache: cache });
+    assert.deepEqual(rows.map((r) => r.n), [1, 0]);
+  });
+  it('a dotted key or {col} operand follows the path hook; a key the row holds is read as is', () => {
+    R.setHooks({ path: (row, p) => (p === 'plan.months' ? 12 : 'x') });
+    try {
+      assert.equal(R.condMatches({ plan: 'a' }, { 'plan.months': { gte: 12 } }), true);
+      assert.equal(R.condMatches({ n: 13 }, { n: { gt: { col: 'plan.months' } } }), true);
+      assert.equal(R.condMatches({ 'a.b': 1 }, { 'a.b': 1 }), true);
+      const r = R.resolveComputed([{ s: '2026-01-15' }], [{ name: 'e', computed: { dateAdd: { from: 's', months: { col: 'plan.months' }, days: -1 } } }], {})[0];
+      assert.equal(r.e, '2027-01-14');
+    } finally { R.setHooks(null); }
+  });
+  it('buildRows fills a table\'s derived columns through the derive hook, on copies', () => {
+    const cache = { t: [{ id: 'a', x: 1 }] };
+    R.setHooks({ derive: (table, rows) => rows.map((r) => Object.assign({}, r, { y: r.x + 1 })) });
+    try {
+      assert.equal(R.buildRows({ sources: ['t'] }, cache)[0].y, 2);
+      assert.equal(cache.t[0].y, undefined);
+    } finally { R.setHooks(null); }
+  });
+});

@@ -41,6 +41,19 @@
   //   { "f": { "lt"|"gt"|"lte"|"gte": v } }        ordered comparison (see _cmp) — combinable in one object
   // Membership is expressed with `$or` of equalities (array-IN shorthand was retired; convertViewFilters
   // upgrades any legacy `{f:[a,b]}` to `$or` at load). Empty/absent cond => true.
+  // HOOKS the app installs (setHooks), because only it knows the schema:
+  //   derive(table, rows, cache) -> the rows with the table's computed columns filled in, copies;
+  //   path(row, "a.b")            -> the value a reference path reaches from the row.
+  // Unset (Node tests of the pure functions), rows pass through and a dotted key is just a key.
+  var hooks = { derive: null, path: null };
+  function setHooks(h) { hooks = { derive: (h && h.derive) || null, path: (h && h.path) || null }; }
+  // A row's value for a key -- the key itself, or, when it is a dotted reference path the row does not
+  // hold, where the path leads.
+  function _get(row, key) {
+    if (!row) return undefined;
+    if (key in row || typeof key !== 'string' || key.indexOf('.') < 1 || !hooks.path) return row[key];
+    return hooks.path(row, key);
+  }
   function condMatches(item, cond) {
     if (!cond || typeof cond !== 'object') return true;
     item = item || {};
@@ -48,7 +61,7 @@
     if (cond.$and) return cond.$and.every(function(s) { return condMatches(item, s); });
     for (var k in cond) {
       if (k[0] === '$') continue;
-      var c = cond[k], v = item[k];
+      var c = cond[k], v = _get(item, k);
       if (c && typeof c === 'object' && !Array.isArray(c)) {
         if (c.matchList) { var _L = root._listsCache && root._listsCache[c.matchList]; var _ok = _L && (Array.isArray(v) ? v.some(function(x){ return _L.indexOf(x) >= 0; }) : _L.indexOf(v) >= 0); if (!_ok) return false; }
         else if (c.notMatchList) { var _Ln = root._listsCache && root._listsCache[c.notMatchList]; var _hit = _Ln && (Array.isArray(v) ? v.some(function(x){ return _Ln.indexOf(x) >= 0; }) : _Ln.indexOf(v) >= 0); if (_hit) return false; }
@@ -87,7 +100,7 @@
   // date column works without a separate operator. Returns NaN when either side is blank or missing:
   // every comparison against NaN is false, so an unset value matches NO ordered filter in either
   // direction (fail-closed, matching `within`) instead of silently sorting as zero.
-  function _operand(item, x) { return (x && typeof x === 'object' && !Array.isArray(x) && typeof x.col === 'string') ? item[x.col] : x; }
+  function _operand(item, x) { return (x && typeof x === 'object' && !Array.isArray(x) && typeof x.col === 'string') ? _get(item, x.col) : x; }
   function _cmp(a, b) {
     if (a == null || a === '' || b == null || b === '') return NaN;
     var na = Number(a), nb = Number(b);
@@ -102,7 +115,7 @@
   function _dateAdd(r, spec) {
     var from = r[spec.from];
     if (!from) return '';
-    var amt = function(x) { if (x == null) return 0; var v = (typeof x === 'object' && typeof x.col === 'string') ? r[x.col] : x; if (v === '' || v == null) return NaN; return Number(v); };
+    var amt = function(x) { if (x == null) return 0; var v = (typeof x === 'object' && typeof x.col === 'string') ? _get(r, x.col) : x; if (v === '' || v == null) return NaN; return Number(v); };
     var m = amt(spec.months), w = amt(spec.weeks), dd = amt(spec.days);
     if (isNaN(m) || isNaN(w) || isNaN(dd)) return '';
     dd += 7 * w;
@@ -404,6 +417,8 @@
       var srcRows = partitionRows(dataCache, src, want);
       // `includeArchive` means "the history too", so it folds in whichever partition is NOT being read.
       if (cfg.includeArchive) srcRows = srcRows.concat(partitionRows(dataCache, src, want === 'active' ? 'archive' : 'active'));
+      // A table's own computed columns, filled in for every view that reads it (see setHooks).
+      if (hooks.derive) srcRows = hooks.derive(src, srcRows, dataCache);
       if (cfg.mode === 'join') {
         // Indexed by id rather than a `rows.find` per source row: the scan made a join O(rows^2) in the
         // number of rows already merged. `byId` spans the whole join (all sources), which is exactly the
@@ -612,6 +627,22 @@
     // ({ from: "start_on", months: { col: "plan_months" }, days: -1 }). An amount may name another column
     // ({ col }), computed earlier in the same list included. A blank start, or an amount that is not a
     // number (a plan with no length), gives '' -- no end -- rather than a date that means nothing.
+    // count: how many ACTIVE rows of another table point at this row -- its `on` column holding this row's
+    // `match` (default `id`) -- optionally only those matching `where`. "Weeks paused on this membership."
+    if (comp.count) {
+      var ckey = '#' + comp.count + '|' + comp.on + '|' + JSON.stringify(comp.where || null);
+      var cmap = idx[ckey];
+      if (!cmap) {
+        cmap = idx[ckey] = new Map();
+        partitionRows(cache, comp.count, 'active').forEach(function(x) {
+          if (comp.where && !condMatches(x, comp.where)) return;
+          var key = x[comp.on]; if (key == null || key === '') return;
+          cmap.set(key, (cmap.get(key) || 0) + 1);
+        });
+      }
+      r[d.name] = cmap.get(r[comp.match || 'id']) || 0;
+      return;
+    }
     if (comp.dateAdd) {
       r[d.name] = _dateAdd(r, comp.dateAdd);
       return;
@@ -631,7 +662,7 @@
       // `view` instead of `table`: look the field up in a VIEW's rows -- an aggregate such as a balance
       // per member -- which the caller supplies through ctx.viewRows (rows.js reads no views itself).
       var lk = comp.lookup, onCol = lk.on || lk.match, ikey = (lk.view ? '@' + lk.view : lk.table) + '|' + onCol;
-      var lsrc = lk.view ? ((ctx && ctx.viewRows) ? ctx.viewRows(lk.view) : []) : (cache[lk.table] || []);
+      var lsrc = lk.view ? ((ctx && ctx.viewRows) ? ctx.viewRows(lk.view) : []) : (hooks.derive ? hooks.derive(lk.table, cache[lk.table] || [], cache) : (cache[lk.table] || []));
       var lmap = idx[ikey] || (idx[ikey] = _indexBy(lsrc, onCol));
       var lhit = lmap.get(r[lk.match]);
       r[d.name] = (lhit && lhit[lk.field] != null) ? lhit[lk.field] : (lk.default != null ? lk.default : '');
@@ -665,7 +696,7 @@
     aggregateRows: aggregateRows, resolveComputed: resolveComputed, isFilterToken: isFilterToken,
     compareValues: compareValues, listOrderFor: listOrderFor,
     partitionOf: partitionOf, partitionRows: partitionRows, storeOf: storeOf,
-    searchRows: searchRows, searchColumns: searchColumns, fold: fold
+    searchRows: searchRows, searchColumns: searchColumns, fold: fold, setHooks: setHooks, getPath: _get
   };
   if (isNode) module.exports = M;
   else { root.Rows = M; for (var k in M) root[k] = M[k]; } // also expose each as a global for bare callers
