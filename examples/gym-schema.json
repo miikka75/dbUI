@@ -804,7 +804,7 @@
         "label": "text.add_workout",
         "icon": "mdi-plus"
       },
-      "markdown": "## {{t:text.training_stats}}\n\n{{view:my_pulse}}\n\n## {{t:text.training_weeks}}\n\n{{view:my_minutes_weeks}}\n\n## {{t:text.training_top}}\n\n{{view:my_top_exercises}}\n\n## {{t:text.training_steps}}\n\n{{view:my_steps_week}}\n\n## {{t:text.training_log}}\n\n{{view:my_workouts}}\n\n## {{t:text.training_visits}}\n\n{{view:my_visits}}\n"
+      "markdown": "## {{t:text.training_weeks}}\n\n{{view:my_minutes_weeks}}\n\n## {{t:text.training_top}}\n\n{{view:my_top_exercises}}\n\n## {{t:text.training_steps}}\n\n{{view:my_steps_week}}\n\n## {{t:text.training_log}}\n\n{{view:my_workouts}}\n\n## {{t:text.training_visits}}\n\n{{view:my_visits}}\n"
     },
     {
       "name": "my_pulse",
@@ -1900,6 +1900,9 @@
         "view": "doc_home"
       },
       {
+        "view": "class_calendar"
+      },
+      {
         "view": "doc_training",
         "hideFromAdmin": true
       },
@@ -1921,9 +1924,6 @@
       },
       {
         "view": "coach"
-      },
-      {
-        "view": "class_calendar"
       },
       {
         "view": "gyms"
