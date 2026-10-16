@@ -10,12 +10,12 @@ const { createKvBackend } = require('../../backend-kv');
 
 const SCHEMA = {
   tables: {
-    classes: { columns: [{ name: 'title' }, { name: 'capacity', type: 'number' }, { name: 'booked', type: 'number' }] },
+    classes: { columns: [{ name: 'title' }, { name: 'capacity', type: 'number' }, { name: 'booked', type: 'number' }, { name: 'walk_ins', type: 'number' }] },
     bookings: {
       columns: [{ name: 'owner', type: 'owner' }, { name: 'class', type: 'ref', table: 'classes', valueCol: 'id' },
                 { name: 'booking', type: 'select', list: 'booking_status' }, { name: 'note' }],
       ownerWritable: ['class', 'booking', 'note'],
-      capacity: { link: 'class', status: 'booking', column: 'capacity', count: 'booked', holds: ['booked'] }
+      capacity: { link: 'class', status: 'booking', column: 'capacity', count: 'booked', reserved: 'walk_ins', holds: ['booked'] }
     }
   },
   views: []
@@ -49,7 +49,7 @@ describe('capacity (Postgres trigger)', () => {
   it('saveSchema mirrors the config both rules layers read', async () => {
     as('admin@x.com');
     assert.deepEqual((await S.getMeta('ownerTables')).capacity, {
-      responses: { bookings: { events: 'classes', link: 'class', status: 'booking', capacity: 'capacity', count: 'booked', holds: ['booked'] } },
+      responses: { bookings: { events: 'classes', link: 'class', status: 'booking', capacity: 'capacity', count: 'booked', reserved: 'walk_ins', holds: ['booked'] } },
       events: { classes: 'bookings' }
     });
   });
@@ -94,6 +94,16 @@ describe('capacity (Postgres trigger)', () => {
   it('a blank limit is no limit', async () => {
     for (const [who, id] of [['ann@x.com', 'y1'], ['bob@x.com', 'y2'], ['cy@x.com', 'y3']]) assert.equal(await attempt(book(who, id, 'c2')), 'ok');
     assert.equal(await count('c2'), 3);
+  });
+
+  it('walk-ins on the class (`reserved`) take places: the booking they leave no room for is refused', async () => {
+    as('admin@x.com');
+    await S.put('classes__active', 'c3', { id: 'c3', title: 'Pump', capacity: 2, walk_ins: 2 });
+    assert.equal(await attempt(book('ann@x.com', 'w1', 'c3')), 'full');
+    as('admin@x.com');
+    await S.put('classes__active', 'c3', { walk_ins: 1 });
+    assert.equal(await attempt(book('ann@x.com', 'w1', 'c3')), 'ok');
+    assert.equal(await count('c3'), 1);
   });
 
   it('a member still cannot write the count themselves', async () => {

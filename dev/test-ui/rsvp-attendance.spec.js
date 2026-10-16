@@ -640,3 +640,30 @@ test('a started event: nobody joins or leaves, holder included, and the calendar
   await page.evaluate(() => appInstance.selectTab('timetable'));
   await expect(page.locator('[data-testid="cal-view"]')).not.toContainText('Spin');
 });
+
+test('staff: walk-ins with − / + take places, and a tap on a booked name marks them arrived', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.tables.practices.columns.push({ name: 'capacity', type: 'number' }, { name: 'booked', type: 'number' }, { name: 'walk_ins', type: 'number' });
+  schema.tables.rsvps.capacity = { link: 'practice', status: 'response', column: 'capacity', count: 'booked', reserved: 'walk_ins', holds: ['coming'] };
+  Object.assign(schema.views[0].rsvp, { rosterVisibility: 'admins', checkin: { codeColumn: 'note', set: { attendance: 'attended' } } });
+  await setup(page);
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'practices', tab: 'active', data: { id: 'p1', date: future, title: 'Tuesday', capacity: 5, booked: 1, walk_ins: 0 } }, headers: ADMIN });
+  await page.request.post('/api/putRow', { data: { tableId: 'rsvps', tab: 'active', data: { id: 'r1', owner: 'ann@x', practice: 'p1', response: 'coming', attendance: 'pending', rosterPublic: false } }, headers: ADMIN });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('test_user', 'org@x'); });
+  await page.goto('/');
+  await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+  await page.evaluate(() => appInstance.selectTab('my_rsvp'));
+  const row = page.locator('tr', { hasText: 'Tuesday' });
+  await row.locator('[data-testid="count-stepper-plus"]').click();
+  await row.locator('[data-testid="count-stepper-plus"]').click();
+  await expect(row.locator('[data-testid="count-stepper-value"]')).toHaveText('2');
+  await expect(row.locator('[data-testid="rsvp-places"]')).toContainText('2');           // 5 − 1 booked − 2 walk-ins
+  const stored = async (t, id) => ((await (await page.request.post('/api/getTableData', { data: { tableId: t, tab: 'active' }, headers: ADMIN })).json()).rows || []).find((r) => r.id === id);
+  await expect.poll(async () => (await stored('practices', 'p1')).walk_ins).toBe(2);
+  await row.locator('[data-testid="rsvp-arrive"]').click();
+  await expect.poll(async () => (await stored('rsvps', 'r1')).attendance).toBe('attended');
+  await row.locator('[data-testid="rsvp-arrive"]').click();
+  await expect.poll(async () => (await stored('rsvps', 'r1')).attendance).toBe('pending');
+});

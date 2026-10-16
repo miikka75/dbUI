@@ -478,6 +478,8 @@ service cloud.firestore {
           && (coll.split('__')[0] in capMirror().responses);
       }
       function capCfg(coll) { return capMirror().responses[coll.split('__')[0]]; }
+      // `reserved`: places taken that are not responses (walk-ins), a number on the event row; 0 when none.
+      function capRes(cfg, ev) { return cfg.get('reserved', '') != '' && ev.get(cfg.reserved, 0) is number ? ev.get(cfg.reserved, 0) : 0; }
       function capHolds(cfg, st) { return st != null && st != '' && (cfg.holds.size() == 0 || st in cfg.holds); }
       function counted(cfg, eid, delta, bid) {
         let p = /databases/$(database)/documents/$(cfg.events + '__active')/$(eid);
@@ -486,7 +488,7 @@ service cloud.firestore {
         let cap = before.get(cfg.capacity, '');
         return after.get(cfg.count, 0) == before.get(cfg.count, 0) + delta
           && after.get('lastBooking', '') == bid
-          && (delta < 0 || !(cap is number) || after.get(cfg.count, 0) <= cap);
+          && (delta < 0 || !(cap is number) || after.get(cfg.count, 0) + capRes(cfg, before) <= cap);
       }
       function capCreateOk(coll, id) {
         return !capped(coll)
@@ -528,7 +530,7 @@ service cloud.firestore {
         let heldBefore = exists(bp) && get(bp).data.get(cfg.link, '') == id && capHolds(cfg, get(bp).data.get(cfg.status, ''));
         let heldAfter = existsAfter(bp) && getAfter(bp).data.get(cfg.link, '') == id && capHolds(cfg, getAfter(bp).data.get(cfg.status, ''));
         return (d == 1 && !heldBefore && heldAfter && getAfter(bp).data.get('owner', '') == myEmail()
-                && (!(cap is number) || request.resource.data.get(cfg.count, 0) <= cap))
+                && (!(cap is number) || request.resource.data.get(cfg.count, 0) + capRes(cfg, resource.data) <= cap))
           || (d == -1 && heldBefore && !heldAfter && get(bp).data.get('owner', '') == myEmail());
       }
 

@@ -596,5 +596,22 @@ await ok('capacity: two bookings cannot share one increment',
 await ok('capacity: a member may not touch any other field of the event',
   assertFails(setDoc(doc(viewer, 'gclasses__active/c1'), { capacity: 99 }, { merge: true })));
 
+
+// --- Capacity with walk-ins (`reserved`): places taken on the event row, not by responses. ---
+await testEnv.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  const m = (await getDoc(doc(db, '_meta/ownerTables'))).data();
+  m.capacity.responses.gbookings.reserved = 'walk_ins';
+  await setDoc(doc(db, '_meta/ownerTables'), m);
+  await setDoc(doc(db, 'gclasses__active/c2'), { id: 'c2', capacity: 2, booked: 0, walk_ins: 1 });
+});
+const bookC2 = (db, who, id, booked) => batch(db, (b) => {
+  b.set(doc(db, 'gbookings__active/' + id), { id, owner: who, class: 'c2', booking: 'booked', rosterPublic: false });
+  b.set(doc(db, 'gclasses__active/c2'), { booked, lastBooking: id }, { merge: true });
+});
+await ok('capacity + walk-ins: a booking into the place the walk-ins left succeeds',
+  assertSucceeds(bookC2(viewer, 'viewer@x.com', 'w1', 1)));
+await ok('capacity + walk-ins: a booking the walk-ins leave no room for is refused',
+  assertFails(bookC2(editor, 'editor@x.com', 'w2', 2)));
 await testEnv.cleanup();
 console.log(`\nFIRESTORE RULES OK — ${passed} checks passed`);

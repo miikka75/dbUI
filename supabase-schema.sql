@@ -606,7 +606,7 @@ returns trigger language plpgsql security definer set search_path = public as $$
 declare
   st text := coalesce(new.store, old.store);
   cfg jsonb;
-  link text; ev_store text; ev text; n bigint; cap numeric; ev_row jsonb;
+  link text; ev_store text; ev text; n bigint; cap numeric; res numeric; ev_row jsonb;
   takes boolean;
 begin
   if st not like '%\_\_active' then return null; end if;
@@ -624,13 +624,16 @@ begin
       where store = st and value ->> link = ev and public.app_capacity_holds(cfg, value ->> (cfg ->> 'status'));
     -- A blank or non-numeric limit is no limit, as in the rules.
     cap := case when jsonb_typeof(ev_row -> (cfg ->> 'capacity')) = 'number' then (ev_row ->> (cfg ->> 'capacity'))::numeric end;
+    -- `reserved`: places taken that are not rows here (walk-ins), a number on the event row.
+    res := case when coalesce(cfg ->> 'reserved', '') <> '' and jsonb_typeof(ev_row -> (cfg ->> 'reserved')) = 'number'
+                then (ev_row ->> (cfg ->> 'reserved'))::numeric else 0 end;
     -- Refuse only the write that TAKES a place here: a member editing a note on a booking in a class
     -- the organizer has since shrunk below its count is not taking anything.
     takes := tg_op <> 'DELETE' and new.value ->> link = ev
       and public.app_capacity_holds(cfg, new.value ->> (cfg ->> 'status'))
       and (tg_op = 'INSERT' or old.value ->> link is distinct from ev
            or not public.app_capacity_holds(cfg, old.value ->> (cfg ->> 'status')));
-    if takes and cap is not null and n > cap then
+    if takes and cap is not null and n + res > cap then
       raise exception 'capacity: % is full', ev using errcode = 'P0001', hint = 'capacity_full';
     end if;
     if (ev_row -> (cfg ->> 'count')) is distinct from to_jsonb(n) then

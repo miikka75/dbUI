@@ -1305,6 +1305,18 @@ A member subscribes to their own booked classes and workouts in their phone's ca
 
 **Medium.**
 
+#### 21. The desk: walk-ins and arrivals by hand *(landed)*
+
+Non-members signed in at the desk take places too, and a member without a phone still needs checking in.
+
+- **`capacity.reserved`**: a number on the event row counted as taken by both servers (the Postgres
+  trigger and the Firestore rules) and by *Places left*. Staff set it with a **− n +** stepper in the
+  booking list (`<count-stepper>`, a shared element).
+- **Tap to arrive**: with `checkin.set`, a staff tap on a name in the roster stamps it, a second undoes.
+
+The gym's Attendance view loses its booked count and roll (now in Class check-in) and is renamed Classes.
+**Small–medium.**
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the

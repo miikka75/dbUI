@@ -63,6 +63,8 @@
       "btn.show_archived": "Past",
       "btn.show_all": "Show all",
       "btn.show_fewer": "Show fewer",
+      "btn.decrease": "Decrease",
+      "btn.increase": "Increase",
       "btn.undo": "Undo",
       "cal.add_on_day": "Add on this day",
       "cal.err_date_col": "Pick the column holding the date",

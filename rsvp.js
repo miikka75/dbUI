@@ -69,7 +69,10 @@
       // The roster: who responded, and how. The caller only receives the responses the backend returned —
       // so with owner-scoped reads a non-organizer sees just their own row here; with a public roster,
       // everyone's. (Access is enforced server-side; this is only the display.)
-      var participants = responded.map(function(r) { return { owner: r[ownerCol], status: r[statusCol] }; })
+      // `arrived`: the row carries every value check-in stamps (`checkin.set`) -- what staff tick off by hand.
+      var stamp = (opts.checkin && opts.checkin.set) || null;
+      var participants = responded.map(function(r) { return { owner: r[ownerCol], status: r[statusCol], id: r.id,
+          arrived: !!stamp && Object.keys(stamp).every(function(c) { return r[c] === stamp[c]; }) }; })
         .sort(function(a, b) { return String(a.status).localeCompare(String(b.status)) || String(a.owner).localeCompare(String(b.owner)); });
       return {
         id: e.id,
@@ -81,8 +84,10 @@
         myCode: mine && opts.checkinColumn ? (mine[opts.checkinColumn] || '') : '',
         isToday: !!opts.today && dayOf(e[dateCol]) === opts.today,
         capacity: cap ? limitOf(e[cap.column]) : null,
-        booked: cap ? (Number(e[cap.count]) || 0) : 0,
-        full: !!cap && limitOf(e[cap.column]) !== null && (Number(e[cap.count]) || 0) >= limitOf(e[cap.column]),
+        // Places taken: the responses holding one, plus `reserved` (walk-ins) on the event row.
+        reserved: cap && cap.reserved ? (Number(e[cap.reserved]) || 0) : 0,
+        booked: cap ? (Number(e[cap.count]) || 0) + (cap.reserved ? (Number(e[cap.reserved]) || 0) : 0) : 0,
+        full: !!cap && limitOf(e[cap.column]) !== null && (Number(e[cap.count]) || 0) + (cap.reserved ? (Number(e[cap.reserved]) || 0) : 0) >= limitOf(e[cap.column]),
         myHolds: !!mine && holds(cap, mine[statusCol]),
         tally: tally,
         total: responded.length,

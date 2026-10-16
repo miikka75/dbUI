@@ -367,7 +367,7 @@ describe('capacityOf / ownerTablesMirror (the _meta/ownerTables document both ru
   } };
   it('maps each capped response table to its events table, and back', () => {
     assert.deepEqual(H.capacityOf(schema), {
-      responses: { bookings: { events: 'classes', link: 'class', status: 'booking', capacity: 'capacity', count: 'booked', holds: ['booked'] } },
+      responses: { bookings: { events: 'classes', link: 'class', status: 'booking', capacity: 'capacity', count: 'booked', reserved: '', holds: ['booked'] } },
       events: { classes: 'bookings' }
     });
   });

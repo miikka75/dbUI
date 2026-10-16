@@ -207,6 +207,7 @@ function validateSchema() {
       if (!d) errors.push(cat + '`' + k + '` "' + cap[k] + '" is not a column of "' + lk.table + '"');
       else if (ty !== 'number') errors.push(cat + '`' + k + '` "' + cap[k] + '" must be a number column');
     });
+    if (cap.reserved !== undefined) { var rd = ecols[cap.reserved], rty = (typeof rd === 'string') ? rd : (rd && rd.type); if (rty !== 'number') errors.push(cat + '`reserved` "' + cap.reserved + '" must be a number column of "' + lk.table + '"'); }
     if (cap.holds !== undefined && (!Array.isArray(cap.holds) || !cap.holds.length)) errors.push(cat + '`holds` must be a non-empty list of statuses (omit it to let any status take a place)');
     if (capEvents[lk.table]) errors.push(cat + '"' + lk.table + '" is already capped by "' + capEvents[lk.table] + '" — one count per event row');
     capEvents[lk.table] = ct;

@@ -291,7 +291,8 @@ backend = {
       return _db.runTransaction(function(tx) {
         return tx.get(eRef).then(function(es) {
           var e = es.exists ? es.data() : {}, n = Number(e[cfg.count]) || 0, cap = e[cfg.capacity], d = now ? 1 : -1;
-          if (d > 0 && typeof cap === 'number' && n + 1 > cap) throw new Error('capacity: ' + ev + ' is full');
+          var res = cfg.reserved && typeof e[cfg.reserved] === 'number' ? e[cfg.reserved] : 0;   // walk-ins
+          if (d > 0 && typeof cap === 'number' && n + res + 1 > cap) throw new Error('capacity: ' + ev + ' is full');
           var bump = { lastBooking: id, updated_at: new Date().toISOString() };
           bump[cfg.count] = n + d;
           tx.set(eRef, bump, { merge: true });

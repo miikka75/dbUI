@@ -1118,7 +1118,7 @@ function createVueApp() {
         return Leftovers.corpus([doc, VIEWS, this.pageCache, cfg], [doc.tables || {}], [doc.views || [], VIEWS]);
       },
       staticTranslationKeys: function() {
-        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.more',
+        return ['app.title', 'btn.add', 'btn.show_active', 'btn.show_archived', 'btn.show_all', 'btn.show_fewer', 'btn.decrease', 'btn.increase', 'btn.more',
          'btn.edit', 'btn.copy', 'btn.show', 'btn.hide', 'btn.preview', 'btn.save', 'btn.search', 'btn.export_ics', 'btn.publish_feed', 'cal.feed_url', 'feed.subscribe', 'feed.link_pending', 'feed.unsubscribe', 'cal.window_back', 'cal.window_forward', 'cal.window_lang', 'cal.lang_auto', 'msg.no_blob_store', 'msg.feed_cap_reached', 'settings.feeds', 'settings.feed_regenerate', 'settings.feed_unpublish', 'settings.feed_not_republishing', 'settings.feed_all_personal', 'settings.feed_subscribers', 'settings.feed_revoking', 'settings.feed_over_cap', 'settings.feed_unpublished', 'settings.feed_revoked', 'settings.feed_sweep', 'settings.csp_reports', 'settings.csp_token', 'settings.csp_bad_token', 'settings.csp_read_failed', 'settings.csp_none', 'settings.csp_extensions', 'settings.csp_directive', 'settings.csp_blocked', 'settings.csp_count', 'settings.csp_last_seen', 'btn.refresh', 'settings.csp_rotate', 'msg.feed_swept', 'cal.err_no_source', 'cal.err_table', 'cal.err_date_col', 'cal.err_not_date', 'cal.err_title_col', 'settings.add_calendar', 'settings.cal_title', 'settings.cal_table', 'settings.cal_date_col', 'settings.cal_title_cols', 'settings.cal_add_source', 'btn.delete', 'btn.confirm_delete', 'cal.err_not_rotation', 'settings.cal_rotations', 'msg.name_taken', 'cal.err_name', 'lang.add_language', 'btn.cancel', 'timeline.empty', 'col.switch_list',
          'img.replace', 'img.upload', 'img.remove', 'img.url', 'img.view', 'img.open_original',
          'btn.close', 'btn.previous', 'btn.next',
@@ -2903,7 +2903,7 @@ function createVueApp() {
       // The response table's `capacity`, as the engine reads it -- null when the table has none.
       rsvpCapacity: function(cfg) {
         var c = SCHEMA[cfg.responses] && SCHEMA[cfg.responses].capacity;
-        return c ? { column: c.column, count: c.count, holds: Array.isArray(c.holds) ? c.holds : [] } : null;
+        return c ? { column: c.column, count: c.count, reserved: c.reserved || '', holds: Array.isArray(c.holds) ? c.holds : [] } : null;
       },
       // Self check-in with a shared code (`rsvp.checkin`). The code is the DAY's: one claim covers every
       // event the member reserved today, one press stamps all of today's events. Two sides, and the
@@ -2913,6 +2913,24 @@ function createVueApp() {
       //
       // Whoever may write the responses table outright is an organizer here; a member's writes go
       // through self-service and cannot reach the verdict column.
+      // Staff set an event's `capacity.reserved` count (walk-ins signed in at the desk) on the event row.
+      setRsvpReserved: function(name, ev, n) {
+        var cfg = VIEWS[name] && VIEWS[name].rsvp, cap = cfg && this.rsvpCapacity(cfg);
+        if (!cap || !cap.reserved) return;
+        var t = VIEWS[cfg.events] ? (VIEWS[cfg.events].sources || [])[0] : cfg.events;
+        var row = (this.dataCache[t] || []).filter(function(r) { return r.id === ev.id; })[0];
+        if (row) this.saveField(row, cap.reserved, Math.max(0, n), t);
+      },
+      // Staff tick a booked person off as arrived (or take it back): the check-in stamp (`checkin.set`) by
+      // hand, for someone with no phone; undone back to each column's default.
+      setRsvpArrived: function(name, rowId, arrived) {
+        var cfg = VIEWS[name] && VIEWS[name].rsvp, set = cfg && cfg.checkin && cfg.checkin.set;
+        if (!set) return;
+        var t = cfg.responses, self = this, defs = Columns.columnDefs(SCHEMA[t] || {});
+        var row = (this.dataCache[t] || []).filter(function(r) { return r.id === rowId; })[0];
+        if (!row) return;
+        Object.keys(set).forEach(function(c) { var d = defs[c]; self.saveField(row, c, arrived ? set[c] : ((d && typeof d === 'object' && d.default != null) ? d.default : ''), t); });
+      },
       rsvpOrganizer: function(name) {
         var v = VIEWS[name], t = v && v.rsvp && v.rsvp.responses;
         if (!t || this.currentUserRole === 'viewer' || this.canSelfServe(t)) return false;
@@ -9283,6 +9301,19 @@ function createVueApp() {
 
   // A collapsible Settings section's heading, bound to the caller's flag:
   // <section-toggle v-model:collapsed="a.settings._collapseX">. The caller owns where "collapsed" lives.
+  // A whole number set with − and + (walk-ins at the desk). <count-stepper :value="n" @change="…">; never below 0.
+  app.component('count-stepper', {
+    props: { value: { type: Number, default: 0 } },
+    inject: ['uiHost'],
+    emits: ['change'],
+    methods: { t: function(k) { return this.uiHost.t(k); } },
+    template: '<span class="d-inline-flex align-center" data-testid="count-stepper">'
+      + '<v-btn icon="mdi-minus" variant="text" size="small" :disabled="value <= 0" :title="t(\'btn.decrease\')" :aria-label="t(\'btn.decrease\')" data-testid="count-stepper-minus" @click="$emit(\'change\', value - 1)"></v-btn>'
+      + '<span style="min-width:2ch;text-align:center;font-variant-numeric:tabular-nums" data-testid="count-stepper-value">{{ value }}</span>'
+      + '<v-btn icon="mdi-plus" variant="text" size="small" :title="t(\'btn.increase\')" :aria-label="t(\'btn.increase\')" data-testid="count-stepper-plus" @click="$emit(\'change\', value + 1)"></v-btn>'
+      + '</span>'
+  });
+
   app.component('section-toggle', {
     props: { collapsed: { type: Boolean, default: false }, title: { type: String, default: '' } },
     emits: ['update:collapsed'],
@@ -10378,6 +10409,9 @@ function createVueApp() {
       cfg: function() { return (VIEWS[this.viewName] && VIEWS[this.viewName].rsvp) || {}; },
       data: function() { return appInstance.rsvpFor(this.viewName); },
       canStamp: function() { return appInstance.rsvpCanStamp(this.viewName); },
+      // The response table's `capacity.reserved` (walk-ins), which staff set where their own response would be.
+      reservedCol: function() { var c = appInstance.rsvpCapacity(this.cfg); return (c && c.reserved) || ''; },
+      walkIns: function() { return !!this.reservedCol && this.organizer; },
       organizer: function() { return appInstance.rsvpOrganizer(this.viewName); },
       pageLink: function() { return appInstance.viewDeepLink(this.viewName); },
       pageTitle: function() { return appInstance.t('view.' + this.viewName) || this.viewName; },
@@ -10455,7 +10489,7 @@ function createVueApp() {
         ev.participants.forEach(function(p) {
           var name = self.ownerName(p.owner);
           if (!name) return;   // unshared member seen by a non-admin -> hidden
-          (groups[p.status] || (groups[p.status] = [])).push({ email: p.owner, name: name });
+          (groups[p.status] || (groups[p.status] = [])).push({ email: p.owner, name: name, id: p.id, arrived: p.arrived });
         });
         var keys = Object.keys(groups).sort(function(a, b) { var ia = order.indexOf(a), ib = order.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
         return keys.map(function(s) { return { status: s, label: self.statusLabel(s), people: groups[s] }; });
@@ -10473,7 +10507,7 @@ function createVueApp() {
       + '<thead><tr>'
       + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'date\')" :aria-sort="ariaSort(\'date\')" data-testid="rsvp-sort-date">{{ a.t(\'rsvp.date\') }}</th>'
       + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'title\')" :aria-sort="ariaSort(\'title\')">{{ a.t(\'rsvp.title\') }}</th>'
-      + '<th class="text-left" style="cursor:pointer" @click="toggleSort(\'myStatus\')" :aria-sort="ariaSort(\'myStatus\')">{{ a.t(\'rsvp.your_response\') }}</th>'
+      + '<th v-if="walkIns" class="text-left">{{ a.tOr(\'field.\' + reservedCol, reservedCol) }}</th><th v-else class="text-left" style="cursor:pointer" @click="toggleSort(\'myStatus\')" :aria-sort="ariaSort(\'myStatus\')">{{ a.t(\'rsvp.your_response\') }}</th>'
       + '<th v-if="cfg.showCounts" class="text-left" style="cursor:pointer" @click="toggleSort(\'total\')" :aria-sort="ariaSort(\'total\')">{{ a.t(\'rsvp.responses\') }}</th>'
       // "Who" is a status-grouped name roster, not a single value -- nothing coherent to order by.
       + '<th v-if="showRoster" class="text-left">{{ a.t(\'rsvp.who\') }}</th>'
@@ -10482,10 +10516,10 @@ function createVueApp() {
       + '<tr v-for="ev in events" :key="ev.id">'
       + '<td style="white-space:nowrap">{{ a.dateTimeLabel(ev.date) }}</td>'
       + '<td>{{ ev.title }}<div v-if="placesShown(ev)" style="font-size:0.8rem;opacity:0.7" data-testid="rsvp-places">{{ placesText(ev) }}</div></td>'
-      + '<td><rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
+      + '<td><count-stepper v-if="walkIns" :value="ev.reserved" @change="a.setRsvpReserved(viewName, ev, $event)"></count-stepper><rsvp-picker v-else :options="options" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
       + '</td>'
       + '<td v-if="cfg.showCounts" style="font-size:0.82rem;opacity:0.75;white-space:nowrap">{{ tallyText(ev) }}</td>'
-      + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></td>'
+      + '<td v-if="showRoster" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <template v-for="p in g.people" :key="p.email"><v-chip v-if="canStamp && cfg.checkin && cfg.checkin.set" size="small" variant="tonal" class="rsvp-person mr-1 mb-1" :color="p.arrived ? \'success\' : undefined" :prepend-icon="p.arrived ? \'mdi-check-circle\' : \'mdi-circle-outline\'" :aria-pressed="String(p.arrived)" data-testid="rsvp-arrive" @click="a.setRsvpArrived(viewName, p.id, !p.arrived)">{{ p.name }}</v-chip><user-ref v-else :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></template></div></td>'
       + '</tr>'
       + '<tr v-if="!events.length"><td colspan="5" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</td></tr>'
       + '</tbody>'
@@ -10494,9 +10528,10 @@ function createVueApp() {
       + '<v-card v-for="ev in events" :key="ev.id" variant="tonal" class="mb-2 pa-3">'
       + '<div>{{ a.dateTimeLabel(ev.date) }}</div>'
       + '<div v-if="ev.title" class="mb-2" style="font-size:0.9rem;opacity:0.7">{{ ev.title }}<div v-if="placesShown(ev)" style="font-size:0.8rem" data-testid="rsvp-places">{{ placesText(ev) }}</div></div>'
-      + '<rsvp-picker :options="options" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
+      + '<div v-if="walkIns" class="d-flex align-center" style="gap:6px"><span style="font-size:0.85rem">{{ a.tOr(\'field.\' + reservedCol, reservedCol) }}</span><count-stepper :value="ev.reserved" @change="a.setRsvpReserved(viewName, ev, $event)"></count-stepper></div>'
+      + '<rsvp-picker v-else :options="options" :picker="picker" :value="ev.myStatus" :disabled="locked(ev)" @set="set(ev.key, $event)"></rsvp-picker>'
       + '<div v-if="cfg.showCounts && ev.total" class="mt-2" style="font-size:0.8rem;opacity:0.7">{{ tallyText(ev) }}</div>'
-      + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <user-ref v-for="p in g.people" :key="p.email" :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></div></div>'
+      + '<div v-if="showRoster && ev.participants.length" class="mt-1" style="font-size:0.82rem" data-testid="rsvp-roster"><div v-for="g in rosterGroups(ev)" :key="g.status" class="rsvp-roster-group"><span style="opacity:0.6">{{ g.label }}:</span> <template v-for="p in g.people" :key="p.email"><v-chip v-if="canStamp && cfg.checkin && cfg.checkin.set" size="small" variant="tonal" class="rsvp-person mr-1 mb-1" :color="p.arrived ? \'success\' : undefined" :prepend-icon="p.arrived ? \'mdi-check-circle\' : \'mdi-circle-outline\'" :aria-pressed="String(p.arrived)" data-testid="rsvp-arrive" @click="a.setRsvpArrived(viewName, p.id, !p.arrived)">{{ p.name }}</v-chip><user-ref v-else :email="p.email" :name="p.name" :size="20" class="rsvp-person"></user-ref></template></div></div>'
       + '</v-card>'
       + '<div v-if="!events.length" class="pa-2" style="opacity:0.6">{{ a.t(\'rsvp.none\') }}</div>'
       + '</div>'

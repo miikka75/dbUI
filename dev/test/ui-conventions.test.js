@@ -92,7 +92,7 @@ describe('views that declare what they need', () => {
   // and rotation families, the shared UI elements and the read-only views are converted; calendar-screen
   // and rotation-screen, the app's own top-level screens, deliberately are not.
   const DECLARED = ['cal-event-row', 'cal-month', 'cal-week', 'cal-year', 'cal-agenda', 'cal-day-panel', 'calendar-view',
-    'copy-field', 'confirm-x', 'confirm-btn', 'section-toggle',
+    'copy-field', 'confirm-x', 'confirm-btn', 'section-toggle', 'count-stepper',
     'list-value', 'user-avatar', 'user-ref', 'pivot-view', 'timeline-view', 'stats-view',
     'rotation-table', 'rotation-cards', 'rotation-list', 'rotation-view', 'data-gallery'];
   function ownSource(name) {

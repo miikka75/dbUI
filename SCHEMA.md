@@ -1543,6 +1543,10 @@ whichever screen writes the row:
 | `column` | The events table's `number` column holding the limit. Blank = no limit |
 | `count` | The events table's `number` column the **server** keeps the count in. Leave it to the server |
 | `holds` | The statuses that take a place (optional; default: any non-empty one). `maybe` usually should not |
+| `reserved` | The events table's `number` column of places taken that are **not** responses — walk-ins signed in at the desk (optional). Both servers add it to the count before refusing a booking, and *Places left* subtracts it. Staff (whoever may write the responses table) see it in the booking list as a **− n +** stepper where their own response would be |
+
+With `checkin.set`, staff see each booked person in the roster as a chip: a tap stamps `set` on that response
+(arrived, for someone with no phone), a second tap returns those columns to their defaults.
 
 The booking list shows *Places left: N* under each event, or *Full*. A full event cannot be joined, but a
 member who holds a place in it can still give it up. Booking the last place on a stale screen is refused

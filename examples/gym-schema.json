@@ -162,6 +162,11 @@
         {
           "name": "booked",
           "type": "number"
+        },
+        {
+          "name": "walk_ins",
+          "type": "number",
+          "default": 0
         }
       ]
     },
@@ -233,7 +238,8 @@
         "count": "booked",
         "holds": [
           "booked"
-        ]
+        ],
+        "reserved": "walk_ins"
       }
     },
     "visits": {
@@ -1220,6 +1226,7 @@
             ],
             "label": "Pause",
             "filter": {
+              "owner": "@me",
               "sent": "yes"
             },
             "endColumn": "pause_until",
@@ -1491,19 +1498,6 @@
       ]
     },
     {
-      "name": "class_roll",
-      "kind": "data",
-      "sources": [
-        "bookings"
-      ],
-      "columns": [
-        "owner",
-        "booking",
-        "attendance"
-      ],
-      "defaultSort": "owner"
-    },
-    {
       "name": "attendance_check",
       "kind": "data",
       "icon": "mdi-clipboard-check-outline",
@@ -1517,15 +1511,7 @@
         "class_type",
         "room",
         "instructor",
-        "capacity",
-        "booked",
-        {
-          "view": "class_roll",
-          "filterBy": {
-            "class": "id"
-          },
-          "hideEmpty": true
-        }
+        "capacity"
       ]
     },
     {

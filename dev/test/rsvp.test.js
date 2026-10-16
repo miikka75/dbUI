@@ -52,14 +52,15 @@ describe('rsvp.js — build', () => {
 
   it('exposes the per-event roster (participants sorted by status, then owner)', () => {
     const r = Rsvp.build(events, responses, opts);
-    assert.deepEqual(r.events[0].participants, [
+    const who = (ps) => ps.map((p) => ({ owner: p.owner, status: p.status }));
+    assert.deepEqual(who(r.events[0].participants), [
       { owner: 'me@x', status: 'coming' },
       { owner: 'you@x', status: 'maybe' }
     ]);
     // the caller only ever gets the responses the backend returned -> owner-scoped reads naturally
     // shrink this list to just the viewer's own row.
     const scoped = Rsvp.build(events, responses.filter(x => x.owner === 'me@x'), opts);
-    assert.deepEqual(scoped.events[0].participants, [{ owner: 'me@x', status: 'coming' }]);
+    assert.deepEqual(who(scoped.events[0].participants), [{ owner: 'me@x', status: 'coming' }]);
   });
 
   it('an empty-status response is excluded from tally/total/roster (no blank line)', () => {
@@ -166,5 +167,19 @@ describe('rsvp.js — a datetime dateColumn', () => {
     const r = Rsvp.build(evs, [], opts);
     assert.deepEqual(r.events.map(e => e.key), ['early', 'late']);
     assert.deepEqual(r.events.map(e => e.isToday), [true, true]);
+  });
+});
+
+describe('rsvp.js — walk-ins take places, and who has arrived', () => {
+  const Rsvp2 = require('../../rsvp');
+  it('`capacity.reserved` adds to the places taken; a participant carrying the check-in stamp has arrived', () => {
+    const ev = [{ id: 'c1', on: '2099-01-01', capacity: 3, booked: 1, walk_ins: 2 }];
+    const resp = [{ id: 'b1', owner: 'a@x', class: 'c1', booking: 'booked', attendance: 'attended' }, { id: 'b2', owner: 'b@x', class: 'c1', booking: 'booked', attendance: 'pending' }];
+    const out = Rsvp2.build(ev, resp, { me: 'z@x', dateColumn: 'on', linkColumn: 'class', eventKey: 'id', statusColumn: 'booking',
+      capacity: { column: 'capacity', count: 'booked', reserved: 'walk_ins', holds: ['booked'] }, checkin: { set: { attendance: 'attended' } } }).events[0];
+    assert.equal(out.reserved, 2);
+    assert.equal(out.booked, 3);
+    assert.equal(out.full, true);
+    assert.deepEqual(out.participants.map((p) => [p.id, p.arrived]), [['b1', true], ['b2', false]]);
   });
 });

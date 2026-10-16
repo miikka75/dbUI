@@ -364,7 +364,10 @@
         if (!ev || !tables[ev] || !defs[cap.status] || out.events[ev]) continue;
         var edefs = Cols().columnDefs(tables[ev]);
         if (!edefs[cap.column] || !edefs[cap.count]) continue;
+        // `reserved`: places taken that are not responses (walk-ins signed in at the desk), a number on the
+        // event row. Blank when none, so both rules layers can test for it without a missing-key branch.
         out.responses[t] = { events: ev, link: cap.link, status: cap.status, capacity: cap.column, count: cap.count,
+                             reserved: (cap.reserved && edefs[cap.reserved]) ? cap.reserved : '',
                              holds: Array.isArray(cap.holds) ? cap.holds.map(String) : [] };
         out.events[ev] = t;
       }
