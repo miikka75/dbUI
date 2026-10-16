@@ -797,6 +797,12 @@ function validateSchema() {
       if (!VIEWS[lk.view]) errors.push('view "' + v + '": `lookup.view` names missing view "' + lk.view + '"');
       else if (lk.view === v) errors.push('view "' + v + '": `lookup.view` cannot read the view it is in');
     });
+    // `limit` keeps the first N rows of the default order, so without a defaultSort it would keep an
+    // arbitrary N.
+    if (view.limit !== undefined) {
+      if (!(typeof view.limit === 'number' && view.limit > 0 && Math.floor(view.limit) === view.limit)) errors.push('view "' + v + '": `limit` must be a whole number above 0');
+      else if (!view.defaultSort) errors.push('view "' + v + '": `limit` keeps the first rows of `defaultSort`, so it needs one');
+    }
     // `blockedBy` on an rsvp or a scan: periods of the caller's own rows in another table. A table or a
     // column that does not exist would block nothing, which looks exactly like "not paused".
     [view.rsvp && view.rsvp.blockedBy, view.scan && view.scan.blockedBy].forEach(function(bb) {

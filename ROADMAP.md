@@ -1257,6 +1257,21 @@ calendar left open since the morning still offered the 07:00 class. Three genera
 
 Screen rules, as `closeBefore` is. **Small.**
 
+#### 17. A log that shows the recent past — relative dates, newest first, the latest N *(landed)*
+
+The workout log and the visit list grow without end. Archiving them is the wrong tool: it takes rows out
+of the streak, the weekly totals and My calendar, the sweep runs only for someone who may archive the
+whole table (not the member), and an archived row still lives in the active store, so it saves no reads.
+What the screen needs is to SHOW less, so three general pieces, each useful on its own:
+
+- **`@today`, `@today-N`, `@today+N` as comparison operands** — `{ "done_on": { "gte": "@today-6" } }` is
+  the last 7 days, `{ "due_on": { "lt": "@today" } }` is overdue. Rolling, unlike `within`'s periods.
+- **`defaultSortDesc`** — the default sort, newest first.
+- **`limit`** — the view holds the first N rows of its default order: the latest 10 workouts.
+
+And `defaultFrom: "@today"`, so a new log row is dated today and stays inside a date-filtered view.
+**Small.**
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the

@@ -1731,7 +1731,7 @@ function createVueApp() {
         this.pageEditing = false;
         var cfg = VIEWS[id] || SCHEMA[id] || {};
         this.sortCol = cfg.defaultSort || null;
-        this.sortAsc = true;
+        this.sortAsc = !cfg.defaultSortDesc;
         if (this.isCalendarView || this.isPivotView || this.isRsvpView || this.isFormView) { this.loadTableData(); }
         else if (this.isDataView || this.isRotationView || this.isBoardView || this.isStatsView || this.isScanView) { this.periodOffset = 0; this.loadTableData(); }
         else if (VIEWS[id] && typeof VIEWS[id].markdown === 'string') this.loadPage(id);
@@ -4737,7 +4737,7 @@ function createVueApp() {
       },
       // Resolve a column's `defaultFrom` token to the value stamped on a new row. Unknown tokens stamp
       // blank rather than writing the token text, so a typo can't end up looking like data.
-      defaultFromValue: function(token, col) { return token === '@me' ? this.meValueFor(col) : ''; },
+      defaultFromValue: function(token, col) { return token === '@me' ? this.meValueFor(col) : token === '@today' ? fmtDate(new Date()) : ''; },
       // Columns an OWNER-scoped write may touch on a self-service table, per the table's `ownerWritable`
       // (mirrored to _meta/ownerWritable for the rules — see BackendHelpers.ownerWritableOf). null = the
       // table sets no bound, so the owner may write the whole row, which is the historical behaviour.
@@ -8107,10 +8107,10 @@ function createVueApp() {
       // Non-admins keep the initial {} exactly as the swallowed rejection left them.
       usersLoaded: function(v) { if (v && this.isAdmin) this.loadListUserLinks(); },
       viewingArchive: function() {
-        // Active tab sorts the default column ascending (today -> future); the archive tab reverses it
-        // (today -> past, most-recently-archived first). Only applies when a defaultSort is set.
+        // Active tab sorts the default column in its own direction (ascending unless defaultSortDesc); the
+        // archive tab reverses it (most-recently-archived first). Only applies when a defaultSort is set.
         var cfg = this.currentConfig || {};
-        if (cfg.defaultSort) { this.sortCol = cfg.defaultSort; this.sortAsc = !this.viewingArchive; }
+        if (cfg.defaultSort) { this.sortCol = cfg.defaultSort; this.sortAsc = !cfg.defaultSortDesc !== this.viewingArchive; }
         this.loadTableData();
       },
       sortedData: function(val) { if (this.currentConfig.collapsed && val.length) this.expandedCard = val[0].id; }

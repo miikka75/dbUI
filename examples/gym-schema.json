@@ -303,7 +303,8 @@
         },
         {
           "name": "done_on",
-          "type": "date"
+          "type": "date",
+          "defaultFrom": "@today"
         },
         {
           "name": "exercise",
@@ -1055,7 +1056,10 @@
       "layout": "table",
       "defaultSort": "done_on",
       "filter": {
-        "member": "@me"
+        "member": "@me",
+        "done_on": {
+          "gte": "@today-6"
+        }
       },
       "columns": [
         "done_on",
@@ -1066,7 +1070,8 @@
         "minutes",
         "km",
         "note"
-      ]
+      ],
+      "defaultSortDesc": true
     },
     {
       "name": "my_visits",
@@ -1080,13 +1085,17 @@
       "readonly": true,
       "defaultSort": "visited_on",
       "filter": {
-        "member": "@me"
+        "member": "@me",
+        "visited_on": {
+          "gte": "@today-6"
+        }
       },
       "columns": [
         "visited_on",
         "gym",
         "verified"
-      ]
+      ],
+      "defaultSortDesc": true
     },
     {
       "name": "exercise_heatmap",
