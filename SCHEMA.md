@@ -463,6 +463,7 @@ invisibly: no row matches, and the view shows an empty list that reads as "no ro
 | `"col": { "matchList": "listName" }` | Filter should track a user-editable list (Lookup tab) |
 | `"col": "@me"` | Resolves to the signed-in user's identity **for that column**: on a `userlink` list, the curated value linked to their account; otherwise their **profile display name** (see **user profiles**). No identity → matches nothing (fail-closed). Works in `filter`, `groupBy.filter`, calendar `sources[].filter`, rotation `filter`, and embeds. Display-only — never widens server-enforced access. |
 | `"col": { "within": "@month" }` | Date column falls in the current period. Token: `@today`/`@week`/`@month`/`@year`, with an optional **back-offset** (`@month-1` = last month, `@week-2` = two weeks ago). Recomputed from *today* each render, so it **auto-resets** (a `@month` leaderboard rolls to the new month); weeks are Monday-start; unknown tokens match nothing. Ideal for a period-scoped `groupBy.filter` (e.g. this-month leaderboard). |
+| `"col": { "within": { "calendar": "my_calendar" } }` | Date column falls in the period that calendar view **shows** — its week, month or year (List: its month), following the reader's ‹ › and mode. With the calendar not on screen, its `defaultView` around today. Put a calendar and the logs/reports that follow it on one page (`{{view:…}}` each) and the page answers "this week / month / year". A view's `filter` and `groupBy.filter` only; `validateSchema` names a calendar that does not exist |
 
 ### aggregate views (groupBy + collect)
 A view with `groupBy` + `collect` groups rows by person/key and collects a column's values:
@@ -1243,7 +1244,7 @@ Distinct from data views, documents, and rotationViews.
     "source": "chore_log",        // REQUIRED (or `sources`) — one table
     "dateColumn": "done_on",       // REQUIRED — a date column of `source` (YYYY-MM-DD)
     "titleColumns": ["chore", "person"], // OPTIONAL — joined with " — " for the event label
-    "defaultView": "month",        // OPTIONAL — "month" | "week" | "list" (default "month")
+    "defaultView": "month",        // OPTIONAL — "month" | "week" | "year" | "list" (default "month"); "year" lists the whole year
     "weekStart": 1                 // OPTIONAL — 0=Sun, 1=Mon (default 1)
   }
 }
@@ -1785,7 +1786,7 @@ The two are mutually exclusive; declaring both is a load-time error.
 
 | Key | Meaning |
 |-----|---------|
-| `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals }` |
+| `tiles` | Explicit tiles. Each: `{ label, agg, column, when, goal, display, decimals, divide }`. `divide` shows the number in a bigger unit — `"divide": 60` turns minutes into hours — rounded to `decimals` (default 1) |
 | `rowTiles` | `{ label, value, goal?, order?, skipUntargeted? }` — one tile per row instead |
 | `goal` | Default bar target for every tile: a positive number, `"max"` (scale to the largest tile), a **ladder** of levels (below), or `{ "column": "<col>" }` to read the target off each row (`rowTiles` only). No goal = no bar, just a number |
 | `display` | `"bar"` (default) or `"number"`. Per-tile, or view-wide as a default |

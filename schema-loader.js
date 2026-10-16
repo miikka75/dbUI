@@ -524,7 +524,7 @@ function validateSchema() {
     if (view.calendar) {
       var cvv = view.calendar;
       if (cvv.source && cvv.sources) errors.push('calendar "' + v + '": use `source` OR `sources`, not both');
-      if (cvv.defaultView && ['month', 'week', 'list'].indexOf(cvv.defaultView) < 0) errors.push('calendar "' + v + '" defaultView must be month/week/list');
+      if (cvv.defaultView && ['month', 'week', 'year', 'list'].indexOf(cvv.defaultView) < 0) errors.push('calendar "' + v + '" defaultView must be month/week/year/list');
       var csrcs = cvv.sources || [{ table: cvv.source, dateColumn: cvv.dateColumn, titleColumns: cvv.titleColumns }];
       // `filters`: columns the reader narrows the events by. Each must be a column of some source, with options
       // to pick from -- a list or a ref -- or the selector would offer nothing, or narrow nothing.
@@ -686,6 +686,7 @@ function validateSchema() {
     if (view.stats) {
       var st = view.stats;
       var stAggs = ['count', 'sum', 'avg', 'min', 'max', 'latest', 'streak'];
+      (Array.isArray(st.tiles) ? st.tiles : []).forEach(function(t, i) { if (t && t.divide !== undefined && !(typeof t.divide === 'number' && t.divide > 0)) errors.push('stats "' + v + '" tile ' + i + ': `divide` must be a number above 0'); });
       if (st.rowTiles && st.tiles) errors.push('stats "' + v + '": use `rowTiles` OR `tiles`, not both');
       else if (!st.rowTiles && !Array.isArray(st.tiles)) errors.push('stats "' + v + '" needs `tiles` (an array) or `rowTiles`');
       // A goal is either a number to measure against or the string "max" (scale to the largest tile).
@@ -796,6 +797,18 @@ function validateSchema() {
       if (!lk || lk.view === undefined) return;
       if (!VIEWS[lk.view]) errors.push('view "' + v + '": `lookup.view` names missing view "' + lk.view + '"');
       else if (lk.view === v) errors.push('view "' + v + '": `lookup.view` cannot read the view it is in');
+    });
+    // `within: { calendar }` follows a calendar's period; a name that is not a calendar would match nothing.
+    [view.filter, view.groupBy && view.groupBy.filter].forEach(function(f) {
+      (function walk(x) {
+        if (!x || typeof x !== 'object') return;
+        if (Array.isArray(x)) { x.forEach(walk); return; }
+        Object.keys(x).forEach(function(k) {
+          var w = x[k] && x[k].within;
+          if (w && typeof w === 'object' && !(VIEWS[w.calendar] && VIEWS[w.calendar].calendar)) errors.push('view "' + v + '": `within: { calendar }` on "' + k + '" must name a calendar view (got "' + w.calendar + '")');
+          else if (k.charAt(0) === '$') walk(x[k]);
+        });
+      })(f);
     });
     // `limit` keeps the first N rows of the default order, so without a defaultSort it would keep an
     // arbitrary N.

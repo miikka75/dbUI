@@ -1272,6 +1272,20 @@ What the screen needs is to SHOW less, so three general pieces, each useful on i
 And `defaultFrom: "@today"`, so a new log row is dated today and stays inside a date-filtered view.
 **Small.**
 
+#### 18. Reports that follow the calendar — a shared period, a Year mode, hours *(landed)*
+
+My calendar's ‹ › and Week / Month moved only the calendar; the workout log, the visits and the reports
+under it kept their own fixed periods. General pieces:
+
+- **A calendar shares the period it shows** (its week, month or year — not the padded grid).
+- **`{ "done_on": { "within": { "calendar": "my_calendar" } } }`** in a view's `filter`: the rows in that
+  period. Logs, aggregates (top 3) and stats all read it, so one page answers "this week / month / year".
+  A calendar that is not on screen counts as its default view around today.
+- **A Year mode** on the calendar: the whole year as a list, ‹ › a year at a time.
+- **`divide`** on a stats tile: minutes shown as hours.
+
+Next, not built: a **series** tile — the period broken into its weeks or months as bars. **Medium.**
+
 #### Not proposed
 
 - **Opening the gate.** It needs the gate controller's own API and a server to call it from; the

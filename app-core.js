@@ -358,6 +358,8 @@ function createVueApp() {
       // THE clock booking rules read (rsvpClosed): ticks every 30 s, so a class closes on every screen
       // showing it -- a calendar left open since the morning included -- when its window does.
       clockNow: Date.now(),
+      // The period each mounted calendar shows ({ name: {from, toExclusive} }), for `within: { calendar }`.
+      calPeriods: {},
       // The scan button (nav.scan): its typing dialog, what is typed, and which view a typed code is for.
       scanDialog: false, scanTyped: '', scanNote: '',
       dataCache: {},
@@ -1147,7 +1149,7 @@ function createVueApp() {
          'settings.user_id', 'settings.name', 'settings.role', 'settings.tables', 'settings.tables_view', 'settings.add_user', 'settings.all',
          'role.admin', 'role.editor', 'role.viewer',
          'settings.rotation_anchor', 'settings.rotation_from', 'settings.rotation_periods', 'settings.rotation_every', 'settings.rotation_cycle', 'cal.today', 'btn.reset',
-         'cal.month', 'cal.week', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
+         'cal.month', 'cal.week', 'cal.year', 'cal.list', 'cal.undated', 'cal.no_events', 'cal.items', 'cal.add_on_day',
          'rsvp.date', 'rsvp.title', 'rsvp.your_response', 'rsvp.responses', 'rsvp.who', 'rsvp.none', 'rsvp.checkin_code', 'rsvp.checkin', 'rsvp.show_code', 'rsvp.page_qr', 'rsvp.places_left', 'rsvp.full', 'rsvp.closed', 'rsvp.started', 'msg.capacity_full', 'msg.checked_in',
          'access.request_access', 'access.request_sent', 'access.your_name', 'access.pending_requests', 'access.approve', 'access.deny', 'access.name_required',
          'profile.title', 'profile.email', 'profile.share_name', 'profile.picture',
@@ -6679,12 +6681,40 @@ function createVueApp() {
       // untouched when no @me token is present, to avoid needless churn).
       _viewWithMe: function(view) {
         if (!view) return view;
-        var hasMe = (JSON.stringify(view.filter || null).indexOf('"@me"') >= 0) || (JSON.stringify((view.groupBy && view.groupBy.filter) || null).indexOf('"@me"') >= 0);
-        if (!hasMe) return view;
+        var fs = JSON.stringify([view.filter || null, (view.groupBy && view.groupBy.filter) || null]);
+        var hasMe = fs.indexOf('"@me"') >= 0, hasCal = fs.indexOf('"calendar"') >= 0;
+        if (!hasMe && !hasCal) return view;
+        var self = this, res = function(f) { if (hasMe) f = self.resolveMeTokens(f); return hasCal ? self.resolveCalendarPeriods(f) : f; };
         var v = Object.assign({}, view);
-        if (view.filter) v.filter = this.resolveMeTokens(view.filter);
-        if (view.groupBy) { v.groupBy = Object.assign({}, view.groupBy); if (view.groupBy.filter) v.groupBy.filter = this.resolveMeTokens(view.groupBy.filter); }
+        if (view.filter) v.filter = res(view.filter);
+        if (view.groupBy) { v.groupBy = Object.assign({}, view.groupBy); if (view.groupBy.filter) v.groupBy.filter = res(view.groupBy.filter); }
         return v;
+      },
+      // The period calendar `name` shows: the one on screen, or -- when it is not mounted -- its default
+      // view around today, which is what it would show when opened.
+      calendarPeriod: function(name) {
+        if (this.calPeriods[name]) return this.calPeriods[name];
+        var c = (VIEWS[name] && VIEWS[name].calendar) || {}, today = fmtDate(new Date(this.clockNow));
+        return Calendar.periodFor(today, c.defaultView || 'month', c.weekStart != null ? Number(c.weekStart) : 1, today);
+      },
+      // `{ col: { within: { calendar: name } } }` -> `{ col: { gte: from, lt: toExclusive } }`: the rows in
+      // the period that calendar shows, so a log or a report below it follows its week / month / year.
+      resolveCalendarPeriods: function(filter) {
+        var self = this;
+        var walk = function(x) {
+          if (Array.isArray(x)) return x.map(walk);
+          if (!x || typeof x !== 'object') return x;
+          var o = {};
+          Object.keys(x).forEach(function(k) {
+            var c = x[k], w = c && typeof c === 'object' && !Array.isArray(c) && c.within;
+            if (w && typeof w === 'object' && w.calendar) {
+              var p = self.calendarPeriod(w.calendar), r = Object.assign({}, c);
+              delete r.within; r.gte = p.from; r.lt = p.toExclusive; o[k] = r;
+            } else o[k] = walk(c);
+          });
+          return o;
+        };
+        return walk(filter);
       },
       // Inject the leaderboard's ‹ › back-offset into bare @period tokens (@month -> @month-<offset>).
       // Offset 0 leaves tokens unchanged; only bare tokens (no existing -N) are rewritten.
@@ -8225,7 +8255,8 @@ function createVueApp() {
           filterOptions: function(col) { return vm.colIsRef(col) ? vm.getRefOptions(col, {}).filter(function(o) { return o.value !== ''; }) : vm.getListOptions(col); },
           fieldLabel: function(col) { return vm.tOr('field.' + col, col); },
           dateLabel: function(v) { return vm.dateLabel(v); },
-          now: function() { return vm.clockNow; }
+          now: function() { return vm.clockNow; },
+          setPeriod: function(name, p) { var o = Object.assign({}, vm.calPeriods); if (p) o[name] = p; else delete o[name]; vm.calPeriods = o; }
         },
         // The shared UI elements (CLAUDE.md "UI conventions"): words, and the clipboard with its notice.
         uiHost: {
@@ -8696,7 +8727,7 @@ function createVueApp() {
   // source of truth per element. This is the element-level seam behind "views are parts that combine":
   // to place a different body, register another component under VIEW_PARTS.calendar[<mode>].
   window.VIEW_PARTS = {
-    calendar: { month: 'cal-month', week: 'cal-week', list: 'cal-agenda' },
+    calendar: { month: 'cal-month', week: 'cal-week', year: 'cal-agenda', list: 'cal-agenda' },
     rotation: { table: 'rotation-table', card: 'rotation-cards', list: 'rotation-list' },
     data: { list: 'data-list', gallery: 'data-gallery', split: 'data-split' }   // card/table editing grids remain inline (deeper refactor)
   };
@@ -9317,6 +9348,8 @@ function createVueApp() {
   app.component('calendar-view', {
     props: { name: { type: String, required: true }, embed: { type: Boolean, default: false } },
     inject: ['calendarHost'],
+    watch: { period: { immediate: true, handler: function(p) { this.calendarHost.setPeriod(this.name, p); } } },
+    beforeUnmount: function() { this.calendarHost.setPeriod(this.name, null); },
     data: function() {
       var today = this.calendarHost.today();
       // `picked`: the reader's `filters` choices, { column: [values] }, kept in THIS browser -- a
@@ -9348,17 +9381,20 @@ function createVueApp() {
       monthCells: function() { var ev = this.events; return Calendar.cellsMonth(this.anchor, this.weekStart, this.calendarHost.today()).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
       weekCells: function() { var ev = this.events; return Calendar.cellsWeek(this.anchor, this.weekStart, this.calendarHost.today()).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
       dowNames: function() { var loc = this.calendarHost.locale(), ws = this.weekStart, fmt = new Intl.DateTimeFormat(loc, { weekday: 'short' }), out = []; for (var i = 0; i < 7; i++) out.push(fmt.format(new Date(2023, 0, 1 + ((ws + i) % 7)))); return out; },
-      title: function() { var loc = this.calendarHost.locale(); if (this.mode === 'week') { var cs = this.weekCells, f = cs[0].date.split('-'), l = cs[6].date.split('-'); return new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' }).format(new Date(+f[0], +f[1] - 1, +f[2])) + ' – ' + new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(+l[0], +l[1] - 1, +l[2])); } var p = this.anchor.split('-'); return new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, 1)); },
+      // The period on screen, shared with the views that filter by it (`within: { calendar }`).
+      period: function() { return Calendar.periodFor(this.anchor, this.mode, this.weekStart, this.calendarHost.today()); },
+      title: function() { var loc = this.calendarHost.locale(); if (this.mode === 'year') return this.anchor.slice(0, 4); if (this.mode === 'week') { var cs = this.weekCells, f = cs[0].date.split('-'), l = cs[6].date.split('-'); return new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' }).format(new Date(+f[0], +f[1] - 1, +f[2])) + ' – ' + new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(+l[0], +l[1] - 1, +l[2])); } var p = this.anchor.split('-'); return new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, 1)); },
       selEvents: function() { return this.events[this.sel] || []; },
       selLabel: function() { if (!this.sel) return ''; var p = this.sel.split('-'); return new Intl.DateTimeFormat(this.calendarHost.locale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(+p[0], +p[1] - 1, +p[2])); },
       // A list reads FORWARD: today and after. The month and week grids are where the past is browsed.
       // The list reads forward from NOW: past days are left out, and so is an event of today whose start
       // time has passed. The month and week grids still show the whole day.
+      // The YEAR is a list too, of the whole year, past included.
       listDays: function() {
-        var ev = this.events, loc = this.calendarHost.locale(), now = this.calendarHost.now(), today = fmtDate(new Date(now));
-        return Object.keys(ev).filter(function(k) { return k !== '__undated__' && k >= today; }).sort().map(function(k) {
+        var ev = this.events, loc = this.calendarHost.locale(), now = this.calendarHost.now(), today = fmtDate(new Date(now)), whole = this.displayMode === 'year';
+        return Object.keys(ev).filter(function(k) { return k !== '__undated__' && (whole || k >= today); }).sort().map(function(k) {
           var p = k.split('-');
-          var evs = k > today ? ev[k] : ev[k].filter(function(e) { return !e.at || Date.parse(e.at) > now; });
+          var evs = (whole || k > today) ? ev[k] : ev[k].filter(function(e) { return !e.at || Date.parse(e.at) > now; });
           return { date: k, label: new Intl.DateTimeFormat(loc, { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: evs };
         }).filter(function(d) { return d.events.length; });
       },
@@ -9367,8 +9403,9 @@ function createVueApp() {
       body: function() { return window.viewPartFor('calendar', this.displayMode) || 'cal-agenda'; }
     },
     methods: Object.assign({}, CAL_T, {
-      prev: function() { this.anchor = addIntervals(this.anchor, -1, this.mode === 'week' ? 'weekly' : 'monthly'); },
-      next: function() { this.anchor = addIntervals(this.anchor, 1, this.mode === 'week' ? 'weekly' : 'monthly'); },
+      prev: function() { this.step(-1); },
+      next: function() { this.step(1); },
+      step: function(n) { this.anchor = addIntervals(this.anchor, this.mode === 'year' ? 12 * n : n, this.mode === 'week' ? 'weekly' : 'monthly'); },
       goToday: function() { this.anchor = this.sel = this.calendarHost.today(); },
       setMode: function(m) { this.mode = m; },
       addOnDay: function() { this.calendarHost.addOnDay(this.name, this.sel); },
@@ -9388,6 +9425,7 @@ function createVueApp() {
       + '<v-btn-toggle :model-value="mode" density="compact" variant="outlined" divided mandatory @update:model-value="setMode($event)">'
       + '<v-btn value="month" size="small">{{ t(\'cal.month\') }}</v-btn>'
       + '<v-btn value="week" size="small">{{ t(\'cal.week\') }}</v-btn>'
+      + '<v-btn value="year" size="small" data-testid="cal-mode-year">{{ t(\'cal.year\') }}</v-btn>'
       + '<v-btn value="list" size="small">{{ t(\'cal.list\') }}</v-btn></v-btn-toggle>'
       + '<slot name="actions"></slot></div>'
       + '<div v-if="filters.length" class="d-flex flex-wrap px-2 pb-2" style="gap:8px" data-testid="cal-filters">'
@@ -9396,7 +9434,7 @@ function createVueApp() {
       + '<slot name="tools"></slot>'
       + '<v-divider></v-divider>'
       + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
-      + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents" :can-add="canAdd" @add="addOnDay"></cal-day-panel>'
+      + '<cal-day-panel v-if="displayMode!==\'list\' && displayMode!==\'year\'" :label="selLabel" :events="selEvents" :can-add="canAdd" @add="addOnDay"></cal-day-panel>'
       + '</component>'
   });
 

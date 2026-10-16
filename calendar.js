@@ -75,10 +75,20 @@
   // Visible grid window {from, toExclusive} for a calendar anchor+mode (month/list -> month grid, week
   // -> strip). Bounds rotation generation to what's on screen.
   function windowFor(anchor, mode, weekStart, today) {
+    if (mode === 'year') return periodFor(anchor, mode, weekStart, today);
     var cells = (mode === 'week') ? cellsWeek(anchor || today, weekStart, today) : cellsMonth(anchor || today, weekStart, today);
     var last = cells[cells.length - 1].date.split('-');
     return { from: cells[0].date, toExclusive: fmtDate(new Date(+last[0], +last[1] - 1, +last[2] + 1)) };
   }
+  // The PERIOD a calendar shows -- its week, month or year, not the grid (which pads a month out to whole
+  // weeks). {from, toExclusive}. A list is its month. What `within: { calendar }` filters by.
+  function periodFor(anchor, mode, weekStart, today) {
+    var a = anchor || today, p = a.split('-');
+    if (mode === 'week') { var c = cellsWeek(a, weekStart, today), l = c[6].date.split('-'); return { from: c[0].date, toExclusive: fmtDate(new Date(+l[0], +l[1] - 1, +l[2] + 1)) }; }
+    if (mode === 'year') return { from: p[0] + '-01-01', toExclusive: (+p[0] + 1) + '-01-01' };
+    return { from: fmtDate(new Date(+p[0], +p[1] - 1, 1)), toExclusive: fmtDate(new Date(+p[0], +p[1], 1)) };
+  }
+
   // Deterministic palette color for a categorical key (stable across renders). Colors a calendar
   // event's label, a rotation overlay, and a board card's left stripe (`board.color`).
   //
@@ -132,7 +142,7 @@
   function rotationSources(views, name) { var v = views[name]; return (v && v.calendar && v.calendar.rotationSources) || []; }
 
   var C = {
-    fmtDate: fmtDate, toDateStr: toDateStr, dateLabel: dateLabel, dateTimeLabel: dateTimeLabel, toLocalInput: toLocalInput, fromLocalInput: fromLocalInput, cellsMonth: cellsMonth, cellsWeek: cellsWeek, windowFor: windowFor,
+    fmtDate: fmtDate, toDateStr: toDateStr, dateLabel: dateLabel, dateTimeLabel: dateTimeLabel, toLocalInput: toLocalInput, fromLocalInput: fromLocalInput, cellsMonth: cellsMonth, cellsWeek: cellsWeek, windowFor: windowFor, periodFor: periodFor,
     hashColor: hashColor, paletteAt: paletteAt, sources: sources, rotationSources: rotationSources
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = C;

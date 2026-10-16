@@ -201,6 +201,8 @@
         var bucket = t.when ? rows.filter(function(r) { return Rows.condMatches(r, t.when); }) : rows;
         var v = t.agg === 'streak' ? streak(bucket, t.column, t.interval || 'weekly', now) : reduce(bucket, t.agg || 'count', t.column);
         if ((t.agg || 'count') === 'avg') v = roundAvg(v, t.decimals);
+        // `divide`: show the number in a bigger unit -- minutes as hours (60) -- rounded to `decimals`.
+        if (t.divide > 0 && typeof v === 'number') v = roundAvg(v / t.divide, t.decimals);
         out.push({
           label: t.label || '',
           labelCol: null,

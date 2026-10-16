@@ -362,3 +362,11 @@ describe('stats.js — streak (periods in a row) and icons by value', () => {
     assert.equal(tile([], { icons }).icon, null);
   });
 });
+
+describe('stats.js — divide', () => {
+  it('shows a sum in a bigger unit, rounded to decimals', () => {
+    const rows = [{ minutes: 45 }, { minutes: 50 }];
+    assert.equal(Stats.build(rows, { tiles: [{ agg: 'sum', column: 'minutes', divide: 60 }] }).tiles[0].value, 1.6);
+    assert.equal(Stats.build(rows, { tiles: [{ agg: 'sum', column: 'minutes', divide: 60, decimals: 2 }] }).tiles[0].value, 1.58);
+  });
+});

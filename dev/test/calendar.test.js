@@ -202,3 +202,13 @@ describe('calendar.js — datetime values', () => {
     assert.equal(C.toLocalInput('nope'), '');
   });
 });
+
+describe('calendar.js — the period a calendar shows (what `within: { calendar }` filters by)', () => {
+  it('is the week, the month (not the padded grid) or the year; a list is its month', () => {
+    assert.deepEqual(Calendar.periodFor('2026-07-15', 'week', 1, '2026-07-15'), { from: '2026-07-13', toExclusive: '2026-07-20' });
+    assert.deepEqual(Calendar.periodFor('2026-07-15', 'month', 1, '2026-07-15'), { from: '2026-07-01', toExclusive: '2026-08-01' });
+    assert.deepEqual(Calendar.periodFor('2026-12-15', 'list', 1, '2026-12-15'), { from: '2026-12-01', toExclusive: '2027-01-01' });
+    assert.deepEqual(Calendar.periodFor('2026-07-15', 'year', 1, '2026-07-15'), { from: '2026-01-01', toExclusive: '2027-01-01' });
+    assert.deepEqual(Calendar.windowFor('2026-07-15', 'year', 1, '2026-07-15'), { from: '2026-01-01', toExclusive: '2027-01-01' });
+  });
+});

@@ -907,58 +907,72 @@
       }
     },
     {
-      "name": "my_minutes_weeks",
+      "name": "my_period_totals",
       "kind": "stats",
-      "icon": "mdi-chart-bar",
+      "icon": "mdi-sigma",
       "sources": [
-        "workouts"
+        "workouts",
+        "visits"
       ],
       "mode": "union",
       "filter": {
-        "member": "@me"
+        "$and": [
+          {
+            "member": "@me"
+          },
+          {
+            "$or": [
+              {
+                "done_on": {
+                  "within": {
+                    "calendar": "my_calendar"
+                  }
+                }
+              },
+              {
+                "visited_on": {
+                  "within": {
+                    "calendar": "my_calendar"
+                  }
+                }
+              }
+            ]
+          }
+        ]
       },
       "readonly": true,
       "stats": {
         "tiles": [
           {
-            "label": "text.week_0",
+            "label": "text.total_hours",
             "agg": "sum",
             "column": "minutes",
+            "divide": 60,
+            "decimals": 1
+          },
+          {
+            "label": "text.total_exercises",
+            "agg": "count",
             "when": {
               "done_on": {
-                "within": "@week"
+                "notEmpty": true
               }
             }
           },
           {
-            "label": "text.week_1",
-            "agg": "sum",
-            "column": "minutes",
+            "label": "text.total_visits",
+            "agg": "count",
             "when": {
-              "done_on": {
-                "within": "@week-1"
-              }
+              "visited_on": {
+                "notEmpty": true
+              },
+              "verified": "yes"
             }
           },
           {
-            "label": "text.week_2",
+            "label": "text.total_km",
             "agg": "sum",
-            "column": "minutes",
-            "when": {
-              "done_on": {
-                "within": "@week-2"
-              }
-            }
-          },
-          {
-            "label": "text.week_3",
-            "agg": "sum",
-            "column": "minutes",
-            "when": {
-              "done_on": {
-                "within": "@week-3"
-              }
-            }
+            "column": "km"
           }
         ],
         "display": "number"
@@ -973,30 +987,25 @@
       ],
       "mode": "union",
       "filter": {
-        "member": "@me"
+        "member": "@me",
+        "day": {
+          "within": {
+            "calendar": "my_calendar"
+          }
+        }
       },
       "readonly": true,
       "stats": {
         "tiles": [
           {
-            "label": "text.steps_today",
+            "label": "text.steps_total",
             "agg": "sum",
-            "column": "step_count",
-            "when": {
-              "day": {
-                "within": "@today"
-              }
-            }
+            "column": "step_count"
           },
           {
-            "label": "text.steps_week_avg",
+            "label": "text.steps_avg",
             "agg": "avg",
             "column": "step_count",
-            "when": {
-              "day": {
-                "within": "@week"
-              }
-            },
             "decimals": 0
           }
         ],
@@ -1028,7 +1037,9 @@
       "filter": {
         "member": "@me",
         "done_on": {
-          "within": "@month"
+          "within": {
+            "calendar": "my_calendar"
+          }
         }
       },
       "readonly": true,
@@ -1058,7 +1069,9 @@
       "filter": {
         "member": "@me",
         "done_on": {
-          "gte": "@today-6"
+          "within": {
+            "calendar": "my_calendar"
+          }
         }
       },
       "columns": [
@@ -1087,7 +1100,9 @@
       "filter": {
         "member": "@me",
         "visited_on": {
-          "gte": "@today-6"
+          "within": {
+            "calendar": "my_calendar"
+          }
         }
       },
       "columns": [
@@ -1951,7 +1966,7 @@
         "label": "text.add_workout",
         "icon": "mdi-plus"
       },
-      "markdown": "{{view:my_calendar}}\n\n## {{t:text.training_weeks}}\n\n{{view:my_minutes_weeks}}\n\n## {{t:text.training_top}}\n\n{{view:my_top_exercises}}\n\n## {{t:text.training_steps}}\n\n{{view:my_steps_week}}\n\n## {{t:text.training_log}}\n\n{{view:my_workouts}}\n\n## {{t:text.training_visits}}\n\n{{view:my_visits}}\n"
+      "markdown": "{{view:my_calendar}}\n\n## {{t:text.training_totals}}\n\n{{view:my_period_totals}}\n\n## {{t:text.training_top}}\n\n{{view:my_top_exercises}}\n\n## {{t:text.training_steps}}\n\n{{view:my_steps_week}}\n\n## {{t:text.training_log}}\n\n{{view:my_workouts}}\n\n## {{t:text.training_visits}}\n\n{{view:my_visits}}\n"
     }
   ],
   "nav": {

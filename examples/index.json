@@ -5,13 +5,13 @@
       "code": "en",
       "name": "English",
       "file": "app-lang-en.json",
-      "hash": "fc5fa18cfd8a61fa"
+      "hash": "6a9cd172260a3d14"
     },
     {
       "code": "fi",
       "name": "Suomi",
       "file": "app-lang-fi.json",
-      "hash": "ac09758b6476d179"
+      "hash": "63b06a661bbfd814"
     }
   ],
   "bundles": [
@@ -161,20 +161,20 @@
       "views": 36,
       "schema": {
         "file": "gym-schema.json",
-        "hash": "50069350b8852672"
+        "hash": "a6a08a546792fc4a"
       },
       "languages": [
         {
           "code": "en",
           "name": "English",
           "file": "gym-lang-en.json",
-          "hash": "3de4a97ac12e6788"
+          "hash": "50fb3e32135ad058"
         },
         {
           "code": "fi",
           "name": "Suomi",
           "file": "gym-lang-fi.json",
-          "hash": "e930e4f4249da3aa"
+          "hash": "3e0f7fcdcfcd3b9b"
         }
       ],
       "data": {
@@ -183,10 +183,10 @@
       },
       "about": {
         "file": "gym-about.json",
-        "hash": "2b44c27df76e7567"
+        "hash": "4ff48e4735c39f45"
       },
       "notes": {
-        "1": "First release: book group classes, with places left, a full class refused, and booking from home closing 30 minutes before the start (after that, at the gym); check in to classes by scanning the room code, and log gym visits by scanning the door code; a workout and step log with weekly counts and your top 3 exercises (My calendar lists the last 7 days of workouts and gym visits, newest first; the calendar and the stats keep the whole history); coins earned by attending classes, spent in a reward shop; buying a membership or a single visit, and pausing it (the pause shows on My calendar across its days, and while it lasts classes cannot be booked or checked in to and the door code is refused); requesting a personal trainer; news and a library of workouts and multi-week programmes. The front desk gets attendance, membership, PT and reward boards."
+        "1": "First release: book group classes, with places left, a full class refused, and booking from home closing 30 minutes before the start (after that, at the gym); check in to classes by scanning the room code, and log gym visits by scanning the door code; My calendar with your classes, workouts, visits, pauses and PT sessions, where the workout log, gym visits, totals (hours, exercises, visits, km), steps and your top 3 exercises follow the week, month or year the calendar shows; coins earned by attending classes, spent in a reward shop; buying a membership or a single visit, and pausing it (the pause shows on My calendar across its days, and while it lasts classes cannot be booked or checked in to and the door code is refused); requesting a personal trainer; news and a library of workouts and multi-week programmes. The front desk gets attendance, membership, PT and reward boards."
       }
     }
   ]
