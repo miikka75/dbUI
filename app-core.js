@@ -8245,7 +8245,6 @@ function createVueApp() {
         calendarHost: {
           t: function(k) { return vm.t(k); },
           locale: function() { return vm.calLocale(); },
-          isMobile: function() { return vm.mobile; },
           today: function() { return vm._calToday(); },
           config: function(name) { return (VIEWS[name] && VIEWS[name].calendar) || {}; },
           events: function(name, win) { return vm.calEventsFor(name, win); },
@@ -9393,7 +9392,8 @@ function createVueApp() {
         });
         return out;
       },
-      displayMode: function() { return (this.calendarHost.isMobile() && this.mode === 'month') ? 'list' : (this.mode || 'month'); },
+      // The mode the reader picked, on a phone too: the month grid fits one.
+      displayMode: function() { return this.mode || 'month'; },
       monthCells: function() { var ev = this.events; return Calendar.cellsMonth(this.anchor, this.weekStart, this.calendarHost.today()).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
       weekCells: function() { var ev = this.events; return Calendar.cellsWeek(this.anchor, this.weekStart, this.calendarHost.today()).map(function(c) { c.count = (ev[c.date] || []).length; return c; }); },
       dowNames: function() { var loc = this.calendarHost.locale(), ws = this.weekStart, fmt = new Intl.DateTimeFormat(loc, { weekday: 'short' }), out = []; for (var i = 0; i < 7; i++) out.push(fmt.format(new Date(2023, 0, 1 + ((ws + i) % 7)))); return out; },

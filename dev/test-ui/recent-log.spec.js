@@ -79,3 +79,18 @@ test('a log and a report follow the calendar on their page: week, month, year, a
   const err = await page.evaluate(() => { VIEWS.log.filter = { done_on: { within: { calendar: 'nope' } } }; return validateSchema().join(' | '); });
   expect(err).toContain('must name a calendar view (got "nope")');
 });
+
+test('on a phone, Month is the month grid, not the list', async ({ page }) => {
+  const schema = JSON.parse(JSON.stringify(SCHEMA));
+  schema.views = [{ name: 'cal', kind: 'calendar', calendar: { sources: [{ table: 'logs', dateColumn: 'done_on', titleColumns: ['what'] }], defaultView: 'month' } }];
+  schema.nav = { items: [{ view: 'cal' }] };
+  await page.request.post('/api/resetData');
+  await page.request.post('/api/setUserRole', { data: { uid: 'org@x', role: 'admin', user: 'org@x', tables: 'all' } });
+  await page.request.post('/api/saveSchema', { data: { schema }, headers: ADMIN });
+  await page.setViewportSize({ width: 400, height: 800 });
+  await page.addInitScript(() => { localStorage.setItem('app_folder', 'local'); localStorage.setItem('app_mode', 'local'); localStorage.setItem('test_user', 'org@x'); });
+  await page.goto('/');
+  await page.waitForFunction(() => window.appInstance && !appInstance.loading, { timeout: 30000 });
+  await page.evaluate(() => appInstance.selectTab('cal'));
+  await expect(page.locator('[data-testid="cal-cell-' + ymd(0) + '"]')).toBeVisible();
+});

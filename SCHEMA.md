@@ -1233,7 +1233,7 @@ Distinct from data views, documents, and rotationViews.
   below the grid** (a one-day agenda slice; it does NOT switch to List mode).
 - **Week**: a 7-day strip (day number + count badge); click fills the same panel.
 - **List / agenda**: a flat multi-day list (date subheading + event rows), plus an **Undated**
-  section for rows with an empty date. This is also the automatic **mobile fallback** for Month.
+  section for rows with an empty date. A phone shows the mode picked, Month included.
 - Event dots in the panel/list are coloured by **event type** (the `label`, or the source table's
   translated `tab.<table>` name). The month/week count badge is always the neutral accent.
 
