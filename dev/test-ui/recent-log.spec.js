@@ -69,10 +69,12 @@ test('a log and a report follow the calendar on their page: week, month, year, a
   await expect(count).toHaveText('1');
   await page.locator('[data-testid="cal-mode-year"]').click();
   await expect.poll(logged).toEqual(['mo', 'wk', 'yr']);
-  await expect(page.locator('main')).toContainText('2026');
+  await expect(page.locator('[data-testid="cal-year-2026-02"]')).toBeVisible();
   await page.locator('button .mdi-chevron-left').first().click();
   await expect.poll(logged).toEqual(['old']);
   await expect(count).toHaveText('1');
+  await page.locator('[data-testid="cal-year-2025-12"] div').first().click();   // the month's name opens it
+  await expect.poll(() => page.evaluate(() => appInstance.calendarPeriod('cal'))).toEqual({ from: '2025-12-01', toExclusive: '2026-01-01' });
   // validateSchema names a calendar that is not one.
   const err = await page.evaluate(() => { VIEWS.log.filter = { done_on: { within: { calendar: 'nope' } } }; return validateSchema().join(' | '); });
   expect(err).toContain('must name a calendar view (got "nope")');

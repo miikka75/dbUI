@@ -8727,7 +8727,7 @@ function createVueApp() {
   // source of truth per element. This is the element-level seam behind "views are parts that combine":
   // to place a different body, register another component under VIEW_PARTS.calendar[<mode>].
   window.VIEW_PARTS = {
-    calendar: { month: 'cal-month', week: 'cal-week', year: 'cal-agenda', list: 'cal-agenda' },
+    calendar: { month: 'cal-month', week: 'cal-week', year: 'cal-year', list: 'cal-agenda' },
     rotation: { table: 'rotation-table', card: 'rotation-cards', list: 'rotation-list' },
     data: { list: 'data-list', gallery: 'data-gallery', split: 'data-split' }   // card/table editing grids remain inline (deeper refactor)
   };
@@ -8788,6 +8788,22 @@ function createVueApp() {
       + '<span :style="c.isToday?\'background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-weight:600\':\'\'">{{ c.day }}</span>'
       + '<span v-if="c.count" style="position:absolute;top:1px;right:3px;background:rgb(var(--v-theme-primary));color:rgb(var(--v-theme-on-primary));font-size:0.6rem;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;min-width:12px;text-align:center">{{ c.count }}</span>'
       + '</div></div></div>'
+  });
+
+  // The year: twelve small months side by side, a day with events shaded. A day selects it (the day panel
+  // below lists it); a month's name opens that month.
+  app.component('cal-year', {
+    props: Object.assign({ months: Array }, CAL_BODY_PROPS), emits: ['select', 'month'],
+    template: ''
+      // At most six months a row, never narrower than 92px: three on a phone.
+      + '<div style="padding:8px"><tile-grid min="max(92px, calc((100% - 60px) / 6))">'
+      + '<div v-for="mo in months" :key="mo.first" :data-testid="\'cal-year-\' + mo.first.slice(0, 7)">'
+      +   '<div style="font-size:0.75rem;font-weight:600;cursor:pointer;margin-bottom:2px" @click="$emit(\'month\', mo.first)">{{ mo.label }}</div>'
+      +   '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;font-size:0.55rem;opacity:0.5;text-transform:uppercase"><div v-for="d in dowNames" :key="d" style="text-align:center">{{ d.charAt(0) }}</div></div>'
+      +   '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px">'
+      +     '<div v-for="c in mo.cells" :key="c.date" :title="c.inMonth && c.count ? String(c.count) : undefined" :style="{ height:\'18px\', display:\'flex\', alignItems:\'center\', justifyContent:\'center\', borderRadius:\'4px\', fontSize:\'0.62rem\', visibility: c.inMonth?\'visible\':\'hidden\', cursor:\'pointer\', fontWeight: c.isToday?700:400, background: c.count?\'rgba(var(--v-theme-primary),\' + Math.min(0.15 + 0.15 * c.count, 0.6) + \')\':\'transparent\', outline: c.date===selected?\'1px solid rgb(var(--v-theme-primary))\':(c.isToday?\'1px solid rgba(var(--v-theme-on-surface),0.5)\':\'none\') }" @click="$emit(\'select\', c.date)">{{ c.day }}</div>'
+      +   '</div>'
+      + '</div></tile-grid></div>'
   });
 
   app.component('cal-week', {
@@ -9389,16 +9405,26 @@ function createVueApp() {
       // A list reads FORWARD: today and after. The month and week grids are where the past is browsed.
       // The list reads forward from NOW: past days are left out, and so is an event of today whose start
       // time has passed. The month and week grids still show the whole day.
-      // The YEAR is a list too, of the whole year, past included.
       listDays: function() {
-        var ev = this.events, loc = this.calendarHost.locale(), now = this.calendarHost.now(), today = fmtDate(new Date(now)), whole = this.displayMode === 'year';
-        return Object.keys(ev).filter(function(k) { return k !== '__undated__' && (whole || k >= today); }).sort().map(function(k) {
+        var ev = this.events, loc = this.calendarHost.locale(), now = this.calendarHost.now(), today = fmtDate(new Date(now));
+        return Object.keys(ev).filter(function(k) { return k !== '__undated__' && k >= today; }).sort().map(function(k) {
           var p = k.split('-');
-          var evs = (whole || k > today) ? ev[k] : ev[k].filter(function(e) { return !e.at || Date.parse(e.at) > now; });
+          var evs = k > today ? ev[k] : ev[k].filter(function(e) { return !e.at || Date.parse(e.at) > now; });
           return { date: k, label: new Intl.DateTimeFormat(loc, { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(+p[0], +p[1] - 1, +p[2])), events: evs };
         }).filter(function(d) { return d.events.length; });
       },
       undated: function() { return this.events['__undated__'] || []; },
+      // The year: twelve small months, each day carrying its event count.
+      yearMonths: function() {
+        if (this.displayMode !== 'year') return [];
+        var ev = this.events, y = this.anchor.slice(0, 4), ws = this.weekStart, today = this.calendarHost.today();
+        var fmt = new Intl.DateTimeFormat(this.calendarHost.locale(), { month: 'short' }), out = [];
+        for (var m = 1; m <= 12; m++) {
+          var first = y + '-' + String(m).padStart(2, '0') + '-01';
+          out.push({ first: first, label: fmt.format(new Date(+y, m - 1, 1)), cells: Calendar.cellsMonth(first, ws, today).map(function(c) { c.count = (ev[c.date] || []).length; return c; }) });
+        }
+        return out;
+      },
       canAdd: function() { return this.calendarHost.canAdd(this.name); },
       body: function() { return window.viewPartFor('calendar', this.displayMode) || 'cal-agenda'; }
     },
@@ -9408,6 +9434,7 @@ function createVueApp() {
       step: function(n) { this.anchor = addIntervals(this.anchor, this.mode === 'year' ? 12 * n : n, this.mode === 'week' ? 'weekly' : 'monthly'); },
       goToday: function() { this.anchor = this.sel = this.calendarHost.today(); },
       setMode: function(m) { this.mode = m; },
+      openMonth: function(first) { this.anchor = first; this.mode = 'month'; },
       addOnDay: function() { this.calendarHost.addOnDay(this.name, this.sel); },
       selectDay: function(d) { this.sel = d; },
       setPicked: function(col, vals) {
@@ -9423,9 +9450,9 @@ function createVueApp() {
       + '<v-btn size="small" variant="text" @click="goToday()">{{ t(\'cal.today\') }}</v-btn>'
       + '<span style="font-weight:600;min-width:150px">{{ title }}</span><v-spacer></v-spacer>'
       + '<v-btn-toggle :model-value="mode" density="compact" variant="outlined" divided mandatory @update:model-value="setMode($event)">'
+      + '<v-btn value="year" size="small" data-testid="cal-mode-year">{{ t(\'cal.year\') }}</v-btn>'
       + '<v-btn value="month" size="small">{{ t(\'cal.month\') }}</v-btn>'
       + '<v-btn value="week" size="small">{{ t(\'cal.week\') }}</v-btn>'
-      + '<v-btn value="year" size="small" data-testid="cal-mode-year">{{ t(\'cal.year\') }}</v-btn>'
       + '<v-btn value="list" size="small">{{ t(\'cal.list\') }}</v-btn></v-btn-toggle>'
       + '<slot name="actions"></slot></div>'
       + '<div v-if="filters.length" class="d-flex flex-wrap px-2 pb-2" style="gap:8px" data-testid="cal-filters">'
@@ -9433,8 +9460,8 @@ function createVueApp() {
       + '</div>'
       + '<slot name="tools"></slot>'
       + '<v-divider></v-divider>'
-      + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" @select="selectDay"></component>'
-      + '<cal-day-panel v-if="displayMode!==\'list\' && displayMode!==\'year\'" :label="selLabel" :events="selEvents" :can-add="canAdd" @add="addOnDay"></cal-day-panel>'
+      + '<component :is="body" :cells="displayMode===\'week\'?weekCells:monthCells" :dow-names="dowNames" :days="listDays" :undated="undated" :selected="sel" :months="displayMode===\'year\' ? yearMonths : undefined" @select="selectDay" @month="openMonth"></component>'
+      + '<cal-day-panel v-if="displayMode!==\'list\'" :label="selLabel" :events="selEvents" :can-add="canAdd" @add="addOnDay"></cal-day-panel>'
       + '</component>'
   });
 

@@ -1281,7 +1281,8 @@ under it kept their own fixed periods. General pieces:
 - **`{ "done_on": { "within": { "calendar": "my_calendar" } } }`** in a view's `filter`: the rows in that
   period. Logs, aggregates (top 3) and stats all read it, so one page answers "this week / month / year".
   A calendar that is not on screen counts as its default view around today.
-- **A Year mode** on the calendar: the whole year as a list, ‹ › a year at a time.
+- **A Year mode** on the calendar: twelve small months, a day with events shaded (a day opens in the day
+  panel, a month's name opens the month), ‹ › a year at a time.
 - **`divide`** on a stats tile: minutes shown as hours.
 
 Next, not built: a **series** tile — the period broken into its weeks or months as bars. **Medium.**

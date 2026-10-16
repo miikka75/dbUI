@@ -1244,7 +1244,7 @@ Distinct from data views, documents, and rotationViews.
     "source": "chore_log",        // REQUIRED (or `sources`) — one table
     "dateColumn": "done_on",       // REQUIRED — a date column of `source` (YYYY-MM-DD)
     "titleColumns": ["chore", "person"], // OPTIONAL — joined with " — " for the event label
-    "defaultView": "month",        // OPTIONAL — "month" | "week" | "year" | "list" (default "month"); "year" lists the whole year
+    "defaultView": "month",        // OPTIONAL — "year" | "month" | "week" | "list" (default "month"); "year" is twelve small months, a day with events shaded
     "weekStart": 1                 // OPTIONAL — 0=Sun, 1=Mon (default 1)
   }
 }
