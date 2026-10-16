@@ -407,7 +407,7 @@
         <v-icon>{{ tab.icon || 'mdi-view-list' }}</v-icon>
         <span style="font-size:0.6rem; max-width:64px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ tab.title }}</span>
       </v-btn>
-      <v-btn v-if="bottomNavTabs.length > 5" size="small" @click.stop="openMoreDrawer()">
+      <v-btn v-if="bottomNavMore" size="small" data-testid="bottom-more" @click.stop="openMoreDrawer()">
         <v-icon>mdi-dots-horizontal</v-icon>
         <span style="font-size:0.6rem">{{ t('btn.more') }}</span>
       </v-btn>

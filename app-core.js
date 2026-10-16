@@ -479,7 +479,13 @@ function createVueApp() {
         // Fallback: first 5 flattened items
         return Nav.flatten(this.sidebarTabs).slice(0, 5);
       },
-      bottomNavVisible: function() { return this.bottomNavTabs.length > 5 ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
+      // "More" when the bar cannot hold every destination: more than 5 asked for, or menu pages the bar
+      // leaves out (they would otherwise be reachable only through the top-left menu). It takes the 5th slot.
+      bottomNavMore: function() {
+        var bar = this.bottomNavTabs, ids = bar.map(function(t) { return t.id; });
+        return bar.length > 5 || Nav.flatten(this.sidebarTabs).some(function(t) { return t.id.charAt(0) !== '_' && ids.indexOf(t.id) < 0; });   // Settings & co. do not count
+      },
+      bottomNavVisible: function() { return this.bottomNavMore ? this.bottomNavTabs.slice(0, 4) : this.bottomNavTabs; },
       // The view-kind computeds, all off ONE discriminator (SchemaNormalize.viewKind, which reads the
       // `kind` the schema carries). They used to be seven independent probes for seven fields, plus an
       // eighth in schema-normalize and a ninth in migrations -- an implicit discriminator cannot be kept

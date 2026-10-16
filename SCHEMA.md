@@ -2997,8 +2997,8 @@ from the authenticated session — never asked for.
   person pointing the camera is the intent — where a forwarded deep link only arms the box. A link to
   another site is refused.
 - **`bottomNav`** (string[], optional) — **mobile only**: view/table ids shown in the bottom
-  navigation bar, in this order. More than 5 → the first 4 plus a "⋯ More" button that opens the
-  drawer. Omit to auto-pick the first 5 flattened nav items. Ids must match `items` entries
+  navigation bar, in this order. More than 5, or menu pages the bar leaves out → the first 4 plus a
+  "⋯ More" button that opens the drawer. Omit to auto-pick the first 5 flattened nav items. Ids must match `items` entries
   (including nested group children); unresolved ids are silently dropped.
 
 ## theme (brand palette)
